@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# downloaded models and fonts live here (see setup_models.py)
+models/
+# local runs and exports
+*.log
+taslation.toml
+*.stcache
+*.before-import.*.json
+.claude/launch.json
+.claude/worktrees/
+.kv-cache-by-install

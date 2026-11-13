@@ -1,0 +1,41 @@
+"""The window's strings for a save that failed: the status line while the translations stay in memory, and the warning
+when the window closes with them still unwritten (a full disk, a locked file)."""
+
+TEXTS: dict[str, dict[str, str]] = {
+    "Could not save the translations ({error}). They stay in memory until a save works: free some disk space, or close what holds the file.": {
+        "ja": "翻訳を保存できませんでした（{error}）。保存できるまではメモリに残ります。ディスクの空きを増やすか、ファイルを使っているものを閉じてください。",
+        "es": "No se pudieron guardar las traducciones ({error}). Siguen en memoria hasta que se guarden: libera espacio en el disco o cierra lo que tiene abierto el archivo.",
+        "pt": "Não foi possível salvar as traduções ({error}). Elas ficam na memória até que seja possível salvar: libere espaço em disco ou feche o que está usando o arquivo.",
+        "fr": "Impossible d'enregistrer les traductions ({error}). Elles restent en mémoire jusqu'à ce qu'un enregistrement réussisse : libérez de l'espace disque ou fermez ce qui utilise le fichier.",
+        "de": "Die Übersetzungen konnten nicht gespeichert werden ({error}). Sie bleiben im Arbeitsspeicher, bis das Speichern gelingt: Geben Sie Speicherplatz frei oder schließen Sie, was die Datei belegt.",
+        "it": "Impossibile salvare le traduzioni ({error}). Restano in memoria finché il salvataggio non riesce: libera spazio su disco o chiudi ciò che tiene occupato il file.",
+        "nl": "De vertalingen konden niet worden opgeslagen ({error}). Ze blijven in het geheugen tot opslaan lukt: maak schijfruimte vrij of sluit wat het bestand vasthoudt.",
+        "pl": "Nie udało się zapisać tłumaczeń ({error}). Pozostają w pamięci, dopóki zapis się nie powiedzie: zwolnij miejsce na dysku albo zamknij to, co blokuje plik.",
+        "ru": "Не удалось сохранить переводы ({error}). Они остаются в памяти, пока сохранение не удастся: освободите место на диске или закройте то, что держит файл.",
+        "tr": "Çeviriler kaydedilemedi ({error}). Kaydetme başarılı olana dek bellekte kalırlar: diskte yer açın veya dosyayı tutan şeyi kapatın.",
+        "id": "Terjemahan tidak dapat disimpan ({error}). Terjemahan tetap di memori sampai berhasil disimpan: kosongkan ruang disk atau tutup yang sedang memakai berkas itu.",
+        "vi": "Không lưu được bản dịch ({error}). Bản dịch vẫn nằm trong bộ nhớ cho đến khi lưu được: hãy giải phóng dung lượng đĩa hoặc đóng thứ đang giữ tệp.",
+        "zh": "无法保存译文（{error}）。在保存成功之前，译文保留在内存中：请释放磁盘空间，或关闭占用该文件的程序。",
+        "zh-tw": "無法儲存譯文（{error}）。在儲存成功之前，譯文保留在記憶體中：請釋放磁碟空間，或關閉佔用該檔案的程式。",
+        "ko": "번역을 저장하지 못했습니다({error}). 저장에 성공할 때까지 메모리에 남아 있습니다. 디스크 공간을 확보하거나 파일을 사용 중인 프로그램을 닫으세요.",
+        "th": "บันทึกคำแปลไม่ได้ ({error}) คำแปลจะอยู่ในหน่วยความจำจนกว่าจะบันทึกได้ กรุณาเพิ่มพื้นที่ดิสก์หรือปิดสิ่งที่ใช้ไฟล์นั้นอยู่",
+    },
+    "Some translations could not be saved ({error}) and are lost when this window closes.": {
+        "ja": "一部の翻訳を保存できませんでした（{error}）。このウィンドウを閉じると失われます。",
+        "es": "Algunas traducciones no se pudieron guardar ({error}) y se pierden al cerrar esta ventana.",
+        "pt": "Algumas traduções não puderam ser salvas ({error}) e serão perdidas ao fechar esta janela.",
+        "fr": "Certaines traductions n'ont pas pu être enregistrées ({error}) et seront perdues à la fermeture de cette fenêtre.",
+        "de": "Einige Übersetzungen konnten nicht gespeichert werden ({error}) und gehen verloren, wenn dieses Fenster geschlossen wird.",
+        "it": "Alcune traduzioni non sono state salvate ({error}) e andranno perse alla chiusura di questa finestra.",
+        "nl": "Sommige vertalingen konden niet worden opgeslagen ({error}) en gaan verloren wanneer dit venster sluit.",
+        "pl": "Części tłumaczeń nie udało się zapisać ({error}); przepadną po zamknięciu tego okna.",
+        "ru": "Часть переводов не удалось сохранить ({error}); они будут потеряны при закрытии этого окна.",
+        "tr": "Bazı çeviriler kaydedilemedi ({error}) ve bu pencere kapanınca kaybolacak.",
+        "id": "Sebagian terjemahan tidak dapat disimpan ({error}) dan akan hilang saat jendela ini ditutup.",
+        "vi": "Một số bản dịch không lưu được ({error}) và sẽ mất khi đóng cửa sổ này.",
+        "zh": "部分译文无法保存（{error}），关闭此窗口后将丢失。",
+        "zh-tw": "部分譯文無法儲存（{error}），關閉此視窗後將遺失。",
+        "ko": "일부 번역을 저장하지 못했습니다({error}). 이 창을 닫으면 사라집니다.",
+        "th": "บันทึกคำแปลบางส่วนไม่ได้ ({error}) และจะหายไปเมื่อปิดหน้าต่างนี้",
+    },
+}

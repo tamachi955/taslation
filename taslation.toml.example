@@ -1,0 +1,94 @@
+# Tools > Settings... in the window changes the common settings and its "Open settings file" makes a taslation.toml
+# from this file where there is none (each setting a note there, until its "#" is deleted). By hand: copy this file
+# to taslation.toml. TASlation reads the first of: the file given with --config; ./taslation.toml in the
+# directory you run taslation from (or next to this file, in a checkout); taslation.toml in the state folder
+# (~/.taslation, or TASLATION_STATE_DIR: the place for an installed program); else these defaults.
+# `taslation doctor` prints which file it read.
+# Every key is optional; these are the defaults. Keys are the fields of taslation/config.py:Settings. A key this
+# version does not know is left out, and the window names it once.
+
+# --- translation: a local Ollama server only (the URL must be a loopback address) ---
+ollama_url = "http://127.0.0.1:11434"
+ollama_model = "auto"         # "auto": PLaMo 3 Translate 2B for every language it writes, Qwen3.5 4B for Brazilian Portuguese and Turkish; or an Ollama model of your own (see docs/MANUAL.md, the section on choosing the model)
+ollama_timeout = 900.0
+ollama_temperature = 0.2
+ollama_num_ctx = 16384        # the chat translator's context window (0 = server default; a batch request needs ~10K); PLaMo has its own (8192)
+ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the first line to translate loads it, the end of a whole-book run or closing the window releases it. "-1": load it at the start and never unload
+target_language = "English"
+context_pages = 2             # live mode: previous pages given to the model as context (memory only)
+
+# --- whole-book batch: every page read as it is turned, then all of them translated in chunks with the whole book as context ---
+context_mode = true           # false: page by page (each page translated as it is captured)
+chunk_bubbles = 30            # lines per request of the whole-book translation (3-5 pages; in runs of 100 the replies drift off their lines)
+lookahead_bubbles = 60        # upcoming bubbles shown to the chat translator for context only (PLaMo has no place for them)
+context_pairs = 40            # previous (source, translation) pairs carried into the next request
+
+# --- OCR ---
+# models_dir = "C:/path/to/models"   # where setup_models.py put the OCR model (default: ./models)
+ocr_threads = 0               # threads for the OCR model (0 = one per core); while other programs keep the CPU busy, half the cores can be faster
+
+# --- detection ---
+white_threshold = 225
+dark_threshold = 140
+min_bubble_area_ratio = 0.0006
+max_bubble_area_ratio = 0.20
+min_bubble_size = 24
+min_short_bubble = 60         # a smaller region read as 1-2 characters is treated as noise, unless it is a bubble's short line the OCR is sure of (0.95+, led by a hiragana or a kanji)
+ocr_min_confidence = 0.65     # OCR readings with a lower confidence (the characters' mean heat times their mean classifier probability) are dropped (on lettering about 0.9)
+detect_text_blocks = true     # also find dialogue lettered straight onto light areas (no bubble)
+detect_dark_bubbles = true    # also find dark bubbles and light lettering on dark areas
+split_joined_bubbles = true   # bubbles that touch or overlap (one white area): one region per bubble, cut at the neck or the junction
+take_columns_beyond = false   # dark bubbles: also read a column that goes on past the interior on the bubble's own black
+slant_text = true             # lettering set at a slant: measured, read turned upright and lettered at its slant (false: all upright)
+translate_sfx = true          # translate short katakana sound effects found outside bubbles
+detect_model = "off"          # (opt-in for now: "auto" to use it) the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs too: with its "auto", only on a computer with a GPU), "on" or "off" (classical alone)
+margins = [0, 0, 0, 0]        # left, top, right, bottom pixels of the capture to ignore ("Set area" in the GUI)
+
+# --- rendering ---
+font_path = ""                # empty = the series sheet's font where installed, then models/fonts (setup_models.py --font), then Windows fonts
+min_font_size = 9
+max_font_size = 64
+text_scale = 1.0              # the lettering's size: 0.9 sets every translation a tenth smaller, 1.2 larger where the page's sizes held it back (never over its bubble or max_font_size); a book can have its own (Book settings... in translator mode)
+line_spacing = 1.12
+readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
+spellcheck = true            # flag a word the dictionary does not know (pip install pyspellchecker; offline word lists)
+enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering" for review
+uppercase = false
+erase_mode = "fill"           # "fill": the bubble's own paper, flat or along its shading, within its outline; "inpaint": the lettering inpainted (keeps toned bubble interiors); "classic": the erase of before 2026-10-30 (one flat colour, lettering told by light and dark alone)
+art_erase = "auto"            # with "fill", lettering on the drawing is inpainted by LaMa, once its model is installed: "auto" only where PyTorch has a CUDA GPU (elsewhere the erase is as with "off"), "lama" always, on the CPU too (about 4 s a screen), or "off"
+
+# --- translation cache (translated text + bubble geometry + page fingerprints; never images) ---
+# state_dir = "~/.taslation"
+cache_enabled = true
+fingerprint_max_distance = 36
+match_min_iou = 0.4
+
+# --- batch reading ---
+# The viewer's page keys, which the page keys you press in TASlation's window are passed on as: Left, Right, Up, Down,
+# PageUp, PageDown, Home, End, Space, Enter, Tab, Backspace, Escape, F1-F12, a letter or a digit. Page > Page keys... (or `taslation keys`) keeps keys per viewer
+# in profiles.json, and "Apply to all viewers" keeps defaults there too; both come before these lines, which are
+# the keys of a viewer that has neither (TASlation never rewrites this file).
+next_page_key = "Left"        # the next page (Left: a manga reader, right-to-left; Right: an image viewer)
+prev_page_key = "Right"       # the previous page
+# A viewer that stays black (a stuck loading screen, say) may just be loading: after about 8 s the status line says so,
+# after black_wait_s it tells you to reload the book in its own window (click the book, then its reload key: F5 in a
+# browser). TASlation presses no key for it, and goes on by itself once the page shows.
+black_wait_s = 30             # seconds a black viewer is waited for before you are told to reload it
+page_turn_wait_ms = 3000
+settle_ms = 400
+batch_max_pages = 2000
+batch_memory_mb = 2048        # page images a whole-book run keeps in memory (packed, never on disk); at most a quarter of the RAM
+
+# --- app ---
+scan_mode = "page"            # "page": page by page (default); "book": read and translate the whole book first
+role = "reader"               # "reader" | "translator" (mark text, fix translations, keep a glossary)
+ui_language = ""              # window language: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
+ui_scale = 1.0                # size of the window's text, times what Windows sets for its monitor (0.5-3.0; also Tools > Settings...)
+always_on_top = false         # the window starts above the others (View > Always on top for this session; gui --on-top)
+auto_interval_ms = 700
+over_book = true              # over a viewer in full screen on the same monitor, stay on top without taking its keys (View > Over the full-screen viewer)
+bubble_zoom = true            # reading mode and the Reader role: a translated bubble the pointer rests on shows enlarged beside its original
+flash_when_done = true        # a whole-book run that finishes or stops with a problem while TASlation is not in front flashes its taskbar button (no focus taken)
+sound_when_done = false       # ... and plays the system's default sound
+follow = "events"             # "events": the viewer is captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
+debug = false

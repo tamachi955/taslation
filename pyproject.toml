@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taslation"
+version = "0.1.0"
+description = "Self-contained, offline manga translation for books you own."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "TASlation contributors" }]
+keywords = ["manga", "translation", "ocr", "offline", "privacy"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: Microsoft :: Windows",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "numpy>=1.26",
+  "Pillow>=10.0",
+  # (not the headless build: windows-capture requires this one, and the two would share one cv2 folder)
+  "opencv-python>=4.8",
+  "torch>=2.1",
+  "safetensors>=0.4",
+  # the layout model (read from local files only, no remote code)
+  "transformers>=5.0",
+  "jaconv>=0.3",
+  "arabic-reshaper>=3.0",
+  # the viewer's frames (Windows.Graphics.Capture); without it capture falls back on PrintWindow
+  "windows-capture==2.0.1; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+# The encrypted export and import of the translation cache (`taslation cache export/import`, the Caches dialog).
+backup = ["cryptography>=42"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+taslation = "taslation.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["taslation*"]
+
+[tool.setuptools.package-data]
+# the application icon (made by tools/make_icon.py); the locales are Python modules and ship as packages
+"taslation.ui" = ["assets/*.ico", "assets/*.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["page_models: the test's pipeline may use the layout and inpainting models the models folder holds"]

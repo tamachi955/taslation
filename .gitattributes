@@ -1,0 +1,12 @@
+* text=auto
+*.png binary
+*.ico binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.gif binary
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# the README's recording (tools/demo_video.py) shows OpenMantra pages, CC BY-NC 4.0: never in a ZIP of the repository
+docs/media export-ignore
+docs/media/** export-ignore
