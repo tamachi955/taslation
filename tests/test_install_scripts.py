@@ -112,7 +112,9 @@ def _env(tmp: Path, **extra: str) -> dict:
     for key in ("TASLATION_MODELS_DIR", "SELFTRANS_MODELS_DIR", "TASLATION_STATE_DIR", "SELFTRANS_STATE_DIR",
                 "PYTHONUTF8", "TASLATION_UPDATING", "TASLATION_UPDATE_PAUSE"):
         env.pop(key, None)
-    env.setdefault("OLLAMA_KV_CACHE_TYPE", "test")  # no run of install.ps1 here may write the user's environment
+    # no run of install.ps1 here may write the user's environment: a value there is left alone
+    env.setdefault("OLLAMA_KV_CACHE_TYPE", "test")
+    env.setdefault("LLAMA_ARG_CACHE_RAM", "test")
     env.update(extra)
     return env
 
@@ -1464,8 +1466,175 @@ def test_a_set_variable_is_left_alone(tmp_path, ollama_server):
 
 def test_the_script_says_what_it_does_to_ollama():
     text = (ROOT / "install.ps1").read_text(encoding="ascii")
-    head = text[:text.index("[CmdletBinding()]")]
-    assert "OLLAMA_KV_CACHE_TYPE=q8_0 for your user and restarts Ollama" in head.replace("\r\n", " ").replace("\n", " ")
+    head = " ".join(text[:text.index("[CmdletBinding()]")].split())
+    assert "Ollama then restarts once" in head
+    assert "on every computer with Ollama it sets LLAMA_ARG_CACHE_RAM=0 for your user." in head
+    assert "up to 8 GB of RAM as a cache of earlier requests" in head and "LLAMA_ARG_* variables" in head
+    assert "no faster with a GPU, and about 8 % faster without one" in head  # what was measured, both ways
+    assert "on an NVIDIA GPU of 6 GB or less it sets OLLAMA_KV_CACHE_TYPE=q8_0 for your user" in head
+    assert ".cache-ram-by-install" in head and ".kv-cache-by-install" in head
+    assert "uninstall.cmd then clears each variable if it still has that value" in head
+    head = " ".join((ROOT / "uninstall.ps1").read_text(encoding="ascii").split("[CmdletBinding()]")[0].split())
+    assert "LLAMA_ARG_CACHE_RAM (the file .cache-ram-by-install says so) and it is still 0" in head
+
+
+# ---- no prompt cache in Ollama's RAM
+
+
+CACHE_RAM_SAID = (
+    "Ollama is set to keep no cache of earlier requests in RAM (LLAMA_ARG_CACHE_RAM=0 for this Windows user), and "
+    "Ollama restarts.",
+    "Otherwise Ollama keeps up to 8 GB of RAM for that cache. In TASlation's measurements it made translation no "
+    "faster with a GPU, and about 8 % faster without one.",
+    "It applies to the Ollama this user runs, and to any other program of this user that reads llama.cpp's "
+    "LLAMA_ARG_* settings.",
+    'To undo it: uninstall.cmd clears it, or delete LLAMA_ARG_CACHE_RAM in "Edit environment variables for your '
+    'account" (search the Start menu for that).',
+)
+CACHE_RAM_DONE = "ok: Ollama keeps no cache of earlier requests in RAM"
+CACHE_RAM_MARKER = ".cache-ram-by-install"
+
+
+def _cache_env(env: dict, **user: str) -> dict:
+    """*env* without the guard's LLAMA_ARG_CACHE_RAM (and OLLAMA_KV_CACHE_TYPE): the install's steps run as on a
+    computer that has neither; *user* holds what the fake user environment has (`FAKE_USER_<name>`)."""
+    env.pop("LLAMA_ARG_CACHE_RAM", None)
+    env.pop("OLLAMA_KV_CACHE_TYPE", None)
+    env.update({f"FAKE_USER_{name}": value for name, value in user.items()})
+    return env
+
+
+def _user_env_log(tmp: Path) -> list[str]:
+    log = tmp / "user-env.txt"
+    return log.read_text().splitlines() if log.exists() else []
+
+
+@needs_venv
+@pytest.mark.parametrize("gpu", [None, "Fake GPU, 8192 MiB, 610.88, 7.5"], ids=["no GPU", "a GPU of 8 GB"])
+@pytest.mark.parametrize("switches", [(), ("-Yes",)], ids=["no console", "with -Yes"])
+def test_every_computer_with_ollama_gets_no_prompt_cache_and_uninstall_takes_it_back(tmp_path, ollama_server, gpu,
+                                                                                      switches):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_torch_install(co, tmp_path, ollama_server, torch="cpu" if gpu is None else "cuda", gpu=gpu))
+    r = _run(co / "install.ps1", *switches, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    for line in CACHE_RAM_SAID:  # what, for whom, why and how to undo it, before it is done ...
+        assert "  " + line in out, line
+    assert out.index(CACHE_RAM_SAID[-1]) < out.index(CACHE_RAM_DONE) < out.index("[7/7]")  # ... and done
+    assert _user_env_log(tmp_path) == ["LLAMA_ARG_CACHE_RAM=0", "stopped Ollama"]  # (no GPU setting: not a small GPU)
+    assert (co / CACHE_RAM_MARKER).read_text().strip() == "0" and not (co / ".kv-cache-by-install").exists()
+    assert "TASlation is installed." in out and "warning" not in out
+
+    (tmp_path / "user-env.txt").unlink()
+    r = _run(co / "uninstall.ps1", "-Yes", env=_cache_env(env, LLAMA_ARG_CACHE_RAM="0"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path) == ["LLAMA_ARG_CACHE_RAM="]  # cleared for the user
+    assert not (co / CACHE_RAM_MARKER).exists()
+    assert "- the Ollama setting the install made (LLAMA_ARG_CACHE_RAM=0)" in r.stdout
+
+
+@needs_venv
+def test_a_small_gpu_gets_both_settings_and_ollama_restarts_once(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_torch_install(co, tmp_path, ollama_server, torch="cuda", gpu=TURING))
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert _user_env_log(tmp_path) == ["OLLAMA_KV_CACHE_TYPE=q8_0", "LLAMA_ARG_CACHE_RAM=0", "stopped Ollama"]
+    assert (co / ".kv-cache-by-install").is_file() and (co / CACHE_RAM_MARKER).is_file()
+    said = out.index("This GPU has 6 GB or less, so Ollama is set to use less of its memory, and Ollama restarts.")
+    assert said < out.index(CACHE_RAM_SAID[0]) < out.index("ok: Ollama set up for this GPU") < out.index(CACHE_RAM_DONE)
+
+    (tmp_path / "user-env.txt").unlink()
+    env = _cache_env(env, LLAMA_ARG_CACHE_RAM="0", OLLAMA_KV_CACHE_TYPE="q8_0")
+    r = _run(co / "uninstall.ps1", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path) == ["OLLAMA_KV_CACHE_TYPE=", "LLAMA_ARG_CACHE_RAM="]
+    assert not (co / ".kv-cache-by-install").exists() and not (co / CACHE_RAM_MARKER).exists()
+
+
+@needs_venv
+@pytest.mark.parametrize("where, value", [("process", "4096"), ("user", "4096"), ("user", "0"), ("process", "0")])
+def test_a_cache_setting_already_there_is_left_alone_without_a_word(tmp_path, ollama_server, where, value):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    env = _cache_env(env, **({"LLAMA_ARG_CACHE_RAM": value} if where == "user" else {}))
+    if where == "process":
+        env["LLAMA_ARG_CACHE_RAM"] = value
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path) == [] and not (co / CACHE_RAM_MARKER).exists()
+    assert "LLAMA_ARG_CACHE_RAM" not in r.stdout and "cache of earlier requests" not in r.stdout
+    assert "TASlation is installed." in r.stdout
+
+
+@needs_venv
+def test_without_ollama_nothing_is_set(tmp_path):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_whole_install(co, tmp_path))
+    (tmp_path / "bin" / "ollama.cmd").unlink()
+    r = _run(co / "install.ps1", env=env)
+    assert "Install Ollama now (about 3 GB)? [Y/n] n (no console to ask)" in r.stdout
+    assert _user_env_log(tmp_path) == [] and not (co / CACHE_RAM_MARKER).exists()
+    assert "LLAMA_ARG_CACHE_RAM" not in r.stdout
+
+
+@pytest.mark.parametrize("ollama", [True, False], ids=["Ollama there", "Ollama to install"])
+def test_a_dry_run_plans_the_setting_and_changes_nothing(tmp_path, ollama):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    env = _cache_env(_tools(tmp_path, ollama=ollama, gpu=None))
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert f"would: set LLAMA_ARG_CACHE_RAM=0 for this user (and write {co / CACHE_RAM_MARKER})" in out
+    assert "detail: so that Ollama keeps no cache of earlier requests in RAM, up to 8 GB otherwise" in out
+    assert out.count("would: start Ollama again if it is running (once), so that it reads what was set") == 1
+    assert "OLLAMA_KV_CACHE_TYPE" not in out  # (no GPU)
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+    env["FAKE_USER_LLAMA_ARG_CACHE_RAM"] = "512"
+    r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
+    assert "detail: LLAMA_ARG_CACHE_RAM is set already (512); left as it is" in r.stdout
+    assert "would: set LLAMA_ARG_CACHE_RAM" not in r.stdout and "would: start Ollama again" not in r.stdout
+
+
+@pytest.mark.parametrize("value, marker", [("0", False), ("4096", True)], ids=["not set by the install", "changed since"])
+def test_uninstall_leaves_a_cache_setting_that_is_not_the_installs(tmp_path, value, marker):
+    co = _fake_checkout(tmp_path)
+    if marker:
+        (co / CACHE_RAM_MARKER).write_text("0")
+    env = _hide_ollama(_env(tmp_path, FAKE_USER_LLAMA_ARG_CACHE_RAM=value), tmp_path)
+    r = _run(co / "uninstall.ps1", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path) == [] and "LLAMA_ARG_CACHE_RAM" not in r.stdout
+    assert not (co / CACHE_RAM_MARKER).exists()  # the marker goes all the same
+
+
+def test_uninstall_dry_run_says_it_would_clear_the_setting_and_clears_nothing(tmp_path):
+    co = _fake_checkout(tmp_path)
+    (co / CACHE_RAM_MARKER).write_text("0")
+    env = _hide_ollama(_env(tmp_path, FAKE_USER_LLAMA_ARG_CACHE_RAM="0"), tmp_path)
+    r = _run(co / "uninstall.ps1", "-DryRun", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "would: clear LLAMA_ARG_CACHE_RAM for this user" in r.stdout
+    assert _user_env_log(tmp_path) == [] and (co / CACHE_RAM_MARKER).is_file()
+
+
+@needs_venv
+def test_on_a_japanese_pc_the_setting_is_explained_in_japanese(tmp_path, ollama_server):
+    ja = {english: texts["ja"] for english, texts in _texts().items()}
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_torch_install(co, tmp_path, ollama_server, torch="cpu", gpu=None))
+    env["FAKE_UI_CULTURE"] = "ja-JP"
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for line in CACHE_RAM_SAID + (CACHE_RAM_DONE.removeprefix("ok: "),):
+        assert ja[line] in r.stdout and line not in r.stdout, line
+    assert "LLAMA_ARG_CACHE_RAM=0" in ja[CACHE_RAM_SAID[0]] and "8 GB" in ja[CACHE_RAM_SAID[1]] and "8 %" in ja[CACHE_RAM_SAID[1]]
+    assert "uninstall.cmd" in ja[CACHE_RAM_SAID[-1]] and "LLAMA_ARG_CACHE_RAM" in ja[CACHE_RAM_SAID[-1]]
 
 
 def test_ollama_is_given_as_long_as_the_install_gives_it():

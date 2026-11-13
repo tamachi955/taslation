@@ -24,10 +24,19 @@ It can be run again at any time: what is already in place is checked and kept.
 It writes into this folder (.venv and models) and makes one Start-menu shortcut,
 plus what you agree to: Python and Ollama (installed by winget into your user
 profile) and the translation model (into Ollama's model folder).
-One more change has no question: on an NVIDIA GPU of 6 GB or less it sets
-OLLAMA_KV_CACHE_TYPE=q8_0 for your user and restarts Ollama, unless that variable
-is set already. It leaves the file .kv-cache-by-install in this folder, and
-uninstall.cmd then clears the variable if it is still q8_0.
+Two more changes have no question. Each is made only when its variable is not
+set already (for your user or in this window), and Ollama then restarts once:
+  * on every computer with Ollama it sets LLAMA_ARG_CACHE_RAM=0 for your user.
+    Ollama otherwise keeps up to 8 GB of RAM as a cache of earlier requests. In
+    TASlation's measurements that cache made translation no faster with a GPU,
+    and about 8 % faster without one. It applies to the Ollama you run and to
+    any other program of yours that reads llama.cpp's LLAMA_ARG_* variables. It
+    leaves the file .cache-ram-by-install in this folder;
+  * on an NVIDIA GPU of 6 GB or less it sets OLLAMA_KV_CACHE_TYPE=q8_0 for your
+    user, and leaves the file .kv-cache-by-install in this folder.
+uninstall.cmd then clears each variable if it still has that value. To undo one
+by hand, delete it in "Edit environment variables for your account" (search
+the Start menu for that) and restart Ollama.
 Your data folder (~/.taslation) is created later by TASlation itself; only a
 language you choose other than the one offered is written into its ui.json
 first, for the window to start with.
@@ -170,8 +179,10 @@ $Interactive = (-not [Console]::IsInputRedirected) -and [Environment]::UserInter
 # builds), and without long paths enabled Windows opens no path of 260 characters or more. Four are kept spare, as
 # the licence folders of a later torch may be deeper.
 $MaxRootLength = 100
-# Says that this install set OLLAMA_KV_CACHE_TYPE: uninstall.ps1 clears only what the install set.
+# Say that this install set OLLAMA_KV_CACHE_TYPE and LLAMA_ARG_CACHE_RAM: uninstall.ps1 clears only what the install
+# set (update.ps1 never copies them over).
 $KvMarker = Join-Path $Root '.kv-cache-by-install'
+$CacheRamMarker = Join-Path $Root '.cache-ram-by-install'
 $StepCount = 7
 $script:StepNo = 0
 $script:Warnings = New-Object System.Collections.Generic.List[string]
@@ -698,17 +709,40 @@ function Stop-OllamaProcesses([string]$Folder) {
     return $true
 }
 
-function Set-KvCache([string]$OllamaPath) {
+# The two settings below are made for this user (Set-UserEnv) and in this process, whose environment the Ollama that
+# Restart-Ollama starts inherits; an Ollama started later (the tray app at sign-in, ollama serve from a new window)
+# inherits the user's. Each leaves its marker first, so that an uninstall clears only what an install set.
+function Set-KvCache {
     Write-Info 'This GPU has 6 GB or less, so Ollama is set to use less of its memory, and Ollama restarts.'
-    Write-Detail 'OLLAMA_KV_CACHE_TYPE=q8_0 for this user'
     try { Set-Content -LiteralPath $KvMarker -Value 'q8_0' -Encoding Ascii } catch { Write-Detail "no marker: $_" }
     Set-UserEnv 'OLLAMA_KV_CACHE_TYPE' 'q8_0'
     $env:OLLAMA_KV_CACHE_TYPE = 'q8_0'
+}
+
+# Ollama 0.40 runs a model in llama.cpp's server, which keeps a cache of earlier prompts in RAM, up to 8 GiB unless
+# told otherwise (--cache-ram; LLAMA_ARG_CACHE_RAM when the command line does not say, and Ollama's does not). In a
+# whole-book run of 100 pages on the development machine (GPU) the translator's server grew to 9.8 GB working set
+# (11.9 GB committed) with it, and stayed at 1.7 GB (3.8 GB) with 0, no cache; a line took 0.37 s both ways. Without
+# the GPU (16 pages) the server peaked at 7.4 GB with it and 4.0 GB without, and a line took 1.51 s with it and 1.63 s
+# without: one request found an earlier prompt in the cache. The installer trades those 8 % for 3.3 GB of RAM
+# (docs/OFFLINE_VERIFICATION.md, "Ollama's prompt cache in RAM").
+function Set-CacheRam {
+    Write-Info (T 'Ollama is set to keep no cache of earlier requests in RAM (LLAMA_ARG_CACHE_RAM=0 for this Windows user), and Ollama restarts.')
+    Write-Info (T 'Otherwise Ollama keeps up to 8 GB of RAM for that cache. In TASlation''s measurements it made translation no faster with a GPU, and about 8 % faster without one.')
+    Write-Info (T 'It applies to the Ollama this user runs, and to any other program of this user that reads llama.cpp''s LLAMA_ARG_* settings.')
+    Write-Info (T 'To undo it: uninstall.cmd clears it, or delete LLAMA_ARG_CACHE_RAM in "Edit environment variables for your account" (search the Start menu for that).')
+    try { Set-Content -LiteralPath $CacheRamMarker -Value '0' -Encoding Ascii } catch { Write-Detail "no marker: $_" }
+    Set-UserEnv 'LLAMA_ARG_CACHE_RAM' '0'
+    $env:LLAMA_ARG_CACHE_RAM = '0'
+}
+
+# Ollama stopped and started again, once for both settings, so that its server reads them; nothing when it is not
+# running: it reads them when it starts.
+function Restart-Ollama([string]$OllamaPath) {
     if (Stop-OllamaProcesses (Split-Path -Parent $OllamaPath)) {
         Start-Sleep -Seconds 1
         [void](Start-OllamaServer $OllamaPath)
     }
-    Write-Ok 'Ollama set up for this GPU'
 }
 
 function Start-OllamaServer([string]$Exe) {
@@ -1178,12 +1212,39 @@ if ($modelPresent) {
     Write-Info (T 'The translation model was not downloaded. To add it, run install.cmd again.')
 }
 Write-Detail "translation model $($model.Name) for $($language.Name) (the language from $($language.Source))"
+# Ollama's two settings, each only where its variable is set neither for this user nor in this process (a value there
+# is the person's, and stays without a word), then one restart for both. A dry run counts an Ollama it would install.
+$ollamaThere = $ollamaExe -or ($DryRun -and $wantOllama)
+$ollamaSet = New-Object System.Collections.Generic.List[string]
 # a GPU of 6 GB or less holds the model's whole context only with a quantized KV cache (about 4 times the speed)
-if ($ollamaExe -and $gpuMemoryMb -gt 0 -and $gpuMemoryMb -le 6144 -and -not $env:OLLAMA_KV_CACHE_TYPE -and -not (Get-UserEnv 'OLLAMA_KV_CACHE_TYPE')) {
+if ($ollamaThere -and $gpuMemoryMb -gt 0 -and $gpuMemoryMb -le 6144 -and -not $env:OLLAMA_KV_CACHE_TYPE -and -not (Get-UserEnv 'OLLAMA_KV_CACHE_TYPE')) {
     if ($DryRun) {
-        Write-Plan 'set OLLAMA_KV_CACHE_TYPE=q8_0 for this user and start Ollama again'
+        Write-Plan "set OLLAMA_KV_CACHE_TYPE=q8_0 for this user (and write $KvMarker)"
     } else {
-        Set-KvCache $ollamaExe
+        Set-KvCache
+    }
+    $ollamaSet.Add('Ollama set up for this GPU')
+}
+# every computer: no prompt cache of up to 8 GiB in RAM (Set-CacheRam)
+if ($ollamaThere -and -not $env:LLAMA_ARG_CACHE_RAM -and -not (Get-UserEnv 'LLAMA_ARG_CACHE_RAM')) {
+    if ($DryRun) {
+        Write-Plan "set LLAMA_ARG_CACHE_RAM=0 for this user (and write $CacheRamMarker)"
+        Write-Detail 'so that Ollama keeps no cache of earlier requests in RAM, up to 8 GB otherwise; uninstall.cmd clears it'
+    } else {
+        Set-CacheRam
+    }
+    $ollamaSet.Add((T 'Ollama keeps no cache of earlier requests in RAM'))
+} elseif ($ollamaThere) {
+    $cacheRam = $env:LLAMA_ARG_CACHE_RAM
+    if (-not $cacheRam) { $cacheRam = Get-UserEnv 'LLAMA_ARG_CACHE_RAM' }
+    Write-Detail "LLAMA_ARG_CACHE_RAM is set already ($cacheRam); left as it is"
+}
+if ($ollamaSet.Count -gt 0) {
+    if ($DryRun) {
+        Write-Plan 'start Ollama again if it is running (once), so that it reads what was set'
+    } else {
+        Restart-Ollama $ollamaExe
+        foreach ($done in $ollamaSet) { Write-Ok $done }
     }
 }
 

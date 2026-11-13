@@ -41,7 +41,7 @@ def _write(path: Path, text: str) -> Path:
 
 def _installed(tmp: Path) -> Path:
     """An installed folder with a space in its name: this checkout's update scripts, an old program, the person's
-    taslation.toml, .venv, models and install marker."""
+    taslation.toml, .venv, models and the install's markers."""
     here = tmp / "TASlation here"
     for name in ("update.ps1", "update.cmd"):
         _write(here / name, "")
@@ -55,6 +55,7 @@ def _installed(tmp: Path) -> Path:
     _write(here / ".venv" / "Scripts" / "python.exe", "not a real python")
     _write(here / "models" / "fonts" / "OFL.txt", "licence")
     _write(here / ".kv-cache-by-install", "q8_0")
+    _write(here / ".cache-ram-by-install", "0")
     _write(here / "README.md", "old readme\n")
     _write(here / "my notes.txt", "the person's own file\n")
     return here
@@ -77,6 +78,8 @@ def _new_copy(tmp: Path, top: str | None = "taslation-main") -> Path:
     _write(new / "README.md", "new readme\n")
     _write(new / "taslation.toml", "min_font_size = 99\n")  # (another person's: never copied)
     _write(new / "models" / "should-not-come.txt", "x")
+    _write(new / ".kv-cache-by-install", "another install's")  # (markers of the folder it was copied from)
+    _write(new / ".cache-ram-by-install", "another install's")
     return outer
 
 
@@ -120,6 +123,7 @@ def _updated(here: Path) -> None:
     assert (here / ".venv" / "Scripts" / "python.exe").read_text() == "not a real python"
     assert (here / "models" / "fonts" / "OFL.txt").is_file() and not (here / "models" / "should-not-come.txt").exists()
     assert (here / ".kv-cache-by-install").read_text() == "q8_0" and (here / "my notes.txt").is_file()
+    assert (here / ".cache-ram-by-install").read_text() == "0"
 
 
 # ---- the scripts themselves
@@ -209,6 +213,7 @@ def test_a_dry_run_changes_nothing_and_runs_nothing(tmp_path):
     assert _snapshot(here) == before
     assert "would: copy README.md" in r.stdout and "would: delete taslation\\old_module.py" in r.stdout
     assert "would: copy taslation.toml" not in r.stdout and "models" not in r.stdout.split("Kept as they are")[0]
+    assert "by-install" not in r.stdout  # neither marker of the install
 
 
 @pytest.mark.parametrize("what", ["not taslation", "this folder", "missing", "no -From"])

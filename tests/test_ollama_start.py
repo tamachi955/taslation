@@ -4,6 +4,8 @@ for, the window's start with its popup, a request that finds Ollama gone, the co
 stops rather than spins."""
 from __future__ import annotations
 
+import contextlib
+import os
 import subprocess
 import threading
 from types import SimpleNamespace
@@ -117,6 +119,7 @@ def test_started_detached_with_no_console_and_no_shell(machine, tmp_path, monkey
     home = _install(tmp_path, "ollama app.exe")
     machine.after_start = 2
     monkeypatch.setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
+    monkeypatch.setenv("LLAMA_ARG_CACHE_RAM", "0")  # as install.ps1 sets it
     said: list[str] = []
     assert start_ollama(URL, on_starting=lambda: said.append("starting")) is None
     assert said == ["starting"] and len(machine.started) == 1
@@ -134,6 +137,94 @@ def test_the_server_is_run_as_ollama_serve(machine, tmp_path):
     machine.after_start = 0
     assert start_ollama(URL) is None
     assert machine.started[0][0] == [str(home / "ollama.exe"), "serve"]
+
+
+# ------------------------------------------------------------------------------------------ no prompt cache in RAM
+def _started_env(machine, tmp_path, monkeypatch, stored: str | None) -> dict | None:
+    """The environment the Ollama started gets (None: TASlation's own, inherited) when Windows keeps *stored* as the
+    user's LLAMA_ARG_CACHE_RAM."""
+    _install(tmp_path, "ollama app.exe")
+    machine.after_start = 0
+    asked: list[str] = []
+    monkeypatch.setattr(ollama_start, "stored_value", lambda name: asked.append(name) or stored)
+    assert start_ollama(URL) is None
+    options = machine.started[0][1]
+    if "env" not in options:
+        assert asked == []  # the variable was there: nothing looked up
+        return None
+    assert asked == ["LLAMA_ARG_CACHE_RAM"]
+    return options["env"]
+
+
+def test_an_ollama_started_where_the_variable_is_set_nowhere_keeps_no_prompt_cache(machine, tmp_path, monkeypatch):
+    monkeypatch.delenv("LLAMA_ARG_CACHE_RAM", raising=False)
+    monkeypatch.setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
+    env = _started_env(machine, tmp_path, monkeypatch, None)
+    assert env["LLAMA_ARG_CACHE_RAM"] == "0" == ollama_start.CACHE_RAM_OFF
+    assert {k: v for k, v in env.items() if k != "LLAMA_ARG_CACHE_RAM"} == dict(os.environ)  # the rest unchanged
+    assert env["OLLAMA_KV_CACHE_TYPE"] == "q8_0"
+
+
+@pytest.mark.parametrize("stored", ["0", "4096"])
+def test_the_value_windows_keeps_for_the_user_is_the_one_given(machine, tmp_path, monkeypatch, stored):
+    """TASlation started before the install set the variable (or the reader set it since): the Ollama it starts gets
+    what a process started now would get, the reader's 4096 as much as the install's 0."""
+    monkeypatch.delenv("LLAMA_ARG_CACHE_RAM", raising=False)
+    assert _started_env(machine, tmp_path, monkeypatch, stored)["LLAMA_ARG_CACHE_RAM"] == stored
+
+
+@pytest.mark.parametrize("value", ["0", "4096"])
+def test_a_value_in_taslation_s_own_environment_is_inherited_unchanged(machine, tmp_path, monkeypatch, value):
+    monkeypatch.setenv("LLAMA_ARG_CACHE_RAM", value)
+    assert _started_env(machine, tmp_path, monkeypatch, "999") is None
+
+
+class _Registry:
+    """winreg as `stored_value` uses it, over *values*: {(root, key): {name: (value, kind)}}."""
+
+    def __init__(self, values):
+        self.values = values
+
+    def OpenKey(self, root, key):  # noqa: N802 - winreg's name
+        if (root, key) not in self.values:
+            raise FileNotFoundError(key)
+        return contextlib.nullcontext((root, key))
+
+    def QueryValueEx(self, opened, name):  # noqa: N802
+        try:
+            return self.values[opened][name]
+        except KeyError:
+            raise FileNotFoundError(name) from None
+
+
+@windows_only
+@pytest.mark.parametrize("user, machine_value, found", [
+    ("1024", "2048", "1024"),  # the user's comes first, as in a new process's environment
+    (None, "2048", "2048"),
+    (None, None, None),
+    ("%CACHE_MIB%", None, "512"),  # REG_EXPAND_SZ, expanded
+])
+def test_the_value_windows_keeps_is_the_user_s_then_the_computer_s(monkeypatch, user, machine_value, found):
+    import winreg
+
+    values = {(winreg.HKEY_CURRENT_USER, ollama_start.USER_ENV_KEY): {},
+              (winreg.HKEY_LOCAL_MACHINE, ollama_start.MACHINE_ENV_KEY): {}}
+    if user is not None:
+        kind = winreg.REG_EXPAND_SZ if "%" in user else winreg.REG_SZ
+        values[(winreg.HKEY_CURRENT_USER, ollama_start.USER_ENV_KEY)]["LLAMA_ARG_CACHE_RAM"] = (user, kind)
+    if machine_value is not None:
+        values[(winreg.HKEY_LOCAL_MACHINE, ollama_start.MACHINE_ENV_KEY)]["LLAMA_ARG_CACHE_RAM"] = (machine_value,
+                                                                                                    winreg.REG_SZ)
+    fake = _Registry(values)
+    monkeypatch.setattr(winreg, "OpenKey", fake.OpenKey)
+    monkeypatch.setattr(winreg, "QueryValueEx", fake.QueryValueEx)
+    monkeypatch.setenv("CACHE_MIB", "512")
+    assert ollama_start.stored_value("LLAMA_ARG_CACHE_RAM") == found
+
+
+@windows_only
+def test_a_variable_windows_does_not_keep_is_none():
+    assert ollama_start.stored_value("TASLATION_TEST_NO_SUCH_VARIABLE_7F3A") is None  # (read only)
 
 
 def test_not_started_for_another_port(machine, tmp_path):

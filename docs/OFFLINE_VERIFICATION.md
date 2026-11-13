@@ -2221,3 +2221,65 @@ mean classifier probability. **What was retuned**, on 736 text and 197 non-text 
 * `SPLIT_DISTANCE` 0.2: all three pairs that far apart flag the line. 18 of the 664 lines (2.7 %), mean CER 36 %, 5 of
   the 18 wrong lines; 16 of them were under `OCR_UNSURE` anyway.
 * The pad and the size ratio are as they were. No budget for short crops: it was not measured in the pipeline.
+
+## Ollama's prompt cache in RAM (2026-11-14)
+
+Ollama 0.40 runs the model in llama.cpp's server (`llama-server.exe`), which keeps earlier prompts in RAM to reuse
+them: up to 8 GiB, unless `--cache-ram` says otherwise, or `LLAMA_ARG_CACHE_RAM` when the command line does not (the
+command line Ollama gives it has no `--cache-ram`). For PLaMo 3 Translate 2B a saved prompt carries its context
+checkpoints, and a long one takes 1.5 to 2 GB; after a whole-book run the server reported `cache state: 11 prompts,
+8060.077 MiB (limits: 8192.000 MiB, 8192 tokens, 14731 est)`. install.ps1 now sets `LLAMA_ARG_CACHE_RAM=0` for the
+user, and TASlation passes 0 to an Ollama it starts itself when the variable is set nowhere (`taslation/ollama_start.py`).
+
+**How it was measured.** Whole-book runs through the pipeline API without a window (the read-first batch, the code of
+8b1261f, a scratch `TASLATION_STATE_DIR`), on the development machine (Intel Core i7-9700F, 48 GB, GeForce GTX 1660 Ti
+6 GB, Ollama 0.40.16, PLaMo 3 Translate 2B Q4_K_M, context 8192). Each run had a second Ollama server of its own on
+127.0.0.1:11435, with the variables under test in that server's environment only; the owner's server and the user's
+environment were not touched. With the GPU: 50 two-page screens of OpenMantra (100 pages, 674 lines, 649 requests) and
+`OLLAMA_KV_CACHE_TYPE=q8_0`, as this machine has it. Without the GPU (`CUDA_VISIBLE_DEVICES=-1` and the other backends
+off, no KV setting): the first 8 screens (16 pages, 106 lines, about 100 requests). The working set and the commit of
+`llama-server.exe` and of TASlation's process were sampled every 0.5 s. One run each (n = 1); the 2026-11-13 columns
+are the runs the README's hardware figures came from (the GPU one on the owner's server, same settings).
+
+With the GPU:
+
+| | 8 GiB (default), 2026-11-13 | 8 GiB (default) | 0 (the install's) |
+|---|---|---|---|
+| llama-server, peak working set / commit | 9,757 / 11,878 MB | 9,787 / 11,907 MB | 1,737 / 3,838 MB |
+| TASlation, peak working set / commit | 2,442 / 3,813 MB | 2,431 / 3,797 MB | 2,433 / 3,806 MB |
+| Translation pass | 247.2 s | 249.3 s | 250.5 s |
+| A line | 0.367 s | 0.370 s | 0.372 s |
+| Generation | 117.0 tok/s | 115.3 tok/s | 115.5 tok/s |
+| Prompt tokens the server evaluated (time) | | 52,460 (168.3 s) | 53,311 (170.6 s) |
+
+Without the GPU:
+
+| | 8 GiB, 2026-11-13 | 8 GiB | 2 GiB | 0 |
+|---|---|---|---|---|
+| llama-server, peak working set / commit | 7,349 / 7,442 MB | 7,366 / 7,460 MB | 5,715 / 5,806 MB | 4,046 / 4,135 MB |
+| TASlation, peak working set / commit | 1,594 / 2,399 MB | 1,588 / 2,400 MB | 1,599 / 2,400 MB | 1,590 / 2,397 MB |
+| Translation pass | 155.8 s | 160.0 s | 158.6 s | 173.2 s |
+| A line | 1.47 s | 1.51 s | 1.50 s | 1.63 s |
+| Generation | 16.3 tok/s | 15.8 tok/s | 16.0 tok/s | 15.7 tok/s |
+| Prompt tokens the server evaluated (time) | | 6,307 (106.3 s) | 6,293 (105.5 s) | 7,338 (119.4 s) |
+
+The server's log says which: `srv    load_model: prompt cache is enabled, size limit: 8192 MiB` (or 2048) with the cache,
+``srv    load_model: prompt cache is disabled - use `--cache-ram N` to enable it`` with 0. Its GPU memory was 1,951 MB
+both ways.
+
+**Where the time goes.** In each run with a cache, one request found an earlier prompt in it (`found better prompt with
+f_keep = 1.000, f_sim = 0.970` on the CPU) and did not evaluate 850 to 1,050 tokens again. On the GPU that is about 2 s
+of 250; on the CPU, where a long prompt takes 10 to 13 s, it is the whole difference: 8 % on 16 pages. How often such a
+hit comes on other books was not measured. Between the two days the same settings differed by 1 % on the GPU and 3 % on
+the CPU, so the GPU's 0.5 % is no difference.
+
+**Decision.** 0 on every computer: the cache costs about 8 GB of RAM with a GPU for no speed, and 3.3 GB without one
+for about 8 %. A 2 GiB cache would have kept that 8 % for 1.7 GB.
+
+**How the variable reaches the server.** Read from the processes' environment blocks: the owner's Ollama tray app and
+the server it started have every variable of the user (`HKCU\Environment`), `OLLAMA_KV_CACHE_TYPE=q8_0` among them;
+`ollama serve` started with `LLAMA_ARG_CACHE_RAM=0` passed it on to its `llama-server.exe`, whose command line has no
+`--cache-ram`. Not shown here, because it needs the owner's environment or the owner's Ollama: the variable set for
+the user reaching the tray app when Windows starts it, the installer's restart of the tray app, programs started from
+the Start menu before Explorer reads the change, and TASlation starting the tray app with it (tests with fakes only).
+No computer with 8 GB of RAM was tried.

@@ -22,8 +22,10 @@ translator_models.json in the data folder says which) with `ollama rm`; a
 model you had before stays, and is not asked about. An install from before
 that file is asked about its configured model. Then it asks whether to
 uninstall Ollama itself with winget (all default: no). When the install set
-OLLAMA_KV_CACHE_TYPE (the file .kv-cache-by-install says so) and it is still
-q8_0, it clears that variable for your user. It never touches
+LLAMA_ARG_CACHE_RAM (the file .cache-ram-by-install says so) and it is still 0,
+or OLLAMA_KV_CACHE_TYPE (the file .kv-cache-by-install) and it is still q8_0,
+it clears that variable for your user (an Ollama already running keeps the
+setting until it restarts). A value you set yourself stays. It never touches
 anything else: this folder's own files, Python (also when install.cmd installed
 it; it says how to remove it) and pip's download cache stay.
 
@@ -48,6 +50,7 @@ $Root = $PSScriptRoot
 $Venv = Join-Path $Root '.venv'
 $Models = Join-Path $Root 'models'
 $KvMarker = Join-Path $Root '.kv-cache-by-install'
+$CacheRamMarker = Join-Path $Root '.cache-ram-by-install'
 $ShortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'TASlation.lnk'
 $Interactive = (-not [Console]::IsInputRedirected) -and [Environment]::UserInteractive
 $script:Deleted = New-Object System.Collections.Generic.List[string]
@@ -194,6 +197,21 @@ function Remove-FromRecord([string]$StateDir, [string]$Name) {
 
 function Get-UserEnv([string]$Name) { return [Environment]::GetEnvironmentVariable($Name, 'User') }
 function Set-UserEnv([string]$Name, [string]$Value) { [Environment]::SetEnvironmentVariable($Name, $Value, 'User') }
+
+# A variable the install set for this user (its *Marker* says so) cleared while it still has the install's *Value*;
+# one changed since is the person's and stays. The marker goes either way.
+function Clear-InstallSetting([string]$Marker, [string]$Name, [string]$Value) {
+    if (-not (Test-Path -LiteralPath $Marker)) { return }
+    if ((Get-UserEnv $Name) -eq $Value) {
+        if ($DryRun) {
+            Write-Plan "clear $Name for this user"
+        } else {
+            Set-UserEnv $Name $null
+        }
+        $script:Deleted.Add("the Ollama setting the install made ($Name=$Value)")
+    }
+    if (-not $DryRun) { Remove-Item -LiteralPath $Marker -Force -ErrorAction SilentlyContinue }
+}
 
 # ---------------------------------------------------------------- start
 Write-Host 'TASlation uninstaller' -ForegroundColor Cyan
@@ -361,18 +379,9 @@ if (-not $ollamaExe) {
     }
 }
 
-# 5. the setting the install made ------------------------------------------
-if (Test-Path -LiteralPath $KvMarker) {
-    if ((Get-UserEnv 'OLLAMA_KV_CACHE_TYPE') -eq 'q8_0') {
-        if ($DryRun) {
-            Write-Plan 'clear OLLAMA_KV_CACHE_TYPE for this user'
-        } else {
-            Set-UserEnv 'OLLAMA_KV_CACHE_TYPE' $null
-        }
-        $script:Deleted.Add('the Ollama setting the install made (OLLAMA_KV_CACHE_TYPE)')
-    }
-    if (-not $DryRun) { Remove-Item -LiteralPath $KvMarker -Force -ErrorAction SilentlyContinue }
-}
+# 5. the settings the install made -----------------------------------------
+Clear-InstallSetting $KvMarker 'OLLAMA_KV_CACHE_TYPE' 'q8_0'
+Clear-InstallSetting $CacheRamMarker 'LLAMA_ARG_CACHE_RAM' '0'
 
 # summary ------------------------------------------------------------------
 $script:Left.Add("this folder itself ($Root): delete it by hand when you no longer want it")

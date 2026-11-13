@@ -799,6 +799,9 @@ extends this, so it is not loaded again for every page. In a whole-book run, the
 but when the reading is over and it moves on to the notes and the translation. At the end of a run (a stop or a failure included) and when the window closes, it is released at once.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
+Ollama uses up to 8 GB of RAM for a cache of earlier requests. `install.cmd` switches it off with the environment variable `LLAMA_ARG_CACHE_RAM=0` for this Windows user ("Installation" in the README).
+When TASlation starts Ollama itself and TASlation's own environment lacks this variable, it passes on the value Windows keeps for this user (or this computer),
+or 0 when there is none (for an installation by a version before this one, and for TASlation started from a window opened before the setting was made). A value that is set is never changed.
 
 ### Trying it without a book
 
