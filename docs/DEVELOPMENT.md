@@ -4,7 +4,7 @@
 
 ```bash
 python -m venv .venv
-.venv\Scriptsctivate
+.venv\Scripts\activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 # or, with an NVIDIA GPU, the build install.cmd takes there: whl/cu126 (driver 528.33+), whl/cu130 for Blackwell (580+)
 pip install -e .[dev,backup]
@@ -111,8 +111,31 @@ hedges exactly as strong. The English takes the window's labels from the app's E
 strings), not from a translation of the Japanese labels. `tests/test_translator_install.py` checks that both READMEs
 carry the PLaMo credit and the download sizes.
 
+## The install check
+
+`.github/workflows/install-check.yml` installs TASlation from scratch on a fresh Windows runner of GitHub
+(`windows-2025`: Windows Server 2025, which has winget, and no GPU) and shows that it works. It is started by hand
+only (Actions > Install check > Run workflow): it downloads about 5 GB and takes about half an hour. It unpacks the
+repository as "Download ZIP" gives it (`git archive`, so `.gitattributes` applies), hides the runner's own Python from
+the installer (the input `hide_python`), and runs `install.cmd -Yes` in it. Then it checks, one step each, what the
+installer made (`.venv`, the three OCR models, the translation model in Ollama, `LLAMA_ARG_CACHE_RAM=0` for the user
+with its marker, the Start-menu shortcut), `taslation doctor`, that Ollama's server and llama.cpp's server run with
+`LLAMA_ARG_CACHE_RAM=0` (from their environment blocks and Ollama's log, before anything of TASlation starts Ollama),
+a `taslation translate` of `tests/fixtures/sample_page.png` (counts only), `uninstall.cmd -DryRun -Yes` and
+`uninstall.cmd -Yes`. The job summary lists every check, the installer's step times and the sizes, and what the check
+does not cover (a GPU, the questions a person answers, a real viewer, Windows 10 and 11); the console output is kept
+as the artifact `install-check-output`. Its helpers are in `.github/install-check/`. `.gitattributes` leaves `.github`
+out of GitHub's ZIP, and `update.ps1` never copies it. `tests/test_install_check_workflow.py` checks the workflow
+without running it.
+
+`-Yes` never agrees to a licence by itself. The workflow sets `TASLATION_AGREE_OCR_LICENCE` to
+`I agree to CC BY-NC-SA 4.0` and `TASLATION_AGREE_PLAMO_LICENCE` to `I agree to the PLaMo Community License`, which
+install.ps1 counts as agreement only with `-Yes` and only as these exact sentences, and the comment beside them records
+that the repository owner has read both licences and agrees to them for this non-commercial check. Whoever runs the
+workflow in a copy of the repository agrees through those lines too, so reads the two licences first.
+
 ## Releases
 
 A release is a git tag: bump `__version__` in `taslation/__init__.py`, commit, tag. GitHub's source ZIP of the tag is
 what people download, and `install.cmd` in it does the rest. Nothing is built. `.gitattributes` keeps CRLF for `*.cmd`
-and `*.ps1` in that ZIP.
+and `*.ps1` in that ZIP, and leaves `docs/media` and `.github` out of it.

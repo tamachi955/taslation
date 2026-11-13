@@ -240,6 +240,8 @@ After that, TASlation does not connect to anything outside this computer.
 All the questions come first. Once you have answered them, you can leave the computer. Depending on your connection, it takes about 15 to 60 minutes.
 Download progress is shown in percent and MB. If the connection breaks partway, it goes on from where it broke off.
 
+`install.cmd -Yes`, for runs nobody watches, never agrees to a licence by itself. Agreeing beforehand is only for automated checks of the installation: someone who has read both licences sets `TASLATION_AGREE_OCR_LICENCE` and `TASLATION_AGREE_PLAMO_LICENCE` to the exact sentences in install.ps1's help, and setting them is that person's agreement (to install TASlation for yourself, answer the questions).
+
 ### Updating
 
 1. Download the new ZIP ("Code" → "Download ZIP" on GitHub) and close TASlation.

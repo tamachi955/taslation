@@ -15,3 +15,4 @@ taslation.toml
 .claude/launch.json
 .claude/worktrees/
 .kv-cache-by-install
+.cache-ram-by-install

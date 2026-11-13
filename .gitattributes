@@ -10,3 +10,6 @@
 # the README's recording (tools/demo_video.py) shows OpenMantra pages, CC BY-NC 4.0: never in a ZIP of the repository
 docs/media export-ignore
 docs/media/** export-ignore
+# the repository's own checks (the install check): nothing a person installs from the ZIP uses them
+.github export-ignore
+.github/** export-ignore

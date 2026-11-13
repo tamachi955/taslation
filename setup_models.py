@@ -552,7 +552,8 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
                        ollama_exe: str | None = None, agreed: str | None = None,
                        cancel: threading.Event | None = None) -> int:
     """The translator model translating into *language* needs, installed (`tinstall`): PLaMo after the person agreed
-    to its licence (*agreed*: where they did, "install" or "window"; else asked here), downloaded, checked, imported
+    to its licence (*agreed*: where they did, "install" or "window", or "TASLATION_AGREE_PLAMO_LICENCE" for an
+    automated check's install whose variable said so; else asked here), downloaded, checked, imported
     into Ollama, its GGUF then deleted; Qwen3.5 4B pulled. A model that is there already is left as it is. Nothing is
     left half done: a stopped or failed install removes its download and an import Ollama did not finish. The exit
     code: 0 ready, 1 failed, CANCELLED, NO_ROOM."""

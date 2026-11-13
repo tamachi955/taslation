@@ -110,7 +110,8 @@ def _sandbox(script: Path, tmp: Path) -> None:
 def _env(tmp: Path, **extra: str) -> dict:
     env = dict(os.environ)
     for key in ("TASLATION_MODELS_DIR", "SELFTRANS_MODELS_DIR", "TASLATION_STATE_DIR", "SELFTRANS_STATE_DIR",
-                "PYTHONUTF8", "TASLATION_UPDATING", "TASLATION_UPDATE_PAUSE"):
+                "PYTHONUTF8", "TASLATION_UPDATING", "TASLATION_UPDATE_PAUSE",
+                "TASLATION_AGREE_OCR_LICENCE", "TASLATION_AGREE_PLAMO_LICENCE"):  # (an automated check's agreements)
         env.pop(key, None)
     # no run of install.ps1 here may write the user's environment: a value there is left alone
     env.setdefault("OLLAMA_KV_CACHE_TYPE", "test")
@@ -1683,6 +1684,182 @@ def test_a_no_to_plamo_installs_no_translator(tmp_path, ollama_server):
     assert r.returncode == 0, r.stdout + r.stderr
     assert len((co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()) == 1  # the reading part
     assert "The translation model was not downloaded" in r.stdout
+
+
+# ---- an automated check's agreement to the licences: with -Yes only, by a variable holding an exact sentence
+
+
+OCR_CONSENT = "TASLATION_AGREE_OCR_LICENCE"
+OCR_SENTENCE = "I agree to CC BY-NC-SA 4.0"
+PLAMO_CONSENT = "TASLATION_AGREE_PLAMO_LICENCE"
+PLAMO_SENTENCE = "I agree to the PLaMo Community License"
+OCR_AGREED = ("CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/) is agreed to through "
+              "TASLATION_AGREE_OCR_LICENCE, by whoever set that variable.")
+PLAMO_AGREED = ("The PLaMo Community License (https://plamo.preferredai.jp/info/plamo-community-license-en, "
+                "https://plamo.preferredai.jp/info/plamo-community-license-ja) is agreed to through "
+                "TASLATION_AGREE_PLAMO_LICENCE, by whoever set that variable.")
+YES_DOES_NOT_AGREE = "[y/N] (-Yes does not agree to a licence; run install.cmd and answer it yourself)"
+PLAMO_ASKED = PLAMO_QUESTION + " (PLaMo is then downloaded)?"
+
+
+def _not_agreed(name: str) -> str:
+    return f"[y/N] n ({name} is set, but not to the sentence in install.ps1's help that agrees: not agreed)"
+
+
+def test_the_exact_sentence_with_yes_agrees_to_the_ocr_licence_and_says_by_whom(tmp_path):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path, gpu=None)
+    env[OCR_CONSENT] = OCR_SENTENCE
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    out = r.stdout
+    assert r.returncode == 1 and "could not create" in out  # past the licence: the fake py ends the run there
+    assert STOPPED not in out and "[3/7]" in out
+    # the licence as the question shows it, the answer that counts and by whom, with its name and address again
+    assert out.index("Their licence is CC BY-NC-SA 4.0:") < out.index("  https://creativecommons.org/licenses/by-nc-sa/4.0/")
+    assert out.index("https://creativecommons.org/licenses/by-nc-sa/4.0/") < out.index(LICENCE + " [y/N] y (" + OCR_CONSENT + ")")
+    assert "  " + OCR_AGREED in out
+    # that variable is for this licence only: PLaMo's is not agreed to
+    assert PLAMO_ASKED + " " + YES_DOES_NOT_AGREE in out and "PLaMo is left out" in out and PLAMO_AGREED not in out
+
+
+@pytest.mark.parametrize("value", [OCR_SENTENCE.lower(), OCR_SENTENCE + " ", " " + OCR_SENTENCE, OCR_SENTENCE + ".",
+                                   "yes", "y", "1", "true", PLAMO_SENTENCE],
+                         ids=["lower case", "a space after", "a space before", "a full stop", "yes", "y", "1", "true",
+                              "the other licence's"])
+def test_any_other_value_agrees_to_nothing_and_the_run_says_so(tmp_path, value):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path)
+    env[OCR_CONSENT] = value
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert LICENCE + " " + _not_agreed(OCR_CONSENT) in r.stdout and OCR_AGREED not in r.stdout
+    _nothing_done(co, r)
+
+
+def test_an_empty_value_is_no_value_and_yes_goes_on_as_before(tmp_path):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path)
+    env[OCR_CONSENT] = ""  # (Windows keeps no empty variable: the process has none)
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert LICENCE + " " + YES_DOES_NOT_AGREE in r.stdout and OCR_CONSENT not in r.stdout
+    _nothing_done(co, r)
+
+
+def test_yes_alone_says_nothing_of_the_variables(tmp_path):
+    co = _without_the_model(tmp_path)
+    r = _run(co / "install.ps1", "-Yes", env=_tools(tmp_path))
+    assert LICENCE + " " + YES_DOES_NOT_AGREE in r.stdout
+    assert OCR_CONSENT not in r.stdout and PLAMO_CONSENT not in r.stdout
+    _nothing_done(co, r)
+
+
+@pytest.mark.parametrize("console", [False, True], ids=["no console", "a person at the console"])
+def test_without_yes_the_sentence_is_ignored_and_a_person_is_asked(tmp_path, console):
+    co = _without_the_model(tmp_path)
+    if console:
+        _answering(co / "install.ps1", {LICENCE: ""})  # Enter is no, whatever the variable says
+    env = _tools(tmp_path)
+    env[OCR_CONSENT] = OCR_SENTENCE
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE
+    r = _run(co / "install.ps1", env=env)
+    out = r.stdout
+    assert (LICENCE + " [y/N] = " if console else LICENCE + " [y/N] n (no console to ask)") in out
+    assert OCR_CONSENT not in out and OCR_AGREED not in out
+    _nothing_done(co, r)
+
+
+@needs_venv
+def test_the_exact_sentence_with_yes_agrees_to_plamo_and_the_record_says_where(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)  # (the OCR models are there: no question about them, whatever their variable says)
+    env = _whole_install(co, tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server)  # the model is not there yet
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE
+    env[OCR_CONSENT] = "anything"
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert LICENCE not in out and OCR_CONSENT not in out
+    assert out.index("https://plamo.preferredai.jp/info/plamo-community-license-ja") < out.index(
+        PLAMO_ASKED + " [y/N] y (" + PLAMO_CONSENT + ")") < out.index("  " + PLAMO_AGREED)
+    assert "PLaMo is left out" not in out and "TASlation is installed." in out
+    translator = (co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()[-1]
+    assert translator.endswith(f"--translator-for English --brief --plamo-agreed {PLAMO_CONSENT} "
+                               f"--ollama-exe {tmp_path / 'bin' / 'ollama.cmd'}")
+
+
+@pytest.mark.parametrize("value", [PLAMO_SENTENCE.upper(), OCR_SENTENCE, "I agree"], ids=["capitals", "the OCR one", "short"])
+def test_a_wrong_sentence_for_plamo_leaves_it_out_and_says_so(tmp_path, value):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    env = _tools(tmp_path, ollama=True, gpu=None)
+    env[PLAMO_CONSENT] = value
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    out = r.stdout
+    assert PLAMO_ASKED + " " + _not_agreed(PLAMO_CONSENT) in out and PLAMO_AGREED not in out
+    assert "PLaMo is left out" in out and "translation model PLaMo 3 Translate 2B (not now)" in out
+    assert "[3/7]" in out  # (the install goes on; the fake py ends it there)
+
+
+def test_each_licence_has_its_own_variable(tmp_path):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path)
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE  # PLaMo's agreement says nothing of the OCR models
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert LICENCE + " " + YES_DOES_NOT_AGREE in r.stdout
+    _nothing_done(co, r)
+
+
+@pytest.mark.parametrize("agrees", [True, False], ids=["the sentences", "other values"])
+def test_a_dry_run_says_what_the_variables_would_do(tmp_path, agrees):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path, ollama=True, gpu=None)
+    env[OCR_CONSENT] = OCR_SENTENCE if agrees else "no"
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE if agrees else "no"
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    if agrees:
+        assert (LICENCE + f" [y/N] (dry run: {OCR_CONSENT} holds the sentence that agrees, so a real run counts it "
+                "as y)") in out
+        assert (PLAMO_ASKED + f" [y/N] (dry run: {PLAMO_CONSENT} holds the sentence that agrees, so a real run "
+                "counts it as y)") in out
+        assert f"--plamo-agreed {PLAMO_CONSENT} --ollama-exe" in out
+    else:
+        for question, name in ((LICENCE, OCR_CONSENT), (PLAMO_ASKED, PLAMO_CONSENT)):
+            assert (question + f" [y/N] (dry run: {name} is set, but not to the sentence that agrees, so a real run "
+                    "counts it as n; counted as y)") in out
+        assert "--plamo-agreed install --ollama-exe" in out
+    assert OCR_AGREED not in out and PLAMO_AGREED not in out  # nothing is agreed to in a dry run
+    assert "Dry run finished; nothing was changed." in out
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+
+
+def test_a_dry_run_without_yes_ignores_the_variables(tmp_path):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path, ollama=True, gpu=None)
+    env[OCR_CONSENT] = OCR_SENTENCE
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE
+    r = _run(co / "install.ps1", "-DryRun", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert LICENCE + " [y/N] (dry run: would ask; counted as y)" in r.stdout
+    assert PLAMO_ASKED + " [y/N] (dry run: would ask; counted as y)" in r.stdout
+    assert OCR_CONSENT not in r.stdout and PLAMO_CONSENT not in r.stdout
+
+
+def test_the_help_says_who_agrees_through_the_variables():
+    text = (ROOT / "install.ps1").read_text(encoding="ascii")
+    head = " ".join(text[:text.index("[CmdletBinding()]")].split())
+    assert f'{OCR_CONSENT} = "{OCR_SENTENCE}"' in head and f'{PLAMO_CONSENT} = "{PLAMO_SENTENCE}"' in head
+    assert "whoever has read the licence and agrees to it sets its variable to its exact sentence" in head
+    assert "setting it is that person's agreement" in head and "any other value agrees to nothing" in head
+    assert "A run without -Yes asks the person and ignores both." in head
+    yes = head[head.index(".PARAMETER Yes"):head.index(".PARAMETER DryRun")]
+    assert "by itself never agrees to the OCR models' licence nor to PLaMo's" in yes
+    assert "For automated checks by someone who has read and agrees to the licences" in yes
+    assert "setting the variable is that person's agreement" in yes
+    # the sentences install.ps1 compares with are the ones the help gives
+    assert f"$OcrConsentVar = '{OCR_CONSENT}'" in text and f"$OcrConsentText = '{OCR_SENTENCE}'" in text
+    assert f"$PlamoConsentVar = '{PLAMO_CONSENT}'" in text and f"$PlamoConsentText = '{PLAMO_SENTENCE}'" in text
 
 
 @pytest.mark.parametrize("where", ["ui.json", "toml", "culture"])

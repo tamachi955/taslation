@@ -49,8 +49,9 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 $Venv = Join-Path $Root '.venv'
 $Interactive = (-not [Console]::IsInputRedirected) -and [Environment]::UserInteractive
-# Never copied over (at the top of the folder): the person's settings, what install.ps1 made, the clone's own history.
-$KeptNames = @('taslation.toml', '.venv', 'models', '.git', '.kv-cache-by-install', '.cache-ram-by-install')
+# Never copied over (at the top of the folder): the person's settings, what install.ps1 made, the clone's own history
+# and the repository's checks (.github: GitHub's ZIP leaves it out, a clone has it).
+$KeptNames = @('taslation.toml', '.venv', 'models', '.git', '.github', '.kv-cache-by-install', '.cache-ram-by-install')
 $Downloads = Join-Path $env:USERPROFILE 'Downloads'
 $script:Temp = $null
 

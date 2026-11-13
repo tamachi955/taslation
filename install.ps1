@@ -70,15 +70,29 @@ build of PyTorch already installed is kept; a CPU build on a computer with an
 NVIDIA GPU is replaced by the GPU build, except in the run after update.cmd,
 which keeps it and says how to get the GPU build.
 
+Automated checks of the installation (a run with -Yes that nobody watches) are
+the one case where a licence can be agreed to without its question: whoever
+has read the licence and agrees to it sets its variable to its exact sentence
+before the run, and setting it is that person's agreement:
+  * TASLATION_AGREE_OCR_LICENCE = "I agree to CC BY-NC-SA 4.0", for the three
+    OCR models' licence;
+  * TASLATION_AGREE_PLAMO_LICENCE = "I agree to the PLaMo Community License",
+    for PLaMo 3 Translate 2B's.
+The sentence is compared exactly (without the quotes); any other value agrees
+to nothing, and the run says so. The run prints which licence was agreed to
+through which variable. A run without -Yes asks the person and ignores both.
+
 .PARAMETER Yes
 For unattended runs and checks; install.cmd asks instead. Takes the language
 offered and answers Y to the questions for Python, Ollama and the Qwen
 translation model (a Y there accepts winget's agreements for Python and Ollama,
 as a person's does). It never answers the question about the layout and
-inpainting models, and never agrees to the OCR models'
-licence nor to PLaMo's, which take a person: without the OCR models the run
-stops, without PLaMo it goes on without a translation model. Too little disk
-space also stops it.
+inpainting models, and by itself never agrees to the OCR models' licence nor
+to PLaMo's, which take a person: without the OCR models the run stops, without
+PLaMo it goes on without a translation model. For automated checks by someone
+who has read and agrees to the licences, each one counts as agreed when its
+variable holds its exact sentence (see the description); setting the variable
+is that person's agreement. Too little disk space also stops it.
 
 .PARAMETER DryRun
 For checks: look at everything and print what would be done, with the details
@@ -172,8 +186,15 @@ $WindowLanguages = @('English', 'Spanish', 'Portuguese (Brazil)', 'French', 'Ger
 $TextsFile = Join-Path $Root 'installer-texts.json'
 $script:Texts = $null
 $script:TextLanguage = ''
+$OcrLicenceUrl = 'https://creativecommons.org/licenses/by-nc-sa/4.0/'
 $PlamoLicenceUrls = @('https://plamo.preferredai.jp/info/plamo-community-license-en',
                       'https://plamo.preferredai.jp/info/plamo-community-license-ja')
+# For automated checks only (with -Yes; Get-LicenceConsent): a licence agreed to beforehand by whoever sets its variable
+# to this exact sentence. A person running install.cmd is asked instead.
+$OcrConsentVar = 'TASLATION_AGREE_OCR_LICENCE'
+$OcrConsentText = 'I agree to CC BY-NC-SA 4.0'
+$PlamoConsentVar = 'TASLATION_AGREE_PLAMO_LICENCE'
+$PlamoConsentText = 'I agree to the PLaMo Community License'
 $Interactive = (-not [Console]::IsInputRedirected) -and [Environment]::UserInteractive
 # The longest file in .venv has 154 characters (a licence file in torch 2.15.0's CPU build; 151 in 2.14.1's GPU
 # builds), and without long paths enabled Windows opens no path of 260 characters or more. Four are kept spare, as
@@ -239,6 +260,34 @@ function Confirm-Choice([string]$Question, [bool]$DefaultYes = $false) {
     $words = 'y|yes|\uFF59|\uFF59\uFF45\uFF53|\u306F\u3044'
     if ($DefaultYes) { return ($answer -match "^\s*($words)?\s*$") }
     return ($answer -match "^\s*($words)\s*$")
+}
+
+# A licence agreed to for an automated check, which -Yes alone never does: 'agreed' when this is a -Yes run and the
+# variable *Name* holds exactly *Sentence* (whoever set it read the licence and agrees: the help says so), 'wrong' when
+# it holds anything else, which agrees to nothing, 'unset' when it is not set or the run is not a -Yes run (a person
+# is asked then, whatever the variable says).
+function Get-LicenceConsent([string]$Name, [string]$Sentence) {
+    if (-not $Yes) { return 'unset' }
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ($null -eq $value) { return 'unset' }
+    if ([string]::Equals($value, $Sentence, [StringComparison]::Ordinal)) { return 'agreed' }
+    return 'wrong'
+}
+
+# What a -Yes run says of a licence's question (*Question*) when its variable *Name* is set (*Consent*, from
+# Get-LicenceConsent: 'agreed' or 'wrong'): the answer that counts, and for an agreement which licence it was and
+# through whom, with the licence's name (*Licence*) and address (*Urls*) as the question's text gives them.
+function Write-LicenceConsent([string]$Question, [string]$Consent, [string]$Name, [string]$Licence, [string[]]$Urls) {
+    if ($DryRun -and $Consent -eq 'agreed') {
+        Write-Info "$Question [y/N] (dry run: $Name holds the sentence that agrees, so a real run counts it as y)"
+    } elseif ($DryRun) {
+        Write-Info "$Question [y/N] (dry run: $Name is set, but not to the sentence that agrees, so a real run counts it as n; counted as y)"
+    } elseif ($Consent -eq 'agreed') {
+        Write-Info "$Question [y/N] y ($Name)"
+        Write-Info ('{0} ({1}) is agreed to through {2}, by whoever set that variable.' -f $Licence, ($Urls -join ', '), $Name)
+    } else {
+        Write-Info "$Question [y/N] n ($Name is set, but not to the sentence in install.ps1's help that agrees: not agreed)"
+    }
 }
 
 # Runs a program and returns its exit code and output lines (stderr included) without stopping on stderr.
@@ -857,7 +906,8 @@ $language = Select-TargetLanguage $offeredLanguage
 
 # The OCR models' licence comes before anything is installed: without them TASlation cannot read pages, so a no ends
 # the run here with nothing done. An install from before the three keeps reading with the one it has, so there a no
-# only leaves the other two out. -Yes does not agree: a licence takes a person.
+# only leaves the other two out. -Yes does not agree: a licence takes a person (an automated check's variable is that
+# person's agreement: Get-LicenceConsent).
 $models = Get-ModelsDir
 $ocrReady = Test-OcrModel $models.Path
 if (-not $ocrReady) {
@@ -865,13 +915,23 @@ if (-not $ocrReady) {
     Write-Info (T 'TASlation reads pages with three OCR models (about 700 MB in all):')
     Write-Info '  manga-ocr-charspot-small, manga-ocr-nar-small, manga-ocr-base-CPT-flex'
     Write-Info (T 'All three are free for NON-COMMERCIAL use only. Their licence is CC BY-NC-SA 4.0:')
-    Write-Info '  https://creativecommons.org/licenses/by-nc-sa/4.0/'
+    Write-Info "  $OcrLicenceUrl"
     Write-Info (T 'TASlation itself is MIT, but it cannot read pages without these models.')
     $licenceQuestion = (T 'Do you agree to the terms of the OCR models?')
-    if ($DryRun) {
+    $ocrConsent = Get-LicenceConsent $OcrConsentVar $OcrConsentText
+    $ocrAgreed = $true
+    if ($ocrConsent -ne 'unset') {
+        Write-LicenceConsent $licenceQuestion $ocrConsent $OcrConsentVar 'CC BY-NC-SA 4.0' @($OcrLicenceUrl)
+        $ocrAgreed = $DryRun -or ($ocrConsent -eq 'agreed')
+    } elseif ($DryRun) {
         Write-Info "$licenceQuestion [y/N] (dry run: would ask; counted as y)"
-    } elseif ($Yes -or -not (Confirm-Choice $licenceQuestion)) {
-        if ($Yes) { Write-Info "$licenceQuestion [y/N] (-Yes does not agree to a licence; run install.cmd and answer it yourself)" }
+    } elseif ($Yes) {
+        Write-Info "$licenceQuestion [y/N] (-Yes does not agree to a licence; run install.cmd and answer it yourself)"
+        $ocrAgreed = $false
+    } else {
+        $ocrAgreed = Confirm-Choice $licenceQuestion
+    }
+    if (-not $ocrAgreed) {
         if (Test-FirstOcrModel $models.Path) {
             Write-Info (T 'TASlation goes on reading with the one model it has. To agree later, run install.cmd again.')
             $ocrReady = $true
@@ -958,6 +1018,7 @@ $modelPresent = ($null -ne $installedModels) -and (Test-HasModel $installedModel
 
 $wantOllama = $false
 $wantModel = $false
+$plamoAgreedWhere = 'install'  # where the agreement to PLaMo's licence was given, as setup_models.py records it
 if (-not $ollamaExe) {
     Write-Info (T 'Ollama runs the translation model on this computer. TASlation needs it to translate.')
     if (-not $winget) {
@@ -970,7 +1031,8 @@ if (-not $ollamaExe) {
 if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'qwen') {
     $wantModel = Confirm-Choice ((T 'Download the translation model {0} for {1} now (about 3.3 GB)?') -f $model.Name, $language.Name) $true
 } elseif (($ollamaExe -or $wantOllama) -and -not $modelPresent) {
-    # PLaMo's licence takes a person, as the OCR models' does; a no leaves TASlation without a translator for now.
+    # PLaMo's licence takes a person, as the OCR models' does (or an automated check's variable: Get-LicenceConsent); a
+    # no leaves TASlation without a translator for now.
     Write-Host ''
     Write-Info ((T 'TASlation translates into {0} with PLaMo 3 Translate 2B by Preferred Networks (about 1.8 GB).') -f $language.Name)
     Write-Info (T 'Its licence is the PLaMo Community License:')
@@ -983,7 +1045,12 @@ if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'q
     Write-Info (T 'The full licence, in English and in Japanese:')
     foreach ($u in $PlamoLicenceUrls) { Write-Info "  $u" }
     $plamoQuestion = (T 'Do you agree to the PLaMo Community License (PLaMo is then downloaded)?')
-    if ($DryRun) {
+    $plamoConsent = Get-LicenceConsent $PlamoConsentVar $PlamoConsentText
+    if ($plamoConsent -ne 'unset') {
+        Write-LicenceConsent $plamoQuestion $plamoConsent $PlamoConsentVar 'The PLaMo Community License' $PlamoLicenceUrls
+        $wantModel = $DryRun -or ($plamoConsent -eq 'agreed')
+        if ($plamoConsent -eq 'agreed') { $plamoAgreedWhere = $PlamoConsentVar }
+    } elseif ($DryRun) {
         Write-Info "$plamoQuestion [y/N] (dry run: would ask; counted as y)"
         $wantModel = $true
     } elseif ($Yes) {
@@ -1190,7 +1257,7 @@ if ($wantOllama) {
 }
 # setup_models.py installs it and writes down that TASlation did (so that only it is ever removed again)
 $translatorArgs = @('-u', $setup, '--translator-for', $language.Name, '--brief')
-if ($model.Kind -eq 'plamo') { $translatorArgs += @('--plamo-agreed', 'install') }
+if ($model.Kind -eq 'plamo') { $translatorArgs += @('--plamo-agreed', $plamoAgreedWhere) }
 if ($modelPresent) {
     Write-Ok "$($model.Shown) is already there"
 } elseif ($wantModel -and $DryRun) {

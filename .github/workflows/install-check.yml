@@ -1,0 +1,576 @@
+# The install check: TASlation installed from scratch on a fresh Windows runner, the way a person with a clean PC
+# installs it (the repository as GitHub's "Download ZIP" gives it, then install.cmd), and then shown to work, one step
+# per fact. Started by hand only (Actions > Install check > Run workflow): it downloads about 5 GB and takes about half
+# an hour, so it never runs on a push or a pull request.
+#
+# Each check is printed as "ok", "FAILED" or "not shown" (what cannot be shown on a runner), a failed one fails its
+# step, and the job summary lists them all with the times and sizes, and what this check does not cover. The console
+# output of the installer and of the other commands is kept as the artifact "install-check-output": on a runner it
+# holds the runner's own folders and versions, nothing of a person. The helpers are in .github/install-check/.
+
+name: Install check
+
+on:
+  workflow_dispatch:
+    inputs:
+      hide_python:
+        description: >-
+          Hide the runner's own Python from the installer, as on a clean PC, so that the installer installs Python
+          3.13 with winget (untick to let it use the runner's Python)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-check:
+    name: Install from scratch and translate a test page
+    # Windows Server 2025, which comes with winget: install.ps1 installs Ollama with it, and Python when it finds none
+    # of 3.11 or newer (the windows-2022 image has no winget). A fixed label rather than windows-latest, so that the
+    # check stays the same until it is changed here. No GPU: the CPU build of PyTorch and the CPU path are checked.
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false  # nothing here pushes, so no token stays in the checkout
+
+      - name: The machine before the install
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'The machine'
+          $os = Get-CimInstance -ClassName Win32_OperatingSystem
+          $cpu = @(Get-CimInstance -ClassName Win32_Processor)
+          $cores = ($cpu | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+          $ramGb = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)  # (the size is in KB)
+          $gpus = @(Get-CimInstance -ClassName Win32_VideoController | ForEach-Object { $_.Name })
+          $drives = Get-Drives
+          Write-Host "Windows: $($os.Caption) $($os.Version), $($os.OSArchitecture)"
+          Write-Host "CPU: $($cpu[0].Name.Trim()), $cores logical processors"
+          Write-Host "RAM: $ramGb GB"
+          foreach ($d in $drives) { Write-Host ('Disk {0} {1} GB free of {2} GB' -f $d.drive, $d.free_gb, $d.size_gb) }
+          $nvidia = [bool](Get-Command nvidia-smi -CommandType Application -ErrorAction SilentlyContinue)  # (install.ps1's test)
+          Write-Host "Display adapters: $($gpus -join ', ') (nvidia-smi: $(if ($nvidia) { 'yes' } else { 'no' }))"
+          Write-Host "Display language: $((Get-UICulture).Name)"
+          Write-Host "Session $((Get-Process -Id $PID).SessionId), interactive: $([Environment]::UserInteractive)"
+          # what install.ps1 looks for: winget, a Python of 3.11 or newer (py -3, python), Ollama
+          $winget = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          $wingetVersion = $null
+          if ($winget) { $wingetVersion = "$(& $winget.Source --version 2>&1 | Select-Object -First 1)".Trim() }
+          Write-Host "winget: $(if ($winget) { "$wingetVersion ($($winget.Source))" } else { 'not on the PATH' })"
+          $pythons = @(Get-Command python, py -CommandType Application -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+          Write-Host "Python on the PATH: $(if ($pythons) { $pythons -join ', ' } else { 'none' })"
+          $ollama = Find-OllamaExe
+          Write-Host "Ollama: $(if ($ollama) { $ollama } else { 'none' })"
+          $cacheRam = Get-UserVariable 'LLAMA_ARG_CACHE_RAM'
+          Write-Host "LLAMA_ARG_CACHE_RAM for this user: $(if ($null -ne $cacheRam) { $cacheRam } else { 'not set' })"
+          Set-Fact 'machine' ([ordered]@{
+              os = "$($os.Caption) $($os.Version)"; cpu = $cpu[0].Name.Trim(); cores = $cores; ram_gb = $ramGb
+              gpus = $gpus; nvidia = $nvidia; language = (Get-UICulture).Name; drives_before = $drives })
+          Set-Fact 'before' ([ordered]@{ winget = $wingetVersion; pythons = $pythons; ollama = $ollama; cache_ram = $cacheRam })
+          # Fresh means fresh: no Ollama and none of the install's settings yet. The display language decides the
+          # language the installer offers, and so the translator: English, whose translator (PLaMo) is the default.
+          Add-Check $step 'no Ollama on the runner before the install' (-not $ollama) "$ollama"
+          Add-Check $step 'LLAMA_ARG_CACHE_RAM not set for this user before the install' ($null -eq $cacheRam) "$cacheRam"
+          Add-Check $step 'the display language is English, so the installer offers English' ((Get-UICulture).Name -like 'en*') (Get-UICulture).Name
+          Complete-Step $step
+
+      - name: Unpack the repository as "Download ZIP" gives it
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'The ZIP'
+          # GitHub's source ZIP is git archive's: .gitattributes applies (CRLF for the scripts, export-ignore), and
+          # everything sits in one folder, taslation-main. Unpacked outside the checkout, as a person unpacks it.
+          $zip = Join-Path $env:RUNNER_TEMP 'taslation-main.zip'
+          git archive --format=zip --prefix=taslation-main/ -o $zip HEAD
+          if ($LASTEXITCODE -ne 0) { Add-Check $step 'git archive made the ZIP' $false "exit code $LASTEXITCODE"; Complete-Step $step }
+          $unpacked = Join-Path $env:RUNNER_TEMP 'unpacked'
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+          $dir = Join-Path $unpacked 'taslation-main'
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "INSTALL_DIR=$dir"
+          Write-Host "ZIP: $([math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)) MB, unpacked into $dir"
+          Set-Fact 'install_dir' $dir
+          $cmd = [IO.File]::ReadAllBytes((Join-Path $dir 'install.cmd'))
+          $crlf = ([regex]::Matches([Text.Encoding]::ASCII.GetString($cmd), "`r`n")).Count
+          $lf = ([regex]::Matches([Text.Encoding]::ASCII.GetString($cmd), "`n")).Count
+          Add-Check $step 'install.cmd in the ZIP has CRLF line ends' ($lf -gt 0 -and $crlf -eq $lf) "$crlf of $lf"
+          Add-Check $step 'the ZIP leaves out .github (this check)' (-not (Test-Path -LiteralPath (Join-Path $dir '.github')))
+          Add-Check $step 'the ZIP leaves out docs/media (CC BY-NC sample pages)' (-not (Test-Path -LiteralPath (Join-Path $dir 'docs\media')))
+          Add-Check $step 'the ZIP has the test pages' (Test-Path -LiteralPath (Join-Path $dir 'tests\fixtures\sample_page.png'))
+          Complete-Step $step
+
+      - name: Make sure the installer has winget
+        id: prepare
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'winget'
+          $route = 'winget'
+          $hide = '${{ inputs.hide_python }}'
+          if (-not (Get-Command winget -CommandType Application -ErrorAction SilentlyContinue)) {
+              $apps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+              if (Test-Path -LiteralPath (Join-Path $apps 'winget.exe')) {
+                  # On a person's PC this folder is on the user's PATH from the start; here it was not.
+                  Add-Content -LiteralPath $env:GITHUB_PATH -Value $apps
+                  $route = 'winget (its folder added to the PATH first)'
+              } else {
+                  # The precondition made true here, apart from the installer: Ollama from its own installer, for this
+                  # user, as install.ps1 would have had winget do. The installer's winget route is then NOT checked,
+                  # and it uses the runner's Python, since it could not install one.
+                  Write-Host '::warning title=winget::No winget on this runner. Ollama is installed by this workflow with its own installer, so the installer''s winget route is not checked.'
+                  $setup = Join-Path $env:RUNNER_TEMP 'OllamaSetup.exe'
+                  Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile $setup
+                  $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -PassThru
+                  $p.WaitForExit()
+                  Add-Check $step 'Ollama installed by its own installer (no winget)' ([bool](Find-OllamaExe)) "exit code $($p.ExitCode)"
+                  $route = 'none: Ollama installed by the workflow with its own installer'
+                  $hide = 'false'
+              }
+          }
+          Write-Host "winget route: $route"
+          Set-Fact 'winget_route' $route
+          Set-Fact 'hide_python' ($hide -eq 'true')
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "hide_python=$hide"
+          Complete-Step $step
+
+      - name: Install TASlation (install.cmd -Yes)
+        id: install
+        timeout-minutes: 60
+        working-directory: ${{ env.INSTALL_DIR }}
+        env:
+          # The repository owner has read the two licences below and agrees to them. The models are used here only
+          # to check that TASlation installs and works, which is non-commercial use; nothing they make leaves the
+          # runner, and the runner is deleted after the job.
+          #   the three OCR models: CC BY-NC-SA 4.0, https://creativecommons.org/licenses/by-nc-sa/4.0/
+          #   PLaMo 3 Translate 2B: the PLaMo Community License, https://plamo.preferredai.jp/info/plamo-community-license-en
+          # install.ps1 counts a licence as agreed only with -Yes and only when its variable holds this exact sentence
+          # (its help says so); setting it is that agreement.
+          TASLATION_AGREE_OCR_LICENCE: "I agree to CC BY-NC-SA 4.0"
+          TASLATION_AGREE_PLAMO_LICENCE: "I agree to the PLaMo Community License"
+          HIDE_PYTHON: ${{ steps.prepare.outputs.hide_python }}
+        run: |
+          . "$env:GITHUB_WORKSPACE\.github\install-check\checks.ps1"
+          $step = 'Install'
+          $ErrorActionPreference = 'Continue'  # what the installer writes to stderr is part of its output
+          # As a double-click starts it: Windows PowerShell 5.1 with its own module path, not this PowerShell 7's.
+          $env:PSModulePath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')
+          if ($env:HIDE_PYTHON -eq 'true') {
+              # The runner's Python out of the installer's sight, as on a clean PC (where `python` is at most the
+              # Store's stand-in in WindowsApps, which stays, with winget). install.ps1 looks for `py -3`, `python`
+              # and the folder winget installs Python 3.13 into, in that order.
+              $hidden = @(); $kept = @()
+              foreach ($dir in $env:PATH -split ';') {
+                  if (-not $dir) { continue }
+                  $isPython = $false
+                  try { $isPython = (Test-Path -LiteralPath (Join-Path $dir 'python.exe')) -and ($dir -notmatch '\\WindowsApps\\?$') } catch { }
+                  if ($isPython) { $hidden += $dir } else { $kept += $dir }
+              }
+              # A py launcher in a folder that stays (C:\Windows) would still find the runner's Python: a py.cmd
+              # that answers as a missing command does goes before it.
+              $py = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
+              $env:PATH = $kept -join ';'
+              if ($py) {
+                  $noPy = Join-Path $env:RUNNER_TEMP 'no-py'
+                  $null = New-Item -ItemType Directory -Force -Path $noPy
+                  Set-Content -LiteralPath (Join-Path $noPy 'py.cmd') -Value '@exit /b 9009' -Encoding ascii
+                  $env:PATH = "$noPy;$env:PATH"
+                  $hidden += "$($py.Source) (by $noPy\py.cmd)"
+              }
+              Write-Host "Hidden from the installer: $(if ($hidden) { $hidden -join ', ' } else { 'nothing' })"
+              $left = @(Get-Command python, py -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+              Write-Host "What the installer finds as python and py now: $(if ($left) { $left -join ', ' } else { 'nothing' })"
+              Set-Fact 'python_hidden' ([ordered]@{ hidden = $hidden; left = $left })
+          }
+          $log = Join-Path $CheckDir 'installer-output.txt'
+          $writer = [IO.StreamWriter]::new($log, $false, [Text.UTF8Encoding]::new($false))
+          $writer.AutoFlush = $true
+          $stages = [Collections.Generic.List[object]]::new()
+          $receivedBefore = Get-ReceivedBytes
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          try {
+              # each line as it comes, timed: the installer's steps begin with "[n/7] title"
+              & .\install.cmd -Yes 2>&1 | ForEach-Object {
+                  $line = "$_"
+                  if ($line -match '^\[(\d+)/(\d+)\] (.+)$') {
+                      $stages.Add([ordered]@{ title = $Matches[3]; start_s = [math]::Round($clock.Elapsed.TotalSeconds, 1) })
+                  }
+                  $writer.WriteLine($line)
+                  Write-Host $line
+              }
+              $code = $LASTEXITCODE
+          } finally {
+              $writer.Dispose()
+          }
+          $total = [math]::Round($clock.Elapsed.TotalSeconds, 1)
+          $receivedAfter = Get-ReceivedBytes
+          for ($i = 0; $i -lt $stages.Count; $i++) {
+              $end = $total
+              if ($i + 1 -lt $stages.Count) { $end = $stages[$i + 1].start_s }
+              $stages[$i].seconds = [math]::Round($end - $stages[$i].start_s, 1)
+          }
+          $received = $null
+          if ($null -ne $receivedBefore -and $null -ne $receivedAfter) { $received = [math]::Round(($receivedAfter - $receivedBefore) / 1GB, 2) }
+          Set-Fact 'install' ([ordered]@{ exit_code = $code; seconds = $total; stages = $stages; received_gb = $received
+                                         ended_utc = [DateTime]::UtcNow.ToString('o') })
+          Write-Host ''
+          Write-Host "install.cmd -Yes ended with exit code $code after $total s; received over the network: $received GB"
+          Add-Check $step 'install.cmd -Yes ended with exit code 0' ($code -eq 0) "exit code $code"
+          Complete-Step $step
+
+      - name: Check what the installer made
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'What the installer made'
+          Set-Location -LiteralPath $InstallDir  # (Python reads the program from the folder it runs in)
+          $logFile = Join-Path $CheckDir 'installer-output.txt'
+          $log = ''
+          if (Test-Path -LiteralPath $logFile) { $log = Get-Content -LiteralPath $logFile -Raw -Encoding utf8 }
+          Add-Check $step 'the installer ends with "TASlation is installed."' ($log -match '(?m)^TASlation is installed\.\r?$')
+          Add-Check $step 'the installer translates into English' ($log -match 'Enter: English -> English \(-Yes\)')
+          Add-Check $step 'the OCR licence agreed through TASLATION_AGREE_OCR_LICENCE' ($log.Contains('is agreed to through TASLATION_AGREE_OCR_LICENCE, by whoever set that variable.'))
+          Add-Check $step 'the PLaMo licence agreed through TASLATION_AGREE_PLAMO_LICENCE' ($log.Contains('is agreed to through TASLATION_AGREE_PLAMO_LICENCE, by whoever set that variable.'))
+          Add-Check $step 'no warning from the installer' (-not ($log -match '(?m)^\d+ warning\(s\):'))
+          # which way Python and Ollama came
+          $python = 'not found in the output'
+          if ($log -match 'ok: Python (\S+) installed') { $python = "Python $($Matches[1]), installed by the installer with winget" }
+          elseif ($log -match 'ok: Python (\S+) found') { $python = "Python $($Matches[1]) of the runner, found by the installer (winget's Python route not used)" }
+          $ollamaRoute = 'not found in the output'
+          if ($log -match 'ok: Ollama installed') { $ollamaRoute = 'installed by the installer with winget' }
+          elseif ($log -match 'ok: Ollama found') { $ollamaRoute = 'there before the installer ran (installed by this workflow)' }
+          Set-Fact 'python_route' $python
+          Set-Fact 'ollama_route' $ollamaRoute
+          Write-Host "Python: $python"
+          Write-Host "Ollama: $ollamaRoute"
+          # what the installer said it would download (its disk step), for the summary
+          Set-Fact 'installer_sizes' @($log -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\.\d GB\s+.+\((to download|already there|not now)\)$' } | ForEach-Object { $_.Trim() })
+          # the program files
+          $venvOk = Test-Path -LiteralPath $VenvPy
+          Add-Check $step '.venv exists' $venvOk $VenvPy
+          if ($venvOk) {
+              # (what Python writes to stderr, a warning say, goes to the log only)
+              $info = @(& $VenvPy -c "import sys, torch, taslation; print(sys.version.split()[0]); print(torch.__version__); print(torch.version.cuda or 'none')" | ForEach-Object { "$_" })
+              $ran = $LASTEXITCODE -eq 0 -and $info.Count -ge 3
+              Add-Check $step '.venv runs TASlation and PyTorch' $ran ($info -join ' | ')
+              if ($ran) { Set-Fact 'program' ([ordered]@{ python = $info[0]; torch = $info[1]; cuda = $info[2] }) }
+              # the three OCR models, as TASlation itself checks them
+              $models = @(& $VenvPy -c "from taslation.config import OCR_MODELS, default_models_dir; d = default_models_dir(); [print(m.dirname + ' ' + (','.join(m.missing(d)) or 'complete')) for m in OCR_MODELS]" | ForEach-Object { "$_" })
+              foreach ($name in 'manga-ocr-charspot-small', 'manga-ocr-nar-small', 'manga-ocr-base-CPT-flex') {
+                  $line = @($models | Where-Object { $_.StartsWith("$name ") }) | Select-Object -First 1
+                  Add-Check $step "the OCR model $name is complete" ($line -eq "$name complete") "$line"
+              }
+          }
+          # Ollama, its model and its setting
+          $ollama = Find-OllamaExe
+          Add-Check $step 'Ollama is installed' ([bool]$ollama) "$ollama"
+          $answers = Test-OllamaAnswers
+          Add-Check $step 'the Ollama server answers' $answers $OllamaUrl
+          if ($ollama -and $answers) {
+              $list = @(& $ollama list 2>&1 | ForEach-Object { "$_" })
+              $listed = @($list | Where-Object { $_ -match ('^' + [regex]::Escape($TranslatorModel) + '(:latest)?\s') }).Count -gt 0
+              Add-Check $step "the translation model $TranslatorModel is in ``ollama list``" $listed "exit code $LASTEXITCODE"
+              $list | ForEach-Object { Write-Host "  | $_" }
+          }
+          $cacheRam = Get-UserVariable 'LLAMA_ARG_CACHE_RAM'
+          Add-Check $step 'LLAMA_ARG_CACHE_RAM is 0 for this user (HKCU\Environment)' ($cacheRam -eq '0') "value: $(if ($null -ne $cacheRam) { $cacheRam } else { 'not set' })"
+          $marker = Join-Path $InstallDir '.cache-ram-by-install'
+          Add-Check $step 'the marker .cache-ram-by-install is there, for uninstall.ps1' ((Test-Path -LiteralPath $marker) -and ((Get-Content -LiteralPath $marker -Raw).Trim() -eq '0'))
+          Add-Check $step 'no OLLAMA_KV_CACHE_TYPE setting (that one is for a GPU of 6 GB or less)' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.kv-cache-by-install')))
+          # the Start-menu shortcut
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'TASlation.lnk'
+          $lnkOk = $false
+          $lnkDetail = 'none'
+          if (Test-Path -LiteralPath $lnk) {
+              $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+              $lnkOk = ($s.TargetPath -ieq $VenvPyw) -and ($s.Arguments -eq '-m taslation gui')
+              $lnkDetail = "$($s.TargetPath) $($s.Arguments)"
+          }
+          Add-Check $step 'the Start-menu shortcut TASlation starts .venv\Scripts\pythonw.exe -m taslation gui' $lnkOk $lnkDetail
+          # what it takes on the disk
+          $ollamaModels = $env:OLLAMA_MODELS
+          if (-not $ollamaModels) { $ollamaModels = Join-Path $env:USERPROFILE '.ollama\models' }
+          Set-Fact 'sizes_gb' ([ordered]@{
+              '.venv' = Get-FolderGB (Join-Path $InstallDir '.venv'); 'models (OCR models, fonts)' = Get-FolderGB (Join-Path $InstallDir 'models')
+              'Ollama (program)' = Get-FolderGB $OllamaHome; 'Ollama models' = Get-FolderGB $ollamaModels
+              'Python 3.13 (user install)' = Get-FolderGB (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313') })
+          Set-Fact 'drives_after' (Get-Drives)
+          Complete-Step $step
+
+      - name: taslation doctor
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'taslation doctor'
+          Set-Location -LiteralPath $InstallDir
+          $env:PYTHONIOENCODING = 'utf-8'
+          # doctor only looks (it starts no Ollama); exit code 0 and "Result: ready" when TASlation can read and translate
+          $out = @(& $VenvPy -m taslation doctor 2>&1 | ForEach-Object { "$_" })
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          $out | Set-Content -LiteralPath (Join-Path $CheckDir 'doctor.txt') -Encoding utf8
+          Add-Check $step 'taslation doctor says "Result: ready" with exit code 0' ($code -eq 0 -and ($out -contains 'Result: ready')) "exit code $code"
+          Complete-Step $step
+
+      - name: Ollama's server keeps no prompt cache in RAM
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'Prompt cache off'
+          # Nothing since the install has started Ollama (the checks above only ask it), so the server that answers is
+          # the one the installer restarted after setting LLAMA_ARG_CACHE_RAM=0. Its processes' environment says
+          # what they run with; llama.cpp's server, which runs the model, also says it in Ollama's log when the
+          # model loads. This step's own environment has no LLAMA_ARG_CACHE_RAM: nothing here passes it on.
+          if (-not (Test-OllamaAnswers)) {
+              Add-Check $step 'the Ollama server the installer restarted is running' $false "nothing answers at $OllamaUrl"
+              Complete-Step $step
+          }
+          # Ollama's processes: those of its program folder and every process they started, each with its kind (the
+          # app in the tray, the server `ollama serve`, or one that runs a model: llama.cpp's server, wherever it is)
+          # and LLAMA_ARG_CACHE_RAM as it sees it ('' for none, $null when it cannot be read).
+          function Show-Processes([string]$When) {
+              $all = @(Get-CimInstance -ClassName Win32_Process)
+              $ours = @($all | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($OllamaHome + '\', [StringComparison]::OrdinalIgnoreCase) })
+              do {
+                  $ids = @($ours | ForEach-Object { $_.ProcessId })
+                  # (not the console host Windows gives a console program)
+                  $more = @($all | Where-Object { $ids -contains $_.ParentProcessId -and $ids -notcontains $_.ProcessId -and $_.Name -ine 'conhost.exe' })
+                  $ours += $more
+              } while ($more.Count -gt 0)
+              Write-Host "Ollama's processes $When`:"
+              foreach ($p in $ours) {
+                  $kind = 'model'
+                  if ($p.Name -ieq 'ollama app.exe') { $kind = 'app' }
+                  elseif ($p.Name -ieq 'ollama.exe' -and "$($p.CommandLine)" -match '\sserve(\s|$)') { $kind = 'server' }
+                  $value = $null
+                  try { $value = Get-ProcessVariable $p.ProcessId 'LLAMA_ARG_CACHE_RAM' } catch { $value = $null }
+                  $shown = 'unreadable'
+                  if ($null -ne $value) { $shown = $(if ($value) { $value } else { 'not set' }) }
+                  Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown)
+                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Value = $value }
+              }
+          }
+          $servers = @(Show-Processes 'before the model loads' | Where-Object { $_.Kind -eq 'server' })
+          $read = @($servers | Where-Object { $null -ne $_.Value })
+          if ($read.Count -eq 0) {
+              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" $null 'its environment could not be read here'
+          } else {
+              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { if ($_.Value) { $_.Value } else { 'not set' } }) -join ', ')
+          }
+          # The model loaded as a translation loads it (an empty request loads it: Ollama's API).
+          $logStart = 0
+          if (Test-Path -LiteralPath $OllamaLog) { $logStart = (Get-Item -LiteralPath $OllamaLog).Length }
+          $loaded = $true
+          try {
+              $body = @{ model = $TranslatorModel; keep_alive = '15m' } | ConvertTo-Json
+              $null = Invoke-RestMethod -Method Post -Uri "$OllamaUrl/api/generate" -Body $body -ContentType 'application/json' -TimeoutSec 600
+          } catch {
+              $loaded = $false
+              Add-Check $step "Ollama loads $TranslatorModel" $false "$($_.Exception.Message)"
+          }
+          if ($loaded) {
+              $runners = @(Show-Processes 'with the model loaded' | Where-Object { $_.Kind -eq 'model' })
+              $read = @($runners | Where-Object { $null -ne $_.Value })
+              if ($read.Count -eq 0) {
+                  Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" $null 'no process of it found, or its environment could not be read'
+              } else {
+                  Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { "$($_.Name): $(if ($_.Value) { $_.Value } else { 'not set' })" }) -join ', ')
+              }
+              $said = @()
+              if (Test-Path -LiteralPath $OllamaLog) {
+                  $stream = [IO.File]::Open($OllamaLog, 'Open', 'Read', 'ReadWrite')
+                  try {
+                      $null = $stream.Seek($logStart, 'Begin')
+                      $said = @(([IO.StreamReader]::new($stream)).ReadToEnd() -split "`r?`n" | Where-Object { $_ -match 'prompt cache is (enabled|disabled)' })
+                  } finally { $stream.Dispose() }
+              }
+              $said | ForEach-Object { Write-Host "  log: $($_.Trim())" }
+              if ($said.Count -eq 0) {
+                  Add-Check $step "llama.cpp's log line says the prompt cache is disabled" $null "no such line in $OllamaLog"
+              } else {
+                  Add-Check $step "llama.cpp's log line says the prompt cache is disabled" (@($said | Where-Object { $_ -match 'prompt cache is enabled' }).Count -eq 0) ($said[-1].Trim())
+              }
+          }
+          Complete-Step $step
+
+      - name: Translate a synthetic test page (taslation translate)
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        timeout-minutes: 30
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'Translation'
+          Set-Location -LiteralPath $InstallDir  # (the installed program, not the checkout's files)
+          # tests/fixtures/sample_page.png: drawn by tools/make_sample_page.py, invented lines, no real book. The helper
+          # prints counts only; on a runner without a GPU this takes a few minutes.
+          $counts = Join-Path $CheckDir 'translation.json'
+          & $VenvPy "$env:GITHUB_WORKSPACE\.github\install-check\translate-page.py" 'tests\fixtures\sample_page.png' --out $counts
+          $code = $LASTEXITCODE
+          $detail = ''
+          if (Test-Path -LiteralPath $counts) {
+              $c = Get-Content -LiteralPath $counts -Raw | ConvertFrom-Json -AsHashtable
+              Set-Fact 'translation' $c
+              $detail = "$($c['read']) of $($c['bubbles']) bubbles read, $($c['translated']) translated, $($c['seconds']) s"
+          }
+          Add-Check $step 'taslation translate read and translated the test page' ($code -eq 0) $detail
+          Complete-Step $step
+
+      - name: uninstall.cmd -DryRun lists what the install made
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'Uninstall, dry run'
+          Set-Location -LiteralPath $InstallDir
+          $out = @(& .\uninstall.cmd -DryRun -Yes 2>&1 | ForEach-Object { "$_" })
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          $out | Set-Content -LiteralPath (Join-Path $CheckDir 'uninstall-dry-run.txt') -Encoding utf8
+          $text = $out -join "`n"
+          Add-Check $step 'uninstall.cmd -DryRun -Yes ends with exit code 0' ($code -eq 0) "exit code $code"
+          $would = [ordered]@{
+              'delete .venv' = "delete the virtual environment ($InstallDir\.venv,"
+              'delete models' = "delete the OCR model and fonts ($InstallDir\models,"
+              'delete the Start-menu shortcut' = 'delete the Start-menu shortcut '
+              "remove $TranslatorModel from Ollama" = "ollama rm $TranslatorModel"
+              'clear LLAMA_ARG_CACHE_RAM' = 'clear LLAMA_ARG_CACHE_RAM for this user'
+          }
+          foreach ($what in $would.Keys) {
+              Add-Check $step "it would $what" ($text.Contains("dry run, would: $($would[$what])"))
+          }
+          Add-Check $step 'and it deletes nothing' ((Test-Path -LiteralPath $VenvPy) -and ((Get-UserVariable 'LLAMA_ARG_CACHE_RAM') -eq '0'))
+          Complete-Step $step
+
+      - name: uninstall.cmd -Yes removes it
+        if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        run: |
+          . .github/install-check/checks.ps1
+          $step = 'Uninstall'
+          Set-Location -LiteralPath $InstallDir
+          $out = @(& .\uninstall.cmd -Yes 2>&1 | ForEach-Object { "$_" })
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          $out | Set-Content -LiteralPath (Join-Path $CheckDir 'uninstall.txt') -Encoding utf8
+          Add-Check $step 'uninstall.cmd -Yes ends with exit code 0' ($code -eq 0) "exit code $code"
+          Add-Check $step '.venv is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.venv')))
+          Add-Check $step 'models is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'models')))
+          Add-Check $step 'the Start-menu shortcut is gone' (-not (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'TASlation.lnk')))
+          Add-Check $step 'LLAMA_ARG_CACHE_RAM is cleared for this user' ($null -eq (Get-UserVariable 'LLAMA_ARG_CACHE_RAM'))
+          Add-Check $step 'the marker .cache-ram-by-install is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.cache-ram-by-install')))
+          $models = Get-OllamaModels
+          if ($null -eq $models) {
+              Add-Check $step "the translation model is removed from Ollama" $null 'the Ollama server does not answer'
+          } else {
+              Add-Check $step "the translation model is removed from Ollama" (@($models | Where-Object { $_ -like "$TranslatorModel*" }).Count -eq 0)
+          }
+          # what -Yes keeps: a run nobody watches destroys no translations, and leaves Ollama itself
+          Add-Check $step 'the data folder ~/.taslation stays (-Yes keeps it)' (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.taslation'))
+          Add-Check $step 'Ollama itself stays (-Yes keeps it)' ([bool](Find-OllamaExe))
+          Complete-Step $step
+
+      - name: Job summary
+        if: ${{ always() }}
+        run: |
+          . .github/install-check/checks.ps1
+          $ErrorActionPreference = 'Continue'  # a fact missing after an early failure leaves its line out, not the summary
+          $f = Get-Facts
+          $results = Get-Results
+          $md = [Collections.Generic.List[string]]::new()
+          $failed = @($results | Where-Object { $_.ok -eq $false }).Count
+          $unshown = @($results | Where-Object { $null -eq $_.ok }).Count
+          $md.Add('# Install check')
+          $md.Add('')
+          $verdict = "**$(@($results | Where-Object { $_.ok -eq $true }).Count) checks passed, $failed failed, $unshown could not be shown here.**"
+          $md.Add($verdict)
+          $md.Add('')
+          if ($f.Contains('machine')) {
+              $m = $f['machine']
+              $md.Add("Runner: ``windows-2025``, $($m['os']), $($m['cpu']) ($($m['cores']) logical processors), $($m['ram_gb']) GB of RAM, $(if ($m['nvidia']) { 'an NVIDIA GPU' } else { 'no NVIDIA GPU' }); display language $($m['language']).")
+              $disk = 'Free on the disk before the install: ' + (@($m['drives_before'] | ForEach-Object { "$($_['drive']) $($_['free_gb']) GB" }) -join ', ')
+              if ($f.Contains('drives_after')) { $disk += '; after it: ' + (@($f['drives_after'] | ForEach-Object { "$($_['drive']) $($_['free_gb']) GB" }) -join ', ') }
+              $md.Add("$disk.")
+          }
+          if ($f.Contains('before')) {
+              $b = $f['before']
+              $md.Add("Before the install: winget $(if ($b['winget']) { $b['winget'] } else { 'not on the PATH' }); Python on the PATH: $(if ($b['pythons']) { $b['pythons'] -join ', ' } else { 'none' }); Ollama: $(if ($b['ollama']) { $b['ollama'] } else { 'none' }).")
+          }
+          $md.Add('')
+          $md.Add('## How it was installed')
+          $md.Add('')
+          $md.Add('The repository as GitHub''s "Download ZIP" gives it (`git archive`), unpacked, then `install.cmd -Yes` in it, with the two licences agreed through `TASLATION_AGREE_OCR_LICENCE` and `TASLATION_AGREE_PLAMO_LICENCE` (see the workflow).')
+          if ($f.Contains('hide_python')) { $md.Add("* The runner's own Python hidden from the installer: $(if ($f['hide_python']) { 'yes' } else { 'no' })") }
+          if ($f.Contains('python_hidden')) {
+              $h = $f['python_hidden']
+              $md.Add("  * hidden: $(if ($h['hidden']) { @($h['hidden']) -join ', ' } else { 'nothing' }); what the installer could still find as python and py: $(if ($h['left']) { @($h['left']) -join ', ' } else { 'nothing' })")
+          }
+          if ($f.Contains('python_route')) { $md.Add("* Python: $($f['python_route'])") }
+          if ($f.Contains('winget_route')) { $md.Add("* winget: $($f['winget_route'])") }
+          if ($f.Contains('ollama_route')) { $md.Add("* Ollama: $($f['ollama_route'])") }
+          if ($f.Contains('program')) { $md.Add("* Program files: Python $($f['program']['python']), PyTorch $($f['program']['torch']) (CUDA: $($f['program']['cuda']))") }
+          if ($f.Contains('install')) {
+              $i = $f['install']
+              $md.Add("* install.cmd -Yes: exit code $($i['exit_code']) after $([math]::Round($i['seconds'] / 60, 1)) min; received over the network during it: $(if ($null -ne $i['received_gb']) { "$($i['received_gb']) GB" } else { 'not known' })")
+              if ($i['stages']) {
+                  $md.Add('')
+                  $md.Add('| Installer step | Time |')
+                  $md.Add('|---|---|')
+                  foreach ($s in $i['stages']) { $md.Add("| $($s['title']) | $($s['seconds']) s |") }
+              }
+          }
+          if ($f.Contains('installer_sizes') -and $f['installer_sizes']) {
+              $md.Add('')
+              $md.Add('What the installer counted on the disk:')
+              $md.Add('')
+              foreach ($s in $f['installer_sizes']) { $md.Add("* $s") }
+          }
+          if ($f.Contains('sizes_gb')) {
+              $md.Add('')
+              $md.Add('On the disk after the install: ' + (@($f['sizes_gb'].GetEnumerator() | Where-Object { $null -ne $_.Value } | ForEach-Object { "$($_.Key) $($_.Value) GB" }) -join ', ') + '.')
+          }
+          if ($f.Contains('translation')) {
+              $t = $f['translation']
+              $md.Add('')
+              $line = "Translation of ``tests/fixtures/$($t['page'])`` (invented lines), $($t['bubbles']) bubbles: "
+              if ($t.Contains('read')) { $line += "$($t['read']) read, $($t['translated']) translated" } else { $line += 'no result' }
+              $line += ", in $($t['seconds']) s"
+              if ($t.Contains('timings') -and $t['timings']) { $line += ' (stages: ' + (@($t['timings'].GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value) s" }) -join ', ') + ')' }
+              if ($t['error']) { $line += "; error: $($t['error'])" }
+              $md.Add("$line.")
+          }
+          $md.Add('')
+          $md.Add('## Checks')
+          $md.Add('')
+          $md.Add('| Step | Check | Result |')
+          $md.Add('|---|---|---|')
+          foreach ($r in $results) {
+              $mark = 'ok'
+              if ($r.ok -eq $false) { $mark = '**FAILED**' } elseif ($null -eq $r.ok) { $mark = 'not shown here' }
+              $what = $r.what.Replace('|', '\|')
+              if ($r.detail) { $what += ' (' + $r.detail.Replace('|', '\|') + ')' }
+              $md.Add("| $($r.step) | $what | $mark |")
+          }
+          $md.Add('')
+          $md.Add('## What this check does not cover')
+          $md.Add('')
+          $md.Add('* A GPU: the runner has none, so the GPU build of PyTorch (about 2.6 GB), its check on the GPU and the fall-back to the CPU build, the layout and inpainting models'' default (Enter is yes on a GPU) and LaMa on the GPU, and `OLLAMA_KV_CACHE_TYPE` for a GPU of 6 GB or less are not checked.')
+          $md.Add('* The questions a person answers: `-Yes` takes the language offered and answers the rest, the licences are agreed through the variables, and the layout and inpainting models are left out (`-Yes` does not answer that question). Enter''s defaults, a "no", and the questions in Japanese are covered by `tests/test_install_scripts.py` only.')
+          $md.Add('* A real viewer window: capturing a page, turning pages, the reading window itself (only the command line translates a page here).')
+          $md.Add('* Ollama after a restart of the computer: the server checked here is the one the installer started again, with the setting in its own environment; that an Ollama started at sign-in takes `LLAMA_ARG_CACHE_RAM` from the user''s variables is shown only by the variable being there.')
+          $md.Add('* Windows 10 or 11, Home or Pro: the runner is Windows Server 2025 with an administrator account, a fast connection, and no SmartScreen question for a ZIP from the internet (a downloaded ZIP carries the mark of the web; this one was made on the runner).')
+          $md.Add('* `update.cmd`, a second run of `install.cmd`, and the translator for Portuguese (Brazil) and Turkish (Qwen3.5 4B).')
+          $md -join "`n" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          $md -join "`n" | Set-Content -LiteralPath (Join-Path $CheckDir 'summary.md') -Encoding utf8
+          if (Test-Path -LiteralPath $OllamaLog) { Copy-Item -LiteralPath $OllamaLog -Destination (Join-Path $CheckDir 'ollama-server.log') }
+          exit 0
+
+      - name: Keep the console output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: install-check-output
+          # the installer's and the other commands' output, the checks, the counts of the translation (no page
+          # text) and Ollama's server log: the runner's folders and versions, nothing of a person
+          path: ${{ runner.temp }}/install-check/
+          if-no-files-found: warn
+          retention-days: 30

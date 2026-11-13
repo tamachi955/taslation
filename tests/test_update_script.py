@@ -80,6 +80,7 @@ def _new_copy(tmp: Path, top: str | None = "taslation-main") -> Path:
     _write(new / "models" / "should-not-come.txt", "x")
     _write(new / ".kv-cache-by-install", "another install's")  # (markers of the folder it was copied from)
     _write(new / ".cache-ram-by-install", "another install's")
+    _write(new / ".github" / "workflows" / "install-check.yml", "x")  # (a clone's: the repository's checks)
     return outer
 
 
@@ -124,6 +125,7 @@ def _updated(here: Path) -> None:
     assert (here / "models" / "fonts" / "OFL.txt").is_file() and not (here / "models" / "should-not-come.txt").exists()
     assert (here / ".kv-cache-by-install").read_text() == "q8_0" and (here / "my notes.txt").is_file()
     assert (here / ".cache-ram-by-install").read_text() == "0"
+    assert not (here / ".github").exists()
 
 
 # ---- the scripts themselves
