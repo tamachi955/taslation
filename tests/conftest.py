@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from taslation import health, viewerparts
+from taslation import health, names, protect, viewerparts
 from taslation.config import Settings
 from taslation.detect import layout
 from taslation.ocr.charspot import check_model_dir
@@ -86,6 +86,27 @@ def nothing_learned_of_real_viewers(monkeypatch):
     monkeypatch.setattr(viewerparts, "use", use)
     yield
     real_use(None)
+
+
+@pytest.fixture(autouse=True)
+def real_saved_files_left_alone(monkeypatch):
+    """No test protects, or opens to count, the saved files of this machine's own state folder at a start (some
+    stand-ins' settings have the default, real state folder): there `protect.migrate` and `protect.survey` find
+    nothing; a test's own folder gets the real thing. Nor does a test say a file an earlier test set aside
+    (`names.take_set_aside`: the list is the process's)."""
+    real_migrate, real_survey = protect.migrate, protect.survey
+
+    def migrate(state_dir):
+        return protect.Tally() if _real_state_folder(state_dir) else real_migrate(state_dir)
+
+    def survey(state_dir, check=True):
+        return protect.Tally(checked=check) if _real_state_folder(state_dir) else real_survey(state_dir, check)
+
+    monkeypatch.setattr(protect, "migrate", migrate)
+    monkeypatch.setattr(protect, "survey", survey)
+    names.take_set_aside()
+    yield
+    names.take_set_aside()
 
 
 @pytest.fixture(autouse=True)

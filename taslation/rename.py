@@ -49,6 +49,7 @@ from .annotations import (
     ANNOTATION_FILES, SHEET_FILES, AnnotationStore, Conflict, Glossary, GlossaryStore, Review, apply_review,
     compare_sheets,
 )
+from . import protect
 from .atomic import write_atomic
 from .bookid import generic_book_name
 from .cache import DETAIL_FIELDS, CacheStore, clean_detail, language_key, stored_book
@@ -456,8 +457,9 @@ def _encode(data: dict[str, Any]) -> bytes:
 
 
 def _write(moves: list[_Move]) -> None:
-    """Every move's target written; when one cannot be, the ones written before are taken back (a new file deleted,
-    a file written over - in place, or joined - given its old bytes again) and the OSError raised."""
+    """Every move's target written, protected for this Windows user (`protect.protected`); when one cannot be, the
+    ones written before are taken back (a new file deleted, a file written over - in place, or joined - given its old
+    bytes again, in the protected form when they were an earlier version's plain file) and the OSError raised."""
     done: list[_Move] = []
     try:
         for move in moves:
@@ -466,13 +468,13 @@ def _write(moves: list[_Move]) -> None:
             except FileNotFoundError:
                 move.original = None  # a new file
             move.target.parent.mkdir(parents=True, exist_ok=True)
-            write_atomic(move.target, _encode(move.data))
+            write_atomic(move.target, protect.protected(_encode(move.data)))
             done.append(move)
     except OSError:
         for move in reversed(done):
             try:
                 if move.original is not None:
-                    write_atomic(move.target, move.original)
+                    write_atomic(move.target, protect.protected(move.original))
                 else:
                     move.target.unlink(missing_ok=True)
             except OSError:

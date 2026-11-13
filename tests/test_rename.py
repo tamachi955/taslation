@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from taslation import protect
 from taslation import rename as rename_mod
 from taslation import viewerparts
 from taslation.annotations import AnnotationStore, CharacterSheet, GlossaryStore, StyleGuide
@@ -23,6 +24,7 @@ from taslation.config import Settings
 from taslation.names import file_names
 from taslation.notes import series_key
 from taslation.rename import RenameRefused, RenameResult, Stores, conflict_key, plan_rename, rename_book
+from helpers import store_json
 
 OLD, NEW = "my star book 3", "見本の物語 3"
 COLOPHON = {"title": "見本の物語", "volume": "3", "author": "仮野みのり", "publisher": "株式会社見本出版",
@@ -87,7 +89,7 @@ def test_a_book_and_its_series_move_to_the_new_name(stores, tmp_path):
         assert cache.path.name == file_names(NEW, language)[0]
         assert sorted(b.text for p in cache.pages for b in p.bubbles) == [f"{language} a", f"{language} b"]
         assert cache.details == COLOPHON  # its own details, the colophon's over them
-        data = json.loads(cache.path.read_text(encoding="utf-8"))
+        data = store_json(cache.path)
         assert data["book"] == NEW and list(data)[-1] == "pages"  # the header first, as a save writes it
     assert identity_of(stores.cache, NEW, "English") == COLOPHON
     # the annotations, the sheet in both languages
@@ -136,7 +138,7 @@ def _series_sheet(stores: Stores, language: str = "English", star: str = "Stardu
     sheet.set_character(CharacterSheet(name="ピヨ", rendering="Piyo", pronoun="私"))
     sheet.style = StyleGuide(honorifics="keep", tone="light")
     sheet.save()
-    data = json.loads(sheet.path.read_text(encoding="utf-8"))
+    data = store_json(sheet.path)
     sheet.path.write_text(json.dumps({**data, "updated": "2020-01-01T00:00:00", "shared_by": "a friend"},
                                      ensure_ascii=False), encoding="utf-8")
     return sheet.path
@@ -178,7 +180,7 @@ def test_the_books_sheet_joins_the_sheet_the_new_series_has_already(stores, tmp_
     piyo = sheet.get_character("ピヨ")
     assert (piyo.pronoun, piyo.gender) == ("私", "female")  # the series' first person kept, the fact it lacked added
     assert (sheet.style.honorifics, sheet.style.tone, sheet.style.rules) == ("keep", "light", ["Short SFX."])
-    data = json.loads(target.read_text(encoding="utf-8"))
+    data = store_json(target)
     assert (data["series"], data["language"], data["shared_by"], data["kind"]) == (SERIES, "English", "a friend",
                                                                                   "glossary")
     assert data["updated"] != "2020-01-01T00:00:00"
@@ -246,7 +248,11 @@ def test_a_write_that_fails_gives_a_joined_sheet_its_bytes_back(stores, tmp_path
         rename_book(stores, OLD, NEW, answers={("term", "星", "", ""): True})
     first = next(c for c in calls if c in joined)
     assert calls.count(first) == 2  # the first joined sheet written, then its old bytes again
-    assert _files(tmp_path) == before  # everything as it was: the series' sheet, the new files gone
+    # everything as it was: the series' sheet (its old bytes, written back protected), the new files gone
+    assert set(_files(tmp_path)) == set(before)
+    assert ({k: protect.readable(v) for k, v in _files(tmp_path).items()}
+            == {k: protect.readable(v) for k, v in before.items()})
+    assert protect.is_protected(first.read_bytes())
 
 
 def test_a_file_in_the_way_or_an_old_file_that_cannot_be_read_refuses_the_rename(stores, tmp_path):
@@ -304,7 +310,7 @@ def test_a_name_that_gives_the_same_file_name_is_written_in_place(stores, tmp_pa
     path = stores.cache.path_for("Pebble Harbor 1")
     result = rename_book(stores, "Pebble Harbor 1", "Pebble:Harbor 1")
     assert result.caches == 1 and result.left == []
-    assert stores.cache.path_for("Pebble:Harbor 1") == path and json.loads(path.read_text(encoding="utf-8"))["book"] == "Pebble:Harbor 1"
+    assert stores.cache.path_for("Pebble:Harbor 1") == path and store_json(path)["book"] == "Pebble:Harbor 1"
     assert [e["book"] for e in stores.cache.list()] == ["Pebble:Harbor 1"]
     assert [e["book"] for e in stores.annotations.list()] == ["Pebble:Harbor 1"]
     assert [e["series"] for e in stores.sheets.list()] == ["Pebble:Harbor"]  # its own series now, in the same file
@@ -375,7 +381,7 @@ def test_a_sheet_that_records_no_series_moves_under_its_english_file_name(stores
     assert result.sheets == 1
     moved = stores.sheets.list()
     assert [(e["series"], e["entries"]) for e in moved] == [("見本の物語", 1)]
-    assert json.loads(Path(moved[0]["file"]).read_text(encoding="utf-8"))["series"] == "見本の物語"
+    assert store_json(Path(moved[0]["file"]))["series"] == "見本の物語"
 
 
 def test_the_stores_of_the_settings(tmp_path):

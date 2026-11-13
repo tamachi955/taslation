@@ -26,9 +26,13 @@ the model, which still produces every translation on the reader's machine:
 Each file records the book (or the series and language) it belongs to; when the
 plain file name holds another one whose name gives the same file name, the file
 is ``<book>-<hash>.json`` (``<series>-<hash>[.<language>].json``) instead
-(`names.py`). A file this version cannot read (damaged, or written by a newer
-TASlation) is kept beside as ``<file stem>.unreadable-<date>.json`` before a
-fresh one takes its place, never written over (`names.set_aside`).
+(`names.py`). Each is written protected at rest, so that only the Windows user
+who saved it can open it, on this computer (`protect.py`; a plain file of an
+earlier version is read as it is). Neither has an export: they stay on the
+computer they were made on. A file this version cannot read (damaged, written
+by a newer TASlation, or protected for another Windows user or computer) is
+kept beside as ``<file stem>.unreadable-<date>.json`` before a fresh one takes
+its place, never written over (`names.set_aside`).
 
 Two series sheets can be compared (`compare_sheets`): when a rename joins a
 book's sheet to the sheet the new series has already (`rename.py`), what the
@@ -48,10 +52,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .atomic import write_atomic
+from . import protect
 from .config import TEXT_SCALE_RANGE
 from .fingerprint import FINGERPRINT_HEX_LEN, hamming
-from .names import StoreFiles, read_object
+from .names import StoreFiles, load_object, read_object
 from .regions import box_iou
 from .textclean import clean_text
 
@@ -148,10 +152,20 @@ def _now() -> str:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    """*data* as the file at *path*, all or nothing (`write_atomic`: never through a temporary name another process
-    or a file of the reader's may have)."""
+    """*data* as the file at *path*, protected for this Windows user (`protect.write`), all or nothing
+    (`atomic.write_atomic`: never through a temporary name another process or a file of the reader's may have)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_atomic(path, json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
+    protect.write(path, json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
+
+
+def _load_json(path: Path) -> Any:
+    """The JSON object of the store file at *path*, opened when it is protected (`names.load_object`):
+    FileNotFoundError when there is none, `names.Unreadable` (a ValueError) when it holds no JSON object or cannot be
+    opened here."""
+    data = load_object(path)
+    if data is None:
+        raise FileNotFoundError(2, "No such file or directory", str(path))
+    return data
 
 
 # --- annotations ----------------------------------------------------------------------------
@@ -541,8 +555,8 @@ class BookAnnotations:
 
     @classmethod
     def load(cls, path: Path) -> "BookAnnotations":
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_json(json.load(f), path)
+        """The annotations in the file at *path* (protected or plain, `_load_json`); ValueError for another schema."""
+        return cls.from_json(_load_json(path), path)
 
     @classmethod
     def from_json(cls, data: Any, path: Path) -> "BookAnnotations":
@@ -974,8 +988,8 @@ class Glossary:
 
     @classmethod
     def load(cls, path: Path) -> "Glossary":
-        with open(path, "r", encoding="utf-8") as f:
-            return cls.from_json(json.load(f), path)
+        """The sheet in the file at *path* (protected or plain, `_load_json`); ValueError for another schema."""
+        return cls.from_json(_load_json(path), path)
 
     @classmethod
     def from_json(cls, data: Any, path: Path) -> "Glossary":

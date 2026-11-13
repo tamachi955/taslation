@@ -128,6 +128,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} menghalangi. Pindahkan keluar dari {folder}, lalu coba lagi.",
     "rename.no_name": "Nama itu tidak menyebut buku apa pun; beri buku ini namanya sendiri.",
     "rename.same_name": "Buku ini sudah bernama {book}.",
+    "store.protected": "{files} file tersimpan dilindungi: mulai sekarang hanya pengguna Windows ini yang dapat membukanya, di komputer ini.",
+    "store.not_protected": "{files} file tersimpan belum dapat dilindungi: program lain sedang memakainya. TASlation akan mencoba lagi saat dimulai berikutnya.",
+    "store.not_here": "{files} file tersimpan tidak dapat dibuka oleh pengguna Windows ini di komputer ini: disimpan oleh pengguna Windows lain atau di komputer lain, atau rusak. TASlation tidak pernah menimpanya: buku seperti itu dimulai dari awal, dan filenya disimpan di sebelahnya dengan nama baru. Untuk membawa terjemahan sebuah buku ke sini, ekspor terjemahan itu di tempat ia disimpan (Alat > Terjemahan tersimpan... > Ekspor (terenkripsi)...) lalu impor file tersebut di sini (Impor...).",
+    "store.set_aside": "Sebuah file tersimpan dari buku ini tidak dapat dibuka oleh pengguna Windows ini di komputer ini: disimpan oleh pengguna Windows lain atau di komputer lain, atau rusak. File itu disimpan sebagai {path}, dan buku ini dimulai dari awal di sini. Untuk membawa terjemahannya ke sini, ekspor di tempat ia disimpan (Alat > Terjemahan tersimpan... > Ekspor (terenkripsi)...) lalu impor file tersebut di sini (Impor...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Model terjemahan untuk bahasa ini, {name}, belum terpasang. Jalankan install.cmd lagi untuk memasangnya.",
     "translator.other_model": "Model terjemahan untuk bahasa ini, {name}, belum terpasang; untuk sementara menerjemahkan dengan {used}. Jalankan install.cmd lagi untuk memasang {name}.",

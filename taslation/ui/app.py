@@ -33,7 +33,7 @@ from typing import Any, Callable
 import numpy as np
 from PIL import Image
 
-from .. import jurisdictions, notice, viewerparts
+from .. import jurisdictions, notice, protect, viewerparts
 from ..annotations import AnnotationStore, GlossaryStore
 from ..batch import BatchReader, keep_awake, release_awake
 from ..cache import CacheStore, viewer_key_from_title
@@ -155,6 +155,22 @@ def stored_target(shown: str) -> str:
     return next((language for language in LANGUAGES if typed in (language, _(language))), shown)
 
 
+def protect_saved_files(state_dir: Path) -> protect.Tally | None:
+    """At the window's start, before any store reads them: the saved files with text of a book still in plain text
+    (an earlier version's caches, annotations and series sheets, with the copies kept beside them) replaced by their
+    protected form, each in its own atomic step (`protect.migrate`; a file that fails stays as it was and is tried
+    again at the next start). On the Tk thread, so that no save of this window runs meanwhile: once, a fraction of a
+    second for a few dozen books; then only a look at each file's first bytes. The counts it found (the log has them
+    too, never a name), or None where this system cannot protect files (a save says so itself) or it failed."""
+    if not protect.available():
+        return None
+    try:
+        return protect.migrate(state_dir)
+    except Exception as e:  # noqa: BLE001 - the window starts all the same; the files stay as they were
+        protect.LOG.warning("the saved files could not be protected at the start: %s", type(e).__name__)
+        return None
+
+
 def first_target(state_dir: Path, configured: str, window_language: str, first_start: bool) -> str:
     """The target language the window starts with: one given by --language or the configuration; else the one last
     chosen (ui.json); else, at the very first start, the window's language when it is one of the list, kept from
@@ -224,6 +240,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._models: list[str] = []
 
         self.settings = settings
+        # the saved files with text of a book an earlier version left in plain text, protected for this Windows user
+        # before any store reads them (once; `protect_saved_files`); the worker's start says how many (`_job_init`)
+        self._protection = protect_saved_files(state_dir)
         viewerparts.use(settings.state_dir)  # what was learned of the viewers on this computer (an older folder: once)
         settings.target_language = first_target(state_dir, settings.target_language, code, first_start)
         self._target_kept = settings.target_language  # what ui.json holds of the "To:" box, or will

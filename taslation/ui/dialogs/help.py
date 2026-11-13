@@ -76,6 +76,8 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "It keeps the translated text with the place of each bubble, matched to each page by a short code made from its picture. Your series sheet and notes are kept too.",
         "No page image is ever kept, nor the Japanese lines, and there is no way to save a page. A translation shows only over its page in the viewer.",
         "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks and viewer settings are kept too, in the folder named in Help > About TASlation.",
+        "The translations, series sheets and notes are protected for your Windows user on this computer: copied to another computer, or opened by another Windows user, they cannot be read. Programs you run yourself can still read them.",
+        "To keep a spare, or to move a book's translations to another computer, make an encrypted copy of them in Tools > Saved translations...; series sheets and notes stay on this computer. If the translations matter to you, keep such a copy: an administrator's reset of your Windows password, a new Windows profile or a reinstalled Windows leaves the saved files unreadable.",
     )),
 )
 FIRST_LINES = (  # the popup of a first start

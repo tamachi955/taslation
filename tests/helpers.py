@@ -20,6 +20,22 @@ EN_TEXTS = {
 }
 
 
+def store_text(path) -> str:
+    """The text of a store's file (a cache, annotations, a series sheet, a copy kept beside one) as TASlation reads
+    it: opened when it is protected for this Windows user (`protect.read`), an earlier version's plain file as it
+    is."""
+    from taslation import protect
+
+    return protect.read(path).decode("utf-8-sig")
+
+
+def store_json(path):
+    """The JSON a store's file holds (`store_text`)."""
+    import json
+
+    return json.loads(store_text(path))
+
+
 class FakeOcr:
     """Returns canned Japanese strings in call order (the pipeline never sees coordinates)."""
 

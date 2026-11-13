@@ -17,6 +17,7 @@ pytest.importorskip("cryptography")
 from taslation import backup, netguard  # noqa: E402
 from taslation.cache import BookCache, CacheStore, CachedBubble, CachedPage, cache_names  # noqa: E402
 from taslation.cli import main  # noqa: E402
+from helpers import store_text  # noqa: E402
 
 PASSPHRASE = "correct horse battery staple"
 BOOK = "秘密の本 Secret Volume 3"
@@ -433,7 +434,7 @@ def test_control_characters_never_reach_a_terminal(tmp_path):
     bubble = cache.pages[0].bubbles[0]
     assert bubble.text == "Hi\n]0;owned[2Jthere" and bubble.note == "]0;owned[2J"
     assert bubble.flags == ["]0;owned[2J", "small"]
-    assert not any(ch in path.read_text(encoding="utf-8") for path in store.cache_dir.iterdir() for ch in "\x1b\x07\x9b")
+    assert not any(ch in store_text(path) for path in store.cache_dir.iterdir() for ch in "\x1b\x07\x9b")
 
 
 def _files(store: CacheStore) -> dict[str, bytes]:

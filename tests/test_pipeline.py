@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from helpers import EN_TEXTS, JA_TEXTS, FailingTranslator, FakeOcr
+from helpers import EN_TEXTS, FailingTranslator, FakeOcr, JA_TEXTS, store_json, store_text
 from PIL import Image
 
 from taslation.cache import BookCache, CacheStore
@@ -29,7 +29,7 @@ def test_translate_render_and_cache(sample_page, settings):
 
     # cache: translated text + geometry only, written to disk
     assert cache.path.is_file()
-    raw = cache.path.read_text(encoding="utf-8")
+    raw = store_text(cache.path)
     data = json.loads(raw)
     assert data["pages"] and data["pages"][0]["bubbles"]
     assert all(b["text"] in EN_TEXTS.values() for b in data["pages"][0]["bubbles"])
@@ -139,7 +139,7 @@ def test_stale_cached_bubbles_are_not_drawn_and_are_pruned_on_rescan(sample_page
     assert u.dropped == 1 and u.kept == [] and len(u.japanese()) >= 6 and not u.cached
     translations = {i: EN_TEXTS.get(r.source_text, "ok") for i, r in enumerate(u.japanese())}
     assert pipeline.commit_unit(u, translations)
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     texts = [b["text"] for p in data["pages"] for b in p["bubbles"]]
     assert "Then..." not in texts and len(texts) >= 6
     # a second re-scan keeps everything and translates nothing

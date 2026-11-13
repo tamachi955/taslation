@@ -8,7 +8,7 @@ from collections import deque
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, JA_TEXTS, FakeOcr, read_book
+from helpers import EN_TEXTS, FakeOcr, JA_TEXTS, read_book, store_json, store_text
 from test_batch import _fake_viewer
 
 from taslation import fingerprint as fp
@@ -57,7 +57,7 @@ def test_a_brand_new_unit_with_two_of_three_translations_is_stored_and_not_compl
     assert pipeline.commit_unit(unit, {0: "One.", 2: "Three."}) is False
     assert [b.text for b in pipeline.cache.pages[0].bubbles] == ["One.", "Three."]
     assert pipeline.cache.pages[0].incomplete
-    assert json.loads(pipeline.cache.path.read_text(encoding="utf-8"))["pages"][0]["incomplete"] is True
+    assert store_json(pipeline.cache.path)["pages"][0]["incomplete"] is True
 
 
 def test_a_unit_with_nothing_real_enters_no_cache_and_the_copied_japanese_never_does(settings):
@@ -65,7 +65,7 @@ def test_a_unit_with_nothing_real_enters_no_cache_and_the_copied_japanese_never_
     assert pipeline.commit_unit(_unit(), {0: "一", 1: "", 2: "  "}) is False
     assert len(pipeline.cache) == 0 and not pipeline.cache.path.exists()
     assert pipeline.commit_unit(_unit(), {0: "一", 1: "Two."}) is False
-    raw = pipeline.cache.path.read_text(encoding="utf-8")
+    raw = store_text(pipeline.cache.path)
     assert "一" not in raw and [b.text for b in pipeline.cache.pages[0].bubbles] == ["Two."]
 
 
@@ -74,7 +74,7 @@ def test_a_complete_unit_clears_the_mark(settings):
     pipeline.commit_unit(_unit(), {0: "One."})
     assert pipeline.commit_unit(_unit(), {0: "One.", 1: "Two.", 2: "Three."}) is True
     assert len(pipeline.cache) == 1 and not pipeline.cache.pages[0].incomplete
-    assert "incomplete" not in json.loads(pipeline.cache.path.read_text(encoding="utf-8"))["pages"][0]
+    assert "incomplete" not in store_json(pipeline.cache.path)["pages"][0]
 
 
 # --- the cache file -------------------------------------------------------------------------------------------------

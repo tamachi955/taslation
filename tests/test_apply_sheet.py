@@ -5,6 +5,7 @@ import json
 
 from taslation.cache import CacheStore, CachedBubble, CachedPage
 from taslation.cli import main
+from helpers import store_json
 
 
 def test_cache_rename_is_whole_word(tmp_path):
@@ -32,9 +33,9 @@ def test_renames_given_apply_to_the_series_caches_with_a_backup(tmp_path, monkey
         assert main(["glossary", "apply", "Series", "--rename", "Noowa=Nowa", "--rename", "Hja=Hya", "--dry-run"]) == 0
         out = capsys.readouterr().out
         assert "Noowa -> Nowa" in out and "would change" in out
-        assert "Noowa" in json.loads(cache.path.read_text(encoding="utf-8"))["pages"][0]["bubbles"][0]["text"]
+        assert "Noowa" in store_json(cache.path)["pages"][0]["bubbles"][0]["text"]
         assert main(["glossary", "apply", "Series", "--rename", "Noowa=Nowa", "--rename", "Hja=Hya"]) == 0
-        text = json.loads(cache.path.read_text(encoding="utf-8"))["pages"][0]["bubbles"][0]["text"]
+        text = store_json(cache.path)["pages"][0]["bubbles"][0]["text"]
         assert text == "Nowa hears Piyo and Hya."
         backups = list(cache.path.parent.glob(cache.path.stem + ".before-apply.*.json"))
         assert len(backups) == 1

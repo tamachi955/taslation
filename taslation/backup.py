@@ -23,6 +23,13 @@ volume has some 200; the file size cap alone would let in some 500,000) of at mo
 each, every page readable, the strings without control characters, and the book's cache file must be that book's,
 never another one whose name gives the same file. An export of a cache over those caps is refused the same way.
 
+The export is the one form of a cache that moves to another computer or Windows user: the cache files themselves are
+protected for the Windows user who saved them, on that computer (`protect.py`), and an export protected so would open
+nowhere else. It is read from the cache through the store (`BookCache.load`, which opens the protected file) and
+written with `write_atomic` as it is, its passphrase its only protection; an import is saved through the store, and so
+protected like every cache. The format is the same as before the caches were protected (2026-11-14), so an export of
+an earlier version imports.
+
 Every refusal is a BackupError with a sentence for the reader; a window tells the kinds apart by class:
 WrongPassphrase, BrokenPassphrase, UnreadableExport (from a newer TASlation), TooLarge, LibraryMissing, and
 plain BackupError for a damaged file. NameClash, an OSError, is the cache file that holds another book.
@@ -42,6 +49,7 @@ import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from . import protect
 from .atomic import write_atomic
 
 if TYPE_CHECKING:
@@ -375,11 +383,13 @@ def _incoming(payload: bytes) -> BookCache:
 
 def _keep_copy(path: Path) -> None:
     """A dated copy of the cache file at *path* beside it, before an import changes it (never over an earlier
-    copy); an import of the wrong or an older file can then be undone by hand."""
+    copy); an import of the wrong or an older file can then be undone by hand. The copy is protected as the cache is
+    (`protect.protected`: the same bytes when the file is protected, sealed when it is an earlier version's plain
+    file), whether or not this Windows user can open it here."""
     if path.is_file():
         copy = path.with_suffix(time.strftime(".before-import.%Y%m%d-%H%M%S.json"))
         if not copy.exists():
-            write_atomic(copy, path.read_bytes())
+            write_atomic(copy, protect.protected(path.read_bytes()))
 
 
 def import_cache(store: CacheStore, path: Path | str, passphrase: str, replace: bool = False) -> tuple[str, int]:

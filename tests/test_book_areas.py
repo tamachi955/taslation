@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, store_json
 from test_translator_mode import Window
 
 from taslation.annotations import AREA_INSIDE, BookAnnotations, BookArea, page_side
@@ -98,12 +98,12 @@ def test_areas_are_kept_in_the_books_file_and_a_file_without_any_stays_as_it_was
     path = tmp_path / "Book.json"
     ann = BookAnnotations(path, "Book")
     ann.save()
-    assert "areas" not in json.loads(path.read_text(encoding="utf-8"))
+    assert "areas" not in store_json(path)
     area = BookArea.around((0.4, 0.9, 0.6, 0.96), "left", 0.7)
     assert ann.add_area(area) and not ann.add_area(BookArea.around((0.401, 0.9, 0.6, 0.96), "left", 0.7))
     assert ann.add_area(BookArea.around((0.4, 0.9, 0.6, 0.96)))  # the same place on every page is another area
     ann.save()
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = store_json(path)
     assert data["areas"][0] == {"box": list(area.box), "side": "left", "aspect": 0.7}
     assert data["areas"][1] == {"box": list(BookArea.around((0.4, 0.9, 0.6, 0.96)).box)}
     again = BookAnnotations.load(path)

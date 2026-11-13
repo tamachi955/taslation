@@ -119,6 +119,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} 擋住了去路。請將其移出 {folder}，然後重試。",
     "rename.no_name": "該名稱不能指稱一本書；請為書取一個專屬的名稱。",
     "rename.same_name": "這本書已經叫 {book} 了。",
+    "store.protected": "已保護 {files} 個儲存的檔案：今後只有這個 Windows 使用者能在這台電腦上開啟它們。",
+    "store.not_protected": "還有 {files} 個儲存的檔案未能保護：另一個程式正在使用它們。TASlation 會在下次啟動時再試。",
+    "store.not_here": "有 {files} 個儲存的檔案無法由這個 Windows 使用者在這台電腦上開啟：它們由另一個 Windows 使用者或在另一台電腦上儲存，或已損毀。TASlation 絕不會覆寫它們：這樣的書會從頭開始，原檔案改名後保留在旁邊。要把某本書的譯文帶到這裡，請在儲存它的地方匯出（工具 > 已儲存的翻譯... > 匯出（加密）...），再在這裡匯入該檔案（匯入...）。",
+    "store.set_aside": "這本書的一個儲存的檔案無法由這個 Windows 使用者在這台電腦上開啟：它由另一個 Windows 使用者或在另一台電腦上儲存，或已損毀。它已保留為 {path}，這本書在這裡從頭開始。要把譯文帶到這裡，請在儲存它的地方匯出（工具 > 已儲存的翻譯... > 匯出（加密）...），再在這裡匯入該檔案（匯入...）。",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "尚未安裝此語言的翻譯模型 {name}。請再次執行 install.cmd 進行安裝。",
     "translator.other_model": "尚未安裝此語言的翻譯模型 {name}；暫時使用 {used} 翻譯。要安裝 {name}，請再次執行 install.cmd。",

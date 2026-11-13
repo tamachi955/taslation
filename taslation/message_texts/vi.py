@@ -124,6 +124,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} đang cản trở. Hãy chuyển nó ra khỏi {folder} rồi thử lại.",
     "rename.no_name": "Tên đó không chỉ một cuốn sách nào; hãy đặt cho sách tên riêng.",
     "rename.same_name": "Sách đã có tên {book} rồi.",
+    "store.protected": "Đã bảo vệ {files} tệp đã lưu: từ nay chỉ người dùng Windows này mới mở được chúng, trên máy tính này.",
+    "store.not_protected": "Chưa bảo vệ được {files} tệp đã lưu: một chương trình khác đang dùng chúng. TASlation sẽ thử lại ở lần khởi động sau.",
+    "store.not_here": "{files} tệp đã lưu không mở được bằng người dùng Windows này trên máy tính này: chúng được lưu bởi người dùng Windows khác hoặc trên máy tính khác, hoặc đã hỏng. TASlation không bao giờ ghi đè lên chúng: cuốn sách đó bắt đầu lại từ đầu, và tệp của nó được giữ bên cạnh dưới tên mới. Để đưa bản dịch của một cuốn sách sang đây, hãy xuất chúng ở nơi đã lưu (Công cụ > Bản dịch đã lưu... > Xuất (đã mã hóa)...) rồi nhập tệp đó ở đây (Nhập...).",
+    "store.set_aside": "Một tệp đã lưu của cuốn sách này không mở được bằng người dùng Windows này trên máy tính này: nó được lưu bởi người dùng Windows khác hoặc trên máy tính khác, hoặc đã hỏng. Tệp được giữ lại với tên {path}, và cuốn sách bắt đầu lại từ đầu ở đây. Để đưa bản dịch sang đây, hãy xuất chúng ở nơi đã lưu (Công cụ > Bản dịch đã lưu... > Xuất (đã mã hóa)...) rồi nhập tệp đó ở đây (Nhập...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Mô hình dịch cho ngôn ngữ này, {name}, chưa được cài đặt. Hãy chạy lại install.cmd để cài đặt.",
     "translator.other_model": "Mô hình dịch cho ngôn ngữ này, {name}, chưa được cài; tạm thời dịch bằng {used}. Hãy chạy lại install.cmd để cài {name}.",

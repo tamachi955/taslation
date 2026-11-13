@@ -133,6 +133,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} przeszkadza. Przenieś plik poza {folder} i spróbuj ponownie.",
     "rename.no_name": "Ta nazwa nie oznacza żadnej książki; nadaj książce własną nazwę.",
     "rename.same_name": "Książka już nazywa się {book}.",
+    "store.protected": "Zabezpieczone zapisane pliki: {files}. Od teraz może je otworzyć tylko ten użytkownik systemu Windows, na tym komputerze.",
+    "store.not_protected": "Jeszcze niezabezpieczone zapisane pliki: {files} (używa ich inny program). TASlation spróbuje ponownie przy następnym uruchomieniu.",
+    "store.not_here": "Zapisane pliki, których ten użytkownik systemu Windows nie może otworzyć na tym komputerze: {files}. Zapisał je inny użytkownik systemu Windows lub inny komputer albo są uszkodzone. TASlation nigdy ich nie nadpisuje: taka książka zaczyna się od nowa, a jej plik zostaje obok pod nową nazwą. Aby przenieść tutaj tłumaczenia książki, wyeksportuj je tam, gdzie zostały zapisane (Narzędzia > Zapisane tłumaczenia... > Eksportuj (zaszyfrowany)...), i zaimportuj ten plik tutaj (Importuj...).",
+    "store.set_aside": "Ten użytkownik systemu Windows nie może otworzyć na tym komputerze zapisanego pliku tej książki: zapisał go inny użytkownik systemu Windows lub inny komputer albo plik jest uszkodzony. Zostaje zachowany jako {path}, a książka zaczyna się tutaj od nowa. Aby przenieść tutaj jej tłumaczenia, wyeksportuj je tam, gdzie zostały zapisane (Narzędzia > Zapisane tłumaczenia... > Eksportuj (zaszyfrowany)...), i zaimportuj ten plik tutaj (Importuj...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Model tłumaczenia dla tego języka, {name}, nie jest zainstalowany. Uruchom ponownie install.cmd, aby go zainstalować.",
     "translator.other_model": "Model tłumaczenia dla tego języka, {name}, nie jest zainstalowany; na razie tłumaczenie odbywa się modelem {used}. Uruchom ponownie install.cmd, aby zainstalować {name}.",

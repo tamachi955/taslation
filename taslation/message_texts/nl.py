@@ -130,6 +130,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} staat in de weg. Haal het uit {folder} en probeer het opnieuw.",
     "rename.no_name": "Die naam noemt geen boek; geef het boek een eigen naam.",
     "rename.same_name": "Het boek heet al {book}.",
+    "store.protected": "{files:bewaard bestand|bewaarde bestanden} beveiligd: voortaan kan alleen deze Windows-gebruiker ze openen, op deze computer.",
+    "store.not_protected": "Nog niet beveiligd: {files:bewaard bestand|bewaarde bestanden}, geopend door een ander programma. TASlation probeert het bij de volgende start opnieuw.",
+    "store.not_here": "Deze Windows-gebruiker kan {files:bewaard bestand|bewaarde bestanden} op deze computer niet openen: bewaard door een andere Windows-gebruiker of op een andere computer, of beschadigd. TASlation overschrijft ze nooit: zo'n boek begint opnieuw, en het bestand blijft ernaast staan onder een nieuwe naam. Om de vertalingen van een boek hierheen te halen, exporteert u ze waar ze bewaard zijn (Extra > Bewaarde vertalingen... > Exporteren (versleuteld)...) en importeert u dat bestand hier (Importeren...).",
+    "store.set_aside": "Deze Windows-gebruiker kan een bewaard bestand van dit boek op deze computer niet openen: het is bewaard door een andere Windows-gebruiker of op een andere computer, of het is beschadigd. Het blijft bewaard als {path}, en het boek begint hier opnieuw. Om de vertalingen hierheen te halen, exporteert u ze waar ze bewaard zijn (Extra > Bewaarde vertalingen... > Exporteren (versleuteld)...) en importeert u dat bestand hier (Importeren...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Het vertaalmodel voor deze taal, {name}, is niet geïnstalleerd. Voer install.cmd opnieuw uit om het te installeren.",
     "translator.other_model": "Het vertaalmodel voor deze taal, {name}, is niet geïnstalleerd; voorlopig wordt met {used} vertaald. Voer install.cmd opnieuw uit om {name} te installeren.",

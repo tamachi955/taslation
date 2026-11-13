@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, store_json
 from PIL import Image
 
 from taslation.annotations import (
@@ -233,7 +233,7 @@ def test_a_region_style_keeps_only_what_is_set_and_checks_its_bounds(tmp_path):
     page.set_style((0.5, 0.5, 0.6, 0.7), style)
     page.set_style((0.1, 0.1, 0.2, 0.2), RegionStyle(align="right"))
     ann.save()
-    raw = json.loads((tmp_path / "Book.json").read_text(encoding="utf-8"))
+    raw = store_json((tmp_path / "Book.json"))
     assert raw["schema"] == 1 and raw["pages"][0]["notes"][0] == {"box": [0.5, 0.5, 0.6, 0.7], "speaker": "ピヨ",
                                                                   "style": style.to_json()}
     again = BookAnnotations.load(tmp_path / "Book.json").pages[0]

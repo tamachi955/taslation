@@ -41,7 +41,7 @@ FLOAT_PARAMS = {"seconds"}
 INT_PARAMS = {"percent", "page", "pages", "bubbles", "new", "cached", "dropped", "done", "total", "characters", "terms", "chunk",
               "chunks", "failed", "limit", "minutes", "pid", "units", "incomplete", "group", "entries",
               "translations", "review", "status", "chars", "hwnd", "problems", "mb", "free", "need", "batch",
-              "lines", "kept", "again", "queued"}
+              "lines", "kept", "again", "queued", "files"}
 TEXTS = {"title": "Store - Browser", "key": "Left", "call": "PrintWindow", "detail": "something broke",
          "translator": "ollama:qwen3.5:4b", "url": URL, "model": "qwen3.5:4b", "path": "/models/manga-ocr",
          "missing": "config.json", "command": "ollama pull qwen3.5:4b", "wanted": "qwen3.5:4b", "used": "gemma3:4b",

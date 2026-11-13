@@ -125,6 +125,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} がじゃまをしています。{folder} の外に移してから、もう一度試してください。",
     "rename.no_name": "その名前では本を指せません。本に固有の名前を付けてください。",
     "rename.same_name": "この本の名前はすでに {book} です。",
+    "store.protected": "保存ファイル {files} 件を保護しました。今後は、この Windows ユーザーだけが、このパソコンでだけ開けます。",
+    "store.not_protected": "保存ファイル {files} 件はまだ保護できていません。ほかのプログラムが使用中です。次の起動時に TASlation がもう一度試します。",
+    "store.not_here": "保存ファイル {files} 件は、この Windows ユーザーではこのパソコンで開けません。別の Windows ユーザーか別のパソコンで保存されたか、壊れています。TASlation がこれを上書きすることはありません。その本は最初からになり、元のファイルは名前を変えて横に残します。本の翻訳をここへ移すには、保存した側で書き出して（ツール > 保存した翻訳... > 暗号化して書き出す...）、そのファイルをここで取り込んでください（取り込む...）。",
+    "store.set_aside": "この本の保存ファイルを、この Windows ユーザーではこのパソコンで開けません。別の Windows ユーザーか別のパソコンで保存されたか、壊れています。ファイルは {path} として残し、この本はここでは最初からになります。翻訳をここへ移すには、保存した側で書き出して（ツール > 保存した翻訳... > 暗号化して書き出す...）、そのファイルをここで取り込んでください（取り込む...）。",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "この言語の翻訳モデル {name} がインストールされていません。install.cmd をもう一度実行してインストールしてください。",
     "translator.other_model": "この言語の翻訳モデル {name} がインストールされていないため、当面は {used} で翻訳します。{name} をインストールするには、install.cmd をもう一度実行してください。",

@@ -168,6 +168,11 @@ PARAMS: dict[str, tuple[str, ...]] = {
     "rename.in_way": ("path", "folder"),
     "rename.no_name": (),
     "rename.same_name": ("book",),
+    # the saved files protected at rest for this Windows user (protect.py at the start, names.set_aside)
+    "store.protected": ("files",),
+    "store.not_protected": ("files",),
+    "store.not_here": ("files",),
+    "store.set_aside": ("path",),
 }
 
 # code -> its English text; the fallback for a window without a template of its own for the code
@@ -313,6 +318,19 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} is in the way. Move it out of {folder}, then try again.",
     "rename.no_name": "That name names no book; give the book its own name.",
     "rename.same_name": "The book is called {book} already.",
+    "store.protected": ("Protected {files:saved file|saved files}: from now on only this Windows user can open them, on "
+                        "this computer."),
+    "store.not_protected": ("{files:saved file|saved files} could not be protected yet: another program holds them. "
+                            "TASlation tries again at the next start."),
+    "store.not_here": ("{files:saved file|saved files} cannot be opened by this Windows user on this computer: saved by "
+                       "another Windows user or on another computer, or damaged. TASlation never writes over them: such "
+                       "a book starts afresh, and its file is kept beside it under a new name. To bring a book's "
+                       "translations here, export them where they were saved (Tools > Saved translations... > Export "
+                       "(encrypted)...) and import that file here (Import...)."),
+    "store.set_aside": ("A saved file of this book cannot be opened by this Windows user on this computer: saved by "
+                        "another Windows user or on another computer, or damaged. It is kept as {path}, and the book "
+                        "starts afresh here. To bring its translations here, export them where they were saved (Tools > "
+                        "Saved translations... > Export (encrypted)...) and import that file here (Import...)."),
 }
 
 # code -> (param, follow-up code): the follow-up's sentence comes after the message when the param is set

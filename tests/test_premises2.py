@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, store_json
 
 from taslation import fingerprint as fp
 from taslation.annotations import (
@@ -109,7 +109,7 @@ def test_forget_page_drops_the_cached_translations(sample_page, settings):
     res = pipeline.process(sample_page)
     assert len(cache) == 1 and len(tr.calls) == 1
     assert pipeline.forget_page(res) == 1 and len(cache) == 0
-    assert json.loads(cache.path.read_text(encoding="utf-8"))["pages"] == []
+    assert store_json(cache.path)["pages"] == []
     pipeline.process(sample_page)
     assert len(tr.calls) == 2 and len(cache) == 1
 

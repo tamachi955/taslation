@@ -36,6 +36,7 @@ from taslation.bookid import (
 from taslation.cache import BookCache, CachedBubble, CachedPage, CacheStore
 from taslation.detect.page_area import find_page_area, page_area_margins
 from taslation.i18n import load_ui_table, save_ui_language
+from helpers import store_json, store_text
 
 LEARNED = ("Yomizuq", "FOLIO☆QAT")  # invented viewers, as this computer learned them
 
@@ -170,11 +171,11 @@ def test_identities_read_the_header_and_the_fingerprints_without_the_pages(tmp_p
     path = store.path_for("Star Road 2")
     # a copy kept beside a cache is never read; a file written by hand in another key order is read the slow way
     (cache_dir / "Star_Road_2.unreadable-20260101-000000.json").write_bytes(path.read_bytes())
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = store_json(path)
     (cache_dir / "Hand_Made.json").write_text(json.dumps({
         "pages": data["pages"][:1], "schema": 1, "book": "Hand Made", "language": "English",
         "isbn": "4-12-345678-2"}), encoding="utf-8")
-    (cache_dir / "Cut_Short.json").write_text(path.read_text(encoding="utf-8")[:300], encoding="utf-8")
+    (cache_dir / "Cut_Short.json").write_text(store_text(path)[:300], encoding="utf-8")
     (cache_dir / "Newer.json").write_text(json.dumps({"schema": 99, "book": "Newer", "pages": []}), encoding="utf-8")
     ids = {i.book: i for i in store.identities()}
     assert set(ids) == {"Star Road 1", "Star Road 2", "Other Book", "Yomizuq", "Hand Made"}
@@ -197,7 +198,7 @@ def test_the_colophons_details_stay_in_the_header_through_saves_and_merges(tmp_p
     assert cache.set_details(title="Book", volume="3", isbn="978-4-06-123456-7", author="A\x00uthor  Name")
     assert not cache.set_details(title="Book")  # nothing changed
     cache.save()
-    data = json.loads(store.path_for("Book 3").read_text(encoding="utf-8"))
+    data = store_json(store.path_for("Book 3"))
     assert list(data)[-1] == "pages" and data["author"] == "Author Name" and data["volume"] == "3"
     other = store.open("Book 3", "m")  # another process: it adds a page; the header stays
     other.add(CachedPage(fingerprint="a" * 80, aspect=0.7, bubbles=[], seq=-1))

@@ -15,12 +15,19 @@ each where `pick` puts it, and then deletes the old ones (`files_of`).
 A file that records no name (one written by hand or by another tool) belongs to the first name that opens it under
 its file name; the store records that name in it at its next save (`owns`, `StoreFiles.load`).
 
+Every such file is protected at rest for the Windows user who saved it, on this computer (`protect.py`: Windows DPAPI),
+under the same name: `load_object` opens a protected file and reads an earlier version's plain JSON as it is, and the
+stores write through `protect.write`. A protected file this Windows user cannot open here - saved by another Windows
+user or on another computer, or damaged - is a file the store cannot read (`NOT_HERE`).
+
 A file a store cannot read is never written over: damaged (no JSON object, or not the shape the store writes), of
-another kind, or written by a newer TASlation (a schema number above the one this version reads). The store that
-opens it, or would save over it, first moves it to ``<stem>.unreadable-<YYYYmmdd-HHMMSS>.json`` beside it and says
-so in one line on stderr, without anything the file holds, then starts afresh (`set_aside`, `StoreFiles.load`).
-Such a copy, like the ``<stem>.corrupt.json`` of earlier versions of the cache, is no name's file whatever it holds
-(`is_copy`): no store lists or picks it, and `delete_files` takes it with the files of its name.
+another kind, written by a newer TASlation (a schema number above the one this version reads), or protected for
+another Windows user or computer. The store that opens it, or would save over it, first moves it to
+``<stem>.unreadable-<YYYYmmdd-HHMMSS>.json`` beside it and says so in one line on stderr, without anything the file
+holds, then starts afresh (`set_aside`, `StoreFiles.load`); a file moved for the last reason is also kept in a list the
+window reads to say so (`take_set_aside`). Such a copy, like the ``<stem>.corrupt.json`` of earlier versions of the
+cache, is no name's file whatever it holds (`is_copy`): no store lists or picks it, and `delete_files` takes it with
+the files of its name.
 
 Standard library only: `notice.py` and the start of the command line must not load the image libraries that
 `cache.py` brings in.
@@ -35,12 +42,15 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
+
+from . import protect
 
 # Names Windows keeps for devices: a file called so (on Windows 10, with any extension) opens the device instead,
 # and what is written to it is gone. Microsoft's list, COM0, LPT0 and the superscript digits included.
@@ -57,7 +67,12 @@ _COPY_PART = r"(?:unreadable-[0-9]{8}-[0-9]{6}(?:-[0-9]+)?|corrupt)"
 _COPY_NAME = re.compile(r".+\." + _COPY_PART + r"\.json", re.IGNORECASE | re.DOTALL)
 NEWER = "written by a newer TASlation"  # the reason a file with a schema number above this version's is set aside
 DAMAGED = "damaged: wrong structure"  # the reason for a JSON object a store cannot take its data from
+NOT_HERE = protect.NOT_HERE  # the reason for a protected file this Windows user cannot open on this computer
 COPY_TRIES = 1000  # names tried for one copy (`set_aside`)
+# what the line of `set_aside` adds for a file set aside as NOT_HERE: what to do
+NOT_HERE_ADVICE = ("to bring a book's translations to this computer, export them where they were saved (Saved "
+                   "translations..., or taslation cache export) and import the export here")
+SET_ASIDE_KEPT = 50  # files set aside as NOT_HERE kept in the list the window reads (`take_set_aside`)
 
 
 def slugify(text: str) -> str:
@@ -115,13 +130,22 @@ class Unreadable(ValueError):
 
 
 def load_object(path: Path) -> dict[str, Any] | None:
-    """The JSON object in the file at *path* (UTF-8, a byte order mark allowed); None when there is no such file.
-    Unreadable when there is one but it holds no JSON object; OSError when it cannot be opened."""
+    """The JSON object in the file at *path* (UTF-8, a byte order mark allowed), opened first when it is protected
+    (`protect.readable`; an earlier version's plain file is read as it is); None when there is no such file.
+    Unreadable when there is one but it holds no JSON object, or is protected and cannot be opened here (NOT_HERE:
+    another Windows user's or computer's, or damaged; NEWER for a newer TASlation's); OSError when it cannot be opened
+    now (another program holds it, or Windows' data protection did not answer)."""
     try:
         with open(path, "rb") as f:
             raw = f.read()
     except FileNotFoundError:
         return None
+    try:
+        raw = protect.readable(raw)
+    except protect.Newer:
+        raise Unreadable(NEWER) from None
+    except protect.CannotOpen:
+        raise Unreadable(NOT_HERE) from None
     try:
         data = json.loads(raw.decode("utf-8-sig"))
     except (ValueError, RecursionError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
@@ -186,12 +210,35 @@ def _move_new(source: Path, target: Path) -> None:
         pass  # another process set it aside meanwhile: the copy is made all the same
 
 
+class SetAside(NamedTuple):
+    """A file a store set aside because this Windows user cannot open it here (`set_aside`, NOT_HERE): where it was,
+    and the copy it is now."""
+
+    path: Path
+    copy: Path
+
+
+_set_aside: list[SetAside] = []
+_set_aside_lock = threading.Lock()
+
+
+def take_set_aside() -> list[SetAside]:
+    """The files set aside as NOT_HERE in this process since the last call (the latest `SET_ASIDE_KEPT`), oldest
+    first, and the list emptied: what the window says once (`ui.jobs`)."""
+    with _set_aside_lock:
+        taken = list(_set_aside)
+        _set_aside.clear()
+    return taken
+
+
 def set_aside(path: Path, reason: str) -> Path | None:
     """Move the file at *path*, which a store could not read for *reason* (a few words, never anything the file
     holds), out of the way before anything is written there: to ``<stem>.unreadable-<YYYYmmdd-HHMMSS>.json`` beside
     it, ``-2``, ``-3`` ... after the time when that is taken (never over an earlier copy), with one line on stderr
-    that says so. Returns the copy; None when the file is gone already (another process set it aside). OSError when
-    it cannot be moved: then nothing may be written in its place either."""
+    that says so (for NOT_HERE, what to do: `NOT_HERE_ADVICE`; the file is also kept for `take_set_aside`). The copy is
+    the very file, moved: nothing of it is read, changed or deleted. Returns the copy; None when the file is gone
+    already (another process set it aside). OSError when it cannot be moved: then nothing may be written in its place
+    either."""
     when = time.strftime("%Y%m%d-%H%M%S")
     for n in range(1, COPY_TRIES + 1):
         copy = path.with_name(f"{path.stem}.unreadable-{when}{'' if n == 1 else f'-{n}'}.json")
@@ -201,7 +248,12 @@ def set_aside(path: Path, reason: str) -> Path | None:
             continue
         except FileNotFoundError:
             return None
-        _say(f"{path} could not be read ({reason}); kept as {copy}")
+        advice = f"; {NOT_HERE_ADVICE}" if reason == NOT_HERE else ""
+        _say(f"{path} could not be read ({reason}); kept as {copy}{advice}")
+        if reason == NOT_HERE:
+            with _set_aside_lock:
+                _set_aside.append(SetAside(path, copy))
+                del _set_aside[:-SET_ASIDE_KEPT]
         return copy
     raise FileExistsError(errno.EEXIST, f"no free name for a copy of {path.name} beside it", str(path))
 
@@ -419,7 +471,8 @@ class StoreFiles:
 
 
 __all__ = [
-    "DAMAGED", "NEWER", "WINDOWS_DEVICES", "Owner", "OwnerOf", "StoreFiles", "Unreadable", "check_schema", "claim",
-    "delete_files", "drop_leftovers", "file_names", "files_of", "is_copy", "is_listed", "language_key", "leftovers",
-    "load_object", "name_hash", "owns", "pick", "read_object", "set_aside", "slugify",
+    "DAMAGED", "NEWER", "NOT_HERE", "WINDOWS_DEVICES", "Owner", "OwnerOf", "SetAside", "StoreFiles", "Unreadable",
+    "check_schema", "claim", "delete_files", "drop_leftovers", "file_names", "files_of", "is_copy", "is_listed",
+    "language_key", "leftovers", "load_object", "name_hash", "owns", "pick", "read_object", "set_aside", "slugify",
+    "take_set_aside",
 ]

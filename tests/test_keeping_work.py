@@ -9,7 +9,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-from helpers import EN_TEXTS, FakeOcr, read_book
+from helpers import EN_TEXTS, FakeOcr, read_book, store_json
 from test_batch import _fake_viewer
 
 from taslation import cache as cachemod
@@ -58,7 +58,7 @@ def manual_page(settings, sample_page):
 
 
 def on_disk(cache) -> list[str]:
-    return [b["text"] for page in json.loads(cache.path.read_text(encoding="utf-8"))["pages"] for b in page["bubbles"]]
+    return [b["text"] for page in store_json(cache.path)["pages"] for b in page["bubbles"]]
 
 
 # ------------------------------------------------------------------ a run keeps what is stored

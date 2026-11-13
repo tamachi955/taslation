@@ -7,6 +7,7 @@ import numpy as np
 
 from taslation.cache import BookCache, CacheStore, CachedBubble, CachedPage
 from taslation.regions import TextRegion
+from helpers import store_json
 
 FP_X = "a" * 80
 FP_P = "b" * 80
@@ -20,7 +21,7 @@ def _page(fp: str, texts: list[str], seq: int = -1) -> CachedPage:
 
 
 def _texts(path) -> dict[str, list[str]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = store_json(path)
     return {p["fp"]: [b["text"] for b in p["bubbles"]] for p in data["pages"]}
 
 
@@ -40,7 +41,7 @@ def test_two_processes_merge_their_saves(tmp_path):
     texts = _texts(app.path)
     assert texts[FP_X] == ["Hello"]  # the pruning survived
     assert texts[FP_P] == ["New page"] and texts[FP_Q] == ["Live page"]
-    seqs = [p["seq"] for p in json.loads(app.path.read_text(encoding="utf-8"))["pages"]]
+    seqs = [p["seq"] for p in store_json(app.path)["pages"]]
     assert len(seqs) == len(set(seqs)) == 3  # both appended a page: no sequence number is shared
     # and the batch copy, saving again, keeps the app's page too
     batch.add(_page(FP_X, ["Hello!"]))
@@ -80,7 +81,7 @@ def test_pipeline_rescan_replaces_the_matched_entry_even_when_the_fingerprint_dr
     u = pipeline.scan(sample_page).units[0]
     assert u.dropped == 1 and u.stored_fingerprint == drifted and not u.cached
     assert pipeline.commit_unit(u, {i: EN_TEXTS.get(r.source_text, "ok") for i, r in enumerate(u.japanese())})
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     assert len(data["pages"]) == 1 and data["pages"][0]["fp"] == drifted
     assert "Then..." not in [b["text"] for b in data["pages"][0]["bubbles"]]
 

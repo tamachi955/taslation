@@ -6,7 +6,7 @@ from __future__ import annotations
 import threading
 
 import pytest
-from helpers import EN_TEXTS, FakeOcr, read_book
+from helpers import EN_TEXTS, FakeOcr, read_book, store_json, store_text
 from test_batch import _fake_viewer
 
 from taslation.batch import BatchReader, Readings
@@ -236,7 +236,7 @@ def test_a_cache_file_with_first_drafts_of_an_earlier_version_loads_them_as_tran
     store = CacheStore(settings.cache_dir)
     cache = store.open("Old drafts", "fake")
     read_book(_reader(settings, DictTranslator(EN_TEXTS), cache))
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     for page in data["pages"]:
         for b in page["bubbles"]:
             b["draft"] = True  # as a run of a version before 2026-11-06 left them
@@ -251,7 +251,7 @@ def test_a_cache_file_with_first_drafts_of_an_earlier_version_loads_them_as_tran
     assert tr.calls == [] and tr.requests == [] and done.translated == 0
     old.dirty = True
     old.save()
-    assert '"draft"' not in old.path.read_text(encoding="utf-8")
+    assert '"draft"' not in store_text(old.path)
 
 
 @pytest.mark.parametrize("complete", [True, False])

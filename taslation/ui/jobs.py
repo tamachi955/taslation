@@ -91,6 +91,9 @@ PACE_KEPT = 8
 # ui.json: the start dialog's answer per book ("start": read it whole; "page": page by page), the latest kept
 BOOK_STARTS = "book_starts"
 BOOK_STARTS_KEPT = 200
+# ui.json: how many saved files this Windows user cannot open here the window last said in a box ("not_here"), so
+# that the box comes again only when that number changes (`JobsMixin._tell_not_here`)
+SAVED_FILES = "saved_files"
 
 
 class Recognition(NamedTuple):
@@ -312,6 +315,7 @@ class JobsMixin:
                 pass
         self._post("models", models=models or [])
         self._post("ready", ocr=ocr is not None)
+        self._tell_protection(loaded)  # (after ready: opening each protected file to count takes a moment)
         if not problems or not any(code_of(m) in DOWN_CODES for m in problems):
             self._post("compute", where=ollama_compute())  # the translator on the processor: one line at the start
         if getattr(ocr, "missing", ()):
@@ -320,6 +324,60 @@ class JobsMixin:
             loaded.append(Message("layout.classical"))
         if loaded:
             self._post("status", text=self._loaded_line(loaded))
+
+    def _tell_protection(self, loaded: list[Message]) -> None:
+        """At the start, in the worker: what the window's start did to the saved files with text of a book still in
+        plain text (``_protection``, `protect.migrate` in `App.__init__`), for the status line once the window is
+        ready (*loaded*), counts only; then how many saved files this Windows user cannot open on this computer
+        (`protect.survey`, each protected file opened: a few milliseconds for a cache of 200 pages), which the
+        "not_here" event says in a box when that number is new (`_tell_not_here`)."""
+        from .. import protect
+
+        done = getattr(self, "_protection", None)
+        if done is not None:
+            if done.protected:
+                loaded.append(Message("store.protected", files=done.protected))
+            if done.plain or done.unreadable:
+                loaded.append(Message("store.not_protected", files=done.plain + done.unreadable))
+        if not protect.available():
+            return
+        try:
+            found = protect.survey(self.settings.state_dir)
+            told = load_ui_table(self.settings.state_dir, SAVED_FILES).get("not_here")
+        except Exception as e:  # noqa: BLE001 - a store that opens such a file says so itself (`_watch_set_aside`)
+            LOG.warning("the saved files could not be looked at: %s", type(e).__name__)
+            return
+        if found.not_here or told:  # (none now, and none said before: nothing to say or to forget)
+            self._post("not_here", files=found.not_here)
+
+    def _tell_not_here(self, files: int) -> None:
+        """The saved files this Windows user cannot open on this computer (*files*, from `_tell_protection`): copied
+        from another computer or another Windows user's folder, or damaged. Said in a box (`store.not_here`: what
+        happened, that they are never written over, how to bring the translations here) when the number differs from
+        the one said last (ui.json `SAVED_FILES`), so that the same files do not bring the box at every start; nothing
+        when there are none."""
+        state_dir = self.settings.state_dir
+        try:
+            told = load_ui_table(state_dir, SAVED_FILES).get("not_here", "0")
+        except OSError:
+            told = "0"
+        if str(files) == told:
+            return
+        try:
+            save_ui_entry(state_dir, SAVED_FILES, "not_here", str(files) if files else None)
+        except OSError:  # (a state folder that cannot be written: the box comes again at the next start)
+            pass
+        if files:
+            self._warn_unasked(rendered(Message("store.not_here", files=files)))
+
+    def _watch_set_aside(self) -> None:
+        """A store of this window set aside a file this Windows user cannot open here (`names.take_set_aside`: the
+        book starts afresh, the file kept beside it under a new name): said in a box, once, with where it is kept."""
+        from ..names import take_set_aside
+
+        taken = take_set_aside()
+        if taken:
+            self._warn_unasked(rendered(Message("store.set_aside", path=", ".join(str(t.copy) for t in taken))))
 
     def _warm_page_models(self) -> None:
         """The page models (layout, erase) made ready ahead of the first page, once the pipeline is there and a
@@ -601,7 +659,8 @@ class JobsMixin:
         except queue.Empty:
             pass
         finally:
-            for step in (self._flush_fill, self._flush_busy, self._watch_page, self._watch_trouble):
+            for step in (self._flush_fill, self._flush_busy, self._watch_page, self._watch_trouble,
+                         self._watch_set_aside):
                 try:
                     step()
                 except Exception:  # noqa: BLE001 - never stop the event pump
@@ -671,6 +730,8 @@ class JobsMixin:
             self._warn_unasked(text, said=True)
         elif kind == "ollama_failed":  # Ollama could not be started at the window's start: what to do, said once
             self._warn_unasked(rendered(data["message"]))
+        elif kind == "not_here":  # saved files this Windows user cannot open here, found at the start
+            self._tell_not_here(int(data.get("files", 0)))
         elif kind == "models":
             self._take_models(data["models"])
         elif kind == "health":  # a setup check: the banner, and the next check while a problem stands

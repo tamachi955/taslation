@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, store_text
 from PIL import Image
 
 from taslation.annotations import BookAnnotations, RegionStyle
@@ -65,7 +65,7 @@ def test_a_region_of_a_cached_page_is_read_again_in_memory_and_nothing_is_stored
     read = pipeline.read_source(result, region)
     assert read and region.source_text == read and region.translated_text == text and region.status == status
     assert {p.name: p.read_bytes() for p in settings.cache_dir.glob("*.json")} == files  # nothing written
-    assert read not in "".join(p.read_text(encoding="utf-8") for p in settings.cache_dir.glob("*.json"))
+    assert read not in "".join(store_text(p) for p in settings.cache_dir.glob("*.json"))
     pipeline.ocr = None
     assert pipeline.read_source(result, result.translated[1]) == "" and not result.translated[1].source_text
 

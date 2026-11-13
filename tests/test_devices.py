@@ -132,6 +132,7 @@ class Start:
     _warm_page_models = jobs.JobsMixin._warm_page_models
     _revive_ollama = jobs.JobsMixin._revive_ollama
     _loaded_line = jobs.JobsMixin._loaded_line
+    _tell_protection = jobs.JobsMixin._tell_protection
     _post = jobs.JobsMixin._post
 
     def __init__(self, settings: Settings, setup, order: list):

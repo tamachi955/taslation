@@ -5,9 +5,10 @@ import json
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, store_json, store_text
 
 from taslation import fingerprint as fp
+from taslation import protect
 from taslation.annotations import (
     AnnotationStore,
     BookAnnotations,
@@ -41,7 +42,7 @@ def test_annotations_roundtrip_and_lookup(tmp_path):
     assert loaded.lookup(FP_B, 0.7, max_distance=36) is None
     assert loaded.lookup(FP_A, 1.6, max_distance=36) is None  # another aspect: another page
     assert loaded.remove_box(FP_A, 0.7, (0.1, 0.1, 0.3, 0.2)) == 1 and loaded.box_count == 1
-    data = json.loads(loaded.path.read_text(encoding="utf-8"))
+    data = store_json(loaded.path)
     assert data["kind"] == "annotations" and set(data["pages"][0]) == {"fp", "aspect", "add", "ignore"}
     assert store.list()[0]["book"] == "Book" and store.delete("Book") and not store.list()
 
@@ -56,7 +57,7 @@ def test_a_box_past_its_page_units_box_is_kept_and_one_bad_box_loses_only_itself
     ann.save()
     (page,) = store.open("Book").pages
     assert page.add == [(0.2, 1.09, 0.55, 1.71)]
-    data = json.loads(ann.path.read_text(encoding="utf-8"))
+    data = store_json(ann.path)
     raw = data["pages"][0]
     raw["add"] += [[0.1, 1.5, 0.4, 2.5], [0.3, 0.3, 0.2, 0.4], "x", [0.6, 0.6, 0.7, 0.8]]
     raw["ignore"] = [[0.1, 0.1, 0.2, 0.2], [-1.5, 0.1, 0.2, 0.2]]
@@ -109,10 +110,11 @@ def test_saves_never_go_through_a_fixed_temporary_name(tmp_path):
     gl.save()
     for path in (ann.path, gl.path):
         assert path.with_name(path.name + ".tmp").read_text(encoding="utf-8") == "a file of the reader's"
-        raw = path.read_bytes()
+        assert protect.is_protected(path.read_bytes())  # saved protected; inside, the JSON as it was dumped
+        raw = protect.read(path)
         assert raw == json.dumps(json.loads(raw), ensure_ascii=False, indent=1).encode("utf-8")
         assert sorted(p.name for p in path.parent.iterdir()) == sorted([path.name, path.name + ".tmp"])
-    assert "ピーヨ".encode("utf-8") in gl.path.read_bytes()
+    assert "ピーヨ".encode("utf-8") in protect.read(gl.path) and "ピーヨ".encode("utf-8") not in gl.path.read_bytes()
 
 
 def test_the_store_files_contain_no_text(tmp_path):
@@ -133,10 +135,10 @@ def test_the_store_files_contain_no_text(tmp_path):
                 yield from keys(v)
 
     for path in (ann.path, gl.path):  # geometry and the sheet only: no field could carry a line of the book
-        assert "text" not in set(keys(json.loads(path.read_text(encoding="utf-8"))))
-    data = json.loads(ann.path.read_text(encoding="utf-8"))
+        assert "text" not in set(keys(store_json(path)))
+    data = store_json(ann.path)
     assert set(data["pages"][0]) == {"fp", "aspect", "add", "ignore"} and data["pages"][0]["fp"] == FP_A
-    assert set(json.loads(gl.path.read_text(encoding="utf-8"))["entries"][0]) == {"term", "rendering"}
+    assert set(store_json(gl.path)["entries"][0]) == {"term", "rendering"}
 
 
 def test_settings_modes_are_validated():
@@ -211,7 +213,7 @@ def test_translator_mode_completes_a_cached_page_and_edits_it(sample_page, setti
     assert page is not None and len(page.ignore) == 1 and len(page.add) == 1
     again = pipeline.process(sample_page)  # the dropped spot stays empty on the next read
     assert not any(r.bbox == victim.bbox for r in again.regions)
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     assert "Edited line" in [b["text"] for p in data["pages"] for b in p["bubbles"]]
 
 

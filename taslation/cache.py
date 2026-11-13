@@ -7,14 +7,20 @@ original Japanese text. The cache lets a page you already translated be
 composited again instantly when it is on screen, and is useless without the
 real page in your viewer.
 
-Files are plain JSON under ``~/.taslation/cache`` so you can inspect or delete
-them at any time. A book's file is ``<name>[.<language>].json``; when that file
+Files are JSON under ``~/.taslation/cache``, protected at rest so that only the
+Windows user who saved them can open them, on this computer (`protect.py`:
+Windows DPAPI; a file of an earlier version, plain JSON, is read as it is and
+protected at the next start or save). Copied to another computer or opened by
+another Windows user they cannot be read; the passphrase-encrypted export
+(`backup.py`) is what moves a book's translations. A book's file is
+``<name>[.<language>].json``; when that file
 already holds another book whose name gives the same file name (letter case on
 Windows, punctuation, the 120-character cut), it is ``<name>-<hash>[.<language>].json``
 instead, the hash being of the exact name (see `CacheStore.path_for`; every
 store names its files so, `names.py`). A file this version cannot read (damaged,
-or written by a newer TASlation) is kept beside as ``<file stem>.unreadable-<date>.json``
-before a fresh cache takes its place, never written over (`names.set_aside`).
+written by a newer TASlation, or protected for another Windows user or computer)
+is kept beside as ``<file stem>.unreadable-<date>.json`` before a fresh cache
+takes its place, never written over (`names.set_aside`).
 
 The file's header may also say what the book is as its colophon names it (`DETAIL_FIELDS`: the title, the volume,
 the author, the publisher, the ISBN; each optional, cleaned and bounded, never text from a page's bubbles), and
@@ -36,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, NamedTuple
 
+from . import protect
 from .atomic import write_atomic
 from .fingerprint import FINGERPRINT_BITS, FINGERPRINT_HEX_LEN, hamming
 from .names import (
@@ -483,13 +490,16 @@ class BookCache:
         with ``merge=False`` this copy replaces what the file holds. When another process gave the file to another
         book meanwhile (one whose name gives the same file name, opened before either was saved), this cache moves
         to its book's other file name instead (`cache_names`). A file there that this version cannot read (written
-        meanwhile: damaged, or by a newer TASlation) is set aside first, never written over (`names.set_aside`);
-        an OSError, and nothing written, when the file cannot be opened now."""
+        meanwhile: damaged, by a newer TASlation, or protected for another Windows user or computer) is set aside
+        first, never written over (`names.set_aside`); an OSError, and nothing written, when the file cannot be opened
+        now or this system cannot protect it (`protect.Unavailable`). The file is written protected, sealed before
+        anything reaches the disk (`protect.protected`), all or nothing (`write_atomic`)."""
         if merge:
             self._take_in()
         self.updated = time.strftime("%Y-%m-%dT%H:%M:%S")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        write_atomic(self.path, json.dumps(self.to_json(), ensure_ascii=False, indent=1).encode("utf-8"))
+        payload = json.dumps(self.to_json(), ensure_ascii=False, indent=1).encode("utf-8")
+        write_atomic(self.path, protect.protected(payload))
         self.stamp = _stamp(self.path)
         self.touched.clear()
         self.removed.clear()
@@ -689,12 +699,13 @@ def _read_identity(path: Path) -> _Read | None:
     """The header (every field but the pages) and the pages' (fingerprint, aspect) of the cache file at *path*, read
     without building its pages: the header from the text before the list of pages (which a save writes last), the
     fingerprints by their pattern in the rest, which in a file `json.dumps` wrote can only be the pages' own (a quote
-    inside a string is escaped). A file of another shape (written by hand) is parsed whole instead. None when there
-    is no such file, it cannot be read, or `BookCache.load` would refuse it for what this can tell (no complete JSON
-    object, another schema, no list of pages)."""
+    inside a string is escaped). A file of another shape (written by hand) is parsed whole instead. A protected file
+    is opened first (`protect.read`), a plain one of an earlier version read as it is. None when there is no such
+    file, it cannot be read or opened here, or `BookCache.load` would refuse it for what this can tell (no complete
+    JSON object, another schema, no list of pages)."""
     try:
-        text = path.read_bytes().decode("utf-8-sig")
-    except (OSError, UnicodeDecodeError):
+        text = protect.read(path).decode("utf-8-sig")
+    except (OSError, ValueError):  # protect.CannotOpen and UnicodeDecodeError are ValueErrors
         return None
     if not text.rstrip().endswith("}"):
         return None  # cut short, or no object: no JSON object to read
@@ -759,7 +770,8 @@ class CacheStore:
         """The book, the language, the header's details and the page fingerprints of every cache `list` gives (each
         book's file in every language, not the copies kept beside them), without building their pages; what
         recognising a book by a page needs (`bookid.recognise`). A file read before is read again only once it has
-        changed: a dozen caches of 200 pages take a few tenths of a second the first time, milliseconds after that.
+        changed: 30 protected caches of 200 pages take some 140 ms the first time (each opened, `protect.read`; 23 ms
+        as the plain files of before), 1.4 ms after that (measured 2026-11-14).
         A page whose bubbles a load would refuse still counts here by its fingerprint."""
         out: list[CacheIdentity] = []
         if not self.cache_dir.is_dir():

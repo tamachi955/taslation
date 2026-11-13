@@ -135,6 +135,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} gêne. Sortez-le de {folder}, puis réessayez.",
     "rename.no_name": "Ce nom ne désigne aucun livre ; donnez au livre un nom à lui.",
     "rename.same_name": "Le livre s'appelle déjà {book}.",
+    "store.protected": "Protégés : {files:fichier enregistré|fichiers enregistrés}. Désormais, seul cet utilisateur Windows peut les ouvrir, sur cet ordinateur.",
+    "store.not_protected": "Pas encore protégés : {files:fichier enregistré|fichiers enregistrés}, qu'un autre programme utilise. TASlation réessaiera au prochain démarrage.",
+    "store.not_here": "Cet utilisateur Windows ne peut pas ouvrir sur cet ordinateur {files:fichier enregistré|fichiers enregistrés} : enregistrés par un autre utilisateur Windows ou sur un autre ordinateur, ou endommagés. TASlation ne les écrase jamais : un tel livre repart de zéro, et son fichier est gardé à côté sous un nouveau nom. Pour amener ici les traductions d'un livre, exportez-les là où elles ont été enregistrées (Outils > Traductions enregistrées... > Exporter (chiffré)...) et importez ce fichier ici (Importer...).",
+    "store.set_aside": "Cet utilisateur Windows ne peut pas ouvrir sur cet ordinateur un fichier enregistré de ce livre : il a été enregistré par un autre utilisateur Windows ou sur un autre ordinateur, ou il est endommagé. Il est gardé sous le nom {path}, et le livre repart de zéro ici. Pour amener ici ses traductions, exportez-les là où elles ont été enregistrées (Outils > Traductions enregistrées... > Exporter (chiffré)...) et importez ce fichier ici (Importer...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Le modèle de traduction pour cette langue, {name}, n'est pas installé. Exécutez de nouveau install.cmd pour l'installer.",
     "translator.other_model": "Le modèle de traduction pour cette langue, {name}, n'est pas installé ; traduction avec {used} en attendant. Exécutez de nouveau install.cmd pour installer {name}.",

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from helpers import EN_TEXTS
+from helpers import EN_TEXTS, store_json
 from test_page_units import ABOVE, BELOW, FP_LEFT, FP_RIGHT, LEFT, RIGHT, SHORT, _capture, _pipeline
 
 from taslation import fingerprint
@@ -63,7 +63,7 @@ def test_a_page_cached_before_the_unit_grew_is_served_and_rekeyed(settings, monk
     page = cache.lookup(FP_GROWN, 0.0, 0)[0]  # re-keyed: today's fingerprint, the bubble in today's unit
     assert page.seq == seq and _near(page.bubbles[0].box, PageUnit(RIGHT, FP_GROWN, 0).normalize(ABOVE))
     assert cache.lookup(FP_RIGHT, 0.0, 6) is None and len(cache.pages) == 2
-    on_disk = {p["fp"] for p in json.loads(cache.path.read_text(encoding="utf-8"))["pages"]}
+    on_disk = {p["fp"] for p in store_json(cache.path)["pages"]}
     assert on_disk == {FP_LEFT, FP_GROWN}  # saved at once
 
     again = pipeline.process(_capture())  # from now on found as any page: the units as found before not made

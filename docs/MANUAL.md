@@ -455,7 +455,7 @@ and the page can be edited.
 The speaker, kind, continuation mark and note go with each bubble, and the series sheet is placed before the bubbles, when they are given to the model. They are saved in
 `~/.taslation/annotations/<book>.json` and
 `~/.taslation/glossary/<series>.json` (names that would give the same file name get `<name>-<hash>.json`),
-and hold only positions, facts and policies. Neither the text nor the translations go in.
+and hold only positions, facts and policies. Neither the text nor the translations go in. Both are saved protected, as the translation cache is (see "The translation cache and backups").
 
 The effect of the premises can be measured without a book with
 `python tools/premises_eval.py` (it translates test lines with and without a series sheet and scores names, pronouns, honorifics,
@@ -507,17 +507,31 @@ one file per target language (the book's name comes from the viewer window's tit
 Book 1", get `<book>-<hash>.json`). "Saved translations..." in the "Tools" menu
 lists and deletes caches. "Delete" moves only the file of the selected row's book, in that row's language, to the Windows Recycle Bin
 (the translations in other languages stay). The confirmation's default button is "Keep them", and the file can be restored from the Recycle Bin. When it cannot be moved to the Recycle Bin
-(on a drive without one, for example), nothing is deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader,
-so open it in a text editor and see for yourself. The model never writes notes about the story to keep (note files that an old version wrote in
+(on a drive without one, for example), nothing is deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader.
+The model never writes notes about the story to keep (note files that an old version wrote in
 `~/.taslation/series` are left as they are, unread; delete them if you do not need them).
 
-A cache, page-information or series-sheet file that TASlation cannot read (a broken one, or one written by a newer version) is not overwritten.
+The cache, page-information and series-sheet files (with the copies kept beside them, and an old version's note files) are saved protected with Windows' own data protection (DPAPI),
+and only your Windows user on this computer can open them. There is no passphrase. Copied to another computer, or opened by another Windows user, they cannot be read.
+But a program running as your Windows user can open them, as TASlation does. The file names still end in `.json`, but what is inside is no longer JSON,
+so a text editor shows no translations. To see what they hold, use `taslation cache list`, `taslation review` and `taslation glossary show`.
+Files saved by an earlier version are replaced one by one by their protected form when TASlation starts (the status line and the log give only the counts).
+A file that another program holds and that could not be replaced is read as it is and tried again at the next start. `taslation cache protect` replaces them too,
+and `taslation audit` shows whether any file is left unprotected. TASlation versions before this one cannot read the protected files (they keep them beside as unreadable).
+What an earlier version saved unprotected, and files you delete, may still be recoverable from the disk.
+
+A cache, page-information or series-sheet file that TASlation cannot read (a broken one, one written by a newer version, or one saved by another Windows user or on another computer) is not overwritten.
 It is kept beside as `<name>.unreadable-<date>.json`, a line is printed on the console, and a new file takes its place.
+When there are files that cannot be opened on this computer, the window says at its start how many and how to move the translations (only when the number changes).
 Deleting the book or the series deletes such copies too.
 
 A book's cache can be made into a file encrypted with a passphrase, as a backup for yourself or to move it to another computer of your own ("Saved translations...",
 or `taslation cache export` and `taslation cache import`). The file contains the translations,
 so keep it to yourself. Without the passphrase, no one, TASlation included, can open it, and a forgotten passphrase cannot be recovered.
+Since the saved files cannot be read on another computer even when copied, this is the only way to move translations. Series sheets and page information cannot be exported, and stay on this computer.
+When an administrator resets your Windows password (changing it yourself is fine), when you move to a new Windows profile,
+or when Windows is reinstalled, the protected files can no longer be opened. If the translations matter to you, keep an exported file.
+The format of the exported file has not changed, so files exported by an earlier version can be imported too. Imported translations are saved protected as well.
 
 * Export and import each start with a warning. An exported file is for you alone (even if the book is yours, giving it to someone else infringes the author's rights),
   and you import only files you made yourself, on your own computer. "Cancel" there stops before you choose a file.
@@ -569,13 +583,14 @@ taslation translate page.png --show    translate an image file of your own (writ
 taslation translate page.png --translator echo --no-translate   detection and OCR only
 taslation review --book <book> [--notes]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader
 taslation cache list | delete <book> | path
+taslation cache protect        protect the saved files that are not protected yet, and show the counts (also done at every start)
 taslation glossary list | show <series> | set <series> <term> <rendering> [--note ..] | delete <series> [term]
 taslation glossary apply <series> --rename OLD=NEW [..] [--dry-run]   replace OLD with NEW in what is already translated
 taslation glossary font <series> "Comic Neue" | --clear   the lettering font the series suggests (checks whether this PC has it)
 taslation glossary lettering <series> thought|shout|narration|handwritten|sfx [--family NAME] [--italic|--no-italic] [--bold|--no-bold] [--reset]
 taslation batch --window "<title>" --retranslate   translate every page again with the current premises
 taslation gui --mode book --role translator   start in the mode that translates the whole book first (the default is page), as translator
-taslation audit page.png       run the processing and show every network connection made
+taslation audit page.png       run the processing and show every network connection made (and at the end, whether any saved file is left unprotected)
 taslation annotations list [--json]          list the books that have a notes file on this PC (pages, frames, memos, skipped pages, reading orders; no text is shown)
 ```
 

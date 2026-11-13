@@ -130,6 +130,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} engel oluyor. Onu {folder} dışına taşıyın, sonra yeniden deneyin.",
     "rename.no_name": "Bu ad bir kitabı belirtmiyor; kitaba kendi adını verin.",
     "rename.same_name": "Kitabın adı zaten {book}.",
+    "store.protected": "{files} kayıtlı dosya korundu: bundan sonra yalnızca bu Windows kullanıcısı onları bu bilgisayarda açabilir.",
+    "store.not_protected": "{files} kayıtlı dosya henüz korunamadı: başka bir program onları kullanıyor. TASlation bir sonraki başlatmada yeniden dener.",
+    "store.not_here": "{files} kayıtlı dosya bu Windows kullanıcısı tarafından bu bilgisayarda açılamıyor: başka bir Windows kullanıcısı tarafından ya da başka bir bilgisayarda kaydedilmiş veya bozuk. TASlation bunların üzerine asla yazmaz: böyle bir kitap baştan başlar ve dosyası yeni bir adla yanında saklanır. Bir kitabın çevirilerini buraya getirmek için onları kaydedildikleri yerde dışa aktarın (Araçlar > Kaydedilen çeviriler... > Şifreli dışa aktar...) ve o dosyayı burada içe aktarın (İçe aktar...).",
+    "store.set_aside": "Bu kitabın kayıtlı bir dosyası bu Windows kullanıcısı tarafından bu bilgisayarda açılamıyor: başka bir Windows kullanıcısı tarafından ya da başka bir bilgisayarda kaydedilmiş veya bozuk. Dosya {path} olarak saklanıyor ve kitap burada baştan başlıyor. Çevirilerini buraya getirmek için onları kaydedildikleri yerde dışa aktarın (Araçlar > Kaydedilen çeviriler... > Şifreli dışa aktar...) ve o dosyayı burada içe aktarın (İçe aktar...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "Bu dilin çeviri modeli {name} kurulu değil. Kurmak için install.cmd dosyasını yeniden çalıştırın.",
     "translator.other_model": "Bu dilin çeviri modeli {name} kurulu değil; şimdilik {used} modeliyle çevriliyor. {name} modelini kurmak için install.cmd dosyasını yeniden çalıştırın.",

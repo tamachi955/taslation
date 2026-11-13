@@ -122,6 +122,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path}이(가) 방해가 됩니다. {folder} 밖으로 옮긴 다음 다시 시도하세요.",
     "rename.no_name": "그 이름은 책을 가리키지 않습니다. 책에 고유한 이름을 주세요.",
     "rename.same_name": "이 책의 이름은 이미 {book}입니다.",
+    "store.protected": "저장된 파일 {files}개를 보호했습니다. 이제 이 Windows 사용자만 이 컴퓨터에서 열 수 있습니다.",
+    "store.not_protected": "저장된 파일 {files}개를 아직 보호하지 못했습니다. 다른 프로그램이 사용 중입니다. TASlation이 다음 시작 때 다시 시도합니다.",
+    "store.not_here": "저장된 파일 {files}개를 이 Windows 사용자는 이 컴퓨터에서 열 수 없습니다. 다른 Windows 사용자나 다른 컴퓨터에서 저장되었거나 손상되었습니다. TASlation은 이 파일을 절대 덮어쓰지 않습니다. 그런 책은 처음부터 다시 시작하고, 원래 파일은 새 이름으로 옆에 남겨 둡니다. 책의 번역을 여기로 옮기려면 저장한 곳에서 내보낸 다음(도구 > 저장된 번역... > 내보내기(암호화)...) 그 파일을 여기서 가져오세요(가져오기...).",
+    "store.set_aside": "이 책의 저장된 파일을 이 Windows 사용자는 이 컴퓨터에서 열 수 없습니다. 다른 Windows 사용자나 다른 컴퓨터에서 저장되었거나 손상되었습니다. 파일은 {path}(으)로 남겨 두었고, 이 책은 여기서 처음부터 다시 시작합니다. 번역을 여기로 옮기려면 저장한 곳에서 내보낸 다음(도구 > 저장된 번역... > 내보내기(암호화)...) 그 파일을 여기서 가져오세요(가져오기...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "이 언어의 번역 모델 {name}이(가) 설치되어 있지 않습니다. install.cmd를 다시 실행하여 설치하세요.",
     "translator.other_model": "이 언어의 번역 모델 {name}이(가) 설치되어 있지 않아 당분간 {used} 모델로 번역합니다. {name} 모델을 설치하려면 install.cmd를 다시 실행하세요.",

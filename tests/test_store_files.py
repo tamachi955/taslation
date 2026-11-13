@@ -22,6 +22,7 @@ from taslation import names
 from taslation.annotations import AnnotationStore, GlossaryStore
 from taslation.cache import CacheStore, CachedBubble, CachedPage
 from taslation.names import file_names
+from helpers import store_json, store_text
 
 LONG = "x" * 125  # past the 120 characters a file name keeps
 SECRET = "LINE-OF-THE-BOOK"  # stands for what a file holds: never on stderr
@@ -229,7 +230,7 @@ def test_a_file_that_records_no_name_belongs_to_the_first_that_opens_it(tmp_path
     plain.write_text(json.dumps(store.raw("e")), encoding="utf-8")
     assert store.path_for("Pebble:Harbor 1") == plain and store.marks("Pebble:Harbor 1") == {"e"}
     assert store.save("Pebble:Harbor 1", "a") == plain
-    assert json.loads(plain.read_text(encoding="utf-8"))[kind.name_field] == "Pebble:Harbor 1"
+    assert store_json(plain)[kind.name_field] == "Pebble:Harbor 1"
     other = store.save("Pebble Harbor 1", "b")
     assert other.name == store.file_names("Pebble Harbor 1")[1]
     assert store.marks("Pebble:Harbor 1") == {"a", "e"} and store.marks("Pebble Harbor 1") == {"b"}
@@ -277,7 +278,7 @@ def test_two_names_with_one_hash_are_refused(tmp_path, kind, monkeypatch):
 
 def _copies(folder) -> dict[str, str]:
     """The copies set aside in *folder*, by name, with what they hold."""
-    return {p.name: p.read_text(encoding="utf-8") for p in folder.iterdir() if COPY.fullmatch(p.name)}
+    return {p.name: store_text(p) for p in folder.iterdir() if COPY.fullmatch(p.name)}
 
 
 def _same_second(monkeypatch) -> None:

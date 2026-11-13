@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from helpers import store_json
+
 from taslation import viewerparts
 from taslation.cache import (
     BookCache,
@@ -52,7 +54,7 @@ def test_file_contains_only_text_and_geometry(tmp_path):
     cache = CacheStore(tmp_path).open("b", "m")
     cache.add(_page(FP_A))
     cache.save()
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     assert data["schema"] == 1
     assert set(data["pages"][0].keys()) == {"fp", "aspect", "seq", "bubbles"}
     assert set(data["pages"][0]["bubbles"][0].keys()) == {"box", "text", "poly"}
@@ -65,7 +67,7 @@ def test_bad_page_entries_are_skipped_and_languages_are_separate(tmp_path):
     cache = store.open("Book", "m")
     cache.add(_page(FP_A))
     cache.save()
-    data = json.loads(cache.path.read_text(encoding="utf-8"))
+    data = store_json(cache.path)
     data["pages"].append({"fp": "not-hex", "aspect": 0.7, "seq": 5, "bubbles": []})
     cache.path.write_text(json.dumps(data), encoding="utf-8")
     assert len(store.open("Book", "m")) == 1

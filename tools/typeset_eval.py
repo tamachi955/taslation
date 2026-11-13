@@ -42,7 +42,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import openmantra  # noqa: E402
 from taslation import fingerprint as fp  # noqa: E402
-from taslation import netguard  # noqa: E402
+from taslation import netguard, protect  # noqa: E402
 from taslation.cache import CachedPage  # noqa: E402
 from taslation.config import Settings  # noqa: E402
 from taslation.pipeline import Pipeline, is_dark  # noqa: E402
@@ -64,8 +64,10 @@ class EvalPage:
 
 
 def _cached_pages(series: str) -> list[CachedPage]:
+    """The cached pages of *series*'s cache file, read as the application reads it (protected or plain:
+    `protect.read`)."""
     path = Path.home() / ".taslation" / "cache" / f"{CACHES[series]}.json"
-    return [CachedPage.from_json(p) for p in json.loads(path.read_text(encoding="utf-8"))["pages"]]
+    return [CachedPage.from_json(p) for p in json.loads(protect.read(path).decode("utf-8-sig"))["pages"]]
 
 
 def eval_pages(pipeline: Pipeline, root: Path | None, limit: int, series: Sequence[str]) -> list[EvalPage]:

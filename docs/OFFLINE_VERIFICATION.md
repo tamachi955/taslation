@@ -33,6 +33,13 @@ Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
    translated page to disk. The on-disk cache (`~/.taslation/cache/*.json`)
    holds translated text, normalised bubble geometry and 320-bit page
    fingerprints only.
+7. **Saved files protected at rest** (`taslation/protect.py`): the caches,
+   annotations and series sheets (and the copies kept beside them) are written
+   only in their protected form, Windows DPAPI for the Windows user who saved
+   them, so a copy taken off the computer or opened by another Windows user
+   reads as nothing. Any program running as that same Windows user can open
+   them, as TASlation does. An earlier version's plain files are converted at
+   the start; `taslation audit` ends with the count of any left plain.
 
 ## Check it yourself
 
@@ -41,7 +48,13 @@ taslation doctor                                   # guard status, model, font, 
 taslation audit tests/fixtures/sample_page.png --translator echo   # full pipeline + list of network calls
 taslation audit tests/fixtures/sample_page.png     # same, with Ollama: only 127.0.0.1:11434 appears
 python -m pytest tests/test_netguard.py -q          # guard tests incl. a raw-socket subprocess
+taslation cache protect                            # saved files: protected, plain, opened here (counts only)
+python -m pytest tests/test_protect.py -q           # the protection, with real DPAPI in a temporary folder
 ```
+
+The audit's last part, `--- saved files (at rest) ---`, counts the files with
+text of a book in the state folder and ends with "plain files with text of a
+book: none" when every one is protected; it changes nothing.
 
 Then disconnect (Wi-Fi off / cable out) and use the GUI normally. Ollama keeps
 answering on loopback; the OCR model loads from disk.

@@ -127,6 +127,10 @@ TEMPLATES: dict[str, str] = {
     "rename.in_way": "{path} estorba. Sácalo de {folder} y vuelve a intentarlo.",
     "rename.no_name": "Ese nombre no nombra ningún libro; dale al libro su propio nombre.",
     "rename.same_name": "El libro ya se llama {book}.",
+    "store.protected": "Se protegieron {files:archivo guardado|archivos guardados}: desde ahora solo este usuario de Windows puede abrirlos, en este equipo.",
+    "store.not_protected": "Aún no se pudieron proteger {files:archivo guardado|archivos guardados}: otro programa los está usando. TASlation lo intentará de nuevo en el próximo inicio.",
+    "store.not_here": "Este usuario de Windows no puede abrir en este equipo {files:archivo guardado|archivos guardados}: se guardaron con otro usuario de Windows o en otro equipo, o están dañados. TASlation nunca los sobrescribe: un libro así empieza de cero, y su archivo se conserva al lado con un nombre nuevo. Para traer aquí las traducciones de un libro, expórtalas donde se guardaron (Herramientas > Traducciones guardadas... > Exportar (cifrado)...) e importa aquí ese archivo (Importar...).",
+    "store.set_aside": "Este usuario de Windows no puede abrir en este equipo un archivo guardado de este libro: se guardó con otro usuario de Windows o en otro equipo, o está dañado. Se conserva como {path}, y el libro empieza de cero aquí. Para traer aquí sus traducciones, expórtalas donde se guardaron (Herramientas > Traducciones guardadas... > Exportar (cifrado)...) e importa aquí ese archivo (Importar...).",
     # the translation model the target language chooses (translate/models.py, translate/plamo.py)
     "translator.model_missing": "El modelo de traducción para este idioma, {name}, no está instalado. Ejecuta install.cmd de nuevo para instalarlo.",
     "translator.other_model": "El modelo de traducción para este idioma, {name}, no está instalado; por ahora se traduce con {used}. Ejecuta install.cmd de nuevo para instalar {name}.",

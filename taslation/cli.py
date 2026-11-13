@@ -115,8 +115,9 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--language", default=argparse.SUPPRESS,  # as given before the command, or the configured one
                     help="target language of the cache (default: the configured one)")
     rv.add_argument("--notes", action="store_true", help="also list the notes for the reader kept with the translations")
-    c = sub.add_parser("cache", help="list, delete, export or import translation caches (text only, never images)")
-    c.add_argument("action", choices=["list", "delete", "path", "export", "import"])
+    c = sub.add_parser("cache", help="list, delete, export or import translation caches (text only, never images); "
+                                     "protect: protect the saved files still in plain text, and count them")
+    c.add_argument("action", choices=["list", "delete", "path", "export", "import", "protect"])
     c.add_argument("target", nargs="?", metavar="BOOK|FILE", help="delete, export: the book; import: the file")
     c.add_argument("--out", type=Path,
                    help="export: the file to write, encrypted with a passphrase (asked for, or TASLATION_PASSPHRASE)")
@@ -869,6 +870,7 @@ def cmd_annotations(args: argparse.Namespace, settings: Settings) -> int:
               f"{b['ignore']} ignore; {b['region_notes']} note(s), {b['skipped']} skipped page(s), "
               f"{b['orders']} reading order(s); updated {b['updated']}")
         print(f"    {b['file']}")
+    _say_not_here(settings)
     return 0
 
 
@@ -885,6 +887,7 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
             print(f"no glossaries in {store.glossary_dir}")
         for e in entries:
             print(f"{e['series']!r} [{e['language']}]: {e['entries']} term(s)\n    {e['file']}")
+        _say_not_here(settings)
         return 0
     if not args.series:
         raise SystemExit(f"error: glossary {args.action} needs a series name")
@@ -933,6 +936,7 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
             print(font_line(glossary.style.font, settings))
         return 0
     if args.action == "apply":
+        from . import protect
         from .cache import CacheStore
         from .notes import series_key
 
@@ -957,8 +961,8 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
             if changed and not args.dry_run:
                 backup = cache.path.with_suffix(time.strftime(".before-apply.%Y%m%d-%H%M%S.json"))
                 try:
-                    if not backup.exists():  # never overwrite an earlier backup
-                        backup.write_bytes(cache.path.read_bytes())
+                    if not backup.exists():  # never overwrite an earlier backup; protected as the cache is
+                        protect.write(backup, cache.path.read_bytes())
                 except OSError:
                     pass
                 cache.save()
@@ -1023,6 +1027,8 @@ def cmd_cache(args: argparse.Namespace, settings: Settings) -> int:
     if args.action == "path":
         print(store.cache_dir)
         return 0
+    if args.action == "protect":
+        return _protect_files(settings)
     if args.action == "list":
         books = store.list()
         if not books:
@@ -1030,6 +1036,7 @@ def cmd_cache(args: argparse.Namespace, settings: Settings) -> int:
         for b in books:
             print(f"{b['book']!r}: {b['pages']} page(s), {b['bubbles']} bubble(s), model {b['model']}, updated {b['updated']}")
             print(f"    {b['file']}")
+        _say_not_here(settings)
         return 0
     if args.action in ("export", "import"):
         return _cache_backup(args, settings, store)
@@ -1037,6 +1044,75 @@ def cmd_cache(args: argparse.Namespace, settings: Settings) -> int:
         raise SystemExit("error: cache delete needs a book name (see `taslation cache list`)")
     print("deleted" if store.delete(args.target) else "no such cache")
     return 0
+
+
+def _protect_files(settings: Settings) -> int:
+    """`cache protect`: every saved file with text of a book (the caches, annotations and series sheets, with the
+    copies kept beside them) still in plain text replaced by its protected form, each in its own atomic step
+    (`protect.migrate`, which every start does too), then what the folder holds (`protect.survey`: each protected
+    file opened to see whether this Windows user can open it here). Counts only, never a name. Status 1 when a file
+    is left in plain text (another program holds it: tried again at the next start); files that cannot be opened here
+    are never written over, and the advice says how to bring them here. Where this system cannot protect files, it
+    says so and changes nothing (status 1)."""
+    from . import protect
+    from .names import NOT_HERE_ADVICE
+
+    if not protect.available():
+        raise SystemExit("error: this system cannot protect saved files (Windows data protection is missing); "
+                         "nothing was changed")
+    done = protect.migrate(settings.state_dir)
+    found = protect.survey(settings.state_dir)
+    # the survey counts the files protected now among the protected ones, and opened them again
+    found.protected, found.sealed = done.protected, max(0, found.sealed - done.protected)
+    found.opened = max(0, found.opened - done.protected)
+    for line in found.lines():
+        print(line)
+    if found.not_here:
+        print(f"    {NOT_HERE_ADVICE}")
+    return 1 if found.plain or found.unreadable else 0
+
+
+def _say_not_here(settings: Settings) -> None:
+    """After `cache list`: on stderr, how many saved files this Windows user cannot open on this computer (copied
+    from another computer or another user's folder, or damaged; `protect.survey`), and what to do; counts only."""
+    from . import protect
+    from .names import NOT_HERE_ADVICE
+
+    found = protect.survey(settings.state_dir)
+    if found.not_here and sys.stderr is not None:
+        print(f"note: {found.not_here} saved file(s) {protect.NOT_HERE}; TASlation never writes over them. "
+              f"{NOT_HERE_ADVICE[0].upper()}{NOT_HERE_ADVICE[1:]}", file=sys.stderr)
+
+
+# the commands that read or write the saved files with text of a book: at their start the plain ones are protected
+# (`_protect_at_start`; the window does it itself, `ui.app`). `audit` only counts them: it reports what is on disk.
+STORE_COMMANDS = frozenset({"translate", "read", "batch", "review", "cache", "annotations", "glossary"})
+
+
+def _protect_at_start(args: argparse.Namespace, settings: Settings) -> None:
+    """At the start of a command of `STORE_COMMANDS`, the saved files with text of a book still in plain text (an
+    earlier version's) protected for this Windows user, each in its own atomic step (`protect.migrate`): one line on
+    stderr when some were, one when some could not be (another program holds them: tried again at the next start),
+    counts only. Never stops the command: a file left plain is read as it is and protected at its next save; where
+    this system cannot protect files nothing is tried, and a save says so itself."""
+    from . import protect
+    from .messages import Message
+
+    if args.command not in STORE_COMMANDS or (args.command == "cache" and args.action in ("protect", "path")):
+        return
+    if not protect.available():
+        return
+    try:
+        tally = protect.migrate(settings.state_dir)
+    except Exception as e:  # noqa: BLE001 - the command goes on; the files stay as they were
+        LOG.warning("the saved files could not be protected at the start: %s", type(e).__name__)
+        return
+    if sys.stderr is None:
+        return
+    if tally.protected:
+        print(f"note: {Message('store.protected', files=tally.protected)}", file=sys.stderr)
+    if tally.plain or tally.unreadable:
+        print(f"note: {Message('store.not_protected', files=tally.plain + tally.unreadable)}", file=sys.stderr)
 
 
 # What `cache export` and `cache import` say before the passphrase, as the Caches dialog's warnings do.
@@ -1153,7 +1229,23 @@ def cmd_audit(args: argparse.Namespace, settings: Settings) -> int:
             print("  " + b)
     else:
         print("blocked attempts: none")
+    _audit_saved_files(settings)
     return 0
+
+
+def _audit_saved_files(settings: Settings) -> None:
+    """The audit's second part: whether a saved file with text of a book is left in plain text in the state folder
+    (`protect.survey`, nothing changed: the audit reports what is on disk), counts only, never a name."""
+    from . import protect
+
+    found = protect.survey(settings.state_dir)
+    print("\n--- saved files (at rest) ---")
+    if not protect.available():
+        print("this system cannot protect saved files (Windows data protection is missing)")
+    for line in found.lines():
+        print(line)
+    if not found.plain and not found.unreadable:
+        print("plain files with text of a book: none")
 
 
 def cmd_gui(args: argparse.Namespace, settings: Settings) -> int:
@@ -1248,6 +1340,7 @@ def main(argv: list[str] | None = None) -> int:
     # Nothing but the local Ollama port, from here on.
     netguard.install(settings.ollama_port)
     try:
+        _protect_at_start(args, settings)
         if (args.command in TRANSLATING_COMMANDS and args.language and getattr(args, "translator", "ollama") == "ollama"
                 and not getattr(args, "no_translate", False) and not ensure_translator(settings, settings.target_language)):
             return 1

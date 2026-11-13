@@ -166,6 +166,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _job_batch = A._job_batch
     _use_model = A._use_model
     _loaded_line = A._loaded_line
+    _tell_protection = A._tell_protection
     _area_of = A._area_of
     _turned_from_job = A._turned_from_job
     _watch_page = A._watch_page
