@@ -22,7 +22,7 @@ This is the real window during "Translating the whole book" (reading is shown at
 
 In this recording, translating 4 two-page screens (8 pages, 85 lines) took about 30 seconds on a computer with a GPU.
 
-The pages in the recording are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021), provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/). In the recording TASlation has erased the Japanese and set an English translation in its place (the pages are changed). The recording is not covered by TASlation's own MIT licence, and it is not in the ZIP that is distributed.
+The pages in the recording are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial). In the recording TASlation has erased the Japanese and set an English translation in its place (the pages are changed). The recording is not covered by TASlation's own MIT licence, and it is not in the ZIP that is distributed.
 
 ## Why it was made
 
@@ -188,14 +188,18 @@ The sources for each country's laws and cases are in [docs/LEGAL_SOURCES.md](doc
 * Windows 10/11 (64-bit)
 * About 7.5 GB of free disk space (about 9.0 GB when you translate into Portuguese (Brazil) or Turkish; of the translation models, PLaMo 3 Translate 2B takes about 1.8 GB (about 3.8 GB only while it is being imported), and Qwen3.5 4B, used for Portuguese (Brazil) and Turkish, about 3.3 GB; only one of the two is installed, whichever your target language needs).
   On a computer with an NVIDIA GPU, PyTorch's GPU build needs about 3.7 GB more (and, during the installation only, about 2.6 GB more again)
-* 16 GB of RAM recommended (8 GB minimum)
-* An NVIDIA GPU (6 GB of memory or more) recommended. It works without one, but translation is slower. AMD and Intel GPUs are not used (it runs on the CPU).
+* 16 GB of RAM recommended (measured: TASlation itself used up to about 2.5 GB, and Ollama, which does the translating, up to about 10 GB. Most of Ollama's share is a cache that Ollama keeps in memory. It has not been tried on a computer with 8 GB)
+* An NVIDIA GPU (6 GB of memory) recommended. Measured: the translation model used about 1.9 GB and the model that erases lettering on the art about 0.5 GB, besides what Windows and your other programs use. A 4 GB GPU works too, but when less than about 3 GB of its memory is free, part of the translation model runs on the CPU and translation is about 1.5 times slower. It also runs without a GPU (translation is then about 4 times slower). AMD and Intel GPUs are not used (it runs on the CPU).
 * A viewer that shows the book (an app or a browser)
 
-| Task | With a GPU | Without a GPU |
+| Step | With a GPU | Without a GPU |
 |---|---|---|
-| One page | About 5 seconds | About 35 to 50 seconds |
-| Reading a whole book (190 pages) | About 45 to 60 minutes | About 2 to 3 hours |
+| One screen showing one page (about 10 lines) | about 6 s (3 to 8) | about 23 s (12 to 30) |
+| One screen showing two pages (about 16 lines) | about 9 s (6 to 14) | about 30 s (19 to 45) |
+| The first page after starting | 4 to 5 s more (the translation model loads) | the same |
+| Reading and translating a whole book (190 pages) | about 15 to 20 min | about 35 min to 1 h |
+
+The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. The whole-book times are estimates, calculated from 100 pages actually measured with the GPU and 16 pages without. The time you take to turn the pages is not included. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). Reading the pages (OCR) is done on the CPU, so a GPU does not make it faster (about 3 s for one two-page screen).
 
 ## Installation
 

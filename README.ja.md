@@ -20,7 +20,7 @@ TASlation（Tool Assisting Self-translation）のウィンドウは、お使い�
 
 この録画では、見開き 4 画面（8 ページ）・85 行の翻訳に、GPU のあるパソコンで約 30 秒かかりました。
 
-録画に映っているページは [OpenMantra データセット](https://github.com/mantra-inc/open-mantra-dataset)（Mantra Inc. 公開。Hinami, Ishiwatari, Yasuda, Matsui「Towards Fully Automated Manga Translation」AAAI 2021）のもので、[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) で提供されています。録画の中では、TASlation が日本語を消して英訳を載せています（改変あり）。この録画は TASlation 本体の MIT ライセンスの対象ではなく、配布用の ZIP にも入りません。
+録画に映っているページは [OpenMantra データセット](https://github.com/mantra-inc/open-mantra-dataset)（Mantra Inc. 公開。Hinami, Ishiwatari, Yasuda, Matsui「Towards Fully Automated Manga Translation」AAAI 2021）に収録されている『バルーンドリーム』（朽鷹みつき 作）のもので、データセットは [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)（表示・非営利）で提供されています。録画の中では、TASlation が日本語を消して英訳を載せています（改変あり）。この録画は TASlation 本体の MIT ライセンスの対象ではなく、配布用の ZIP にも入りません。
 
 ## なぜ作ったのか
 
@@ -186,14 +186,18 @@ TASlation は、どの電子書籍ストア、ビューア、出版社とも提�
 * Windows 10/11（64 ビット）
 * 空きディスク約 7.5 GB（ポルトガル語（ブラジル）とトルコ語に翻訳する場合は約 9.0 GB。翻訳モデルは PLaMo 3 Translate 2B が約 1.8 GB（取り込むあいだだけ約 3.8 GB）、ポルトガル語（ブラジル）とトルコ語に使う Qwen3.5 4B が約 3.3 GB で、入れるのは翻訳先に要るどちらか一方です）。
   NVIDIA の GPU があるパソコンでは、PyTorch の GPU 版の分がさらに約 3.7 GB（インストールのあいだだけ、もう約 2.6 GB）要ります
-* RAM 16 GB 推奨（最低 8 GB）
-* NVIDIA GPU（メモリ 6 GB 以上）推奨。無くても動きますが、翻訳が遅くなります。AMD と Intel の GPU は使いません（CPU で動きます）。
+* RAM 16 GB 推奨（実測では、TASlation 本体が最大約 2.5 GB、翻訳を受け持つ Ollama が最大約 10 GB を使いました。Ollama の分の大半は、Ollama がメモリにためておくキャッシュです。8 GB のパソコンでは試していません）
+* NVIDIA GPU（メモリ 6 GB）推奨。実測では翻訳モデルが約 1.9 GB、絵の上の文字を消すモデルが約 0.5 GB を使い、ほかに Windows やほかのアプリが使う分があります。4 GB の GPU でも動きますが、GPU メモリの空きが約 3 GB より少ないと翻訳モデルの一部が CPU で動き、翻訳が約 1.5 倍遅くなります。GPU が無くても動きます（翻訳は約 4 倍遅くなります）。AMD と Intel の GPU は使いません（CPU で動きます）。
 * 本を表示するビューア（アプリやブラウザ）
 
 | 処理 | GPU あり | GPU なし |
 |---|---|---|
-| 1ページ | 約5秒 | 約35〜50秒 |
-| 1冊（190ページ）をまるごと読む | 約45〜60分 | 約2〜3時間 |
+| 1画面に1ページ（約10行） | 約6秒（3〜8秒） | 約23秒（12〜30秒） |
+| 1画面に見開き2ページ（約16行） | 約9秒（6〜14秒） | 約30秒（19〜45秒） |
+| 起動して最初のページ | さらに4〜5秒（翻訳モデルの読み込み） | 同じ |
+| 1冊（190ページ）をまるごと読んで翻訳する | 約15〜20分 | 約35分〜1時間 |
+
+測定に使ったパソコンは、Intel Core i7-9700F（8コア）、RAM 48 GB、GeForce GTX 1660 Ti（6 GB）です。1920×1080 の画面に表示した見本の漫画のページで測りました。1冊の時間は見積もりで、GPU ありは 100 ページ、GPU なしは 16 ページを実際に測った結果から計算しています。ページをめくる時間は入っていません。行の多いページほど時間がかかります（1行の翻訳は GPU ありで約 0.4 秒、GPU なしで約 1.5〜1.8 秒）。ページの読み取り（OCR）は CPU で行うので、GPU があっても速さは変わりません（見開き1画面で約3秒）。
 
 ## インストール
 

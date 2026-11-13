@@ -154,7 +154,8 @@ External program and models (not bundled, not required to install TASlation):
 The evaluation dataset of Hinami, Ishiwatari, Yasuda and Matsui, "Towards Fully Automated Manga Translation" (AAAI
 2021), published by Mantra Inc. under CC BY-NC 4.0. It is downloaded by `tools/fetch_openmantra.py` into the
 developer's own folder for measurements (`docs/DEVELOPMENT.md`); the dataset is not in the repository or in a release.
-The README's recording, `docs/media/whole-book-demo.gif` (`tools/demo_video.py`), shows eight of its pages while
+The README's recording, `docs/media/whole-book-demo.gif` (`tools/demo_video.py`), shows eight pages of one of its titles
+(バルーンドリーム by Mitsuki Kuchitaka, 朽鷹みつき, as its title page credits it) while
 TASlation translates them (the Japanese erased, an English translation set in its place: the pages are changed). The
 recording is under CC BY-NC 4.0 with that credit, not under TASlation's MIT licence, and `.gitattributes` leaves
 `docs/media` out of every ZIP of the repository.
