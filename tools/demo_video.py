@@ -1,4 +1,6 @@
-"""The recording at the top of the README (dev tool, never part of a release): the real TASlation window, in English,
+"""A recording of a whole-book run, the one at the top of the README until November 15, 2026 (dev tool, never part of
+a release; the README's recording since then was made with this tool's guard by a longer script that is not in the
+repository): the real TASlation window, in English,
 in a whole-book run over public sample pages - the pages read as a stand-in viewer turns them, then translated by the
 real models, each line lettered as the model answers it - taken from TASlation's own window only and made into an
 animated GIF.
@@ -11,7 +13,7 @@ Shonosuke Ishiwatari, Kazuhiko Yasuda, Yusuke Matsui, AAAI 2021; published by Ma
 Attribution-NonCommercial 4.0 (CC BY-NC 4.0), not under TASlation's licence, and the GIF shows its pages: the GIF is
 CC BY-NC material too. Every frame says so under the picture ("Sample pages: OpenMantra dataset (Mantra Inc., CC BY-NC
 4.0)"); wherever the GIF is shown the dataset is to be credited and the licence named, and the GIF is never part of a
-release (it is in docs/media for the README alone, like the dataset itself, which is never shipped).
+release (docs/media holds the README's recording alone, like the dataset itself, which is never shipped).
 
 What runs, all on this computer:
 

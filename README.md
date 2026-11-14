@@ -11,18 +11,18 @@ translates it on this computer, and shows the translation laid over the page. It
 
 ## See it working
 
-![The TASlation window while it translates a whole book](docs/media/whole-book-demo.gif)
+![The TASlation introduction: beside the viewer, a page is translated, corrected, and a whole book is translated](docs/media/taslation-intro.gif)
 
-This is the real window during "Translating the whole book" (reading is shown at 1.2x speed, translation at 1.5x). Nothing is staged: the real OCR and the real translation model are running.
+This is an introduction recorded from the real windows (about 2 minutes 15 seconds; scenes that are sped up show the factor at the bottom left). On the left is the viewer that shows the book (here an image viewer opened on the sample pages), on the right TASlation. Nothing is staged: the real OCR and the real translation model are running. The pointer was drawn in after the recording; the actions were sent straight to the TASlation window.
 
-1. **It reads as you turn the pages**: when you turn a page in the viewer, TASlation reads that page. The blue outlines are the lines it found. The pages it has read line up in the strip below.
-2. **Press "Finished reading"**: press it when you have turned to the end. The viewer is not used from here on.
-3. **The translation comes in line by line**: the page being translated is shown, and the Japanese in each bubble gives way to the translation as the model answers that line. Lines not translated yet stay as in the original, with an outline.
-4. **Done**: when you open that page in the viewer, the translation is shown laid over it.
+1. **Reading**: choose the viewer, and "Translate" (F5) translates the page it is showing. Press → or ← in TASlation and the key is passed on to the viewer; the page you turned to is translated. There are 16 languages to translate into.
+2. **Correcting (translator mode)**: write down in the series sheet how a name or a term is to be rendered, and every line that has it uses that rendering. Double-click a bubble to change its translation and its formatting. A region is resized with its handles, turned with its round handle, dropped with Delete, and added by dragging on the page. Ctrl+Z takes any change back.
+3. **A whole book**: turn the pages yourself so that they are read, press "Finished reading", and they are translated together. TASlation never turns a page itself.
+4. **How it works, and what it needs**: at the end come the steps (capturing the screen, finding the text, OCR, translation, erasing and lettering), the models used, the fact that nothing is sent outside, the speed with and without a GPU, and what to check before you use it.
 
-In this recording, translating 4 two-page screens (8 pages, 85 lines) took about 30 seconds on a computer with a GPU.
+In this recording, translating a whole book of 6 two-page screens (12 pages, 88 lines) took about 27 seconds on a computer with a GPU.
 
-The pages in the recording are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial). In the recording TASlation has erased the Japanese and set an English translation in its place (the pages are changed). The recording is not covered by TASlation's own MIT licence, and it is not in the ZIP that is distributed.
+The pages in the recording are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial). In the recording TASlation has erased the Japanese and set an English translation in its place (a Spanish one in one scene), and in the editing scenes a translation is rewritten (the pages are changed). The recording is not covered by TASlation's own MIT licence, and it is not in the ZIP that is distributed.
 
 ## Why it was made
 
