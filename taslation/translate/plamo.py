@@ -4,10 +4,13 @@ for every target language it writes (`taslation.translate.models`).
 PLaMo 3 Translate is a translation model, not an instruction model. It takes one text at a time in its own prompt
 format, PFML3 (its README, "PFML3 Prompt Format"): a ``translation`` dataset tag, optional reference ``context``,
 earlier source/translation pairs, a ``glossary`` for the text, then the text and the language to write, and it answers
-with the bare translation. Ollama renders the model's own chat template for /api/chat, and that template cannot be
-given the target language (it falls back to Japanese), so the prompt is built here by hand and sent to /api/generate
-with ``raw: true``, as PFN recommend for applications; the beginning-of-sequence token, which raw mode does not add,
-comes first, and the answer is stopped at the next ``<|plamo:tag|>`` or ``<|plamo:bos|>``.
+with the bare translation. Ollama renders the model's own chat template for /api/chat; the template in the file of the
+revision pinned first could not be given the target language that way (it fell back to Japanese), and the one in the
+file pinned since 2026-11-14 takes it from a ``[plamo-translate]`` system message and builds the same prompt as
+`pfml_prompt` (checked for plain, context, history and glossary inputs). The prompt is built here by hand all the same
+and sent to /api/generate with ``raw: true``, as PFN recommend for applications, so no template is used; the
+beginning-of-sequence token, which raw mode does not add, comes first, and the answer is stopped at the next
+``<|plamo:tag|>`` or ``<|plamo:bos|>``.
 
 What the pipeline hands a translator maps to it like this:
 

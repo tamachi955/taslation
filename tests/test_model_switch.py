@@ -205,7 +205,9 @@ def test_a_licence_agreed_before_is_not_shown_again(tmp_path, boxes, monkeypatch
 
 
 @pytest.mark.parametrize("outcome, said", [("cancelled", "Stopped. Nothing was left on the disk."),
-                                           ("failed", "could not be installed"), ("no_room", "too little disk space")])
+                                           ("failed", "Check the network and the disk space, and try again."),
+                                           ("no_room", "too little disk space"),
+                                           ("refused", "Trying again will not help: update TASlation")])
 def test_an_install_that_did_not_end_well_says_so_and_puts_the_language_back(tmp_path, boxes, outcome, said):
     w = Window(tmp_path, [PLAMO_TAG], "Turkish")
     boxes.answers = {"needs the translation model": True}
@@ -213,6 +215,8 @@ def test_an_install_that_did_not_end_well_says_so_and_puts_the_language_back(tmp
     assert not w._translator_ready("Turkish", "English")
     assert said in boxes.told[-1] and boxes.removed == []  # nothing is removed before the new one is there
     assert w.lang_var.get() == "English"
+    if outcome == "refused":  # a file the server refuses: no advice to try again
+        assert "network" not in boxes.told[-1] and "issues page" in boxes.told[-1]
 
 
 def test_a_model_that_is_there_or_an_ollama_that_does_not_answer_asks_nothing(tmp_path, boxes):
@@ -262,6 +266,25 @@ def test_every_string_of_the_offer_is_in_every_language():
             if code != "en":
                 assert catalog.get(key), (code, key)
     assert tm.LICENCE_TEXT in translator_models.TEXTS
+
+
+def test_the_licence_in_the_window_is_the_revised_one_with_its_articles_in_every_language():
+    from taslation.locales.features import translator_models
+
+    text = tm.LICENCE_TEXT
+    assert ti.PLAMO_LICENCE_REVISED in text and text.count("•") == 5
+    for words in ("non-commercial use is free", "(article 3)", "18 or older", "(article 2)",
+                  "what comes out of it", "no rights to other people's works (article 9)",
+                  "without a note that it is PLaMo's output", "a book or another long publication",
+                  "models trained on it fall under this licence (article 5)", "not to publish translations at all",
+                  "without any warranty", "(article 7)"):
+        assert words in text, words
+    assert "only with a clear note" not in text  # (the text before the revision)
+    for code, translated in translator_models.TEXTS[text].items():
+        head, *bullets = translated.split("•")
+        assert "2026" in head and "9" in head and len(bullets) == 5, code
+        for bullet, article in zip(bullets, "32957"):  # each point with its article, as in English
+            assert article in bullet, (code, article)
 
 
 # ---- the dialogs
@@ -322,7 +345,7 @@ def _wait(dialog, root, seconds=10.0):
 
 
 def test_the_install_dialog_shows_how_far_and_ends_with_the_outcome(hidden_root):
-    gb = 1_807_192_480
+    gb = ti.PLAMO_BYTES
     installer = FakeInstaller([{"phase": "download", "done": gb // 2, "total": gb}, {"phase": "check"},
                                {"phase": "import"}])
     after = []

@@ -115,11 +115,42 @@ def test_the_modelfile_sets_the_context_and_the_stops_and_no_template():
     assert "TEMPLATE" not in text
 
 
+def test_the_pin_is_the_revision_checked_on_2026_11_14():
+    """The file and the licence texts of revision 4f672106 (2026-11-09), downloaded whole and hashed: the revision
+    pinned before, f2b4599d, is refused by Hugging Face's storage since then."""
+    assert ti.PLAMO_REVISION == "4f672106b847200bfdc0f6af6c321cd94eba1aed"
+    assert ti.PLAMO_SHA256 == "1ffd9073afcc70e35ccc942428aa2b73d7aa2b9ea779bf504b775369e0276c13"
+    assert ti.PLAMO_BYTES == 1_807_203_040
+    assert dict((path, sha) for path, sha, _name in ti.PLAMO_LICENCE_FILES) == {
+        "LICENSE/en": "ca0c5e90f6de6799fc2d2d4f2b2647cc088444c19f286f689e525d4ad28f9ed6",
+        "LICENSE/ja": "7dd74339bbf9a39fe33e271a89657aacf06f452b082fcb1273fb792b8d6b7db2"}
+    assert ti.PLAMO_LICENCE_REVISED == "November 9, 2026"
+
+
 def test_the_terms_say_what_matters_in_plain_words():
     terms = ti.PLAMO_TERMS
     for words in ("non-commercial use is free", "18 or older", "PLaMo's output", "article 5", "without any warranty",
                   *ti.PLAMO_LICENCE_URLS):
         assert words in terms
+
+
+def test_the_terms_are_the_revised_licence_s_with_its_articles():
+    terms = " ".join(ti.PLAMO_TERMS.split())  # (its lines joined)
+    assert f"as revised on {ti.PLAMO_LICENCE_REVISED}" in terms
+    for words in ("registering with PFN first (article 3)", "guardian's consent (article 2)",
+                  "the rights to what you put into it and to what comes out of it",
+                  "no rights to other people's works (article 9)", "without a note that it is PLaMo's output",
+                  "a book or another long publication must say that PLaMo was used",
+                  "models trained on it fall under this licence (article 5)", "not to publish translations at all",
+                  "your responsibility (article 7)"):
+        assert words in terms, words
+    assert "only with a clear note" not in terms  # (the text before the revision)
+
+
+def test_install_ps1_shows_the_same_revision_and_knows_the_refusal_s_exit_code():
+    install = (ROOT / "install.ps1").read_text("ascii")
+    assert f"as revised on {ti.PLAMO_LICENCE_REVISED}:" in install and "(article 9)" in install
+    assert f"$RefusedCode = {ti.REFUSED}" in install
 
 
 # ---- the install
@@ -215,6 +246,63 @@ def test_a_changed_licence_is_asked_about_again(tmp_path, monkeypatch):
     assert ti.has_agreed(tmp_path)
     monkeypatch.setattr(ti, "PLAMO_LICENCE_FILES", (("LICENSE/en", "1" * 64, "x.txt"),))
     assert not ti.has_agreed(tmp_path)
+
+
+def _refusing(hf, monkeypatch, code: int, url: str) -> None:
+    """The fake Hugging Face answers *url* with the HTTP error *code*, as its storage did for the old revision's file."""
+    import urllib.error
+
+    answer = setup_models.urllib.request.urlopen
+
+    def urlopen(request, timeout=None):
+        if getattr(request, "full_url", request) == url:
+            hf["asked"].append(url)
+            raise urllib.error.HTTPError(url, code, "Forbidden", {}, None)
+        return answer(request, timeout)
+
+    monkeypatch.setattr(setup_models.urllib.request, "urlopen", urlopen)
+
+
+@pytest.mark.parametrize("code", sorted(ti.REFUSED_HTTP))
+def test_a_file_the_server_refuses_ends_with_its_own_code_and_no_advice_to_try_again(tmp_path, hf, ollama, monkeypatch,
+                                                                                     capsys, code):
+    _refusing(hf, monkeypatch, code, ti.plamo_url(ti.PLAMO_FILE))
+    assert _install(tmp_path) == ti.REFUSED
+    out = capsys.readouterr().out
+    assert f"(HTTP {code})" in out and "Running this again will not help: update TASlation" in out
+    assert "issues page" in out and "check the network" not in out
+    assert hf["asked"].count(ti.plamo_url(ti.PLAMO_FILE)) == 1  # not tried again
+    folder = tmp_path / "models" / ti.PLAMO_DIRNAME
+    assert not list(folder.glob("*.part")) and not list(folder.glob("*.gguf")) and ollama.read()["models"] == []
+
+
+def test_a_dropped_connection_still_says_to_check_the_network(tmp_path, hf, ollama, monkeypatch, capsys):
+    monkeypatch.setattr(setup_models, "RETRIES", 0)
+    _refusing(hf, monkeypatch, 503, ti.plamo_url(ti.PLAMO_FILE))  # (a 5xx is no refusal: tried again, then 1)
+    assert _install(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "check the network and the disk space" in out and "will not help" not in out
+
+
+def test_the_reading_model_refused_ends_the_script_with_the_same_code(tmp_path, monkeypatch, capsys):
+    import urllib.error
+
+    def refused(model, models_dir):
+        raise urllib.error.HTTPError("https://huggingface.co/x", 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(setup_models, "download_ocr", refused)
+    monkeypatch.chdir(tmp_path)
+    assert setup_models.main(["--agreed", "--skip-page-models", "--models-dir", str(tmp_path / "models")]) == ti.REFUSED
+    out = capsys.readouterr().out
+    assert "(HTTP 403)" in out and "will not help" in out and "Check the network" not in out
+
+
+def test_the_window_s_runner_reads_the_refusal(tmp_path):
+    script = tmp_path / "setup_models.py"
+    script.write_text("import sys\nprint('refused', flush=True)\n"
+                      f"sys.exit({ti.REFUSED})\n", "utf-8")
+    installer = ti.Installer("English", tmp_path / "models", tmp_path / "state", script=script, python=sys.executable)
+    assert installer.run().state == "refused"
 
 
 def test_too_little_disk_downloads_nothing(tmp_path, hf, ollama, monkeypatch):

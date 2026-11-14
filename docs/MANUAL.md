@@ -612,7 +612,8 @@ By default (`ollama_model = "auto"`), the target language decides the model.
 | Brazilian Portuguese, Turkish | Qwen3.5 4B (`qwen3.5:4b`) | 3.3 GB | Apache-2.0 | About 30 lines at a time |
 
 PLaMo 3 Translate is a model made only for translation. TASlation builds its PFML3 prompt itself and sends it as it is to Ollama's `/api/generate`
-(the model's own chat template cannot name the target language, and ends up translating back into Japanese). Each line is one request,
+(the form the model's card recommends for production use; the model's own chat template is not used: the template in the earlier revision's file could not be told
+the target language through Ollama, and ended up translating back into Japanese, and the one in the current file builds the same prompt as TASlation). Each line is one request,
 which carries the earlier lines and their translations, the series sheet as reference information (for a line with a speaker set, that speaker too), and, as a glossary, the series sheet's renderings that appear in that line.
 The context is 8192 tokens, and it takes about 1.9 GB of GPU memory. On OpenMantra (Japanese to English, whole books, three runs each with fixed seeds),
 its chrF was 5.9 higher than Qwen3.5 4B's (a bootstrap interval of roughly +4.7 to +7.2), and it was about twice as fast.
@@ -626,7 +627,9 @@ install.cmd's questions are shown in Japanese if Windows' display language is Ja
 a language without a translation gets English).
 When you choose a language in "To:" that needs the other model, the window offers to download that model (showing its size) and to remove the one no longer needed.
 TASlation installs only one translation model at a time. For a model TASlation did not install (a `qwen3.5:4b` you had installed yourself, for example),
-it asks separately whether to remove it, and keeps it by default. The first time PLaMo is installed, it first asks for your agreement to its licence.
+it asks separately whether to remove it, and keeps it by default. The first time PLaMo is installed, it first asks for your agreement to its licence (the PLaMo Community License as revised on November 9, 2026;
+the main points are in `docs/THIRD_PARTY.md`). A PLaMo installed after agreeing to the earlier text goes on working as it is; agreement to the revised text is asked the next time PLaMo is installed.
+When the publisher's server refused the download or no longer has the file, trying again will not help, so it tells you to update TASlation or to see the project's issues page.
 While it lies over the book, in reading mode, and during a whole-book run, it does not ask; it asks when you are back in the window.
 On the command line, `--language` asks the same, and `python setup_models.py --translator-for "Turkish"` installs it too.
 When `ollama_model` names a model of your own, nothing is offered.
@@ -798,7 +801,8 @@ and the application never downloads them. Only `setup_models.py` downloads them.
 (when the server honours HTTP Range; if not, it starts that file again). For the OCR models, the page models
 and the fonts, a failure leaves the partial file (`.part`), and the next run fetches the rest. A file completed this way, too,
 is put in place only after the checksum of the whole file has been checked. PLaMo's files, on a failure or a cancellation, have their partial file deleted too
-(because an installation from the window leaves nothing behind). When winget installs Python and Ollama, your Y to the question is passed on to winget
+(because an installation from the window leaves nothing behind). A file the server refused or no longer has (HTTP 401, 403, 404, 410) is not fetched again,
+and the script ends with exit code 5 (running it again would not help, so it tells you to update TASlation or to see the project's issues page). When winget installs Python and Ollama, your Y to the question is passed on to winget
 as agreement to its terms of use (`--accept-source-agreements --accept-package-agreements`; this is said before the question).
 
 If an earlier installation has only manga-ocr-charspot-small, TASlation works with that model alone. The status line says so in one line,

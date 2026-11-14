@@ -21,7 +21,11 @@ from typing import TextIO
 from . import jurisdictions
 from .atomic import write_atomic
 
-NOTICE_VERSION = 6  # 6: PLaMo's licence on published translations (article 5)
+# 6: PLaMo's licence on published translations (article 5). Its sentence follows the licence as revised on November 9,
+# 2026 without a 7: the revision asks less of a published translation, and its new duty (whoever is given a
+# translation is told that models trained on it fall under the licence) arises only from sharing, which the notice
+# already tells everyone not to do.
+NOTICE_VERSION = 6
 DEFAULT = "en"
 
 TITLES: dict[str, str] = {
@@ -75,7 +79,7 @@ TASlation does not filter or censor what your viewer shows; you see the book as 
 
 In practice the risks come in this order: the laws of your country on possessing certain content; your store closing your account for breaking its terms; and copyright, which becomes real only if you share what you translated.
 
-Translations come from a local AI model and can be wrong, including names, numbers and the sense of a line. Do not rely on them for anything that matters. The translation model PLaMo, which TASlation uses for most languages, has a licence of its own: if a translation made with it is ever published, it must say clearly that it is PLaMo's output (PLaMo Community License, article 5).
+Translations come from a local AI model and can be wrong, including names, numbers and the sense of a line. Do not rely on them for anything that matters. The translation model PLaMo, which TASlation uses for most languages, has a licence of its own: if a translation made with it is ever published as all or a large part of a book or another long publication, it must say that PLaMo was used; and when a translation is given to anyone or made public, they must be told that models trained on it fall under that licence (PLaMo Community License, article 5).
 
 TASlation is provided as is, without any warranty, under the MIT licence. To the extent the law allows, its author accepts no liability for any damage or legal consequence arising from its use, from the books you read with it or from this notice, which summarises laws that change and is not legal advice. By continuing you accept this.
 
@@ -90,7 +94,7 @@ TASlation は、ビューアに表示される内容を一切検閲・フィル�
 
 現実の危険は、大きい順に次のとおりです。お住まいの国で特定の内容の所持を罰する法律、規約違反による書店のアカウント停止、そして著作権。著作権は、訳したものを共有したときに初めて現実の問題になります。
 
-翻訳はこのパソコン上の AI モデルによるもので、名前・数字・文の意味を含めて誤ることがあります。重要な判断の根拠にはしないでください。TASlation がほとんどの言語で使う翻訳モデル PLaMo には独自のライセンスがあり、これで作った翻訳を公表する場合は、PLaMo の生成物であることを明示しなければなりません（PLaMo Community License 第5条）。
+翻訳はこのパソコン上の AI モデルによるもので、名前・数字・文の意味を含めて誤ることがあります。重要な判断の根拠にはしないでください。TASlation がほとんどの言語で使う翻訳モデル PLaMo には独自のライセンスがあり、これで作った翻訳を書籍などの長い公表物の全部または大部分として公表する場合は、PLaMo を翻訳に使ったことを明示しなければなりません。また、翻訳を人に渡したり公開したりする場合は、それで学習したモデルにもこのライセンスが適用されることを、相手にわかるように示さなければなりません（PLaMo Community License 第5条）。
 
 TASlation は MIT ライセンスのもと、現状のまま、いかなる保証もなく提供されます。法令が許す限りにおいて、作者は、本ソフトウェアの使用、本ソフトウェアで読んだ本、およびこの案内（変わり得る法律の要約であり、法的助言ではありません）から生じるいかなる損害や法的な結果についても責任を負いません。続行することで、これに同意したものとします。
 
@@ -105,7 +109,7 @@ TASlation no filtra ni censura lo que muestra tu visor: ves el libro tal como se
 
 En la práctica, los riesgos son, por este orden: las leyes de tu país sobre la posesión de determinados contenidos; que tu tienda cierre tu cuenta por incumplir sus condiciones; y los derechos de autor, que solo se convierten en un riesgo real si compartes lo que has traducido.
 
-Las traducciones proceden de un modelo de IA local y pueden ser erróneas, incluso en nombres, números y el sentido de una frase. No te fíes de ellas para nada importante. El modelo de traducción PLaMo, que TASlation usa para la mayoría de los idiomas, tiene su propia licencia: si alguna vez se publica una traducción hecha con él, debe indicar claramente que es un resultado de PLaMo (PLaMo Community License, artículo 5).
+Las traducciones proceden de un modelo de IA local y pueden ser erróneas, incluso en nombres, números y el sentido de una frase. No te fíes de ellas para nada importante. El modelo de traducción PLaMo, que TASlation usa para la mayoría de los idiomas, tiene su propia licencia: si alguna vez se publica una traducción hecha con él como la totalidad o una parte sustancial de un libro u otra publicación extensa, debe indicar que se usó PLaMo; y quien reciba una traducción o la vea publicada debe ser informado de que los modelos entrenados con ella quedan sujetos a esa licencia (PLaMo Community License, artículo 5).
 
 TASlation se ofrece tal cual, sin garantía alguna, bajo la licencia MIT. En la medida en que la ley lo permita, su autor declina toda responsabilidad por cualquier daño o consecuencia jurídica que se derive de su uso, de los libros que leas con él o de este aviso, que resume leyes cambiantes y no constituye asesoramiento jurídico. Al continuar, lo aceptas.
 
@@ -120,7 +124,7 @@ O TASlation não filtra nem censura o que o seu leitor mostra: você vê o livro
 
 Na prática, os riscos são, nesta ordem: as leis do seu país sobre a posse de determinados conteúdos; a sua loja encerrar a sua conta por violação dos termos; e os direitos autorais, que só se tornam um risco real se você compartilhar o que traduziu.
 
-As traduções vêm de um modelo de IA local e podem estar erradas, inclusive em nomes, números e no sentido de uma frase. Não confie nelas para nada importante. O modelo de tradução PLaMo, que o TASlation usa para a maioria dos idiomas, tem uma licença própria: se uma tradução feita com ele for publicada, ela deve indicar claramente que é um resultado do PLaMo (PLaMo Community License, artigo 5).
+As traduções vêm de um modelo de IA local e podem estar erradas, inclusive em nomes, números e no sentido de uma frase. Não confie nelas para nada importante. O modelo de tradução PLaMo, que o TASlation usa para a maioria dos idiomas, tem uma licença própria: se uma tradução feita com ele for publicada como o todo ou uma parte substancial de um livro ou de outra publicação longa, ela deve informar que o PLaMo foi usado; e quem receber uma tradução ou a vir publicada deve ser informado de que modelos treinados com ela ficam sujeitos a essa licença (PLaMo Community License, artigo 5).
 
 O TASlation é fornecido como está, sem garantia alguma, sob a licença MIT. Na medida em que a lei permitir, o autor não assume responsabilidade por qualquer dano ou consequência jurídica decorrente do seu uso, dos livros que você ler com ele ou deste aviso, que resume leis que mudam e não constitui aconselhamento jurídico. Ao continuar, você aceita isso.
 
@@ -135,7 +139,7 @@ TASlation ne filtre ni ne censure ce que votre lecteur affiche : vous voyez le l
 
 En pratique, les risques se présentent dans cet ordre : les lois de votre pays sur la possession de certains contenus ; la fermeture de votre compte par votre boutique pour non-respect de ses conditions ; et le droit d'auteur, qui ne devient un risque réel que si vous partagez ce que vous avez traduit.
 
-Les traductions proviennent d'un modèle d'IA local et peuvent être erronées, y compris dans les noms, les chiffres et le sens d'une réplique. Ne vous y fiez pas pour quoi que ce soit d'important. Le modèle de traduction PLaMo, que TASlation utilise pour la plupart des langues, a sa propre licence : si une traduction faite avec lui est un jour publiée, elle doit indiquer clairement qu'elle est produite par PLaMo (PLaMo Community License, article 5).
+Les traductions proviennent d'un modèle d'IA local et peuvent être erronées, y compris dans les noms, les chiffres et le sens d'une réplique. Ne vous y fiez pas pour quoi que ce soit d'important. Le modèle de traduction PLaMo, que TASlation utilise pour la plupart des langues, a sa propre licence : si une traduction faite avec lui est un jour publiée comme tout ou partie substantielle d'un livre ou d'une autre publication longue, elle doit indiquer que PLaMo a été utilisé ; et quiconque reçoit une traduction ou la voit rendue publique doit être informé que les modèles entraînés avec elle relèvent de cette licence (PLaMo Community License, article 5).
 
 TASlation est fourni tel quel, sans aucune garantie, sous licence MIT. Dans la mesure permise par la loi, son auteur décline toute responsabilité pour tout dommage ou toute conséquence juridique découlant de son utilisation, des livres que vous lisez avec lui ou du présent avis, qui résume des lois susceptibles de changer et ne constitue pas un conseil juridique. En continuant, vous l'acceptez.
 
@@ -150,7 +154,7 @@ TASlation filtert und zensiert nicht, was Ihr Viewer anzeigt: Sie sehen das Buch
 
 In der Praxis ergeben sich die Risiken in dieser Reihenfolge: die Gesetze Ihres Landes zum Besitz bestimmter Inhalte; die Schließung Ihres Kontos durch Ihren Shop wegen Verstoßes gegen seine Bedingungen; und das Urheberrecht, das erst dann zu einem realen Risiko wird, wenn Sie das Übersetzte teilen.
 
-Die Übersetzungen stammen von einem lokalen KI-Modell und können fehlerhaft sein, auch bei Namen, Zahlen und dem Sinn eines Satzes. Verlassen Sie sich bei nichts Wichtigem darauf. Das Übersetzungsmodell PLaMo, das TASlation für die meisten Sprachen verwendet, hat eine eigene Lizenz: Wird eine damit gemachte Übersetzung jemals veröffentlicht, muss sie klar angeben, dass sie eine Ausgabe von PLaMo ist (PLaMo Community License, Artikel 5).
+Die Übersetzungen stammen von einem lokalen KI-Modell und können fehlerhaft sein, auch bei Namen, Zahlen und dem Sinn eines Satzes. Verlassen Sie sich bei nichts Wichtigem darauf. Das Übersetzungsmodell PLaMo, das TASlation für die meisten Sprachen verwendet, hat eine eigene Lizenz: Wird eine damit gemachte Übersetzung jemals als Ganzes oder wesentlicher Teil eines Buchs oder einer anderen langen Veröffentlichung veröffentlicht, muss sie angeben, dass PLaMo verwendet wurde; und wer eine Übersetzung bekommt oder veröffentlicht sieht, muss darauf hingewiesen werden, dass damit trainierte Modelle unter diese Lizenz fallen (PLaMo Community License, Artikel 5).
 
 TASlation wird unter der MIT-Lizenz so bereitgestellt, wie es ist, ohne jede Gewährleistung. Soweit gesetzlich zulässig, übernimmt der Autor keine Haftung für Schäden oder rechtliche Folgen, die aus der Nutzung, aus den damit gelesenen Büchern oder aus diesem Hinweis entstehen, der sich ändernde Gesetze zusammenfasst und keine Rechtsberatung ist. Indem Sie fortfahren, akzeptieren Sie dies.
 
@@ -165,7 +169,7 @@ TASlation non filtra né censura ciò che il tuo lettore mostra: vedi il libro c
 
 In pratica i rischi si presentano in quest'ordine: le leggi del tuo paese sul possesso di certi contenuti; la chiusura del tuo account da parte del negozio per violazione delle condizioni; e il diritto d'autore, che diventa un rischio concreto solo se condividi ciò che hai tradotto.
 
-Le traduzioni provengono da un modello di IA locale e possono contenere errori, anche nei nomi, nei numeri e nel senso di una battuta. Non farci affidamento per nulla di importante. Il modello di traduzione PLaMo, che TASlation usa per la maggior parte delle lingue, ha una licenza propria: se una traduzione fatta con esso venisse pubblicata, dovrebbe indicare chiaramente che è un risultato di PLaMo (PLaMo Community License, articolo 5).
+Le traduzioni provengono da un modello di IA locale e possono contenere errori, anche nei nomi, nei numeri e nel senso di una battuta. Non farci affidamento per nulla di importante. Il modello di traduzione PLaMo, che TASlation usa per la maggior parte delle lingue, ha una licenza propria: se una traduzione fatta con esso venisse pubblicata come tutto o parte sostanziale di un libro o di un'altra pubblicazione lunga, dovrebbe dire che è stato usato PLaMo; e chi riceve una traduzione o la vede resa pubblica deve essere informato che i modelli addestrati su di essa ricadono sotto questa licenza (PLaMo Community License, articolo 5).
 
 TASlation è fornito così com'è, senza alcuna garanzia, con licenza MIT. Nei limiti consentiti dalla legge, l'autore non risponde di alcun danno o conseguenza legale derivante dal suo uso, dai libri che leggi con esso o da questo avviso, che riassume leggi soggette a cambiamenti e non è una consulenza legale. Proseguendo accetti tutto ciò.
 
@@ -180,7 +184,7 @@ TASlation filtert of censureert niet wat uw viewer toont: u ziet het boek zoals 
 
 In de praktijk zijn de risico's, in deze volgorde: de wetten van uw land over het bezit van bepaalde inhoud; het sluiten van uw account door uw winkel wegens schending van de voorwaarden; en het auteursrecht, dat pas een reëel risico wordt als u deelt wat u hebt vertaald.
 
-De vertalingen komen van een lokaal AI-model en kunnen fouten bevatten, ook in namen, getallen en de betekenis van een zin. Vertrouw er niet op voor iets dat ertoe doet. Het vertaalmodel PLaMo, dat TASlation voor de meeste talen gebruikt, heeft een eigen licentie: wordt een vertaling die ermee is gemaakt ooit gepubliceerd, dan moet die duidelijk vermelden dat het uitvoer van PLaMo is (PLaMo Community License, artikel 5).
+De vertalingen komen van een lokaal AI-model en kunnen fouten bevatten, ook in namen, getallen en de betekenis van een zin. Vertrouw er niet op voor iets dat ertoe doet. Het vertaalmodel PLaMo, dat TASlation voor de meeste talen gebruikt, heeft een eigen licentie: wordt een vertaling die ermee is gemaakt ooit gepubliceerd als geheel of groot deel van een boek of een andere lange publicatie, dan moet die vermelden dat PLaMo is gebruikt; en wie een vertaling krijgt of openbaar gemaakt ziet, moet worden verteld dat modellen die ermee worden getraind onder die licentie vallen (PLaMo Community License, artikel 5).
 
 TASlation wordt geleverd zoals het is, zonder enige garantie, onder de MIT-licentie. Voor zover de wet het toestaat, aanvaardt de auteur geen aansprakelijkheid voor schade of juridische gevolgen die voortvloeien uit het gebruik, uit de boeken die u ermee leest of uit deze kennisgeving, die veranderende wetten samenvat en geen juridisch advies is. Door verder te gaan aanvaardt u dit.
 
@@ -195,7 +199,7 @@ TASlation nie filtruje ani nie cenzuruje tego, co pokazuje Twój czytnik: widzis
 
 W praktyce ryzyka układają się w następującej kolejności: prawo Twojego kraju dotyczące posiadania określonych treści; zamknięcie konta przez sklep za złamanie regulaminu; i prawo autorskie, które staje się realnym problemem dopiero wtedy, gdy udostępnisz swoje tłumaczenia.
 
-Tłumaczenia pochodzą z lokalnego modelu AI i mogą zawierać błędy, także w imionach, liczbach i sensie wypowiedzi. Nie polegaj na nich w niczym istotnym. Model tłumaczenia PLaMo, którego TASlation używa dla większości języków, ma własną licencję: jeśli wykonane nim tłumaczenie zostanie kiedykolwiek opublikowane, musi wyraźnie informować, że jest wynikiem działania PLaMo (PLaMo Community License, artykuł 5).
+Tłumaczenia pochodzą z lokalnego modelu AI i mogą zawierać błędy, także w imionach, liczbach i sensie wypowiedzi. Nie polegaj na nich w niczym istotnym. Model tłumaczenia PLaMo, którego TASlation używa dla większości języków, ma własną licencję: jeśli wykonane nim tłumaczenie zostanie kiedykolwiek opublikowane jako całość lub istotna część książki albo innej długiej publikacji, musi podawać, że użyto PLaMo; a każdy, kto otrzyma tłumaczenie lub zobaczy je opublikowane, musi zostać poinformowany, że modele na nim trenowane podlegają tej licencji (PLaMo Community License, artykuł 5).
 
 TASlation jest dostarczany w stanie, w jakim się znajduje, bez jakiejkolwiek gwarancji, na licencji MIT. W zakresie dozwolonym przez prawo jego autor nie ponosi odpowiedzialności za żadne szkody ani skutki prawne wynikające z korzystania z programu, z książek, które za jego pomocą czytasz, ani z tej informacji, która streszcza zmieniające się przepisy i nie jest poradą prawną. Kontynuując, akceptujesz to.
 
@@ -210,7 +214,7 @@ TASlation не фильтрует и не цензурирует то, что п
 
 На практике риски располагаются в следующем порядке: законы вашей страны о хранении определённых материалов; закрытие вашего аккаунта магазином за нарушение его условий; и авторское право, которое становится реальной проблемой лишь тогда, когда вы делитесь тем, что перевели.
 
-Переводы делает локальная ИИ-модель, и они могут содержать ошибки, в том числе в именах, числах и смысле реплики. Не полагайтесь на них ни в чём важном. У модели перевода PLaMo, которую TASlation использует для большинства языков, своя лицензия: если сделанный с её помощью перевод когда-либо публикуется, в нём должно быть ясно указано, что это результат работы PLaMo (PLaMo Community License, статья 5).
+Переводы делает локальная ИИ-модель, и они могут содержать ошибки, в том числе в именах, числах и смысле реплики. Не полагайтесь на них ни в чём важном. У модели перевода PLaMo, которую TASlation использует для большинства языков, своя лицензия: если сделанный с её помощью перевод когда-либо публикуется как вся книга или другая длинная публикация либо как их существенная часть, в нём должно быть указано, что использовалась PLaMo; а тому, кто получает перевод или видит его опубликованным, нужно сообщить, что на модели, обученные на нём, распространяется эта лицензия (PLaMo Community License, статья 5).
 
 TASlation предоставляется «как есть», без каких-либо гарантий, по лицензии MIT. В той мере, в какой это допускает закон, его автор не несёт ответственности за любой ущерб или правовые последствия, возникшие в связи с его использованием, с книгами, которые вы с его помощью читаете, или с этим уведомлением, которое кратко излагает меняющиеся законы и не является юридической консультацией. Продолжая, вы соглашаетесь с этим.
 
@@ -225,7 +229,7 @@ TASlation, görüntüleyicinizin gösterdiği içeriği filtrelemez ve sansürle
 
 Uygulamada riskler şu sıradadır: ülkenizin belirli içerikleri bulundurmaya ilişkin yasaları; koşullarını ihlal ettiğiniz için mağazanızın hesabınızı kapatması; ve ancak çevirdiklerinizi paylaştığınızda gerçek bir sorun hâline gelen telif hakkı.
 
-Çeviriler yerel bir yapay zekâ modelinden gelir ve adlar, sayılar ile bir cümlenin anlamı da dâhil olmak üzere yanlış olabilir. Önemli hiçbir konuda onlara güvenmeyin. TASlation'ın çoğu dil için kullandığı çeviri modeli PLaMo'nun kendi lisansı vardır: onunla yapılan bir çeviri bir gün yayımlanırsa, PLaMo'nun çıktısı olduğunu açıkça belirtmelidir (PLaMo Community License, madde 5).
+Çeviriler yerel bir yapay zekâ modelinden gelir ve adlar, sayılar ile bir cümlenin anlamı da dâhil olmak üzere yanlış olabilir. Önemli hiçbir konuda onlara güvenmeyin. TASlation'ın çoğu dil için kullandığı çeviri modeli PLaMo'nun kendi lisansı vardır: onunla yapılan bir çeviri bir gün bir kitabın veya başka uzun bir yayının tamamı ya da büyük bir kısmı olarak yayımlanırsa PLaMo'nun kullanıldığını belirtmelidir; bir çeviriyi alan ya da yayımlanmış hâlini gören herkese, onunla eğitilen modellerin bu lisansa tabi olduğu bildirilmelidir (PLaMo Community License, madde 5).
 
 TASlation, MIT lisansı altında, olduğu gibi ve hiçbir garanti olmaksızın sunulur. Yasanın izin verdiği ölçüde yazar, kullanımından, onunla okuduğunuz kitaplardan ya da değişen yasaları özetleyen ve hukuki tavsiye olmayan bu bildirimden doğan hiçbir zarar veya hukuki sonuçtan sorumlu değildir. Devam ederek bunu kabul etmiş olursunuz.
 
@@ -240,7 +244,7 @@ TASlation tidak menyaring maupun menyensor apa yang tampil di penampil Anda: And
 
 Dalam praktiknya, urutan risikonya adalah sebagai berikut: hukum negara Anda tentang kepemilikan konten tertentu; toko Anda menutup akun Anda karena Anda melanggar ketentuannya; dan hak cipta, yang baru menjadi masalah nyata jika Anda membagikan apa yang Anda terjemahkan.
 
-Terjemahan dihasilkan oleh model AI lokal dan bisa salah, termasuk nama, angka, dan makna sebuah kalimat. Jangan mengandalkannya untuk hal yang penting. Model terjemahan PLaMo, yang dipakai TASlation untuk sebagian besar bahasa, memiliki lisensi sendiri: jika terjemahan yang dibuat dengannya dipublikasikan, terjemahan itu harus menyebutkan dengan jelas bahwa itu hasil PLaMo (PLaMo Community License, pasal 5).
+Terjemahan dihasilkan oleh model AI lokal dan bisa salah, termasuk nama, angka, dan makna sebuah kalimat. Jangan mengandalkannya untuk hal yang penting. Model terjemahan PLaMo, yang dipakai TASlation untuk sebagian besar bahasa, memiliki lisensi sendiri: jika terjemahan yang dibuat dengannya dipublikasikan sebagai seluruh atau sebagian besar sebuah buku atau publikasi panjang lainnya, terjemahan itu harus menyebutkan bahwa PLaMo digunakan; dan siapa pun yang menerima terjemahan atau melihatnya dipublikasikan harus diberi tahu bahwa model yang dilatih dengannya tunduk pada lisensi itu (PLaMo Community License, pasal 5).
 
 TASlation disediakan apa adanya, tanpa jaminan apa pun, di bawah lisensi MIT. Sejauh diizinkan oleh hukum, pembuatnya tidak bertanggung jawab atas kerugian atau akibat hukum apa pun yang timbul dari penggunaannya, dari buku yang Anda baca dengannya, atau dari pemberitahuan ini, yang merangkum hukum yang dapat berubah dan bukan merupakan nasihat hukum. Dengan melanjutkan, Anda menerima hal ini.
 
@@ -255,7 +259,7 @@ TASlation không lọc hay kiểm duyệt những gì trình xem của bạn hi�
 
 Trên thực tế, các rủi ro xếp theo thứ tự sau: luật của nước bạn về việc tàng trữ một số nội dung; cửa hàng đóng tài khoản của bạn vì vi phạm điều khoản; và bản quyền, vốn chỉ trở thành vấn đề thật sự khi bạn chia sẻ những gì mình đã dịch.
 
-Bản dịch do một mô hình AI cục bộ tạo ra và có thể sai, kể cả về tên, con số và ý nghĩa của một câu thoại. Đừng dựa vào chúng cho bất cứ điều gì quan trọng. Mô hình dịch PLaMo, mà TASlation dùng cho hầu hết các ngôn ngữ, có giấy phép riêng: nếu một bản dịch tạo bằng nó được công bố, bản dịch đó phải ghi rõ là kết quả của PLaMo (PLaMo Community License, điều 5).
+Bản dịch do một mô hình AI cục bộ tạo ra và có thể sai, kể cả về tên, con số và ý nghĩa của một câu thoại. Đừng dựa vào chúng cho bất cứ điều gì quan trọng. Mô hình dịch PLaMo, mà TASlation dùng cho hầu hết các ngôn ngữ, có giấy phép riêng: nếu một bản dịch tạo bằng nó được công bố như toàn bộ hoặc phần lớn một cuốn sách hay một ấn phẩm dài khác, bản dịch đó phải ghi rõ đã dùng PLaMo; và ai nhận được bản dịch hoặc thấy nó được công khai đều phải được cho biết rằng các mô hình huấn luyện bằng nó cũng thuộc giấy phép đó (PLaMo Community License, điều 5).
 
 TASlation được cung cấp nguyên trạng, không có bất kỳ bảo đảm nào, theo giấy phép MIT. Trong phạm vi pháp luật cho phép, tác giả không chịu trách nhiệm về bất kỳ thiệt hại hay hậu quả pháp lý nào phát sinh từ việc sử dụng nó, từ những cuốn sách bạn đọc bằng nó, hoặc từ thông báo này, vốn chỉ tóm tắt các luật có thể thay đổi và không phải là tư vấn pháp lý. Bằng việc tiếp tục, bạn chấp nhận điều này.
 
@@ -270,7 +274,7 @@ TASlation 不会对阅读器显示的内容做任何过滤或审查，您看到�
 
 实际的风险按以下顺序排列：您所在国家关于持有特定内容的法律；书店因您违反条款而关闭账户；以及著作权，只有在您分享所译内容时才会成为现实问题。
 
-译文由本机的 AI 模型生成，可能出错，包括人名、数字和一句话的意思。请勿在任何重要事项上依赖译文。TASlation 在大多数语言中使用的翻译模型 PLaMo 有其自身的许可：用它生成的译文如被公开，必须清楚注明是 PLaMo 的输出（PLaMo Community License 第 5 条）。
+译文由本机的 AI 模型生成，可能出错，包括人名、数字和一句话的意思。请勿在任何重要事项上依赖译文。TASlation 在大多数语言中使用的翻译模型 PLaMo 有其自身的许可：用它生成的译文如作为书籍或其他长篇出版物的全部或主要部分公开，必须注明使用了 PLaMo；把译文交给他人或公开时，须让对方知道用它训练的模型也适用该许可（PLaMo Community License 第 5 条）。
 
 TASlation 依 MIT 许可证按现状提供，不附带任何保证。在法律允许的范围内，作者对因使用本软件、因您用它阅读的图书或因本提示而产生的任何损害或法律后果不承担责任；本提示只是对可能变化的法律的概括，不构成法律意见。继续使用即表示您接受这一点。
 
@@ -285,7 +289,7 @@ TASlation 不會對閱讀器顯示的內容做任何過濾或審查，您看到�
 
 實際的風險依以下順序排列：您所在國家關於持有特定內容的法律；書店因您違反條款而關閉帳戶；以及著作權，只有在您分享所譯內容時才會成為現實問題。
 
-譯文由本機的 AI 模型產生，可能出錯，包括人名、數字和一句話的意思。請勿在任何重要事項上依賴譯文。TASlation 在大多數語言中使用的翻譯模型 PLaMo 有其自身的授權：用它產生的譯文如被公開，必須清楚註明是 PLaMo 的輸出（PLaMo Community License 第 5 條）。
+譯文由本機的 AI 模型產生，可能出錯，包括人名、數字和一句話的意思。請勿在任何重要事項上依賴譯文。TASlation 在大多數語言中使用的翻譯模型 PLaMo 有其自身的授權：用它產生的譯文如作為書籍或其他長篇出版物的全部或主要部分公開，必須註明使用了 PLaMo；把譯文交給他人或公開時，須讓對方知道用它訓練的模型也適用該授權（PLaMo Community License 第 5 條）。
 
 TASlation 依 MIT 授權按現狀提供，不附帶任何保證。在法律允許的範圍內，作者對因使用本軟體、因您用它閱讀的書籍或因本提示而產生的任何損害或法律後果不負任何責任；本提示只是對可能變動的法律的概括，不構成法律意見。繼續使用即表示您接受這一點。
 
@@ -300,7 +304,7 @@ TASlation는 뷰어가 보여 주는 내용을 전혀 걸러 내거나 검열하
 
 실제 위험은 다음 순서입니다. 특정 내용의 소지를 처벌하는 거주국의 법, 약관 위반으로 인한 서점의 계정 정지, 그리고 저작권. 저작권은 번역한 것을 공유했을 때 비로소 현실적인 문제가 됩니다.
 
-번역은 이 컴퓨터의 AI 모델이 만든 것으로, 이름·숫자·대사의 뜻을 포함해 틀릴 수 있습니다. 중요한 일의 근거로 삼지 마십시오. TASlation이 대부분의 언어에 사용하는 번역 모델 PLaMo에는 별도의 라이선스가 있습니다. 이 모델로 만든 번역을 공개하는 경우에는 PLaMo의 출력물임을 분명히 밝혀야 합니다(PLaMo Community License 제5조).
+번역은 이 컴퓨터의 AI 모델이 만든 것으로, 이름·숫자·대사의 뜻을 포함해 틀릴 수 있습니다. 중요한 일의 근거로 삼지 마십시오. TASlation이 대부분의 언어에 사용하는 번역 모델 PLaMo에는 별도의 라이선스가 있습니다. 이 모델로 만든 번역을 책이나 그 밖의 긴 출판물의 전부 또는 상당 부분으로 공개하는 경우에는 PLaMo를 사용했음을 밝혀야 하고, 번역을 다른 사람에게 주거나 공개할 때는 그것으로 학습한 모델에도 이 라이선스가 적용된다는 것을 상대가 알 수 있게 표시해야 합니다(PLaMo Community License 제5조).
 
 TASlation는 MIT 라이선스에 따라 있는 그대로, 어떠한 보증도 없이 제공됩니다. 법이 허용하는 범위에서 작성자는 이 소프트웨어의 사용, 이것으로 읽은 책, 또는 변할 수 있는 법을 요약한 것일 뿐 법률 자문이 아닌 이 안내로부터 생기는 어떠한 손해나 법적 결과에 대해서도 책임지지 않습니다. 계속 진행하면 이에 동의한 것으로 봅니다.
 
@@ -315,7 +319,7 @@ TASlation ไม่กรองหรือเซ็นเซอร์สิ่�
 
 ในทางปฏิบัติ ความเสี่ยงมาตามลำดับนี้: กฎหมายของประเทศคุณเกี่ยวกับการครอบครองเนื้อหาบางประเภท ร้านของคุณปิดบัญชีของคุณเพราะละเมิดข้อกำหนด และลิขสิทธิ์ ซึ่งจะกลายเป็นเรื่องจริงจังก็ต่อเมื่อคุณแบ่งปันสิ่งที่แปล
 
-คำแปลมาจากโมเดล AI ในเครื่อง และอาจผิดพลาดได้ รวมถึงชื่อ ตัวเลข และความหมายของบทพูด อย่าใช้คำแปลเป็นหลักในเรื่องที่สำคัญ โมเดลแปลภาษา PLaMo ซึ่ง TASlation ใช้กับภาษาส่วนใหญ่ มีสัญญาอนุญาตของตนเอง หากมีการเผยแพร่คำแปลที่สร้างด้วยโมเดลนี้ ต้องระบุอย่างชัดเจนว่าเป็นผลลัพธ์ของ PLaMo (PLaMo Community License ข้อ 5)
+คำแปลมาจากโมเดล AI ในเครื่อง และอาจผิดพลาดได้ รวมถึงชื่อ ตัวเลข และความหมายของบทพูด อย่าใช้คำแปลเป็นหลักในเรื่องที่สำคัญ โมเดลแปลภาษา PLaMo ซึ่ง TASlation ใช้กับภาษาส่วนใหญ่ มีสัญญาอนุญาตของตนเอง หากเผยแพร่คำแปลที่สร้างด้วยโมเดลนี้เป็นหนังสือหรือสิ่งพิมพ์ขนาดยาวอื่นทั้งเล่มหรือเป็นส่วนสำคัญของสิ่งพิมพ์นั้น ต้องระบุว่าใช้ PLaMo และเมื่อมอบคำแปลให้ผู้อื่นหรือเผยแพร่ ต้องแจ้งให้ผู้รับทราบว่าโมเดลที่ฝึกด้วยคำแปลนั้นอยู่ภายใต้สัญญาอนุญาตนี้ด้วย (PLaMo Community License ข้อ 5)
 
 TASlation จัดให้ตามสภาพที่เป็นอยู่ โดยไม่มีการรับประกันใด ๆ ภายใต้สัญญาอนุญาต MIT เท่าที่กฎหมายอนุญาต ผู้สร้างจะไม่รับผิดต่อความเสียหายหรือผลทางกฎหมายใด ๆ ที่เกิดจากการใช้งาน จากหนังสือที่คุณอ่านด้วยโปรแกรมนี้ หรือจากประกาศนี้ ซึ่งเป็นการสรุปกฎหมายที่เปลี่ยนแปลงได้และไม่ใช่คำแนะนำทางกฎหมาย การดำเนินการต่อถือว่าคุณยอมรับเงื่อนไขนี้
 

@@ -139,6 +139,8 @@ def test_the_lines_it_looks_for_are_the_scripts_own():
     for line in ("Write-Host (T 'TASlation is installed.')", 'Write-Host "$($script:Warnings.Count) warning(s):"',
                  "Write-Ok \"Python $($basePython.Version) installed\"", "Write-Ok \"Python $($basePython.Version) found\"",
                  "Write-Ok 'Ollama installed'", "Write-Ok 'Ollama found'", "Write-Info \"$question -> $($Offered.Name) ($why)\"",
+                 "Write-Ok (T 'Ollama started, with its app')",
+                 "Write-Ok (T 'Ollama started, as ollama serve in a hidden window (it runs until you sign out)')",
                  "is agreed to through {2}, by whoever set that variable.", "'[{0}/{1}] {2}'",
                  "$lnk.Arguments = '-m taslation gui'", "$CacheRamMarker = Join-Path $Root '.cache-ram-by-install'"):
         assert line in install, line

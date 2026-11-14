@@ -82,7 +82,9 @@ class AboutDialog(tk.Toplevel):
         self.paths: list[str] = []
         self._fields: list[ttk.Entry] = []
         self._line(frm, _("Free software under the MIT licence"), pady=(12, 0))
-        self._line(frm, CREDIT, pady=(2, 0))  # PLaMo's licence, article 4: these words as they are
+        # PLaMo's licence, article 4 (1) (ii): these words as they are (since the revision of November 9, 2026 asked of
+        # whoever provides the model or a model made from it; TASlation provides neither and keeps the credit)
+        self._line(frm, CREDIT, pady=(2, 0))
         self._line(frm, _("Runs offline: it talks only to Ollama on this computer (localhost:{port})").format(port=port),
                    pady=(2, 0))
         if guard:

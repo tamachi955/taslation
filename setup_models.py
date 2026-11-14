@@ -19,7 +19,8 @@ script you run once, by hand. It fetches:
   the Noto Sans family for non-Latin target languages;
 * with ``--translator-for LANGUAGE``, the translator model translating into LANGUAGE needs, and nothing else: PLaMo 3
   Translate 2B (pfnet/plamo-3-translate-2b-GGUF, the PLaMo Community License, about 1.8 GB) for every language but two,
-  after a person agreed to its licence: one GGUF file at a fixed revision, checked against its SHA256, imported into
+  after a person agreed to its licence: one GGUF file at a fixed revision (its licence texts, saved beside it, from
+  the same revision), checked against its SHA256, imported into
   Ollama as ``taslation-plamo3-translate-2b`` and then deleted (Ollama's copy is the one used); for Portuguese (Brazil)
   and Turkish, Qwen3.5 4B (Apache-2.0, about 3.3 GB) with ``ollama pull``. What it installed is written down in the
   data folder (``translator_models.json``, `taslation.translator_install`), so that TASlation never removes a model
@@ -346,6 +347,21 @@ def _download_once(url: str, part: Path, progress: Callable[[int, int | None], N
 _DROPPED = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError, IncompleteDownload)
 
 
+def refused_code(error: BaseException) -> int | None:
+    """The HTTP status of a download the server refused or no longer has (`tinstall.REFUSED_HTTP`: 401, 403, 404,
+    410), which trying again does not change; None for any other error (the network, the disk)."""
+    if isinstance(error, urllib.error.HTTPError) and error.code in tinstall.REFUSED_HTTP:
+        return int(error.code)
+    return None
+
+
+def refused_text(what: str, code: int) -> str:
+    """What a person reads when *what* could not be downloaded because the server refused it (`refused_code`)."""
+    return (f"{what} was not installed: the publisher's server refused the download or no longer has this file "
+            f"(HTTP {code}). Running this again will not help: update TASlation (a newer version names the current "
+            "file), or look at the project's issues page. Nothing was left behind.")
+
+
 def _on_a_line_of_its_own() -> str:
     try:
         return "\n" if sys.stdout.isatty() else ""  # (after a progress line written over)
@@ -556,7 +572,8 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
     automated check's install whose variable said so; else asked here), downloaded, checked, imported
     into Ollama, its GGUF then deleted; Qwen3.5 4B pulled. A model that is there already is left as it is. Nothing is
     left half done: a stopped or failed install removes its download and an import Ollama did not finish. The exit
-    code: 0 ready, 1 failed, CANCELLED, NO_ROOM."""
+    code: 0 ready, 1 failed, CANCELLED, NO_ROOM, REFUSED (the server refused the file or no longer has it: running
+    this again does not help, `refused_text`)."""
     cancel = cancel or threading.Event()
     needed = model_for_language(language)
     name = tinstall.shown_name(needed)
@@ -625,6 +642,11 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
         return tinstall.CANCELLED
     except (OSError, http.client.HTTPException, subprocess.SubprocessError) as e:
         _undo(exe, url, needed, before, models_dir, state_dir)
+        refused = refused_code(e)
+        if refused is not None:  # the file this version names is gone: a newer TASlation names the current one
+            print(refused_text(name, refused))
+            _report("error", text=f"HTTP {refused}", refused=refused)
+            return tinstall.REFUSED
         print(f"{name} was not installed: {e}. Nothing was left behind; check the network and the disk space, and "
               "run this again.")
         _report("error", text=str(e))
@@ -726,6 +748,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.fonts:
             download_noto_fonts(models_dir)
     except (OSError, http.client.HTTPException) as e:
+        refused = refused_code(e)
+        if refused is not None:
+            print(f"The download failed: the server refused it or no longer has the file (HTTP {refused}). Running "
+                  "this again will not help: update TASlation (a newer version names the current files), or look at "
+                  "the project's issues page.")
+            return tinstall.REFUSED
         print(f"The download failed: {e}. Check the network and the disk space, and run this again.")
         return 1
     if args.ollama_model and is_auto(args.ollama_model):

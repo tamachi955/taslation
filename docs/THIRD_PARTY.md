@@ -84,29 +84,53 @@ asks, the window and the command line ask when the language changes).
 
 | Model | Licence | Lineage | Training data |
 |---|---|---|---|
-| [PLaMo 3 Translate 2B GGUF](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF) (`plamo-3-translate-2b-Q4_K_M.gguf`, 1.81 GB), revision `f2b4599d`; every target language but the two below | [PLaMo Community License](https://plamo.preferredai.jp/info/plamo-community-license-en) ([Japanese](https://plamo.preferredai.jp/info/plamo-community-license-ja)); its English and Japanese texts are in the repository's `LICENSE/` folder and saved next to the Modelfile | Preferred Networks (PFN). Built on PLaMo 3 NICT, a pretrained model of joint research by PFN and the National Institute of Information and Communications Technology (NICT), then trained further for translation; quantized for llama.cpp by PFN. | "Tens of billions of tokens of translation-focused data", says its card; where that data, or PLaMo 3 NICT's, comes from is not stated there. |
+| [PLaMo 3 Translate 2B GGUF](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF) (`plamo-3-translate-2b-Q4_K_M.gguf`, 1.81 GB), revision `4f672106`; every target language but the two below | [PLaMo Community License](https://plamo.preferredai.jp/info/plamo-community-license-en) ([Japanese](https://plamo.preferredai.jp/info/plamo-community-license-ja)); its English and Japanese texts are in the repository's `LICENSE/` folder and saved next to the Modelfile | Preferred Networks (PFN). Built on PLaMo 3 NICT, a pretrained model of joint research by PFN and the National Institute of Information and Communications Technology (NICT), then trained further for translation; quantized for llama.cpp by PFN. | "Tens of billions of tokens of translation-focused data", says its card; where that data, or PLaMo 3 NICT's, comes from is not stated there. |
 | [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Alibaba; Ollama library `qwen3.5:4b`, about 3.3 GB); Portuguese (Brazil) and Turkish | Apache-2.0 | Alibaba's Qwen3.5 family; Ollama's own build. | Not reviewed for this table; see its card. |
 
 PLaMo is downloaded from Hugging Face as that one file at that revision, checked against its SHA256
-(`2c288ecc...c4cc060787`), imported into Ollama as `taslation-plamo3-translate-2b` with a Modelfile beside it (the GGUF,
-`num_ctx`, the stop tokens `<|plamo:tag|>` and `<|plamo:bos|>`; no template: TASlation sends its prompts raw), and the
-GGUF is then deleted: Ollama's copy is the one used. The name has "PLaMo" in it, as article 4 of the licence asks of a
-model made from it.
+(`1ffd9073...69e0276c13`, 1,807,203,040 bytes), imported into Ollama as `taslation-plamo3-translate-2b` with a
+Modelfile beside it (the GGUF, `num_ctx`, the stop tokens `<|plamo:tag|>` and `<|plamo:bos|>`; no template: TASlation
+sends its prompts raw), and the GGUF is then deleted: Ollama's copy is the one used. The licence texts saved beside it
+come from the same revision. The name has "PLaMo" in it, as article 4 of the licence asks of a model made from it.
 
-What the PLaMo Community License means here, in short (the licence itself decides):
+The revision pinned before, `f2b4599d` (SHA256 `2c288ecc...c4cc060787`, 1,807,192,480 bytes), is refused by Hugging
+Face's storage since PFN's revision of November 9, 2026, which moved the chat template into system messages and
+revised the licence. Its file and the new one hold the same tensors and the same metadata byte for byte, but for the
+embedded chat template, which TASlation does not use: a model imported from the old file stays as it is, needs no new
+download, and translates the same (504 OpenMantra lines, 445 requests with context, glossary and earlier lines: the
+same answer to each).
+
+What the PLaMo Community License, as revised on November 9, 2026, means here, in short (the licence itself decides):
 
 * personal and other non-commercial use is free, with no registration; commercial use needs registering with PFN first
-  (free up to 1 billion yen of yearly revenue, a separate contract above). The licence counts as commercial also the
-  use "for developing ... products, services", so developing TASlation itself with PLaMo may count as such: the
-  owner's call;
+  (article 3; free up to 1 billion yen of yearly revenue, a separate contract above). The licence counts as commercial
+  also the use "for developing ... products, services", so developing TASlation itself with PLaMo may count as such:
+  the owner's call;
 * the user must be 18 or older, or of age where they live, or have a parent's or guardian's consent (article 2): the
   agreement step says so;
-* "Built with PLaMo" is shown where TASlation is described (article 4): Help > About TASlation and the README;
-* a translation made with it may be published only with a clear note that it is PLaMo's output (article 5): the legal
-  notice says so in every language, besides asking never to publish translations at all;
+* the user is responsible for having the rights, permissions and consents needed for what they put into it and for
+  what comes out, and the licence gives no licence to anyone else's rights in them (article 9): the agreement step
+  says so; for a book, that is what the legal notice is about;
+* "Built with PLaMo" is shown where TASlation is described: Help > About TASlation and the README. Article 4 asks it,
+  with a copy of the licence and "PLaMo" in a model's name, of whoever provides the model or a model made from it to
+  others (since the revision, no longer of whoever provides outputs). TASlation provides neither, as each computer
+  downloads the file from Hugging Face itself, and keeps the credit all the same;
+* a translation made with it may be published without a note that it is PLaMo's output (article 5 (2): PLaMo 3
+  Translate is a "conversion model"), but one published as all or a large part of a book or another long standalone
+  publication must say, in a reasonable place such as the colophon, that PLaMo was used; and whoever is given a
+  translation, or can see it made public, must be told that models trained on it fall under the licence (article 5
+  (4)). The legal notice says so in every language, besides asking never to publish or share translations at all;
+* the model and its output come as is, without any warranty, and the user is responsible for how they use them
+  (article 7);
 * the agreement is asked for before anything is downloaded, in install.ps1, in the window (a tick and a button of its
-  own) and at the console, and written down with its time and the licence texts' SHA256 in `translator_models.json`;
-  a changed licence is asked about again.
+  own) and at the console, and written down with its time, the revision and the licence texts' SHA256 in
+  `translator_models.json`; a changed licence is asked about again before PLaMo is next installed.
+
+A revised licence: PFN may change it, and tells "the modification details and the effective date" in the way it
+chooses by that date (article 12). The revised terms then apply to whoever agreed before as well; the licence asks no
+new agreement of them. TASlation therefore leaves a PLaMo already installed as it is and does not ask about the
+revision then; its record of the agreement names the earlier texts, so the revised one is shown and asked about the
+next time PLaMo is installed (a language change back to it, a new computer).
 
 Qwen3.5 4B is Apache-2.0: no step of its own beyond the yes to the download.
 

@@ -135,6 +135,10 @@ $OllamaWingetArgs = @('install', '--id', 'Ollama.Ollama', '--exact', '--source',
 $PythonUserExe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'
 $OllamaPage = 'https://ollama.com/download'
 $OllamaUrl = 'http://127.0.0.1:11434'
+$OllamaStartWaitS = 30  # how long a started Ollama is given to answer, each way (the window gives it as long)
+# setup_models.py's exit code for a download the server refused or no longer has (translator_install.REFUSED):
+# running install.cmd again does not help then, a newer TASlation that names the current file does
+$RefusedCode = 5
 $TorchCpuIndex = 'https://download.pytorch.org/whl/cpu'
 # The GPU builds of PyTorch, from the same index (NVIDIA's CUDA libraries come inside the wheel), by the compute
 # capability a GPU reaches (nvidia-smi's compute_cap): cu126 runs on every NVIDIA GPU from Maxwell (5.0) to Hopper and
@@ -207,6 +211,8 @@ $CacheRamMarker = Join-Path $Root '.cache-ram-by-install'
 $StepCount = 7
 $script:StepNo = 0
 $script:Warnings = New-Object System.Collections.Generic.List[string]
+# What the end says when TASlation cannot translate yet, when a step knows why better than "run install.cmd again"
+$script:NotReady = $null
 $script:LastCommand = $null
 
 # ---------------------------------------------------------------- helpers
@@ -785,30 +791,53 @@ function Set-CacheRam {
     $env:LLAMA_ARG_CACHE_RAM = '0'
 }
 
-# Ollama stopped and started again, once for both settings, so that its server reads them; nothing when it is not
-# running: it reads them when it starts.
+# Ollama stopped and started again, once for both settings, so that its server reads them (Start-OllamaServer). What
+# came of it: 'not running' when no Ollama of this folder ran (it reads them when it starts), else what
+# Start-OllamaServer says: 'running', 'app' or 'serve' when the server answers again, '' when it does not.
 function Restart-Ollama([string]$OllamaPath) {
-    if (Stop-OllamaProcesses (Split-Path -Parent $OllamaPath)) {
-        Start-Sleep -Seconds 1
-        [void](Start-OllamaServer $OllamaPath)
-    }
+    if (-not (Stop-OllamaProcesses (Split-Path -Parent $OllamaPath))) { return 'not running' }
+    Start-Sleep -Seconds 1
+    return (Start-OllamaServer $OllamaPath)
 }
 
-function Start-OllamaServer([string]$Exe) {
-    if (Test-OllamaServer) { return $true }
-    $app = Join-Path (Split-Path $Exe -Parent) 'ollama app.exe'
-    if (Test-Path -LiteralPath $app) {
-        Write-Info 'Starting Ollama.'
-        Start-Process -FilePath $app | Out-Null
-    } else {
-        Write-Info 'Starting Ollama.'
-        Start-Process -FilePath $Exe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
-    }
-    for ($i = 0; $i -lt 30; $i++) {
+# Whether Ollama's server answers within $OllamaStartWaitS seconds of being started. The time counts, not the tries:
+# asking an address nobody listens on takes Windows about 2 s, and on the install check's runner 30 tries took 90 s.
+function Wait-OllamaServer {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $OllamaStartWaitS) {
         Start-Sleep -Seconds 1
         if (Test-OllamaServer) { return $true }
     }
     return $false
+}
+
+# Ollama's server started when it does not answer: Ollama's own app first (the tray icon, which runs the server), as
+# Ollama starts at sign-in; when no server answers after it (on the install check's runner, a fresh Windows, the app
+# ran and no server came up), `ollama serve` itself in a hidden window, which runs until the person signs out. How
+# the server answers: 'running' (it did already), 'app' or 'serve'; '' when it does not answer either way.
+function Start-OllamaServer([string]$Exe) {
+    if (Test-OllamaServer) { return 'running' }
+    Write-Info (T 'Starting Ollama.')
+    $app = Join-Path (Split-Path $Exe -Parent) 'ollama app.exe'
+    if (Test-Path -LiteralPath $app) {
+        try { Start-Process -FilePath $app | Out-Null } catch { Write-Detail "Ollama's app did not start: $_" }
+        if (Wait-OllamaServer) {
+            Write-Ok (T 'Ollama started, with its app')
+            return 'app'
+        }
+        Write-Info ((T 'Ollama''s app did not bring its server up within {0} seconds: the server is started by itself (ollama serve, in a hidden window).') -f $OllamaStartWaitS)
+    }
+    try {
+        Start-Process -FilePath $Exe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
+    } catch {
+        Write-Detail "ollama serve did not start: $_"
+        return ''
+    }
+    if (Wait-OllamaServer) {
+        Write-Ok (T 'Ollama started, as ollama serve in a hidden window (it runs until you sign out)')
+        return 'serve'
+    }
+    return ''
 }
 
 function Get-FreeGB([string]$Path) {
@@ -1035,13 +1064,19 @@ if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'q
     # no leaves TASlation without a translator for now.
     Write-Host ''
     Write-Info ((T 'TASlation translates into {0} with PLaMo 3 Translate 2B by Preferred Networks (about 1.8 GB).') -f $language.Name)
-    Write-Info (T 'Its licence is the PLaMo Community License:')
+    Write-Info (T 'Its licence is the PLaMo Community License, as revised on November 9, 2026:')
     Write-Info (T '  - personal and other non-commercial use is free, with no registration;')
-    Write-Info (T '    commercial use needs registering with Preferred Networks first;')
-    Write-Info (T '  - you must be 18 or older (or of age where you live), or have a parent''s or guardian''s consent;')
-    Write-Info (T '  - a translation made with it may be published only with a clear note that it is PLaMo''s output')
-    Write-Info (T '    (article 5); TASlation asks you not to publish translations at all;')
-    Write-Info (T '  - the model comes as is, without any warranty.')
+    Write-Info (T '    commercial use needs registering with Preferred Networks first (article 3);')
+    Write-Info (T '  - you must be 18 or older (or of age where you live), or have a parent''s or guardian''s consent')
+    Write-Info (T '    (article 2);')
+    Write-Info (T '  - you are responsible for having the rights to what you put into it and to what comes out of it;')
+    Write-Info (T '    the licence gives no rights to other people''s works (article 9);')
+    Write-Info (T '  - a translation made with it may be published without a note that it is PLaMo''s output, but one')
+    Write-Info (T '    published as all or a large part of a book or another long publication must say that PLaMo')
+    Write-Info (T '    was used; when you give a translation to someone or make it public, you must tell them that')
+    Write-Info (T '    models trained on it fall under this licence (article 5);')
+    Write-Info (T '    TASlation asks you not to publish translations at all;')
+    Write-Info (T '  - the model comes as is, without any warranty; how you use it is your responsibility (article 7).')
     Write-Info (T 'The full licence, in English and in Japanese:')
     foreach ($u in $PlamoLicenceUrls) { Write-Info "  $u" }
     $plamoQuestion = (T 'Do you agree to the PLaMo Community License (PLaMo is then downloaded)?')
@@ -1232,6 +1267,7 @@ if ($DryRun) {
     Write-Plan ('python ' + ($setupArgs -join ' '))
 } else {
     $code = Invoke-Console $VenvPy $setupArgs
+    if ($code -eq $RefusedCode) { Stop-Install 'the reading model or the fonts did not download: the server refused them or no longer has the files. Running install.cmd again will not help: update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.' }
     if ($code -ne 0) { Stop-Install "the reading model or the fonts did not download (exit code $code). Check the network and the disk space." }
     Write-Ok 'reading model and fonts ready'
 }
@@ -1264,7 +1300,8 @@ if ($modelPresent) {
     Write-Plan ('start Ollama if it is not running, then: python ' + ($translatorArgs -join ' ') + ' --ollama-exe OLLAMA')
 } elseif ($wantModel -and $ollamaExe) {
     if (-not (Start-OllamaServer $ollamaExe)) {
-        Write-Warn 'Ollama did not start: run install.cmd again.'
+        Write-Warn (T 'Ollama did not start, so the translation model was not installed. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
+        $script:NotReady = (T 'TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
     } else {
         $installedModels = Get-OllamaModels
         if ($null -ne $installedModels -and (Test-HasModel $installedModels $model.Name)) {
@@ -1272,6 +1309,10 @@ if ($modelPresent) {
         } else {
             $code = Invoke-Console $VenvPy ($translatorArgs + @('--ollama-exe', $ollamaExe))
             if ($code -eq 0) { Write-Ok "$($model.Shown) installed" }
+            elseif ($code -eq $RefusedCode) {  # the file this version names is gone: a newer TASlation names the current one
+                Write-Warn (T 'The translation model was not installed: the publisher''s server refused the download or no longer has the file. Running install.cmd again will not help: update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.')
+                $script:NotReady = (T 'TASlation cannot translate yet: the translation model''s file is not available from its publisher. Update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.')
+            }
             else { Write-Warn "The translation model was not installed (exit code $code): run install.cmd again." }
         }
     }
@@ -1310,8 +1351,13 @@ if ($ollamaSet.Count -gt 0) {
     if ($DryRun) {
         Write-Plan 'start Ollama again if it is running (once), so that it reads what was set'
     } else {
-        Restart-Ollama $ollamaExe
-        foreach ($done in $ollamaSet) { Write-Ok $done }
+        # an "ok" only when the server answers again (or no Ollama ran: it reads them when it starts)
+        if (Restart-Ollama $ollamaExe) {
+            foreach ($done in $ollamaSet) { Write-Ok $done }
+        } else {
+            Write-Warn (T 'Ollama was stopped to read its new settings and did not start again. Start Ollama from the Start menu, or restart the PC: the settings are saved and apply from its next start.')
+            if (-not $script:NotReady) { $script:NotReady = (T 'TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.') }
+        }
     }
 }
 
@@ -1355,13 +1401,17 @@ if ($hasShortcut) {
     }
 }
 
+# The run ends with 0 also when TASlation cannot translate yet (what is done is kept, and the window offers the
+# translation model itself); its last line then says so, after the warnings too.
+$notReady = $script:NotReady
+if (-not $notReady) { $notReady = (T 'TASlation cannot translate yet: run install.cmd again.') }
 Write-Host ''
 if ($DryRun) {
     Write-Host 'Dry run finished; nothing was changed.' -ForegroundColor Cyan
 } elseif ($canTranslate) {
     Write-Host (T 'TASlation is installed.') -ForegroundColor Cyan
 } else {
-    Write-Host (T 'Translating is not ready yet: run install.cmd again.') -ForegroundColor Yellow
+    Write-Host $notReady -ForegroundColor Yellow
 }
 Write-Host "  Version: $(Get-VersionLine)"
 if ($hasShortcut) { Write-Host ('  ' + (T 'To start it: open the Start menu and choose TASlation.')) }
@@ -1370,5 +1420,9 @@ if ($script:Warnings.Count -gt 0) {
     Write-Host ''
     Write-Host "$($script:Warnings.Count) warning(s):" -ForegroundColor Yellow
     foreach ($w in $script:Warnings) { Write-Host "  - $w" -ForegroundColor Yellow }
+    if (-not $DryRun -and -not $canTranslate) {
+        Write-Host ''
+        Write-Host $notReady -ForegroundColor Yellow
+    }
 }
 Exit-Install 0

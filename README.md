@@ -207,7 +207,8 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
 2. Double-click `install.cmd`. If a warning appears, go on with "More info" → "Run anyway".
 3. First it asks for the language to translate into (a number or the English name; Enter takes the language shown). This language decides the translation model.
    Next it asks, once only, for your agreement to the terms of use of the three OCR models (about 700 MB in all) (non-commercial only, CC BY-NC-SA 4.0). TASlation cannot read pages without these models,
-   so if you do not agree, it does not install. If the target language is neither Portuguese (Brazil) nor Turkish, it also asks for your agreement to the licence (the PLaMo Community License) of the translation model PLaMo 3 Translate 2B (about 1.8 GB) (those two languages use Qwen3.5 4B, about 3.3 GB, whose licence needs no agreement). If you answer the remaining questions with Enter, this computer gets everything it needs.
+   so if you do not agree, it does not install. If the target language is neither Portuguese (Brazil) nor Turkish, it also asks for your agreement to the licence (the PLaMo Community License) of the translation model PLaMo 3 Translate 2B (about 1.8 GB) (those two languages use Qwen3.5 4B, about 3.3 GB, whose licence needs no agreement).
+   The main points of PLaMo's licence (as revised on November 9, 2026): free for non-commercial use with no registration, 18 or older or a guardian's consent, the rights needed for what goes in and what comes out are yours to secure, and what you must say when you give a translation to someone or make it public (`docs/THIRD_PARTY.md`; TASlation asks you not to publish translations). If you answer the remaining questions with Enter, this computer gets everything it needs.
    If you answer Y to the questions whether to install Python and Ollama, you also agree to the terms of use shown by winget (Windows' package manager), which installs them (so that winget does not ask you partway through).
    It also asks whether to install the two models that find and erase lettering on the drawing (a layout model, about 170 MB, and an inpainting model, LaMa, about 200 MB).
    Neither of them makes clear where its training images come from, so it tells you that before it asks. On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses LaMa on the GPU by default),
@@ -223,7 +224,9 @@ and if the download failed or it did not run on the GPU, it says so in one line,
 A GPU build already installed is left as it is. On a computer where a version before this one installed the CPU build, running install.cmd again replaces it with the GPU build (`update.cmd` does not replace it).
 
 It makes two settings for Ollama without asking. Each is made only when its environment variable is not set yet, neither for this Windows user nor in the window running the installation,
-and Ollama is restarted once afterwards. A value that is already there is left as it is.
+and Ollama is restarted once afterwards. A value that is already there is left as it is. Only when the restarted server answers does it say "ok"; otherwise it warns
+and tells you to start Ollama from the Start menu or restart the PC (the settings are saved and apply from its next start). When Ollama's app does not bring the server up,
+it starts `ollama serve` in a hidden window instead, and says which way it started.
 
 * On every computer with Ollama, it sets the environment variable `LLAMA_ARG_CACHE_RAM=0` for this Windows user. Without it, Ollama uses up to 8 GB of RAM
   for a cache of earlier requests. In TASlation's measurements that cache made translation faster only without a GPU, by about 8 %
@@ -233,6 +236,11 @@ and Ollama is restarted once afterwards. A value that is already there is left a
 
 `uninstall.cmd` removes each of them if it still has the value the installer set. To undo one by hand, search the Start menu for "environment variables",
 open "Edit environment variables for your account", delete the variable and restart Ollama.
+
+When something could not be done, the installer keeps what it did, goes on to the end and lists the warnings there. Its last line then says
+that TASlation cannot translate yet, and what to do. When the publisher's server refused a download or no longer has the file
+(HTTP 401, 403, 404, 410), running it again will not help, so it tells you to update TASlation (download its newest copy and run `update.cmd`)
+or to see the project's issues page.
 
 The network is used only during the installation. Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
 After that, TASlation does not connect to anything outside this computer.
@@ -289,4 +297,4 @@ More in [docs/MANUAL.md](docs/MANUAL.md).
 All the projects used or referred to, and their licences, are listed in `docs/THIRD_PARTY.md`.
 TASlation's code is under the MIT licence (see `LICENSE`). The weights of the three OCR models are CC BY-NC-SA 4.0; each user agrees to their terms and obtains them at installation (see `docs/THIRD_PARTY.md`).
 
-Built with PLaMo: translation uses Preferred Networks' PLaMo 3 Translate 2B (PLaMo Community License). Portuguese (Brazil) and Turkish use Qwen3.5 4B (Apache-2.0).
+Built with PLaMo: translation uses Preferred Networks' PLaMo 3 Translate 2B (PLaMo Community License, as revised on November 9, 2026). Portuguese (Brazil) and Turkish use Qwen3.5 4B (Apache-2.0).

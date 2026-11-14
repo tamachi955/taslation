@@ -242,10 +242,17 @@ jobs:
           $ollamaRoute = 'not found in the output'
           if ($log -match 'ok: Ollama installed') { $ollamaRoute = 'installed by the installer with winget' }
           elseif ($log -match 'ok: Ollama found') { $ollamaRoute = 'there before the installer ran (installed by this workflow)' }
+          # how the installer brought Ollama's server up when it started it (its app, or ollama serve when the app
+          # brought none: llama.cpp's log lines then go to that hidden window, not to the app's server.log)
+          $ollamaStart = 'no start line in the output (it answered already, or no Ollama of its folder ran)'
+          if ($log -match 'ok: Ollama started, as ollama serve in a hidden window') { $ollamaStart = 'ollama serve in a hidden window' }
+          elseif ($log -match 'ok: Ollama started, with its app') { $ollamaStart = "Ollama's app" }
           Set-Fact 'python_route' $python
           Set-Fact 'ollama_route' $ollamaRoute
+          Set-Fact 'ollama_start' $ollamaStart
           Write-Host "Python: $python"
           Write-Host "Ollama: $ollamaRoute"
+          Write-Host "Ollama's server started by: $ollamaStart"
           # what the installer said it would download (its disk step), for the summary
           Set-Fact 'installer_sizes' @($log -split "`r?`n" | Where-Object { $_ -match '^\s+\d+\.\d GB\s+.+\((to download|already there|not now)\)$' } | ForEach-Object { $_.Trim() })
           # the program files
@@ -507,6 +514,7 @@ jobs:
           if ($f.Contains('python_route')) { $md.Add("* Python: $($f['python_route'])") }
           if ($f.Contains('winget_route')) { $md.Add("* winget: $($f['winget_route'])") }
           if ($f.Contains('ollama_route')) { $md.Add("* Ollama: $($f['ollama_route'])") }
+          if ($f.Contains('ollama_start')) { $md.Add("* Ollama's server, as the installer started it: $($f['ollama_start'])") }
           if ($f.Contains('program')) { $md.Add("* Program files: Python $($f['program']['python']), PyTorch $($f['program']['torch']) (CUDA: $($f['program']['cuda']))") }
           if ($f.Contains('install')) {
               $i = $f['install']

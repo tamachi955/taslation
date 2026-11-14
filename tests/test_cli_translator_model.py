@@ -95,6 +95,16 @@ def test_a_stopped_install_translates_nothing(console, capsys):
     assert "Stopped. Nothing was left on the disk." in capsys.readouterr().out and console.removed == []
 
 
+def test_a_refused_file_says_trying_again_will_not_help(console, capsys):
+    console.answers = ["y", "y"]
+    console.outcome = "refused"
+    assert not cli.ensure_translator(console.settings, "French")
+    out = capsys.readouterr().out
+    assert "refused the download or no longer has this file. Trying again will not help: update TASlation" in out
+    assert "Translation is off: French needs PLaMo 3 Translate 2B, which is not installed." in out
+    assert "Run the command again" not in out and "Check the network" not in out
+
+
 def test_a_model_that_is_there_asks_nothing(console):
     console.models = [PLAMO.ollama_name + ":latest"]
     assert cli.ensure_translator(console.settings, "German") and console.asked == []

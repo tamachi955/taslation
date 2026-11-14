@@ -253,7 +253,8 @@ def ensure_translator(settings: Settings, language: str) -> bool:
     if switch.unneeded is not None and switch.ours:
         print(f"{ti.shown_name(switch.unneeded)} is not needed for {language} and is then removed, which frees about "
               f"{ti.size_text(switch.freed_gb)} GB.")
-    off = (f"Translation is off: {language} needs {name}, which is not installed. Run the command again and answer y, "
+    missing = f"Translation is off: {language} needs {name}, which is not installed."
+    off = (f"{missing} Run the command again and answer y, "
            f"or run: python setup_models.py --translator-for \"{language}\"")
     if not _console_yes("Download it now? [y/N]"):
         print(off)
@@ -289,10 +290,13 @@ def ensure_translator(settings: Settings, language: str) -> bool:
         outcome = ti.Outcome("cancelled")
     if outcome.state != "done":
         print({"cancelled": "Stopped. Nothing was left on the disk.",
-               "no_room": f"There is too little disk space for {name}. Nothing was downloaded."}.get(
+               "no_room": f"There is too little disk space for {name}. Nothing was downloaded.",
+               "refused": f"{name} could not be installed: the publisher's server refused the download or no longer "
+                          "has this file. Trying again will not help: update TASlation (a newer version names the "
+                          "current file), or look at the project's issues page. Nothing was left on the disk."}.get(
             outcome.state, f"{name} could not be installed ({outcome.detail}). Check the network and the disk space, and "
                            "try again. Nothing was left on the disk."))
-        print(off)
+        print(missing if outcome.state == "refused" else off)  # (running it again would not help then)
         return False
     print(f"{name} is installed.")
     if remove and switch.unneeded is not None:

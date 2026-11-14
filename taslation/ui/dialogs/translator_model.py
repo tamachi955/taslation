@@ -20,11 +20,12 @@ from .caches import WARNING_CHARS, in_lines
 POLL_MS = 100  # how often the install dialog looks at what the install said
 URL_CHARS = 64  # the licence's addresses: read-only lines this wide
 LICENCE_TEXT = (  # what the person agrees to, in plain words (a key of the window's catalogs)
-    "TASlation translates with PLaMo 3 Translate 2B by Preferred Networks (PFN). Its licence is the PLaMo Community License:\n"
-    "• Personal and other non-commercial use is free, with no registration. Commercial use needs registering with PFN first.\n"
-    "• You must be 18 or older (or of age where you live), or have a parent's or guardian's consent.\n"
-    "• A translation made with it may be published only with a clear note that it is PLaMo's output (article 5). TASlation asks you not to publish translations at all.\n"
-    "• The model comes as is, without any warranty; how you use it is your responsibility.")
+    "TASlation translates with PLaMo 3 Translate 2B by Preferred Networks (PFN). Its licence is the PLaMo Community License, as revised on November 9, 2026:\n"
+    "• Personal and other non-commercial use is free, with no registration. Commercial use needs registering with PFN first (article 3).\n"
+    "• You must be 18 or older (or of age where you live), or have a parent's or guardian's consent (article 2).\n"
+    "• You are responsible for having the rights to what you put into it and to what comes out of it; the licence gives no rights to other people's works (article 9).\n"
+    "• A translation made with it may be published without a note that it is PLaMo's output, but one published as all or a large part of a book or another long publication must say that PLaMo was used. When you give a translation to someone or make it public, you must tell them that models trained on it fall under this licence (article 5). TASlation asks you not to publish translations at all.\n"
+    "• The model comes as is, without any warranty; how you use it is your responsibility (article 7).")
 
 
 def _over_everything(win: tk.Toplevel, master: tk.Misc) -> None:

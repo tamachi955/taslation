@@ -175,6 +175,8 @@ class ModelSwitchMixin:
                 tell(self, _("Stopped. Nothing was left on the disk."), icon="info")
             elif outcome.state == "no_room":
                 tell(self, _("There is too little disk space for {model}. Nothing was downloaded.").format(model=name))
+            elif outcome.state == "refused":  # the file this version names is gone: trying again would not help
+                tell(self, _("{model} could not be installed: the publisher's server refused the download or no longer has this file. Trying again will not help: update TASlation (a newer version names the current file), or look at the project's issues page. Nothing was left on the disk.").format(model=name))
             else:
                 tell(self, _("{model} could not be installed. Check the network and the disk space, and try again. Nothing was left on the disk.").format(model=name))
             self._switch_declined(switch, before)

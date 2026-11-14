@@ -78,91 +78,108 @@ TEXTS: dict[str, dict[str, str]] = {
         "vi": "Giấy phép của PLaMo", "zh": "PLaMo 的许可", "zh-tw": "PLaMo 的授權", "ko": "PLaMo 라이선스",
         "th": "สัญญาอนุญาตของ PLaMo",
     },
-    "TASlation translates with PLaMo 3 Translate 2B by Preferred Networks (PFN). Its licence is the PLaMo Community License:\n"
-    "\u2022 Personal and other non-commercial use is free, with no registration. Commercial use needs registering with PFN first.\n"
-    "\u2022 You must be 18 or older (or of age where you live), or have a parent's or guardian's consent.\n"
-    "\u2022 A translation made with it may be published only with a clear note that it is PLaMo's output (article 5). TASlation asks you not to publish translations at all.\n"
-    "\u2022 The model comes as is, without any warranty; how you use it is your responsibility.": {
-        "ja": "TASlation は Preferred Networks (PFN) の PLaMo 3 Translate 2B で翻訳します。ライセンスは PLaMo Community License（PLaMoコミュニティライセンス）です。\n"
-              "\u2022 個人での利用など商用以外の利用は無料で、登録も要りません。商用で使うには先に PFN への登録が必要です。\n"
-              "\u2022 18歳以上（またはお住まいの国で成人）であるか、親権者・法定代理人の同意が必要です。\n"
-              "\u2022 これで作った翻訳を公表するときは、PLaMo の生成物であることを明示しなければなりません（第5条）。TASlation は、翻訳を一切公表しないようお願いしています。\n"
-              "\u2022 モデルは現状のまま、いかなる保証もなく提供されます。使い方の責任はご自身にあります。",
-        "es": "TASlation traduce con PLaMo 3 Translate 2B, de Preferred Networks (PFN). Su licencia es la PLaMo Community License:\n"
-              "\u2022 El uso personal y cualquier otro uso no comercial es gratuito y sin registro. El uso comercial exige registrarse antes con PFN.\n"
-              "\u2022 Debes tener 18 años o más (o la mayoría de edad donde vives), o el consentimiento de tus padres o tutores.\n"
-              "\u2022 Una traducción hecha con él solo puede publicarse indicando claramente que es un resultado de PLaMo (artículo 5). TASlation te pide que no publiques ninguna traducción.\n"
-              "\u2022 El modelo se ofrece tal cual, sin ninguna garantía; cómo lo uses es responsabilidad tuya.",
-        "pt": "O TASlation traduz com o PLaMo 3 Translate 2B, da Preferred Networks (PFN). A licença dele é a PLaMo Community License:\n"
-              "\u2022 O uso pessoal e qualquer outro uso não comercial é gratuito e sem cadastro. O uso comercial exige cadastro prévio na PFN.\n"
-              "\u2022 Você precisa ter 18 anos ou mais (ou a maioridade onde mora), ou o consentimento dos pais ou do responsável.\n"
-              "\u2022 Uma tradução feita com ele só pode ser publicada com uma indicação clara de que é um resultado do PLaMo (artigo 5). O TASlation pede que você não publique nenhuma tradução.\n"
-              "\u2022 O modelo é fornecido como está, sem nenhuma garantia; a forma como você o usa é responsabilidade sua.",
-        "fr": "TASlation traduit avec PLaMo 3 Translate 2B, de Preferred Networks (PFN). Sa licence est la PLaMo Community License :\n"
-              "\u2022 L'usage personnel et tout autre usage non commercial est gratuit, sans inscription. Un usage commercial demande de s'inscrire d'abord auprès de PFN.\n"
-              "\u2022 Vous devez avoir 18 ans ou plus (ou être majeur là où vous vivez), ou avoir l'accord d'un parent ou d'un tuteur.\n"
-              "\u2022 Une traduction faite avec lui ne peut être publiée qu'en indiquant clairement qu'elle est produite par PLaMo (article 5). TASlation vous demande de ne publier aucune traduction.\n"
-              "\u2022 Le modèle est fourni tel quel, sans aucune garantie ; l'usage que vous en faites relève de votre responsabilité.",
-        "de": "TASlation übersetzt mit PLaMo 3 Translate 2B von Preferred Networks (PFN). Seine Lizenz ist die PLaMo Community License:\n"
-              "\u2022 Private und andere nicht kommerzielle Nutzung ist kostenlos und ohne Registrierung. Für kommerzielle Nutzung müssen Sie sich zuerst bei PFN registrieren.\n"
-              "\u2022 Sie müssen mindestens 18 Jahre alt sein (oder dort, wo Sie leben, volljährig) oder die Zustimmung eines Elternteils oder Vormunds haben.\n"
-              "\u2022 Eine damit gemachte Übersetzung darf nur mit dem klaren Hinweis veröffentlicht werden, dass sie eine Ausgabe von PLaMo ist (Artikel 5). TASlation bittet Sie, Übersetzungen überhaupt nicht zu veröffentlichen.\n"
-              "\u2022 Das Modell wird so bereitgestellt, wie es ist, ohne jede Gewährleistung; wie Sie es nutzen, liegt in Ihrer Verantwortung.",
-        "it": "TASlation traduce con PLaMo 3 Translate 2B di Preferred Networks (PFN). La sua licenza è la PLaMo Community License:\n"
-              "\u2022 L'uso personale e ogni altro uso non commerciale è gratuito, senza registrazione. L'uso commerciale richiede prima la registrazione presso PFN.\n"
-              "\u2022 Devi avere almeno 18 anni (o la maggiore età dove vivi), oppure il consenso di un genitore o tutore.\n"
-              "\u2022 Una traduzione fatta con esso può essere pubblicata solo indicando chiaramente che è un risultato di PLaMo (articolo 5). TASlation ti chiede di non pubblicare alcuna traduzione.\n"
-              "\u2022 Il modello è fornito così com'è, senza alcuna garanzia; come lo usi è una tua responsabilità.",
-        "nl": "TASlation vertaalt met PLaMo 3 Translate 2B van Preferred Networks (PFN). De licentie is de PLaMo Community License:\n"
-              "\u2022 Persoonlijk en ander niet-commercieel gebruik is gratis, zonder registratie. Voor commercieel gebruik moet u zich eerst bij PFN registreren.\n"
-              "\u2022 U moet 18 jaar of ouder zijn (of meerderjarig waar u woont), of toestemming hebben van een ouder of voogd.\n"
-              "\u2022 Een vertaling die ermee is gemaakt, mag alleen worden gepubliceerd met een duidelijke vermelding dat het uitvoer van PLaMo is (artikel 5). TASlation vraagt u helemaal geen vertalingen te publiceren.\n"
-              "\u2022 Het model wordt geleverd zoals het is, zonder enige garantie; hoe u het gebruikt, is uw eigen verantwoordelijkheid.",
-        "pl": "TASlation tłumaczy za pomocą PLaMo 3 Translate 2B firmy Preferred Networks (PFN). Jego licencja to PLaMo Community License:\n"
-              "\u2022 Użytek osobisty i inny niekomercyjny jest bezpłatny i nie wymaga rejestracji. Użytek komercyjny wymaga wcześniejszej rejestracji w PFN.\n"
-              "\u2022 Musisz mieć ukończone 18 lat (lub być pełnoletni tam, gdzie mieszkasz) albo mieć zgodę rodzica lub opiekuna.\n"
-              "\u2022 Tłumaczenie wykonane za jego pomocą można opublikować tylko z wyraźną informacją, że jest wynikiem działania PLaMo (artykuł 5). TASlation prosi, by w ogóle nie publikować tłumaczeń.\n"
-              "\u2022 Model jest udostępniany w obecnej postaci, bez żadnej gwarancji; za sposób jego użycia odpowiadasz sam.",
-        "ru": "TASlation переводит с помощью PLaMo 3 Translate 2B от Preferred Networks (PFN). Его лицензия — PLaMo Community License:\n"
-              "\u2022 Личное и другое некоммерческое использование бесплатно и без регистрации. Для коммерческого использования нужно сначала зарегистрироваться у PFN.\n"
-              "\u2022 Вам должно быть 18 лет или больше (или вы должны быть совершеннолетним там, где живёте), либо нужно согласие родителя или опекуна.\n"
-              "\u2022 Перевод, сделанный с его помощью, можно публиковать только с ясным указанием, что это результат работы PLaMo (статья 5). TASlation просит вообще не публиковать переводы.\n"
-              "\u2022 Модель предоставляется как есть, без каких-либо гарантий; за то, как вы её используете, отвечаете вы.",
-        "tr": "TASlation, Preferred Networks (PFN) tarafından geliştirilen PLaMo 3 Translate 2B ile çeviri yapar. Lisansı PLaMo Community License'tır:\n"
-              "\u2022 Kişisel ve diğer ticari olmayan kullanım ücretsizdir, kayıt gerekmez. Ticari kullanım için önce PFN'ye kayıt olmak gerekir.\n"
-              "\u2022 18 yaşında veya daha büyük (ya da yaşadığınız yerde reşit) olmalı ya da ebeveyninizin veya vasinizin onayını almalısınız.\n"
-              "\u2022 Onunla yapılan bir çeviri, ancak PLaMo'nun çıktısı olduğu açıkça belirtilerek yayımlanabilir (madde 5). TASlation, çevirileri hiç yayımlamamanızı rica eder.\n"
-              "\u2022 Model olduğu gibi, hiçbir garanti olmadan sunulur; onu nasıl kullandığınız sizin sorumluluğunuzdadır.",
-        "id": "TASlation menerjemahkan dengan PLaMo 3 Translate 2B dari Preferred Networks (PFN). Lisensinya adalah PLaMo Community License:\n"
-              "\u2022 Penggunaan pribadi dan penggunaan nonkomersial lainnya gratis, tanpa pendaftaran. Penggunaan komersial harus didaftarkan dulu ke PFN.\n"
-              "\u2022 Anda harus berusia 18 tahun atau lebih (atau cukup umur di tempat tinggal Anda), atau mendapat persetujuan orang tua atau wali.\n"
-              "\u2022 Terjemahan yang dibuat dengannya hanya boleh dipublikasikan dengan keterangan jelas bahwa itu hasil PLaMo (pasal 5). TASlation meminta Anda untuk sama sekali tidak memublikasikan terjemahan.\n"
-              "\u2022 Model ini diberikan apa adanya, tanpa jaminan apa pun; cara Anda menggunakannya adalah tanggung jawab Anda.",
-        "vi": "TASlation dịch bằng PLaMo 3 Translate 2B của Preferred Networks (PFN). Giấy phép của nó là PLaMo Community License:\n"
-              "\u2022 Dùng cho cá nhân và các mục đích phi thương mại khác là miễn phí, không cần đăng ký. Dùng cho mục đích thương mại phải đăng ký với PFN trước.\n"
-              "\u2022 Bạn phải từ 18 tuổi trở lên (hoặc đủ tuổi thành niên nơi bạn sống), hoặc được cha mẹ hay người giám hộ đồng ý.\n"
-              "\u2022 Bản dịch tạo bằng nó chỉ được công bố khi ghi rõ đó là kết quả của PLaMo (điều 5). TASlation đề nghị bạn hoàn toàn không công bố bản dịch.\n"
-              "\u2022 Mô hình được cung cấp nguyên trạng, không có bất kỳ bảo đảm nào; bạn tự chịu trách nhiệm về cách mình sử dụng.",
-        "zh": "TASlation 使用 Preferred Networks (PFN) 的 PLaMo 3 Translate 2B 进行翻译。其许可为 PLaMo Community License：\n"
-              "\u2022 个人使用及其他非商业用途免费，无需注册。商业用途须先在 PFN 注册。\n"
-              "\u2022 您须年满 18 岁（或达到您所在地的成年年龄），或取得父母或监护人的同意。\n"
-              "\u2022 用它生成的译文只有在清楚注明是 PLaMo 的输出时才能公开（第 5 条）。TASlation 请您完全不要公开译文。\n"
-              "\u2022 该模型按现状提供，不附带任何保证；如何使用由您自己负责。",
-        "zh-tw": "TASlation 使用 Preferred Networks (PFN) 的 PLaMo 3 Translate 2B 進行翻譯。其授權為 PLaMo Community License：\n"
-                 "\u2022 個人使用及其他非商業用途免費，無需註冊。商業用途須先向 PFN 註冊。\n"
-                 "\u2022 您須年滿 18 歲（或達到您所在地的成年年齡），或取得父母或監護人的同意。\n"
-                 "\u2022 用它產生的譯文只有在清楚註明是 PLaMo 的輸出時才能公開（第 5 條）。TASlation 請您完全不要公開譯文。\n"
-                 "\u2022 該模型依現狀提供，不附帶任何保證；如何使用由您自己負責。",
-        "ko": "TASlation은 Preferred Networks (PFN)의 PLaMo 3 Translate 2B로 번역합니다. 라이선스는 PLaMo Community License입니다.\n"
-              "\u2022 개인 이용 등 비상업적 이용은 무료이며 등록이 필요 없습니다. 상업적으로 이용하려면 먼저 PFN에 등록해야 합니다.\n"
-              "\u2022 18세 이상(또는 거주하는 나라의 성년)이거나, 부모 또는 보호자의 동의가 있어야 합니다.\n"
-              "\u2022 이 모델로 만든 번역은 PLaMo의 출력물임을 분명히 밝혀야만 공개할 수 있습니다(제5조). TASlation은 번역을 전혀 공개하지 않기를 부탁드립니다.\n"
-              "\u2022 모델은 있는 그대로, 어떠한 보증도 없이 제공됩니다. 어떻게 사용하는지는 본인의 책임입니다.",
-        "th": "TASlation แปลด้วย PLaMo 3 Translate 2B ของ Preferred Networks (PFN) สัญญาอนุญาตของโมเดลนี้คือ PLaMo Community License:\n"
-              "\u2022 การใช้ส่วนตัวและการใช้อื่นที่ไม่ใช่เชิงพาณิชย์ใช้ได้ฟรี ไม่ต้องลงทะเบียน การใช้เชิงพาณิชย์ต้องลงทะเบียนกับ PFN ก่อน\n"
-              "\u2022 คุณต้องมีอายุ 18 ปีขึ้นไป (หรือบรรลุนิติภาวะตามที่ที่คุณอาศัยอยู่) หรือได้รับความยินยอมจากพ่อแม่หรือผู้ปกครอง\n"
-              "\u2022 คำแปลที่สร้างด้วยโมเดลนี้จะเผยแพร่ได้ก็ต่อเมื่อระบุชัดเจนว่าเป็นผลลัพธ์ของ PLaMo (ข้อ 5) TASlation ขอให้คุณไม่เผยแพร่คำแปลเลย\n"
-              "\u2022 โมเดลนี้ให้มาตามสภาพ โดยไม่มีการรับประกันใด ๆ การใช้งานเป็นความรับผิดชอบของคุณเอง",
+    "TASlation translates with PLaMo 3 Translate 2B by Preferred Networks (PFN). Its licence is the PLaMo Community License, as revised on November 9, 2026:\n"
+    "\u2022 Personal and other non-commercial use is free, with no registration. Commercial use needs registering with PFN first (article 3).\n"
+    "\u2022 You must be 18 or older (or of age where you live), or have a parent's or guardian's consent (article 2).\n"
+    "\u2022 You are responsible for having the rights to what you put into it and to what comes out of it; the licence gives no rights to other people's works (article 9).\n"
+    "\u2022 A translation made with it may be published without a note that it is PLaMo's output, but one published as all or a large part of a book or another long publication must say that PLaMo was used. When you give a translation to someone or make it public, you must tell them that models trained on it fall under this licence (article 5). TASlation asks you not to publish translations at all.\n"
+    "\u2022 The model comes as is, without any warranty; how you use it is your responsibility (article 7).": {
+        "ja": "TASlation は Preferred Networks (PFN) の PLaMo 3 Translate 2B で翻訳します。ライセンスは PLaMo Community License（PLaMoコミュニティライセンス、2026年11月9日改定）です。\n"
+              "\u2022 個人での利用など商用以外の利用は無料で、登録も要りません。商用で使うには先に PFN への登録が必要です（第3条）。\n"
+              "\u2022 18歳以上（またはお住まいの国で成人）であるか、親権者・法定代理人の同意が必要です（第2条）。\n"
+              "\u2022 入力する内容と翻訳結果を使うのに必要な権利・許諾は、ご自身の責任で確保します。このライセンスは、他人の作品についての権利を何も与えません（第9条）。\n"
+              "\u2022 これで作った翻訳は、PLaMo の生成物である旨を書かずに公表できます。ただし、書籍などの長い公表物の全部または大部分として公表するときは、PLaMo を翻訳に使ったことを明示しなければなりません。翻訳を人に渡したり公開したりするときは、それで学習したモデルにもこのライセンスが適用されることを、相手にわかるように示さなければなりません（第5条）。TASlation は、翻訳を一切公表しないようお願いしています。\n"
+              "\u2022 モデルは現状のまま、いかなる保証もなく提供されます。使い方の責任はご自身にあります（第7条）。",
+        "es": "TASlation traduce con PLaMo 3 Translate 2B, de Preferred Networks (PFN). Su licencia es la PLaMo Community License, revisada el 9 de noviembre de 2026:\n"
+              "\u2022 El uso personal y cualquier otro uso no comercial es gratuito y sin registro. El uso comercial exige registrarse antes con PFN (artículo 3).\n"
+              "\u2022 Debes tener 18 años o más (o la mayoría de edad donde vives), o el consentimiento de tus padres o tutores (artículo 2).\n"
+              "\u2022 Eres responsable de tener los derechos sobre lo que introduces y sobre lo que sale; la licencia no da ningún derecho sobre obras ajenas (artículo 9).\n"
+              "\u2022 Una traducción hecha con él puede publicarse sin indicar que es un resultado de PLaMo, pero si se publica como la totalidad o una parte sustancial de un libro u otra publicación extensa, debe indicar que se usó PLaMo. Si das una traducción a alguien o la haces pública, debes indicarle que los modelos entrenados con ella quedan sujetos a esta licencia (artículo 5). TASlation te pide que no publiques ninguna traducción.\n"
+              "\u2022 El modelo se ofrece tal cual, sin ninguna garantía; cómo lo uses es responsabilidad tuya (artículo 7).",
+        "pt": "O TASlation traduz com o PLaMo 3 Translate 2B, da Preferred Networks (PFN). A licença dele é a PLaMo Community License, revisada em 9 de novembro de 2026:\n"
+              "\u2022 O uso pessoal e qualquer outro uso não comercial é gratuito e sem cadastro. O uso comercial exige cadastro prévio na PFN (artigo 3).\n"
+              "\u2022 Você precisa ter 18 anos ou mais (ou a maioridade onde mora), ou o consentimento dos pais ou do responsável (artigo 2).\n"
+              "\u2022 Você é responsável por ter os direitos sobre o que coloca nele e sobre o que sai dele; a licença não dá nenhum direito sobre obras de outras pessoas (artigo 9).\n"
+              "\u2022 Uma tradução feita com ele pode ser publicada sem indicar que é um resultado do PLaMo, mas, se for publicada como o todo ou uma parte substancial de um livro ou de outra publicação longa, deve informar que o PLaMo foi usado. Ao entregar uma tradução a alguém ou torná-la pública, você deve informar que modelos treinados com ela ficam sujeitos a esta licença (artigo 5). O TASlation pede que você não publique nenhuma tradução.\n"
+              "\u2022 O modelo é fornecido como está, sem nenhuma garantia; a forma como você o usa é responsabilidade sua (artigo 7).",
+        "fr": "TASlation traduit avec PLaMo 3 Translate 2B, de Preferred Networks (PFN). Sa licence est la PLaMo Community License, révisée le 9 novembre 2026 :\n"
+              "\u2022 L'usage personnel et tout autre usage non commercial est gratuit, sans inscription. Un usage commercial demande de s'inscrire d'abord auprès de PFN (article 3).\n"
+              "\u2022 Vous devez avoir 18 ans ou plus (ou être majeur là où vous vivez), ou avoir l'accord d'un parent ou d'un tuteur (article 2).\n"
+              "\u2022 Il vous revient d'avoir les droits sur ce que vous lui donnez et sur ce qui en sort ; la licence ne donne aucun droit sur les œuvres d'autrui (article 9).\n"
+              "\u2022 Une traduction faite avec lui peut être publiée sans indiquer qu'elle est produite par PLaMo, mais publiée comme tout ou partie substantielle d'un livre ou d'une autre publication longue, elle doit indiquer que PLaMo a été utilisé. Si vous remettez une traduction à quelqu'un ou la rendez publique, vous devez indiquer que les modèles entraînés avec elle relèvent de cette licence (article 5). TASlation vous demande de ne publier aucune traduction.\n"
+              "\u2022 Le modèle est fourni tel quel, sans aucune garantie ; l'usage que vous en faites relève de votre responsabilité (article 7).",
+        "de": "TASlation übersetzt mit PLaMo 3 Translate 2B von Preferred Networks (PFN). Seine Lizenz ist die PLaMo Community License in der Fassung vom 9. November 2026:\n"
+              "\u2022 Private und andere nicht kommerzielle Nutzung ist kostenlos und ohne Registrierung. Für kommerzielle Nutzung müssen Sie sich zuerst bei PFN registrieren (Artikel 3).\n"
+              "\u2022 Sie müssen mindestens 18 Jahre alt sein (oder dort, wo Sie leben, volljährig) oder die Zustimmung eines Elternteils oder Vormunds haben (Artikel 2).\n"
+              "\u2022 Sie sind dafür verantwortlich, die Rechte an dem zu haben, was Sie eingeben, und an dem, was herauskommt; die Lizenz gibt keine Rechte an Werken anderer (Artikel 9).\n"
+              "\u2022 Eine damit gemachte Übersetzung darf ohne Hinweis darauf veröffentlicht werden, dass sie eine Ausgabe von PLaMo ist; wird sie aber als Ganzes oder wesentlicher Teil eines Buchs oder einer anderen langen Veröffentlichung veröffentlicht, muss angegeben werden, dass PLaMo verwendet wurde. Wenn Sie eine Übersetzung jemandem geben oder veröffentlichen, müssen Sie darauf hinweisen, dass damit trainierte Modelle unter diese Lizenz fallen (Artikel 5). TASlation bittet Sie, Übersetzungen überhaupt nicht zu veröffentlichen.\n"
+              "\u2022 Das Modell wird so bereitgestellt, wie es ist, ohne jede Gewährleistung; wie Sie es nutzen, liegt in Ihrer Verantwortung (Artikel 7).",
+        "it": "TASlation traduce con PLaMo 3 Translate 2B di Preferred Networks (PFN). La sua licenza è la PLaMo Community License, nella revisione del 9 novembre 2026:\n"
+              "\u2022 L'uso personale e ogni altro uso non commerciale è gratuito, senza registrazione. L'uso commerciale richiede prima la registrazione presso PFN (articolo 3).\n"
+              "\u2022 Devi avere almeno 18 anni (o la maggiore età dove vivi), oppure il consenso di un genitore o tutore (articolo 2).\n"
+              "\u2022 Sei responsabile di avere i diritti su ciò che inserisci e su ciò che ne esce; la licenza non dà alcun diritto sulle opere altrui (articolo 9).\n"
+              "\u2022 Una traduzione fatta con esso può essere pubblicata senza indicare che è un risultato di PLaMo, ma se è pubblicata come tutto o parte sostanziale di un libro o di un'altra pubblicazione lunga deve dire che è stato usato PLaMo. Se dai una traduzione a qualcuno o la rendi pubblica, devi indicare che i modelli addestrati su di essa ricadono sotto questa licenza (articolo 5). TASlation ti chiede di non pubblicare alcuna traduzione.\n"
+              "\u2022 Il modello è fornito così com'è, senza alcuna garanzia; come lo usi è una tua responsabilità (articolo 7).",
+        "nl": "TASlation vertaalt met PLaMo 3 Translate 2B van Preferred Networks (PFN). De licentie is de PLaMo Community License, herzien op 9 november 2026:\n"
+              "\u2022 Persoonlijk en ander niet-commercieel gebruik is gratis, zonder registratie. Voor commercieel gebruik moet u zich eerst bij PFN registreren (artikel 3).\n"
+              "\u2022 U moet 18 jaar of ouder zijn (of meerderjarig waar u woont), of toestemming hebben van een ouder of voogd (artikel 2).\n"
+              "\u2022 U bent er zelf verantwoordelijk voor dat u de rechten hebt op wat u erin stopt en op wat eruit komt; de licentie geeft geen rechten op werk van anderen (artikel 9).\n"
+              "\u2022 Een vertaling die ermee is gemaakt, mag worden gepubliceerd zonder vermelding dat het uitvoer van PLaMo is, maar wordt ze gepubliceerd als geheel of groot deel van een boek of een andere lange publicatie, dan moet worden vermeld dat PLaMo is gebruikt. Als u een vertaling aan iemand geeft of openbaar maakt, moet u vermelden dat modellen die ermee worden getraind onder deze licentie vallen (artikel 5). TASlation vraagt u helemaal geen vertalingen te publiceren.\n"
+              "\u2022 Het model wordt geleverd zoals het is, zonder enige garantie; hoe u het gebruikt, is uw eigen verantwoordelijkheid (artikel 7).",
+        "pl": "TASlation tłumaczy za pomocą PLaMo 3 Translate 2B firmy Preferred Networks (PFN). Jego licencja to PLaMo Community License w brzmieniu zmienionym 9 listopada 2026 r.:\n"
+              "\u2022 Użytek osobisty i inny niekomercyjny jest bezpłatny i nie wymaga rejestracji. Użytek komercyjny wymaga wcześniejszej rejestracji w PFN (artykuł 3).\n"
+              "\u2022 Musisz mieć ukończone 18 lat (lub być pełnoletni tam, gdzie mieszkasz) albo mieć zgodę rodzica lub opiekuna (artykuł 2).\n"
+              "\u2022 Sam odpowiadasz za to, by mieć prawa do tego, co do niego wprowadzasz, i do tego, co z niego wychodzi; licencja nie daje żadnych praw do cudzych utworów (artykuł 9).\n"
+              "\u2022 Tłumaczenie wykonane za jego pomocą można opublikować bez informacji, że jest wynikiem działania PLaMo, ale tłumaczenie opublikowane jako całość lub istotna część książki albo innej długiej publikacji musi podawać, że użyto PLaMo. Gdy przekazujesz komuś tłumaczenie lub udostępniasz je publicznie, musisz zaznaczyć, że modele na nim trenowane podlegają tej licencji (artykuł 5). TASlation prosi, by w ogóle nie publikować tłumaczeń.\n"
+              "\u2022 Model jest udostępniany w obecnej postaci, bez żadnej gwarancji; za sposób jego użycia odpowiadasz sam (artykuł 7).",
+        "ru": "TASlation переводит с помощью PLaMo 3 Translate 2B от Preferred Networks (PFN). Его лицензия — PLaMo Community License в редакции от 9 ноября 2026 года:\n"
+              "\u2022 Личное и другое некоммерческое использование бесплатно и без регистрации. Для коммерческого использования нужно сначала зарегистрироваться у PFN (статья 3).\n"
+              "\u2022 Вам должно быть 18 лет или больше (или вы должны быть совершеннолетним там, где живёте), либо нужно согласие родителя или опекуна (статья 2).\n"
+              "\u2022 Вы сами отвечаете за то, чтобы у вас были права на то, что вы в него вводите, и на то, что он выдаёт; лицензия не даёт никаких прав на чужие произведения (статья 9).\n"
+              "\u2022 Перевод, сделанный с его помощью, можно публиковать без указания, что это результат работы PLaMo, но если он публикуется как вся книга или другая длинная публикация либо как их существенная часть, нужно указать, что использовалась PLaMo. Передавая перевод кому-либо или публикуя его, вы должны указать, что на модели, обученные на нём, распространяется эта лицензия (статья 5). TASlation просит вообще не публиковать переводы.\n"
+              "\u2022 Модель предоставляется как есть, без каких-либо гарантий; за то, как вы её используете, отвечаете вы (статья 7).",
+        "tr": "TASlation, Preferred Networks (PFN) tarafından geliştirilen PLaMo 3 Translate 2B ile çeviri yapar. Lisansı, 9 Kasım 2026'da revize edilen haliyle PLaMo Community License'tır:\n"
+              "\u2022 Kişisel ve diğer ticari olmayan kullanım ücretsizdir, kayıt gerekmez. Ticari kullanım için önce PFN'ye kayıt olmak gerekir (madde 3).\n"
+              "\u2022 18 yaşında veya daha büyük (ya da yaşadığınız yerde reşit) olmalı ya da ebeveyninizin veya vasinizin onayını almalısınız (madde 2).\n"
+              "\u2022 Ona verdiğiniz içerik ve ondan çıkan sonuç üzerindeki haklara sahip olmak sizin sorumluluğunuzdadır; lisans, başkalarının eserleri üzerinde hiçbir hak vermez (madde 9).\n"
+              "\u2022 Onunla yapılan bir çeviri, PLaMo'nun çıktısı olduğu belirtilmeden yayımlanabilir; ancak bir kitabın veya başka uzun bir yayının tamamı ya da büyük bir kısmı olarak yayımlanırsa PLaMo'nun kullanıldığı belirtilmelidir. Bir çeviriyi birine verir veya herkese açarsanız, onunla eğitilen modellerin bu lisansa tabi olduğunu belirtmeniz gerekir (madde 5). TASlation, çevirileri hiç yayımlamamanızı rica eder.\n"
+              "\u2022 Model olduğu gibi, hiçbir garanti olmadan sunulur; onu nasıl kullandığınız sizin sorumluluğunuzdadır (madde 7).",
+        "id": "TASlation menerjemahkan dengan PLaMo 3 Translate 2B dari Preferred Networks (PFN). Lisensinya adalah PLaMo Community License, sebagaimana direvisi pada 9 November 2026:\n"
+              "\u2022 Penggunaan pribadi dan penggunaan nonkomersial lainnya gratis, tanpa pendaftaran. Penggunaan komersial harus didaftarkan dulu ke PFN (pasal 3).\n"
+              "\u2022 Anda harus berusia 18 tahun atau lebih (atau cukup umur di tempat tinggal Anda), atau mendapat persetujuan orang tua atau wali (pasal 2).\n"
+              "\u2022 Anda bertanggung jawab memiliki hak atas apa yang Anda masukkan dan atas hasil yang keluar; lisensi ini tidak memberi hak apa pun atas karya orang lain (pasal 9).\n"
+              "\u2022 Terjemahan yang dibuat dengannya boleh dipublikasikan tanpa keterangan bahwa itu hasil PLaMo, tetapi jika dipublikasikan sebagai seluruh atau sebagian besar sebuah buku atau publikasi panjang lainnya, harus disebutkan bahwa PLaMo digunakan. Jika Anda memberikan terjemahan kepada orang lain atau memublikasikannya, Anda harus menyatakan bahwa model yang dilatih dengannya tunduk pada lisensi ini (pasal 5). TASlation meminta Anda untuk sama sekali tidak memublikasikan terjemahan.\n"
+              "\u2022 Model ini diberikan apa adanya, tanpa jaminan apa pun; cara Anda menggunakannya adalah tanggung jawab Anda (pasal 7).",
+        "vi": "TASlation dịch bằng PLaMo 3 Translate 2B của Preferred Networks (PFN). Giấy phép của nó là PLaMo Community License, bản sửa đổi ngày 9 tháng 11 năm 2026:\n"
+              "\u2022 Dùng cho cá nhân và các mục đích phi thương mại khác là miễn phí, không cần đăng ký. Dùng cho mục đích thương mại phải đăng ký với PFN trước (điều 3).\n"
+              "\u2022 Bạn phải từ 18 tuổi trở lên (hoặc đủ tuổi thành niên nơi bạn sống), hoặc được cha mẹ hay người giám hộ đồng ý (điều 2).\n"
+              "\u2022 Bạn tự chịu trách nhiệm có đủ quyền đối với nội dung bạn đưa vào và kết quả nhận được; giấy phép không trao bất kỳ quyền nào đối với tác phẩm của người khác (điều 9).\n"
+              "\u2022 Bản dịch tạo bằng nó có thể được công bố mà không cần ghi đó là kết quả của PLaMo, nhưng nếu công bố như toàn bộ hoặc phần lớn một cuốn sách hay một ấn phẩm dài khác thì phải ghi rõ đã dùng PLaMo. Khi đưa bản dịch cho người khác hoặc công khai nó, bạn phải cho họ biết rằng các mô hình được huấn luyện bằng nó cũng thuộc giấy phép này (điều 5). TASlation đề nghị bạn hoàn toàn không công bố bản dịch.\n"
+              "\u2022 Mô hình được cung cấp nguyên trạng, không có bất kỳ bảo đảm nào; bạn tự chịu trách nhiệm về cách mình sử dụng (điều 7).",
+        "zh": "TASlation 使用 Preferred Networks (PFN) 的 PLaMo 3 Translate 2B 进行翻译。其许可为 PLaMo Community License（2026 年 11 月 9 日修订版）：\n"
+              "\u2022 个人使用及其他非商业用途免费，无需注册。商业用途须先在 PFN 注册（第 3 条）。\n"
+              "\u2022 您须年满 18 岁（或达到您所在地的成年年龄），或取得父母或监护人的同意（第 2 条）。\n"
+              "\u2022 您须自行负责取得输入内容和输出结果所需的权利与许可；该许可不授予任何对他人作品的权利（第 9 条）。\n"
+              "\u2022 用它生成的译文可以不注明是 PLaMo 的输出而公开；但作为书籍或其他长篇出版物的全部或主要部分公开时，必须注明使用了 PLaMo。把译文交给他人或公开时，须让对方知道用它训练的模型也适用本许可（第 5 条）。TASlation 请您完全不要公开译文。\n"
+              "\u2022 该模型按现状提供，不附带任何保证；如何使用由您自己负责（第 7 条）。",
+        "zh-tw": "TASlation 使用 Preferred Networks (PFN) 的 PLaMo 3 Translate 2B 進行翻譯。其授權為 PLaMo Community License（2026 年 11 月 9 日修訂版）：\n"
+                 "\u2022 個人使用及其他非商業用途免費，無需註冊。商業用途須先向 PFN 註冊（第 3 條）。\n"
+                 "\u2022 您須年滿 18 歲（或達到您所在地的成年年齡），或取得父母或監護人的同意（第 2 條）。\n"
+                 "\u2022 您須自行負責取得輸入內容與輸出結果所需的權利與許可；本授權不給予任何對他人作品的權利（第 9 條）。\n"
+                 "\u2022 用它產生的譯文可以不註明是 PLaMo 的輸出而公開；但作為書籍或其他長篇出版物的全部或主要部分公開時，必須註明使用了 PLaMo。把譯文交給他人或公開時，須讓對方知道用它訓練的模型也適用本授權（第 5 條）。TASlation 請您完全不要公開譯文。\n"
+                 "\u2022 該模型依現狀提供，不附帶任何保證；如何使用由您自己負責（第 7 條）。",
+        "ko": "TASlation은 Preferred Networks (PFN)의 PLaMo 3 Translate 2B로 번역합니다. 라이선스는 PLaMo Community License(2026년 11월 9일 개정)입니다.\n"
+              "\u2022 개인 이용 등 비상업적 이용은 무료이며 등록이 필요 없습니다. 상업적으로 이용하려면 먼저 PFN에 등록해야 합니다(제3조).\n"
+              "\u2022 18세 이상(또는 거주하는 나라의 성년)이거나, 부모 또는 보호자의 동의가 있어야 합니다(제2조).\n"
+              "\u2022 입력하는 내용과 출력 결과를 사용하는 데 필요한 권리와 허락은 본인의 책임으로 확보해야 합니다. 이 라이선스는 다른 사람의 저작물에 대한 권리를 전혀 주지 않습니다(제9조).\n"
+              "\u2022 이 모델로 만든 번역은 PLaMo의 출력물이라고 밝히지 않고 공개할 수 있습니다. 다만 책이나 그 밖의 긴 출판물의 전부 또는 상당 부분으로 공개할 때는 PLaMo를 사용했음을 밝혀야 합니다. 번역을 다른 사람에게 주거나 공개할 때는 그것으로 학습한 모델에도 이 라이선스가 적용된다는 것을 상대가 알 수 있게 표시해야 합니다(제5조). TASlation은 번역을 전혀 공개하지 않기를 부탁드립니다.\n"
+              "\u2022 모델은 있는 그대로, 어떠한 보증도 없이 제공됩니다. 어떻게 사용하는지는 본인의 책임입니다(제7조).",
+        "th": "TASlation แปลด้วย PLaMo 3 Translate 2B ของ Preferred Networks (PFN) สัญญาอนุญาตของโมเดลนี้คือ PLaMo Community License ฉบับแก้ไขเมื่อวันที่ 9 พฤศจิกายน 2026:\n"
+              "\u2022 การใช้ส่วนตัวและการใช้อื่นที่ไม่ใช่เชิงพาณิชย์ใช้ได้ฟรี ไม่ต้องลงทะเบียน การใช้เชิงพาณิชย์ต้องลงทะเบียนกับ PFN ก่อน (ข้อ 3)\n"
+              "\u2022 คุณต้องมีอายุ 18 ปีขึ้นไป (หรือบรรลุนิติภาวะตามที่ที่คุณอาศัยอยู่) หรือได้รับความยินยอมจากพ่อแม่หรือผู้ปกครอง (ข้อ 2)\n"
+              "\u2022 คุณต้องรับผิดชอบเองในการมีสิทธิ์ในสิ่งที่ใส่เข้าไปและในผลลัพธ์ที่ได้ สัญญาอนุญาตนี้ไม่ให้สิทธิ์ใด ๆ ในผลงานของผู้อื่น (ข้อ 9)\n"
+              "\u2022 คำแปลที่สร้างด้วยโมเดลนี้เผยแพร่ได้โดยไม่ต้องระบุว่าเป็นผลลัพธ์ของ PLaMo แต่ถ้าเผยแพร่เป็นหนังสือหรือสิ่งพิมพ์ขนาดยาวอื่นทั้งเล่มหรือเป็นส่วนสำคัญของสิ่งพิมพ์นั้น ต้องระบุว่าใช้ PLaMo เมื่อมอบคำแปลให้ผู้อื่นหรือเผยแพร่ ต้องแจ้งให้ผู้รับทราบว่าโมเดลที่ฝึกด้วยคำแปลนั้นอยู่ภายใต้สัญญาอนุญาตนี้ด้วย (ข้อ 5) TASlation ขอให้คุณไม่เผยแพร่คำแปลเลย\n"
+              "\u2022 โมเดลนี้ให้มาตามสภาพ โดยไม่มีการรับประกันใด ๆ การใช้งานเป็นความรับผิดชอบของคุณเอง (ข้อ 7)",
     },
     "The full licence, in English and in Japanese:": {
         "ja": "ライセンスの全文（英語と日本語）:",
@@ -328,6 +345,24 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "已停止。磁碟上沒有留下任何東西。",
         "ko": "중지했습니다. 디스크에 남은 것은 없습니다.",
         "th": "หยุดแล้ว ไม่มีสิ่งใดค้างอยู่บนดิสก์",
+    },
+    "{model} could not be installed: the publisher's server refused the download or no longer has this file. Trying again will not help: update TASlation (a newer version names the current file), or look at the project's issues page. Nothing was left on the disk.": {
+        "ja": "{model} をインストールできませんでした。配布元のサーバーがダウンロードを拒否したか、このファイルをもう置いていません。もう一度試しても変わりません。TASlation を更新するか（新しい版は現在のファイルを指定しています）、プロジェクトの Issues ページをご覧ください。ディスクには何も残っていません。",
+        "es": "No se pudo instalar {model}: el servidor del editor rechazó la descarga o ya no tiene este archivo. Volver a intentarlo no servirá: actualiza TASlation (una versión más reciente indica el archivo actual) o consulta la página de incidencias (issues) del proyecto. No ha quedado nada en el disco.",
+        "pt": "Não foi possível instalar {model}: o servidor do publicador recusou o download ou não tem mais este arquivo. Tentar de novo não vai adiantar: atualize o TASlation (uma versão mais nova indica o arquivo atual) ou veja a página de issues do projeto. Nada ficou no disco.",
+        "fr": "{model} n'a pas pu être installé : le serveur de l'éditeur a refusé le téléchargement ou n'a plus ce fichier. Réessayer n'y changera rien : mettez TASlation à jour (une version plus récente indique le fichier actuel) ou consultez la page des tickets (issues) du projet. Rien n'est resté sur le disque.",
+        "de": "{model} konnte nicht installiert werden: Der Server des Anbieters hat den Download abgelehnt oder hat diese Datei nicht mehr. Ein neuer Versuch hilft nicht: Aktualisieren Sie TASlation (eine neuere Version nennt die aktuelle Datei) oder sehen Sie auf der Issues-Seite des Projekts nach. Auf dem Datenträger ist nichts zurückgeblieben.",
+        "it": "Non è stato possibile installare {model}: il server dell'editore ha rifiutato il download o non ha più questo file. Riprovare non servirà: aggiorna TASlation (una versione più recente indica il file attuale) oppure consulta la pagina delle segnalazioni (issues) del progetto. Sul disco non è rimasto nulla.",
+        "nl": "{model} kon niet worden geïnstalleerd: de server van de uitgever weigerde de download of heeft dit bestand niet meer. Opnieuw proberen helpt niet: werk TASlation bij (een nieuwere versie noemt het huidige bestand) of kijk op de issues-pagina van het project. Er is niets op de schijf achtergebleven.",
+        "pl": "Nie udało się zainstalować {model}: serwer wydawcy odmówił pobrania albo nie ma już tego pliku. Ponowna próba nic nie da: zaktualizuj TASlation (nowsza wersja wskazuje aktualny plik) albo zajrzyj na stronę zgłoszeń (issues) projektu. Na dysku nic nie zostało.",
+        "ru": "Не удалось установить {model}: сервер издателя отказал в загрузке или этого файла у него больше нет. Повторная попытка не поможет: обновите TASlation (в более новой версии указан текущий файл) или загляните на страницу issues проекта. На диске ничего не осталось.",
+        "tr": "{model} kurulamadı: yayıncının sunucusu indirmeyi reddetti ya da bu dosya artık onda yok. Yeniden denemek işe yaramaz: TASlation'ı güncelleyin (daha yeni bir sürüm güncel dosyayı belirtir) ya da projenin issues sayfasına bakın. Diskte hiçbir şey kalmadı.",
+        "id": "{model} tidak dapat dipasang: server penerbit menolak unduhan atau tidak lagi memiliki berkas ini. Mencoba lagi tidak akan membantu: perbarui TASlation (versi yang lebih baru menyebut berkas yang berlaku) atau lihat halaman issues proyek. Tidak ada yang tertinggal di disk.",
+        "vi": "Không cài đặt được {model}: máy chủ của nhà phát hành đã từ chối tải xuống hoặc không còn tệp này. Thử lại cũng không giúp được: hãy cập nhật TASlation (phiên bản mới hơn chỉ định tệp hiện hành) hoặc xem trang issues của dự án. Không có gì còn sót lại trên ổ đĩa.",
+        "zh": "无法安装 {model}：发布方的服务器拒绝了下载，或已不再提供此文件。重试也没有用：请更新 TASlation（较新的版本指定了当前的文件），或查看项目的 issues 页面。磁盘上没有留下任何东西。",
+        "zh-tw": "無法安裝 {model}：發布方的伺服器拒絕了下載，或已不再提供此檔案。重試也沒有用：請更新 TASlation（較新的版本指定了目前的檔案），或查看專案的 issues 頁面。磁碟上沒有留下任何東西。",
+        "ko": "{model}을(를) 설치하지 못했습니다. 배포처의 서버가 다운로드를 거부했거나 이 파일이 더 이상 없습니다. 다시 시도해도 소용없습니다. TASlation을 업데이트하거나(새 버전은 현재 파일을 지정합니다) 프로젝트의 issues 페이지를 확인하세요. 디스크에 남은 것은 없습니다.",
+        "th": "ติดตั้ง {model} ไม่ได้: เซิร์ฟเวอร์ของผู้เผยแพร่ปฏิเสธการดาวน์โหลด หรือไม่มีไฟล์นี้แล้ว ลองอีกครั้งก็ไม่ช่วย: อัปเดต TASlation (เวอร์ชันใหม่กว่าระบุไฟล์ปัจจุบัน) หรือดูหน้า issues ของโปรเจกต์ ไม่มีสิ่งใดค้างอยู่บนดิสก์",
     },
     "{model} could not be installed. Check the network and the disk space, and try again. Nothing was left on the disk.": {
         "ja": "{model} をインストールできませんでした。ネットワークとディスクの空きを確認して、もう一度お試しください。ディスクには何も残っていません。",

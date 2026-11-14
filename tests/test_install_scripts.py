@@ -1235,6 +1235,16 @@ def test_python_is_not_installed_after_a_no(tmp_path):
 
 READER_NEVER_SEES = (".venv", "winget", "ollama pull", "setup_models", "doctor", "editable", "CUDA", "config.py",
                      "> python", "python.exe", "PyTorch", "backup")
+NOT_READY = "TASlation cannot translate yet: run install.cmd again."  # the end's line when it cannot, by default
+OLLAMA_NOT_RUNNING = ("TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or "
+                      "restart the PC), then run install.cmd again.")
+REFUSED_AT_THE_END = ("TASlation cannot translate yet: the translation model's file is not available from its "
+                      "publisher. Update TASlation (download its newest copy and run update.cmd), or see the project's "
+                      "issues page.")
+
+
+def _last_line(out: str) -> str:
+    return [line for line in out.splitlines() if line.strip()][-1]
 
 
 @pytest.mark.skipif(sys.prefix == sys.base_prefix, reason="needs a virtual environment's launcher to copy")
@@ -1251,7 +1261,7 @@ def test_a_whole_install_says_nothing_of_its_insides_and_ends_ready(tmp_path, ol
                   "Ollama and the translation model", "Final check"):
         assert title in out
     assert out.index("Final check") < out.index("ok: ready") < out.index("TASlation is installed.")
-    assert "Version: 0.1.0, files dated " in out and "Translating is not ready" not in out
+    assert "Version: 0.1.0, files dated " in out and "cannot translate yet" not in out
     assert (tmp_path / "start menu" / "TASlation.lnk").is_file()
     assert not (tmp_path / "bin" / "ollama-args.txt").exists()  # setup_models.py installs the translator
     reading, translator = (co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()
@@ -1272,7 +1282,7 @@ def test_what_is_missing_is_all_the_final_check_shows(tmp_path, ollama_server):
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
     assert "NOT INSTALLED" in out and "Config file" not in out and "Result:" not in out
-    assert "Translating is not ready yet: run install.cmd again." in out
+    assert NOT_READY in out
     assert "TASlation is installed." not in out
 
 
@@ -1286,9 +1296,78 @@ def test_a_no_to_ollama_ends_not_ready_and_points_at_the_installer(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
     assert "Ollama is not installed. To add it, run install.cmd again." in out
-    assert "Translating is not ready yet: run install.cmd again." in out
+    assert NOT_READY in out
     assert "Download the translation model" not in out and "ollama pull" not in out
     assert not (tmp_path / "bin" / "winget-args.txt").exists()
+
+
+def _setup_ending(co: Path, reading: int, translator: int) -> None:
+    """A stand-in setup_models.py that ends with *reading* for the reading model and fonts, *translator* for the
+    translator model (writing its arguments down as `_whole_install`'s)."""
+    (co / "setup_models.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        'with open(Path(__file__).with_name("setup-args.txt"), "a") as f:\n    f.write(" ".join(sys.argv[1:]) + "\\n")\n'
+        f"sys.exit({translator} if '--translator-for' in sys.argv else {reading})\n")
+
+
+@needs_venv
+def test_with_warnings_the_last_line_still_says_it_cannot_translate_yet(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path, doctor="Ollama: model missing", doctor_code=1)
+    _ollama_at(co / "install.ps1", ollama_server)  # the model is not there yet
+    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
+    _setup_ending(co, 0, 1)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr  # what is done is kept: the run ends with 0 all the same
+    out = r.stdout
+    assert "  - The translation model was not installed (exit code 1): run install.cmd again." in out
+    assert out.index(NOT_READY) < out.index("1 warning(s):") < out.rindex(NOT_READY)
+    assert _last_line(out).strip() == NOT_READY and out.count(NOT_READY) == 2
+
+
+@needs_venv
+def test_a_translation_model_the_server_refuses_says_running_again_will_not_help(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path, doctor="Ollama: model missing", doctor_code=1)
+    _ollama_at(co / "install.ps1", ollama_server)
+    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
+    _setup_ending(co, 0, 5)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert ("  - The translation model was not installed: the publisher's server refused the download or no longer "
+            "has the file. Running install.cmd again will not help: update TASlation (download its newest copy and run "
+            "update.cmd), or see the project's issues page.") in out
+    assert "exit code 5" not in out and NOT_READY not in out
+    assert _last_line(out).strip() == REFUSED_AT_THE_END
+
+
+@needs_venv
+def test_a_reading_model_the_server_refuses_stops_the_install_with_what_to_do(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    _setup_ending(co, 5, 0)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert ("error: the reading model or the fonts did not download: the server refused them or no longer has the "
+            "files. Running install.cmd again will not help") in r.stdout
+    assert "Check the network" not in r.stdout and "[6/7]" not in r.stdout
+
+
+@needs_venv
+def test_an_ollama_that_does_not_start_says_so_at_the_import_and_at_the_end(tmp_path):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path, doctor="Ollama: not reachable", doctor_code=1)
+    _override(co / "install.ps1", "function Start-OllamaServer([string]$Exe) { return '' }")  # nothing answers
+    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert ("  - Ollama did not start, so the translation model was not installed. Start Ollama from the Start menu "
+            "(or restart the PC), then run install.cmd again.") in out
+    assert len((co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()) == 1  # the reading part
+    assert _last_line(out).strip() == OLLAMA_NOT_RUNNING
 
 
 @pytest.mark.skipif(sys.prefix == sys.base_prefix, reason="needs a virtual environment's launcher to copy")
@@ -1642,8 +1721,104 @@ def test_ollama_is_given_as_long_as_the_install_gives_it():
     from taslation import ollama_start
 
     assert ollama_start.START_WAIT_S == 30
-    assert "$i -lt 30" in (ROOT / "install.ps1").read_text(encoding="ascii")
+    assert "$OllamaStartWaitS = 30 " in (ROOT / "install.ps1").read_text(encoding="ascii")
 
+
+def _start_ollama(tmp: Path, *, app: bool = True, app_works: bool = True, serve_works: bool = True,
+                  running: bool = False, stopped: bool | None = None) -> tuple[str, list[str]]:
+    """Start-OllamaServer taken out of install.ps1 (Restart-Ollama when *stopped* says whether Ollama's processes
+    were stopped), with fakes: Ollama's folder with or without its app, a server that answers already (*running*), or
+    after the app (*app_works*) or after ``ollama serve`` (*serve_works*); nothing is started, no time is waited.
+    What it returned, and what it said and would have started, in order."""
+    folder = tmp / "Ollama"
+    folder.mkdir()
+    (folder / "ollama.exe").write_text("")
+    if app:
+        (folder / "ollama app.exe").write_text("")
+
+    def ps(value: bool) -> str:
+        return "$true" if value else "$false"
+
+    command = (
+        _functions("Start-OllamaServer", "Wait-OllamaServer", "Restart-Ollama")
+        + f"$OllamaStartWaitS = 0.3; $global:up = {ps(running)}; "
+        "function T([string]$Text) { $Text }; "
+        "function Write-Info([string]$Text) { Write-Host \"info: $Text\" }; "
+        "function Write-Ok([string]$Text) { Write-Host \"ok: $Text\" }; "
+        "function Write-Detail([string]$Text) { }; "
+        "function Start-Sleep { }; "
+        "function Test-OllamaServer { return $global:up }; "
+        f"function Stop-OllamaProcesses([string]$Folder) {{ Write-Host \"stopped: $Folder\"; return {ps(bool(stopped))} }}; "
+        "function Start-Process { param($FilePath, $ArgumentList, $WindowStyle) "
+        "Write-Host (\"started: \" + (Split-Path -Leaf $FilePath) + \" $ArgumentList $WindowStyle\").TrimEnd(); "
+        f"if ($FilePath -like '*ollama app.exe') {{ $global:up = {ps(app_works)} }} else {{ $global:up = {ps(serve_works)} }} }}; "
+        + ("$r = Restart-Ollama" if stopped is not None else "$r = Start-OllamaServer")
+        + f" '{folder / 'ollama.exe'}'; Write-Host \"returned: [$r]\""
+    )
+    r = _ps(RUN_SHELL, command)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
+    assert lines[-1].startswith("returned: [")
+    return lines[-1][len("returned: ["):-1], lines[:-1]
+
+
+APP_STARTED = "ok: Ollama started, with its app"
+SERVE_STARTED = "ok: Ollama started, as ollama serve in a hidden window (it runs until you sign out)"
+FELL_BACK_TO_SERVE = ("info: Ollama's app did not bring its server up within 0.3 seconds: the server is started by "
+                      "itself (ollama serve, in a hidden window).")
+
+
+def test_an_ollama_that_answers_is_left_as_it_is(tmp_path):
+    assert _start_ollama(tmp_path, running=True) == ("running", [])
+
+
+def test_ollama_s_app_starts_the_server_and_the_run_says_so(tmp_path):
+    assert _start_ollama(tmp_path) == ("app", ["info: Starting Ollama.", "started: ollama app.exe", APP_STARTED])
+
+
+def test_when_the_app_brings_no_server_up_ollama_serve_is_started_hidden(tmp_path):
+    assert _start_ollama(tmp_path, app_works=False) == (
+        "serve", ["info: Starting Ollama.", "started: ollama app.exe", FELL_BACK_TO_SERVE,
+                  "started: ollama.exe serve Hidden", SERVE_STARTED])
+
+
+def test_without_the_app_ollama_serve_is_started_hidden_at_once(tmp_path):
+    assert _start_ollama(tmp_path, app=False) == (
+        "serve", ["info: Starting Ollama.", "started: ollama.exe serve Hidden", SERVE_STARTED])
+
+
+def test_a_server_that_answers_neither_way_is_said_by_an_empty_answer_and_no_ok(tmp_path):
+    result, said = _start_ollama(tmp_path, app_works=False, serve_works=False)
+    assert result == "" and not [line for line in said if line.startswith("ok:")]
+    assert said[-1] == "started: ollama.exe serve Hidden"
+
+
+@pytest.mark.parametrize("stopped, result", [(False, "not running"), (True, "app")])
+def test_a_restart_says_whether_the_server_answers_again(tmp_path, stopped, result):
+    got, said = _start_ollama(tmp_path, stopped=stopped)
+    assert got == result and said[0] == f"stopped: {tmp_path / 'Ollama'}"
+    if not stopped:  # no Ollama ran: it reads the settings when it starts, nothing is started
+        assert said == [f"stopped: {tmp_path / 'Ollama'}"]
+
+
+def test_a_restart_whose_server_does_not_answer_again_says_so(tmp_path):
+    assert _start_ollama(tmp_path, stopped=True, app_works=False, serve_works=False)[0] == ""
+
+
+@needs_venv
+def test_an_ollama_that_does_not_start_again_after_its_settings_gets_a_warning_not_an_ok(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_whole_install(co, tmp_path, doctor="Ollama: not reachable", doctor_code=1))
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    _override(co / "install.ps1", "function Restart-Ollama([string]$OllamaPath) { return '' }")  # as on the runner
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert CACHE_RAM_SAID[0] in out and CACHE_RAM_DONE not in out
+    assert ("  - Ollama was stopped to read its new settings and did not start again. Start Ollama from the Start "
+            "menu, or restart the PC: the settings are saved and apply from its next start.") in out
+    assert _last_line(out).strip() == OLLAMA_NOT_RUNNING and out.count(OLLAMA_NOT_RUNNING) == 2
+    assert "TASlation is installed." not in out
 
 # ---- the translator model the language needs
 

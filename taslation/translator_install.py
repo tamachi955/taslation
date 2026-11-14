@@ -38,35 +38,50 @@ from .translate.models import AUTO, PLAMO, QWEN, TranslatorModel, by_ollama_name
 
 MODELS: tuple[TranslatorModel, ...] = (PLAMO, QWEN)
 
-# PLaMo 3 Translate 2B, GGUF (Q4_K_M, the card's default), from this revision of the repository only
+# PLaMo 3 Translate 2B, GGUF (Q4_K_M, the card's default), from this revision of the repository only (2026-11-09: the
+# chat template in system messages, the licence as revised on November 9, 2026). The file of the revision pinned
+# before, f2b4599d (sha256 2c288ecc...c4cc060787, 1,807,192,480 bytes), is refused by Hugging Face's storage since
+# then; its tensors and every other metadata key are those of this file byte for byte, only the embedded chat template
+# differs (10,560 bytes), and TASlation sends its prompts raw, without that template: a model imported from it stays
+# as it is and translates the same (504 OpenMantra lines, 445 requests, the same answer to each, 2026-11-14).
 PLAMO_REPO = "pfnet/plamo-3-translate-2b-GGUF"
-PLAMO_REVISION = "f2b4599dff9b3e45c62567eac15e83186b4cb64e"
+PLAMO_REVISION = "4f672106b847200bfdc0f6af6c321cd94eba1aed"
 PLAMO_FILE = "plamo-3-translate-2b-Q4_K_M.gguf"
-PLAMO_SHA256 = "2c288ecc7ebfe60c3561726580da3583767f3c41ca3ef5c6825bf6c4cc060787"
-PLAMO_BYTES = 1_807_192_480
+PLAMO_SHA256 = "1ffd9073afcc70e35ccc942428aa2b73d7aa2b9ea779bf504b775369e0276c13"
+PLAMO_BYTES = 1_807_203_040
 PLAMO_DIRNAME = "plamo-3-translate-2b"  # its folder under the models folder: the Modelfile and the licence's texts
 PLAMO_NUM_CTX = 16384  # the context the window's whole-book requests need (the card trained 32K)
 PLAMO_STOPS = ("<|plamo:tag|>", "<|plamo:bos|>")  # where a translation ends (the card's Completions examples)
-# the licence, in the two languages the repository has it in (path in the repository, sha256, file name kept)
+# the licence, in the two languages the repository has it in (path in the repository, sha256, file name kept): the
+# texts at the pinned revision, "Established on February 25, 2025 / Revised on November 9, 2026"
 PLAMO_LICENCE = "plamo-community-license"
+PLAMO_LICENCE_REVISED = "November 9, 2026"  # the revision the summaries below describe (`PLAMO_TERMS`, the window's)
 PLAMO_LICENCE_FILES = (
-    ("LICENSE/en", "d9979039b8f1a96fa81e1be61c4550d06f8542b25119e3f765c7c011a68597fb", "PLaMo-Community-License-en.txt"),
-    ("LICENSE/ja", "988b37b0b21ca130ad84a092429e4e5bceec5f86dfe85a8ca3e06ea703b960ca", "PLaMo-Community-License-ja.txt"),
+    ("LICENSE/en", "ca0c5e90f6de6799fc2d2d4f2b2647cc088444c19f286f689e525d4ad28f9ed6", "PLaMo-Community-License-en.txt"),
+    ("LICENSE/ja", "7dd74339bbf9a39fe33e271a89657aacf06f452b082fcb1273fb792b8d6b7db2", "PLaMo-Community-License-ja.txt"),
 )
 PLAMO_LICENCE_URLS = ("https://plamo.preferredai.jp/info/plamo-community-license-en",
                       "https://plamo.preferredai.jp/info/plamo-community-license-ja")
 # a GGUF on the disk and its copy in Ollama's folder, for a moment both (the GGUF is deleted after the import)
 PLAMO_ROOM_GB = 2 * PLAMO_BYTES / 1e9 + 0.2
-CREDIT = "Built with PLaMo"  # the licence's article 4: in the window (About) and the README
-# what the person agrees to, in plain words (the console's; the window's is in its language, locales/features)
+# the licence's article 4 (1) (ii), for whoever provides the model or a model made from it to others: in the window
+# (About) and the README
+CREDIT = "Built with PLaMo"
+# what the person agrees to, in plain words, with the articles of the revised text (the console's; the window's is in
+# its language, locales/features/translator_models.py; install.ps1 has its own copy)
 PLAMO_TERMS = f"""TASlation translates with PLaMo 3 Translate 2B by Preferred Networks (PFN), about 1.8 GB, into every
-language but Portuguese (Brazil) and Turkish. Its licence is the PLaMo Community License:
+language but Portuguese (Brazil) and Turkish. Its licence is the PLaMo Community License, as revised on
+{PLAMO_LICENCE_REVISED}:
   * personal and other non-commercial use is free, with no registration;
-    commercial use needs registering with PFN first;
-  * you must be 18 or older (or of age where you live), or have a parent's or guardian's consent;
-  * a translation made with it may be published only with a clear note that it is PLaMo's output
-    (article 5); TASlation asks you not to publish translations at all;
-  * the model comes as is, without any warranty; how you use it is your responsibility.
+    commercial use needs registering with PFN first (article 3);
+  * you must be 18 or older (or of age where you live), or have a parent's or guardian's consent (article 2);
+  * you are responsible for having the rights to what you put into it and to what comes out of it;
+    the licence gives no rights to other people's works (article 9);
+  * a translation made with it may be published without a note that it is PLaMo's output, but one
+    published as all or a large part of a book or another long publication must say that PLaMo was
+    used; when you give a translation to someone or make it public, you must tell them that models
+    trained on it fall under this licence (article 5); TASlation asks you not to publish translations at all;
+  * the model comes as is, without any warranty; how you use it is your responsibility (article 7).
 The full licence, in English and in Japanese:
   {PLAMO_LICENCE_URLS[0]}
   {PLAMO_LICENCE_URLS[1]}"""
@@ -75,6 +90,10 @@ RECORD_FILE = "translator_models.json"
 PROGRESS_PREFIX = "@taslation "  # a line of setup_models.py --progress: this, then one JSON object
 CANCELLED = 3  # setup_models.py's exit code for an install that was stopped (nothing left behind)
 NO_ROOM = 4  # ... for too little disk space (nothing downloaded)
+# ... for a download the server refused or no longer has (HTTP `REFUSED_HTTP`): trying again does not help, a newer
+# TASlation that names the current file does (install.ps1 says so, and the window)
+REFUSED = 5
+REFUSED_HTTP = frozenset({401, 403, 404, 410})
 CANCEL_WAIT_S = 20.0  # how long a stopped install has to clean up before its process is ended
 
 
@@ -416,7 +435,8 @@ def parse_progress(line: str) -> dict[str, Any] | None:
 
 @dataclass
 class Outcome:
-    """How an install ended: "done", "cancelled", "failed" or "no_room" (*detail*: what setup_models.py said last)."""
+    """How an install ended: "done", "cancelled", "failed", "no_room" or "refused" (the server refused the file or no
+    longer has it: `REFUSED`) (*detail*: what setup_models.py said last)."""
 
     state: str
     detail: str = ""
@@ -501,6 +521,8 @@ class Installer:
         self._clean(exe, before)
         if code == NO_ROOM:
             return Outcome("no_room", str(self.last.get("text", "")))
+        if code == REFUSED:
+            return Outcome("refused", str(self.last.get("text", "")))
         return Outcome("failed", str(self.last.get("text", "")) or f"exit code {code}")
 
     def _end_if_stuck(self) -> None:
