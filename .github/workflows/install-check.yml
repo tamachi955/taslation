@@ -355,7 +355,8 @@ jobs:
               } while ($more.Count -gt 0)
               Write-Host "Ollama's processes $When`:"
               foreach ($p in $ours) {
-                  $kind = 'model'
+                  $kind = 'other'  # (the app's own helpers, such as the web view its window is drawn with)
+                  if ($p.Name -imatch '^(llama-server|ollama)(\.exe)?$') { $kind = 'model' }
                   if ($p.Name -ieq 'ollama app.exe') { $kind = 'app' }
                   elseif ($p.Name -ieq 'ollama.exe' -and "$($p.CommandLine)" -match '\sserve(\s|$)') { $kind = 'server' }
                   $value = $null
@@ -446,12 +447,13 @@ jobs:
               'delete .venv' = "delete the virtual environment ($InstallDir\.venv,"
               'delete models' = "delete the OCR model and fonts ($InstallDir\models,"
               'delete the Start-menu shortcut' = 'delete the Start-menu shortcut '
-              "remove $TranslatorModel from Ollama" = "ollama rm $TranslatorModel"
               'clear LLAMA_ARG_CACHE_RAM' = 'clear LLAMA_ARG_CACHE_RAM for this user'
           }
           foreach ($what in $would.Keys) {
               Add-Check $step "it would $what" ($text.Contains("dry run, would: $($would[$what])"))
           }
+          # (-Yes answers no to removing the translation model, as to the data folder and Ollama: it is left in place)
+          Add-Check $step "it would leave $TranslatorModel in Ollama (-Yes keeps it)" ($text.Contains("- the Ollama model $TranslatorModel (remove it later: ollama rm $TranslatorModel)"))
           Add-Check $step 'and it deletes nothing' ((Test-Path -LiteralPath $VenvPy) -and ((Get-UserVariable 'LLAMA_ARG_CACHE_RAM') -eq '0'))
           Complete-Step $step
 
@@ -473,9 +475,9 @@ jobs:
           Add-Check $step 'the marker .cache-ram-by-install is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.cache-ram-by-install')))
           $models = Get-OllamaModels
           if ($null -eq $models) {
-              Add-Check $step "the translation model is removed from Ollama" $null 'the Ollama server does not answer'
+              Add-Check $step "the translation model stays in Ollama (-Yes keeps it)" $null 'the Ollama server does not answer'
           } else {
-              Add-Check $step "the translation model is removed from Ollama" (@($models | Where-Object { $_ -like "$TranslatorModel*" }).Count -eq 0)
+              Add-Check $step "the translation model stays in Ollama (-Yes keeps it)" (@($models | Where-Object { $_ -like "$TranslatorModel*" }).Count -gt 0)
           }
           # what -Yes keeps: a run nobody watches destroys no translations, and leaves Ollama itself
           Add-Check $step 'the data folder ~/.taslation stays (-Yes keeps it)' (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.taslation'))
