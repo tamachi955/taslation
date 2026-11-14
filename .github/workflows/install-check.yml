@@ -1,7 +1,10 @@
 # The install check: TASlation installed from scratch on a fresh Windows runner, the way a person with a clean PC
 # installs it (the repository as GitHub's "Download ZIP" gives it, then install.cmd), and then shown to work, one step
-# per fact. Started by hand only (Actions > Install check > Run workflow): it downloads about 5 GB and takes about half
-# an hour, so it never runs on a push or a pull request.
+# per fact. Started by hand (Actions > Install check > Run workflow) and once a week by itself: the files the installer
+# downloads are other people's, and one that is changed or withdrawn there (as the translation model's was) stops every
+# new installation until this repository follows. It downloads about 5 GB and takes about half an hour, so it never
+# runs on a push or a pull request. GitHub tells the repository's owner by e-mail when the weekly run fails, and stops
+# the weekly runs of a repository without activity for 60 days (Actions then offers to start them again).
 #
 # Each check is printed as "ok", "FAILED" or "not shown" (what cannot be shown on a runner), a failed one fails its
 # step, and the job summary lists them all with the times and sizes, and what this check does not cover. The console
@@ -11,6 +14,8 @@
 name: Install check
 
 on:
+  schedule:
+    - cron: '0 22 * * 0'  # Sunday 22:00 UTC, Monday 07:00 in Japan
   workflow_dispatch:
     inputs:
       hide_python:
@@ -111,6 +116,7 @@ jobs:
           $step = 'winget'
           $route = 'winget'
           $hide = '${{ inputs.hide_python }}'
+          if (-not $hide) { $hide = 'true' }  # (the weekly run has no inputs: as on a clean PC)
           if (-not (Get-Command winget -CommandType Application -ErrorAction SilentlyContinue)) {
               $apps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
               if (Test-Path -LiteralPath (Join-Path $apps 'winget.exe')) {

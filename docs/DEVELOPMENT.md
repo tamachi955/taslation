@@ -115,7 +115,9 @@ carry the PLaMo credit and the download sizes.
 
 `.github/workflows/install-check.yml` installs TASlation from scratch on a fresh Windows runner of GitHub
 (`windows-2025`: Windows Server 2025, which has winget, and no GPU) and shows that it works. It is started by hand
-only (Actions > Install check > Run workflow): it downloads about 5 GB and takes about half an hour. It unpacks the
+(Actions > Install check > Run workflow) and once a week by itself (Monday 07:00 in Japan), so that a file withdrawn
+or changed where the installer downloads it is noticed within days; it downloads about 5 GB and takes about half an
+hour. GitHub e-mails the owner when the weekly run fails, and stops weekly runs after 60 days without activity. It unpacks the
 repository as "Download ZIP" gives it (`git archive`, so `.gitattributes` applies), hides the runner's own Python from
 the installer (the input `hide_python`), and runs `install.cmd -Yes` in it. Then it checks, one step each, what the
 installer made (`.venv`, the three OCR models, the translation model in Ollama, `LLAMA_ARG_CACHE_RAM=0` for the user

@@ -43,10 +43,12 @@ def _install_ps1(name: str) -> str:
     return m.group(1)
 
 
-def test_it_is_started_by_hand_only_and_may_only_read_the_repository():
+def test_it_is_started_by_hand_or_weekly_and_may_only_read_the_repository():
     wf = _workflow()
     on = wf.get("on", wf.get(True))  # (YAML 1.1 reads the key `on` as true)
-    assert list(on) == ["workflow_dispatch"]
+    assert sorted(on) == ["schedule", "workflow_dispatch"]  # never a push or a pull request: it downloads 5 GB
+    assert on["schedule"] == [{"cron": "0 22 * * 0"}]  # once a week
+    assert "if (-not $hide) { $hide = 'true' }" in (ROOT / ".github/workflows/install-check.yml").read_text("utf-8")
     assert wf["permissions"] == {"contents": "read"}
     assert list(wf["jobs"]) == ["install-check"]
     job = wf["jobs"]["install-check"]
