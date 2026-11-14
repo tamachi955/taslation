@@ -2800,3 +2800,23 @@ def test_without_the_file_of_texts_the_questions_are_in_english(tmp_path):
     env["FAKE_UI_CULTURE"] = "ja-JP"
     r = _run(co / "install.ps1", env=env)
     assert LICENCE + " [y/N] = " in r.stdout and STOPPED in r.stdout
+
+
+@pytest.mark.parametrize("script", ["install.ps1", ".github/install-check/checks.ps1"])
+def test_the_models_of_a_stopped_ollama_are_read_from_both_manifest_folders(tmp_path, script):
+    r"""Ollama 0.40 writes a model made with `ollama create` into manifests-v2 (ollama.com\library), beside the older
+    manifests (registry.ollama.ai\library): the installer and the install check read both, each name once."""
+    store = tmp_path / "store"
+    for folder in ("manifests/registry.ollama.ai/library/older/4b", "manifests-v2/ollama.com/library/older/4b",
+                   "manifests-v2/ollama.com/library/made-here/latest", "manifests-v2/ollama.com/someone/theirs/q4",
+                   "manifests/example.org/a/b/c"):
+        path = store / folder
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", "ascii")
+    text = (ROOT / script).read_bytes().decode("ascii").replace("\r\n", "\n")
+    function = re.search(r"^function Get-StoredModels \{\n.*?^\}\n", text, re.M | re.S).group(0)
+    probe = tmp_path / "probe.ps1"
+    probe.write_text(f"$OllamaStore = '{store}'\n$env:OLLAMA_MODELS = '{store}'\n{function}Get-StoredModels\n", "ascii")
+    r = subprocess.run([RUN_SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+                       capture_output=True, encoding="utf-8", errors="replace", timeout=60, stdin=subprocess.DEVNULL)
+    assert sorted(r.stdout.split()) == ["example.org/a/b:c", "made-here:latest", "older:4b", "someone/theirs:q4"], r

@@ -143,20 +143,26 @@ function Add-LifetimeCheck([string]$Step, [string]$What, $Ok, [string]$Detail = 
 }
 
 # The models in Ollama's model folder (OLLAMA_MODELS, else ~/.ollama/models), by the names Ollama gives them, from its
-# manifests (manifests\<registry>\<namespace>\<model>\<tag>), as install.ps1 reads them while Ollama does not run.
+# manifests (<registry>\<namespace>\<model>\<tag> in manifests and, since Ollama 0.40, in manifests-v2), as install.ps1
+# reads them while Ollama does not run.
 function Get-StoredModels {
     $store = $env:OLLAMA_MODELS
     if (-not $store) { $store = Join-Path $env:USERPROFILE '.ollama\models' }
-    $manifests = Join-Path $store 'manifests'
-    if (-not (Test-Path -LiteralPath $manifests)) { return }
-    foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
-        $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
-        if ($parts.Count -ne 4) { continue }
-        $name = "$($parts[0])/$($parts[1])/$($parts[2])"
-        if ($parts[0] -eq 'registry.ollama.ai' -and $parts[1] -eq 'library') { $name = $parts[2] }
-        elseif ($parts[0] -eq 'registry.ollama.ai') { $name = "$($parts[1])/$($parts[2])" }
-        "${name}:$($parts[3])"
+    $names = @()
+    foreach ($kind in 'manifests', 'manifests-v2') {
+        $manifests = Join-Path $store $kind
+        if (-not (Test-Path -LiteralPath $manifests)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
+            $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
+            if ($parts.Count -ne 4) { continue }
+            $own = $parts[0] -eq 'registry.ollama.ai' -or $parts[0] -eq 'ollama.com'
+            $name = "$($parts[0])/$($parts[1])/$($parts[2])"
+            if ($own -and $parts[1] -eq 'library') { $name = $parts[2] }
+            elseif ($own) { $name = "$($parts[1])/$($parts[2])" }
+            $names += "${name}:$($parts[3])"
+        }
     }
+    $names | Select-Object -Unique
 }
 
 # The running processes of Ollama's program folder: its app, its server, the model's (llama-server, in lib\ollama).

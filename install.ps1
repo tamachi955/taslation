@@ -784,20 +784,27 @@ function Get-OllamaModels {
     } catch { return $null }
 }
 
-# The models in Ollama's model folder ($OllamaStore), by the names Ollama gives them, from its manifests
-# (manifests\<registry>\<namespace>\<model>\<tag>; Ollama's own library is registry.ollama.ai\library): what Ollama
-# has while its server does not run. Nothing when there is no such folder.
+# The models in Ollama's model folder ($OllamaStore), by the names Ollama gives them, from its manifests: what Ollama
+# has while its server does not run. Ollama keeps them as <registry>\<namespace>\<model>\<tag> in two folders:
+# manifests (its library is registry.ollama.ai\library there) and, since Ollama 0.40, manifests-v2 (ollama.com\library),
+# where a model made with `ollama create` goes. Nothing when there is neither.
 function Get-StoredModels {
-    $manifests = Join-Path $OllamaStore 'manifests'
-    if (-not (Test-Path -LiteralPath $manifests)) { return }
-    foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
-        $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
-        if ($parts.Count -ne 4) { continue }
-        $name = "$($parts[0])/$($parts[1])/$($parts[2])"
-        if ($parts[0] -eq 'registry.ollama.ai' -and $parts[1] -eq 'library') { $name = $parts[2] }
-        elseif ($parts[0] -eq 'registry.ollama.ai') { $name = "$($parts[1])/$($parts[2])" }
-        "${name}:$($parts[3])"
+    $store = $OllamaStore
+    $names = @()
+    foreach ($kind in 'manifests', 'manifests-v2') {
+        $manifests = Join-Path $store $kind
+        if (-not (Test-Path -LiteralPath $manifests)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
+            $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
+            if ($parts.Count -ne 4) { continue }
+            $own = $parts[0] -eq 'registry.ollama.ai' -or $parts[0] -eq 'ollama.com'
+            $name = "$($parts[0])/$($parts[1])/$($parts[2])"
+            if ($own -and $parts[1] -eq 'library') { $name = $parts[2] }
+            elseif ($own) { $name = "$($parts[1])/$($parts[2])" }
+            $names += "${name}:$($parts[3])"
+        }
     }
+    $names | Select-Object -Unique
 }
 
 function Test-HasModel([object[]]$Installed, [string]$Name) {
