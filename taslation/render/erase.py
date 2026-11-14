@@ -48,6 +48,9 @@ LEAK_BEYOND = 20  # px of a cut-off part lying beyond the mask's reach that make
 LEAK_GROUND = 12  # px of a cut-off part from which its ground, when it is not the bubble's paper, makes it so too
 LETTER_SHARE = 0.1  # glyph-sized ink in the text box, a tenth of a glyph's square, makes a cut-off part lettering
 LEAK_MIN = 60  # px: a closing that cuts off less than this from the lettering seals nothing worth taking out
+RECT_WHOLE = 0.97  # a reader's rectangle whose paper is this much of it lies within the paper: wiped whole
+RECT_LETTER_SIDE, RECT_LETTER_AREA = 5, 8  # px: a dark piece at least so long and so large may be lettering
+RECT_OUTSIDE = 0.5  # lettering beyond the paper, this share of the lettering on it: the rectangle is wiped as drawn
 
 # (light, x, y, w, h, the piece's own pixels and the piece with its holes, both in its box) -> lettering or not
 PieceTest = Callable[[bool, int, int, int, int, np.ndarray, np.ndarray], bool]
@@ -209,6 +212,48 @@ def within_outline(image: np.ndarray, region: TextRegion, mask: np.ndarray, dark
             return mask
         return kept
     return mask
+
+
+def within_paper(crop: np.ndarray, mask: np.ndarray, dark_threshold: int = 140) -> np.ndarray:
+    """The part of a reader's rectangle on a light ground that is wiped (*mask*: bool, the rectangle).
+
+    A rectangle the reader drew, or a region they resized or moved (which is a rectangle of theirs from then on),
+    may reach across a bubble's outline onto the drawing: wiped whole, the outline and the drawing inside it went
+    white. The paper the lettering stands on is the largest piece of the rectangle that is not ink, with what it
+    encloses (the lettering); a line that runs from one edge of the rectangle to another (the bubble's outline, a
+    panel's border) encloses nothing and stays, with a pixel of its anti-aliasing, and so does what lies beyond it.
+
+    *mask* is returned as it is, and the rectangle wiped as drawn, when the paper is nearly all of it
+    (`RECT_WHOLE`: the rectangle lies within a bubble or on the page's ground), when the paper is less than a third
+    of it or holds no lettering (lettering set on the drawing), and when there is lettering beyond the paper too
+    (`RECT_OUTSIDE`: a line of text across the outline, a caption on both sides of a border)."""
+    total = int(mask.sum())
+    if not total:
+        return mask
+    gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
+    ink = (gray < dark_threshold) & mask
+    n, free = cv2.connectedComponents((mask & ~ink).astype(np.uint8), connectivity=4)
+    if n < 2:
+        return mask
+    sizes = np.bincount(free.ravel(), minlength=n)
+    sizes[0] = 0
+    paper = fill_holes((free == int(np.argmax(sizes))).astype(np.uint8) * 255) > 0
+    if int(paper.sum()) >= RECT_WHOLE * total or int(paper.sum()) < total / 3:
+        return mask
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8), connectivity=8)
+    h, w = mask.shape
+    at_edge = (stats[:, 0] == 0) | (stats[:, 1] == 0) | (stats[:, 0] + stats[:, 2] >= w) | (stats[:, 1] + stats[:, 3] >= h)
+    letters = (~at_edge & (np.maximum(stats[:, 2], stats[:, 3]) >= RECT_LETTER_SIDE)
+               & (stats[:, 4] >= RECT_LETTER_AREA))
+    letters[0] = False
+    on_paper = np.bincount(labels[paper].ravel(), minlength=count) > 0
+    inside = int(stats[letters & on_paper, 4].sum())
+    outside = int(stats[letters & ~on_paper, 4].sum())
+    if not inside or outside > RECT_OUTSIDE * inside:
+        return mask
+    lines = cv2.dilate((ink & ~paper).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    kept = paper & ~lines
+    return kept if int(kept.sum()) >= total / 3 else mask
 
 
 FILL_SIGMAS = (1.5, 3.0, 6.0, 12.0, 24.0)  # px: the ground a stroke is painted from, nearest first
@@ -525,6 +570,8 @@ def _erase(image: np.ndarray, crop: np.ndarray, region: TextRegion, mask: np.nda
            white_threshold: int, dark_threshold: int, dark: bool) -> tuple[int, int, int]:
     """`erase_region` in the modes "fill" and "inpaint" (see the module's docstring)."""
     inside = within_outline(image, region, mask > 0, dark_threshold, dark)
+    if region.kind == "manual":  # the reader's rectangle on a light ground: not past a bubble's outline
+        inside = within_paper(crop, inside, dark_threshold)
     cut = not np.array_equal(inside, mask > 0)
     bg = paper_colour(crop, inside, dark)
     if region.kind in STRAY_KINDS and region.text_box is not None:
@@ -537,7 +584,7 @@ def _erase(image: np.ndarray, crop: np.ndarray, region: TextRegion, mask: np.nda
     if mode == "inpaint":
         _inpaint(crop, inside.astype(np.uint8) * 255, dark_threshold, dark)
     elif region.kind in MANUAL_KINDS:
-        crop[inside] = bg  # the reader's own rectangle: wiped, as drawn
+        crop[inside] = bg  # the reader's own rectangle: wiped as drawn, or its paper alone (`within_paper`)
     else:
         fill_paper(crop, inside, bg, dark, whole=region.kind not in ON_PAGE_KINDS)
     if cut:
