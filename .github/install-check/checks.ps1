@@ -131,6 +131,62 @@ function Get-OllamaModels {
     } catch { return $null }
 }
 
+# A check of Ollama's lifetime (nothing of it running when TASlation does not need it, no start with Windows, no setting
+# for the user), which holds for an Ollama the installer installs: when Ollama was there before the installer ran (no
+# winget on the runner: the workflow installed it, OLLAMA_BY_INSTALLER is false), it is said as not shown.
+function Add-LifetimeCheck([string]$Step, [string]$What, $Ok, [string]$Detail = '') {
+    if ($env:OLLAMA_BY_INSTALLER -eq 'false') {
+        Add-Check $Step $What $null 'Ollama was there before the installer ran (no winget on this runner)'
+        return
+    }
+    Add-Check $Step $What $Ok $Detail
+}
+
+# The models in Ollama's model folder (OLLAMA_MODELS, else ~/.ollama/models), by the names Ollama gives them, from its
+# manifests (manifests\<registry>\<namespace>\<model>\<tag>), as install.ps1 reads them while Ollama does not run.
+function Get-StoredModels {
+    $store = $env:OLLAMA_MODELS
+    if (-not $store) { $store = Join-Path $env:USERPROFILE '.ollama\models' }
+    $manifests = Join-Path $store 'manifests'
+    if (-not (Test-Path -LiteralPath $manifests)) { return }
+    foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
+        $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
+        if ($parts.Count -ne 4) { continue }
+        $name = "$($parts[0])/$($parts[1])/$($parts[2])"
+        if ($parts[0] -eq 'registry.ollama.ai' -and $parts[1] -eq 'library') { $name = $parts[2] }
+        elseif ($parts[0] -eq 'registry.ollama.ai') { $name = "$($parts[1])/$($parts[2])" }
+        "${name}:$($parts[3])"
+    }
+}
+
+# The running processes of Ollama's program folder: its app, its server, the model's (llama-server, in lib\ollama).
+function Get-OllamaProcesses {
+    $prefix = $OllamaHome.TrimEnd('\') + '\'
+    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    })
+}
+
+# How Ollama starts with Windows, as install.ps1 looks for it: each shortcut in the Startup folder that points into its
+# folder, and each value of the Run key (HKCU) that runs a program of it, as "shortcut <path>" or "run <name>".
+function Get-OllamaAutostart {
+    $prefix = $OllamaHome.TrimEnd('\') + '\'
+    $startup = [Environment]::GetFolderPath('Startup')
+    if ($startup -and (Test-Path -LiteralPath $startup)) {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($link in @(Get-ChildItem -LiteralPath $startup -Filter '*.lnk' -File -ErrorAction SilentlyContinue)) {
+            $target = ''
+            try { $target = $shell.CreateShortcut($link.FullName).TargetPath } catch { $target = '' }
+            if ($target -and $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { "shortcut $($link.FullName)" }
+        }
+    }
+    try { $key = Get-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction Stop } catch { return }
+    foreach ($name in @($key.GetValueNames())) {
+        $data = [string]$key.GetValue($name)
+        if ($name -and $data.IndexOf($prefix, [StringComparison]::OrdinalIgnoreCase) -ge 0) { "run $name" }
+    }
+}
+
 # A variable of the user as Windows keeps it (HKCU\Environment), which every process started later gets; $null when
 # it is not there.
 function Get-UserVariable([string]$Name) {

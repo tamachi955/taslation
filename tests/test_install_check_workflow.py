@@ -96,13 +96,42 @@ def test_the_installed_program_runs_in_the_install_folder():
     assert "cwd=install_dir" in helper and "sys.prefix == sys.base_prefix" in helper
 
 
-def test_the_steps_run_in_an_order_that_shows_whose_setting_the_server_has():
-    # the prompt cache is looked at before anything of TASlation starts Ollama (it would pass the setting itself),
-    # and the uninstall comes last
+def test_the_steps_run_in_an_order_that_shows_what_the_install_left_running():
+    # what the install left (no Ollama running, none starting with Windows) is looked at before anything of TASlation
+    # starts Ollama; the server TASlation starts is looked at while it holds it; and the uninstall comes last
     order = [_step(n)[0] for n in ("(install.cmd -Yes)", "Check what the installer made", "taslation doctor",
                                    "prompt cache", "Translate a synthetic test page", "-DryRun", "uninstall.cmd -Yes",
                                    "Job summary", "Keep the console output")]
     assert order == sorted(order)
+    made = _step("Check what the installer made")[1]["run"]
+    for check in ("'no process of Ollama is left running after the install'",
+                  "'Ollama does not start with Windows (no shortcut to it in Startup, no Run value)'",
+                  "'the marker .ollama-by-install is there (Ollama installed for TASlation)'",
+                  "'LLAMA_ARG_CACHE_RAM is not set for this user (HKCU\\Environment)'",
+                  "'no marker .cache-ram-by-install'"):
+        assert check in made, check
+    assert "& $ollama list" not in made  # (the ollama command would start Ollama's app when no server answers)
+    doctor = _step("taslation doctor")[1]["run"]
+    assert "'no process of Ollama is left running after doctor'" in doctor
+    held = _step("prompt cache")[1]["run"]
+    assert "hold-ollama.py" in held and "Get-ProcessVariable" in held
+    assert "'no process of Ollama is left running'" in held
+    translation = _step("Translate a synthetic test page")[1]["run"]
+    assert ("'no process of Ollama runs before the translation'" in translation
+            and "'no process of Ollama is left running after it'" in translation)
+    for name in ("-DryRun", "uninstall.cmd -Yes"):
+        assert "LLAMA_ARG_CACHE_RAM=0" not in _step(name)[1]["run"] and "Get-OllamaModels" not in _step(name)[1]["run"]
+
+
+def test_the_helper_holds_the_server_with_the_product_s_own_starter_and_lets_the_product_stop_it():
+    helper = (HELPERS / "hold-ollama.py").read_text("utf-8")
+    assert "ollama_start.OllamaStarter(url, state_dir=settings.state_dir" in helper
+    assert "ollama_start.finish_all()" in helper and "state[\"finish\"] == [ollama_start.STOPPED]" in helper
+    assert "subprocess" not in helper and "Popen" not in helper  # it starts nothing itself
+    page = (HELPERS / "translate-page.py").read_text("utf-8")
+    from taslation import ollama_start
+
+    assert f'STOPPED = "{ollama_start.STOPPED}"' in page
     for name in ("Job summary", "Keep the console output"):
         assert _step(name)[1]["if"] == "${{ always() }}"
     upload = _step("Keep the console output")[1]
@@ -113,12 +142,13 @@ def test_the_steps_run_in_an_order_that_shows_whose_setting_the_server_has():
 def test_the_helpers_it_names_are_there_and_parse():
     text = WORKFLOW.read_text("utf-8")
     named = set(re.findall(r"\.github[/\\]install-check[/\\](\w[\w-]*\.\w+)", text))
-    assert named == {"checks.ps1", "translate-page.py"}
+    assert named == {"checks.ps1", "translate-page.py", "hold-ollama.py"}
     for name in named:
         assert (HELPERS / name).is_file(), name
     for path in (WORKFLOW, *HELPERS.iterdir()):
         assert all(b < 128 for b in path.read_bytes()), path.name
-    ast.parse((HELPERS / "translate-page.py").read_text("utf-8"))
+    for name in ("translate-page.py", "hold-ollama.py"):
+        ast.parse((HELPERS / name).read_text("utf-8"))
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 (the runner's shell) is not installed")
@@ -141,20 +171,29 @@ def test_the_lines_it_looks_for_are_the_scripts_own():
     for line in ("Write-Host (T 'TASlation is installed.')", 'Write-Host "$($script:Warnings.Count) warning(s):"',
                  "Write-Ok \"Python $($basePython.Version) installed\"", "Write-Ok \"Python $($basePython.Version) found\"",
                  "Write-Ok 'Ollama installed'", "Write-Ok 'Ollama found'", "Write-Info \"$question -> $($Offered.Name) ($why)\"",
-                 "Write-Ok (T 'Ollama started, with its app')",
-                 "Write-Ok (T 'Ollama started, as ollama serve in a hidden window (it runs until you sign out)')",
+                 "Write-Ok (T 'Ollama started (ollama serve, in a hidden window)')",
+                 "Write-Ok (T 'Ollama, started for the installation, is stopped again')",
                  "is agreed to through {2}, by whoever set that variable.", "'[{0}/{1}] {2}'",
-                 "$lnk.Arguments = '-m taslation gui'", "$CacheRamMarker = Join-Path $Root '.cache-ram-by-install'"):
+                 "$lnk.Arguments = '-m taslation gui'", "$CacheRamMarker = Join-Path $Root '.cache-ram-by-install'",
+                 "$OllamaMarker = Join-Path $Root '.ollama-by-install'"):
         assert line in install, line
     uninstall = (ROOT / "uninstall.ps1").read_text("ascii")
     for line in ('"  dry run, would: $Text"', "Remove-Target 'the virtual environment' $Venv",
                  "Remove-Target 'the OCR model and fonts' $Models", '"delete $What ($Path, $size)"',
-                 '"delete the Start-menu shortcut $ShortcutPath"', '"ollama rm $name"', '"clear $Name for this user"'):
+                 '"delete the Start-menu shortcut $ShortcutPath"', '"ollama rm $name (with ollama serve started',
+                 '"clear $Name for this user"',
+                 "$script:Left.Add(\"the Ollama model $name (remove it later: ollama rm $name)\")",
+                 "'Ollama was installed for TASlation and does not start with Windows; it stays so.'"):
         assert line in uninstall, line
     workflow = WORKFLOW.read_text("utf-8")
     model = re.search(r"^\$TranslatorModel = '([^']+)'", (HELPERS / "checks.ps1").read_text("ascii"), re.M).group(1)
     assert model in (ROOT / "setup_models.py").read_text("utf-8")
     assert "'Result: ready'" in workflow and 'print("Result:", "ready"' in (ROOT / "taslation" / "cli.py").read_text("utf-8")
+    # doctor's and the product's own lines about the Ollama they start
+    from taslation import cli, ollama_start
+
+    assert cli.DOCTOR_STARTED.strip() in workflow.replace("\\(", "(").replace("\\)", ")")
+    assert workflow.count(f"'{ollama_start.STOPPED}'") == 2  # (doctor's step and the hold's)
 
 
 def test_github_zip_leaves_the_checks_out():

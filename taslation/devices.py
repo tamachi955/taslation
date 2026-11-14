@@ -148,27 +148,43 @@ def gpu_name() -> str:
 def nvml_name() -> str:
     """The first GPU's name as NVIDIA's driver library says it (Windows: ``System32\\nvml.dll`` by its full path,
     nothing else is loaded), "" when there is none."""
+    name = ctypes.create_string_buffer(96)
+    found = _nvml_first(lambda nvml, handle: nvml.nvmlDeviceGetName(handle, name, 96) == 0)
+    return name.value.decode("utf-8", "replace").strip() if found else ""
+
+
+class _NvmlMemory(ctypes.Structure):
+    _fields_ = [("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong), ("used", ctypes.c_ulonglong)]
+
+
+def nvml_memory_mib() -> int:
+    """The first GPU's video memory in MiB as NVIDIA's driver library says it (as `nvml_name`; the number nvidia-smi
+    prints as memory.total), 0 when there is none."""
+    memory = _NvmlMemory()
+    found = _nvml_first(lambda nvml, handle: nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) == 0)
+    return int(memory.total // (1024 * 1024)) if found else 0
+
+
+def _nvml_first(ask: Any) -> bool:
+    """*ask* (nvml, the first GPU's handle) -> whether it answered, run with NVML open; False without NVML or a GPU."""
     if sys.platform != "win32":
-        return ""
+        return False
     path = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvml.dll"
     if not path.is_file():
-        return ""
+        return False
     try:
         nvml = ctypes.WinDLL(str(path))
         if nvml.nvmlInit_v2() != 0:
-            return ""
+            return False
         try:
             handle = ctypes.c_void_p()
             if nvml.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(handle)) != 0:
-                return ""
-            name = ctypes.create_string_buffer(96)
-            if nvml.nvmlDeviceGetName(handle, name, 96) != 0:
-                return ""
-            return name.value.decode("utf-8", "replace").strip()
+                return False
+            return bool(ask(nvml, handle))
         finally:
             nvml.nvmlShutdown()
     except (OSError, AttributeError):
-        return ""
+        return False
 
 
 # ------------------------------------------------------------------ the stages

@@ -246,13 +246,16 @@ jobs:
           if ($log -match 'ok: Python (\S+) installed') { $python = "Python $($Matches[1]), installed by the installer with winget" }
           elseif ($log -match 'ok: Python (\S+) found') { $python = "Python $($Matches[1]) of the runner, found by the installer (winget's Python route not used)" }
           $ollamaRoute = 'not found in the output'
-          if ($log -match 'ok: Ollama installed') { $ollamaRoute = 'installed by the installer with winget' }
+          $ollamaByInstaller = $log -match 'ok: Ollama installed'
+          if ($ollamaByInstaller) { $ollamaRoute = 'installed by the installer with winget' }
           elseif ($log -match 'ok: Ollama found') { $ollamaRoute = 'there before the installer ran (installed by this workflow)' }
-          # how the installer brought Ollama's server up when it started it (its app, or ollama serve when the app
-          # brought none: llama.cpp's log lines then go to that hidden window, not to the app's server.log)
-          $ollamaStart = 'no start line in the output (it answered already, or no Ollama of its folder ran)'
-          if ($log -match 'ok: Ollama started, as ollama serve in a hidden window') { $ollamaStart = 'ollama serve in a hidden window' }
-          elseif ($log -match 'ok: Ollama started, with its app') { $ollamaStart = "Ollama's app" }
+          # how the installer brought Ollama's server up for the import of the translation model: ollama serve in a
+          # hidden window, never Ollama's app, and stopped again before its final check
+          $ollamaStart = 'no start line in the output (it answered already)'
+          if ($log -match 'ok: Ollama started \(ollama serve, in a hidden window\)') {
+              $ollamaStart = 'ollama serve in a hidden window, for the import'
+              if ($log -match 'ok: Ollama, started for the installation, is stopped again') { $ollamaStart += ', and stopped again' }
+          }
           Set-Fact 'python_route' $python
           Set-Fact 'ollama_route' $ollamaRoute
           Set-Fact 'ollama_start' $ollamaStart
@@ -277,21 +280,29 @@ jobs:
                   Add-Check $step "the OCR model $name is complete" ($line -eq "$name complete") "$line"
               }
           }
-          # Ollama, its model and its setting
+          # Ollama, its model, and its lifetime: an Ollama the installer installs runs only while TASlation needs it.
+          # Nothing here starts it (the ollama command would start Ollama's app when no server answers): the model is
+          # looked for in Ollama's model folder, as the installer looks when Ollama does not run.
           $ollama = Find-OllamaExe
           Add-Check $step 'Ollama is installed' ([bool]$ollama) "$ollama"
-          $answers = Test-OllamaAnswers
-          Add-Check $step 'the Ollama server answers' $answers $OllamaUrl
-          if ($ollama -and $answers) {
-              $list = @(& $ollama list 2>&1 | ForEach-Object { "$_" })
-              $listed = @($list | Where-Object { $_ -match ('^' + [regex]::Escape($TranslatorModel) + '(:latest)?\s') }).Count -gt 0
-              Add-Check $step "the translation model $TranslatorModel is in ``ollama list``" $listed "exit code $LASTEXITCODE"
-              $list | ForEach-Object { Write-Host "  | $_" }
-          }
+          $stored = @(Get-StoredModels)
+          $listed = @($stored | Where-Object { $_ -eq $TranslatorModel -or $_ -eq "${TranslatorModel}:latest" }).Count -gt 0
+          Add-Check $step "the translation model $TranslatorModel is in Ollama's model folder" $listed ($stored -join ', ')
+          # (the steps after this one look at Ollama's lifetime only for an Ollama the installer installed)
+          $env:OLLAMA_BY_INSTALLER = $(if ($ollamaByInstaller) { 'true' } else { 'false' })
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "OLLAMA_BY_INSTALLER=$env:OLLAMA_BY_INSTALLER"
+          $left = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama is left running after the install' ($left.Count -eq 0) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
+          Add-LifetimeCheck $step 'nothing answers at Ollama''s address after the install' (-not (Test-OllamaAnswers)) $OllamaUrl
+          $autostart = @(Get-OllamaAutostart)
+          Add-LifetimeCheck $step 'Ollama does not start with Windows (no shortcut to it in Startup, no Run value)' ($autostart.Count -eq 0) ($autostart -join ', ')
+          $ourMarker = Join-Path $InstallDir '.ollama-by-install'
+          Add-LifetimeCheck $step 'the marker .ollama-by-install is there (Ollama installed for TASlation)' (Test-Path -LiteralPath $ourMarker)
+          if (Test-Path -LiteralPath $ourMarker) { Get-Content -LiteralPath $ourMarker -Encoding utf8 | ForEach-Object { Write-Host "  | $_" } }
+          # TASlation gives the server it starts LLAMA_ARG_CACHE_RAM itself: nothing is set for the user
           $cacheRam = Get-UserVariable 'LLAMA_ARG_CACHE_RAM'
-          Add-Check $step 'LLAMA_ARG_CACHE_RAM is 0 for this user (HKCU\Environment)' ($cacheRam -eq '0') "value: $(if ($null -ne $cacheRam) { $cacheRam } else { 'not set' })"
-          $marker = Join-Path $InstallDir '.cache-ram-by-install'
-          Add-Check $step 'the marker .cache-ram-by-install is there, for uninstall.ps1' ((Test-Path -LiteralPath $marker) -and ((Get-Content -LiteralPath $marker -Raw).Trim() -eq '0'))
+          Add-LifetimeCheck $step 'LLAMA_ARG_CACHE_RAM is not set for this user (HKCU\Environment)' ($null -eq $cacheRam) "value: $(if ($null -ne $cacheRam) { $cacheRam } else { 'not set' })"
+          Add-LifetimeCheck $step 'no marker .cache-ram-by-install' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.cache-ram-by-install')))
           Add-Check $step 'no OLLAMA_KV_CACHE_TYPE setting (that one is for a GPU of 6 GB or less)' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.kv-cache-by-install')))
           # the Start-menu shortcut
           $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'TASlation.lnk'
@@ -320,27 +331,38 @@ jobs:
           $step = 'taslation doctor'
           Set-Location -LiteralPath $InstallDir
           $env:PYTHONIOENCODING = 'utf-8'
-          # doctor only looks (it starts no Ollama); exit code 0 and "Result: ready" when TASlation can read and translate
+          # Exit code 0 and "Result: ready" when TASlation can read and translate. Ollama does not run now (the install
+          # left nothing running): doctor starts it for its check, as a translation would, and stops it again.
+          $before = @(Get-OllamaProcesses).Count
           $out = @(& $VenvPy -m taslation doctor 2>&1 | ForEach-Object { "$_" })
           $code = $LASTEXITCODE
           $out | ForEach-Object { Write-Host $_ }
           $out | Set-Content -LiteralPath (Join-Path $CheckDir 'doctor.txt') -Encoding utf8
           Add-Check $step 'taslation doctor says "Result: ready" with exit code 0' ($code -eq 0 -and ($out -contains 'Result: ready')) "exit code $code"
+          if ($before -eq 0) {
+              Add-Check $step 'doctor says it started Ollama for its check' (@($out | Where-Object { $_ -match '^\s+\(it was not running: it was started for this check, and is stopped again when the check ends\)$' }).Count -eq 1)
+              Add-Check $step 'doctor says it stopped it again' ($out -contains 'The translation program TASlation started was stopped.')
+          } else {
+              Add-Check $step 'doctor says it started Ollama for its check' $null "Ollama ran before doctor ($before process(es))"
+          }
+          $left = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama is left running after doctor' (($before -gt 0) -or ($left.Count -eq 0)) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
           Complete-Step $step
 
-      - name: Ollama's server keeps no prompt cache in RAM
+      - name: The server TASlation starts keeps no prompt cache in RAM
         if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
+        timeout-minutes: 25
         run: |
           . .github/install-check/checks.ps1
           $step = 'Prompt cache off'
-          # Nothing since the install has started Ollama (the checks above only ask it), so the server that answers is
-          # the one the installer restarted after setting LLAMA_ARG_CACHE_RAM=0. Its processes' environment says
-          # what they run with; llama.cpp's server, which runs the model, also says it in Ollama's log when the
-          # model loads. This step's own environment has no LLAMA_ARG_CACHE_RAM: nothing here passes it on.
-          if (-not (Test-OllamaAnswers)) {
-              Add-Check $step 'the Ollama server the installer restarted is running' $false "nothing answers at $OllamaUrl"
-              Complete-Step $step
-          }
+          Set-Location -LiteralPath $InstallDir
+          # The install sets nothing for the user: TASlation gives the server it starts LLAMA_ARG_CACHE_RAM=0 itself
+          # (taslation/ollama_start.py, server_env). hold-ollama.py starts Ollama with the installed program's own
+          # starter, loads the translation model in it and holds the server while this step reads the environment of
+          # its processes, llama.cpp's server among them (it runs the model, and reads the variable); then it lets the
+          # product stop the server, as a command does at its end. This step's own environment has no
+          # LLAMA_ARG_CACHE_RAM: nothing here passes it on.
+          Add-LifetimeCheck $step 'no process of Ollama runs before' (@(Get-OllamaProcesses).Count -eq 0)
           # Ollama's processes: those of its program folder and every process they started, each with its kind (the
           # app in the tray, the server `ollama serve`, or one that runs a model: llama.cpp's server, wherever it is)
           # and LLAMA_ARG_CACHE_RAM as it sees it ('' for none, $null when it cannot be read).
@@ -364,50 +386,68 @@ jobs:
                   $shown = 'unreadable'
                   if ($null -ne $value) { $shown = $(if ($value) { $value } else { 'not set' }) }
                   Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown)
-                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Value = $value }
+                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Id = $p.ProcessId; Value = $value }
               }
           }
-          $servers = @(Show-Processes 'before the model loads' | Where-Object { $_.Kind -eq 'server' })
+          $state = Join-Path $CheckDir 'hold-ollama.json'
+          $release = Join-Path $CheckDir 'hold-ollama.release'
+          Remove-Item -LiteralPath $state, $release -Force -ErrorAction SilentlyContinue
+          $arguments = @("`"$env:GITHUB_WORKSPACE\.github\install-check\hold-ollama.py`"", '--model', $TranslatorModel,
+                         '--state', "`"$state`"", '--release', "`"$release`"")
+          $helper = Start-Process -FilePath $VenvPy -ArgumentList $arguments -WorkingDirectory $InstallDir -NoNewWindow -PassThru `
+              -RedirectStandardOutput (Join-Path $CheckDir 'hold-ollama-output.txt') -RedirectStandardError (Join-Path $CheckDir 'hold-ollama-errors.txt')
+          $null = $helper.Handle  # (kept, so that its exit code can be read)
+          $held = $null
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          while ($clock.Elapsed.TotalMinutes -lt 15 -and -not $helper.HasExited) {
+              if (Test-Path -LiteralPath $state) {
+                  try { $held = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json -AsHashtable } catch { $held = $null }
+                  if ($held -and $held['held']) { break }
+              }
+              Start-Sleep -Seconds 1
+          }
+          if (-not $held -or -not $held['held']) {
+              Add-Check $step 'the installed program started Ollama and loaded the model' $false 'hold-ollama.py gave no state (its output is in the artifact)'
+              if (-not $helper.HasExited) { $helper.Kill($true) }
+              Complete-Step $step
+          }
+          Write-Host "held: $($held | ConvertTo-Json -Compress -Depth 4)"
+          Add-LifetimeCheck $step 'nothing answered at Ollama''s address before' (-not $held['answered_before'])
+          Add-LifetimeCheck $step 'the installed program started Ollama itself' ($null -eq $held['failure']) "$(if ($held['failure']) { $held['failure'] } else { "answers after $($held['start_s']) s" })"
+          Add-LifetimeCheck $step 'and owns it (its record in the data folder names the server)' ($held['owned'] -and $null -ne $held['record'])
+          Add-Check $step "Ollama loads $TranslatorModel in it" ($held.Contains('load_s')) "$(if ($held.Contains('load_s')) { "$($held['load_s']) s" } else { $held['load_error'] })"
+          $processes = @(Show-Processes 'with the model loaded')
+          $servers = @($processes | Where-Object { $_.Kind -eq 'server' })
+          $recorded = $null
+          if ($held['record']) { $recorded = $held['record']['pid'] }
+          Add-LifetimeCheck $step 'the server is the process the record names' (@($servers | Where-Object { $_.Id -eq $recorded }).Count -eq 1) "record: pid $recorded; servers: $(($servers | ForEach-Object { $_.Id }) -join ', ')"
+          Add-LifetimeCheck $step 'Ollama''s app does not run (TASlation starts the server itself, never the app)' (@($processes | Where-Object { $_.Kind -eq 'app' }).Count -eq 0)
           $read = @($servers | Where-Object { $null -ne $_.Value })
           if ($read.Count -eq 0) {
               Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" $null 'its environment could not be read here'
           } else {
               Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { if ($_.Value) { $_.Value } else { 'not set' } }) -join ', ')
           }
-          # The model loaded as a translation loads it (an empty request loads it: Ollama's API).
-          $logStart = 0
-          if (Test-Path -LiteralPath $OllamaLog) { $logStart = (Get-Item -LiteralPath $OllamaLog).Length }
-          $loaded = $true
-          try {
-              $body = @{ model = $TranslatorModel; keep_alive = '15m' } | ConvertTo-Json
-              $null = Invoke-RestMethod -Method Post -Uri "$OllamaUrl/api/generate" -Body $body -ContentType 'application/json' -TimeoutSec 600
-          } catch {
-              $loaded = $false
-              Add-Check $step "Ollama loads $TranslatorModel" $false "$($_.Exception.Message)"
+          $read = @($processes | Where-Object { $_.Kind -eq 'model' -and $null -ne $_.Value })
+          if ($read.Count -eq 0) {
+              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" $null 'no process of it found, or its environment could not be read'
+          } else {
+              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { "$($_.Name): $(if ($_.Value) { $_.Value } else { 'not set' })" }) -join ', ')
           }
-          if ($loaded) {
-              $runners = @(Show-Processes 'with the model loaded' | Where-Object { $_.Kind -eq 'model' })
-              $read = @($runners | Where-Object { $null -ne $_.Value })
-              if ($read.Count -eq 0) {
-                  Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" $null 'no process of it found, or its environment could not be read'
-              } else {
-                  Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { "$($_.Name): $(if ($_.Value) { $_.Value } else { 'not set' })" }) -join ', ')
-              }
-              $said = @()
-              if (Test-Path -LiteralPath $OllamaLog) {
-                  $stream = [IO.File]::Open($OllamaLog, 'Open', 'Read', 'ReadWrite')
-                  try {
-                      $null = $stream.Seek($logStart, 'Begin')
-                      $said = @(([IO.StreamReader]::new($stream)).ReadToEnd() -split "`r?`n" | Where-Object { $_ -match 'prompt cache is (enabled|disabled)' })
-                  } finally { $stream.Dispose() }
-              }
-              $said | ForEach-Object { Write-Host "  log: $($_.Trim())" }
-              if ($said.Count -eq 0) {
-                  Add-Check $step "llama.cpp's log line says the prompt cache is disabled" $null "no such line in $OllamaLog"
-              } else {
-                  Add-Check $step "llama.cpp's log line says the prompt cache is disabled" (@($said | Where-Object { $_ -match 'prompt cache is enabled' }).Count -eq 0) ($said[-1].Trim())
-              }
-          }
+          # the product's end: the server it started is stopped, and nothing of Ollama is left
+          Set-Content -LiteralPath $release -Value 'done'
+          $ended = $helper.WaitForExit(120000)
+          $final = $null
+          try { $final = Get-Content -LiteralPath $state -Raw | ConvertFrom-Json -AsHashtable } catch { $final = $null }
+          Write-Host "finished: $($final | ConvertTo-Json -Compress -Depth 4)"
+          $finish = @()
+          if ($final -and $final['finish']) { $finish = @($final['finish']) }
+          Add-LifetimeCheck $step 'at its end the product stopped the server it started' ($finish -contains 'The translation program TASlation started was stopped.') "$($finish -join ' '); in $(if ($final) { $final['finish_s'] } else { '?' }) s"
+          Start-Sleep -Seconds 2  # (the model's process ends right after the server)
+          $left = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama is left running' ($left.Count -eq 0) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
+          Add-LifetimeCheck $step 'hold-ollama.py ended with exit code 0' ($ended -and $helper.ExitCode -eq 0) "$(if ($ended) { "exit code $($helper.ExitCode)" } else { 'still running after 120 s' })"
+          if (-not $ended) { $helper.Kill($true) }
           Complete-Step $step
 
       - name: Translate a synthetic test page (taslation translate)
@@ -418,17 +458,28 @@ jobs:
           $step = 'Translation'
           Set-Location -LiteralPath $InstallDir  # (the installed program, not the checkout's files)
           # tests/fixtures/sample_page.png: drawn by tools/make_sample_page.py, invented lines, no real book. The helper
-          # prints counts only; on a runner without a GPU this takes a few minutes.
+          # prints counts only; on a runner without a GPU this takes a few minutes. Ollama does not run before it: the
+          # command starts it, and stops it when it ends.
+          $before = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama runs before the translation' ($before.Count -eq 0) (($before | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
           $counts = Join-Path $CheckDir 'translation.json'
           & $VenvPy "$env:GITHUB_WORKSPACE\.github\install-check\translate-page.py" 'tests\fixtures\sample_page.png' --out $counts
           $code = $LASTEXITCODE
           $detail = ''
+          $c = $null
           if (Test-Path -LiteralPath $counts) {
               $c = Get-Content -LiteralPath $counts -Raw | ConvertFrom-Json -AsHashtable
               Set-Fact 'translation' $c
               $detail = "$($c['read']) of $($c['bubbles']) bubbles read, $($c['translated']) translated, $($c['seconds']) s"
           }
           Add-Check $step 'taslation translate read and translated the test page' ($code -eq 0) $detail
+          if ($c) {
+              Add-LifetimeCheck $step 'the command started Ollama itself' ([bool]$c['started_ollama'])
+              Add-LifetimeCheck $step 'and said at its end that it stopped it' ([bool]$c['stopped_ollama'])
+          }
+          Start-Sleep -Seconds 2  # (the model's process ends right after the server)
+          $left = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama is left running after it' ($left.Count -eq 0) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
           Complete-Step $step
 
       - name: uninstall.cmd -DryRun lists what the install made
@@ -447,14 +498,20 @@ jobs:
               'delete .venv' = "delete the virtual environment ($InstallDir\.venv,"
               'delete models' = "delete the OCR model and fonts ($InstallDir\models,"
               'delete the Start-menu shortcut' = 'delete the Start-menu shortcut '
-              'clear LLAMA_ARG_CACHE_RAM' = 'clear LLAMA_ARG_CACHE_RAM for this user'
           }
           foreach ($what in $would.Keys) {
               Add-Check $step "it would $what" ($text.Contains("dry run, would: $($would[$what])"))
           }
+          # the install set nothing for the user, so there is nothing to clear
+          Add-LifetimeCheck $step 'it would clear no Ollama setting (the install made none)' (-not $text.Contains('dry run, would: clear '))
           # (-Yes answers no to removing the translation model, as to the data folder and Ollama: it is left in place)
           Add-Check $step "it would leave $TranslatorModel in Ollama (-Yes keeps it)" ($text.Contains("- the Ollama model $TranslatorModel (remove it later: ollama rm $TranslatorModel)"))
-          Add-Check $step 'and it deletes nothing' ((Test-Path -LiteralPath $VenvPy) -and ((Get-UserVariable 'LLAMA_ARG_CACHE_RAM') -eq '0'))
+          $marker = Join-Path $InstallDir '.ollama-by-install'
+          if (Test-Path -LiteralPath $marker) {
+              Add-Check $step 'it says Ollama, installed for TASlation, stays without a start with Windows' ($text.Contains('Ollama was installed for TASlation and does not start with Windows; it stays so.'))
+          }
+          Add-LifetimeCheck $step 'it starts no Ollama (-Yes removes no model)' (@(Get-OllamaProcesses).Count -eq 0)
+          Add-Check $step 'and it deletes nothing' ((Test-Path -LiteralPath $VenvPy) -and ((Test-Path -LiteralPath $marker) -or -not (Select-String -LiteralPath (Join-Path $CheckDir 'installer-output.txt') -SimpleMatch 'ok: Ollama installed' -Quiet)))
           Complete-Step $step
 
       - name: uninstall.cmd -Yes removes it
@@ -463,22 +520,28 @@ jobs:
           . .github/install-check/checks.ps1
           $step = 'Uninstall'
           Set-Location -LiteralPath $InstallDir
+          $marker = Join-Path $InstallDir '.ollama-by-install'
+          $ours = Test-Path -LiteralPath $marker
           $out = @(& .\uninstall.cmd -Yes 2>&1 | ForEach-Object { "$_" })
           $code = $LASTEXITCODE
           $out | ForEach-Object { Write-Host $_ }
           $out | Set-Content -LiteralPath (Join-Path $CheckDir 'uninstall.txt') -Encoding utf8
+          $text = $out -join "`n"
           Add-Check $step 'uninstall.cmd -Yes ends with exit code 0' ($code -eq 0) "exit code $code"
           Add-Check $step '.venv is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.venv')))
           Add-Check $step 'models is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'models')))
           Add-Check $step 'the Start-menu shortcut is gone' (-not (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'TASlation.lnk')))
-          Add-Check $step 'LLAMA_ARG_CACHE_RAM is cleared for this user' ($null -eq (Get-UserVariable 'LLAMA_ARG_CACHE_RAM'))
-          Add-Check $step 'the marker .cache-ram-by-install is gone' (-not (Test-Path -LiteralPath (Join-Path $InstallDir '.cache-ram-by-install')))
-          $models = Get-OllamaModels
-          if ($null -eq $models) {
-              Add-Check $step "the translation model stays in Ollama (-Yes keeps it)" $null 'the Ollama server does not answer'
-          } else {
-              Add-Check $step "the translation model stays in Ollama (-Yes keeps it)" (@($models | Where-Object { $_ -like "$TranslatorModel*" }).Count -gt 0)
+          Add-LifetimeCheck $step 'LLAMA_ARG_CACHE_RAM is still not set for this user' ($null -eq (Get-UserVariable 'LLAMA_ARG_CACHE_RAM'))
+          if ($ours) {
+              Add-Check $step 'it says Ollama, installed for TASlation, stays without a start with Windows' ($text.Contains('Ollama was installed for TASlation and does not start with Windows; it stays so.'))
           }
+          Add-Check $step 'the marker .ollama-by-install is gone' (-not (Test-Path -LiteralPath $marker))
+          $autostart = @(Get-OllamaAutostart)
+          Add-LifetimeCheck $step 'Ollama still does not start with Windows' ($autostart.Count -eq 0) ($autostart -join ', ')
+          $left = @(Get-OllamaProcesses)
+          Add-LifetimeCheck $step 'no process of Ollama is left running' ($left.Count -eq 0) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
+          $stored = @(Get-StoredModels)
+          Add-Check $step "the translation model stays in Ollama (-Yes keeps it)" (@($stored | Where-Object { $_ -like "$TranslatorModel*" }).Count -gt 0) ($stored -join ', ')
           # what -Yes keeps: a run nobody watches destroys no translations, and leaves Ollama itself
           Add-Check $step 'the data folder ~/.taslation stays (-Yes keeps it)' (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.taslation'))
           Add-Check $step 'Ollama itself stays (-Yes keeps it)' ([bool](Find-OllamaExe))
@@ -522,7 +585,7 @@ jobs:
           if ($f.Contains('python_route')) { $md.Add("* Python: $($f['python_route'])") }
           if ($f.Contains('winget_route')) { $md.Add("* winget: $($f['winget_route'])") }
           if ($f.Contains('ollama_route')) { $md.Add("* Ollama: $($f['ollama_route'])") }
-          if ($f.Contains('ollama_start')) { $md.Add("* Ollama's server, as the installer started it: $($f['ollama_start'])") }
+          if ($f.Contains('ollama_start')) { $md.Add("* Ollama's server during the install: $($f['ollama_start'])") }
           if ($f.Contains('program')) { $md.Add("* Program files: Python $($f['program']['python']), PyTorch $($f['program']['torch']) (CUDA: $($f['program']['cuda']))") }
           if ($f.Contains('install')) {
               $i = $f['install']
@@ -572,7 +635,8 @@ jobs:
           $md.Add('* A GPU: the runner has none, so the GPU build of PyTorch (about 2.6 GB), its check on the GPU and the fall-back to the CPU build, the layout and inpainting models'' default (Enter is yes on a GPU) and LaMa on the GPU, and `OLLAMA_KV_CACHE_TYPE` for a GPU of 6 GB or less are not checked.')
           $md.Add('* The questions a person answers: `-Yes` takes the language offered and answers the rest, the licences are agreed through the variables, and the layout and inpainting models are left out (`-Yes` does not answer that question). Enter''s defaults, a "no", and the questions in Japanese are covered by `tests/test_install_scripts.py` only.')
           $md.Add('* A real viewer window: capturing a page, turning pages, the reading window itself (only the command line translates a page here).')
-          $md.Add('* Ollama after a restart of the computer: the server checked here is the one the installer started again, with the setting in its own environment; that an Ollama started at sign-in takes `LLAMA_ARG_CACHE_RAM` from the user''s variables is shown only by the variable being there.')
+          $md.Add('* Ollama after a restart of the computer: that nothing of Ollama starts at sign-in is shown only by its Startup folder and Run key having nothing of it. Ollama''s own `server.log` is not looked at: the server TASlation starts writes no log (llama.cpp''s line about the prompt cache is not there), so the setting is shown by the processes'' environment.')
+          $md.Add('* An Ollama that was there before the install (the question about its start with Windows, the settings made for the user then, and its restart), and a server another program uses when TASlation ends: covered by `tests/test_install_scripts.py` and `tests/test_ollama_start.py` only.')
           $md.Add('* Windows 10 or 11, Home or Pro: the runner is Windows Server 2025 with an administrator account, a fast connection, and no SmartScreen question for a ZIP from the internet (a downloaded ZIP carries the mark of the web; this one was made on the runner).')
           $md.Add('* `update.cmd`, a second run of `install.cmd`, and the translator for Portuguese (Brazil) and Turkish (Qwen3.5 4B).')
           $md -join "`n" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8

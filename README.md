@@ -188,7 +188,7 @@ The sources for each country's laws and cases are in [docs/LEGAL_SOURCES.md](doc
 * Windows 10/11 (64-bit)
 * About 7.5 GB of free disk space (about 9.0 GB when you translate into Portuguese (Brazil) or Turkish; of the translation models, PLaMo 3 Translate 2B takes about 1.8 GB (about 3.8 GB only while it is being imported), and Qwen3.5 4B, used for Portuguese (Brazil) and Turkish, about 3.3 GB; only one of the two is installed, whichever your target language needs).
   On a computer with an NVIDIA GPU, PyTorch's GPU build needs about 3.7 GB more (and, during the installation only, about 2.6 GB more again)
-* 16 GB of RAM recommended (measured: TASlation itself used up to about 2.5 GB, and Ollama, which does the translating, up to about 2 GB with a GPU and about 4 GB without one. Those are the figures with Ollama's cache switched off, as the installer does. With the cache, Ollama used up to about 10 GB with a GPU and about 7.4 GB without. It has not been tried on a computer with 8 GB)
+* 16 GB of RAM recommended (measured: TASlation itself used up to about 2.5 GB, and Ollama, which does the translating, up to about 2 GB with a GPU and about 4 GB without one. Those are the figures with Ollama's cache switched off (TASlation sets it so for the Ollama it starts). With the cache, Ollama used up to about 10 GB with a GPU and about 7.4 GB without. When you close TASlation, the Ollama it started stops too, and that RAM is free again. It has not been tried on a computer with 8 GB)
 * An NVIDIA GPU (6 GB of memory) recommended. Measured: the translation model used about 1.9 GB and the model that erases lettering on the art about 0.5 GB, besides what Windows and your other programs use. A 4 GB GPU works too, but when less than about 3 GB of its memory is free, part of the translation model runs on the CPU and translation is about 1.5 times slower. It also runs without a GPU (translation is then about 4 times slower). AMD and Intel GPUs are not used (it runs on the CPU).
 * A viewer that shows the book (an app or a browser)
 
@@ -223,18 +223,29 @@ with an older driver, it says so and installs the CPU build (update the driver a
 and if the download failed or it did not run on the GPU, it says so in one line, installs the CPU build and goes on with the installation. AMD and Intel GPUs are not counted as GPUs.
 A GPU build already installed is left as it is. On a computer where a version before this one installed the CPU build, running install.cmd again replaces it with the GPU build (`update.cmd` does not replace it).
 
-It makes two settings for Ollama without asking. Each is made only when its environment variable is not set yet, neither for this Windows user nor in the window running the installation,
-and Ollama is restarted once afterwards. A value that is already there is left as it is. Only when the restarted server answers does it say "ok"; otherwise it warns
-and tells you to start Ollama from the Start menu or restart the PC (the settings are saved and apply from its next start). When Ollama's app does not bring the server up,
-it starts `ollama serve` in a hidden window instead, and says which way it started.
+Ollama runs only while TASlation uses it. An Ollama you started yourself is left running.
 
-* On every computer with Ollama, it sets the environment variable `LLAMA_ARG_CACHE_RAM=0` for this Windows user. Without it, Ollama uses up to 8 GB of RAM
+* When the installer installs Ollama, it keeps it from starting with Windows, and leaves nothing of Ollama running after the installation.
+  Ollama's app sets itself to start with Windows when it first starts; the installer removes that, and writes so into `.ollama-by-install` in this folder.
+  TASlation starts Ollama when it translates and stops it when it ends. To use Ollama yourself, start it from the Start menu.
+* An Ollama that was there before is left as it was, running or not. When it starts with Windows, the installer asks once whether to stop that
+  (the default is "No"; `-Yes` never answers it). After a "Yes" it writes what it removed into `.ollama-autostart-by-install`, and `uninstall.cmd` puts it back.
+  The Ollama running now keeps running until you quit it or sign out.
+* When it puts the translation model into Ollama and Ollama is not running, the installer starts `ollama serve` in a hidden window (never Ollama's app),
+  and stops it before its final check.
+
+There are two settings for Ollama. TASlation gives both to the Ollama it starts, so the installer sets nothing for this Windows user for them.
+For an Ollama that was there before, the installer makes both without asking. Each is made only when its environment variable is not set yet, neither for this Windows user nor in the window running the installation,
+and Ollama is restarted once afterwards. A value that is already there is left as it is. Only when the restarted server answers does it say "ok"; otherwise it warns
+and tells you to start Ollama from the Start menu or restart the PC (the settings are saved and apply from its next start).
+
+* The environment variable `LLAMA_ARG_CACHE_RAM=0`. Without it, Ollama uses up to 8 GB of RAM
   for a cache of earlier requests. In TASlation's measurements that cache made translation faster only without a GPU, by about 8 %
-  (while Ollama then used about 3.3 GB more RAM). The setting applies to the Ollama this user runs, and to any other
+  (while Ollama then used about 3.3 GB more RAM). When the installer sets it for this user, it applies to the Ollama this user runs, and to any other
   program of this user that reads llama.cpp's `LLAMA_ARG_*` environment variables.
 * If the NVIDIA GPU has 6 GB of memory or less, it also sets `OLLAMA_KV_CACHE_TYPE=q8_0`. Ollama then uses less GPU memory, so the translation model fits on the GPU more easily.
 
-`uninstall.cmd` removes each of them if it still has the value the installer set. To undo one by hand, search the Start menu for "environment variables",
+`uninstall.cmd` removes each value the installer set if it still has that value. To undo one by hand, search the Start menu for "environment variables",
 open "Edit environment variables for your account", delete the variable and restart Ollama.
 
 When something could not be done, the installer keeps what it did, goes on to the end and lists the warnings there. Its last line then says
@@ -261,7 +272,7 @@ Download progress is shown in percent and MB. If the connection breaks partway, 
 
 The installation after an update uses the PyTorch already installed, as it is. When the CPU build is installed although there is an NVIDIA GPU (installed by a version before this one),
 it does not start a download of about 2.6 GB without asking; it says so instead. To get the GPU build, run `install.cmd`.
-The installation after an update also makes the Ollama settings above (so a computer installed with a version before this one gets `LLAMA_ARG_CACHE_RAM` too).
+The installation after an update also makes the Ollama settings above (so an Ollama that was there before gets `LLAMA_ARG_CACHE_RAM` too, on a computer installed with a version before this one).
 
 `taslation.toml`, `.venv`, `models` and the data folder (`~/.taslation`) stay as they are. The program folder `taslation\` gets the same contents as the new version
 (files that are not in the new version are deleted); no other file is deleted. `update.cmd` itself uses no network and reads only the ZIP or folder you give it.
@@ -273,7 +284,10 @@ To copy by hand, close TASlation, copy the **contents** of the `taslation-main` 
 ### Uninstalling
 
 Double-click `uninstall.cmd`: it shows a list of what will be removed and asks you to confirm (the default is "No"). It also asks, then and there, whether to delete data such as the translation cache (the default is to keep it).
-It removes the Ollama environment variables the installer set (`LLAMA_ARG_CACHE_RAM`, `OLLAMA_KV_CACHE_TYPE`) if they still have that value. A value you have set again yourself stays. An Ollama that is running keeps the old settings until it restarts. Finally, delete the folder.
+It removes the Ollama environment variables the installer set (`LLAMA_ARG_CACHE_RAM`, `OLLAMA_KV_CACHE_TYPE`) if they still have that value. A value you have set again yourself stays. An Ollama that is running keeps the old settings until it restarts.
+An Ollama that TASlation started and left running is stopped (not while another program has a model loaded in it). To remove Ollama's models when Ollama is not running, it starts `ollama serve` in a hidden window and stops it when done.
+When Ollama is kept, an Ollama you stopped from starting with Windows with a "Yes" during the installation starts with Windows again, as before.
+An Ollama installed for TASlation is left not starting with Windows, and it tells you how to change that. Finally, delete the folder.
 
 ## How to use
 

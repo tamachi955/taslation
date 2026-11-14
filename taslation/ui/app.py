@@ -51,6 +51,7 @@ from ..i18n import (
     set_language,
 )
 from ..notes import series_key
+from ..ollama_start import finish_all
 from ..translate.models import wanted_name
 from ..pagekeys import Profiles
 from ..regions import PageResult
@@ -1044,6 +1045,10 @@ def run_app(settings: Settings, window_query: str | None = None, book: str | Non
         app.mainloop()
     finally:
         release_awake()
+        # the window has gone (its close released the model): the Ollama it started stops now, unless another
+        # TASlation or another program still uses it (`ollama_start.finish_all`: a few seconds at most; the log says
+        # how it went)
+        finish_all()
     return 0
 
 

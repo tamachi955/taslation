@@ -140,7 +140,18 @@ def ollama_running(url: str, timeout: float = 1.0) -> bool:
 
 def installed_models(url: str, timeout: float = 1.0) -> list[str] | None:
     """The models Ollama at *url* has (`/api/tags`), in its order; None when it does not answer as Ollama does."""
-    answer = get(url, "/api/tags", timeout)
+    return _names(url, "/api/tags", timeout)
+
+
+def loaded_models(url: str, timeout: float = 1.0) -> list[str] | None:
+    """The models Ollama at *url* has loaded now (`/api/ps`: it only looks, nothing is loaded); None when it does not
+    answer as Ollama does."""
+    return _names(url, "/api/ps", timeout)
+
+
+def _names(url: str, path: str, timeout: float) -> list[str] | None:
+    """The ``name`` of each entry of ``models`` in Ollama's answer to *path*."""
+    answer = get(url, path, timeout)
     if answer is None or answer[0] != 200:
         return None
     try:

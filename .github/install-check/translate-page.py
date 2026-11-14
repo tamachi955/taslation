@@ -23,6 +23,7 @@ from pathlib import Path
 
 TIMEOUT_S = 25 * 60  # without a GPU the translation model loads and translates on the runner's CPU cores
 JAPANESE = ("translated", "untranslated")  # the statuses of a region read as Japanese (`taslation.pipeline`)
+STOPPED = "The translation program TASlation started was stopped."  # (taslation.ollama_start.STOPPED)
 
 
 def main() -> int:
@@ -48,7 +49,12 @@ def main() -> int:
         counts.update(exit_code=None, seconds=round(time.monotonic() - started, 1), error=f"no result in {TIMEOUT_S} s")
         return _end(args.out, counts, ok=False)
     counts.update(exit_code=run.returncode, seconds=round(time.monotonic() - started, 1))
-    print(f"taslation translate {args.page.name}: exit code {run.returncode} after {counts['seconds']} s")
+    # what the command said at its end of the Ollama it started (taslation.ollama_start's lines: no text of the page)
+    said = run.stderr.decode("utf-8", "replace")
+    counts["started_ollama"] = "Starting the translation program..." in said
+    counts["stopped_ollama"] = STOPPED in said
+    print(f"taslation translate {args.page.name}: exit code {run.returncode} after {counts['seconds']} s; it started "
+          f"Ollama: {counts['started_ollama']}, and stopped it at its end: {counts['stopped_ollama']}")
     try:
         result = json.loads(run.stdout.decode("utf-8"))
     except ValueError:

@@ -120,11 +120,18 @@ or changed where the installer downloads it is noticed within days; it downloads
 hour. GitHub e-mails the owner when the weekly run fails, and stops weekly runs after 60 days without activity. It unpacks the
 repository as "Download ZIP" gives it (`git archive`, so `.gitattributes` applies), hides the runner's own Python from
 the installer (the input `hide_python`), and runs `install.cmd -Yes` in it. Then it checks, one step each, what the
-installer made (`.venv`, the three OCR models, the translation model in Ollama, `LLAMA_ARG_CACHE_RAM=0` for the user
-with its marker, the Start-menu shortcut), `taslation doctor`, that Ollama's server and llama.cpp's server run with
-`LLAMA_ARG_CACHE_RAM=0` (from their environment blocks and Ollama's log, before anything of TASlation starts Ollama),
-a `taslation translate` of `tests/fixtures/sample_page.png` (counts only), `uninstall.cmd -DryRun -Yes` and
-`uninstall.cmd -Yes`. The job summary lists every check, the installer's step times and the sizes, and what the check
+installer made (`.venv`, the three OCR models, the translation model in Ollama's model folder, the Start-menu shortcut,
+and Ollama's lifetime: Ollama runs only while TASlation needs it, so no process of Ollama is left, nothing answers on
+11434, Ollama does not start with Windows, `.ollama-by-install` is there, and neither `LLAMA_ARG_CACHE_RAM` for the
+user nor `.cache-ram-by-install`), `taslation doctor` (ready, with Ollama started for its check and stopped again),
+the server TASlation starts (`.github/install-check/hold-ollama.py`, run by the installed `.venv`, starts it with
+`OllamaStarter` as the window does and loads the model; while it holds it, the workflow checks the server's process
+against TASlation's record and reads `LLAMA_ARG_CACHE_RAM=0` from the environment blocks of Ollama's server and
+llama.cpp's server, or says that a runner does not show them; then it lets the helper end, which must say that it
+stopped the server and leave no process), a `taslation translate` of `tests/fixtures/sample_page.png` with Ollama not
+running before (counts only, and that it started and stopped Ollama), `uninstall.cmd -DryRun -Yes` and
+`uninstall.cmd -Yes`. The lifetime checks are for an Ollama the installer installed: on a runner without winget, where
+the workflow installs Ollama itself, they are not shown. The job summary lists every check, the installer's step times and the sizes, and what the check
 does not cover (a GPU, the questions a person answers, a real viewer, Windows 10 and 11); the console output is kept
 as the artifact `install-check-output`. Its helpers are in `.github/install-check/`. `.gitattributes` leaves `.github`
 out of GitHub's ZIP, and `update.ps1` never copies it. `tests/test_install_check_workflow.py` checks the workflow

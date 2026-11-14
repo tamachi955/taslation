@@ -491,6 +491,11 @@ class Installer:
     def run(self) -> Outcome:
         if not Path(self.script).is_file():
             return Outcome("failed", "setup_models.py is not there")
+        if self.url:  # Ollama's server first, started as TASlation starts it: an ``ollama`` command that finds none
+            # would start Ollama's tray app instead, and with it Ollama's start with Windows
+            from .ollama_start import OllamaStarter
+
+            OllamaStarter(self.url, state_dir=self.state_dir).start()
         exe = find_ollama()
         before = listed(exe, self.url) if exe else None
         env = ollama_env(self.url)

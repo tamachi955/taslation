@@ -16,3 +16,5 @@ taslation.toml
 .claude/worktrees/
 .kv-cache-by-install
 .cache-ram-by-install
+.ollama-by-install
+.ollama-autostart-by-install

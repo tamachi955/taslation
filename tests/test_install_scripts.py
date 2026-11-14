@@ -87,15 +87,23 @@ def _override(script: Path, *lines: str) -> None:
 
 
 def _sandbox(script: Path, tmp: Path) -> None:
-    """This copy off the computer it runs on: `Set-UserEnv` and `Stop-OllamaProcesses` only write down what they would
-    do (into ``user-env.txt``), `Get-UserEnv` reads ``FAKE_USER_<name>`` from the process, the shortcut goes into the
-    temporary folder, the Ollama it would ask is nobody, any disk has room and any folder is short enough; the data
-    folder is TASLATION_STATE_DIR or none, this PC's language FAKE_UI_CULTURE."""
+    """This copy off the computer it runs on: `Set-UserEnv`, `Stop-OllamaProcesses`, the Run key's writes, the start of
+    a hidden ``ollama serve`` and the end of a process only write down what they would do (into ``user-env.txt``),
+    `Get-UserEnv` reads ``FAKE_USER_<name>`` from the process, the Run key is ``run-key.txt`` (lines "name<TAB>command"),
+    the running processes the ones ``processes.txt`` lists (lines "pid<TAB>program<TAB>start"; Ollama's own run when
+    FAKE_OLLAMA_RUNNING is set), the shortcut, the Startup folder and Ollama's model folder are in the temporary folder,
+    the Ollama it would ask is nobody, any disk has room and any folder is short enough; the data folder is
+    TASLATION_STATE_DIR or none, this PC's language FAKE_UI_CULTURE."""
     menu = tmp / "start menu"
     menu.mkdir(exist_ok=True)
+    (tmp / "startup").mkdir(exist_ok=True)
     log = tmp / "user-env.txt"
+    processes = tmp / "processes.txt"
     _override(script, SANDBOXED,
               f"$ShortcutPath = '{menu / 'TASlation.lnk'}'",
+              f"$StartupFolder = '{tmp / 'startup'}'",
+              f"$OllamaStore = '{tmp / 'ollama store'}'",
+              "$OllamaFirstRunWaitS = 0",
               "function Get-StateDir { $v = [Environment]::GetEnvironmentVariable('TASLATION_STATE_DIR'); "
               f"if ($v) {{ return $v }}; return '{tmp / 'no state'}' }}",
               "function Get-UiCulture { return [Environment]::GetEnvironmentVariable('FAKE_UI_CULTURE') }",
@@ -104,7 +112,21 @@ def _sandbox(script: Path, tmp: Path) -> None:
               "function Get-FreeGB([string]$Path) { return 9999.0 }",
               "function Get-UserEnv([string]$Name) { return [Environment]::GetEnvironmentVariable(\"FAKE_USER_$Name\") }",
               f"function Set-UserEnv([string]$Name, [string]$Value) {{ Add-Content -LiteralPath '{log}' \"$Name=$Value\" }}",
-              f"function Stop-OllamaProcesses([string]$Folder) {{ Add-Content -LiteralPath '{log}' 'stopped Ollama'; return $false }}")
+              f"function Stop-OllamaProcesses([string]$Folder) {{ Add-Content -LiteralPath '{log}' 'stopped Ollama'; return $false }}",
+              "function Get-OllamaProcesses([string]$Folder) { if ($env:FAKE_OLLAMA_RUNNING) { return @([pscustomobject]@{ Id = 0 }) }; return @() }",
+              f"function Get-RunValues {{ $f = '{tmp / 'run-key.txt'}'; if (Test-Path -LiteralPath $f) {{ "
+              "foreach ($l in @(Get-Content -LiteralPath $f -Encoding UTF8)) { $p = @($l -split \"`t\", 2); "
+              "[pscustomobject]@{ Name = $p[0]; Data = $p[1] } } } }",
+              f"function Remove-RunValue([string]$Name) {{ Add-Content -LiteralPath '{log}' \"removed the Run value $Name\" }}",
+              f"function Set-RunValue([string]$Name, [string]$Data) {{ Add-Content -LiteralPath '{log}' \"set the Run value $Name=$Data\" }}",
+              f"function Start-HiddenServe([string]$Exe) {{ Add-Content -LiteralPath '{log}' 'started ollama serve'; return $null }}",
+              f"function Stop-ProcessTree($Process) {{ Add-Content -LiteralPath '{log}' \"ended process $($Process.Id)\"; "
+              f"$f = '{processes}'; if (Test-Path -LiteralPath $f) {{ Set-Content -LiteralPath $f -Encoding UTF8 -Value "
+              "@(Get-Content -LiteralPath $f -Encoding UTF8 | Where-Object { ($_ -split \"`t\")[0] -ne [string]$Process.Id }) } }",
+              f"function Get-ProcessInfo([long]$Id) {{ $f = '{processes}'; if (-not (Test-Path -LiteralPath $f)) {{ return $null }}; "
+              "foreach ($l in @(Get-Content -LiteralPath $f -Encoding UTF8)) { $p = @($l -split \"`t\"); "
+              "if ($p[0] -eq [string]$Id) { return [pscustomobject]@{ Process = [pscustomobject]@{ Id = $Id; HasExited = $false }; "
+              "Path = $p[1]; Started = [long]$p[2] } } }; return $null }")
 
 
 def _env(tmp: Path, **extra: str) -> dict:
@@ -1359,7 +1381,7 @@ def test_a_reading_model_the_server_refuses_stops_the_install_with_what_to_do(tm
 def test_an_ollama_that_does_not_start_says_so_at_the_import_and_at_the_end(tmp_path):
     co = _fake_checkout(tmp_path)
     env = _whole_install(co, tmp_path, doctor="Ollama: not reachable", doctor_code=1)
-    _override(co / "install.ps1", "function Start-OllamaServer([string]$Exe) { return '' }")  # nothing answers
+    _override(co / "install.ps1", "function Start-OwnOllama([string]$Exe) { return '' }")  # nothing answers
     _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
     r = _run(co / "install.ps1", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -1548,7 +1570,14 @@ def test_the_script_says_what_it_does_to_ollama():
     text = (ROOT / "install.ps1").read_text(encoding="ascii")
     head = " ".join(text[:text.index("[CmdletBinding()]")].split())
     assert "Ollama then restarts once" in head
-    assert "on every computer with Ollama it sets LLAMA_ARG_CACHE_RAM=0 for your user." in head
+    assert "Ollama runs only while TASlation needs it, unless you run it yourself:" in head
+    assert "an Ollama this run installs does not start with Windows, and nothing of it is left running." in head
+    assert "The file .ollama-by-install in this folder says so." in head
+    assert "(default no; -Yes never answers it)" in head and ".ollama-autostart-by-install" in head
+    assert "(ollama serve, in a hidden window, never Ollama's app) and stops it again" in head
+    assert ("For an Ollama that was there before, two more changes have no question (an Ollama that TASlation starts "
+            "gets both from TASlation itself, and nothing is set for your user).") in head
+    assert "* it sets LLAMA_ARG_CACHE_RAM=0 for your user." in head
     assert "up to 8 GB of RAM as a cache of earlier requests" in head and "LLAMA_ARG_* variables" in head
     assert "no faster with a GPU, and about 8 % faster without one" in head  # what was measured, both ways
     assert "on an NVIDIA GPU of 6 GB or less it sets OLLAMA_KV_CACHE_TYPE=q8_0 for your user" in head
@@ -1556,6 +1585,9 @@ def test_the_script_says_what_it_does_to_ollama():
     assert "uninstall.cmd then clears each variable if it still has that value" in head
     head = " ".join((ROOT / "uninstall.ps1").read_text(encoding="ascii").split("[CmdletBinding()]")[0].split())
     assert "LLAMA_ARG_CACHE_RAM (the file .cache-ram-by-install says so) and it is still 0" in head
+    assert "a server TASlation started and left running (the file ollama-started.json in the data folder" in head
+    assert "(the file .ollama-autostart-by-install lists what it removed), that start with Windows is put back" in head
+    assert "When Ollama does not run, it starts Ollama's server for that in a hidden window and stops it again." in head
 
 
 # ---- no prompt cache in Ollama's RAM
@@ -1661,11 +1693,10 @@ def test_without_ollama_nothing_is_set(tmp_path):
     assert "LLAMA_ARG_CACHE_RAM" not in r.stdout
 
 
-@pytest.mark.parametrize("ollama", [True, False], ids=["Ollama there", "Ollama to install"])
-def test_a_dry_run_plans_the_setting_and_changes_nothing(tmp_path, ollama):
+def test_a_dry_run_plans_the_setting_and_changes_nothing(tmp_path):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
-    env = _cache_env(_tools(tmp_path, ollama=ollama, gpu=None))
+    env = _cache_env(_tools(tmp_path, ollama=True, gpu=None))
     before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
     r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -1679,6 +1710,24 @@ def test_a_dry_run_plans_the_setting_and_changes_nothing(tmp_path, ollama):
     r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
     assert "detail: LLAMA_ARG_CACHE_RAM is set already (512); left as it is" in r.stdout
     assert "would: set LLAMA_ARG_CACHE_RAM" not in r.stdout and "would: start Ollama again" not in r.stdout
+
+
+@pytest.mark.parametrize("gpu", [None, TURING], ids=["no GPU", "a small GPU"])
+def test_a_dry_run_that_would_install_ollama_plans_no_setting_for_the_user(tmp_path, gpu):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    env = _cache_env(_tools(tmp_path, ollama=False, gpu=gpu))
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    r = _run(co / "install.ps1", "-DryRun", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert (f"would: stop what Ollama's installer starts, remove Ollama's start with Windows, and write "
+            f"{co / '.ollama-by-install'}") in out
+    assert "would: set LLAMA_ARG_CACHE_RAM" not in out and "would: set OLLAMA_KV_CACHE_TYPE" not in out
+    assert "would: start Ollama again" not in out
+    assert ("detail: Ollama was installed for TASlation: the server TASlation starts gets LLAMA_ARG_CACHE_RAM and "
+            "OLLAMA_KV_CACHE_TYPE from it; nothing is set for this user") in out
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
 
 
 @pytest.mark.parametrize("value, marker", [("0", False), ("4096", True)], ids=["not set by the install", "changed since"])
@@ -1819,6 +1868,198 @@ def test_an_ollama_that_does_not_start_again_after_its_settings_gets_a_warning_n
             "menu, or restart the PC: the settings are saved and apply from its next start.") in out
     assert _last_line(out).strip() == OLLAMA_NOT_RUNNING and out.count(OLLAMA_NOT_RUNNING) == 2
     assert "TASlation is installed." not in out
+
+
+# ---- Ollama runs only while TASlation needs it
+
+
+INSTALLED_FOR_TASLATION = ("ok: Ollama was installed for TASlation: it does not start with Windows; TASlation starts "
+                           "it when it translates and stops it when it ends.")
+USE_IT_YOURSELF = "To use Ollama yourself, start it from the Start menu."
+AUTOSTART_SAID = ("Ollama starts with Windows on this computer. If you use Ollama only for TASlation, TASlation can "
+                  "start it only when it translates.")
+AUTOSTART_QUESTION = "Stop Ollama from starting with Windows?"
+NO_LONGER = ("ok: Ollama no longer starts with Windows: TASlation starts it when it translates and stops it when it "
+             "ends.")
+KEEPS_RUNNING = "The Ollama running now keeps running until you quit it or sign out."
+
+
+def _shortcut(path: Path, target: Path) -> None:
+    """A real shortcut at *path* (in the temporary folder) to *target*, which is made as an empty file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"")
+    r = _ps(RUN_SHELL, f"$l = (New-Object -ComObject WScript.Shell).CreateShortcut('{path}'); "
+                       f"$l.TargetPath = '{target}'; $l.Save()")
+    assert r.returncode == 0 and path.is_file(), r.stderr
+
+
+def _ollama_from_winget(tmp: Path) -> None:
+    """``ollama`` appears on the PATH only once the fake winget has run (as winget installs it)."""
+    (tmp / "bin" / "ollama.cmd").rename(tmp / "bin" / "ollama.ready")
+    (tmp / "bin" / "winget.cmd").write_text(
+        '@echo off\necho %*> "%~dp0winget-args.txt"\n'
+        'if exist "%~dp0ollama.ready" copy /y "%~dp0ollama.ready" "%~dp0ollama.cmd" >nul\n')
+
+
+def _marker_lines(path: Path) -> list[str]:
+    return path.read_text("utf-8-sig").splitlines()  # (Windows PowerShell writes UTF-8 with a byte order mark)
+
+
+@needs_venv
+def test_an_ollama_this_run_installs_does_not_start_with_windows_and_gets_no_user_setting(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_whole_install(co, tmp_path))
+    _ollama_from_winget(tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server)  # the model is not there yet
+    bin_dir = tmp_path / "bin"
+    link = tmp_path / "startup" / "Ollama.lnk"
+    _shortcut(link, bin_dir / "ollama app.exe")  # what Ollama's app makes at its first start
+    other = tmp_path / "startup" / "Other.lnk"
+    _shortcut(other, tmp_path / "elsewhere" / "other.exe")
+    (tmp_path / "run-key.txt").write_text(
+        f"Other\tC:\\elsewhere\\other.exe\nOllamaServe\t\"{bin_dir / 'ollama.cmd'}\" serve\n", "utf-8")
+    _answering(co / "install.ps1", {"Install Ollama now": "y", PLAMO_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert (bin_dir / "winget-args.txt").read_text().split()[:3] == ["install", "--id", "Ollama.Ollama"]
+    assert out.index("ok: Ollama installed") < out.index(INSTALLED_FOR_TASLATION) < out.index(USE_IT_YOURSELF)
+    assert not link.exists() and other.is_file()  # only Ollama's own
+    assert _user_env_log(tmp_path) == ["stopped Ollama", "removed the Run value OllamaServe"]  # no setting for the user
+    lines = _marker_lines(co / ".ollama-by-install")
+    assert lines[0].startswith("Ollama was installed for TASlation by install.ps1 on ")
+    assert lines[1:] == [f"shortcut\t{link}\t{bin_dir / 'ollama app.exe'}", f"run\tOllamaServe\t\"{bin_dir / 'ollama.cmd'}\" serve"]
+    assert not (co / CACHE_RAM_MARKER).exists() and not (co / ".kv-cache-by-install").exists()
+    assert "LLAMA_ARG_CACHE_RAM" not in out and AUTOSTART_QUESTION not in out
+    assert "TASlation is installed." in out
+
+    # a run again finds it, gives it no setting either, and asks nothing about it
+    (tmp_path / "user-env.txt").unlink()
+    (tmp_path / "run-key.txt").write_text("Other\tC:\\elsewhere\\other.exe\n", "utf-8")  # (what the removal left)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _user_env_log(tmp_path) == [] and not (co / CACHE_RAM_MARKER).exists()
+    assert "ok: Ollama found" in r.stdout and AUTOSTART_QUESTION not in r.stdout
+
+
+@needs_venv
+def test_an_ollama_there_before_that_does_not_run_is_started_for_the_import_and_stopped_again(tmp_path):
+    co = _fake_checkout(tmp_path)
+    env = _cache_env(_whole_install(co, tmp_path))
+    log = tmp_path / "user-env.txt"
+    _override(co / "install.ps1", "$script:asks = 0",
+              "function Test-OllamaServer { $script:asks++; return ($script:asks -gt 1) }",
+              f"function Start-HiddenServe([string]$Exe) {{ Add-Content -LiteralPath '{log}' "
+              "\"started $(Split-Path $Exe -Leaf) serve\"; return [pscustomobject]@{ Id = 4242; HasExited = $false } }",
+              "$OllamaStartWaitS = 5")
+    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    said = [out.index(s) for s in ("Starting Ollama for the installation; it is stopped again at the end.",
+                                   "ok: Ollama started (ollama serve, in a hidden window)",
+                                   "ok: Ollama, started for the installation, is stopped again", "[7/7]")]
+    assert said == sorted(said)
+    # the server it started is stopped before the settings' restart, which then finds no Ollama running
+    assert _user_env_log(tmp_path) == ["started ollama.cmd serve", "ended process 4242", "LLAMA_ARG_CACHE_RAM=0",
+                                       "stopped Ollama"]
+    assert not (co / ".ollama-by-install").exists() and (co / CACHE_RAM_MARKER).is_file()
+    assert "with its app" not in out and "TASlation is installed." in out
+
+
+def _ollama_there_starting_with_windows(co: Path, tmp: Path, ollama_server) -> tuple[dict, Path]:
+    env = _whole_install(co, tmp)  # (the guard's variables: no setting is made)
+    env["FAKE_OLLAMA_RUNNING"] = "1"
+    link = tmp / "startup" / "Ollama.lnk"
+    _shortcut(link, tmp / "bin" / "ollama app.exe")
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    return env, link
+
+
+@needs_venv
+def test_a_yes_stops_an_ollama_there_before_from_starting_with_windows(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env, link = _ollama_there_starting_with_windows(co, tmp_path, ollama_server)
+    _answering(co / "install.ps1", {AUTOSTART_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert out.index(AUTOSTART_SAID) < out.index(f"asked:   {AUTOSTART_QUESTION} [y/N] = y") < out.index("No more questions.")
+    assert out.index(NO_LONGER) < out.index(KEEPS_RUNNING) < out.index("[7/7]")
+    assert not link.exists()
+    lines = _marker_lines(co / ".ollama-autostart-by-install")
+    assert "after a yes" in lines[0] and lines[1:] == [f"shortcut\t{link}\t{tmp_path / 'bin' / 'ollama app.exe'}"]
+    assert not (co / ".ollama-by-install").exists() and _user_env_log(tmp_path) == []  # nothing stopped, nothing set
+
+
+@needs_venv
+def test_enter_leaves_ollama_s_start_with_windows_as_it_is(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env, link = _ollama_there_starting_with_windows(co, tmp_path, ollama_server)
+    _answering(co / "install.ps1", {AUTOSTART_QUESTION: ""})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"asked:   {AUTOSTART_QUESTION} [y/N] = " in r.stdout and NO_LONGER not in r.stdout
+    assert link.is_file() and not (co / ".ollama-autostart-by-install").exists()
+    assert "TASlation is installed." in r.stdout
+
+
+@needs_venv
+@pytest.mark.parametrize("culture, said", [("", f"{AUTOSTART_QUESTION} [y/N] n (-Yes does not answer this: only a "
+                                                 "person does)"), ("ja-JP", None)])
+def test_yes_never_answers_the_question_about_ollama_s_start_with_windows(tmp_path, ollama_server, culture, said):
+    co = _fake_checkout(tmp_path)
+    env, link = _ollama_there_starting_with_windows(co, tmp_path, ollama_server)
+    env["FAKE_UI_CULTURE"] = culture
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    if said is None:  # in this PC's language
+        ja = {english: texts["ja"] for english, texts in _texts().items()}
+        said = ja[AUTOSTART_QUESTION]
+        assert ja[AUTOSTART_SAID] in r.stdout and AUTOSTART_SAID not in r.stdout
+    assert said in r.stdout and link.is_file() and not (co / ".ollama-autostart-by-install").exists()
+
+
+def test_a_dry_run_counts_no_for_ollama_s_start_with_windows(tmp_path):
+    co = _fake_checkout(tmp_path)
+    env = _tools(tmp_path, ollama=True)
+    link = tmp_path / "startup" / "Ollama.lnk"
+    _shortcut(link, tmp_path / "bin" / "ollama app.exe")
+    shutil.rmtree(co / ".venv")
+    r = _run(co / "install.ps1", "-DryRun", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"{AUTOSTART_QUESTION} [y/N] (dry run: would ask; counted as n)" in r.stdout and link.is_file()
+
+
+def test_the_new_lines_about_ollama_are_in_japanese_too():
+    texts = _texts()
+    for line in (INSTALLED_FOR_TASLATION.removeprefix("ok: "), USE_IT_YOURSELF, AUTOSTART_SAID, AUTOSTART_QUESTION,
+                 NO_LONGER.removeprefix("ok: "), KEEPS_RUNNING,
+                 "Ollama's start with Windows could not be removed. Run install.cmd again.",
+                 "Starting Ollama for the installation; it is stopped again at the end.",
+                 "Ollama started (ollama serve, in a hidden window)",
+                 "Ollama, started for the installation, is stopped again"):
+        assert texts[line]["ja"], line
+
+
+def test_ollama_s_start_with_windows_is_only_ever_touched_through_its_named_functions():
+    for name in SCRIPTS:
+        text = (ROOT / name).read_text(encoding="ascii")
+        writes = [line.strip() for line in text.splitlines()
+                  if re.search(r"(Set|Remove|New)-ItemProperty|New-Item -Path \$RunKey", line)]
+        assert all(w.startswith(("function Remove-RunValue", "Set-ItemProperty -LiteralPath $RunKey",
+                                 "if (-not (Test-Path -LiteralPath $RunKey))")) for w in writes), (name, writes)
+    install = (ROOT / "install.ps1").read_text(encoding="ascii")
+    # what is removed is Ollama's own: shortcuts pointing into its folder, Run values running a program of it
+    assert "$target.StartsWith($ollamaHome + '\\', [StringComparison]::OrdinalIgnoreCase)" in install
+    assert "$value.Data.IndexOf($ollamaHome + '\\', [StringComparison]::OrdinalIgnoreCase) -ge 0" in install
+
+
+def test_the_markers_are_kept_by_an_update_and_ignored_by_git():
+    update = (ROOT / "update.ps1").read_text(encoding="ascii")
+    ignored = (ROOT / ".gitignore").read_text(encoding="ascii").splitlines()
+    for marker in (".ollama-by-install", ".ollama-autostart-by-install"):
+        assert f"'{marker}'" in update and marker in ignored
 
 # ---- the translator model the language needs
 
@@ -2098,12 +2339,13 @@ def _record(state: Path, *names: str) -> None:
          "agreed": {"plamo-community-license": {"when": "2026-11-06T00:00:00+00:00", "where": "install"}}}), "utf-8")
 
 
-def test_uninstall_asks_only_about_the_models_taslation_installed(tmp_path):
+def test_uninstall_asks_only_about_the_models_taslation_installed(tmp_path, ollama_server):
     co = _fake_checkout(tmp_path)
     state = tmp_path / "state"
     _record(state, MODEL_NAME)
     env = _tools(tmp_path, ollama=True)
     env["TASLATION_STATE_DIR"] = str(state)
+    _ollama_at(co / "uninstall.ps1", ollama_server, MODEL_NAME, QWEN_NAME)
     _answering(co / "uninstall.ps1", {REMOVE: "y", "This cannot be undone": "", "that TASlation installed": "y",
                                       "Uninstall Ollama itself": ""})
     r = _run(co / "uninstall.ps1", env=env)
@@ -2140,17 +2382,228 @@ def test_uninstall_yes_keeps_the_models_taslation_installed(tmp_path):
     assert f"ollama rm {MODEL_NAME}" in left and f"ollama rm {QWEN_NAME}" in left
 
 
-def test_uninstall_reads_the_record_before_the_data_folder_goes(tmp_path):
+def test_uninstall_reads_the_record_before_the_data_folder_goes(tmp_path, ollama_server):
     co = _fake_checkout(tmp_path)
     state = tmp_path / "state"
     _record(state, MODEL_NAME)
     env = _tools(tmp_path, ollama=True)
     env["TASLATION_STATE_DIR"] = str(state)
+    _ollama_at(co / "uninstall.ps1", ollama_server, MODEL_NAME)
     _answering(co / "uninstall.ps1", {REMOVE: "y", "This cannot be undone": "y", "that TASlation installed": "y",
                                       "Uninstall Ollama itself": ""})
     r = _run(co / "uninstall.ps1", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     assert not state.exists() and (tmp_path / "bin" / "ollama-args.txt").read_text().split() == ["rm", MODEL_NAME]
+    assert "started ollama serve" not in _user_env_log(tmp_path)  # Ollama answered: nothing was started for it
+
+
+def _rm_with_ollama_down(tmp_path: Path, *lines: str) -> tuple[subprocess.CompletedProcess, Path]:
+    """An uninstall whose Ollama does not run, asked to remove the model TASlation installed (*lines* go into the copy)."""
+    co = _fake_checkout(tmp_path)
+    state = tmp_path / "state"
+    _record(state, MODEL_NAME)
+    env = _tools(tmp_path, ollama=True)
+    env["TASLATION_STATE_DIR"] = str(state)
+    if lines:
+        _override(co / "uninstall.ps1", *lines)
+    _answering(co / "uninstall.ps1", {REMOVE: "y", "This cannot be undone": "", "that TASlation installed": "y",
+                                      "Uninstall Ollama itself": ""})
+    r = _run(co / "uninstall.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r, co
+
+
+def test_uninstall_starts_ollama_serve_hidden_for_ollama_rm_and_stops_it_again(tmp_path):
+    # the ollama command would start Ollama's app when no server answers: the run starts the server itself, hidden
+    r, _ = _rm_with_ollama_down(
+        tmp_path, "$script:asks = 0", "function Test-OllamaServer { $script:asks++; return ($script:asks -gt 1) }",
+        f"function Start-HiddenServe([string]$Exe) {{ Add-Content -LiteralPath '{tmp_path / 'user-env.txt'}' "
+        "\"started $(Split-Path $Exe -Leaf) serve\"; return [pscustomobject]@{ Id = 4242; HasExited = $false } }",
+        "$OllamaStartWaitS = 5")
+    assert "starting Ollama (ollama serve, in a hidden window) for ollama rm" in r.stdout
+    assert (tmp_path / "bin" / "ollama-args.txt").read_text().split() == ["rm", MODEL_NAME]
+    assert _user_env_log(tmp_path) == ["started ollama.cmd serve", "ended process 4242"]  # (and nothing else stopped)
+
+
+def test_uninstall_whose_ollama_does_not_answer_removes_no_model_and_says_how(tmp_path):
+    r, _ = _rm_with_ollama_down(tmp_path)  # (the sandbox's hidden server never starts)
+    assert "Ollama's server did not answer, so ollama rm cannot remove a model." in r.stdout
+    assert not (tmp_path / "bin" / "ollama-args.txt").exists()
+    left = r.stdout[r.stdout.index("Left in place"):]
+    assert f"ollama rm {MODEL_NAME}" in left
+
+
+def test_the_uninstall_counts_taslation_s_translators_as_its_own():
+    from taslation.translate.models import MODELS
+
+    text = (ROOT / "uninstall.ps1").read_text(encoding="ascii")
+    own = re.search(r"^\$OwnModels = @\(([^)]*)\)", text, re.M).group(1)
+    assert sorted(re.findall(r"'([^']+)'", own)) == sorted(m.ollama_name for m in MODELS)
+
+
+# ---- the server TASlation left running, at the uninstall
+
+SERVER_EXE = r"C:\fake\Ollama\ollama.exe"
+
+
+def _left_server(tmp_path: Path, state: Path, *, alive: bool = True, same_start: bool = True,
+                 users: tuple[tuple[int, int, bool], ...] = ()) -> None:
+    """The record of a server TASlation started (pid 777, started at 1000), and the processes ``processes.txt`` says run:
+    the server when *alive* (with another start unless *same_start*), and each user (pid, start, whether it runs)."""
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "ollama-started.json").write_text(json.dumps(
+        {"what": "the Ollama server TASlation started", "pid": 777, "exe": SERVER_EXE, "started": 1000,
+         "url": "http://127.0.0.1:11434", "users": [{"pid": p, "started": s} for p, s, _ in users]}), "utf-8")
+    running = [f"{p}\tC:\\fake\\python.exe\t{s}" for p, s, runs in users if runs]
+    if alive:
+        running.append(f"777\t{SERVER_EXE}\t{1000 if same_start else 2000}")
+    (tmp_path / "processes.txt").write_text("\n".join(running) + "\n", "utf-8")
+
+
+def _uninstall_with_left_server(tmp_path: Path, ollama_server, *loaded: str, data: str = "") -> subprocess.CompletedProcess:
+    co = _fake_checkout(tmp_path)
+    state = tmp_path / "state"
+    _record(state)
+    env = _tools(tmp_path, ollama=True)
+    env["TASLATION_STATE_DIR"] = str(state)
+    _ollama_at(co / "uninstall.ps1", ollama_server)
+    _Ollama.models = list(loaded)  # (the stand-in lists them for /api/ps as for /api/tags)
+    _answering(co / "uninstall.ps1", {REMOVE: "y", "This cannot be undone": data, "Uninstall Ollama itself": ""})
+    r = _run(co / "uninstall.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r
+
+
+def test_uninstall_stops_the_server_taslation_left_running(tmp_path, ollama_server):
+    state = tmp_path / "state"
+    _left_server(tmp_path, state, users=((50, 5, False),))  # its user has ended (a crash)
+    r = _uninstall_with_left_server(tmp_path, ollama_server, MODEL_NAME)
+    assert "stopped the Ollama server TASlation had started and left running" in r.stdout
+    assert _user_env_log(tmp_path) == ["ended process 777"]
+    assert not (state / "ollama-started.json").exists()
+
+
+@pytest.mark.parametrize("alive, same_start", [(False, True), (True, False)])
+def test_uninstall_never_stops_a_process_that_is_not_the_recorded_server(tmp_path, ollama_server, alive, same_start):
+    state = tmp_path / "state"
+    _left_server(tmp_path, state, alive=alive, same_start=same_start)  # gone, or its number reused
+    r = _uninstall_with_left_server(tmp_path, ollama_server)
+    assert "ended process" not in " ".join(_user_env_log(tmp_path)) and "left running" not in r.stdout
+    assert not (state / "ollama-started.json").exists()  # the stale record goes
+
+
+def test_uninstall_leaves_the_server_another_taslation_uses(tmp_path, ollama_server):
+    state = tmp_path / "state"
+    _left_server(tmp_path, state, users=((50, 5, True),))
+    r = _uninstall_with_left_server(tmp_path, ollama_server)
+    assert "left running: another copy of TASlation still uses it" in r.stdout
+    assert _user_env_log(tmp_path) == [] and (state / "ollama-started.json").is_file()
+
+
+def test_uninstall_leaves_the_server_with_another_program_s_model(tmp_path, ollama_server):
+    state = tmp_path / "state"
+    _left_server(tmp_path, state)
+    r = _uninstall_with_left_server(tmp_path, ollama_server, MODEL_NAME, "someone-else:7b")
+    assert "another program has 1 model(s) loaded in it (someone-else:7b)" in r.stdout
+    assert _user_env_log(tmp_path) == [] and not (state / "ollama-started.json").exists()  # no longer TASlation's
+
+
+def test_uninstall_stops_the_left_server_also_when_the_data_folder_goes(tmp_path, ollama_server):
+    state = tmp_path / "state"
+    _left_server(tmp_path, state)
+    r = _uninstall_with_left_server(tmp_path, ollama_server, data="y")
+    assert not state.exists() and _user_env_log(tmp_path) == ["ended process 777"]
+
+
+def test_uninstall_dry_run_says_it_would_stop_the_left_server(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    state = tmp_path / "state"
+    _left_server(tmp_path, state)
+    _ollama_at(co / "uninstall.ps1", ollama_server)
+    env = _tools(tmp_path, ollama=True)
+    env["TASLATION_STATE_DIR"] = str(state)
+    r = _run(co / "uninstall.ps1", "-DryRun", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "would: stop the Ollama server TASlation started and left running (process 777)" in r.stdout
+    assert _user_env_log(tmp_path) == [] and (state / "ollama-started.json").is_file()
+
+
+# ---- Ollama's start with Windows, at the uninstall
+
+APP_FOLDER_NAME = "Ollama app folder"
+
+
+def _ollama_app_folder(tmp_path: Path, template: bool = True) -> Path:
+    """An Ollama folder as its installer leaves it: ollama.exe (a .cmd here), ``ollama app.exe``, lib\\Ollama.lnk."""
+    folder = tmp_path / APP_FOLDER_NAME
+    (folder / "lib").mkdir(parents=True)
+    (folder / "ollama.cmd").write_text('@echo off\necho %*>> "%~dp0ollama-args.txt"\n')
+    (folder / "ollama app.exe").write_bytes(b"not a real program")
+    if template:
+        (folder / "lib" / "Ollama.lnk").write_bytes(b"the shortcut Ollama's app copies")
+    return folder
+
+
+def _uninstall_keeping_ollama(tmp_path: Path, marker: str, lines: list[str], winget: str = "") -> tuple[str, Path]:
+    co = _fake_checkout(tmp_path)
+    folder = _ollama_app_folder(tmp_path)
+    (co / marker).write_text("\n".join(lines) + "\n", "utf-8")
+    env = _tools(tmp_path)
+    env["PATH"] = str(folder) + os.pathsep + env["PATH"]
+    env["TASLATION_STATE_DIR"] = str(tmp_path / "no data here")
+    _answering(co / "uninstall.ps1", {REMOVE: "y", "Remove the translation model": "", "Uninstall Ollama itself": winget})
+    r = _run(co / "uninstall.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (co / marker).exists()  # the marker goes either way
+    return r.stdout, folder
+
+
+def test_uninstall_puts_back_the_start_with_windows_the_person_s_yes_removed(tmp_path):
+    link = tmp_path / "startup" / "Ollama.lnk"
+    out, folder = _uninstall_keeping_ollama(tmp_path, ".ollama-autostart-by-install", [
+        "Ollama's start with Windows was removed by install.ps1 on 2026-11-14, after a yes.",
+        f"shortcut\t{link}\t{tmp_path / APP_FOLDER_NAME / 'ollama app.exe'}",
+        f"run\tOllamaServe\t\"{tmp_path / APP_FOLDER_NAME / 'ollama.exe'}\" serve"])
+    assert link.read_bytes() == b"the shortcut Ollama's app copies"  # Ollama's own shortcut, as its app copies it
+    assert _user_env_log(tmp_path) == [f"set the Run value OllamaServe=\"{folder / 'ollama.exe'}\" serve"]
+    assert "Ollama starts with Windows again, as it did before TASlation's install" in out
+
+
+def test_uninstall_leaves_a_run_value_there_now_alone(tmp_path):
+    (tmp_path / "run-key.txt").write_text("OllamaServe\tsomething the person set since\n", "utf-8")
+    out, _ = _uninstall_keeping_ollama(tmp_path, ".ollama-autostart-by-install", [
+        "about", "run\tOllamaServe\tthe value the install removed"])
+    assert _user_env_log(tmp_path) == [] and "starts with Windows again" in out
+
+
+def test_uninstall_puts_nothing_back_once_ollama_itself_is_gone(tmp_path):
+    link = tmp_path / "startup" / "Ollama.lnk"
+    out, _ = _uninstall_keeping_ollama(tmp_path, ".ollama-autostart-by-install", ["about", f"shortcut\t{link}\tx"],
+                                       winget="y")
+    assert not link.exists() and "starts with Windows again" not in out
+
+
+def test_uninstall_leaves_an_ollama_installed_for_taslation_off_and_says_how(tmp_path):
+    link = tmp_path / "startup" / "Ollama.lnk"
+    out, _ = _uninstall_keeping_ollama(tmp_path, ".ollama-by-install", [
+        "Ollama was installed for TASlation by install.ps1 on 2026-11-14: it does not start with Windows.",
+        f"shortcut\t{link}\t{tmp_path / APP_FOLDER_NAME / 'ollama app.exe'}"])
+    assert not link.exists()
+    assert "Ollama was installed for TASlation and does not start with Windows; it stays so." in out
+    assert "shell:startup" in out and "Ollama.lnk from the lib folder" in out
+
+
+def test_uninstall_dry_run_plans_the_start_with_windows_and_keeps_the_marker(tmp_path):
+    co = _fake_checkout(tmp_path)
+    folder = _ollama_app_folder(tmp_path)
+    link = tmp_path / "startup" / "Ollama.lnk"
+    (co / ".ollama-autostart-by-install").write_text(f"about\nshortcut\t{link}\tx\n", "utf-8")
+    env = _tools(tmp_path)
+    env["PATH"] = str(folder) + os.pathsep + env["PATH"]
+    r = _run(co / "uninstall.ps1", "-DryRun", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"would: put back Ollama's start with Windows: shortcut {link}" in r.stdout
+    assert (co / ".ollama-autostart-by-install").is_file() and not link.exists()
 
 
 # ---- the language first, and the questions in this PC's language

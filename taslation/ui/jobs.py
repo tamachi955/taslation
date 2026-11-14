@@ -6,7 +6,9 @@ Around them:
 
 * Ollama started when it does not answer (`taslation.ollama_start`), at the start of the window, before a setup check
   that decides on a whole-book scan, and when a request finds it gone (`_revive_ollama`). At the start a failure is said
-  in a popup, once (the "ollama_failed" event); the window stays usable, and the banner says what stands;
+  in a popup, once (the "ollama_failed" event); the window stays usable, and the banner says what stands. An Ollama
+  the window started is stopped once the window has closed (`run_app`), unless another TASlation or another program
+  still uses it;
 * Ollama's model in memory only while pages need it (`taslation.translate.ollama`): the first page that needs it loads
   it, which the status line and the badge say (`_model_status`); the window's close releases it (`_release_model`);
 * the setup checks: `health.check` at the start and, while a problem stands, every `HEALTH_RECHECK_MS` in a thread
@@ -62,7 +64,7 @@ from ..colophon import precheck as colophon_precheck
 from ..i18n import _, load_ui_table, save_ui_entry
 from ..messages import Cancelled, Message, message_of
 from ..notes import is_temporary_name, series_key
-from ..ollama_start import POPUP_CODES, OllamaStarter
+from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from . import area, name_check
 from .attention import tell_run_ended
 from .banner import ScanState, blocking, busy_title, group_digits
@@ -243,11 +245,11 @@ class JobsMixin:
             return
         self._restarting = True
         self.say("Starting the translation program...")
-        url = self.settings.ollama_url
+        s = self.settings
 
         def run() -> None:
             try:
-                failed = OllamaStarter(url).start()
+                failed = OllamaStarter(s.ollama_url, state_dir=s.state_dir, own=own_models(s)).start()
             except Exception as e:  # noqa: BLE001 - said; the banner stays
                 failed = message_of(f"{type(e).__name__}: {e}")
             self._post("translator_restarted", message=failed)
@@ -274,7 +276,9 @@ class JobsMixin:
         from ..translate.ollama import loaded_message, never_unloads
 
         s = self.settings
-        self._ollama = OllamaStarter(s.ollama_url, lambda: self._post("status", key="Starting the translation program..."))
+        self._ollama = OllamaStarter(s.ollama_url,
+                                     lambda: self._post("status", key="Starting the translation program..."),
+                                     state_dir=s.state_dir, own=own_models(s))
         failed = self._ollama.start()
         if failed is not None and failed.code in POPUP_CODES:
             self._post("ollama_failed", message=failed)
@@ -433,9 +437,13 @@ class JobsMixin:
 
     def _release_model(self) -> None:
         """The window closes: a page being translated is cancelled, and Ollama lets go of the model. Takes a moment at
-        most (`ollama.RELEASE_TIMEOUT`)."""
+        most (`ollama.RELEASE_TIMEOUT`). The model the window translated with counts as TASlation's own when the
+        Ollama the window started is stopped after the window has gone (`ollama_start.finish_all`, `run_app`): a
+        model named in the settings during the session is not another program's."""
         if self._page_cancel is not None:
             self._page_cancel.set()
+        count_as_own(getattr(getattr(self, "translator", None), "model", ""),
+                     *own_models(getattr(self, "settings", None)))
         if self.pipeline is not None:
             self.pipeline.release_translator()
 

@@ -24,9 +24,28 @@ It can be run again at any time: what is already in place is checked and kept.
 It writes into this folder (.venv and models) and makes one Start-menu shortcut,
 plus what you agree to: Python and Ollama (installed by winget into your user
 profile) and the translation model (into Ollama's model folder).
-Two more changes have no question. Each is made only when its variable is not
-set already (for your user or in this window), and Ollama then restarts once:
-  * on every computer with Ollama it sets LLAMA_ARG_CACHE_RAM=0 for your user.
+
+Ollama runs only while TASlation needs it, unless you run it yourself:
+  * an Ollama this run installs does not start with Windows, and nothing of it
+    is left running. Ollama's app makes Ollama start with Windows when it first
+    starts (a shortcut in your Startup folder), which its installer does; the
+    run lets it finish that first start, stops it and removes that shortcut.
+    TASlation starts Ollama's server when it translates and stops it when it
+    ends. The file .ollama-by-install in this folder says so. To use Ollama
+    yourself, start it from the Start menu;
+  * an Ollama that was there before stays as it was, running or not. When it
+    starts with Windows, a run with a console asks once whether to stop that
+    (default no; -Yes never answers it); after a yes the file
+    .ollama-autostart-by-install in this folder says what was removed, and
+    uninstall.cmd puts it back;
+  * the translation model is imported through Ollama's server: when it does
+    not run, this run starts the server itself (ollama serve, in a hidden
+    window, never Ollama's app) and stops it again before its final check.
+For an Ollama that was there before, two more changes have no question (an
+Ollama that TASlation starts gets both from TASlation itself, and nothing is
+set for your user). Each is made only when its variable is not set already
+(for your user or in this window), and Ollama then restarts once:
+  * it sets LLAMA_ARG_CACHE_RAM=0 for your user.
     Ollama otherwise keeps up to 8 GB of RAM as a cache of earlier requests. In
     TASlation's measurements that cache made translation no faster with a GPU,
     and about 8 % faster without one. It applies to the Ollama you run and to
@@ -136,6 +155,16 @@ $PythonUserExe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.e
 $OllamaPage = 'https://ollama.com/download'
 $OllamaUrl = 'http://127.0.0.1:11434'
 $OllamaStartWaitS = 30  # how long a started Ollama is given to answer, each way (the window gives it as long)
+# Ollama's model folder, where its manifests say which models it has while its server does not run (no server is
+# started for a look): OLLAMA_MODELS as this window or the user has it, else Ollama's default.
+$OllamaStore = $env:OLLAMA_MODELS
+if (-not $OllamaStore) { $OllamaStore = [Environment]::GetEnvironmentVariable('OLLAMA_MODELS', 'User') }
+if (-not $OllamaStore) { $OllamaStore = Join-Path $env:USERPROFILE '.ollama\models' }
+# Where Windows starts programs at sign-in for this user: the Startup folder, where Ollama's app puts its shortcut
+# (a copy of lib\Ollama.lnk in Ollama's folder) when it first starts, and the Run key.
+$StartupFolder = [Environment]::GetFolderPath('Startup')
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$OllamaFirstRunWaitS = 30  # how long Ollama's app, which its installer starts, is given to make that shortcut
 # setup_models.py's exit code for a download the server refused or no longer has (translator_install.REFUSED):
 # running install.cmd again does not help then, a newer TASlation that names the current file does
 $RefusedCode = 5
@@ -208,12 +237,19 @@ $MaxRootLength = 100
 # set (update.ps1 never copies them over).
 $KvMarker = Join-Path $Root '.kv-cache-by-install'
 $CacheRamMarker = Join-Path $Root '.cache-ram-by-install'
+# Say that Ollama starts only when TASlation needs it by this install's doing, and what was removed for it (lines
+# "shortcut<TAB>path" and "run<TAB>name<TAB>command"): an Ollama this install installed (.ollama-by-install: nothing
+# is set for the user then), and an Ollama that was there before whose start with Windows the person's yes removed
+# (.ollama-autostart-by-install). uninstall.ps1 puts back what they list; update.ps1 keeps them.
+$OllamaMarker = Join-Path $Root '.ollama-by-install'
+$AutostartMarker = Join-Path $Root '.ollama-autostart-by-install'
 $StepCount = 7
 $script:StepNo = 0
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 # What the end says when TASlation cannot translate yet, when a step knows why better than "run install.cmd again"
 $script:NotReady = $null
 $script:LastCommand = $null
+$script:OwnServer = $null  # the ollama serve this run started (Start-OwnOllama), until it is stopped again
 
 # ---------------------------------------------------------------- helpers
 function Write-Step([string]$Text) {
@@ -254,10 +290,12 @@ function Stop-Install([string]$Text) {
 
 # Asks a yes/no question; -Yes, a dry run and a run without a console answer it without a prompt.
 # With -DefaultYes a plain Enter means yes and a dry run counts a yes; without a console it is still no: nobody agreed.
-function Confirm-Choice([string]$Question, [bool]$DefaultYes = $false) {
+# With -PersonOnly only a person answers it: -Yes answers no.
+function Confirm-Choice([string]$Question, [bool]$DefaultYes = $false, [switch]$PersonOnly) {
     $hint = '[y/N]'
     $counted = 'n'
     if ($DefaultYes) { $hint = '[Y/n]'; $counted = 'y' }
+    if ($Yes -and $PersonOnly) { Write-Info "$Question $hint n (-Yes does not answer this: only a person does)"; return $false }
     if ($Yes) { Write-Info "$Question $hint y (-Yes)"; return $true }
     if ($DryRun) { Write-Info "$Question $hint (dry run: would ask; counted as $counted)"; return $DefaultYes }
     if (-not $Interactive) { Write-Info "$Question $hint n (no console to ask)"; return $false }
@@ -746,6 +784,22 @@ function Get-OllamaModels {
     } catch { return $null }
 }
 
+# The models in Ollama's model folder ($OllamaStore), by the names Ollama gives them, from its manifests
+# (manifests\<registry>\<namespace>\<model>\<tag>; Ollama's own library is registry.ollama.ai\library): what Ollama
+# has while its server does not run. Nothing when there is no such folder.
+function Get-StoredModels {
+    $manifests = Join-Path $OllamaStore 'manifests'
+    if (-not (Test-Path -LiteralPath $manifests)) { return }
+    foreach ($file in @(Get-ChildItem -LiteralPath $manifests -Recurse -File -ErrorAction SilentlyContinue)) {
+        $parts = @($file.FullName.Substring($manifests.Length).TrimStart('\') -split '\\')
+        if ($parts.Count -ne 4) { continue }
+        $name = "$($parts[0])/$($parts[1])/$($parts[2])"
+        if ($parts[0] -eq 'registry.ollama.ai' -and $parts[1] -eq 'library') { $name = $parts[2] }
+        elseif ($parts[0] -eq 'registry.ollama.ai') { $name = "$($parts[1])/$($parts[2])" }
+        "${name}:$($parts[3])"
+    }
+}
+
 function Test-HasModel([object[]]$Installed, [string]$Name) {
     foreach ($m in $Installed) {
         if ($m -eq $Name -or $m -eq "${Name}:latest") { return $true }
@@ -756,12 +810,109 @@ function Test-HasModel([object[]]$Installed, [string]$Name) {
 function Get-UserEnv([string]$Name) { return [Environment]::GetEnvironmentVariable($Name, 'User') }
 function Set-UserEnv([string]$Name, [string]$Value) { [Environment]::SetEnvironmentVariable($Name, $Value, 'User') }
 
+# The processes of the Ollama in *Folder*: its app, its server and the model's processes (llama-server, in lib\ollama).
+function Get-OllamaProcesses([string]$Folder) {
+    $prefix = [IO.Path]::GetFullPath($Folder).TrimEnd('\') + '\'
+    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    })
+}
+
 # This Ollama's own processes stopped; whether there were any.
 function Stop-OllamaProcesses([string]$Folder) {
-    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and (Split-Path -Parent $_.Path) -eq $Folder })
+    $running = @(Get-OllamaProcesses $Folder)
     if ($running.Count -eq 0) { return $false }
     $running | Stop-Process -Force -ErrorAction SilentlyContinue
     return $true
+}
+
+# A process this run started ended with the processes it started (taskkill /T, as Ollama's own uninstaller ends
+# Ollama's), while it is still that process (the object holds it: its number cannot be reused meanwhile).
+function Stop-ProcessTree($Process) {
+    if ($null -eq $Process -or $Process.HasExited) { return }
+    $null = & "$env:SystemRoot\System32\taskkill.exe" /PID $Process.Id /T /F 2>&1
+    try { $null = $Process.WaitForExit(5000) } catch { }
+}
+
+# Where a shortcut points; $null when it cannot be read.
+function Get-LinkTarget([string]$Path) {
+    try { return (New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath } catch { return $null }
+}
+
+# The values of the Run key (name and command), which Windows runs at sign-in.
+function Get-RunValues {
+    try { $key = Get-Item -LiteralPath $RunKey -ErrorAction Stop } catch { return }
+    foreach ($name in @($key.GetValueNames())) {
+        if ($name) { [pscustomobject]@{ Name = $name; Data = [string]$key.GetValue($name) } }
+    }
+}
+function Remove-RunValue([string]$Name) { Remove-ItemProperty -LiteralPath $RunKey -Name $Name -ErrorAction Stop }
+
+# How the Ollama in *Folder* starts with Windows: each shortcut in the Startup folder that points into its folder
+# (Ollama's app makes Ollama.lnk there when it first starts) and each value of the Run key that runs a program of it;
+# Kind 'shortcut' (Name: the shortcut's path) or 'run' (Name, Data: the value). Nothing of another program.
+function Get-OllamaAutostart([string]$Folder) {
+    if (-not $Folder) { return }
+    $ollamaHome = [IO.Path]::GetFullPath($Folder).TrimEnd('\')
+    if ($StartupFolder -and (Test-Path -LiteralPath $StartupFolder)) {
+        foreach ($link in @(Get-ChildItem -LiteralPath $StartupFolder -Filter '*.lnk' -File -ErrorAction SilentlyContinue)) {
+            $target = Get-LinkTarget $link.FullName
+            if ($target -and $target.StartsWith($ollamaHome + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                [pscustomobject]@{ Kind = 'shortcut'; Name = $link.FullName; Data = $target }
+            }
+        }
+    }
+    foreach ($value in @(Get-RunValues)) {
+        if ($value.Data -and $value.Data.IndexOf($ollamaHome + '\', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            [pscustomobject]@{ Kind = 'run'; Name = $value.Name; Data = $value.Data }
+        }
+    }
+}
+
+# Ollama's start with Windows (*Entries*, from Get-OllamaAutostart) removed, each written into *Marker* (a line
+# "shortcut<TAB>path<TAB>target" or "run<TAB>name<TAB>command", after the line *About* when the marker is new) before
+# it goes, so that uninstall.ps1 can put it back. Whether all went.
+function Remove-OllamaAutostart($Entries, [string]$Marker, [string]$About) {
+    $all = $true
+    if (-not (Test-Path -LiteralPath $Marker)) {
+        try { Set-Content -LiteralPath $Marker -Value $About -Encoding UTF8 } catch { Write-Detail "no marker: $_" }
+    }
+    foreach ($entry in @($Entries)) {
+        try {
+            if ($entry.Kind -eq 'shortcut') {
+                Add-Content -LiteralPath $Marker -Value "shortcut`t$($entry.Name)`t$($entry.Data)" -Encoding UTF8
+                Remove-Item -LiteralPath $entry.Name -Force -ErrorAction Stop
+            } else {
+                Add-Content -LiteralPath $Marker -Value "run`t$($entry.Name)`t$($entry.Data)" -Encoding UTF8
+                Remove-RunValue $entry.Name
+            }
+            Write-Detail "removed: $($entry.Kind) $($entry.Name)"
+        } catch {
+            $all = $false
+            Write-Detail "not removed: $($entry.Kind) $($entry.Name): $_"
+        }
+    }
+    return $all
+}
+
+# An Ollama this run installed (winget): Ollama's installer starts its app as its last step, and the app's first start
+# makes Ollama start with Windows (it makes the shortcut on its first start only, so that a person who deletes it is
+# respected). The app is given up to $OllamaFirstRunWaitS seconds to get through that first start, and a moment to
+# write it down, then everything of this Ollama that runs is stopped and its start with Windows removed; the marker
+# says so. Nothing of it runs afterwards: TASlation starts the server itself.
+function Set-OllamaForTaslation([string]$Exe) {
+    $folder = Split-Path -Parent $Exe
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $OllamaFirstRunWaitS -and @(Get-OllamaAutostart $folder).Count -eq 0 -and
+           @(Get-OllamaProcesses $folder).Count -gt 0) {
+        Start-Sleep -Milliseconds 500
+    }
+    if (@(Get-OllamaAutostart $folder).Count -gt 0) { Start-Sleep -Seconds 2 }
+    if (Stop-OllamaProcesses $folder) { Write-Detail 'stopped what Ollama''s installer started' }
+    $about = "Ollama was installed for TASlation by install.ps1 on $(Get-Date -Format 'yyyy-MM-dd'): it does not start with Windows."
+    $null = Remove-OllamaAutostart @(Get-OllamaAutostart $folder) $OllamaMarker $about
+    Write-Ok (T 'Ollama was installed for TASlation: it does not start with Windows; TASlation starts it when it translates and stops it when it ends.')
+    Write-Info (T 'To use Ollama yourself, start it from the Start menu.')
 }
 
 # The two settings below are made for this user (Set-UserEnv) and in this process, whose environment the Ollama that
@@ -811,10 +962,11 @@ function Wait-OllamaServer {
     return $false
 }
 
-# Ollama's server started when it does not answer: Ollama's own app first (the tray icon, which runs the server), as
-# Ollama starts at sign-in; when no server answers after it (on the install check's runner, a fresh Windows, the app
-# ran and no server came up), `ollama serve` itself in a hidden window, which runs until the person signs out. How
-# the server answers: 'running' (it did already), 'app' or 'serve'; '' when it does not answer either way.
+# Ollama's server started again after Restart-Ollama stopped an Ollama that was there before and ran: Ollama's own
+# app first (the tray icon, which runs the server), as Ollama starts at sign-in; when no server answers after it (on
+# the install check's runner, a fresh Windows, the app ran and no server came up), `ollama serve` itself in a hidden
+# window, which runs until the person signs out. How the server answers: 'running' (it did already), 'app' or
+# 'serve'; '' when it does not answer either way.
 function Start-OllamaServer([string]$Exe) {
     if (Test-OllamaServer) { return 'running' }
     Write-Info (T 'Starting Ollama.')
@@ -838,6 +990,40 @@ function Start-OllamaServer([string]$Exe) {
         return 'serve'
     }
     return ''
+}
+
+# `ollama serve` itself in a hidden window (never Ollama's app: its first start would make Ollama start with Windows);
+# the process, $null when it did not start.
+function Start-HiddenServe([string]$Exe) {
+    try {
+        return (Start-Process -FilePath $Exe -ArgumentList 'serve' -WindowStyle Hidden -PassThru)
+    } catch {
+        Write-Detail "ollama serve did not start: $_"
+        return $null
+    }
+}
+
+# Ollama's server for this run's import of the translation model, when it does not answer: started by this run
+# (Start-HiddenServe) and stopped again once the run no longer needs it (Stop-OwnOllama), so that the run leaves
+# Ollama as it found it. 'running' when it answered already, 'serve' when it answers now, '' when it does not.
+function Start-OwnOllama([string]$Exe) {
+    if (Test-OllamaServer) { return 'running' }
+    Write-Info (T 'Starting Ollama for the installation; it is stopped again at the end.')
+    $script:OwnServer = Start-HiddenServe $Exe
+    if ($null -ne $script:OwnServer -and (Wait-OllamaServer)) {
+        Write-Ok (T 'Ollama started (ollama serve, in a hidden window)')
+        return 'serve'
+    }
+    Stop-OwnOllama -Quiet
+    return ''
+}
+
+# The server Start-OwnOllama started, stopped with the model's processes it started; nothing when it started none.
+function Stop-OwnOllama([switch]$Quiet) {
+    if ($null -eq $script:OwnServer) { return }
+    Stop-ProcessTree $script:OwnServer
+    $script:OwnServer = $null
+    if (-not $Quiet) { Write-Ok (T 'Ollama, started for the installation, is stopped again') }
 }
 
 function Get-FreeGB([string]$Path) {
@@ -1042,7 +1228,12 @@ if (Test-Path -LiteralPath $VenvPy) {
 $ollamaExe = Find-OllamaExe
 $model = Get-Translator $language.Name
 $installedModels = $null
-if ($ollamaExe) { $installedModels = Get-OllamaModels }
+if ($ollamaExe) {
+    $installedModels = Get-OllamaModels
+    # an Ollama that does not run (TASlation starts it when it translates) is not started for a look: its model
+    # folder says what it has
+    if ($null -eq $installedModels) { $installedModels = @(Get-StoredModels) }
+}
 $modelPresent = ($null -ne $installedModels) -and (Test-HasModel $installedModels $model.Name)
 
 $wantOllama = $false
@@ -1097,11 +1288,20 @@ if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'q
         Write-Info (T 'PLaMo is left out, and TASlation cannot translate without it. To agree later, run install.cmd again.')
     }
 }
+# An Ollama that starts with Windows runs from every sign-in, used or not: a person may have TASlation start it only
+# when it translates (default no: their Ollama may serve other programs too; -Yes never answers it).
+$ollamaAutostart = @()
+if ($ollamaExe) { $ollamaAutostart = @(Get-OllamaAutostart (Split-Path -Parent $ollamaExe)) }
+$stopAutostart = $false
+if ($ollamaAutostart.Count -gt 0) {
+    Write-Host ''
+    Write-Info (T 'Ollama starts with Windows on this computer. If you use Ollama only for TASlation, TASlation can start it only when it translates.')
+    $stopAutostart = Confirm-Choice (T 'Stop Ollama from starting with Windows?') -PersonOnly
+}
 
 # 2. disk ------------------------------------------------------------------
 Write-Step (T 'Disk space')
-$ollamaModelsDir = $env:OLLAMA_MODELS
-if (-not $ollamaModelsDir) { $ollamaModelsDir = Join-Path $env:USERPROFILE '.ollama\models' }
+$ollamaModelsDir = $OllamaStore
 # the GPU build in place of the CPU build's torch; pip keeps its download in the temporary folder while it installs
 $venvGB = $SizeVenvCpu
 $venvWhat = 'program files'
@@ -1274,15 +1474,23 @@ if ($DryRun) {
 
 # 6. Ollama ----------------------------------------------------------------
 Write-Step (T 'Ollama and the translation model')
+# an Ollama this install installed (now or in an earlier run): TASlation starts it, and gives it its settings itself
+$ollamaOurs = Test-Path -LiteralPath $OllamaMarker
 if ($wantOllama) {
     $wingetArgs = $OllamaWingetArgs
     if ($DryRun) {
         Write-Plan ('winget ' + ($wingetArgs -join ' '))
+        Write-Plan "stop what Ollama's installer starts, remove Ollama's start with Windows, and write $OllamaMarker"
+        $ollamaOurs = $true
     } else {
         Write-Info 'Installing Ollama.'
         $code = Invoke-Console $winget.Source $wingetArgs
         $ollamaExe = Find-OllamaExe
-        if ($ollamaExe) { Write-Ok 'Ollama installed' }
+        if ($ollamaExe) {
+            Write-Ok 'Ollama installed'
+            Set-OllamaForTaslation $ollamaExe
+            $ollamaOurs = $true
+        }
         else { Write-Warn "Ollama was not installed (exit code $code): run install.cmd again." }
     }
 } elseif ($ollamaExe) {
@@ -1291,15 +1499,34 @@ if ($wantOllama) {
 } else {
     Write-Info (T 'Ollama is not installed. To add it, run install.cmd again.')
 }
+# the person's yes to the question about Ollama's start with Windows (an Ollama that was there before, or one whose
+# app made it start with Windows again)
+if ($stopAutostart) {
+    $marker = $AutostartMarker
+    if ($ollamaOurs) { $marker = $OllamaMarker }
+    if ($DryRun) {
+        Write-Plan "remove Ollama's start with Windows and write $marker"
+    } else {
+        $running = @(Get-OllamaProcesses (Split-Path -Parent $ollamaExe)).Count -gt 0
+        $about = "Ollama's start with Windows was removed by install.ps1 on $(Get-Date -Format 'yyyy-MM-dd'), after a yes."
+        if (Remove-OllamaAutostart $ollamaAutostart $marker $about) {
+            Write-Ok (T 'Ollama no longer starts with Windows: TASlation starts it when it translates and stops it when it ends.')
+            if ($running) { Write-Info (T 'The Ollama running now keeps running until you quit it or sign out.') }
+        } else {
+            Write-Warn (T 'Ollama''s start with Windows could not be removed. Run install.cmd again.')
+        }
+    }
+}
 # setup_models.py installs it and writes down that TASlation did (so that only it is ever removed again)
 $translatorArgs = @('-u', $setup, '--translator-for', $language.Name, '--brief')
 if ($model.Kind -eq 'plamo') { $translatorArgs += @('--plamo-agreed', $plamoAgreedWhere) }
 if ($modelPresent) {
     Write-Ok "$($model.Shown) is already there"
 } elseif ($wantModel -and $DryRun) {
-    Write-Plan ('start Ollama if it is not running, then: python ' + ($translatorArgs -join ' ') + ' --ollama-exe OLLAMA')
+    Write-Plan ('start ollama serve in a hidden window when nothing answers, then: python ' + ($translatorArgs -join ' ') +
+                ' --ollama-exe OLLAMA, then stop the server it started')
 } elseif ($wantModel -and $ollamaExe) {
-    if (-not (Start-OllamaServer $ollamaExe)) {
+    if (-not (Start-OwnOllama $ollamaExe)) {
         Write-Warn (T 'Ollama did not start, so the translation model was not installed. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
         $script:NotReady = (T 'TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
     } else {
@@ -1319,10 +1546,15 @@ if ($modelPresent) {
 } elseif ($ollamaExe -and -not $wantModel) {
     Write-Info (T 'The translation model was not downloaded. To add it, run install.cmd again.')
 }
+Stop-OwnOllama  # the run leaves Ollama as it found it: a server it started for the import goes again
 Write-Detail "translation model $($model.Name) for $($language.Name) (the language from $($language.Source))"
-# Ollama's two settings, each only where its variable is set neither for this user nor in this process (a value there
-# is the person's, and stays without a word), then one restart for both. A dry run counts an Ollama it would install.
-$ollamaThere = $ollamaExe -or ($DryRun -and $wantOllama)
+# Ollama's two settings, for an Ollama that was there before only (TASlation gives the server it starts both itself),
+# each only where its variable is set neither for this user nor in this process (a value there is the person's, and
+# stays without a word), then one restart for both.
+$ollamaThere = $ollamaExe -and -not $ollamaOurs
+if ($ollamaOurs) {
+    Write-Detail 'Ollama was installed for TASlation: the server TASlation starts gets LLAMA_ARG_CACHE_RAM and OLLAMA_KV_CACHE_TYPE from it; nothing is set for this user'
+}
 $ollamaSet = New-Object System.Collections.Generic.List[string]
 # a GPU of 6 GB or less holds the model's whole context only with a quantized KV cache (about 4 times the speed)
 if ($ollamaThere -and $gpuMemoryMb -gt 0 -and $gpuMemoryMb -le 6144 -and -not $env:OLLAMA_KV_CACHE_TYPE -and -not (Get-UserEnv 'OLLAMA_KV_CACHE_TYPE')) {
@@ -1365,7 +1597,7 @@ if ($ollamaSet.Count -gt 0) {
 Write-Step (T 'Final check')
 $canTranslate = $false
 if ($DryRun) {
-    Write-Plan 'run .venv\Scripts\python -m taslation doctor'
+    Write-Plan 'run .venv\Scripts\python -m taslation doctor (it starts Ollama for its check when nothing answers, and stops it again)'
 } else {
     $r = Invoke-Captured $VenvPy @('-m', 'taslation', 'doctor')
     $canTranslate = ($r.Code -eq 0)

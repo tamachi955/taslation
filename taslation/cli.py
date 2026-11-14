@@ -244,6 +244,7 @@ def ensure_translator(settings: Settings, language: str) -> bool:
     from . import translator_install as ti
 
     state_dir = Path(settings.state_dir)
+    start_ollama_for(settings, quiet=True)  # (Ollama says which models it has; the command says it when it is down)
     switch = ti.plan(language, health.installed_models(settings.ollama_url), state_dir, settings.ollama_model)
     if switch is None:
         return True
@@ -350,16 +351,19 @@ def warm_ollama(settings: Settings, translator: Any) -> bool:
     return True
 
 
-def start_ollama_for(settings: Settings, translator: Any = None) -> Any:
+def start_ollama_for(settings: Settings, translator: Any = None, quiet: bool = False) -> Any:
     """Before a command translates: Ollama started when it does not answer (said on stderr, and what stands in the
-    way; the command goes on and says it itself when it needs Ollama), and - given the *translator* - started again
-    once when a request finds it gone (`OllamaTranslator.revive`). `build_translator` alone starts nothing: doctor only
-    looks. The `OllamaStarter`, to hand a translator made afterwards (`attach_starter`)."""
-    from .ollama_start import OllamaStarter
+    way unless *quiet*; the command goes on and says it itself when it needs Ollama), and - given the *translator* -
+    started again once when a request finds it gone (`OllamaTranslator.revive`). An Ollama started so is TASlation's
+    (recorded in the state folder) and stops when the command ends (`main`: `ollama_start.finish_all`), unless another
+    TASlation or another program still uses it. `build_translator` alone starts nothing. The `OllamaStarter`, to hand
+    a translator made afterwards (`attach_starter`)."""
+    from .ollama_start import OllamaStarter, own_models
 
-    starter = OllamaStarter(settings.ollama_url, lambda: _note("Starting the translation program..."))
+    starter = OllamaStarter(settings.ollama_url, lambda: _note("Starting the translation program..."),
+                            state_dir=settings.state_dir, own=own_models(settings))
     failed = starter.start()
-    if failed is not None:
+    if failed is not None and not quiet:
         _note(failed)
     if translator is not None:
         attach_starter(translator, starter)
@@ -373,16 +377,37 @@ def attach_starter(translator: Any, starter: Any) -> None:
     translator.on_status = _note
 
 
-def ollama_down_line(url: str) -> str:
-    """Doctor's line when nothing answers at *url*, with what to do. Doctor is a check: it starts nothing."""
+def ollama_down_line(url: str, tried: bool = False) -> str:
+    """Doctor's line when nothing answers at *url*, with what to do; *tried*: doctor started Ollama for its check, and
+    it did not answer."""
     from .ollama_start import find_ollama, startable
 
     if not startable(url):
         return f"Ollama: not running at {url} (TASlation starts it only at its default address)"
     if find_ollama() is None:
         return "Ollama: not installed. Run install.cmd again to install it."
+    if tried:
+        return (f"Ollama: not running at {url}, and it did not answer when it was started for this check. Restart "
+                "your PC, then run this check again; if it still does not answer, run install.cmd again.")
     return (f"Ollama: not running at {url}. TASlation starts it when it translates; if that fails, restart your PC, "
             "then open TASlation again.")
+
+
+DOCTOR_STARTED = "  (it was not running: it was started for this check, and is stopped again when the check ends)"
+
+
+def doctor_ollama(settings: Settings) -> bool:
+    """Doctor's look at Ollama starts it when it does not answer, as a command that translates would
+    (`start_ollama_for`), so that the check says whether translating would work; an Ollama started so is stopped
+    again when doctor ends (`main`), which leaves it as it was. Whether it was started for the check."""
+    from . import health
+    from .ollama_start import find_ollama, startable
+
+    if (health.ollama_running(settings.ollama_url) or not startable(settings.ollama_url)
+            or find_ollama() is None):
+        return False
+    start_ollama_for(settings, quiet=True)
+    return True
 
 
 def build_pipeline(settings: Settings, translator_kind: str = "ollama", book: str | None = None, with_ocr: bool = True,
@@ -617,6 +642,7 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     font = find_font(settings.font_path, settings.fonts_dir)
     print(f"Font: {font if font else 'Pillow default (run install.cmd again, or set font_path)'}")
     try:
+        tried = doctor_ollama(settings)
         tr = build_translator(settings, "ollama")
         if tr.ping():
             from .translate.models import is_auto, wanted_name
@@ -625,6 +651,8 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             wanted = wanted_name(settings.ollama_model, settings.target_language)
             have = tr.has_model(wanted)
             print(f"Ollama: reachable at {settings.ollama_url} (v{tr.version()}); {len(models)} model(s) installed")
+            if tried:
+                print(DOCTOR_STARTED)
             how = "run install.cmd again" if is_default_model(wanted) else pull_command(wanted)
             which = (f"for {settings.target_language} (ollama_model \"auto\")" if is_auto(settings.ollama_model)
                      else "configured")
@@ -636,7 +664,7 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             ok = ok and have
         else:
             ok = False
-            print(ollama_down_line(settings.ollama_url))
+            print(ollama_down_line(settings.ollama_url, tried))
     except Exception as e:
         ok = False
         print(f"Ollama: error {e}")
@@ -659,6 +687,10 @@ def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
             print(line)
     except Exception as e:  # pragma: no cover - said, never fatal
         print(f"Where each stage runs: could not look ({type(e).__name__})")
+    from .ollama_start import finish_all
+
+    for line in finish_all():  # (the Ollama started for the check, stopped before the last line)
+        print(line)
     print("Result:", "ready" if ok else "something is missing (see above)")
     return 0 if ok else 1
 
@@ -1354,3 +1386,19 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     except KeyboardInterrupt:
         return 130
+    finally:
+        _finish_ollama(args.command)
+
+
+def _finish_ollama(command: str) -> None:
+    """The command ends (Ctrl+C included): the Ollama it started stopped when nothing else uses it
+    (`ollama_start.finish_all`), said on stderr; the window's end is in its log. Never raises."""
+    from .ollama_start import finish_all
+
+    try:
+        said = finish_all()
+    except KeyboardInterrupt:  # (a second Ctrl+C: the interpreter's exit tries again)
+        return
+    if command != "gui":
+        for line in said:
+            _note(line)

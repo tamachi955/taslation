@@ -2241,8 +2241,10 @@ Ollama 0.40 runs the model in llama.cpp's server (`llama-server.exe`), which kee
 them: up to 8 GiB, unless `--cache-ram` says otherwise, or `LLAMA_ARG_CACHE_RAM` when the command line does not (the
 command line Ollama gives it has no `--cache-ram`). For PLaMo 3 Translate 2B a saved prompt carries its context
 checkpoints, and a long one takes 1.5 to 2 GB; after a whole-book run the server reported `cache state: 11 prompts,
-8060.077 MiB (limits: 8192.000 MiB, 8192 tokens, 14731 est)`. install.ps1 now sets `LLAMA_ARG_CACHE_RAM=0` for the
-user, and TASlation passes 0 to an Ollama it starts itself when the variable is set nowhere (`taslation/ollama_start.py`).
+8060.077 MiB (limits: 8192.000 MiB, 8192 tokens, 14731 est)`. TASlation passes 0 to the Ollama server it starts itself
+when the variable is set nowhere (`taslation/ollama_start.py`, `server_env`); install.ps1 sets `LLAMA_ARG_CACHE_RAM=0`
+for the user only for an Ollama that was there before the install, since one it installs runs only while TASlation
+needs it ("Ollama only while TASlation needs it" below).
 
 **How it was measured.** Whole-book runs through the pipeline API without a window (the read-first batch, the code of
 8b1261f, a scratch `TASLATION_STATE_DIR`), on the development machine (Intel Core i7-9700F, 48 GB, GeForce GTX 1660 Ti
@@ -2293,6 +2295,43 @@ for about 8 %. A 2 GiB cache would have kept that 8 % for 1.7 GB.
 the server it started have every variable of the user (`HKCU\Environment`), `OLLAMA_KV_CACHE_TYPE=q8_0` among them;
 `ollama serve` started with `LLAMA_ARG_CACHE_RAM=0` passed it on to its `llama-server.exe`, whose command line has no
 `--cache-ram`. Not shown here, because it needs the owner's environment or the owner's Ollama: the variable set for
-the user reaching the tray app when Windows starts it, the installer's restart of the tray app, programs started from
-the Start menu before Explorer reads the change, and TASlation starting the tray app with it (tests with fakes only).
-No computer with 8 GB of RAM was tried.
+the user reaching the tray app when Windows starts it, the installer's restart of the tray app, and programs started
+from the Start menu before Explorer reads the change (tests with fakes only). TASlation no longer starts the tray app:
+the server it starts itself is shown with the variable in the next section. No computer with 8 GB of RAM was tried.
+
+## Ollama only while TASlation needs it (2026-11-14)
+
+The owner's decision: Ollama runs only while TASlation needs it, unless the person runs it themselves. TASlation starts
+`ollama.exe serve` itself, hidden (never Ollama's tray app, whose first start makes Ollama start with Windows), writes
+down that it did (`ollama-started.json` in the data folder: the server's pid, path and start time, the address and the
+TASlation processes using it; no book text), and stops it when it ends, but only while it is still that process, no
+other TASlation the record names runs, and Ollama lists no loaded model but TASlation's own. install.ps1 leaves an
+Ollama it installs not running and not starting with Windows, and imports the model through a hidden `ollama serve` of
+its own; an Ollama there before stays as it is, but for one question, default no, when it starts with Windows.
+
+**How it was tried.** On the development machine (GeForce GTX 1660 Ti 6 GB, Ollama 0.40.16), with TASlation's own
+routines (`server_env`, `find_ollama`, `launch`, the record, `finish_all`) on a second Ollama server of its own:
+`OLLAMA_HOST=127.0.0.1:11435`, a scratch `OLLAMA_MODELS` holding a copy of qwen3.5:4b, also under a second name that
+TASlation does not know (`foreign-test`, for "another program's model"), on the CPU (`CUDA_VISIBLE_DEVICES=-1`), and a
+scratch data folder. `startable` keeps any address but 11434 out of `OllamaStarter.start`, so the record was written as
+`start` writes it after its launch. The owner's server on 11434 was only looked at (its process and start time before
+and after). One run each (n = 1).
+
+| | TASlation's model (qwen3.5:4b) | Another program's model (foreign-test) |
+|---|---|---|
+| `server_env` adds | `LLAMA_ARG_CACHE_RAM=0`, `OLLAMA_KV_CACHE_TYPE=q8_0` (6 GB GPU) | the same |
+| The server answers after | 2.0 s | 2.0 s |
+| In the environment block of `ollama.exe`, `llama-server.exe` and their consoles | both variables | both variables |
+| `finish_all` | `STOPPED`, 0.25 s | `FOREIGN` (names 1 model, foreign-test:latest), 0.02 s |
+| Processes left | none; the record gone | all four; the record gone, so TASlation no longer stops it |
+
+The stop was Ollama's own: the helper attached to the server's console and its CTRL_BREAK was delivered in 0.05 s, and
+the server and the model's server were gone 0.16 s later, so `terminate` found nothing left to end. The server left in
+the second run was then ended by `stop_server` (0.22 s), as a test step. Afterwards nothing listened on 11435, the
+scratch store and data folder were deleted, and the owner's server was the same process as before, still answering.
+
+**Not shown here.** The tray app's first start making the Startup shortcut after a winget install, and install.ps1
+removing it (the install check shows it on a fresh runner, with winget), a crash of TASlation and the next start's
+adoption of the record (tests with fakes), and a person starting Ollama themselves while the server TASlation started
+runs (the address is taken by then; TASlation's end leaves that server running only when a model other than
+TASlation's is loaded in it).

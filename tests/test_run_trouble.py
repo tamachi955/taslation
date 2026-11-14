@@ -123,7 +123,7 @@ def test_ollama_down_has_start_translator_again(flow, monkeypatch):
     started = []
 
     class Starter:
-        def __init__(self, url, on_starting=None):
+        def __init__(self, url, on_starting=None, state_dir=None, own=()):  # (the window's record and own models)
             started.append(url)
 
         def start(self, cancel=None):

@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from taslation import ollama_start  # noqa: E402
 from taslation import translator_install as tinstall  # noqa: E402
 from taslation.config import (OCR_MODELS, PAGE_MODELS, ConfigError, OcrModel, PagedModel, Settings,  # noqa: E402
                               default_models_dir, default_state_dir)
@@ -437,7 +438,9 @@ def pull_ollama(model: str) -> None:
     if not exe:
         sys.exit("ollama was not found on PATH. Install it from https://ollama.com and run: ollama pull " + model)
     print(f"Running: ollama pull {model}")
-    subprocess.run([exe, "pull", model], check=False)
+    state_dir, url, _language = _settings_for_translator()
+    with ollama_start.held(url or Settings.ollama_url, state_dir):  # (as `install_translator`)
+        subprocess.run([exe, "pull", model], check=False)
 
 
 # ---------------------------------------------------------------- the translator model
@@ -573,7 +576,15 @@ def install_translator(language: str, models_dir: Path, state_dir: Path, url: st
     into Ollama, its GGUF then deleted; Qwen3.5 4B pulled. A model that is there already is left as it is. Nothing is
     left half done: a stopped or failed install removes its download and an import Ollama did not finish. The exit
     code: 0 ready, 1 failed, CANCELLED, NO_ROOM, REFUSED (the server refused the file or no longer has it: running
-    this again does not help, `refused_text`)."""
+    this again does not help, `refused_text`). Ollama's server is started first when it does not answer, as TASlation
+    starts it (an ``ollama`` command that finds none would start Ollama's tray app, and with it Ollama's start with
+    Windows), and stopped again at the end (`taslation.ollama_start.held`)."""
+    with ollama_start.held(url or Settings.ollama_url, state_dir):
+        return _install_translator(language, models_dir, state_dir, url, ollama_exe, agreed, cancel)
+
+
+def _install_translator(language: str, models_dir: Path, state_dir: Path, url: str | None, ollama_exe: str | None,
+                        agreed: str | None, cancel: threading.Event | None) -> int:
     cancel = cancel or threading.Event()
     needed = model_for_language(language)
     name = tinstall.shown_name(needed)

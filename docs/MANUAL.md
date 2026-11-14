@@ -818,9 +818,17 @@ extends this, so it is not loaded again for every page. In a whole-book run, the
 but when the reading is over and it moves on to the notes and the translation. At the end of a run (a stop or a failure included) and when the window closes, it is released at once.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
-Ollama uses up to 8 GB of RAM for a cache of earlier requests. `install.cmd` switches it off with the environment variable `LLAMA_ARG_CACHE_RAM=0` for this Windows user ("Installation" in the README).
-When TASlation starts Ollama itself and TASlation's own environment lacks this variable, it passes on the value Windows keeps for this user (or this computer),
-or 0 when there is none (for an installation by a version before this one, and for TASlation started from a window opened before the setting was made). A value that is set is never changed.
+Ollama runs only while TASlation uses it. When it translates and Ollama is not running, TASlation starts Ollama's server (`ollama serve`)
+in a window that is never shown (never Ollama's app), and writes down that it did in `ollama-started.json` in the state folder
+(the process's number, its program, when it started and the TASlation processes that use it; no text of a book). When you close the window, or when a `taslation` command that translated ends,
+it stops that Ollama. It does not stop it while another TASlation still uses it, nor while another program has a model loaded in it (in the second case TASlation no longer treats it as its own).
+When it does not stop, the record is kept, and it is stopped the next time TASlation ends. When TASlation crashed and left Ollama running, the next TASlation that uses it takes it over.
+An Ollama you started yourself (from the Start menu, or with `ollama serve`) was not started by TASlation, and is never stopped by it.
+When a message such as "The translation program did not start" tells you to restart your PC, that is to end for certain an Ollama that stopped answering. After the restart, TASlation starts it again when it translates.
+Ollama uses up to 8 GB of RAM for a cache of earlier requests. TASlation switches it off for the Ollama it starts by passing the environment variable `LLAMA_ARG_CACHE_RAM`.
+When TASlation's own environment lacks this variable, it passes on the value Windows keeps for this user (or this computer), or 0 when there is none.
+On an NVIDIA GPU with 6 GB of memory or less, it passes `OLLAMA_KV_CACHE_TYPE` the same way: the value Windows keeps, or `q8_0`. A value that is set is never changed.
+For an Ollama that was there before, `install.cmd` sets both as environment variables of this Windows user ("Installation" in the README).
 
 ### Trying it without a book
 

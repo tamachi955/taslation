@@ -68,6 +68,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "TASlation finds no page, or reads too much of the window: Page > Set area... lets you mark the page yourself.",
         "Nothing happens: read the line under the page, and the coloured line above it if there is one. Check the Viewer list and that Auto is on.",
         "The translation program starts by itself. If new pages are not translated, press F5 in a moment; if that does not help, restart your PC.",
+        "When you close TASlation, it stops the translation program it started, unless another program is using it. If you started the translation program yourself, TASlation leaves it running.",
         "With a viewer in a browser, the book's tab must be the one in front.",
         "A name comes out wrong all through the book: in the Translator role, Find and replace... changes it on every page at once.",
     )),
