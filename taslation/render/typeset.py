@@ -24,8 +24,10 @@ where its block has fewer defects (`_defects`: lone words, hyphens, an
 hourglass; in a column of a word or two a line, hyphens alone). The checks of
 the lettering (`lettering_flags`) say what is still wrong with the block chosen.
 
-Scripts: Latin-like text wraps at spaces; Chinese, Japanese and Thai wrap
-between characters; Arabic and Hebrew are laid out right-to-left by turning
+Scripts: Latin-like text wraps at spaces; Chinese and Japanese wrap
+between characters; Thai between its words (`breaks.thai_words`: Windows' own
+break iterator, or between syllable-like clusters where it is missing), its
+spaces kept; Arabic and Hebrew are laid out right-to-left by turning
 the line round (`display_form`: Arabic letters are joined with
 ``arabic_reshaper`` first, a run of digits or Latin keeps its order, brackets
 are mirrored; no more of the bidirectional algorithm than that). Devanagari
@@ -46,14 +48,17 @@ is the automatic one (`layout_text`).
 At the limit (`_rescue`), for small lettering only: where the size the text
 fits at is under `RESCUE_BELOW` (14; a line at 14 or more reads comfortably
 and keeps its natural letter shapes), or the text does not fit even at the
-smallest size, it may instead be condensed by up to 8 % or a long Latin word
-hyphenated at a syllable-like point (`hyphen_points`), the largest size that
-then fits winning, with the fewest hyphens and the mildest condensing there.
-The `Fit` says which layout won. Lettering at 14 or more, and any text that
-fits without them, is set exactly as before. A Latin, Greek or Cyrillic word
-that fits nowhere even so is split only as a last resort (`_split_word`): one
-of at least six letters, three or more on either side, with a hyphen; a
-shorter word stays whole, past its room if it must.
+smallest size, it may instead be condensed by up to 8 % or a long Latin or
+Cyrillic word hyphenated at a syllable-like point (`hyphen_points`: by the
+target language's patterns or rules, `breaks.hyphen_points`, else by an
+English-like rule of its own), the largest size that then fits winning, with
+the fewest hyphens and the mildest condensing there. The `Fit` says which
+layout won. Lettering at 14 or more, and any text that fits without them, is
+set exactly as before. A Latin, Greek or Cyrillic word that fits nowhere even
+so is split only as a last resort (`_split_word`): one of at least six
+letters, three or more on either side, with a hyphen; a shorter word stays
+whole, past its room if it must. A Thai word is split so between two of its
+clusters of letters, without a hyphen.
 
 In a rectangle, once the size is chosen the lines are balanced (`_balanced`):
 the same lines at the same places, the words shared out over them by a dynamic
@@ -90,6 +95,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from PIL import Image
 
 from ..regions import Box, TextRegion
+from . import breaks
 from .fonts import NO_SPACE_SCRIPTS, RTL_SCRIPTS, FontT, drawable, script_of
 from .lettering import Lettering, StyledFont, emphasis_marks, shaped_rows, strip_marks, styled_font
 
@@ -253,13 +259,17 @@ def _split_word(word: str, font: FontT, max_width: int, script: str) -> tuple[st
     first part as long as *max_width* allows (the shortest there is when none fits); None when it stays whole. In
     Latin, Greek and Cyrillic only a word of BREAK_MIN_LETTERS letters or more is split, only between two letters
     (or after a hyphen it has), HYPHEN_EDGE letters or more on either side, and the break shows a hyphen; "Damn" stays
-    whole. Other scripts take no hyphen and break between any two letters."""
+    whole. A Thai word breaks between two of its clusters of letters (`breaks.cluster_cuts`), other scripts between
+    any two letters, without a hyphen."""
     lgc = script == "lgc"
     edge = HYPHEN_EDGE if lgc else 1
     letters = [i for i, ch in enumerate(word) if ch.isalpha()]
     if len(letters) < (BREAK_MIN_LETTERS if lgc else 2):
         return None
-    cuts = [i for i in letters[edge : len(letters) - edge + 1] if word[i - 1].isalpha() or word[i - 1] == "-"]
+    if script == "thai":
+        cuts = list(breaks.cluster_cuts(word))
+    else:
+        cuts = [i for i in letters[edge : len(letters) - edge + 1] if word[i - 1].isalpha() or word[i - 1] == "-"]
 
     def head(cut: int) -> str:
         return word[:cut] if word[cut - 1] == "-" or not lgc else f"{word[:cut]}-"
@@ -282,17 +292,53 @@ def _break_word(word: str, font: FontT, max_width: int, script: str) -> list[str
     return [*parts, word]
 
 
-def _wrap_chars(text: str, font: FontT, max_width: int) -> list[str]:
-    """Wrap between characters (Chinese, Japanese, Thai): no spaces to break at."""
+def _units(para: str, script: str) -> list[str]:
+    """A paragraph as what its lines are made of: its words, at its spaces; in Chinese and Japanese its characters,
+    the spaces left out; in Thai its words (`breaks.thai_words`), joined without anything between them, a space kept
+    at the start of the word after it (a line starting there leaves it out: `_lead`)."""
+    if script == "thai":
+        return breaks.thai_words(para)
+    if script in NO_SPACE_SCRIPTS:
+        return list(para.replace(" ", ""))
+    return para.split()
+
+
+def _lead(unit: str, script: str) -> str:
+    """*unit* (of `_units`) as a line starting with it begins: a Thai word without the space before it."""
+    return unit.lstrip(" ") if script == "thai" else unit
+
+
+def _whole_words(text: str, script: str) -> list[str]:
+    """The words of *text* a size is shrunk for rather than split: its words; none in Chinese and Japanese, where a
+    line breaks between any two characters; Thai's words."""
+    if script == "thai":
+        return [w.lstrip(" ") for para in text.replace("\r", "").split("\n") for w in _units(para, script)]
+    return text.split() if script not in NO_SPACE_SCRIPTS else []
+
+
+def _no_start(unit: str) -> bool:
+    """Whether a line may not start with *unit*: a character `_NO_LINE_START` forbids, or a combining mark."""
+    return len(unit) == 1 and (unit in _NO_LINE_START or unicodedata.category(unit) == "Mn")
+
+
+def _wrap_chars(text: str, font: FontT, max_width: int, script: str = "",
+                stats: dict[str, int] | None = None) -> list[str]:
+    """Wrap without spaces to break at: between characters (Chinese, Japanese), between words (Thai, `_units`; a word
+    wider than the line alone is split between its clusters, `_break_word`, and counted in *stats* as "breaks")."""
     lines: list[str] = []
     cur = ""
-    for ch in text.replace(" ", ""):
-        cand = cur + ch
-        if not cur or text_width(font, cand) <= max_width or ch in _NO_LINE_START:
+    for unit in _units(text, script or "jp"):
+        cand = cur + unit if cur else _lead(unit, script)
+        if not cur or text_width(font, cand) <= max_width or unit in _NO_LINE_START:
             cur = cand
         else:
             lines.append(cur)
-            cur = ch
+            cur = _lead(unit, script)
+        if script == "thai" and text_width(font, cur) > max_width:  # one word, wider than the line
+            pieces = _break_word(cur, font, max_width, script)
+            lines.extend(pieces[:-1])
+            cur = pieces[-1]
+            _count(stats, "breaks")
     if cur:
         lines.append(cur)
     return lines
@@ -304,16 +350,23 @@ def _latin_letter(ch: str) -> bool:
     return ch.isalpha() and unicodedata.name(ch, "").startswith("LATIN")
 
 
-def hyphen_points(word: str) -> list[int]:
-    """Where a word may take a hyphen, cheaply and without a dictionary: at the syllable-like boundary between a
+def hyphen_points(word: str, language: str = "") -> list[int]:
+    """Where a word may take a hyphen in the target *language*. In a language with patterns or a rule of its own
+    (`breaks.hyphen_points`: German, French, Spanish, Italian, Portuguese, Polish and Dutch by their patterns, Turkish
+    and Indonesian by their syllables, none in Vietnamese), and for a Cyrillic word in any language, as they say.
+    Elsewhere (English, no language given) cheaply and without a dictionary: at the syllable-like boundary between a
     vowel group and the consonants that follow it, before the longest of those that may start a syllable together
     (won-der, ma-gic, chil-dren, mas-ter), never between two letters that are one sound (ck, gh, ch, sh, th, ph, wh,
-    qu) and never leaving fewer than `HYPHEN_HEAD` letters before it or `HYPHEN_EDGE` after it (ex-tra, not
-    extraordinar-ily). None for a word of fewer than eight letters, for
-    one with anything but Latin letters (a digit, an apostrophe, another script), or in capitals only (a shouted
-    name)."""
+    qu). Never leaving fewer than `HYPHEN_HEAD` letters before it or `HYPHEN_EDGE` after it (ex-tra, not
+    extraordinar-ily). None for a word of fewer than eight letters, for one with anything but Latin (or Cyrillic)
+    letters (a digit, an apostrophe, another script), or in capitals only (a shouted name)."""
     n = len(word)
-    if n < HYPHEN_MIN_LETTERS or word.isupper() or not all(_latin_letter(c) for c in word):
+    if n < HYPHEN_MIN_LETTERS or word.isupper():
+        return []
+    own = breaks.hyphen_points(word, breaks.language_key(language), HYPHEN_HEAD, HYPHEN_EDGE)
+    if own is not None:
+        return list(own)
+    if not all(_latin_letter(c) for c in word):
         return []
     low = word.lower()
     vowel = [c in _VOWELS for c in low]
@@ -348,9 +401,10 @@ def hyphen_points(word: str) -> list[int]:
     return points
 
 
-def _hyphenate(token: str, script: str, fits: Any) -> tuple[str, str] | None:
-    """*token* (a word with its punctuation and emphasis markers) split at the last of its hyphenation points whose
-    first part, with the hyphen, still *fits*: (that part, the rest); None when it has none that fits."""
+def _hyphenate(token: str, script: str, fits: Any, language: str = "") -> tuple[str, str] | None:
+    """*token* (a word with its punctuation and emphasis markers) split at the last of its hyphenation points in
+    *language* whose first part, with the hyphen, still *fits*: (that part, the rest); None when it has none that
+    fits."""
     if script != "lgc":
         return None
     a = 0
@@ -362,7 +416,7 @@ def _hyphenate(token: str, script: str, fits: Any) -> tuple[str, str] | None:
     lead, word, trail = token[:a], token[a:b], token[b:]
     if any(c.isdigit() for c in lead + trail) or any(c.isalpha() for c in trail):
         return None
-    for p in reversed(hyphen_points(word)):
+    for p in reversed(hyphen_points(word, language)):
         head = f"{lead}{word[:p]}-"
         if fits(head):
             return head, word[p:] + trail
@@ -370,13 +424,13 @@ def _hyphenate(token: str, script: str, fits: Any) -> tuple[str, str] | None:
 
 
 def wrap_lines(text: str, font: FontT, max_width: int, script: str | None = None, keep_blank: bool = False,
-               hyphenate: int = 0, stats: dict[str, int] | None = None) -> list[str]:
+               hyphenate: int = 0, stats: dict[str, int] | None = None, language: str = "") -> list[str]:
     """Wrap *text* to *max_width*; words wider than the box are split (`_split_word`; one too short to split stays
     whole, wider than the box). Each line break ends a line;
     an empty line is left out, or with *keep_blank* kept as an empty line. With *hyphenate*, a word wider than the
-    box is first hyphenated at its syllable-like points (`hyphen_points`), and with *hyphenate* 2 a word that does
-    not fit the rest of a line also gives the line its first part. *stats* counts the hyphens and the words split
-    or left wider than the box ("breaks")."""
+    box is first hyphenated at its syllable-like points in *language* (`hyphen_points`), and with *hyphenate* 2 a
+    word that does not fit the rest of a line also gives the line its first part. *stats* counts the hyphens and the
+    words split or left wider than the box ("breaks")."""
     script = script or script_of(text)
     lines: list[str] = []
     for para in text.replace("\r", "").split("\n"):
@@ -384,7 +438,7 @@ def wrap_lines(text: str, font: FontT, max_width: int, script: str | None = None
             lines.append("")
             continue
         if script in NO_SPACE_SCRIPTS:
-            lines.extend(_wrap_chars(para.strip(), font, max_width))
+            lines.extend(_wrap_chars(para.strip(), font, max_width, script, stats))
             continue
         words = para.split()
         if not words:
@@ -396,14 +450,15 @@ def wrap_lines(text: str, font: FontT, max_width: int, script: str | None = None
                 cur = cand
                 continue
             if hyphenate >= 2 and cur:  # the line filled with the word's first part
-                split = _hyphenate(word, script, lambda head: _display_width(font, f"{cur} {head}", script) <= max_width)
+                split = _hyphenate(word, script, lambda head: _display_width(font, f"{cur} {head}", script) <= max_width,
+                                   language)
                 if split is not None:
                     cur, word = f"{cur} {split[0]}", split[1]
                     _count(stats, "hyphens")
             if cur:
                 lines.append(cur)
             while hyphenate and _display_width(font, word, script) > max_width:  # a word wider than the line
-                split = _hyphenate(word, script, lambda head: _display_width(font, head, script) <= max_width)
+                split = _hyphenate(word, script, lambda head: _display_width(font, head, script) <= max_width, language)
                 if split is None:
                     break
                 lines.append(split[0])
@@ -434,7 +489,7 @@ def fit_text(text: str, font_path: str | Lettering | None, box_w: int, box_h: in
     box_w, box_h = max(4, box_w), max(4, box_h)
     script = script or script_of(text)
     hi = max(min_size, min(max_size, int(box_h / line_spacing)))
-    words = text.split() if script not in NO_SPACE_SCRIPTS else []
+    words = _whole_words(text, script)
     size = hi
     while size >= min_size:
         font = styled_font(font_path, size, bold_variation)
@@ -470,7 +525,7 @@ def _fill_line(tokens: list[str], start: int, font: FontT, width: int, script: s
         return wd <= width
 
     while i < len(tokens):
-        cand = tokens[i] if not cur else (cur + tokens[i] if chars else f"{cur} {tokens[i]}")
+        cand = _lead(tokens[i], script) if not cur else (cur + tokens[i] if chars else f"{cur} {tokens[i]}")
         wd = widths.get(cand)
         if wd is None:
             wd = widths[cand] = _display_width(font, cand, script)
@@ -489,9 +544,10 @@ def _fill_line(tokens: list[str], start: int, font: FontT, width: int, script: s
         if not allow_break:
             return None
         _count(stats, "breaks")
-        split = None if chars else _split_word(tokens[i], font, width, script)
+        word = _lead(tokens[i], script)
+        split = None if chars and script != "thai" else _split_word(word, font, width, script)
         if split is None:  # a single character, or a word that stays whole: wider than the line
-            return tokens[i], i + 1
+            return word, i + 1
         tokens[i : i + 1] = [split[1]]
         return split[0], i
     return cur, i
@@ -577,11 +633,11 @@ def _balanced_lines(tokens: list[str], rooms: list[int], font: FontT, script: st
         at += len(token) + len(glue)
     joined = glue.join(tokens)
     closes = _span_closes(joined, starts)
-    no_start = [chars and (t in _NO_LINE_START or unicodedata.category(t) == "Mn") for t in tokens] + [False]
+    no_start = [chars and _no_start(t) for t in tokens] + [False]
     known: dict[tuple[int, int], int] = {}
 
     def line(j: int, i: int) -> str:
-        return joined[starts[j] : starts[i - 1] + len(tokens[i - 1])]
+        return _lead(joined[starts[j] : starts[i - 1] + len(tokens[i - 1])], script)
 
     def width(j: int, i: int) -> int:
         wd = known.get((j, i))
@@ -651,16 +707,20 @@ def _balanced(fit: Fit, text: str, script: str) -> Fit:
     glue = "" if chars else " "
     lines = list(fit.lines)
     k = 0
+
+    def bare(joined: str) -> str:  # (a Thai line leaves out the space before its first word)
+        return joined.replace(" ", "") if script == "thai" else joined
+
     for para in text.replace("\r", "").split("\n"):
-        tokens = list(para.replace(" ", "")) if chars else para.split()
+        tokens = _units(para, script)
         if not tokens:
             k += 1 if k < len(lines) and not lines[k][0] else 0  # a kept empty line
             continue
-        whole = glue.join(tokens)
+        whole = bare(glue.join(tokens))
         held = ""
         end = k
         while len(held) < len(whole) and end < len(lines):
-            held = glue.join(filter(None, (held, lines[end][0])))
+            held = bare(glue.join(filter(None, (held, lines[end][0]))))
             end += 1
         if held != whole:
             break
@@ -727,15 +787,17 @@ COST_OWN_HYPHEN = 0.1  # a break after a word's own hyphen ("well- / known")
 COST_OFF = 0.08  # the block moved off the centre, per line's height squared
 COST_EVEN = 0.6  # the gap above and below the block against its lines' gap at the sides (of the widest room, squared)
 COST_DEFECT = 0.1  # each of the block's defects (`_defects`), between the blocks of one size
-# Words that lean on the next one, by language (a line should not end on them); other languages have none here
+# Words that lean on the next one, by language (a line should not end on them; `breaks.WEAK_WORDS` for the others);
+# a language not listed has none
 WEAK_WORDS = {"english": frozenset("""a an the my your his her its our their of to in on at by for with from into onto
     upon about over under after before between through during without within against toward towards across behind
     beyond near off per via and or but nor so yet as if than because although though while whereas unless until
-    whether""".split())}
+    whether""".split()), **breaks.WEAK_WORDS}
 # Words that go with the name after them, by language (a break between them splits the name)
 TITLES = {"english": frozenset("""mr mr. mrs mrs. ms ms. dr dr. st. prof. mister miss madam sir lady lord captain
     professor doctor uncle aunt auntie king queen prince princess general officer detective inspector sergeant
-    lieutenant commander major colonel president chief master saint father sister brother""".split())}
+    lieutenant commander major colonel president chief master saint father sister brother""".split()),
+    **breaks.TITLES}
 NAME_LANGUAGES_NOT = ("german",)  # languages that capitalise every noun: a capital inside a sentence is no name there
 _SENTENCE_END = set(".!?…。！？")
 _SOFT_END = set(",;:、，；：")
@@ -922,11 +984,11 @@ def _core(token: str) -> tuple[int, int]:
 
 
 def _words(text: str, script: str, keep_blank: bool) -> list[list[str]]:
-    """The paragraphs of *text* (its line breaks) as words, or characters in a script wrapped by character; an empty
-    one kept only with *keep_blank*, never at the start or the end."""
+    """The paragraphs of *text* (its line breaks) as words, or characters in a script wrapped by character (`_units`);
+    an empty one kept only with *keep_blank*, never at the start or the end."""
     paras = []
     for para in text.replace("\r", "").split("\n"):
-        tokens = list(para.replace(" ", "")) if script in NO_SPACE_SCRIPTS else para.split()
+        tokens = _units(para, script)
         if tokens or keep_blank:
             paras.append(tokens)
     while paras and not paras[-1]:
@@ -941,17 +1003,20 @@ def _language(language: str) -> str:
 
 
 def _cut(paras: list[list[str]], script: str, language: str, hyphenate: int, too_wide: Any) -> _Pieces:
-    """*paras* cut into `_Pieces`. With *hyphenate* 2 every Latin word of eight letters or more may take a hyphen at
-    its hyphenation points (`hyphen_points`), with 1 only one *too_wide* says fits on no line; never a name (a word
-    with a capital inside a sentence, but in `NAME_LANGUAGES_NOT`). A word with a hyphen of its own may break after it.
-    A break is free after a sentence, cheap after a comma, a colon or a dash, dearer inside a clause, dearer still where
-    it leaves a word that leans on the next one at a line's end (`WEAK_WORDS` of *language*) or splits a name (two
-    capitalised words inside a sentence, or a title of `TITLES` and a name); impossible before a token of closing
-    punctuation alone or after one of opening punctuation alone, and in a script wrapped by character before a
-    character `_NO_LINE_START` forbids or a combining mark and after one `_NO_LINE_END` forbids."""
+    """*paras* cut into `_Pieces`. With *hyphenate* 2 every Latin (or Cyrillic) word of eight letters or more may take
+    a hyphen at its hyphenation points in *language* (`hyphen_points`), with 1 only one *too_wide* says fits on no
+    line; never a name (a word with a capital inside a sentence, but in `NAME_LANGUAGES_NOT`). A word with a hyphen of
+    its own may break after it. A break is free after a sentence, cheap after a comma, a colon or a dash, dearer inside
+    a clause, dearer still where it leaves a word that leans on the next one at a line's end (`WEAK_WORDS` of
+    *language*) or splits a name (two capitalised words inside a sentence, or a title of `TITLES` and a name);
+    impossible before a token of closing punctuation alone or after one of opening punctuation alone, and in a script
+    wrapped by character before a character `_NO_LINE_START` forbids or a combining mark and after one `_NO_LINE_END`
+    forbids. Thai breaks between its words (`_units`): cheap at a space (kept as one), dearer between two words of a
+    phrase."""
     chars = script in NO_SPACE_SCRIPTS
     lgc = script == "lgc"
-    lang = _language(language)
+    thai = script == "thai"
+    lang = breaks.language_key(language)
     weak = WEAK_WORDS.get(lang, frozenset())
     titles = TITLES.get(lang, frozenset())
     names = lgc and lang not in NAME_LANGUAGES_NOT
@@ -992,8 +1057,10 @@ def _cut(paras: list[list[str]], script: str, language: str, hyphenate: int, too
             if n == 0:
                 cost, ok = 0.0, True
             elif chars:
-                cost = 0.0 if stop in _SENTENCE_END else COST_COMMA if stop in _SOFT_END else 0.0
-                ok = not (tok in _NO_LINE_START or unicodedata.category(tok) == "Mn" or prev in _NO_LINE_END)
+                spaced = thai and tok.startswith(" ")
+                cost = (0.0 if stop in _SENTENCE_END else COST_COMMA if stop in _SOFT_END or spaced
+                        else COST_CLAUSE if thai else 0.0)
+                ok = not (_no_start(tok) or prev in _NO_LINE_END)
             else:
                 soft = stop in _SOFT_END or prev in _DASHES or prev.endswith(("—", "–", "--"))
                 cost = 0.0 if ends_sentence else COST_COMMA if soft else COST_CLAUSE
@@ -1006,17 +1073,17 @@ def _cut(paras: list[list[str]], script: str, language: str, hyphenate: int, too
             prev_name = name or (capital and n == 0 and core.lower() in titles)
             points: list[int] = []
             if lgc and hyphenate and not name and a < b and core.isalpha() and (hyphenate >= 2 or too_wide(tok)):
-                points = hyphen_points(core)
+                points = hyphen_points(core, language)
             own = ([i for i in range(1, len(core) - 1) if core[i - 1] == "-" and core[i - 2:i - 1].isalpha()
                     and core[i].isalpha()] if lgc else [])
             cuts = sorted({a + p for p in points} | {a + p for p in own})
             for m, (s, e) in enumerate(zip([0, *cuts], [*cuts, len(tok)])):
-                out.text.append(tok[s:e])
+                out.text.append(_lead(tok[s:e], script))
                 out.token.append(t)
-                out.hang.append(chars and (tok in _NO_LINE_START or unicodedata.category(tok) == "Mn"))
+                out.hang.append(chars and _no_start(tok))
                 starts.append(at + s)
                 if m == 0:
-                    out.glue.append(0 if n == 0 else 4 if chars else 1)
+                    out.glue.append(0 if n == 0 else (1 if tok.startswith(" ") else 4) if chars else 1)
                     out.cost.append(cost)
                     out.breaks.append(ok)
                 else:
@@ -1298,7 +1365,8 @@ def _plan(body: _Body, paras: list[list[str]], text: str, font_path: str | Lette
     pieces.allow = 2.0 * (margin - MARGIN_PX)  # what hangs reaches no nearer the outline than the smallest margin
     h = left.shape[0]
     y_lo, y_hi = int(rows[0]), int(rows[-1]) + 1
-    space = pieces.gap[1] if len(pieces.gap) > 1 and pieces.glue[1] == 1 else 0.0
+    # the space a line break takes out (Thai mostly breaks where there is none)
+    space = pieces.gap[1] if len(pieces.gap) > 1 and pieces.glue[1] == 1 and script != "thai" else 0.0
     total = pieces.cum[-1]
     fewest = max(len(paras), int(np.ceil(total / max(1.0, widest))))
     most = min(len(pieces.text), int((y_hi - y_lo - tall) / lh) + 1) if y_hi - y_lo >= tall else 0
@@ -1772,7 +1840,7 @@ def _layout_text(mask: np.ndarray, text: str, font_path: str | Lettering | None,
 def _rect_holds(text: str, font: FontT, lines: list[str], line_h: float, box_w: int, box_h: int, script: str) -> bool:
     """Whether fit_text's *lines* fit its box (box_w x box_h) with every word whole: what its smallest size need not."""
     box_w, box_h = max(4, box_w), max(4, box_h)
-    words = text.split() if script not in NO_SPACE_SCRIPTS else []
+    words = _whole_words(text, script)
     return (bool(lines) and len(lines) * line_h <= box_h and all(_display_width(font, w, script) <= box_w for w in words)
             and all(_display_width(font, ln, script) <= box_w for ln in lines))
 
@@ -1863,7 +1931,7 @@ def _fit_at(mask: np.ndarray, text: str, font_path: str | Lettering | None, size
     for rect in rects:
         stats = {}
         fitted = _rect_fit(text, face, rect[2] - rect[0], rect[3] - rect[1], size, size, line_spacing, bold_variation,
-                           script, keep_blank, hyphenate, stats, True)
+                           script, keep_blank, hyphenate, stats, True, language)
         if fitted is not None:
             return Fit(fitted[0], _placed(fitted[1], line_h, rect, fmt), size, line_h, "rect", fmt.align,
                        hyphens=stats.get("hyphens", 0), condense=factor, measure=rect[2] - rect[0])
@@ -1903,19 +1971,20 @@ class Lettered:
 
 def _rect_fit(text: str, font_path: str | Lettering | None, box_w: int, box_h: int, lo: int, hi: int,
               line_spacing: float, bold_variation: bool, script: str, keep_blank: bool = True, hyphenate: int = 0,
-              stats: dict[str, int] | None = None, ink: bool = False) -> tuple[FontT, list[str], int] | None:
+              stats: dict[str, int] | None = None, ink: bool = False,
+              language: str = "") -> tuple[FontT, list[str], int] | None:
     """As fit_text (an empty line kept with *keep_blank*): the largest size from *hi* down to *lo* whose wrapped text
-    fits (box_w x box_h) with every word whole, or hyphenated as *hyphenate* says (`wrap_lines`); None when none
-    does. *stats* gets the hyphens of the lines returned. With *ink*, the last line's glyphs (ascent and descent)
-    must fit too, not only its share of the block."""
+    fits (box_w x box_h) with every word whole, or hyphenated as *hyphenate* says in *language* (`wrap_lines`); None
+    when none does. *stats* gets the hyphens of the lines returned. With *ink*, the last line's glyphs (ascent and
+    descent) must fit too, not only its share of the block."""
     box_w, box_h = max(4, box_w), max(4, box_h)
-    words = text.split() if script not in NO_SPACE_SCRIPTS else []
+    words = _whole_words(text, script)
     size = max(lo, min(hi, int(box_h / line_spacing)))
     while size >= lo:
         font = styled_font(font_path, size, bold_variation)
         if hyphenate or all(_display_width(font, w, script) <= box_w for w in words):
             tried: dict[str, int] = {}
-            lines = wrap_lines(text, font, box_w, script, keep_blank, hyphenate, tried)
+            lines = wrap_lines(text, font, box_w, script, keep_blank, hyphenate, tried, language)
             line_h = size * line_spacing
             tall = (len(lines) - 1) * line_h + max(line_h, sum(font.getmetrics())) if ink else len(lines) * line_h
             if (lines and not tried.get("breaks") and tall <= box_h

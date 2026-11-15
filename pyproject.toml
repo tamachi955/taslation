@@ -48,6 +48,8 @@ include = ["taslation*"]
 [tool.setuptools.package-data]
 # the application icon (made by tools/make_icon.py); the locales are Python modules and ship as packages
 "taslation.ui" = ["assets/*.ico", "assets/*.png"]
+# hyphenation patterns, permissive licences only (docs/THIRD_PARTY.md)
+"taslation.render" = ["hyphenation/*.tex"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -169,6 +169,48 @@ External program and models (not bundled, not required to install TASlation):
 | [Qwen3-30B-A3B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507) (Alibaba; Ollama tag `qwen3:30b-a3b-instruct-2507-q4_K_M`) | Apache-2.0 | documented higher-quality option (about 20 GB of RAM) |
 | [Shisa V2.1 8B](https://huggingface.co/shisa-ai/shisa-v2.1-qwen3-8b) (GGUF by [XpressAI](https://huggingface.co/XpressAI/shisa-v2.1-qwen3-8b-GGUF)) | Apache-2.0 | documented alternative for English (Japanese-English tuned) |
 
+## Hyphenation patterns (bundled) and line breaking
+
+The typesetter hyphenates seven target languages with Liang's patterns, read by `taslation/render/breaks.py` (an
+implementation of Liang's algorithm written for TASlation) from the files below. They are verbatim copies, LF line
+endings, of [hyph-utf8](https://github.com/hyphenation/tex-hyphen) at commit `5684c0f51c0b81133db2efbe60a408b4155a3ff5`
+(`hyph-utf8/tex/generic/hyph-utf8/patterns/tex/`), in `taslation/render/hyphenation/`, shipped with the package. Each
+keeps its header, which holds its copyright line and its licence (the text too, but for Dutch: its MIT text, with the
+file's copyright line, is in `docs/licenses/MIT-hyph-nl.txt`). Only files whose header offers a permissive licence were
+taken; where it offers a choice, TASlation takes the licence named in the table.
+
+| File | Language | Copyright (from its header) | Licence |
+|---|---|---|---|
+| `hyph-de-1996.tex` | German (reformed spelling) | 2013-2024 Stephan Hennig, Werner Lemberg, Günter Milde, Sander van Geloven, Georg Pfeiffer, Gisbert W. Selke, Tobias Wendorf, Keno Wehr (Deutschsprachige Trennmustermannschaft) | MIT |
+| `hyph-fr.tex` | French | 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer | MIT |
+| `hyph-es.tex` | Spanish | 1993, 1997, 2001-2019 Javier Bezos, CervanTeX | MIT/X11 |
+| `hyph-it.tex` | Italian | 2008-2011 Claudio Beccari | MIT (the file offers LPPL 1.3 or MIT) |
+| `hyph-pt.tex` | Portuguese | 1987-2015 Pedro J. de Rezende, J. Joao Dias Almeida, 2024 Leonardo Araujo, Aline Benevides | BSD-3-Clause |
+| `hyph-pl.tex` | Polish | 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko | MIT (one of the licences the file offers) |
+| `hyph-nl.tex` | Dutch | 1996 Piet Tutelaers | MIT (named in the header, without its text) |
+
+SHA256 of each file as committed:
+
+| File | SHA256 |
+|---|---|
+| `hyph-de-1996.tex` | `374ad1ce3263f8a2791ec070ef9b516c532dae64456f3fb656e617e8ae53a9d3` |
+| `hyph-fr.tex` | `526cad6fe8f52fcd3caa3fcaf667cb1740cfc14bca198680e00dc343a84594de` |
+| `hyph-es.tex` | `6a2e5f39a991a23d1cd8a23dbd0f6fe96a9f07561a6695f4f3320f47030e236c` |
+| `hyph-it.tex` | `6ce56ed6ed2ca7c0688838e366e6595e0429f984f4fc6e96ec045cebb1e76a47` |
+| `hyph-pt.tex` | `c110a39e501db372d1d755e1c64464321a2efa7d8e9617f66001000389b941f2` |
+| `hyph-pl.tex` | `83ddbbd21bc06a44bc4f4a4c49c38782e809cff5f026b764c044daa29e818843` |
+| `hyph-nl.tex` | `d21499bfbee53e4d50e867ef92a41fd28b65725d7c91c980e4f8f02889bf6b2a` |
+
+Not taken, as their licences are not clearly permissive: Russian (`hyph-ru.tex`, LPPL 1.2 only), Indonesian
+(`hyph-id.tex`, GPL-2), Turkish (`hyph-tr.tex`, LPPL 1). For these, and Ukrainian, TASlation uses simple rules of its
+own instead (`breaks.py`: Russian and Ukrainian by their vowels, the soft and hard signs and й staying with the letter
+before them; Turkish and Indonesian by their syllables). Vietnamese is never hyphenated; English keeps the typesetter's
+own rule. The lists of words a line should not end on, per language, are written for TASlation.
+
+Thai has no spaces between its words. Where Windows has its ICU library (`icu.dll` in the system folder, part of
+Windows 10 version 1703 and later), TASlation asks its line-break iterator, through ctypes, where Thai words end; nothing
+of it is bundled or downloaded. Without it, a rule of `breaks.py`'s own keeps a line from breaking inside a syllable.
+
 ## Decisions left open for the project owner
 
 * **Neural text detection.** Settled on 2026-11-03: the layout model above (Apache-2.0 by its tag), which keeps the

@@ -38,6 +38,8 @@ between 13 and 26 px and some are cramped. Each case is set by the real typesett
     python tools/typeset_eval.py --png DIR          # contact sheets of the cases as set, to look at
     python tools/typeset_eval.py --json FILE        # the numbers, for comparing two runs
     python tools/typeset_eval.py --openmantra       # the earlier yardstick on OpenMantra (`openmantra_eval`)
+    python tools/typeset_eval.py --breaks           # line breaks by language (`break_eval`): hyphens, Thai words
+    python tools/typeset_eval.py --breaks --thai-fallback   # the same with Thai by the rule, without Windows' ICU
 
 The ``--openmantra`` series set the translations of the book caches ``~/.taslation/cache/OpenMantra_*`` (read only)
 on the dataset's pages (``tools/openmantra.py``; CC BY-NC, never shipped): see `openmantra_eval`. Synthetic shapes and
@@ -52,6 +54,7 @@ import json
 import math
 import sys
 import time
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,7 +166,87 @@ TEXTS: list[tuple[str, str, str]] = [
     ("ja", "short", "そんなこと、一度も言ってないよ！"),
     ("ar", "medium", "لا أعرف ماذا تقصد بذلك."),
 ]
-LANGUAGE_NAMES = {"en": "English", "de": "German", "es": "Spanish", "fr": "French", "ja": "Japanese", "ar": "Arabic"}
+LANGUAGE_NAMES = {"en": "English", "de": "German", "es": "Spanish", "fr": "French", "ja": "Japanese", "ar": "Arabic",
+                  "it": "Italian", "pt": "Portuguese (Brazil)", "pl": "Polish", "nl": "Dutch", "ru": "Russian",
+                  "tr": "Turkish", "id": "Indonesian", "vi": "Vietnamese", "th": "Thai"}
+
+# --- the line-break yardstick (``--breaks``) ---------------------------------------------------------------------
+# Invented lines in the target languages, set in cramped bubbles so that their long words take hyphens and their
+# lines break often. Thai is marked with its word boundaries as written for this tool: "|" between two words, "·"
+# inside a compound where a break still reads (รถ·ไฟ), a space where the line has one; a line break anywhere else is
+# a break inside a word.
+BREAK_TEXTS: list[tuple[str, str]] = [
+    ("de", "Ich habe keine Ahnung, wovon du eigentlich redest, aber die Verantwortung trägst du."),
+    ("de", "Herzlichen Glückwunsch zur Beförderung, das ist wirklich unglaublich!"),
+    ("de", "Entschuldigung, wo ist die Bibliothek? Ich suche die Fahrkartenschalter."),
+    ("de", "Unsere Zusammenarbeit war eine Unverschämtheit, ehrlich gesagt."),
+    ("de", "Die Geschwindigkeitsbegrenzung gilt auch für dich."),
+    ("fr", "Malheureusement, la bibliothèque est fermée aujourd'hui."),
+    ("fr", "C'est absolument incompréhensible, personnellement je ne comprends rien."),
+    ("fr", "Le gouvernement annonce un développement extraordinaire, certainement."),
+    ("fr", "Le professeur trouve cette situation complètement impossible."),
+    ("es", "¡Eso es completamente inaceptable, verdaderamente!"),
+    ("es", "Desafortunadamente, la responsabilidad es tuya y no mía."),
+    ("es", "La construcción de la biblioteca es absolutamente increíble."),
+    ("it", "È assolutamente incredibile, sfortunatamente non abbiamo tempo."),
+    ("it", "La responsabilità della biblioteca è veramente straordinaria."),
+    ("pt", "Infelizmente, a responsabilidade é completamente sua."),
+    ("pt", "Isso é inacreditável, a biblioteca é extraordinária!"),
+    ("pt", "Verdadeiramente impossível, absolutamente!"),
+    ("pl", "To jest niesamowite, przepraszam za odpowiedzialność."),
+    ("pl", "Zdecydowanie nieprawdopodobne, ale biblioteka jest niemożliwie daleko."),
+    ("nl", "Dat is verschrikkelijk, het is onmogelijk om te wachten."),
+    ("nl", "De verantwoordelijkheid van het ziekenhuis is waarschijnlijk belangrijk."),
+    ("ru", "Это невероятно, ваше представление было замечательным."),
+    ("ru", "Здравствуйте, пожалуйста, подумайте о безопасности."),
+    ("ru", "Ответственность лежит на руководителе библиотеки."),
+    ("tr", "Bu kütüphane gerçekten inanılmaz, arkadaşlarım da öyle düşünüyor."),
+    ("tr", "Sorumluluk sende, olağanüstü bir durum değil."),
+    ("id", "Kita harus bertanggung jawab atas perpustakaan ini."),
+    ("id", "Sebenarnya pengetahuan masyarakat kita sangat luas."),
+    ("vi", "Tôi không biết bạn đang nói về chuyện gì nữa, thật sự không biết."),
+    ("th", "ฉัน|ไม่|รู้|ว่า|เธอ|หมาย·ถึง|อะไร แต่|ฉัน|จะ|ลอง|ดู|อีก|ครั้ง"),
+    ("th", "เรา|ต้อง|รีบ|ไป|ที่|สถานี|ก่อน|รถ·ไฟ|ขบวน|สุด·ท้าย|จะ|ออก"),
+    ("th", "อย่า|แตะ|ปุ่ม|นั้น|นะ มัน|อันตราย|มาก"),
+    ("th", "วัน·นี้|อากาศ|ดี|มาก ไป|เดิน·เล่น|กัน|ไหม"),
+    ("th", "ทุก·คน|หาย|ไป|ไหน|กัน|หมด"),
+    ("th", "ถ้า|เรา|ออก|เดิน·ทาง|ตอน·นี้ เรา|ยัง|ทัน|รถ·ไฟ|เที่ยว|สุด·ท้าย"),
+    ("th", "ฉัน|ไม่|อยาก|เชื่อ|เลย|ว่า|เธอ|กิน|เค้ก|หมด|คน|เดียว"),
+    ("th", "ห้อง·สมุด|ปิด|แล้ว|ตั้ง·แต่|เมื่อ·วาน"),
+    ("th", "ขอบ·คุณ|มาก|ที่|ช่วย|ฉัน|ไว้ ฉัน|จะ|ไม่|ลืม|เลย"),
+    ("th", "สะพาน|เก่า|จะ|ปิด|ถาวร|จริง|หรือ"),
+    ("th", "ประภาคาร|แห่ง|นี้|มี|ชื่อ·เสียง|มาก|ใน|หมู่|นัก·ท่อง·เที่ยว"),
+    ("th", "เมื่อ|ฉัน|ยัง|เด็ก ยาย|เคย|เล่า|ให้|ฟัง|ว่า|ดวง·ดาว|คือ|รู|บน|ผ้า·ม่าน"),
+    ("th", "ฝน|จะ|ไม่|หยุด|ตก|จน·กว่า|งาน|เทศกาล|จะ|จบ"),
+    ("th", "อย่า|มอง|ฉัน|แบบ|นั้น ฉัน|ไม่·ได้|ทำ"),
+]
+# Every word of eight letters or more in BREAK_TEXTS, a "-" at every point where it may take a hyphen by its
+# language's rules as written for this tool (several ways where the rules allow several: Bi-b-li-o-thek)
+GOLD_HYPHENS: dict[str, list[str]] = {
+    "de": ["ei-gent-lich", "Ver-ant-wor-tung", "Herz-li-chen", "Glück-wunsch", "Be-för-de-rung", "wirk-lich",
+           "un-glaub-lich", "Ent-schul-di-gung", "Bi-b-li-o-thek", "Fahr-kar-ten-schal-ter", "Zu-sam-men-ar-beit",
+           "Un-ver-schämt-heit", "Ge-schwin-dig-keits-be-gren-zung"],
+    "fr": ["Mal-heu-reu-se-ment", "bi-blio-thèque", "ab-so-lu-ment", "in-com-pré-hen-si-ble",
+           "per-son-nel-le-ment", "com-prends", "gou-ver-ne-ment", "dé-ve-lop-pe-ment", "ex-tra-or-di-naire",
+           "cer-tai-ne-ment", "pro-fes-seur", "si-tua-tion", "com-plè-te-ment", "im-pos-si-ble"],
+    "es": ["com-ple-ta-men-te", "i-n-a-cep-ta-ble", "ver-da-de-ra-men-te", "de-s-a-for-tu-na-da-men-te",
+           "res-pon-sa-bi-li-dad", "cons-truc-ción", "bi-blio-te-ca", "ab-so-lu-ta-men-te", "in-cre-í-ble"],
+    "it": ["as-so-lu-ta-men-te", "in-cre-di-bi-le", "sfor-tu-na-ta-men-te", "re-spon-sa-bi-li-tà", "bi-blio-te-ca",
+           "ve-ra-men-te", "stra-or-di-na-ria"],
+    "pt": ["In-fe-liz-men-te", "res-pon-sa-bi-li-da-de", "com-ple-ta-men-te", "i-na-cre-di-tá-vel",
+           "bi-bli-o-te-ca", "ex-tra-or-di-ná-ri-a", "Ver-da-dei-ra-men-te", "im-pos-sí-vel", "ab-so-lu-ta-men-te"],
+    "pl": ["nie-sa-mo-wi-te", "prze-pra-szam", "od-po-wie-dzial-ność", "Zde-cy-do-wa-nie",
+           "nie-praw-do-po-dob-ne", "bi-b-lio-te-ka", "nie-moż-li-wie"],
+    "nl": ["ver-schrik-ke-lijk", "on-mo-ge-lijk", "ver-ant-woor-de-lijk-heid", "zie-ken-huis", "waar-schijn-lijk",
+           "be-lang-rijk"],
+    "ru": ["не-ве-ро-я-т-но", "пред-ста-в-ле-ние", "за-ме-ча-тель-ным", "здра-в-ствуй-те", "по-жа-луй-ста",
+           "по-ду-май-те", "без-опа-с-но-сти", "От-вет-ствен-ность", "ру-ко-во-ди-те-ле", "би-б-лио-те-ки"],
+    "tr": ["kü-tüp-ha-ne", "ger-çek-ten", "i-na-nıl-maz", "ar-ka-daş-la-rım", "dü-şü-nü-yor", "So-rum-lu-luk",
+           "o-la-ğa-nüs-tü"],
+    "id": ["ber-tang-gung", "per-pus-ta-ka-an", "Se-be-nar-nya", "pe-nge-ta-hu-an", "ma-sya-ra-kat"],
+    "vi": [],
+}
+BREAK_SHAPES = ("narrow", "ellipse", "rounded", "cloud")
 
 
 # --- the shapes ---------------------------------------------------------------------------------------------------
@@ -664,6 +747,178 @@ def synthetic(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- the line-break yardstick --------------------------------------------------------------------------------------
+
+def _gold_points() -> dict[str, dict[str, set[int]]]:
+    """Per language, per word of `GOLD_HYPHENS` in lower case, where it may take a hyphen."""
+    out: dict[str, dict[str, set[int]]] = {}
+    for code, words in GOLD_HYPHENS.items():
+        for marked in words:
+            parts = marked.lower().split("-")
+            points, at = set(), 0
+            for part in parts[:-1]:
+                at += len(part)
+                points.add(at)
+            out.setdefault(code, {})["".join(parts)] = points
+    return out
+
+
+def _thai_gold(marked: str) -> tuple[str, set[int]]:
+    """A Thai line of `BREAK_TEXTS` as it is set (its marks left out) and where a line may break in it, counted in
+    its letters with the spaces left out."""
+    text, ok, letters = [], set(), 0
+    for ch in marked:
+        if ch in "|·":
+            ok.add(letters)
+            continue
+        if ch == " ":
+            ok.add(letters)
+        else:
+            letters += 1
+        text.append(ch)
+    return "".join(text), ok
+
+
+def _hyphen_points(word: str, language: str) -> list[int]:
+    """`typeset.hyphen_points` in *language*, or, in a typesetter whose rule knows no language, as it is."""
+    if "language" in inspect.signature(typeset.hyphen_points).parameters:
+        return typeset.hyphen_points(word, language)
+    return typeset.hyphen_points(word)
+
+
+def _line_hyphens(lines: list[str], text: str, gold: dict[str, set[int]]) -> tuple[int, int, int]:
+    """The words *lines* split (a line ending in a hyphen that is not the word's own, or a line ending inside a word
+    with no hyphen): (all of them, those at a point *gold* does not allow, those whose word *gold* does not know)."""
+    marks = ".,;:!?¡¿\"'«»"
+    own = {w.strip(marks) for w in text.split()}
+    split = bad = unknown = 0
+    k = 0
+    while k < len(lines) - 1:
+        words, after = lines[k].split(), lines[k + 1].split()
+        if not words or not after:
+            k += 1
+            continue
+        head = words[-1]
+        hyphen = head.endswith("-")
+        if (head + after[0]).strip(marks) in own if hyphen else (head + after[0]).strip(marks) not in own:
+            k += 1
+            continue  # a word's own hyphen (well- / known), or two words with a line between them
+        parts = [head[:-1] if hyphen else head]
+        j = k + 1
+        while True:  # the word followed over the lines it runs on
+            tokens = lines[j].split()
+            more = len(tokens) == 1 and tokens[0].endswith("-") and j + 1 < len(lines) and bool(lines[j + 1].split())
+            parts.append(tokens[0][:-1] if more else tokens[0])
+            if not more:
+                break
+            j += 1
+        word = "".join(ch for ch in "".join(parts) if ch.isalpha()).lower()
+        cut = 0
+        for part in parts[:-1]:
+            cut += sum(ch.isalpha() for ch in part)
+            split += 1
+            if word not in gold:
+                unknown += 1
+            elif cut not in gold[word]:
+                bad += 1
+            if (word not in gold or cut not in gold[word]) and SHOW_SPLITS:
+                print(f"   {'unknown' if word not in gold else 'bad'}: {'-'.join(parts)} at {cut}")
+        k = j
+    return split, bad, unknown
+
+
+SHOW_SPLITS = False  # (--cases with --breaks: each bad or unknown split printed)
+
+
+def break_eval(args: argparse.Namespace) -> int:
+    """The line breaks by language, numbers only. Per language the hyphenation points `typeset.hyphen_points` finds
+    in the words of `GOLD_HYPHENS` (``points``, of them ``bad``: where the language's rules allow none; ``found``: the
+    share of the allowed ones, within the letters a hyphen must leave, that it finds); then each line of
+    `BREAK_TEXTS` set by `letter_text` as the app sets it, in cramped bubbles of `BREAK_SHAPES` at sizes drawn between
+    9 and 14 px: ``lines``, ``splits`` (words split over two lines, by a hyphen or, in Thai, by a line break inside a
+    word), ``bad`` (splits where the language allows none: in Thai every split), ``unknown`` (splits of a word gold
+    does not know), and ``ms`` per bubble (the layout without the cache, best of `TIMING_RUNS`)."""
+    global SHOW_SPLITS
+    SHOW_SPLITS = bool(args.cases)
+    gold = _gold_points()
+    print("hyphenation points of the gold words")
+    print(f"{'lang':5s} {'words':>5s} {'points':>6s} {'bad':>4s} {'found':>6s}")
+    for code, words in gold.items():
+        if not words:
+            continue
+        points = bad = allowed = good = 0
+        for word, ok in words.items():
+            found = set(_hyphen_points(word, LANGUAGE_NAMES[code]))
+            n = len(word)
+            reachable = {p for p in ok if typeset.HYPHEN_HEAD <= p <= n - typeset.HYPHEN_EDGE} \
+                if n >= typeset.HYPHEN_MIN_LETTERS else set()
+            points += len(found)
+            bad += len(found - ok)
+            good += len(found & reachable)
+            allowed += len(reachable)
+        print(f"{code:5s} {len(words):5d} {points:6d} {bad:4d} {100.0 * good / max(1, allowed):5.1f}%")
+    offered = inside = allowed = kept = 0
+    for code, marked in BREAK_TEXTS:
+        if code != "th":
+            continue
+        text, ok = _thai_gold(marked)
+        bare = text.replace(" ", "")
+        if hasattr(typeset, "_units"):  # the places the typesetter may break a line at, in the letters
+            at, cuts = 0, set()
+            for unit in typeset._units(text, "thai")[:-1]:
+                at += len(unit.replace(" ", ""))
+                cuts.add(at)
+        else:  # between any two characters but before a combining mark or a character that may not start a line
+            cuts = {p for p in range(1, len(bare)) if unicodedata.category(bare[p]) != "Mn"
+                    and bare[p] not in typeset._NO_LINE_START}
+        offered += len(cuts)
+        inside += len(cuts - ok)
+        allowed += len(ok - {0, len(bare)})
+        kept += len(cuts & ok)
+    print(f"Thai: {offered} places a line may break, {inside} of them inside a word, "
+          f"{100.0 * kept / max(1, allowed):.1f}% of the places between words")
+    rng = np.random.default_rng(args.seed + 1)
+    rows: dict[str, list[float]] = {}
+    for code, marked in BREAK_TEXTS:
+        text, thai_ok = _thai_gold(marked) if code == "th" else (marked, set())
+        language = LANGUAGE_NAMES[code]
+        lettering = _lettering(text, code)
+        script = script_of(text, language)
+        unit = typeset.text_width(typeset.styled_font(lettering, 100), typeset.display_form(text, script))
+        for shape_kind in BREAK_SHAPES:
+            size = float(rng.uniform(9, 14))
+            area = max(1500.0, unit / 100.0 * size * size * LINE_SPACING / float(rng.uniform(0.42, 0.55)))
+            if shape_kind == "narrow":
+                area = max(area, 5000.0)  # (as in the corpus)
+            case = Case(0, code, "break", text, make_shape(shape_kind, area, rng))
+            fit, _image = set_case(case)
+            lines = [t for t, _x, _y in fit.lines if t]
+            if code == "th":
+                at, cuts = 0, []
+                for line in lines[:-1]:
+                    at += len(line.replace(" ", ""))
+                    cuts.append(at)
+                split = sum(c not in thai_ok for c in cuts)
+                bad, unknown = split, 0
+                if split and SHOW_SPLITS:
+                    print("   inside a word:", " / ".join(lines))
+            else:
+                split, bad, unknown = _line_hyphens(lines, text, gold.get(code, {}))
+            ms = time_case(case) if not args.no_timing else 0.0
+            row = rows.setdefault(code, [0.0] * 6)
+            for k, v in enumerate((1.0, float(len(lines)), float(split), float(bad), float(unknown), ms)):
+                row[k] += v
+    print("lines set in cramped bubbles")
+    print(f"{'lang':5s} {'cases':>5s} {'lines':>5s} {'splits':>6s} {'bad':>4s} {'unknown':>7s} {'ms':>6s}")
+    total = [0.0] * 6
+    for code, row in rows.items():
+        print(f"{code:5s} {row[0]:5.0f} {row[1]:5.0f} {row[2]:6.0f} {row[3]:4.0f} {row[4]:7.0f} {row[5] / row[0]:6.1f}")
+        total = [a + b for a, b in zip(total, row)]
+    print(f"{'all':5s} {total[0]:5.0f} {total[1]:5.0f} {total[2]:6.0f} {total[3]:4.0f} {total[4]:7.0f} "
+          f"{total[5] / max(1.0, total[0]):6.1f}")
+    return 0
+
+
 # --- the earlier yardstick: OpenMantra --------------------------------------------------------------------------------
 
 def openmantra_eval(args: argparse.Namespace) -> int:
@@ -796,6 +1051,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", default="", help="a file for the numbers")
     parser.add_argument("--no-timing", action="store_true", help="leave out the timing (faster)")
     parser.add_argument("--openmantra", action="store_true", help="the earlier yardstick on OpenMantra instead")
+    parser.add_argument("--breaks", action="store_true", help="the line breaks by language instead (`break_eval`)")
+    parser.add_argument("--thai-fallback", action="store_true",
+                        help="Thai words by the rule that stands in for Windows' break iterator (breaks.USE_NATIVE off)")
     parser.add_argument("--root", type=Path, default=None, help="(--openmantra) the OpenMantra folder")
     parser.add_argument("--pages", type=int, default=0, help="(--openmantra) only the first N pages of each series")
     parser.add_argument("--series", nargs="*", default=None, help="(--openmantra) the series")
@@ -803,6 +1061,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     netguard.install()
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    if args.thai_fallback:
+        from taslation.render import breaks
+
+        breaks.USE_NATIVE = False
+    if args.breaks:
+        return break_eval(args)
     return openmantra_eval(args) if args.openmantra else synthetic(args)
 
 
