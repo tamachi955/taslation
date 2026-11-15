@@ -2,15 +2,21 @@
 
 Paint cannot do this: a bubble has paper to fill, lettering on hatching, tone or a face has none. A region whose ground,
 in a ring round its box, is not one flat colour (`on_art`) goes here: `art_mask` finds its lettering, the dark pieces
-ringed by white with their rings (`ring_comp`, on the negative too for light lettering), and LaMa (`lama`) fills just
-that. Everything else stays with `erase_region`, bubbles on their paper; so does a region whose box holds too little
-of such lettering to be sure.
+ringed by white with their rings (`ring_comp`, on the negative too for light lettering), wherever the ring lies (past
+the box too, `with_ring`) and a little more (`GROW`), and LaMa (`lama`) fills just that. Everything else stays with
+`erase_region`, bubbles on their paper; so does a region whose box holds too little of such lettering to be sure.
 
 A model "bubble" that the classical detectors could not close is judged here too: with its plain box as the mask (tier
 3) always, with a white area (tier 2) when its ground is not flat; one that has paper between its strokes after all
 (`on_paper`: an open or a thin outline) goes back to the paper fill. So does lettering whose ground right round it is
 one flat colour or a smooth shading (`plain_ground`: a black or white panel, a gradient), where the model only
-blotches what the fill paints as it was.
+blotches what a fill paints as it was: its hole, ring and all, is painted with that ground (`fill_ground`) first. So is
+the hole of outlined lettering on a flat ground, which is no art (`FLAT_RINGS`): the paper fill took a thick white ring
+for paper and left it.
+
+What the model filled is pasted as it came, the hole alone (`paste`): no tone matching against the ring round the hole
+and no feathered edge, since neither helped on `tools/erase_eval.py`'s grounds (docs/OFFLINE_VERIFICATION.md, "The
+erase on the art", 2026-11-15).
 
 LaMa runs in torch, on the GPU when torch has one (about 0.6 s a screen) and on the CPU otherwise (about 4 s). Where
 it runs at all is the setting `art_erase`, read by one rule (`runs_here`, and `available` for the weights too): "auto",
@@ -48,6 +54,9 @@ PIECE = 80  # px: a dark piece longer than this, or than 1.15 times the box's sh
 WIDE_GLYPH = 1.15  # ... (big lettering: a glyph as wide as its column)
 DARK, RINGED = 150, 200  # grey levels of a stroke, and of the white ring round it
 RING_SHARE = 0.55  # the share of a piece's edge that is white when it is ringed
+LIGHT_REACH, LIGHT = 6, 190  # px round a stroke in which the pixels at least this light are its white ring ...
+FRINGE = 215  # ... and the grey level under which the pixel right round it is its anti-aliasing
+GROW = 2  # px the hole is grown past all that: one that ends on the ring's anti-aliasing has LaMa draw it back
 MIN_MASK = 0.03  # of the box: less lettering than this is not worth a model
 REACH = 8  # px (or a tenth of the box's short side) past the box the lettering is followed
 EDGE = 4  # px along a model bubble's box edge where a piece is its outline ...
@@ -55,6 +64,8 @@ ALONG = 0.6  # ... when this share of it lies there (a glyph near the edge only 
 OUTLINE_LEVEL = 215  # grey level under which a pixel is ink, a thin grey outline's too (`on_paper`)
 GROUND_BAND = 9  # px (a disc): the ground right round the hole, on which a flat or shaded ground is told ...
 GROUND_FIT = 8.0  # ... when nine in ten of its pixels lie this close (RGB) to a smooth surface fitted to it
+GROUND_FILL = True  # the hole on such a ground is painted with that surface before the paper fill takes the rest
+FLAT_RINGS = True  # so is lettering's on a flat ground (not `on_art`): the paper fill took a thick white ring for paper
 EDGE_INK = 0.15  # ... and the ink reaching in from its box's edge at most this share: a thin outline, not the art
 PAPER_SHARE = 0.3  # of an unclosed model bubble's lettering box: the ground between its strokes, when it is paper
 WINDOW = 512  # px: the part of the page the model sees (at least)
@@ -110,9 +121,31 @@ def ringed(gray: np.ndarray, short: int = 0) -> tuple[np.ndarray, np.ndarray]:
         band = (cv2.dilate(piece, edge) > 0) & (piece == 0)
         if band.sum() and (gray[y0:y + h + 3, x0:x + w + 3][band] >= RINGED).mean() >= RING_SHARE:
             keep[y0:y + h + 3, x0:x + w + 3] |= piece
-    grown = cv2.dilate(keep, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))) > 0
-    fringe = cv2.dilate(keep, np.ones((3, 3), np.uint8)) > 0
-    return (keep > 0) | (fringe & (gray < 215)) | (grown & (gray >= 190)), keep > 0
+    return with_ring(gray, keep > 0), keep > 0
+
+
+def with_ring(gray: np.ndarray, strokes: np.ndarray) -> np.ndarray:
+    """*strokes* (bool, of *gray*) with what goes with them: the pixel right round them darker than `FRINGE` (their
+    anti-aliasing) and the light pixels (`LIGHT`) within `LIGHT_REACH` of them (their white ring)."""
+    s = strokes.astype(np.uint8)
+    grown = cv2.dilate(s, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * LIGHT_REACH + 1,) * 2)) > 0
+    fringe = cv2.dilate(s, np.ones((3, 3), np.uint8)) > 0
+    return strokes | (fringe & (gray < FRINGE)) | (grown & (gray >= LIGHT))
+
+
+def reach_of(box: tuple[int, int, int, int]) -> int:
+    """How far past the lettering box *box* its lettering is followed (`REACH`, or a tenth of its short side)."""
+    return max(REACH, int(0.1 * min(box[2] - box[0], box[3] - box[1])))
+
+
+def around(image: np.ndarray, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """The part of the page `art_mask` looks at for the lettering box *box*, and the most its hole takes: the box and
+    `reach_of` past it, room for the white ring and growth (`LIGHT_REACH`, `GROW`) of the strokes in the box. (Room for
+    the rings of the pieces followed to its edge as well took more of the drawing they are mostly part of: on the line
+    art of `tools/erase_eval.py`'s grounds the MAE round the lettering rose by 1 to 7.)"""
+    pad = reach_of(box)
+    h, w = image.shape[:2]
+    return max(0, box[0] - pad), max(0, box[1] - pad), min(w, box[2] + pad), min(h, box[3] + pad)
 
 
 def box_of(image: np.ndarray, region: TextRegion) -> tuple[int, int, int, int]:
@@ -151,37 +184,43 @@ def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> 
 
 
 def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
-    """The lettering of *region* as a boolean mask of the page; None when its box holds too little of it. It is found in
-    the box (`ring_comp`); past the box (by `REACH`) only what continues a stroke it took is added: a glyph-sized dark
-    piece the box's edge cut off. A model bubble's own box edge is its outline: a piece lying along it (`ALONG` of it
-    within `EDGE` px) is left out; None too when that leaves too little."""
+    """The lettering of *region* as a boolean mask of the page; None when its box holds too little of it. Its strokes
+    are found in the box (`ringed`), and past the box (by `reach_of`) what continues a stroke it took: a glyph-sized
+    dark piece the box's edge cut off. Each stroke takes its ring and anti-aliasing with it (`with_ring`) wherever they
+    lie, past the box too: a box drawn round the strokes alone (a text block's) cuts the white ring of outlined
+    lettering, and the ring left round the hole had LaMa draw the glyphs back as grey shapes. The hole is grown by
+    `GROW` more, and a pixel for anti-aliasing. A model bubble's own box edge is its outline: a piece lying along it
+    (`ALONG` of it within `EDGE` px) is left out, with the ring round it; None too when that leaves too little."""
     x0, y0, x1, y1 = box_of(image, region)
-    h, w = image.shape[:2]
     gray = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_RGB2GRAY)
     inner, strokes = ringed(gray)
+    negative = None
     if region.dark:  # light lettering ringed by dark: the same test on the negative
-        negative, dark_strokes = ringed(255 - gray)
-        inner, strokes = inner | negative, strokes | dark_strokes
+        dark_inner, negative = ringed(255 - gray)
+        inner = inner | dark_inner
     if inner.sum() < MIN_MASK * inner.size:
         return None
-    reach = max(REACH, int(0.1 * min(x1 - x0, y1 - y0)))
-    ox0, oy0, ox1, oy1 = max(0, x0 - reach), max(0, y0 - reach), min(w, x1 + reach), min(h, y1 + reach)
-    mask = np.zeros((oy1 - oy0, ox1 - ox0), bool)
-    mask[y0 - oy0:y1 - oy0, x0 - ox0:x1 - ox0] = inner
-    taken = np.zeros(mask.shape, bool)
-    taken[y0 - oy0:y1 - oy0, x0 - ox0:x1 - ox0] = strokes
-    around = cv2.cvtColor(image[oy0:oy1, ox0:ox1], cv2.COLOR_RGB2GRAY)
-    for ink in ((around < DARK) | (around > 255 - DARK) if region.dark else (around < DARK),):
+    ox0, oy0, ox1, oy1 = around(image, (x0, y0, x1, y1))
+    near = cv2.cvtColor(image[oy0:oy1, ox0:ox1], cv2.COLOR_RGB2GRAY)
+    mask = np.zeros(near.shape, bool)
+    limit = max(PIECE, WIDE_GLYPH * min(x1 - x0, y1 - y0))
+    for flip, found in ((False, strokes), (True, negative)):
+        if found is None:
+            continue
+        level = 255 - near if flip else near
+        taken = np.zeros(mask.shape, bool)
+        taken[y0 - oy0:y1 - oy0, x0 - ox0:x1 - ox0] = found
+        ink = level < DARK
         n, labels, stats, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8), connectivity=8)
-        limit = max(PIECE, WIDE_GLYPH * min(x1 - x0, y1 - y0))
         go_on = np.zeros(n, bool)
         go_on[np.unique(labels[taken & ink])] = True
         go_on[0] = False
         go_on &= np.maximum(stats[:, 2], stats[:, 3]) <= limit
-        cut = go_on[labels]
-        mask |= cv2.dilate(cut.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+        mask |= with_ring(level, taken | go_on[labels])
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * GROW + 1,) * 2)
+    mask = cv2.dilate(cv2.dilate(mask.astype(np.uint8), np.ones((3, 3), np.uint8)), grow) > 0  # (within `around`)
     if region.from_model and region.kind in ("bubble", "dark-bubble"):
-        dark = (around > 255 - DARK) if region.dark else (around < DARK)
+        dark = (near > 255 - DARK) if region.dark else (near < DARK)
         n, labels = cv2.connectedComponents(dark.astype(np.uint8), connectivity=8)  # the dark pieces round the box
         border = np.ones(mask.shape, bool)
         bx0, by0, bx1, by1 = region.x0 - ox0, region.y0 - oy0, region.x1 - ox0, region.y1 - oy0
@@ -195,34 +234,58 @@ def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
             mask &= ~(cv2.dilate(outline.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))) > 0)
         if mask.sum() < MIN_MASK * inner.size:
             return None
-    full = np.zeros(image.shape[:2], np.uint8)
+    full = np.zeros(image.shape[:2], bool)
     full[oy0:oy1, ox0:ox1] = mask
-    return cv2.dilate(full, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))) > 0
+    return full
 
 
 def plain_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None = None) -> bool:
-    """Whether the ground right round the lettering's *hole* (bool, the page; `GROUND_BAND`), within its lettering box
-    *box* when given (what lies past it is the panel's border, the next drawing), is one colour or a smooth shading of
-    it: a black or white panel, a flat tone, a gradient. There the paper fill paints what lay there and a model, which
-    makes up a texture, only blotches it."""
+    """Whether the ground right round the lettering's *hole* (bool, the page; `GROUND_BAND`), within *box* when given,
+    is one colour or a smooth shading of it: a black or white panel, a flat tone, a gradient. There the hole is painted
+    with that ground (`fill_ground`) and a model, which makes up a texture, would only blotch it. The erase gives no
+    box: the hole holds the white ring of outlined lettering, so the band round it is the ground past the ring. (Within
+    the lettering box, a box drawn round the strokes alone, the ring was all the ground there was: lettering on a
+    drawing passed for lettering on white paper, and was painted white.)"""
+    found = _ground(image, hole, box)
+    if found is None:
+        return False
+    crop, _part, band, surface = found
+    off = np.sqrt(((crop[band].astype(np.float32) - surface[band]) ** 2).sum(axis=1))
+    return float(np.percentile(off, 90)) < GROUND_FIT
+
+
+def _ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None
+            ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """The part of the page round *hole* (`GROUND_BAND`, within *box*), the hole and the ground band in it (bool), and
+    the smooth surface fitted to the band (`paper_surface`); None when there is too little of it."""
     ys, xs = np.nonzero(hole)
     if not xs.size:
-        return False
+        return None
     h, w = hole.shape[:2]
     pad = GROUND_BAND
     x0, y0, x1, y1 = max(0, xs.min() - pad), max(0, ys.min() - pad), min(w, xs.max() + 1 + pad), min(h, ys.max() + 1 + pad)
     if box is not None:
         x0, y0, x1, y1 = max(x0, box[0]), max(y0, box[1]), min(x1, box[2]), min(y1, box[3])
         if x1 - x0 < 4 or y1 - y0 < 4:
-            return False
-    part = hole[y0:y1, x0:x1].astype(np.uint8)
-    band = (cv2.dilate(part, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (GROUND_BAND, GROUND_BAND))) > 0) & (part == 0)
+            return None
+    part = hole[y0:y1, x0:x1]
+    band = (cv2.dilate(part.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (GROUND_BAND,) * 2)) > 0) & ~part
     if int(band.sum()) < 16:
-        return False
+        return None
     crop = image[y0:y1, x0:x1, :3]
-    surface = paper_surface(crop, band)
-    off = np.sqrt(((crop[band].astype(np.float32) - surface[band]) ** 2).sum(axis=1))
-    return float(np.percentile(off, 90)) < GROUND_FIT
+    return crop, part, band, paper_surface(crop, band)
+
+
+def fill_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None = None) -> bool:
+    """Paint *hole* (bool, the page) in place with its plain ground as `plain_ground` judged it (within *box*): the
+    smooth surface fitted to the band right round it, so a gradient stays a gradient and the white ring of outlined
+    lettering goes with its strokes. Whether it was painted."""
+    found = _ground(image, hole, box)
+    if found is None:
+        return False
+    crop, part, _band, surface = found
+    crop[part] = np.clip(np.round(surface[part]), 0, 255).astype(np.uint8)
+    return True
 
 
 def on_paper(image: np.ndarray, region: TextRegion) -> bool:
@@ -249,6 +312,12 @@ def on_paper(image: np.ndarray, region: TextRegion) -> bool:
     surface = paper_surface(crop, ground)
     off = np.sqrt(((crop[ground].astype(np.float32) - surface[ground]) ** 2).sum(axis=1))
     return float(np.percentile(off, 90)) < GROUND_FIT
+
+
+def paste(part: np.ndarray, filled: np.ndarray, hole: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """What of the model's *filled* goes onto *part* (the window it saw) for *hole*: the pixels changed (bool) and
+    their values."""
+    return hole, filled[hole]
 
 
 def window(mask_shape: tuple[int, ...], x: int, y: int, h: int, w: int) -> tuple[int, int, int, int]:
@@ -400,6 +469,10 @@ class ArtEraser:
         app = lambda: self.fallback(image, region, mode, white_threshold, dark_threshold, dark)  # noqa: E731
         if self.failed or not on_art(image, region):
             self.counts["plain"] += 1
+            if not self.failed and FLAT_RINGS and region.kind in ART_KINDS:
+                full = art_mask(image, region)  # outlined lettering on a flat ground: its ring painted that ground
+                if full is not None and plain_ground(image, full):
+                    fill_ground(image, full)
             return app()
         if on_paper(image, region):
             self.counts["ground"] += 1
@@ -409,24 +482,26 @@ class ArtEraser:
             self.counts["weak"] += 1
             return app()
         x0, y0, x1, y1 = box_of(image, region)
-        if plain_ground(image, full, (x0, y0, x1, y1)):
+        if plain_ground(image, full):
             self.counts["ground"] += 1
+            if GROUND_FILL:
+                fill_ground(image, full)  # (strokes, ring and all; the paper fill takes what is left)
             return app()
         wx0, wy0, wx1, wy1 = window(image.shape, x0, y0, y1 - y0, x1 - x0)
         part, hole = image[wy0:wy1, wx0:wx1], full[wy0:wy1, wx0:wx1]
         key = hashlib.sha1(np.ascontiguousarray(part).tobytes() + np.packbits(hole).tobytes()).digest()
         kept = region.inpainted
         if kept is not None and kept[0] == key:
-            filled = kept[1]
+            pixels, where = kept[1], kept[2]
         else:
             filled = self._fill(part, hole) if min(part.shape[:2]) >= SMALLEST else None
-            if filled is not None:
-                region.inpainted = (key, filled[hole], hole)
-        if filled is None:
-            self.counts["plain"] += 1
-            return app()
+            if filled is None:
+                self.counts["plain"] += 1
+                return app()
+            where, pixels = paste(part, filled, hole)
+            region.inpainted = (key, pixels, where)
         self.counts["art"] += 1
-        part[hole] = filled if kept is not None and kept[0] == key else filled[hole]
+        part[where] = pixels
         crop = image[region.y0:region.y1, region.x0:region.x1]
         mask = region.mask
         if crop.shape[:2] != mask.shape:
@@ -454,5 +529,6 @@ class ArtEraser:
             self._lock.release()
 
 
-__all__ = ["ART_ERASES", "ArtEraser", "art_mask", "available", "has_cuda", "installed", "is_dash", "on_art", "on_paper",
-           "plain_ground", "ring_comp", "runs_here", "window"]
+__all__ = ["ART_ERASES", "ArtEraser", "around", "art_mask", "available", "fill_ground", "has_cuda", "installed",
+           "is_dash", "on_art", "on_paper", "paste", "plain_ground", "reach_of", "ring_comp", "runs_here", "window",
+           "with_ring"]

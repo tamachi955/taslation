@@ -2569,3 +2569,147 @@ kept as the sheet spells them and the sheet changed since, the setting off, expo
 run. The region editor with the note that a translation was reused under its header and the line on how far the model
 follows a hint under the hint field: as wide as without the note in all 16 window languages, one or two lines taller
 (21 to 36 pixels; the tallest, Indonesian, 897 pixels against 861).
+
+## The erase on the art (2026-11-15)
+
+Three changes to `taslation/render/artwork.py`, kept because they measured better on the whole (their costs are named
+below), and the ideas tried beside them that did not, with their numbers.
+
+**What was wrong.** A text block's lettering box is drawn round the strokes (`detect/textblocks.py`); the white
+outline of outlined lettering lies past it. `art_mask` cut its hole at that box, so a ring of white stayed round the
+hole and LaMa, continuing what it saw, drew the glyphs back as grey shapes. `plain_ground`, judged within the same box,
+saw only that white ring: lettering on a drawing passed for lettering on white paper and the paper fill painted it
+white. And outlined lettering on a flat grey panel, which is no art (`on_art`), went to the paper fill, which took a
+thick white ring for paper and left it, or painted the strokes white.
+
+**What changed.** (1) The hole is each stroke with its anti-aliasing and white ring wherever these lie within
+`reach_of` past the box (`with_ring`, `around`), grown by `GROW` 2 px more. (2) `plain_ground` is judged on the band
+round that whole hole, with no box, and on such a ground the hole is painted with the surface fitted to the band
+(`fill_ground`) before the paper fill does the rest. (3) Lettering on a flat ground (not `on_art`) whose strokes are
+ringed has its hole painted so too (`FLAT_RINGS`); the paper fill alone otherwise, as before.
+
+**How it was measured.** A new set of `tools/erase_eval.py`, `--set grounds`: mattes of real lettering (clean gold
+crops of OpenMantra) drawn black on clean grounds whose truth is the ground: flat grey (120, 200), four gradients,
+twelve screentones (pitch 4-8 px, 15-50 %), six of line art, four of white line art on black (white lettering on them
+when there is no outline), and 40 crops of real art each, dense drawing and light tone, of 640 px; each without an
+outline, with one of 3 px and with one of 6 px; 408 samples. The region is made as a text block would have it: its box
+round the strokes alone. The numbers: MAE (RGB, 0-255) in the lettering's exact mask (strokes and outline); "outside",
+the MAE in its box and 8 px round it outside the mask (what the erase damaged); "left", the share of the mask more
+than 40 off; "ink", stroke pixels still ink-dark and 40 darker than the ground; "ghost", outline pixels still white and
+40 lighter; "bias", the mean lightness off in the mask; "step", the lightness step at the edge of what the erase
+changed against the ground's own (a visible seam). The variants were tried on a scratch bench built the same way
+(other mattes and crops, its own seed, 408 samples; "in" is the MAE in the mask, "psnr" in it too), patched into the
+module; the tool's set gave the before and after. The development machine (GeForce GTX 1660 Ti 6 GB, torch 2.14.1 with
+CUDA 12.6, LaMa in fp32 as `lama.py` runs it); one run each. Other programs shared the GPU during some runs, so the
+times are rough.
+
+`tools/erase_eval.py --set grounds`, the erase with LaMa ("lama" arm), before (the code of 9c7bf8e) and after:
+
+| | MAE | outside | left | ink px | ghost px | bias | step |
+|---|---|---|---|---|---|---|---|
+| all 408, before | 46.44 | 15.00 | 30.0 % | 135 | 502 | +14.68 | 18.04 |
+| all 408, after | **34.52** | **14.64** | **23.2 %** | 164 | **167** | **-4.62** | **7.17** |
+| flat grey | 21.93 / 0.06 | 0.42 / 0.00 | | | 896 / 0 | | |
+| gradients | 36.27 / 0.58 | 8.04 / 0.26 | | | 871 / 0 | | |
+| screentones | 25.71 / 18.52 | 10.15 / **12.51** | | 47 / 40 | 219 / 52 | | 8.93 / 3.47 |
+| line art | 84.99 / 77.01 | 33.62 / 34.09 | | 202 / **278** | 735 / 345 | | 47.97 / 28.10 |
+| white on black | 67.06 / 58.54 | 36.00 / 36.80 | | 317 / **410** | 550 / 198 | | 31.32 / 3.37 |
+| real art, dense | 58.35 / 42.58 | 14.75 / 14.64 | | 212 / **255** | 575 / 203 | | 18.23 / 8.41 |
+| real art, light | 35.76 / 28.73 | 11.22 / 10.01 | | 96 / 113 | 405 / 192 | | 14.58 / 4.73 |
+| no outline | 50.97 / 47.77 | 21.55 / 21.42 | | | | | 20.43 / 13.22 |
+| outline 3 px | 35.15 / 28.13 | 13.02 / **13.90** | | | | | 15.81 / 3.89 |
+| outline 6 px | 53.19 / 27.65 | 10.43 / 8.62 | | | | | 17.87 / 4.39 |
+
+(Rows by ground or outline: before / after.) The lama arm's regions went to LaMa 309 times before and 354 after, to
+the paper fill on a plain ground ("ground") 55 and 10 times. The paper fill alone ("paper" arm) is unchanged: MAE
+65.38.
+
+Two numbers got worse. The damage round lettering on screentone rose from 10.15 to 12.51 (and round 3 px outlines from
+13.02 to 13.90): the hole now takes the ring and 2 px of tone round it, which LaMa draws on in phase but not dot for
+dot. And "ink" rose by 29 px a region: on the bench the stroke pixels LaMa made dark were as many as the outline pixels
+it made dark, where there never was ink (line art 12.3 and 12.3 %, real dense 8.4 and 7.6 %, real light 3.1 and
+2.7 %, tones 1.3 and 1.0 %), so that is the drawing it makes up over a larger hole, not glyphs drawn back. By eye on
+the bench's galleries (scratch files, deleted): the grey ghost glyphs round outlined lettering are gone, screentone
+goes on through the hole in phase (no smear), and dark smudges are left only where a stroke stayed out of the hole.
+
+`tools/erase_eval.py`'s other two sets (the whole pipeline, detection and OCR first, real mattes on real pages; the
+lama arm, before / after; the paper fill alone is unchanged, 51.36 and 40.64):
+
+| | MAE | plain | light tone | dense | outside | left | regions to LaMa |
+|---|---|---|---|---|---|---|---|
+| plain (300 pairs, 180 regions) | 57.16 / **55.44** | 11.3 / 11.2 | 80.9 / 76.5 | 79.3 / 78.6 | 2.80 / **3.59** | 36.3 / 35.5 % | 70 / 99 |
+| outlined, 2-4 px (295 pairs, 267 regions) | 30.43 / **29.25** | 3.8 / 3.8 | 26.0 / **27.3** | 61.0 / 56.1 | 7.49 / **10.12** | 21.1 / 20.1 % | 157 / 194 |
+
+Here the cost is plainer: what the erase changed round the lettering rose by 0.8 and 2.6, and the MAE on light tone
+with an outline by 1.3. The hole takes the light pixels within `LIGHT_REACH` 6 px of a stroke as its ring, so round a
+2-4 px outline on a light ground it takes some of the ground too, and LaMa draws it anew. A ring of 4 px measured
+better on the bench (in 34.88, out 14.95 against 35.41 and 16.01) but left most of an 8 px outline (in 50.91 against
+29.96, ghost 1,662 px against 432); 5 px: 35.04 and 15.63, 8 px outlines not tried. Telling the outline's width per
+region (where the light stops) would take both; not tried.
+
+**The hole** (bench, the routing as it was):
+
+| | in | out | left | ink px | ghost px | step | psnr |
+|---|---|---|---|---|---|---|---|
+| as it was (ring cut at the box) | 46.54 | 16.13 | 30.7 % | 151 | 605 | 7.87 | 14.96 |
+| the same rule, not cut at the box | 41.59 | 17.54 | 28.0 % | 173 | 463 | 8.18 | 16.03 |
+| that, grown 2 px (kept) | 40.69 | 18.77 | 27.5 % | 172 | 486 | 3.26 | 16.14 |
+| that, grown 4 px | 39.69 | 19.05 | 27.1 % | 171 | 455 | 3.55 | 16.24 |
+| the strokes grown 2 / 4 / 6 / 8 px, no ring | 57.88 / 49.89 / 40.38 / 40.86 | 16.74 / 16.54 / 16.63 / 18.59 | | | 1127 / 872 / 353 / 514 | 12.53 / 10.24 / 6.17 / 3.51 | |
+| ring by connection (light pixels joined to a stroke, 10 px), grown 2 px | 40.75 | 19.49 | 27.9 % | 179 | 474 | 3.86 | 16.08 |
+| grown 3 px on a busy ground, 8 px on an even one | 39.95 | 18.84 | 27.1 % | 172 | 461 | 3.53 | 16.22 |
+
+A hole that ends on the ring's anti-aliasing leaves a seam (step 8.18); 2 px more takes it (3.26). 4 px took a point
+more inside for twice the band of drawing repainted; the adaptive growth was no better than 2 px everywhere. The hole
+is not taken past `reach_of`: room for the rings of the pieces followed to its edge took more of the drawing they are
+mostly part of (out +6.5 on white on black, +3.2 on line art, +1.4 on real dense art); and the pieces that continue a
+stroke past the box keep their ring (taking them without it: in 35.42 against 35.41, out 15.91 against 16.01).
+
+**Where the plain ground is judged** (bench, the hole grown 2 px):
+
+| | in | out | left | ghost px | step | psnr | LaMa |
+|---|---|---|---|---|---|---|---|
+| within the lettering box (as it was) | 40.69 | 18.77 | 27.5 % | 486 | 3.26 | 16.14 | 300 |
+| within the box and 10 px round it | 38.27 | 16.94 | 26.5 % | 374 | 3.13 | 16.54 | 353 |
+| no box | 38.19 | 16.90 | 26.5 % | 371 | 3.11 | 16.58 | 356 |
+| within the box, the hole painted with the fitted surface | 38.00 | 18.10 | 26.1 % | 239 | 3.26 | 18.14 | 300 |
+| no box, painted (kept), and `FLAT_RINGS` | **35.41** | **16.01** | **23.5 %** | **178** | 3.11 | **18.87** | 356 |
+
+On flat grey the MAE went from 32.31 to 0.01, on gradients from 20.32 to 0.89.
+
+**Tried and dropped** (bench, on the kept hole and routing unless said):
+
+- *Matching LaMa's tone to the ring round the hole.* LaMa does shift what it re-renders: on flat grounds of 120-240
+  the hole came out 2.5 to 3.4 levels darker, on near black (25) 2.9 lighter, on gradients 2.4 darker; on tones and
+  real art inside the hole -2.0 to +1.7, and there it does not follow the ring right round the hole (correlation 0.04
+  over 325 runs). Flat grounds and gradients now go to the fitted surface, not to LaMa. An offset, or a gain and an
+  offset, fitted on a ring 1-6 or 6-18 px outside the hole (offset at most 8, gain 0.9-1.1, at least 64 pixels), and a
+  gate (64 ring pixels within 12 levels of its median, the channels' offsets no more than 4 apart, at most 24): MAE in
+  35.50 at best 35.05 (gain, ring 1-6), step 3.18 to 2.79, but the lightness in the hole on real light art from +1.2
+  to +3.1 and on line art from +2.5 to +3.7; the gate 35.32. Under half a level, for a hole further off in lightness
+  on the real art: not kept.
+- *A feathered edge of 1 or 2 px.* Step 3.18 to 3.01 and 2.93, but out 16.48 to 16.66 and 16.79 and the gradient
+  mismatch at the edge 50.8 to 53.4 and 54.9.
+- *A smaller window for LaMa* (512 px at least now): the box and 64 px round it 36.40 (73 ms a region against 134),
+  64 px with 256 at least 36.11, half the box's long side (24-80 px) 36.91, 128 px 35.60 (85 ms), 192 px 35.44
+  (138 ms), against 35.50; on screentone 19.98, 20.44, 19.25 against 19.42, on line art 75.93, 78.13, 74.67 against
+  75.00. Less context is worse; 128 px round the box is as good within noise at about a third less time, not changed
+  here.
+- *Small pieces the hole encloses* (glyph remnants, specks up to 150 or 400 px) added to it: 35.60 and 35.72 against
+  35.41. (What strokes and outline are left, counted as pieces of 4 px or more, went from 17.0 to 15.0 a region with
+  the kept changes; on flat grounds, where a missed island would show most, from 2.8 to 0.)
+- *A higher grey level for the white ring* (`LIGHT` 215 or 230 against 190): 35.36 and 35.41, out 15.85 and 15.70,
+  psnr 18.54 and 18.44 against 18.87.
+- *Paper tolerances relative to the page's noise* (1.5 times the 92nd percentile of the flattest tiles' deviation,
+  6 to 20) against the fixed `FLAT_GROUND` 6 and `GROUND_FIT` 8: on the bench made noisy (scaled to 90 % and back,
+  grain of sigma 2.5, JPEG quality 60) the fixed values sent every flat ground and gradient where they went on the
+  clean bench; the relative ones changed no region's route. What noise did change was the lettering found on tones
+  (6 of 48 to the paper fill as too little), not the thresholds.
+- *Half precision.* `lama.py` runs fp32; fp16 weights and autocast both gave black (the FFT in half precision).
+- *Outlines of 8 px* (beyond the set's 6): in 29.96 against 30.29 for 6 px, ghost 432 against 428, the hole 4.5
+  levels light against 2.5: the ring is taken about as well.
+- *Less growth* (`GROW` 1 or 0 against 2): in 35.03 and 36.22, out 15.22 and 14.69, but the step at the edge 4.13 and
+  7.85 against 3.11: the seam comes back.
+
+**Not shown here.** The live window and a whole book on the viewer; the gated volume tests that read the owner's
+development snapshots (`tests/test_realdata_models.py`); lettering of colour.

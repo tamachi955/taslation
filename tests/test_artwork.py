@@ -111,6 +111,94 @@ def test_the_mask_is_of_the_lettering_box_where_there_is_one():
     assert not mask[:90].any() and not mask[310:].any()
 
 
+def outlined_on_texture(ring=6):
+    """Three glyphs with a white ring of *ring* px on a drawing's texture, and a text block's box drawn round their
+    strokes alone (the ring lies past it)."""
+    page = drawn()
+    for y in (140, 190, 240):
+        cv2.rectangle(page, (140 - ring, y - ring), (160 + ring, y + 20 + ring), (255, 255, 255), -1)
+        cv2.rectangle(page, (140, y), (160, y + 20), (0, 0, 0), 3)
+    return page, region("text", (130, 130, 170, 270), letter_box=(140, 140, 161, 261))
+
+
+def test_the_hole_takes_the_white_ring_past_a_box_drawn_round_the_strokes():
+    """A text block's box holds the strokes and not their ring: the ring is taken all the same, with `GROW` px more,
+    so that no white ring is left round the hole for LaMa to draw the glyphs back from; the drawing further off
+    stays."""
+    page, r = outlined_on_texture(ring=6)
+    mask = art_mask(page, r)
+    assert mask is not None
+    assert mask[150, 134:166].all() and mask[134, 150] and mask[266, 150]  # the ring, past the box on every side
+    assert mask[150, 134 - artwork.GROW] and mask[266 + artwork.GROW, 150]  # and a little more
+    assert not mask[150, :120].any() and not mask[150, 180:].any() and not mask[:120].any()  # the drawing beyond
+
+
+def test_a_plain_ground_is_painted_ring_and_all_before_the_paper_fill(tmp_path):
+    """Outlined lettering on a flat grey with the panel's lines round it: no model, the hole (strokes and white ring)
+    painted the grey of the ground, and the paper fill called for whatever is left."""
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    page = flat(120)
+    page[[88, 90, 92, 308, 310, 312], :] = 40  # lines of the panel round the box: it is on the art
+    page[:, [88, 90, 92, 208, 210, 212]] = 40
+    for y in (140, 190, 240):
+        cv2.rectangle(page, (134, y - 6), (166, y + 26), (255, 255, 255), -1)
+        cv2.rectangle(page, (140, y), (160, y + 20), (0, 0, 0), 3)
+    r = region("text", (100, 100, 200, 300), letter_box=(140, 140, 161, 261))
+    eraser.erase(page, r)
+    assert eraser.counts["ground"] == 1 and eraser._model.runs == 0 and calls
+    assert np.abs(page[130:275, 128:172].astype(int) - 120).max() <= 2  # no ring, no stroke
+    assert (page[90, :] == 40).all()  # the panel's lines stay
+
+
+def test_outlined_lettering_on_a_flat_ground_has_its_ring_painted_that_ground(tmp_path):
+    """A flat grey ground is not the art (no model), but the white ring of outlined lettering on it is painted grey
+    before the paper fill, which took a thick ring for paper and left it; lettering on white paper stays the fill's."""
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    page = flat(120)
+    for y in (140, 190, 240):
+        cv2.rectangle(page, (134, y - 6), (166, y + 26), (255, 255, 255), -1)
+        cv2.rectangle(page, (140, y), (160, y + 20), (0, 0, 0), 3)
+    r = region("text", (100, 100, 200, 300), letter_box=(130, 130, 171, 271))
+    assert not on_art(page, r)
+    eraser.erase(page, r)
+    assert eraser.counts["plain"] == 1 and eraser._model.runs == 0 and len(calls) == 1
+    assert np.abs(page[125:280, 125:176].astype(int) - 120).max() <= 2
+    white = flat(255)
+    cv2.rectangle(white, (140, 140), (160, 160), (0, 0, 0), 3)
+    eraser.erase(white, r)
+    assert eraser._model.runs == 0 and len(calls) == 2 and (white[:130] == 255).all()
+
+
+def test_a_shaded_ground_under_the_lettering_is_painted_as_a_shading():
+    """`fill_ground` paints the hole with the surface fitted to the band round it: a gradient goes on through it, it is
+    not one colour (what the paper fill would paint); `paste` puts the model's pixels on the hole alone."""
+    ramp = np.tile(np.linspace(80, 220, 400).round().astype(np.uint8), (300, 1))
+    page = np.dstack([ramp] * 3)
+    truth = page.copy()
+    hole = np.zeros(page.shape[:2], bool)
+    hole[100:200, 120:280] = True
+    page[hole] = 0
+    assert artwork.plain_ground(page, hole) and artwork.fill_ground(page, hole)
+    assert np.abs(page.astype(int) - truth).max() <= 2
+    where, pixels = artwork.paste(page, np.zeros_like(page), hole)
+    assert (where == hole).all() and pixels.shape == (int(hole.sum()), 3)
+
+
+def test_the_ground_beyond_the_ring_tells_art_from_paper(tmp_path):
+    """Outlined lettering on a drawing with a box round its strokes alone: the ground right round the hole is the
+    drawing past the ring, so the model takes it (within the box, the ring alone passed for white paper)."""
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    page, r = outlined_on_texture(ring=6)
+    eraser.erase(page, r)
+    assert eraser.counts["art"] == 1 and not calls
+
+
 def test_the_window_is_512_more_for_a_larger_box_and_stays_on_the_page():
     assert window((1000, 800), 100, 100, 50, 50) == (0, 0, 512, 512)
     assert window((1000, 800), 700, 900, 50, 50) == (288, 488, 800, 1000)
