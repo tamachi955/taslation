@@ -44,7 +44,6 @@ so they are of no use unless the real page is on the screen.
 TASlation uses machine-learning models to read the text, to translate it and to erase it. Its position on that is as follows.
 
 * **What matters most is that the author and the publisher are paid.** TASlation can show a translation only over the real page that the viewer is showing. It is not a way to read without paying, nor a way to hand a book to others.
-* **It does not regard the use of published works for machine learning as unlawful or wrongful.** Japan's Copyright Act permits, as a rule, their use for information analysis (Article 30-4; not where it would unreasonably prejudice the copyright holder's interests). Other countries treat this differently.
 * **The licence and the training data of each model it uses are published.** They are in `docs/THIRD_PARTY.md`. The two models that find and erase text on the artwork do not disclose where their training images came from, so the installer says so and lets you choose whether to install them.
 * **TASlation itself trains nothing.** No page and no translation leaves the computer, so none can be used to train anyone else's model either.
 * **Where a book has an official translation, buying that is best.** TASlation does not replace human translation; it helps you buy and read a book that has no translation yet. An automatic translation has errors, and the translations are neither published nor distributed.
