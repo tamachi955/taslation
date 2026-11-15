@@ -903,8 +903,17 @@ class JobsMixin:
                 self.say(failed)
         elif kind == "page_stage":  # a page of the run, how far each of its stages is: the page strip
             self._on_page_stage(data)
-        elif kind == "translation_page":  # the page the run translates, lettered so far: the page area follows it
-            self._on_translation_page(data)
+            waits = getattr(self, "_beside_stage", None)  # (the viewer's page beside the run, waiting for it)
+            if waits is not None:
+                waits(data)
+        elif kind == "translation_page":  # the page the run translates, lettered so far: the page area follows it ...
+            held = getattr(self, "_beside_translation_page", None)  # ... until the reader reads beside the run
+            if held is None or not held(data):
+                self._on_translation_page(data)
+        elif kind == "beside_page":  # the run's answer for the page the viewer shows while it translates
+            shown = getattr(self, "_beside_shown", None)
+            if shown is not None:
+                shown(data)
         elif kind == "batch_memory":  # what the run's page pictures take: the line beside the strip
             self._on_batch_memory(data)
         elif kind == "page_missed":  # a page went by before the run could take it: its place on the strip in view
@@ -963,6 +972,9 @@ class JobsMixin:
         self._apply_found_margins()
         self._job_frame = None
         self._hide_busy()
+        end_beside = getattr(self, "_end_beside", None)  # (the viewer's pages read beside the run: as without a run)
+        if end_beside is not None:
+            end_beside()
         # the page the run translated leaves the page area at once (reading is on the viewer: `strip`), however the run
         # ended: the live view takes over
         followed = end_follow(self, redisplay=False)

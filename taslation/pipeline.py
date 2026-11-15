@@ -620,7 +620,8 @@ DraftLines = Sequence[tuple[ScannedUnit, "dict[int, str]"]]  # a page's scanned 
 
 class PageDraft:
     """A page of a whole-book run with lines the model has answered and the run has not stored yet, lettered for the
-    window alone (`translation_view`): its start is the page as the cache letters it now (`Pipeline.page_picture`:
+    window alone (`translation_view`; with no lines, the page the viewer shows while the run translates as the cache
+    letters it, `batch.BatchReader.viewer_page`): its start is the page as the cache letters it now (`Pipeline.page_picture`:
     its frame when the cache holds nothing of it), and each line given to `letter` is matched to the run's region of
     it as a cached bubble is (`scanned_bubble`, `Pipeline._apply_cached`), erased (the erase the run did ahead,
     `PageImages.find`, else the paper fill: never LaMa) and lettered on a working copy (`work`) as
@@ -817,9 +818,10 @@ class Pipeline:
 
     def page_picture(self, store: PageImages, seq: int,
                      lookup: Callable[[fp.PageUnit], tuple[CachedPage, int] | None] | None = None) -> Image.Image | None:
-        """The page *seq* of a whole-book run as the cache letters it now, for the run's translation view alone (the
-        page being translated, `PageDraft.restart`: the window is shown no other page of the run's memory - reading is
-        on the viewer): lettered with the translations the cache holds for it (`translated_page`, on its frame, in
+        """The page *seq* of a whole-book run as the cache letters it now, for the run's translation view (the page
+        being translated, `PageDraft.restart`) and for the page the viewer itself shows while the run translates
+        (`batch.BatchReader.viewer_page`) alone: the window is shown no other page of the run's memory - reading is
+        on the viewer. Lettered with the translations the cache holds for it (`translated_page`, on its frame, in
         memory) when it is translated, else its frame as it was captured; never the bare erased page
         (`PageImages.original`). None when no image of it is held. A lettering that fails (the cache being written
         meanwhile) gives the frame. *lookup*: as for `translated_page`."""

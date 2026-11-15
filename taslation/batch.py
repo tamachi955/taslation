@@ -112,7 +112,10 @@ What a window gets, through *show* (kind, data), besides ``batch_page`` {image} 
 
 Reading is on the viewer only: of the page images this run holds, a window is shown only the page the run works on, as
 its progress - the frame on show as it is taken (``batch_page``) and the page being translated (``translation_page``) -,
-and nothing of them is handed out otherwise (there is no way to ask for the picture of a page by its seq). The images
+and nothing of them is handed out otherwise (there is no way to ask for the picture of a page by its seq) - but for the
+page the viewer itself shows while the run translates (`viewer_page`, asked with the viewer's own frame of it: the run
+needs the viewer no more then, `viewer_free`, and a window follows the reader's turns as without a run), lettered from
+the cache with no model at all and shown only while the viewer shows that page. The images
 stay with the pipeline after the run (``Pipeline.erased_ahead``), for one thing only: the render of a page the viewer
 shows takes a region's erase from there (`Pipeline.erase_key`), so that a page turned to again shows sooner; they go
 with `Pipeline.release_page_images` (the window closes, another book). A page-by-page run lets go of each frame once
@@ -187,7 +190,7 @@ from .messages import Cancelled, Message, message_of
 from .name_variants import RunLine, find_variants
 from .notes import series_key
 from .regions import region_meta
-from .pipeline import EventFn, Pipeline, ScannedUnit, cancel_args, direction_of
+from .pipeline import EventFn, PageDraft, Pipeline, ScannedUnit, cancel_args, direction_of
 from .regions import PageResult
 from .terms import spelt_right
 from .translate import OllamaTranslator, TranslationError
@@ -268,6 +271,21 @@ class Readings:
     units: list[ScannedUnit]
     pages: int = 0
     complete: bool = False
+
+
+@dataclass
+class ViewerPage:
+    """What a whole-book run that translates can show of the page the viewer shows (`BatchReader.viewer_page`).
+    *state*: "translated" (*image* the page lettered from the cache, on *frame*, the capture it was lettered on),
+    "waiting" (a page of this run whose translation has not come yet), "untranslated" (the cache lacks some of it and
+    this run does not translate it), "later" (the cache holds it, but no picture of it can be had without a model:
+    it shows once the run is done) or "none" (no page in the frame). *seq*: its number in this run (0: not one of the
+    run's pages). Nothing of it is stored; it goes from memory to the window's memory."""
+
+    state: str
+    image: Image.Image | None = None
+    frame: Image.Image | None = None
+    seq: int = 0
 
 
 def preflight(settings: Settings, model: str | None = None) -> list[Message]:
@@ -836,6 +854,10 @@ class BatchReader:
         self._says = threading.RLock()  # the sampler and the reading loop both speak (`_emit`)
         self._line_said = 0.0  # when a line answered was last told (`_answered`)
         self.following = False  # the reading pass is on: the reader's keys go on to the viewer (`ui.live`)
+        # the translation pass is on: the run needs the viewer no more, and a window follows it as without a run,
+        # showing what the cache holds of the page it shows (`viewer_page`)
+        self.viewer_free = False
+        self._fps_of: dict[int, tuple[str, ...]] = {}  # seq -> the fingerprints of its page units (`_seq_for`)
         self._preflight = list(preflight) if preflight is not None else None  # the caller's pre-flight result
         self._fatal: Message | None = None  # a failure that every later request would repeat
         self.progress = BatchProgress()
@@ -1465,6 +1487,7 @@ class BatchReader:
         if fps:
             self._sighted.extend(fps)
             self._taken_thumbs.append((key, page, d))
+            self._fps_of[key] = fps
         self._on_show_key = self._last_key = key
         if fps:  # (before the loop can take it: its first event)
             self._page_stage(key, "read", "waiting", thumb=thumb_of(frame))
@@ -2015,7 +2038,8 @@ class BatchReader:
         lacking the rest, so that reading the page translates it (`CachedPage.incomplete`). A unit without an entry
         gets none: the page is translated when it is read in any case."""
         for unit in units:
-            self.pipeline.commit_unit(unit, {})
+            with self._storing:  # (the cache is not made for two threads: a window may be reading it, `viewer_page`)
+                self.pipeline.commit_unit(unit, {})
 
     def _run_pagewise(self, start: float) -> None:
         p = self.progress
@@ -2136,12 +2160,14 @@ class BatchReader:
     def _translation_pass(self, units: list[ScannedUnit], start: float) -> None:
         """All the new lines in runs of pages, each run once, with the series sheet and the whole story as context,
         stored as they come. While a window follows the run, its page on show is the page being translated
-        (`translation_view`)."""
+        (`translation_view`) - until the reader turns to another page in the viewer, which the run needs no more
+        (`viewer_free`, `viewer_page`)."""
         p = self.progress
         s = self.settings
         language = s.target_language
         notes_text = self.pipeline.premises()  # the reader's series sheet
         p.phase = "translate"
+        self.viewer_free = True  # (the sampler has ended with the reading: nothing of the run captures the viewer)
         p.bubbles = 0  # from here on: the bubbles done
         chunks = chunk_units(units, max(1, s.chunk_bubbles))
         recent: deque[tuple[str, str]] = deque(maxlen=max(0, s.context_pairs))
@@ -2168,6 +2194,56 @@ class BatchReader:
                                spell=lambda ja, text, speaker: spelt_right(self.pipeline.check_sheet(), ja, text,
                                                                            speaker),
                                storing=self._storing, priority=lower_priority)
+
+    def _seq_for(self, fps: Sequence[str]) -> int:
+        """The page of this run (its seq) whose page units are the frame's *fps*, each within INDEXED_WITHIN bits;
+        0 when none is."""
+        if not fps:
+            return 0
+        for seq, mine in self._fps_of.items():
+            if len(mine) == len(fps) and all(any(fingerprint.hamming(f, m) <= INDEXED_WITHIN for m in mine)
+                                             for f in fps):
+                return seq
+        return 0
+
+    def viewer_page(self, frame: Image.Image) -> ViewerPage:
+        """What the window can show, while the run translates (`viewer_free`), of the page the viewer shows: its
+        capture *frame* matched to the cache and to this run's pages, drawn without any model - no request to the
+        translator, no detection, no LaMa: none of the run's model or GPU time goes to it. A page this run has yet to
+        translate is "waiting"; a page the cache holds whole is "translated", lettered from the session's memo of the
+        very pixels (`Pipeline.shown_pages`) or else on this run's own picture of it (`pipeline.PageDraft`: the erase
+        done ahead, the paper fill elsewhere), shown only while the viewer shows that page (the window lays the lettering
+        over its own frame: reading stays on the viewer); "later" when neither can be had; "untranslated" when the cache
+        lacks some of it. The cache is asked under the run's lock (`_storing`: it is not made for two threads), copies
+        taken; nothing is stored, written or logged. On the caller's thread (the window's own, not the Tk thread)."""
+        p = self.pipeline
+        rgb = np.asarray(frame.convert("RGB"))
+        units = p.units_of(rgb)
+        if not units:
+            return ViewerPage("none")
+        seq = self._seq_for([u.fingerprint for u in units])
+        if seq and self.stage_of(seq, "translate") in ("waiting", "working"):
+            return ViewerPage("waiting", seq=seq)
+        cache = p.cache
+        if cache is None:
+            return ViewerPage("untranslated", seq=seq)
+        distance = p.settings.fingerprint_max_distance
+        try:
+            with self._storing:
+                held = [cache.lookup(u.fingerprint, u.aspect, distance, p.last_seq) for u in units]
+                key = p._shown_key(rgb, units, False, False) if all(h is not None for h in held) else None
+            if any(h is None for h in held):
+                return ViewerPage("untranslated", seq=seq)
+            got = p.shown_pages.get(key) if key is not None else None
+            if got is not None:  # lettered before in this session, from these very pixels
+                return ViewerPage("translated", Image.fromarray(got[1].lay_over(rgb)), frame, seq)
+            if seq:
+                draft = PageDraft(p, self.images, seq, self._storing)
+                if draft.ok and draft.regions:
+                    return ViewerPage("translated", draft.image(), draft.frame, seq)
+        except Exception:  # noqa: BLE001 - a picture that cannot be made now: it shows once the run is done
+            pass
+        return ViewerPage("later", seq=seq)
 
     def _translate_chunks(self, chunks: list[list[ScannedUnit]], units: list[ScannedUnit],
                           recent: deque[tuple[str, str]], notes_text: str, language: str, left: dict[int, int],

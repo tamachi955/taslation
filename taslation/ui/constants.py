@@ -98,7 +98,9 @@ def in_a_run(window: Any) -> bool:
 
 
 def viewer_rests(window: Any) -> bool:
-    """Whether a run is on that does not follow the reader just now (it starts, or has gone on to the
-    translation): only while it reads the pages the reader turns do their keys and clicks go on to the viewer."""
+    """Whether a run is on that does not follow the reader just now (it starts, or has done the reading and not begun
+    the translation yet): while it reads the pages the reader turns their keys and clicks go on to the viewer, and
+    again once it translates and needs the viewer no more (`BatchReader.viewer_free`: the window follows the viewer
+    then as without a run, `live`)."""
     batch = getattr(window, "batch", None)
-    return in_a_run(window) and not (batch is not None and batch.following)
+    return in_a_run(window) and not (batch is not None and (batch.following or getattr(batch, "viewer_free", False)))
