@@ -20,7 +20,7 @@ from PIL import Image
 from taslation import config
 from taslation.config import ConfigError, Settings
 from taslation.i18n import FEATURE_LANGUAGES
-from taslation.locales.features import bubble_panel, settings_dialog as settings_texts
+from taslation.locales.features import bubble_panel, bubble_steps, settings_dialog as settings_texts
 from taslation.regions import PageResult, TextRegion
 from taslation.ui import app as app_mod
 from taslation.ui import bubble_text, hover, in_place, overbook, zoom
@@ -34,7 +34,7 @@ from taslation.ui.preview import ImageCanvas, patch_picture
 from taslation.ui.progress import Filling
 from taslation.ui.shortcuts import Keymap
 from taslation.ui.translator import TranslatorMixin
-from taslation.ui.zoom import FILL_WAIT, ZOOM_DELAY_MS, ZOOM_REST_MS, BubbleZoomMixin
+from taslation.ui.zoom import FILL_WAIT, HOLD_MS, STILL_PX, ZOOM_DELAY_MS, ZOOM_REST_MS, BubbleZoomMixin
 
 WORK = (0, 0, 1920, 1040)
 INK, PAPER, SET = (0, 0, 0), (255, 255, 255), (60, 60, 60)  # the Japanese, the bubble's paper, the translation
@@ -78,6 +78,13 @@ def test_every_new_line_of_the_window_is_in_every_language():
              bubble_text.COPY_TRANSLATION]
     for key in keys:
         assert set(bubble_panel.TEXTS[key]) == set(FEATURE_LANGUAGES), key
+    steps = [bubble_text.STEP_AT, bubble_text.STEP_FIRST, bubble_text.STEP_LAST, bubble_text.STEP_NONE]
+    from taslation.ui.shortcuts import BY_NAME
+
+    steps += [BY_NAME["next_bubble"].label, BY_NAME["previous_bubble"].label]
+    for key in steps:
+        assert set(bubble_steps.TEXTS[key]) == set(FEATURE_LANGUAGES), key
+    assert "no native review" in bubble_steps.__doc__
     for row in settings_dialog.EXTRA_ROWS[:3]:
         assert row.key in ("hover_shows", "hover_reveal", "bubble_zoom")
         for key in (row.label, row.tip, *(label for _v, label in row.choices)):
@@ -204,8 +211,9 @@ class Window(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin, t
     def _overlay_items(self):
         return []
 
-    def say(self, key, **_values):
+    def say(self, key, **values):
         self.said.append(key)
+        self.said_values = values
 
     def clipboard_clear(self, **_kw):  # (the stand-in's own: the system's clipboard is never touched)
         self.clipboard.append(("clear",))
@@ -545,14 +553,151 @@ def test_without_the_reading_model_the_panel_and_the_status_line_say_so(make):
     assert w.said[-1] == NOT_READ["no-ocr"] and w.clipboard == []
 
 
+# ------------------------------------------------------------------ without the pointer: keys and a held press
+def _screen_middle(w, region):
+    box = w._zoom_screen_box(region)
+    return (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+
+
+def test_the_keys_go_from_bubble_to_bubble_in_reading_order_and_stop_at_the_ends(make):
+    for reveal in ("panel", "in_place"):  # the pinned panel either way (the one there is to pin)
+        w = make("original", reveal)
+        regions = w.last_result.regions
+        w.pointer = (5, 5)  # the pointer far from the page: no pointer needed
+        w.next_bubble()  # nothing pinned, nothing under the pointer: the first
+        assert w._zoom_pinned and w._zoom_for[1] is regions[0] and w.canvas.patch is None, reveal
+        assert w.said[-1] == bubble_text.STEP_AT and w.said_values == {"n": 1, "total": 3}
+        assert w._zoom_where[3] == _screen_middle(w, regions[0])  # placed by the bubble, not the pointer
+        w.next_bubble()
+        assert w._zoom_for[1] is regions[1] and w.said_values == {"n": 2, "total": 3}
+        w.next_bubble()  # one read and left without a translation: its Japanese, as F2 shows it
+        assert w._zoom_for[1] is regions[2] and w._zoom_pinned
+        popup = w._zoom_popup
+        w.next_bubble()  # the last: it stays, and the status line says so (no going round)
+        assert w._zoom_popup is popup and w._zoom_for[1] is regions[2] and w.said[-1] == bubble_text.STEP_LAST
+        w.previous_bubble()
+        w.previous_bubble()
+        assert w._zoom_for[1] is regions[0]
+        w.previous_bubble()
+        assert w._zoom_for[1] is regions[0] and w.said[-1] == bubble_text.STEP_FIRST
+        w._zoom_escape()  # Esc closes it as ever
+        assert w._zoom_popup is None
+        w.previous_bubble()  # nothing pinned: the last
+        assert w._zoom_for[1] is regions[2]
+        w._zoom_hide()
+        w.point(550, 150)  # from the bubble under the pointer
+        w.next_bubble()
+        assert w._zoom_for[1] is regions[2]
+        w.point(150, 200)  # the pinned one counts before the one under the pointer
+        w.previous_bubble()
+        assert w._zoom_for[1] is regions[1]
+        assert w.clipboard == []
+
+
+def test_with_the_pointer_left_on_another_bubble_the_keys_act_on_the_pinned_one(make):
+    w = make()
+    regions = w.last_result.regions
+    w.point(150, 200)  # resting on the first bubble ...
+    w.next_bubble()  # ... the second pinned
+    assert w._zoom_for[1] is regions[1]
+    w.copy_translation()
+    assert w.clipboard[-1] == ("append", "A WIDE SHOUT.")  # the pinned bubble's, not the one under the pointer
+    w.show_japanese()  # F2 again: closes it (the pointer has chosen nothing since)
+    assert w._zoom_popup is None
+    w.next_bubble()
+    w.point(170, 240)  # the pointer moved (beyond a tremble) on the first bubble: it chooses again, as ever
+    w.copy_translation()
+    assert w.clipboard[-1] == ("append", "A small thought.")
+    w.show_japanese()  # ... and F2 pins the one under it
+    assert w._zoom_pinned and w._zoom_for[1] is regions[0]
+
+
+def test_the_keys_go_nowhere_without_a_translated_page_or_in_the_translator_role(make):
+    w = make()
+    w.last_result = None
+    w.next_bubble()
+    assert w.said[-1] == bubble_text.STEP_NONE and getattr(w, "_zoom_popup", None) is None
+    w = make()
+    w.role_var.set("translator")  # the Translator has Tab through the regions
+    w.previous_bubble()
+    assert w.said[-1] == bubble_text.NOT_HERE and getattr(w, "_zoom_popup", None) is None
+    w.reading = True  # reading mode edits nothing: the keys work there
+    w.previous_bubble()
+    assert w._zoom_pinned
+
+
+def _at(w, x, y):
+    """The event of a press at the page point (x, y) (page pixels), the pointer there."""
+    cx, cy = w.canvas.from_image_coords(x, y)
+    w.pointer = (1000 + cx, 100 + cy)
+    return SimpleNamespace(x=cx, y=cy)
+
+
+def test_a_press_held_still_on_a_bubble_pins_its_panel_and_keeps_its_release_from_the_viewer(make):
+    w = make("translation", "panel")
+    regions = w.last_result.regions
+    w._drag_start = None
+    press = _at(w, 150, 200)
+    assert w._hold_press(press) is None  # the press goes on to the page as ever
+    w._drag_start = (press.x, press.y)  # (`TranslatorMixin._on_press`)
+    assert w.delays("_hold_due") == [HOLD_MS] and w._zoom_popup is None
+    w._bubbles_motion(SimpleNamespace(x=press.x + STILL_PX, y=press.y))  # a finger's tremble: still a hold
+    w.due("_hold_due")
+    assert w._zoom_pinned and w._zoom_for[1] is regions[0]
+    assert w._hold_release(press) == "break" and w._drag_start is None  # no click goes on to the viewer
+    assert w._zoom_popup is not None  # the release leaves it pinned
+    tap = _at(w, 550, 150)  # a tap: as ever - the panel goes, the release goes on to the viewer
+    w._hold_press(tap)
+    assert w._zoom_popup is None and w.delays("_hold_due") == [HOLD_MS]
+    assert w._hold_release(tap) is None and w.delays("_hold_due") == [] and w._zoom_popup is None
+    drag = _at(w, 550, 150)  # a press that moves (a swipe, a drag): no hold
+    w._hold_press(drag)
+    w._bubbles_motion(SimpleNamespace(x=drag.x + STILL_PX + 1, y=drag.y))
+    assert w.delays("_hold_due") == [] and w._hold_release(drag) is None and w._zoom_popup is None
+    bare = _at(w, 750, 550)  # off the bubbles: nothing due, a click as ever
+    w._hold_press(bare)
+    assert w.delays("_hold_due") == [] and w._hold_release(bare) is None
+    w.role_var.set("translator")  # the Translator's press selects and edits the regions: nothing of this
+    w._redisplay()
+    w._hold_press(_at(w, 150, 200))
+    assert w.delays("_hold_due") == [] and w._hold_release(press) is None and w._zoom_popup is None
+
+
+def test_a_right_click_on_a_bubble_pins_its_panel_as_windows_makes_a_touch_held(make):
+    w = make()
+    w._hold_right(_at(w, 550, 150))
+    assert w._zoom_pinned and w._zoom_for[1] is w.last_result.regions[1]
+    w._hold_right(_at(w, 750, 550))  # off the bubbles: the panel goes, as with any press
+    assert w._zoom_popup is None and w.delays("_zoom_watch") == [] and w.delays("_hold_due") == []
+    tag = f"Zoom{w.canvas}"
+    for sequence in ("<ButtonPress-1>", "<ButtonRelease-1>", "<ButtonPress-3>"):  # on the page's tag of its own
+        assert w.canvas.bind_class(tag, sequence), sequence
+    assert not w.canvas.bind("<ButtonRelease-1>")  # (the stand-in's page has none of the window's own)
+
+
+def test_the_bubble_keys_over_the_full_screen_viewer_are_held_only_while_a_panel_is_pinned_or_the_pointer_is_on(
+        hidden_root):
+    w = Over(hidden_root)
+    w._zoom_pinned = True  # pinned by a hold, the pointer gone back to the book
+    w._over_keys()
+    assert {"next_bubble", "previous_bubble"} <= w._over_hotkeys.registered
+    w._over_hotkeys.pressed = ["next_bubble"]
+    w._over_keys()
+    assert w.done == ["next_bubble"]
+    w._zoom_pinned = False  # closed: the viewer has F3 and Shift+F3 back at once
+    w._over_keys()
+    assert w._over_hotkeys.registered == {"F5"}
+
+
 def test_the_keys_of_the_bubble_s_text_and_their_hot_keys():
     assert hotkey_code("F2") == (0, 0x71) and hotkey_code("Shift-F2") == (4, 0x71)
     assert hotkey_code("Control-F2") == (2, 0x71) and hotkey_code("Alt-j") == (1, ord("J"))
     assert hotkey_code("Left") is None  # (a page key is the viewer's: never one of them)
+    steps = {"next_bubble": (0, 0x72), "previous_bubble": (4, 0x72)}  # F3 and Shift+F3
     assert text_hotkeys(Keymap()) == {"show_japanese": (0, 0x71), "copy_japanese": (4, 0x71),
-                                      "copy_translation": (2, 0x71)}
+                                      "copy_translation": (2, 0x71), **steps}
     assert text_hotkeys(Keymap().with_key("show_japanese", None)) == {"copy_japanese": (4, 0x71),
-                                                                       "copy_translation": (2, 0x71)}
+                                                                       "copy_translation": (2, 0x71), **steps}
 
 
 class HotKeys:
@@ -596,6 +741,9 @@ class Over(overbook.OverBookMixin):
     def copy_translation(self):
         self.done.append("copy_translation")
 
+    def next_bubble(self):
+        self.done.append("next_bubble")
+
 
 def test_over_the_full_screen_viewer_the_keys_are_taslation_s_only_while_the_pointer_is_on_its_page(hidden_root):
     w = Over(hidden_root)
@@ -604,7 +752,8 @@ def test_over_the_full_screen_viewer_the_keys_are_taslation_s_only_while_the_poi
     w.on_page = True
     w._over_keys()
     assert w._over_hotkeys.codes == {"F5": (0, overbook.OVER_HOTKEYS["F5"]), "show_japanese": (0, 0x71),
-                                     "copy_japanese": (4, 0x71), "copy_translation": (2, 0x71)}
+                                     "copy_japanese": (4, 0x71), "copy_translation": (2, 0x71),
+                                     "next_bubble": (0, 0x72), "previous_bubble": (4, 0x72)}
     w._over_hotkeys.pressed = ["copy_translation"]
     w._over_keys()
     assert w.done == ["copy_translation"]

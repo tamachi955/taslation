@@ -145,16 +145,19 @@ The page a whole-book run shows while it translates, and the page strip, are as 
   With "The bubble itself" chosen, this is the panel there is, opened with F2.
 * Shift+F2: copies the bubble's Japanese to the clipboard (the part selected in the pinned panel, if any).
 * Ctrl+F2: copies the bubble's translation (without the lettering's marks).
+* F3 / Shift+F3: opens the same pinned panel on the next / previous bubble of the page in reading order (from the pinned one, else from the bubble under the pointer, else from the first / last).
+  At the first or the last bubble the panel stays and the status line says so. With "The bubble itself" chosen, it is this panel too.
 
 Tools > Settings... > Shortcuts changes the keys. For a page read in this session the Japanese is in memory. A page shown from the cache has none
 (the cache keeps no Japanese), so the first time it is asked for, the bubble's part of the capture in memory is read again (as translator mode's "Read the Japanese" does),
 and meanwhile "Reading the Japanese..." shows. The Japanese read is kept in memory with the page only, never written to disk or to a log.
 TASlation writes the clipboard only when you copy. A line of the book you copied stays on the clipboard until you copy something else, and other programs can read it there.
-Over a full-screen viewer these three keys are TASlation's only while the pointer is on TASlation's page or a panel is pinned,
+Over a full-screen viewer these keys are TASlation's only while the pointer is on TASlation's page or a panel is pinned,
 and the viewer's the rest of the time. No page key and no click is taken.
 
-Using the keyboard alone: F2, Shift+F2 and Ctrl+F2 act on the bubble under the pointer, so the pointer chooses the bubble.
-There is no key yet that steps from bubble to bubble in the Reader role (Tab moves the focus, and over a full-screen viewer the keys are the viewer's).
+Without the pointer: F3 and Shift+F3 go from bubble to bubble, and while the pointer stays where it was, F2, Shift+F2 and Ctrl+F2 act on the pinned bubble (move the pointer onto a bubble and they act on that one again).
+On a touch screen, where a tap goes to the viewer and nothing rests on the page, press and hold a bubble (about 0.6 seconds, without moving) to pin its panel; that touch is not passed to the viewer, and a short tap goes to the viewer as before.
+Windows turns a touch held still into a right click while its "press and hold" setting is on, so a right click on a bubble pins its panel too.
 
 ### Two ways to read
 

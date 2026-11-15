@@ -18,9 +18,9 @@ drawing.
   mode is on and the viewer or TASlation is in front, taken back when it ends and at closing: F5 (translate; the
   browser's own F5 would reload the book, which the store counts), and in reading mode F11 and Esc (leave it). F11
   and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered. The keys that
-  show and copy a bubble's Japanese and translation (`bubble_text`, F2, Shift+F2, Ctrl+F2 at first, as the keymap has
-  them) are hot keys too, in reading mode and the Reader role, only while the pointer is on TASlation's page or a
-  bubble's Japanese is pinned beside it (`_over_text_keys`).
+  show and copy a bubble's Japanese and translation and go from bubble to bubble (`bubble_text`, F2, Shift+F2,
+  Ctrl+F2, F3, Shift+F3 at first, as the keymap has them) are hot keys too, in reading mode and the Reader role, only
+  while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it (`_over_text_keys`).
 * Tk makes its window anew for its full screen (reading mode in and out), without the style, and activates it: the
   style goes on again and the foreground goes back to the viewer once (`_over_rewrapped`).
 * Where the reader put the window (`PLACE_TABLE` in ui.json): once it has been over the book - moved there with "Move

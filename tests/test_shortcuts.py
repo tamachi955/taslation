@@ -52,6 +52,7 @@ def test_the_table_s_keys_are_bound_as_they_always_were():
                      "how_to_use": ["<F1>"], "keys_help": ["<Shift-F1>"],
                      # a bubble's Japanese and translation at hand (`bubble_text`)
                      "show_japanese": ["<F2>"], "copy_japanese": ["<Shift-F2>"], "copy_translation": ["<Control-F2>"],
+                     "next_bubble": ["<F3>"], "previous_bubble": ["<Shift-F3>"],  # ... from bubble to bubble
                      "edit_box": ["<Return>", "<KP_Enter>"], "remove_box": ["<Delete>"],
                      "text_direction": ["<Key-t>", "<Key-T>"],
                      # translator mode's keys of the region editing branch, in the table since its merge
@@ -125,8 +126,9 @@ def test_what_a_key_may_not_be(name, key, why):
 def test_a_page_key_may_be_plain_and_a_window_key_an_f_key_or_with_ctrl_or_alt():
     keymap = Keymap()
     assert keymap.problem("review", "r") is None and keymap.problem("review", "Control-r") is None
-    assert keymap.problem("settings", "F3") is None and keymap.problem("settings", "Alt-s") is None
+    assert keymap.problem("settings", "F4") is None and keymap.problem("settings", "Alt-s") is None
     assert keymap.problem("settings", "F2") is not None  # (the Japanese of the bubble under the pointer's)
+    assert keymap.problem("settings", "F3") is not None  # (the next bubble's)
     assert keymap.problem("settings", "Control-comma") is None
 
 
@@ -163,7 +165,8 @@ def test_the_bindings_move_with_the_keys_and_what_the_parts_bound_is_let_go(hidd
     bound = shortcuts.bind_keys({"window": window, "page": page}, Keymap(), handlers)
     assert set(window.bind()) == {"<Key-F5>", "<Key-F11>", "<Key-F1>", "<Shift-Key-F1>", "<Control-Key-z>",
                                   "<Control-Lock-Key-Z>", "<Control-Key-y>", "<Control-Lock-Key-Y>",
-                                  "<Key-F2>", "<Shift-Key-F2>", "<Control-Key-F2>"}  # (a bubble's text: `bubble_text`)
+                                  "<Key-F2>", "<Shift-Key-F2>", "<Control-Key-F2>",  # (a bubble's text: `bubble_text`)
+                                  "<Key-F3>", "<Shift-Key-F3>"}
     assert set(page.bind()) == {"<Key-Return>", "<Key-KP_Enter>", "<Key-Delete>", "t", "T",  # (as Tk lists them)
                                 "<Key-Tab>", "<Shift-Key-Tab>", "<Alt-Key-Left>", "<Alt-Key-Right>", "<Alt-Key-Up>",
                                 "<Alt-Key-Down>", "<Control-Key-C>", "<Control-Shift-Key-c>", "<Control-Key-V>",

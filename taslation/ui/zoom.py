@@ -29,7 +29,11 @@ bubble itself instead: `in_place`):
   either way of showing and whatever `bubble_zoom` says, with the bubble's Japanese as text to select and its Copy
   buttons; the pointer may
   then leave the bubble for it. It goes on a click on the page, the wheel, Esc, its Close button, the key again, and
-  when its page is gone; no other panel opens while it is there.
+  when its page is gone; no other panel opens while it is there. The keys of "next_bubble" and "previous_bubble" pin
+  it on the next or the previous bubble without the pointer, and so does a press held still on a bubble
+  (`HOLD_MS` within `STILL_PX`, for a touch screen, where there is no hover: `_hold_press`) or a right click on one
+  (Windows makes a touch held still a right click while its "press and hold" is on). The release of such a press is
+  TASlation's; a tap or a click goes on to the viewer exactly as ever.
 * Focus: the panel is a borderless window, as a tooltip is (Tk shows such a window without activating it, measured:
   the active window and the focus stay where they were), with WS_EX_NOACTIVATE on it besides (`capture.overlay
   .set_over`), so over the full-screen viewer the viewer keeps the foreground and the keys; and it takes no click
@@ -52,7 +56,7 @@ from ..capture.overlay import set_over
 from ..i18n import _
 from ..render.lettering import strip_marks
 from . import layout, shortcuts
-from .hover import reveal_wanted, reverse_on
+from .hover import hover_usable, reveal_wanted, reverse_on
 from .strip import run_page_on_show
 from .wrap import wrap_text
 
@@ -71,6 +75,8 @@ ZOOM_COLOURS = {"edge": "#5c5c5c", "ground": "#1d1d1d", "text": "#f2f2f2", "hint
 ZOOM_HINT = "{key}: its Japanese, to select and copy"  # the panel's last line, with the key of "show_japanese"
 FILL_WAIT = "This bubble is being translated..."  # the panel of a box of the page filling in, before its translation
 FILL_SHOWN = ("found", "read", "lettered")  # the states of such a box the panel opens on (not one without text)
+HOLD_MS = 600  # a press on a bubble held this long ...
+STILL_PX = 6  # ... moving no more than this (canvas pixels; as a click that is no drag) pins its panel
 
 Box = tuple[int, int, int, int]
 
@@ -179,6 +185,15 @@ class FillBox:
         return str(self.fill.texts.get(self.index, "")) if self.state == "lettered" else ""
 
 
+def text_target(region: Any, untranslated: bool = False) -> bool:
+    """Whether *region* is a bubble the panel opens on: translated with a translation; with *untranslated*, one read
+    and left without a translation as well (its Japanese can be shown)."""
+    status = getattr(region, "status", "")
+    if status == "translated" and str(getattr(region, "translated_text", "") or "").strip():
+        return True
+    return untranslated and status == "untranslated"
+
+
 def same_target(a: Any, b: Any) -> bool:
     """Whether two targets of the panel are the same bubble: the same region, or the same box of the same filling."""
     if isinstance(a, FillBox) and isinstance(b, FillBox):
@@ -212,7 +227,8 @@ class BubbleZoomMixin:
         """The page watches the pointer and the keys for the panel and for a bubble shown in its place (`in_place`;
         called as the page is made: `App._build_ui`): on a binding tag of its own, first among the page's, so that the
         page's other handlers stay as they are - a click still goes on to the viewer, a page key still turns the page
-        - and Esc is theirs only while one shows."""
+        - and Esc is theirs only while one shows. A press of the left button is watched for a hold (`_hold_press`;
+        only the release of a hold is kept from the page), a right click on a bubble pins its panel (`_hold_right`)."""
         canvas = self.canvas
         tag = f"Zoom{canvas}"  # (a tag, not a window: it may not begin with a dot)
         if tag in canvas.bindtags():
@@ -223,11 +239,19 @@ class BubbleZoomMixin:
             canvas.bind_class(tag, sequence, lambda _e: self._bubbles_left())
         for sequence in ("<ButtonPress>", "<MouseWheel>"):
             canvas.bind_class(tag, sequence, lambda _e: self._bubbles_away())
+        # (the left and the right button's own, which Tk takes for them in place of <ButtonPress>: away first too)
+        canvas.bind_class(tag, "<ButtonPress-1>", lambda e: self._hold_press(e))
+        canvas.bind_class(tag, "<ButtonRelease-1>", lambda e: self._hold_release(e))
+        canvas.bind_class(tag, "<ButtonPress-3>", lambda e: self._hold_right(e))
         canvas.bind_class(tag, "<Escape>", self._zoom_escape)
 
     def _bubbles_motion(self, event: tk.Event) -> None:
         """The pointer moved on the page: the panel's (`_zoom_motion`) and the bubble's in its place
-        (`InPlaceMixin._reveal_motion`; only one of them ever finds a bubble, by `Settings.hover_reveal`)."""
+        (`InPlaceMixin._reveal_motion`; only one of them ever finds a bubble, by `Settings.hover_reveal`); a press
+        held for a hold that moves beyond `STILL_PX` is no hold any more (a drag, or a swipe)."""
+        hold = getattr(self, "_hold", None)
+        if hold is not None and (abs(event.x - hold[0]) > STILL_PX or abs(event.y - hold[1]) > STILL_PX):
+            self._hold_cancel()
         self._zoom_motion(event)
         motion = getattr(self, "_reveal_motion", None)
         if motion is not None:
@@ -246,6 +270,84 @@ class BubbleZoomMixin:
         hide = getattr(self, "_reveal_hide", None)
         if hide is not None:
             hide()
+
+    # ------------------------------------------------------------------ a press held on a bubble (a touch screen)
+    def _hold_bubble(self, x: float, y: float) -> Any:
+        """The bubble at the canvas point (x, y) whose panel a hold may pin (`text_target`, one left without a
+        translation too), where the pinned panel may open (reading mode or the Reader role, the translated page on
+        show: `hover.hover_usable`); else None. The Translator's pointer selects and edits the regions: never there."""
+        if self.last_result is None or not hover_usable(self) or not self._result_on_show():
+            return None
+        return self._zoom_region_at(x, y, untranslated=True)
+
+    def _hold_press(self, event: tk.Event) -> None:
+        """The left button pressed on the page: no panel nor a bubble's other side in its place (`_bubbles_away`, as
+        any press), and - on a bubble whose panel may be pinned - a hold due after `HOLD_MS` (`_hold_due`). The press
+        goes on to the page's own handlers as ever (never "break")."""
+        self._bubbles_away()
+        self._hold_cancel(fired_too=True)
+        if self._hold_bubble(event.x, event.y) is None:
+            return
+        self._hold = (event.x, event.y, False)  # where it was pressed, and whether its panel was pinned
+        self._hold_job = self.after(HOLD_MS, self._hold_due)
+
+    def _hold_due(self) -> None:
+        """The press was held still on its bubble for `HOLD_MS`: that bubble's panel pinned
+        (`BubbleTextMixin._pin_bubble`), and the release kept from the page (`_hold_release`)."""
+        self._hold_job = None
+        hold = getattr(self, "_hold", None)
+        region = self._hold_bubble(hold[0], hold[1]) if hold is not None else None
+        if region is None:
+            self._hold = None
+            return
+        self._hold = (hold[0], hold[1], True)
+        pin = getattr(self, "_pin_bubble", None)
+        if pin is not None:
+            pin(region)
+        else:
+            self._zoom_show(region, pinned=True)
+
+    def _hold_release(self, _event: tk.Event) -> str | None:
+        """The left button let go: after a hold that pinned a panel the release is TASlation's ("break": the page's
+        own handlers do not see it, so no click goes on to the viewer, and the press is forgotten there too); after a
+        tap or a drag nothing changes (None: the page's release as ever, a tap passed on to the viewer)."""
+        fired = bool(getattr(self, "_hold", None) and self._hold[2])
+        self._hold_cancel(fired_too=True)
+        if not fired:
+            return None
+        if hasattr(self, "_drag_start"):  # (`TranslatorMixin._on_press` noted the press)
+            self._drag_start = None
+        return "break"
+
+    def _hold_right(self, event: tk.Event) -> None:
+        """A right click on the page: no panel nor a bubble's other side in its place, then - on a bubble whose panel
+        may be pinned - that panel pinned. Windows makes a touch held still a right click (its "press and hold" on, as
+        it is at first), sent as the finger lifts, and a right click on the page was nobody's: none goes to the
+        viewer."""
+        self._bubbles_away()
+        self._hold_cancel(fired_too=True)
+        region = self._hold_bubble(event.x, event.y)
+        if region is None:
+            return
+        pin = getattr(self, "_pin_bubble", None)
+        if pin is not None:
+            pin(region)
+        else:
+            self._zoom_show(region, pinned=True)
+
+    def _hold_cancel(self, fired_too: bool = False) -> None:
+        """No hold due any more (a press that moved, or the next press); with *fired_too* one that has pinned its
+        panel is forgotten as well (its release came)."""
+        job = getattr(self, "_hold_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except (tk.TclError, ValueError):
+                pass
+            self._hold_job = None
+        hold = getattr(self, "_hold", None)
+        if hold is not None and (fired_too or not hold[2]):
+            self._hold = None
 
     def _zoom_wanted(self) -> bool:
         """Whether the panel may open on a bubble of the translated page now: the page on show the one translated, the
@@ -282,9 +384,7 @@ class BubbleZoomMixin:
             return None
         ix, iy = canvas.to_image_coords(int(x), int(y))
         hits = [r for r in self._page_regions()
-                if ((r.status == "translated" and str(r.translated_text or "").strip())
-                    or (untranslated and r.status == "untranslated"))
-                and r.x0 <= ix < r.x1 and r.y0 <= iy < r.y1]
+                if text_target(r, untranslated) and r.x0 <= ix < r.x1 and r.y0 <= iy < r.y1]
         return min(hits, key=lambda r: r.area) if hits else None
 
     def _zoom_box_at(self, fill: Any, x: float, y: float) -> FillBox | None:
@@ -374,8 +474,9 @@ class BubbleZoomMixin:
         return "break"
 
     # ------------------------------------------------------------------ the panel
-    def _zoom_show(self, region: Any, pinned: bool = False) -> None:
-        """The panel for *region* beside it (`zoom_place`), then watched (`_zoom_watch`):
+    def _zoom_show(self, region: Any, pinned: bool = False, at: tuple[int, int] | None = None) -> None:
+        """The panel for *region* beside it (`zoom_place`, in the work area of the monitor of *at* - a point on the
+        screen: the bubble's middle when a key chose the bubble - else of the pointer), then watched (`_zoom_watch`):
 
         * with the translation on the page: the original cropped from the frame in memory and the translation at
           `zoom_text_px` (none for a bubble left without one);
@@ -391,7 +492,7 @@ class BubbleZoomMixin:
         canvas = self.canvas
         bubble = self._zoom_screen_box(region)
         try:
-            pointer = self.winfo_pointerxy()
+            pointer = at if at is not None else self.winfo_pointerxy()
         except tk.TclError:
             return
         work = layout.work_area(self, *pointer)
@@ -521,6 +622,7 @@ class BubbleZoomMixin:
                 setattr(self, name, None)
         self._zoom_target = self._zoom_for = None
         self._zoom_pinned = False
+        self._zoom_pinned_at = None  # (where the pointer was as it was pinned: `BubbleTextMixin._pin_bubble`)
         self._zoom_japanese = None  # (the pinned panel's line of Japanese: `BubbleTextMixin._panel_text`)
         popup, self._zoom_popup = getattr(self, "_zoom_popup", None), None
         if popup is None:
