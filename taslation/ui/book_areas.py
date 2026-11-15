@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..annotations import BookAnnotations, BookArea, page_side
+from ..annotations import BookAnnotations, BookArea, unit_side
 from ..fingerprint import hamming
 from ..i18n import _
 from .constants import in_a_run
@@ -59,7 +59,7 @@ def area_for(result: Any, region: Any) -> BookArea | None:
     if not 0 <= region.unit < len(units):
         return None
     unit = units[region.unit]
-    return BookArea.around(unit.normalize(region.bbox), page_side(unit.index, len(units)), unit.aspect)
+    return BookArea.around(unit.normalize(region.bbox), unit_side(unit, units), unit.aspect)
 
 
 def dropped_elsewhere(annotations: BookAnnotations, fingerprint: str, area: BookArea) -> bool:
@@ -83,7 +83,7 @@ def touches(result: Any, area: BookArea, inside: bool = True) -> bool:
     *inside*, a region found on it (not one the reader added) lies mostly inside the area."""
     units = getattr(result, "units", None) or []
     for unit in units:
-        if not area.applies(page_side(unit.index, len(units)), unit.aspect):
+        if not area.applies(unit_side(unit, units), unit.aspect):
             continue
         if not inside:
             return True

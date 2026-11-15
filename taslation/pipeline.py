@@ -87,8 +87,8 @@ from .detect import layout as layout_model
 from .detect.beyond import ocr_view
 from .detect.layout import LayoutModel, Shaper, cover_of, covered, model_regions, take_shape
 from .detect.tilt import Upright, ink_frame, lettering_tilt, region_ink
-from .annotations import (ERASE_ONLY, BookAnnotations, BookArea, Glossary, StyleGuide, clean_book_settings,
-                          join_premises, page_side)
+from .annotations import (ERASE_ONLY, READING_DIRECTIONS, BookAnnotations, BookArea, Glossary, StyleGuide,
+                          clean_book_settings, join_premises, unit_side)
 from .review import OCR_UNSURE, flags_for
 from .terms import spelt_right
 from .textclean import clean_text
@@ -627,7 +627,7 @@ class PageDraft:
             return
         assert self.frame is not None
         self.rgb = np.asarray(self.frame.convert("RGB"))
-        self.units = fp.analyze(self.rgb, pipeline.settings.margins)
+        self.units = pipeline.units_of(self.rgb)
         self.owners = pipeline._owners(self.rgb, self.regions, self.units)
         self.restart()
 
@@ -830,7 +830,7 @@ class Pipeline:
         if self.cache is None or not regions:
             return None
         rgb = np.asarray(frame.convert("RGB"))
-        units = fp.analyze(rgb, self.settings.margins)
+        units = self.units_of(rgb)
         if not units:
             return None
         live = [copy.copy(r) for r in regions]
@@ -1041,7 +1041,31 @@ class Pipeline:
 
     @property
     def rtl(self) -> bool:
+        """Whether the current book is read right to left (a Japanese book; also while it has no annotations, or its
+        direction was never set): the order of a spread's two pages (`fingerprint.analyze`) and of a page's bubbles
+        (`order_on_page`)."""
         return self.annotations.rtl if self.annotations is not None else True
+
+    def units_of(self, rgb: np.ndarray) -> list[fp.PageUnit]:
+        """The page units of the capture *rgb* in the capture area (`fingerprint.analyze`), a spread's two pages in
+        the book's reading direction: the boxes and the fingerprints are the same either way; a book read right to
+        left is analyzed exactly as before there was a direction to set."""
+        margins = self.settings.margins
+        return fp.analyze(rgb, margins) if self.rtl else fp.analyze(rgb, margins, rtl=False)
+
+    def set_reading_direction(self, direction: str) -> bool:
+        """The current book read in *direction* ("rtl" or "ltr") from now on, kept with its annotations (saved). The
+        next reading of a page takes a spread's pages and the bubbles in that order, a page from the cache too (its
+        translations stay as they were made); a page lettered before is lettered again (the direction is in
+        `_shown_key`). Pages cached before keep their sequence numbers. Whether the direction changed: False without
+        a book's annotations, for a direction that is none, or for the one in force ("" and "rtl" read alike)."""
+        if self.annotations is None or direction not in READING_DIRECTIONS or not direction:
+            return False
+        if (direction != "ltr") == self.annotations.rtl:
+            return False
+        self.annotations.reading_direction = direction
+        self.save_annotations()
+        return True
 
     def check_sheet(self) -> Glossary | None:
         """The sheet translations are checked against: the reader's series sheet (None when there is none)."""
@@ -1140,7 +1164,7 @@ class Pipeline:
         result = PageResult(image=original, original=original, regions=[])
         fill = PageFill(self, rgb, events) if events is not None else None
 
-        units = fp.analyze(rgb, s.margins)
+        units = self.units_of(rgb)  # (a spread: the page read first first)
         result.fingerprints = [u.fingerprint for u in units]
         result.units = list(units)
         timer.lap("fingerprint")
@@ -1336,7 +1360,7 @@ class Pipeline:
         rgb = np.asarray(image.convert("RGB"))
         scan = PageScan(width=rgb.shape[1], height=rgb.shape[0])
         fill = PageFill(self, rgb, events) if events is not None else None
-        units = fp.analyze(rgb, s.margins)
+        units = self.units_of(rgb)  # (a spread: the page read first first, and so recorded)
         if not units:
             return scan
         report(Message("pipeline.stage_finding"))
@@ -1617,10 +1641,10 @@ class Pipeline:
 
     def _areas_of(self, units: Sequence[fp.PageUnit], unit: fp.PageUnit) -> list[BookArea]:
         """The areas the reader ignores on every page of the book (`annotations.BookArea`) that apply to *unit* of a
-        capture of *units*: those of its side of a two-page spread (`page_side`) and of its shape."""
+        capture of *units*: those of its side of a two-page spread (`unit_side`) and of its shape."""
         if self.annotations is None or not self.annotations.areas:
             return []
-        return self.annotations.areas_for(page_side(unit.index, len(units)), unit.aspect)
+        return self.annotations.areas_for(unit_side(unit, units), unit.aspect)
 
     def _annotate(self, rgb: np.ndarray, regions: list[TextRegion], units: list[fp.PageUnit]) -> list[TextRegion]:
         """Apply the reader's rectangles: drop detections mostly inside an area ignored on every page of the book

@@ -10,8 +10,22 @@ from tkinter import ttk
 
 from ... import jurisdictions, notice
 from ...i18n import CATALOGS, UI_LANGUAGES, save_ui_language, set_language
-from ..layout import fit_combobox, place_window
+from ..layout import fit_combobox, frame_extents, give_icons, place_window, work_area
 from ..wrap import wrap_line
+
+TEXT_LINES = 31  # the text box's height in lines, where the screen has room for it
+FEWEST_LINES = 8  # the fewest lines it gets on a small screen (it scrolls)
+
+
+def fitted_lines(lines: int, height: int, line_height: int, room: int, fewest: int = FEWEST_LINES) -> int:
+    """The text box's height in lines for a dialog *height* pixels tall on the screen (title bar and borders included)
+    with a box of *lines* lines, each *line_height* pixels, on a work area *room* pixels tall (the screen without the
+    taskbar): *lines* while the dialog fits, else as many fewer as it takes, never fewer than *fewest*. The choosers
+    above the box and the row of buttons below it keep their size: they always show whole."""
+    over = height - room
+    if over <= 0:
+        return lines
+    return max(min(fewest, lines), lines - -(-over // max(1, line_height)))
 
 
 def notice_due(state_dir: Path) -> bool:
@@ -25,9 +39,10 @@ class NoticeDialog(tk.Toplevel):
     country and the language chosen at its top; the whole dialog speaks the chosen language, at one fixed size for
     every language and country. The text is broken into lines here (`wrap_text`), never inside a run of Latin
     letters and digits such as "TASlation" or "§ 184b". "I understand" saves both and what the box says. At the
-    start it comes before the window, and ``accepted`` stays False when the reader quits or closes it (the app does
-    not start then); from the Help menu (``startup=False``) it is modal over the window and its second button
-    only closes it."""
+    start it comes before the window, in the middle of the primary monitor's work area, and ``accepted`` stays False
+    when the reader quits or closes it (the app does not start then); from the Help menu (``startup=False``) it is
+    modal over the window and its second button only closes it. Either way its text box is only as tall as the work
+    area leaves room for (`fitted_lines`: a small screen, a large scaling), so the buttons always show."""
 
     def __init__(self, master: tk.Misc, state_dir: Path, language: str | None = None, startup: bool = True):
         super().__init__(master)
@@ -74,7 +89,7 @@ class NoticeDialog(tk.Toplevel):
         self._font = tkfont.nametofont("TkDefaultFont")
         self._bold = tkfont.Font(self, font=self._font)
         self._bold.configure(weight="bold")
-        self.text = tk.Text(body, width=88, height=31, font=self._font, padx=10, pady=8, wrap="none")
+        self.text = tk.Text(body, width=88, height=TEXT_LINES, font=self._font, padx=10, pady=8, wrap="none")
         self.text.tag_configure("heading", font=self._bold)
         scroll = ttk.Scrollbar(body, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=scroll.set)
@@ -84,11 +99,39 @@ class NoticeDialog(tk.Toplevel):
         self._render()
         self.protocol("WM_DELETE_WINDOW", self._quit)
         self.bind("<Return>", lambda _e: self._acknowledge())
-        if not startup:
+        # at the start the window is not on the screen yet: in the middle of the primary monitor's work area; from the
+        # Help menu over the window, on its monitor. Either way as tall as that work area leaves room for.
+        over = None if startup else master
+        if over is not None:
             self.transient(master)
-            place_window(self, master)
+        else:
+            give_icons(self)  # before the window, it has a taskbar button of its own
+        self.withdraw()  # measured and placed before it first shows
+        self._fit_height(over)
+        place_window(self, over)
+        self.deiconify()
         self.grab_set()
         self.focus_force()
+
+    def _fit_height(self, parent: tk.Misc | None) -> None:
+        """The text box no taller than the work area the dialog lands on (`place_window`'s: the monitor in the middle
+        of *parent*, or the primary one) leaves room for (`fitted_lines`), so that the row of buttons stays on the
+        screen above the taskbar; the box scrolls. The width stays: the text is broken into lines for it."""
+        try:
+            self.update_idletasks()
+            if parent is not None and parent.winfo_viewable():
+                _left, top, _right, bottom = work_area(self, parent.winfo_rootx() + parent.winfo_width() // 2,
+                                                       parent.winfo_rooty() + parent.winfo_height() // 2)
+            else:
+                _left, top, _right, bottom = work_area(self)
+            border, caption = frame_extents()
+            lines = int(self.text.cget("height"))
+            fitted = fitted_lines(lines, self.winfo_reqheight() + caption + border,
+                                  int(self._font.metrics("linespace")), bottom - top)
+            if fitted != lines:
+                self.text.configure(height=fitted)
+        except (tk.TclError, ValueError):
+            pass
 
     def _render(self) -> None:
         """Every label in the chosen language, and the notice with the chosen country's part."""

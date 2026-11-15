@@ -439,10 +439,24 @@ class PageAnnotations:
         return existing
 
 
-def page_side(index: int, units: int) -> str:
+def page_side(index: int, units: int, rtl: bool = True) -> str:
     """The side of a two-page spread the page unit *index* of a capture's *units* is on: "right" or "left"
-    (`fingerprint.split_spread` gives the right page first); "" for a page shown alone, whose side is not known."""
-    return ("right", "left")[index] if units == 2 and index in (0, 1) else ""
+    (`fingerprint.split_spread` gives the page read first first: the right one, the left one without *rtl*); "" for a
+    page shown alone, whose side is not known."""
+    if units != 2 or index not in (0, 1):
+        return ""
+    return ("right", "left")[index] if rtl else ("left", "right")[index]
+
+
+def unit_side(unit: Any, units: Any) -> str:
+    """`page_side` of the page unit *unit* among a capture's *units*, told by where the two lie rather than by their
+    order: "right" for the one further right, whichever page the book's reading direction put first. A capture analyzed
+    in either direction, or before the direction changed, gives its pages the same sides (`BookArea.side`)."""
+    units = list(units)
+    if len(units) != 2 or not any(u is unit for u in units):
+        return ""
+    other = units[1] if units[0] is unit else units[0]
+    return "right" if unit.box[0] + unit.box[2] > other.box[0] + other.box[2] else "left"
 
 
 @dataclass(frozen=True)

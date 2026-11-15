@@ -520,6 +520,8 @@ and the page can be edited.
 * "Book settings..." saves the detection and OCR values that suit this book (thresholds, text-block detection, sound effects) and this book's lettering size
   ("Lettering size" and "Largest size"; "As in Settings" and an empty box mean the values in "Tools > Settings..."), together with the book's premises,
   without changing your own settings. "Apply to this book" re-sets the page on show from the cache (nothing is translated again).
+  "Reading direction" says which page of a two-page spread and which bubble come first: "Right to left (Japanese books)", the default,
+  or "Left to right"; "Clear all" leaves it as it is.
   "Clear all" shows how many settings will go and asks before clearing them (the default button is "Keep them"),
   and leaves the window open. Meanwhile "Undo" brings the cleared settings back. Below that, the areas ignored on every page of this book are listed
   with the pages they apply to (All pages, Right-hand pages, Left-hand pages) and their position (in % of the page's width and height), and "Remove area" (or the Delete key in the list)

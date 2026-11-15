@@ -1,10 +1,10 @@
 """The detection and OCR settings that suit one book, kept with its premises (`BookSettingsDialog`, opened by
-Translator > Book settings...): three plain choices, the size of the book's lettering (`SIZE_ROWS`), and with
-`settings.debug` the numbers too. Clear all asks first (Keep them has the focus) and can be taken back once with Undo
-while the dialog is open. Below the choices, the areas ignored on all pages of the book (`annotations.BookArea`:
-watermarks, page numbers, banners; added in translator mode, `ui.book_areas`), each named by the pages it applies to
-and where it lies on them; Remove area (or Delete in the list) makes text be looked for there again, and the same Undo
-puts it back."""
+Translator > Book settings...): three plain choices, the size of the book's lettering (`SIZE_ROWS`), the book's
+reading direction (`DIRECTIONS`), and with `settings.debug` the numbers too. Clear all asks first (Keep them has the
+focus) and can be taken back once with Undo while the dialog is open. Below the choices, the areas ignored on all pages
+of the book (`annotations.BookArea`: watermarks, page numbers, banners; added in translator mode, `ui.book_areas`),
+each named by the pages it applies to and where it lies on them; Remove area (or Delete in the list) makes text be
+looked for there again, and the same Undo puts it back."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from ...annotations import BOOK_SETTING_BOUNDS, BOOK_SETTING_KEYS
 from ...i18n import _
-from ..layout import place_window
+from ..layout import fit_combobox, place_window
 from ..tooltip import tip
 from . import caches
 from .caches import ERROR_COLOUR
@@ -48,14 +48,23 @@ def area_line(area: Any) -> str:
     x0, y0, x1, y1 = (max(0, min(100, round(float(v) * 100))) for v in area.box)
     return _(AREA_ROW).format(pages=_(SIDE_WORDS.get(area.side, SIDE_WORDS[""])), x0=x0, x1=x1, y0=y0, y1=y1)
 SIZE_ROWS = ("text_scale", "max_font_size")  # the book's lettering size and largest size ("As in Settings", empty: none)
+# the book's reading direction (`BookAnnotations.reading_direction`; "" is read right to left): the row's label, its
+# two choices, and its tip. It is no setting of the reader's own, so Clear all leaves it as it is.
+DIRECTION_LABEL = "Reading direction:"
+DIRECTIONS = {"rtl": "Right to left (Japanese books)", "ltr": "Left to right"}
+DIRECTION_TIP = ("Which page of a two-page spread is read first, and the order of the bubbles on a page. Pages "
+                 "translated before keep their translations and take the new order when shown again. Clear all "
+                 "leaves it as it is.")
 
 
 class BookSettingsDialog(tk.Toplevel):
     """Settings that suit this book, kept with its premises (`annotations.BOOK_SETTING_KEYS`): `CHOICES` as checkboxes,
     which start as this book has them or else as the reader's own setting; the lettering size and the largest size
-    (`SIZE_ROWS`: "As in Settings" and an empty box are the reader's own, Tools > Settings...); only with
-    `settings.debug` the other keys, as raw values (empty: the reader's own setting). Without it those stay as the
-    book has them. Applied, the page on show is lettered again (`App._after_book_settings`). Clear all asks first,
+    (`SIZE_ROWS`: "As in Settings" and an empty box are the reader's own, Tools > Settings...); the book's reading
+    direction (`DIRECTIONS`, with annotations that keep one: `Pipeline.set_reading_direction`, which Clear all leaves
+    alone); only with `settings.debug` the other keys, as raw values (empty: the reader's own setting). Without it
+    those stay as the book has them. Applied, the page on show is lettered again (`App._after_book_settings`), its
+    spread and its bubbles in the book's direction. Clear all asks first,
     saying how many choices go (`CLEAR_QUESTION`, Keep them focused; with none it only says so), and leaves the dialog
     open with Undo, which puts back what it dropped. The areas ignored on all pages are listed under the choices
     (`area_line`; with annotations that keep areas); Remove area takes the selected one out of the book's annotations
@@ -98,11 +107,15 @@ class BookSettingsDialog(tk.Toplevel):
         box.grid(row=row + 1, column=1, sticky="w", padx=(6, 10), pady=1)
         ttk.Label(grid, text=_("(yours: {value})").format(value=base.max_font_size)).grid(row=row + 1, column=2, sticky="w")
         tip(_("No translation of this book is lettered larger than this. Empty: the largest size in Tools > Settings..."), name, box)
+        self.direction_var: tk.StringVar | None = None  # (annotations that keep no direction: no row)
+        self.direction_box: ttk.Combobox | None = None
+        if pipeline.annotations is not None and hasattr(pipeline.annotations, "reading_direction"):
+            self._build_direction(grid, row + 2)
         self.vars: dict[str, tk.StringVar] = {}
         self.kept = {key: value for key, value in current.items() if key not in CHOICES and key not in SIZE_ROWS}
         shown = ([key for key in BOOK_SETTING_KEYS if key not in CHOICES and key not in SIZE_ROWS]
                  if getattr(base, "debug", False) else [])
-        for i, key in enumerate(shown, start=row + 2):
+        for i, key in enumerate(shown, start=row + 3):
             ttk.Label(grid, text=key).grid(row=i, column=0, sticky="w", pady=1)
             var = tk.StringVar(value=str(current[key]) if key in current else "")
             self.vars[key] = var
@@ -129,6 +142,29 @@ class BookSettingsDialog(tk.Toplevel):
         self.said_var = tk.StringVar(self, value="")  # what Clear all or Undo did
         ttk.Label(frm, textvariable=self.said_var, wraplength=420, justify="left").pack(anchor="w", pady=(6, 0))
         place_window(self, master)
+
+    def _build_direction(self, grid: ttk.Frame, row: int) -> None:
+        """The row of the book's reading direction: right to left (also for a book whose direction was never set) or
+        left to right."""
+        name = ttk.Label(grid, text=_(DIRECTION_LABEL))
+        name.grid(row=row, column=0, sticky="w", pady=(6, 1))
+        words = [_(w) for w in DIRECTIONS.values()]
+        self.direction_var = tk.StringVar(self, value=_(DIRECTIONS[self._direction_now()]))
+        self.direction_box = ttk.Combobox(grid, textvariable=self.direction_var, values=words, state="readonly")
+        fit_combobox(self.direction_box, words)
+        self.direction_box.grid(row=row, column=1, columnspan=2, sticky="w", padx=(6, 10), pady=(6, 1))
+        tip(_(DIRECTION_TIP), name, self.direction_box)
+
+    def _direction_now(self) -> str:
+        """The book's reading direction as the row offers it: "ltr", else "rtl"."""
+        return "ltr" if getattr(self.pipeline.annotations, "reading_direction", "") == "ltr" else "rtl"
+
+    def direction(self) -> str:
+        """The reading direction the row says ("rtl" or "ltr"); the book's own without the row."""
+        if self.direction_var is None:
+            return self._direction_now()
+        said = self.direction_var.get()
+        return next((key for key, word in DIRECTIONS.items() if said in (word, _(word))), self._direction_now())
 
     def _build_areas(self, frm: ttk.Frame) -> None:
         """The list of the areas ignored on all pages, with Remove area beside it and a line while there are none."""
@@ -223,6 +259,9 @@ class BookSettingsDialog(tk.Toplevel):
                 except ValueError:
                     values[key] = raw
         self.pipeline.set_book_settings(values)
+        set_direction = getattr(self.pipeline, "set_reading_direction", None)
+        if self.direction_var is not None and set_direction is not None:
+            set_direction(self.direction())  # (saved when it changed; the same one is left as it was, "" too)
         self.destroy()
         self.on_change()
 

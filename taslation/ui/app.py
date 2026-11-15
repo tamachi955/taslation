@@ -226,9 +226,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         code = settings.ui_language or load_ui_language(state_dir)
         if notice_due(state_dir):  # the legal notice, where the first start also chooses the country and language
             self.withdraw()
-            dialog = NoticeDialog(self, state_dir, code)
-            give_icons(dialog)  # before the window, it has a taskbar button of its own
-            place_window(dialog)  # the window is not on the screen yet: in the middle of the screen
+            dialog = NoticeDialog(self, state_dir, code)  # (it gives itself its icons and its place on the screen)
             try:
                 dialog.grab_set()
                 dialog.focus_force()

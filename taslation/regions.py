@@ -165,7 +165,7 @@ class PageResult:
     notes: list[str] = field(default_factory=list)
     cache_hits: int = 0  # page units served from the translation cache
     cache_misses: int = 0
-    fingerprints: list[str] = field(default_factory=list)  # one per page unit, right page first
+    fingerprints: list[str] = field(default_factory=list)  # one per page unit, the page read first first
     units: list[Any] = field(default_factory=list)  # the page units (fingerprint.PageUnit), memory only
     error: str = ""  # e.g. Ollama unreachable; regions are then left untranslated
 

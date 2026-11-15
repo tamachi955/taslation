@@ -214,9 +214,13 @@ def test_the_dialog_in_the_window(tmp_path, monkeypatch, hidden_root):
 
 
 def test_the_dialog_keeps_its_size(tmp_path, monkeypatch, hidden_root):
+    from taslation.ui import layout
     from taslation.ui.app import NoticeDialog
+    from taslation.ui.dialogs import notice as notice_dlg
 
     monkeypatch.setattr(notice, "default_country", lambda: None)
+    for module in (notice_dlg, layout):  # a screen with room for all of it (a small one: tests/test_notice_fit.py)
+        monkeypatch.setattr(module, "work_area", lambda widget, x=None, y=None: (0, 0, 4000, 3000))
     d = NoticeDialog(hidden_root, tmp_path, "en")
     d.withdraw()  # measured, never shown
     d.update_idletasks()

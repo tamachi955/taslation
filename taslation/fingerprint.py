@@ -34,7 +34,8 @@ GAP = 0.03
 
 @dataclass
 class PageUnit:
-    """One page as shown in the viewer (a two-page spread yields two units, right first)."""
+    """One page as shown in the viewer (a two-page spread yields two units, the page read first first: the right one,
+    the left one in a book read left to right; *index* is the unit's place in that order)."""
 
     box: Box  # content box in capture coordinates
     fingerprint: str
@@ -235,8 +236,10 @@ def content_box(gray: np.ndarray, bright_threshold: int = 200, ink_threshold: in
     return (px0 + icols[0], py0 + irows[0], px0 + icols[1], py0 + irows[1])
 
 
-def split_spread(gray: np.ndarray, box: Box, grow: bool = True) -> list[Box]:
-    """Split a two-page spread at the gutter between the pages. Right page first.
+def split_spread(gray: np.ndarray, box: Box, grow: bool = True, rtl: bool = True) -> list[Box]:
+    """Split a two-page spread at the gutter between the pages. The page read first comes first: the right page,
+    the left one without *rtl* (a book read left to right). Only the order follows *rtl*: the boxes, and so the
+    fingerprints, are the same either way.
 
     A gutter is a run of columns near the middle that carries no ink (white gap)
     or is perfectly uniform (viewer background). A false split on a single page
@@ -268,7 +271,7 @@ def split_spread(gray: np.ndarray, box: Box, grow: bool = True) -> list[Box]:
         if w / h < 1.25:
             return [box]
         # A landscape unit without a visible gutter is a spread whose pages touch:
-        # split it in the middle (right page first).
+        # split it in the middle.
         gx0 = gx1 = w // 2
     else:
         gx0, gx1 = lo + best[0], lo + best[1]
@@ -281,7 +284,7 @@ def split_spread(gray: np.ndarray, box: Box, grow: bool = True) -> list[Box]:
     left_box = content_box(left_part, grow=grow) or (0, 0, left_part.shape[1], left_part.shape[0])
     right = (x0 + gx1 + right_box[0], y0 + right_box[1], x0 + gx1 + right_box[2], y0 + right_box[3])
     left = (x0 + left_box[0], y0 + left_box[1], x0 + left_box[2], y0 + left_box[3])
-    return [right, left]
+    return [right, left] if rtl else [left, right]
 
 
 def compute_fingerprint(gray_crop: np.ndarray) -> str:
@@ -330,7 +333,7 @@ def paper_box(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
 def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), grow: bool = True,
-            known: dict[Box, str] | None = None) -> list[PageUnit]:
+            known: dict[Box, str] | None = None, rtl: bool = True) -> list[PageUnit]:
     """Locate the page(s) in a capture and fingerprint each one.
 
     Without *grow* the paper on a dark viewer is the large blobs' union alone (`page_box`), as analyze found it
@@ -338,7 +341,8 @@ def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), 
     black panels the paper now grows through. Only recognising a book (`bookid.page_groups`) and a cache lookup that
     missed (`Pipeline._lookup_before`) look for those; what the pipeline keeps is fingerprinted with *grow*. *known*:
     the fingerprints of boxes of this very capture computed already (by box; the ones computed here are added), for a
-    capture analyzed in several areas."""
+    capture analyzed in several areas. *rtl*: the book's reading direction, which page of a spread comes first
+    (`split_spread`); the units' boxes and fingerprints do not depend on it."""
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
     x0, y0, x1, y1 = capture_area(gray.shape[1], gray.shape[0], margins)
     sub = gray[y0:y1, x0:x1]
@@ -347,7 +351,7 @@ def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), 
         return []
     box = (box[0] + x0, box[1] + y0, box[2] + x0, box[3] + y0)
     units: list[PageUnit] = []
-    for idx, b in enumerate(split_spread(gray, box, grow=grow)):
+    for idx, b in enumerate(split_spread(gray, box, grow=grow, rtl=rtl)):
         bx0, by0, bx1, by1 = b
         if bx1 - bx0 < 16 or by1 - by0 < 16:
             continue
