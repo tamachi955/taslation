@@ -108,6 +108,11 @@ SHEET_OFFER = "{n} line(s) already translated use the series sheet's earlier ren
 SHEET_APPLY = "Apply to the {n} line(s)"
 SHEET_LEAVE = "Leave them as they are"
 SHEET_APPLIED = "Applied to {n} translated line(s) on {pages} page(s). Ctrl+Z takes it back."
+# "Translate again" on a page with lines the person corrected (`CachedBubble.edited`): the question and its box to
+# tick (`locales.features.corrections`)
+AGAIN_KEEPS = ("Translate this page again? Its present translations are replaced, but for the {n} line(s) you "
+               "corrected: they stay as they are.")
+REPLACE_MINE_TOO = "Replace the lines I corrected too"
 SHEET_IN_A_RUN = "The lines already translated were not changed: a run is reading the book. Find and replace can change them once it is done."
 SHEET_WAIT_MS = 300  # how often the offer looks whether the window is free (a page at work) or the cache is open
 
@@ -390,8 +395,8 @@ class TranslatorMixin:
     # ------------------------------------------------------------------ the tools
     def _build_translator_tools(self, parent: tk.Misc) -> None:
         """Translator mode's strip under the toolbar: its tools in groups that flow into rows as the toolbar's do
-        (reading order, skip page, translate again; book settings, series sheet, review; find and replace, the
-        selected region's text direction, undo, redo)
+        (reading order, skip page, translate again; book settings, series sheet, review, my corrections; find and
+        replace, the selected region's text direction, undo, redo)
         and a line on what the pointer does on the page: these tools are here and nowhere else. `_sync_tools` shows it
         while the Translator role is chosen; reading mode hides it with the toolbar. Ctrl+Y makes again what Ctrl+Z took
         back. The buttons and the line name the keys as the keymap has them (`KEYED_TOOLS`, `hint_text`; again after a
@@ -410,7 +415,9 @@ class TranslatorMixin:
                   ((_("Book settings..."), self.open_book_settings, _("Settings that apply to this book only.")),
                    (_("Series sheet..."), self.open_glossary,
                     _("The names, terms and style the translations of this series keep to.")),
-                   (_("Review..."), self.open_review, _("List the text areas of this page that are worth a look."))),
+                   (_("Review..."), self.open_review, _("List the text areas of this page that are worth a look.")),
+                   (_("My corrections..."), self.open_corrections,
+                    _("List the translations you corrected in this book, page by page."))),
                   ((_("Find and replace..."), self.open_find_replace,
                     _("Search this book's translations and replace a word on every page.")),
                    ("Text direction", self._turn_direction,
@@ -558,13 +565,23 @@ class TranslatorMixin:
     def retranslate_page(self) -> None:
         """Translator mode's "Translate again": the page is translated again with the premises as they
         are now, and what that translates replaces its cached translations; a job that translates nothing (Stop, a new
-        page, Ollama down) leaves them as they were (`_job_translate`). The page may have moved on, or a job begun,
-        while the question was up. Ctrl+Z puts the translations it replaced back."""
+        page, Ollama down) leaves them as they were (`_job_translate`). The lines the person corrected
+        (`CachedBubble.edited`) stay as they are, and the model is not asked for them, unless the question's box
+        "Replace the lines I corrected too" is ticked (it is asked only on a page that has some). The page may have
+        moved on, or a job begun, while the question was up. Ctrl+Z puts the translations it replaced back."""
         if self.busy or self.pipeline is None or not self._page_to_work_on():
             return
         result = self.last_result
-        if not boxes.ask(self, _("Translate this page again? Its present translations are replaced."), _("Translate again"),
-                         _("Cancel")):
+        counted = getattr(self.pipeline, "corrections_on", None)
+        mine = counted(result) if counted is not None else 0
+        if mine:
+            go, replace = boxes.ask_choice(self, _(AGAIN_KEEPS).format(n=mine), _(REPLACE_MINE_TOO),
+                                           _("Translate again"), _("Cancel"))
+        else:
+            go = boxes.ask(self, _("Translate this page again? Its present translations are replaced."),
+                           _("Translate again"), _("Cancel"))
+            replace = False
+        if not go:
             return
         if self.busy or self.pipeline is None or self.last_result is not result:
             return
@@ -576,7 +593,7 @@ class TranslatorMixin:
             step.before = unit_states(pipeline, units)
 
         self._jobs.put(begin)
-        self._start_translate(result.original, complete=True, again=result)
+        self._start_translate(result.original, complete=True, again=result, **({"replace_edited": True} if replace else {}))
         self._jobs.put(settle)
 
     def _speaker_names(self) -> list[str]:
@@ -1362,6 +1379,43 @@ class TranslatorMixin:
             return
         self._review = ReviewDialog(self, rows, on_edit=self._open_editor)
 
+    def open_corrections(self) -> None:
+        """Translator mode's "My corrections...": the translations the person wrote in the book of the Book field,
+        page by page (`dialogs.corrections.CorrectionsDialog`), from its cache alone; the list already open is made
+        again and brought to the front. Selecting a row only says its page: nothing goes to the viewer."""
+        from .dialogs.corrections import CorrectionsDialog
+
+        shown = getattr(self, "_corrections", None)
+        if shown is not None and shown.winfo_exists():
+            shown.fill()
+            shown.lift()
+        else:
+            self._corrections = CorrectionsDialog(self, self._correction_rows)
+        book, language = self.book_var.get().strip(), self.lang_var.get().strip() or "English"
+        if (self.pipeline is not None and book and not generic_book_name(book) and not self.busy
+                and getattr(self, "batch", None) is None and not getattr(self, "_batching", False)
+                and self._book_cache() is None):  # another book chosen since the last page: the worker opens its
+            model = self.model_var.get().strip()  # cache (as the next page would, and as Find does); the list then
+            self._jobs.put(lambda: (self._ensure_cache(book, model, language), self._post("find")))  # is made again
+
+    def _correction_rows(self) -> list[Any] | None:
+        """The rows of "My corrections" (`BookCache.corrections`): of the cache of the book and language in the boxes
+        (`ReplaceMixin._book_cache`); none while it is being opened; None while the Book field names no book."""
+        book = self.book_var.get().strip()
+        if not book or generic_book_name(book):
+            return None
+        cache = self._book_cache()
+        return cache.corrections() if cache is not None else []
+
+    def _refresh_corrections(self) -> None:
+        """The translations may have changed: the open "My corrections" list is made again."""
+        shown = getattr(self, "_corrections", None)
+        try:
+            if shown is not None and shown.winfo_exists():
+                shown.fill()
+        except tk.TclError:
+            pass
+
     # ------------------------------------------------------------------ undo and redo
     def undo_edit(self) -> None:
         """Ctrl+Z (Undo on the strip): the newest change on the page on show is taken back - an edit, a region moved,
@@ -1518,6 +1572,9 @@ class TranslatorMixin:
         by now, the region's premises, its note for the reader, the formatting of its lettering and its translation
         stored, the page lettered again; one change to take back (Ctrl+Z), of *kind* ("rotate": the rotate handle's,
         `_rotate_region`; "direction": T's, `_turn_direction`). A region that left that page meanwhile is refused.
+        A translation saved is marked as the person's (`CachedBubble.edited`: "Translate again" keeps it, "My
+        corrections" lists it), but for the model's answer to Ask again saved as it came ("asked"), which clears
+        the mark.
         A reading the person corrected ("source": the editor's "Read as:") the region takes first, in memory only
         (`Pipeline.correct_reading`): no change of the stores, and none Ctrl+Z takes back; the translation is kept
         for that reading (`linememo.remember_edit`)."""
@@ -1550,7 +1607,9 @@ class TranslatorMixin:
                         self._post("status", key="Could not store the formatting: give the book a name first (the Book field).")
                 if text and text != region.translated_text:
                     old = region.translated_text
-                    if not pipeline.set_translation(result, region, text):
+                    # the person's translation (`CachedBubble.edited`), but for the model's answer to Ask again taken
+                    # as it came ("asked")
+                    if not pipeline.set_translation(result, region, text, edited=not data.get("asked")):
                         self._post("status", key="Could not keep the translation: give the book a name first (the Book field).")
                         pipeline.rerender(result)  # the page as it is stored, not as the editor's preview showed it
                     else:

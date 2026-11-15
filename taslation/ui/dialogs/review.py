@@ -488,6 +488,7 @@ class EditBubbleDialog(tk.Toplevel):
         # the reading the model is asked to translate ("source"), and what went wrong meanwhile ("error", filled by the
         # worker)
         self.answer: dict[str, str] = {}
+        self._answer_text: str | None = None  # the model's last answer put in the box (Save: its line as it came)
         self._flash_job: str | None = None
         self._preview_job: str | None = None
         self._saved = self._closed = False
@@ -715,8 +716,13 @@ class EditBubbleDialog(tk.Toplevel):
             button["state"] = "disabled" if last or busy else "normal"
 
     def changed(self) -> bool:
-        """Whether anything the editor shows differs from what it opened with (the text, a field, the formatting)."""
-        return self._data() != getattr(self, "_initial", None)
+        """Whether anything the editor shows differs from what it opened with (the text, a field, the formatting, the
+        reading)."""
+        initial = getattr(self, "_initial", None)
+        if not isinstance(initial, dict):
+            return True
+        now = self._data()
+        return any(now[k] != initial.get(k) for k in now if k != "asked")
 
     def step(self, delta: int) -> None:
         """Previous (-1) or Next (+1), or Alt+Up and Alt+Down: what was changed is handed on to be saved (as Save
@@ -1167,6 +1173,7 @@ class EditBubbleDialog(tk.Toplevel):
                               else _("The model gave no other translation."))
             return
         self._use(texts[0])
+        self._answer_text = self.text.get("1.0", "end").strip()
         self._flash()
         self.busy_var.set(_("The model's new translation is in the box: Save keeps it, Cancel keeps the old one."))
 
@@ -1216,7 +1223,12 @@ class EditBubbleDialog(tk.Toplevel):
         self.text.insert("1.0", text)
 
     def _data(self) -> dict[str, Any]:
-        return {"text": self.text.get("1.0", "end").strip(), "speaker": self.speaker_var.get().strip(),
+        """What Save keeps: the fields, the formatting, the reading ("source", as the person may have corrected it)
+        and whether the translation is the model's answer to Ask again as it came ("asked": not the person's own,
+        `CachedBubble.edited`)."""
+        text = self.text.get("1.0", "end").strip()
+        return {"text": text, "speaker": self.speaker_var.get().strip(),
                 "kind": kind_of(self.kind_var.get().strip()), "continues": bool(self.cont_var.get()),
                 "note": self.note_var.get().strip(), "reader_note": self.reader_var.get().strip(),
-                "style": self.style(), "source": self._source()}
+                "style": self.style(), "source": self._source(),
+                "asked": self._answer_text is not None and text == self._answer_text}

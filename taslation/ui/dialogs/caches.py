@@ -88,15 +88,16 @@ class WarningBox(tk.Toplevel):
     *go* and *stay* say instead (what each button does). Modal over *master* and centred over it (`place_window`).
     ``answer`` turns True on Continue (also Return while Continue has the focus, as it has from the start, unless
     *stay_first*: then Cancel has it); Cancel, Escape and closing the box leave it False. *alone*: Continue only
-    (*go*, OK by default), a box that tells; *icon*: "warning", "info" or "question" (`ICONS`)."""
+    (*go*, OK by default), a box that tells; *icon*: "warning", "info" or "question" (`ICONS`). *choice*: a box to
+    tick under the text, unticked at first; ``chosen`` turns True on Continue with it ticked."""
 
     def __init__(self, master: tk.Misc, title: str, text: str, go: str | None = None, stay: str | None = None,
-                 stay_first: bool = False, alone: bool = False, icon: str = "warning"):
+                 stay_first: bool = False, alone: bool = False, icon: str = "warning", choice: str | None = None):
         super().__init__(master)
         self.title(title)
         self.transient(master)
         self.resizable(False, False)
-        self.answer = False
+        self.answer = self.chosen = False
         self.message_text = text
         self.stay_first = stay_first
         frm = ttk.Frame(self, padding=14)
@@ -110,8 +111,13 @@ class WarningBox(tk.Toplevel):
         self.text_width = WARNING_CHARS * max(1, tkfont.nametofont("TkDefaultFont").measure("0"))
         self.message = ttk.Label(frm, text=in_lines(text, self.text_width), justify="left")
         self.message.grid(row=0, column=1, sticky="nw")
+        self.choice_var = tk.BooleanVar(self, value=False)
+        self.choice_box: ttk.Checkbutton | None = None
+        if choice:
+            self.choice_box = ttk.Checkbutton(frm, text=choice, variable=self.choice_var)
+            self.choice_box.grid(row=1, column=1, sticky="w", pady=(10, 0))
         btns = ttk.Frame(frm)
-        btns.grid(row=1, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        btns.grid(row=2, column=0, columnspan=2, sticky="e", pady=(14, 0))
         self.cancel_btn = ttk.Button(btns, text=stay or _("Cancel"), command=self._cancel,
                                      default="active" if stay_first else "normal")
         if alone:
@@ -133,6 +139,7 @@ class WarningBox(tk.Toplevel):
 
     def _continue(self) -> None:
         self.answer = True
+        self.chosen = bool(self.choice_var.get()) if self.choice_box is not None else False
         self.destroy()
 
     def _cancel(self, _event: tk.Event | None = None) -> None:
@@ -189,6 +196,14 @@ def ask(parent: tk.Misc, text: str, yes: str | None = None, no: str | None = Non
     """A question in TASlation's own box (in place of `messagebox.askyesno`): *yes* and *no* name what each button
     does (Continue and Cancel by default), *no_first* gives *no* the focus. Whether the reader chose *yes*."""
     return _box(parent, text, True, title=title, go=yes, stay=no, stay_first=no_first, icon=icon).answer
+
+
+def ask_choice(parent: tk.Misc, text: str, choice: str, yes: str | None = None, no: str | None = None, *,
+               title: str = "TASlation", no_first: bool = False, icon: str = "question") -> tuple[bool, bool]:
+    """`ask` with a box to tick under the text (*choice*, unticked at first): whether the reader chose *yes*, and
+    whether they ticked the box as they did."""
+    box = _box(parent, text, True, title=title, go=yes, stay=no, stay_first=no_first, icon=icon, choice=choice)
+    return box.answer, box.answer and box.chosen
 
 
 def tell(parent: tk.Misc, text: str, *, title: str = "TASlation", icon: str = "warning", wait: bool = True) -> None:

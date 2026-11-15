@@ -230,8 +230,9 @@ def test_replace_all_in_one_step_writes_the_file_and_changes_only_the_text(windo
     after = cache.to_json()
     for old, new in zip(before["pages"], after["pages"]):
         assert {k: v for k, v in old.items() if k != "bubbles"} == {k: v for k, v in new.items() if k != "bubbles"}
-        for a, b in zip(old["bubbles"], new["bubbles"]):
-            assert {k: v for k, v in a.items() if k != "text"} == {k: v for k, v in b.items() if k != "text"}
+        for a, b in zip(old["bubbles"], new["bubbles"]):  # the text, and the mark that the person changed it
+            assert {k: v for k, v in a.items() if k != "text"} == {k: v for k, v in b.items() if k not in ("text", "edited")}
+            assert b.get("edited", False) is (a["text"] != b["text"])
     assert not window.busy and window.history.done[-1].state == "done"
     assert window.lines == ["Replaced in 3 text area(s) on 2 page(s). Ctrl+Z takes it back."]
 

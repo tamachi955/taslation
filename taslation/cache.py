@@ -101,6 +101,10 @@ class CachedBubble:
     note: str = ""  # a note for the reader (a pun, a reference the translation cannot carry)
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`TextRegion.angle`; written when not 0)
     reused: bool = False  # its translation is one kept for an identical line before it (`linememo`; written when so)
+    # a person changed its translation (translator mode's editor, Find and replace; written when so): a page translated
+    # again keeps it without asking the model (`Pipeline.forget_page`'s *keep_edited*, `Pipeline.scan`'s), and "My
+    # corrections" lists it (`BookCache.corrections`). A file without the mark is read as none
+    edited: bool = False
 
     def to_json(self) -> dict[str, Any]:
         d: dict[str, Any] = {"box": [round(v, 4) for v in self.box], "text": self.text}
@@ -114,6 +118,8 @@ class CachedBubble:
             d["angle"] = round(self.angle, 2)
         if self.reused:
             d["reused"] = True
+        if self.edited:
+            d["edited"] = True
         return d
 
     @classmethod
@@ -129,7 +135,7 @@ class CachedBubble:
         angle = _finite(d.get("angle", 0.0))
         return cls(box=box, text=str(d.get("text", "")), poly=poly, flags=flags,  # type: ignore[arg-type]
                    note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0,
-                   reused=d.get("reused") is True)
+                   reused=d.get("reused") is True, edited=d.get("edited") is True)
 
 
 @dataclass
@@ -354,16 +360,32 @@ class _PageIndex:
 
 class TextEdit(NamedTuple):
     """A bubble's text changed from *old* to *new* (`BookCache.put_texts`): the bubble is the one of the page
-    *fingerprint* at *box* that holds *old*."""
+    *fingerprint* at *box* that holds *old*. *mark*: what its `CachedBubble.edited` becomes (True: a person's change,
+    Find and replace; None: it stays, as for a spelling made consistent), and once the edit is made, *was*: what it
+    was before."""
 
     fingerprint: str
     box: NBox
     old: str
     new: str
+    mark: bool | None = None
+    was: bool | None = None
 
     def undone(self) -> "TextEdit":
-        """The same edit the other way round."""
-        return self._replace(old=self.new, new=self.old)
+        """The same edit the other way round (the mark too)."""
+        return self._replace(old=self.new, new=self.old, mark=self.was, was=self.mark)
+
+
+class Correction(NamedTuple):
+    """A translation a person wrote (`CachedBubble.edited`), as "My corrections" lists it: its page's number (its
+    sequence number from 1, as `taslation review` numbers pages; 0 for a page with none), the page's fingerprint, the
+    bubble's index on it, its text and its box."""
+
+    page: int
+    fingerprint: str
+    bubble: int
+    text: str
+    box: NBox
 
 
 class BookCache:
@@ -634,12 +656,21 @@ class BookCache:
                 self.dirty = True
         return changed
 
+    def corrections(self) -> list[Correction]:
+        """The translations a person wrote, page by page in the order the pages were first seen (a page with no
+        sequence number last), each page's in the order it holds them. From the cache alone: a copy of the list of
+        pages is read (the worker may add to it meanwhile)."""
+        pages = sorted(list(self.pages), key=lambda pg: (pg.seq if pg.seq >= 0 else 10**9, pg.fingerprint))
+        return [Correction(pg.seq + 1 if pg.seq >= 0 else 0, pg.fingerprint, i, b.text, tuple(b.box))  # type: ignore[arg-type]
+                for pg in pages for i, b in enumerate(list(pg.bubbles)) if b.edited]
+
     def put_texts(self, edits: Iterable[TextEdit]) -> list[TextEdit]:
         """Make *edits*, each only where its bubble still holds its old text: the text is all that changes (flags,
         note, the page's mark and every position stay, as in `rename`). A line kept for reuse whose translation is the
         old text of an edit made gets its new text too (`lines`: Find and replace changes the book's translations,
-        the lines to come among them). Returns the edits that were made; a save writes them, and a merging save keeps
-        them as it keeps a page added."""
+        the lines to come among them). An edit with a *mark* sets the bubble's `edited` to it (and keeps what it was in
+        the edit made, for `TextEdit.undone`). Returns the edits that were made; a save writes them, and a merging save
+        keeps them as it keeps a page added."""
         pages = {page.fingerprint: page for page in self.pages}
         made: list[TextEdit] = []
         for edit in edits:
@@ -648,7 +679,11 @@ class BookCache:
                 continue
             for bubble in page.bubbles:
                 if bubble.text == edit.old and all(abs(a - b) <= SAME_BOX for a, b in zip(bubble.box, edit.box)):
-                    made.append(edit)
+                    if edit.mark is None:
+                        made.append(edit)
+                    else:
+                        made.append(edit._replace(was=bubble.edited))
+                        bubble.edited = edit.mark
                     bubble.text = edit.new
                     self.touched[page.fingerprint] = page
                     self.dirty = True
@@ -1009,6 +1044,6 @@ class CacheStore:
 
 __all__ = [
     "DETAIL_FIELDS", "DETAIL_LIMITS", "FINGERPRINT_BITS", "BookCache", "CacheIdentity", "CacheStore", "CachedBubble",
-    "CachedPage", "TextEdit", "WINDOWS_DEVICES", "book_key_from_title", "cache_names", "clean_detail", "language_key", "slugify",
+    "CachedPage", "Correction", "TextEdit", "WINDOWS_DEVICES", "book_key_from_title", "cache_names", "clean_detail", "language_key", "slugify",
     "stored_book", "viewer_key_from_title", "write_atomic",
 ]

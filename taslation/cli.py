@@ -149,7 +149,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--no-context", action="store_true",
                    help="translate page by page as it goes, without reading the book first")
     b.add_argument("--retranslate", action="store_true",
-                   help="translate every page again (after changing the series sheet or the premises); cached pages are replaced")
+                   help="translate every page again (after changing the series sheet or the premises); cached pages "
+                        "are replaced, but for the translations you corrected in the window (see `review --corrections`)")
+    b.add_argument("--replace-corrections", action="store_true",
+                   help="with --retranslate: translate the lines you corrected again too")
     b.add_argument("--translator", choices=["ollama", "echo", "none"], default="ollama")
 
     rv = sub.add_parser("review", help="list the cached translations flagged for a second look (set small, a "
@@ -159,6 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--language", default=argparse.SUPPRESS,  # as given before the command, or the configured one
                     help="target language of the cache (default: the configured one)")
     rv.add_argument("--notes", action="store_true", help="also list the notes for the reader kept with the translations")
+    rv.add_argument("--corrections", action="store_true",
+                    help="list the translations you corrected yourself instead (the window's \"My corrections\")")
     c = sub.add_parser("cache", help="list, delete, export or import translation caches (text only, never images); "
                                      "protect: protect the saved files still in plain text, and count them")
     c.add_argument("action", choices=["list", "delete", "path", "export", "import", "protect"])
@@ -854,6 +859,8 @@ def cmd_batch(args: argparse.Namespace, settings: Settings) -> int:
     from .bookname import clean_series
     from .notes import sheet_key
 
+    if getattr(args, "replace_corrections", False) and not args.retranslate:
+        raise SystemExit("error: --replace-corrections goes with --retranslate")
     _notice_once(settings)
     enable_dpi_awareness()
     win = _pick_window(args.window, wait=max(0.0, args.wait))
@@ -871,7 +878,8 @@ def cmd_batch(args: argparse.Namespace, settings: Settings) -> int:
 
     reader = BatchReader(pipeline, win.hwnd, settings, on_progress, max_pages=args.max_pages,
                          context_mode=not args.no_context, book=book,
-                         series=series, title=win.title, query=args.window, retranslate=args.retranslate)
+                         series=series, title=win.title, query=args.window, retranslate=args.retranslate,
+                         replace_corrections=getattr(args, "replace_corrections", False))
     threading.Thread(target=_finish_at_enter, args=(reader,), name="batch-enter", daemon=True).start()
     try:
         reader.run()
@@ -1085,7 +1093,9 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_review(args: argparse.Namespace, settings: Settings) -> int:
-    """List the cached translations that carry review flags, page by page: each reason in the window's language with its code after it, "label (code)" (`review.reason_label`)."""
+    """List the cached translations that carry review flags, page by page: each reason in the window's language with its code after it, "label (code)" (`review.reason_label`).
+    With --corrections, the translations a person wrote instead (`BookCache.corrections`, the window's "My
+    corrections"), as the flagged ones are listed."""
     from .cache import CacheStore
     from .names import language_key
     from .review import reason_label
@@ -1101,6 +1111,15 @@ def cmd_review(args: argparse.Namespace, settings: Settings) -> int:
     args.book = book
     cache = store.open(args.book, "", target)
     pages = sorted(cache.pages, key=lambda pg: (pg.seq if pg.seq >= 0 else 10**9, pg.fingerprint))
+    if getattr(args, "corrections", False):
+        rows = cache.corrections()
+        for row in rows:
+            where = f"page {row.page}" if row.page else f"page {row.fingerprint[:8]}"
+            print(f"{where} bubble {row.bubble + 1}: corrected\n    {row.text}")
+        total = sum(len(pg.bubbles) for pg in pages)
+        print(f"{len(rows)} of {total} cached translation(s) corrected by you" if total
+              else f"no cached translations for {args.book!r} in {target}")
+        return 0
     with_notes = getattr(args, "notes", False)
     flagged = total = noted = 0
     for pg in pages:

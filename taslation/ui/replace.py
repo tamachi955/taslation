@@ -114,7 +114,8 @@ def replacements(hits: Iterable[Hit], text: str) -> tuple[list[TextEdit], int]:
         if not new:
             left += 1
         elif new != first.text.strip():
-            edits.append(TextEdit(first.fingerprint, first.box, first.text, new))
+            # (the person's change: marked as theirs, `CachedBubble.edited`, which Ctrl+Z takes back with the text)
+            edits.append(TextEdit(first.fingerprint, first.box, first.text, new, mark=True))
     return edits, left
 
 

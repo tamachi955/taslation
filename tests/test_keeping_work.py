@@ -162,17 +162,25 @@ class Again(translator_mod.TranslatorMixin):
     def _look_for_colophon(self, *_a):
         pass
 
-    def _start_translate(self, image, complete=None, thumb=None, again=None):
-        self._job_translate(image, "Book", "m", "English", complete, self.cancel, again)
+    def _start_translate(self, image, complete=None, thumb=None, again=None, replace_edited=False):
+        self._job_translate(image, "Book", "m", "English", complete, self.cancel, again, replace_edited=replace_edited)
 
     def kinds(self):
         return [kind for kind, _data in self.posted]
 
 
+class Asked(list):
+    """The questions asked; *replace*: the answer to "Replace the lines I corrected too" (`caches.ask_choice`)."""
+
+    replace = False
+
+
 @pytest.fixture
 def asked(monkeypatch):
-    questions: list[str] = []
+    questions = Asked()
     monkeypatch.setattr(caches, "ask", lambda _parent, text, *_a, **_k: questions.append(text) or True)
+    monkeypatch.setattr(caches, "ask_choice",
+                        lambda _parent, text, *_a, **_k: questions.append(text) or (True, questions.replace))
     return questions
 
 
@@ -223,11 +231,33 @@ def test_translate_again_that_fails_keeps_them(settings, sample_page, asked):
     assert sorted(on_disk(cache)) == before
 
 
-def test_translate_again_replaces_them_once_something_is_translated(settings, sample_page, asked):
+def test_translate_again_replaces_them_once_something_is_translated_but_the_corrected_line(settings, sample_page, asked):
     p, cache, result = translated_page(settings, sample_page)
+    before = len(p.translator.calls)
     w = Again(p, result)
     w.retranslate_page()
+    asked_for = [text for call in p.translator.calls[before:] for text in call]
+    assert "1 line(s) you corrected" in asked[0]
+    assert TYPED in on_disk(cache) and len(cache) == 1 and len(on_disk(cache)) == len(result.translated)
+    assert result.regions[0].source_text not in asked_for and asked_for  # the corrected line is not asked for
+    [page] = CacheStore(settings.cache_dir).open("Again", "m").pages
+    assert not page.incomplete and [b.text for b in page.bubbles if b.edited] == [TYPED]
+
+
+def test_translate_again_with_the_box_ticked_replaces_the_corrected_line_too(settings, sample_page, asked):
+    p, cache, result = translated_page(settings, sample_page)
+    asked.replace = True
+    Again(p, result).retranslate_page()
     assert TYPED not in on_disk(cache) and len(cache) == 1 and on_disk(cache)
+    assert not cache.corrections()
+
+
+def test_translate_again_on_a_page_without_corrections_asks_the_plain_question(settings, sample_page, asked):
+    cache = CacheStore(settings.cache_dir).open("Again", "m")
+    p = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS, default="ok"), cache=cache)
+    result = p.process(sample_page)
+    Again(p, result).retranslate_page()
+    assert asked == ["Translate this page again? Its present translations are replaced."]
 
 
 def test_a_job_begun_or_a_page_turned_while_the_question_was_up_stops_it(settings, sample_page, monkeypatch):
@@ -236,6 +266,7 @@ def test_a_job_begun_or_a_page_turned_while_the_question_was_up_stops_it(setting
     w = Again(p, result)
     for change in (lambda: setattr(w, "busy", True), lambda: setattr(w, "last_result", object())):
         monkeypatch.setattr(caches, "ask", lambda *_a, change=change, **_k: change() or True)
+        monkeypatch.setattr(caches, "ask_choice", lambda *_a, change=change, **_k: change() or (True, False))
         w.busy, w.last_result = False, result
         w.retranslate_page()
         assert w.posted == [] and sorted(on_disk(cache)) == before

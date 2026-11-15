@@ -782,6 +782,7 @@ class BatchReader:
                  max_pages: int | None = None, context_mode: bool | None = None,
                  book: str = "", series: str = "", title: str = "",
                  query: str = "", retranslate: bool = False, own_windows: Sequence[int] = (),
+                 replace_corrections: bool = False,
                  preflight: Sequence[Message] | None = None, show: EventFn | None = None,
                  readings: Readings | None = None, keep_readings: bool = False,
                  page_area: JoinedArea | None = None):
@@ -795,7 +796,9 @@ class BatchReader:
         self.hwnd = hwnd
         # TASlation's windows (handles): the screen where they are is never read
         self.own_windows = list(own_windows)
-        self.retranslate = retranslate  # ignore cached translations: every page is read and translated again
+        self.retranslate = retranslate  # ignore cached translations: every page is read and translated again ...
+        # ... but for the translations a person wrote (`CachedBubble.edited`), unless these are to go too
+        self.replace_corrections = replace_corrections
         self.title = title  # the window's title when it was picked ("" = do not check); see still_the_book
         self.query = query
         self.settings = settings
@@ -2076,6 +2079,7 @@ class BatchReader:
             began = time.monotonic()
             erasing = self._erasing and taken.seq > 0
             scan = self.pipeline.scan(frame, skip_cached=True, fresh=self.retranslate, cancel=self._stop,
+                                      keep_edited=not self.replace_corrections,
                                       events=self._events_of(taken),
                                       progress=self._stage if self.show is not None else None,
                                       **({"keep_regions": True} if erasing else {}))

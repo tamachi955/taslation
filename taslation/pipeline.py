@@ -1253,7 +1253,8 @@ class Pipeline:
         for unit, unit_regions, page in plans:
             if page is not None:
                 if completes(page):
-                    err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow)
+                    err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow,
+                                              reuse=reuse)
                     if err:
                         result.error = err
             elif unit_regions:
@@ -1355,7 +1356,7 @@ class Pipeline:
     # ------------------------------------------------------------------ batch
     def scan(self, image: Image.Image, *, skip_cached: bool = True, progress: ProgressFn | None = None,
              fresh: bool = False, cancel: threading.Event | None = None,
-             events: EventFn | None = None, keep_regions: bool = False) -> PageScan:
+             events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True) -> PageScan:
         """Detect and read a page; keep text and geometry only (the image is not retained). Once *cancel* is set,
         `Cancelled` is raised between regions.
 
@@ -1367,6 +1368,10 @@ class Pipeline:
 
         With *events*, the page is told as it fills in (`PageFill`): the regions of the units to translate once they
         are found, and each one read; a page from the cache announces nothing.
+
+        With *fresh* (a whole-book run that translates every page again) a cached page's Japanese regions are all
+        returned for translation, but for those a translation a person wrote lies on (`CachedBubble.edited`): with
+        *keep_edited* (the default) that translation is kept, and the model is not asked for it.
 
         With *keep_regions*, the scan's ``erasable`` holds the regions the render will erase once the page is
         translated, as the render will see them: the detection's regions as they were before the reading (a page from
@@ -1439,6 +1444,12 @@ class Pipeline:
                 su.regions = scanned
                 su.kept = self._bubbles_held(unit, page.bubbles, scanned)  # nothing to translate them from
                 held_ids = {id(cb) for cb in su.kept}
+                if keep_edited:  # a person's translation stays, its region is not translated again
+                    mine = self._bubbles_matched(unit, [cb for cb in page.bubbles if cb.edited and id(cb) not in held_ids],
+                                                 su.japanese())
+                    su.kept.extend(cb for cb, _r in mine)
+                    held_ids.update(id(cb) for cb, _r in mine)
+                    su.regions = [r for r in scanned if not any(r is taken for _cb, taken in mine)]
                 su.kept.extend(self._kept_in_areas(units, unit, [cb for cb in page.bubbles if id(cb) not in held_ids]))
                 if not su.japanese() and page.bubbles:
                     self._save_page(page.fingerprint, unit.aspect, su.kept)  # no text on this page any more
@@ -1480,6 +1491,26 @@ class Pipeline:
         area taken back brings their translations back."""
         areas = self._areas_of(units, unit)
         return [cb for cb in bubbles if areas and any(a.holds(cb.box) for a in areas)]
+
+    def _bubbles_matched(self, unit: fp.PageUnit, bubbles: Sequence[CachedBubble],
+                         regions: Sequence[ScannedRegion]) -> list[tuple[CachedBubble, ScannedRegion]]:
+        """Those of *bubbles* one of *regions* lies on (`bubble_scores`, as `_bubbles_held` matches), each region taking
+        one, with the region it took."""
+        if not bubbles or not regions:
+            return []
+        scores = bubble_scores([[unit.normalize(b) for b in (r.bbox, *r.aliases)] for r in regions],
+                               [cb.box for cb in bubbles], self.settings.match_min_iou)
+        out: list[tuple[CachedBubble, ScannedRegion]] = []
+        taken: set[int] = set()
+        for j, cb in enumerate(bubbles):
+            best, best_iou = -1, 0.0
+            for i in range(len(regions)):
+                if i not in taken and scores[i][j] > best_iou:
+                    best, best_iou = i, scores[i][j]
+            if best >= 0:
+                taken.add(best)
+                out.append((cb, regions[best]))
+        return out
 
     def _bubbles_held(self, unit: fp.PageUnit, bubbles: Sequence[CachedBubble],
                       scanned: Sequence[ScannedRegion]) -> list[CachedBubble]:
@@ -1720,11 +1751,13 @@ class Pipeline:
 
     def _complete_page(self, rgb: np.ndarray, unit: fp.PageUnit, page: CachedPage, regions: list[TextRegion],
                        report: ProgressFn, fill: PageFill | None = None, cancel: threading.Event | None = None,
-                       on_slow: SlowFn | None = None) -> str:
+                       on_slow: SlowFn | None = None, reuse: bool = True) -> str:
         """Translator mode, and a page marked `CachedPage.incomplete`: read and translate the live regions a cached
         page has no bubble for, and add what the model gave, also when it failed for the others. The mark goes once
         no text is left without a translation, and comes when one is; a reading that added nothing to a marked page
-        leaves it as it was. Returns "" or the Message of what went wrong."""
+        leaves it as it was. *reuse* False ("Translate again" of a page whose corrected lines stayed,
+        `forget_page`'s *keep_edited*): every line asked of the model (`linememo`). Returns "" or the Message of what
+        went wrong."""
         todo = [r for r in regions if r.status == "unmatched"]
         err: str = ""
         if todo:
@@ -1734,7 +1767,7 @@ class Pipeline:
             regions[:] = [r for r in regions if r.status != "repeated"]
             self._order_read(rgb, unit.box, regions)  # what was read now, in its place among the translations
             todo = [r for r in regions if any(r is t for t in todo)]
-            err = self._translate_regions(todo, report, fill, cancel, on_slow, unit.box)
+            err = self._translate_regions(todo, report, fill, cancel, on_slow, unit.box, reuse=reuse)
         new = [r for r in todo if r.status == "translated"]
         lacking = any(r.status in ("untranslated", "ocr-unavailable") for r in todo)
         if self.cache is None or (not new and lacking == page.incomplete):
@@ -1762,9 +1795,11 @@ class Pipeline:
             return hit[0]
         return CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=[], seq=-1)
 
-    def set_translation(self, result: PageResult, region: TextRegion, text: str) -> bool:
+    def set_translation(self, result: PageResult, region: TextRegion, text: str, edited: bool = True) -> bool:
         """Store *text* as the translation of *region* (on its cached page) and redraw the result. A short line's is
-        kept as a person's translation for the identical lines to come (`linememo.remember_edit`)."""
+        kept as a person's translation for the identical lines to come (`linememo.remember_edit`). *edited*: the
+        person wrote it (`CachedBubble.edited`: kept when the page is translated again, listed in "My corrections");
+        False for the model's answer the person took as it came (the editor's Ask again)."""
         text = text.strip()
         if self.cache is None or region.unit >= len(result.units) or not text:
             return False
@@ -1778,10 +1813,12 @@ class Pipeline:
             best.text = text
             best.flags = []  # the reader has looked at it
             best.reused = False
+            best.edited = edited
         else:
             poly = [unit.normalize((int(x) + region.x0, int(y) + region.y0, int(x) + region.x0, int(y) + region.y0))[:2]
                     for x, y in mask_polygon(region.mask)]
-            page.bubbles.append(CachedBubble(box=nbox, text=text, poly=poly, note=region.reader_note, angle=region.angle))
+            page.bubbles.append(CachedBubble(box=nbox, text=text, poly=poly, note=region.reader_note, angle=region.angle,
+                                             edited=edited))
         # a page that enters the cache with this one line alone may lack the others: the next reading sees
         self._save_page(page.fingerprint, page.aspect, page.bubbles, page.incomplete or page.seq < 0)
         region.translated_text = text
@@ -2006,19 +2043,38 @@ class Pipeline:
         pages = [self.annotations.lookup(u.fingerprint, u.aspect, s.fingerprint_max_distance) for u in result.units]
         return bool(pages) and all(p is not None and p.skip for p in pages)
 
-    def forget_page(self, result: PageResult) -> int:
-        """Drop the cached translations of this capture's page units (the premises stay); returns how many pages."""
+    def forget_page(self, result: PageResult, keep_edited: bool = False) -> int:
+        """Drop the cached translations of this capture's page units (the premises stay); returns how many pages.
+        With *keep_edited* ("Translate again", unless the person asks for theirs to go too) a translation a person
+        wrote (`CachedBubble.edited`) stays: its page keeps those alone, its place in the book and the mark that it
+        lacks the rest (`CachedPage.incomplete`), so that the next reading translates only the others."""
         if self.cache is None:
             return 0
         gone = 0
         for unit in result.units:
             hit = self.cache.lookup(unit.fingerprint, unit.aspect, self.settings.fingerprint_max_distance, None)
-            if hit is not None:
-                gone += self.cache.remove(hit[0].fingerprint)
+            if hit is None:
+                continue
+            page = hit[0]
+            mine = [copy.deepcopy(b) for b in page.bubbles if b.edited] if keep_edited else []
+            if mine:
+                self.cache.add(CachedPage(fingerprint=page.fingerprint, aspect=page.aspect, bubbles=mine, seq=page.seq,
+                                          incomplete=True))
+                gone += 1
+            else:
+                gone += self.cache.remove(page.fingerprint)
         if gone:
             self._save_store("cache", self.cache)
         self.reset_context()
         return gone
+
+    def corrections_on(self, result: PageResult) -> int:
+        """How many translations of this capture's page units a person wrote (`CachedBubble.edited`)."""
+        if self.cache is None:
+            return 0
+        hits = [self.cache.lookup(u.fingerprint, u.aspect, self.settings.fingerprint_max_distance, None)
+                for u in result.units]
+        return sum(1 for hit in hits if hit is not None for b in hit[0].bubbles if b.edited)
 
     def pages_of(self, result: PageResult) -> list[CachedPage]:
         """Copies of the cached pages of this capture's units, for `restore_pages` once they are forgotten."""
@@ -2030,11 +2086,22 @@ class Pipeline:
 
     def restore_pages(self, pages: Sequence[CachedPage]) -> None:
         """Put back pages `forget_page` took away (`pages_of`), but for one that has an entry again meanwhile: "Translate
-        again" that came to nothing. The translations are the reader's until new ones take their place."""
-        if self.cache is None:
+        again" that came to nothing. The translations are the reader's until new ones take their place. An entry that
+        holds only what `forget_page` kept of it (the person's translations, marked as lacking the rest) is no new
+        one: the page is put back whole."""
+        cache = self.cache
+        if cache is None:
             return
-        back = [p for p in pages if self.cache.lookup(p.fingerprint, p.aspect, self.settings.fingerprint_max_distance,
-                                                      None) is None]
+
+        def left_alone(page: CachedPage) -> bool:
+            hit = cache.lookup(page.fingerprint, page.aspect, self.settings.fingerprint_max_distance, None)
+            if hit is None:
+                return True
+            now = hit[0]
+            return now.incomplete and all(any(b.text == h.text and list(b.box) == list(h.box)
+                                              for h in page.bubbles if h.edited) for b in now.bubbles)
+
+        back = [p for p in pages if left_alone(p)]
         for page in back:
             self.cache.put_back(page)
         if back:
@@ -2129,6 +2196,9 @@ class Pipeline:
         if self.cache is not None:
             page = self._page_for(old_unit)
             rest = [b for b in page.bubbles if box_iou(b.box, old_nbox) < s.match_min_iou]  # type: ignore[arg-type]
+            # a translation the person wrote that the region keeps stays theirs (`CachedBubble.edited`)
+            edited = region.translated_text == kept[1] and any(
+                b.edited and b.text == kept[1] for b in page.bubbles if not any(b is r for r in rest))
             if len(rest) != len(page.bubbles):
                 self._save_page(page.fingerprint, page.aspect, rest, page.incomplete)
             if region.status == "translated" and region.translated_text:
@@ -2137,7 +2207,7 @@ class Pipeline:
                         for x, y in mask_polygon(region.mask)]
                 bubbles = [b for b in page.bubbles if box_iou(b.box, nbox) < s.match_min_iou]  # type: ignore[arg-type]
                 bubbles.append(CachedBubble(box=nbox, text=region.translated_text, poly=poly, flags=list(region.flags),
-                                            note=region.reader_note, angle=region.angle))
+                                            note=region.reader_note, angle=region.angle, edited=edited))
                 self._save_page(page.fingerprint, page.aspect, bubbles, page.incomplete)
                 region.from_cache = True
         self.rerender(result)

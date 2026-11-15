@@ -405,7 +405,7 @@ the folder where the cache, series sheets and settings are kept, and where the R
 ### Translator mode
 
 The window has two roles. As **Reader**, keys and clicks on the page go to the viewer. Switch to **Translator** with "Translator" in the toolbar,
-and below the toolbar appear translator mode's tools (Reading order, Skip page, Translate again, Book settings, Series sheet, Review, Find and replace, Text direction, Undo, Redo; all of them are only here) and
+and below the toolbar appear translator mode's tools (Reading order, Skip page, Translate again, Book settings, Series sheet, Review, My corrections, Find and replace, Text direction, Undo, Redo; all of them are only here) and
 a line explaining the mouse actions and keys ("Click: select · drag: move · drag a handle: resize · drag the round handle: rotate (Shift: 15° steps) · double-click: edit · drag on empty space: add · Delete: drop · T: text direction · Ctrl+Z: undo · Ctrl+Y: redo · Tab: next region · Alt+arrow keys: move by 1 px"; the keys shown are those set in "Shortcuts" in "Settings", and actions whose key was removed are left out),
 and the page can be edited.
 
@@ -491,6 +491,11 @@ and the page can be edited.
   does not change; Ctrl+Z takes it back).
   "Skip page" marks a page with nothing to translate, such as an advertisement or the viewer's own panel,
   and "Translate again" (not using the cache) translates the page again with the current premises.
+  The translations you corrected yourself (in the editor, or with Find and replace) stay as they are and are not sent to the model;
+  tick "Replace the lines I corrected too" in its question to have them translated again as well.
+* "My corrections..." lists the translations you corrected yourself in this book, page by page, from the saved translations alone.
+  Selecting one says which page it is on; nothing is sent to the viewer, so you turn to that page yourself.
+  The model's answer to "Ask again", saved as it came, is not your correction; a spelling made consistent by the series sheet or the name check leaves a line as it was.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
   It also lists the regions whose automatic lettering could not be set well: letters touching the bubble's edge, the text
   off the bubble's centre (as when one translation for two joined bubbles is set in one of them), a word split with a
@@ -589,7 +594,8 @@ A batch has three safeguards.
 * A batch clicks nothing and sends no keys. You are the one who turns the pages.
 
 After you change premises such as the series sheet, `taslation batch --retranslate` reads every page again and translates it again,
-so the change reaches the whole volume (cached pages are replaced).
+so the change reaches the whole volume (cached pages are replaced, but for the translations you corrected yourself;
+add `--replace-corrections` to have those translated again too).
 
 When the reading reaches the end of the volume, some viewers show an end-of-book panel (ratings, the next volume). The arrow keys may not get you out of this panel,
 so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers)
@@ -665,10 +671,10 @@ series sheet goes by: the Series field, so a volume still kept under a name type
 3巻") shares its lines with "Some Title 4".
 
 * A translation you corrected in translator mode wins: later identical lines get your text. "Ask again" in the editor
-  asks the model; its answer, once saved, counts as your correction. When a translation was reused from an earlier
-  identical line, the editor says so. Ctrl+Z on a correction also takes back the line it kept.
-* "Translate again" and reading the whole book again ask the model for every line, and the new answers replace the
-  model's earlier ones (never your corrections).
+  asks the model; its answer, once saved, counts as your correction here (not in "My corrections"). When a translation
+  was reused from an earlier identical line, the editor says so. Ctrl+Z on a correction also takes back the line it kept.
+* "Translate again" and reading the whole book again ask the model for every line but those you corrected (unless you
+  ask for them to go too), and the new answers replace the model's earlier ones (never your corrections).
 * What is kept is spelt as the series sheet spells, as the page shows it. Before it is reused, a kept translation is
   held to the series sheet as it is now: a name spelt another way is put right, as in a translation just made, and a
   translation that still misses a rendering the sheet asks for is not reused (the model is asked).
@@ -719,14 +725,14 @@ taslation read --window "<title>" --series "My Book" --volume 1   the book's nam
     (batch, read, gui, review and translate take them; --volume goes with --series, never with --book)
 taslation translate page.png --show    translate an image file of your own (writes nothing)
 taslation translate page.png --translator echo --no-translate   detection and OCR only
-taslation review --book <book> | --series S --volume V [--notes]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader
+taslation review --book <book> | --series S --volume V [--notes] [--corrections]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader; --corrections lists the translations you corrected yourself instead
 taslation cache list | delete <book> | path
 taslation cache protect        protect the saved files that are not protected yet, and show the counts (also done at every start)
 taslation glossary list | show <series> | set <series> <term> <rendering> [--note ..] | delete <series> [term]
 taslation glossary apply <series> --rename OLD=NEW [..] [--dry-run]   replace OLD with NEW in what is already translated
 taslation glossary font <series> "Comic Neue" | --clear   the lettering font the series suggests (checks whether this PC has it)
 taslation glossary lettering <series> thought|shout|narration|handwritten|sfx [--family NAME] [--italic|--no-italic] [--bold|--no-bold] [--reset]
-taslation batch --window "<title>" --retranslate   translate every page again with the current premises
+taslation batch --window "<title>" --retranslate [--replace-corrections]   translate every page again with the current premises (your corrections stay, unless --replace-corrections)
 taslation gui --mode book --role translator   start in the mode that translates the whole book first (the default is page), as translator
 taslation audit page.png       run the processing and show every network connection made (and at the end, whether any saved file is left unprotected)
 taslation annotations list [--json]          list the books that have a notes file on this PC (pages, frames, memos, skipped pages, reading orders; no text is shown)

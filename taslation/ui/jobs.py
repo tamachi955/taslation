@@ -514,11 +514,13 @@ class JobsMixin:
         return True
 
     def _job_translate(self, image: Image.Image, book: str, model: str, language: str, complete: bool = False,
-                       cancel: threading.Event | None = None, again: Any = None) -> None:
+                       cancel: threading.Event | None = None, again: Any = None, replace_edited: bool = False) -> None:
         """The page *image* read and translated, in the worker. *again* (a page's `PageResult`): "Translate again",
         every line asked of the model (none reused: `linememo`), its cached translations forgotten first and put back
-        when this translates nothing: Stop, a new page, Ollama down, a job that fails. They may be the reader's own,
-        and no undo brings them back. A save that failed is said after the page (`Pipeline.save_error`)."""
+        when this translates nothing new: Stop, a new page, Ollama down, a job that fails. They may be the reader's
+        own, and no undo brings them back. The lines the person corrected (`CachedBubble.edited`) stay and are not
+        asked for (`Pipeline.forget_page`'s *keep_edited*), unless *replace_edited*. A save that failed is said after
+        the page (`Pipeline.save_error`)."""
         held: list[Any] = []
         try:
             self._use_model(model, language)
@@ -526,7 +528,7 @@ class JobsMixin:
                 return  # the status line says which file could not be opened
             if again is not None:
                 held = self.pipeline.pages_of(again)
-                self.pipeline.forget_page(again)
+                self.pipeline.forget_page(again, keep_edited=not replace_edited)
             try:
                 result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
                                                complete=complete, events=lambda kind, data: self._post(kind, **data),
@@ -536,7 +538,8 @@ class JobsMixin:
             except Cancelled:  # Stop, or a new page: nothing of this page reached the cache
                 self._post("page_cancelled")
                 return
-            if held and not result.translated:
+            if held and not [r for r in result.translated if not r.from_cache]:  # nothing translated anew (a corrected
+                # line that stayed is no new translation)
                 self.pipeline.restore_pages(held)
                 error = result.error
                 result = self.pipeline.process(image, translate=False)  # the page as it is kept: nothing was replaced
@@ -810,6 +813,9 @@ class JobsMixin:
                 self._review.fill(review_rows(self.last_result.regions))
             if getattr(self, "_find", None) is not None:
                 self._refresh_find()
+            refresh = getattr(self, "_refresh_corrections", None)  # ("My corrections": an edit, a page again)
+            if refresh is not None:
+                refresh()
         elif kind == "page_cancelled":  # Stop, or a new page: the page was not translated
             self._hide_busy()
             if self._cancel_why != "page":
@@ -829,6 +835,9 @@ class JobsMixin:
             name_check.names_applied(self, data)
         elif kind == "find":  # the book's text changed, or its cache is there: what the list of matches shows
             self._book_text_changed(data.get("lines", ()))
+            refresh = getattr(self, "_refresh_corrections", None)  # (and "My corrections": a replacement, its undo)
+            if refresh is not None:
+                refresh()
         elif kind == "colophon":  # a page of the book was its colophon: its name is offered (once the window can)
             self._colophon_found = (data["book"], data.get("model", ""), data.get("language", ""), data["colophon"])
             self._offer_colophon()
@@ -1857,9 +1866,10 @@ class JobsMixin:
             self._tick()
 
     def _start_translate(self, image: Image.Image, complete: bool | None = None, thumb: np.ndarray | None = None,
-                         again: Any = None) -> None:
+                         again: Any = None, replace_edited: bool = False) -> None:
         """The page *image* read and translated in the worker; Stop and Esc cancel it, and so does a new page Auto
-        sees meanwhile (`_watch_page`). A black frame is no page: nothing is read from it. *again*: `_job_translate`."""
+        sees meanwhile (`_watch_page`). A black frame is no page: nothing is read from it. *again*, *replace_edited*:
+        `_job_translate`."""
         if is_black(image, self.settings.margins):
             self.say(VIEWER_BLACK if getattr(getattr(self, "_black_watch", None), "told", False)
                      else VIEWER_LOADING)
@@ -1875,7 +1885,11 @@ class JobsMixin:
         book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
         if complete is None:
             complete = self.role_var.get() == "translator"
-        self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again))
+        if replace_edited:
+            self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again,
+                                                       replace_edited=True))
+        else:
+            self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again))
         pump_soon(self)
 
     def _area_of(self, image: Image.Image) -> np.ndarray:
