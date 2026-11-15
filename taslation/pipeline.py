@@ -81,7 +81,8 @@ from . import linememo
 from .pageimages import ErasedRegion, PageImages, packed_mask, region_digest
 from .render.memo import ErasedRegions, ShownPages, changed_pixels, pixels_digest, signature
 from .devices import StageTimes
-from .cache import INDEXED_WITHIN, BookCache, CachedBubble, CachedPage
+from .cache import INDEXED_WITHIN, SAME_BOX, BookCache, CachedBubble, CachedPage
+from .name_variants import RunLine
 from .colophon import AUTHOR_LABELS, LABELS
 from .detect import layout as layout_model
 from .detect.beyond import ocr_view
@@ -2085,6 +2086,52 @@ class Pipeline:
         hits = [self.cache.lookup(u.fingerprint, u.aspect, self.settings.fingerprint_max_distance, None)
                 for u in result.units]
         return [copy.deepcopy(hit[0]) for hit in hits if hit is not None]
+
+    def page_lines(self, result: PageResult) -> list[RunLine]:
+        """The lines of the page *result* as the cache holds them now, for the name check of the pages read one by one
+        (`name_variants.PageLines`, `jobs.keep_page_names`): each translated region's Japanese, the text of the
+        stored bubble it is drawn from and where that is (the cached page's fingerprint and the bubble's box, as
+        `cache.TextEdit` finds it); a real translation only, as a run keeps its own (`BatchReader._keep_said`). A
+        region drawn from the cache alone has no Japanese (the cache never holds it) and gives none. In memory only,
+        never written nor logged; the worker's, as the cache is."""
+        if self.cache is None or not result.units:
+            return []
+        distance, iou = self.settings.fingerprint_max_distance, self.settings.match_min_iou
+        out: list[RunLine] = []
+        for unit in result.units:
+            mine = [r for r in result.regions if r.unit == unit.index and r.status == "translated"
+                    and (r.source_text or "").strip()]
+            hit = self.cache.lookup(unit.fingerprint, unit.aspect, distance, None) if mine else None
+            if hit is None:
+                continue
+            page = hit[0]
+            for r in mine:
+                nbox = unit.normalize(r.bbox)
+                text = (r.translated_text or "").strip()
+                best = max(page.bubbles, default=None,
+                           key=lambda b: (box_iou(b.box, nbox), (b.text or "").strip() == text))  # type: ignore[arg-type]
+                if best is None or box_iou(best.box, nbox) < iou:  # type: ignore[arg-type]
+                    continue
+                stored = best.text or ""  # (as stored: what a TextEdit finds there)
+                if stored.strip() and self.real_translation(r.source_text, stored.strip()):
+                    out.append(RunLine(r.source_text, stored, (page.fingerprint, tuple(best.box))))
+        return out
+
+    def stored_text(self) -> Callable[[Any], str | None]:
+        """What the cache holds now at the place of a line (`name_variants.PageLines.retext`): the text of the bubble at
+        its box on the page of its fingerprint, as `BookCache.put_texts` finds it; None when there is none."""
+        pages = {page.fingerprint: page for page in self.cache.pages} if self.cache is not None else {}
+
+        def text_at(where: Any) -> str | None:
+            page = pages.get(where[0])
+            if page is None:
+                return None
+            for bubble in page.bubbles:
+                if all(abs(a - b) <= SAME_BOX for a, b in zip(bubble.box, where[1])):
+                    return bubble.text
+            return None
+
+        return text_at
 
     def restore_pages(self, pages: Sequence[CachedPage]) -> None:
         """Put back pages `forget_page` took away (`pages_of`), but for one that has an entry again meanwhile: "Translate

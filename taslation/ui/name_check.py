@@ -1,7 +1,9 @@
 """The window's side of the name consistency helper: what a whole-book run found (`taslation.name_variants`, kept in
 memory for the session with the run's lines - their translations and where each is stored, never their Japanese),
 offered on the band at the end of the run and from Tools > Names rendered in more than one way..., and the change the
-reader chooses in `dialogs.names.NamesDialog`.
+reader chooses in `dialogs.names.NamesDialog`. The pages read one by one are looked at too (`keep_page_found`: their
+lines kept in the worker's memory only, `jobs.keep_page_names`): a name new to the book in this session joins
+what is found, and the band offers it quietly, once (`JobsMixin._offer_page_names`).
 
 A change is the replace machinery's (`ReplaceMixin`): the lines' texts through `BookCache.put_texts` (only a bubble
 whose text is still what the run stored changes; flags, notes and positions stay), as one `history.BookStep` (Ctrl+Z
@@ -14,7 +16,7 @@ Nothing of the book's text is logged or printed: it goes to the reader's own win
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..annotations import CharacterSheet
@@ -22,6 +24,7 @@ from ..cache import TextEdit
 from ..i18n import _
 from ..name_variants import NameVariants, RunLine, changes
 from ..notes import sheet_key
+from .constants import in_a_run
 from .history import BookStep, owner
 
 
@@ -53,7 +56,7 @@ def review_names(window: Any) -> None:
 
     found = found_for(window)
     if found is None:
-        window.say("No whole-book run in this session found a name of this book rendered in more than one way. The Japanese lines are looked at only while TASlation is open.")
+        window.say("Neither a whole-book run nor the pages read one by one in this session rendered a name of this book in more than one way. The Japanese lines are looked at only while TASlation is open.")
         return
     dialog = getattr(window, "_names_dialog", None)
     if dialog is not None and dialog.winfo_exists():
@@ -222,12 +225,74 @@ def take_back_name(window: Any, v: NameVariants) -> bool:
 
 
 def keep_found(window: Any, progress: Any, book: str, language: str) -> int:
-    """A run has ended: the names it found kept for its book and language (the latest run's), how many."""
+    """A run has ended: the names it found kept for its book and language (the latest run's), how many. The pages
+    read one by one afterwards do not offer them again (`keep_page_found`)."""
     variants = list(getattr(progress, "names", None) or [])
     if not variants:
         return 0
     window._names_found = Found(book, language, variants, list(getattr(progress, "name_lines", None) or []))
+    _offered(window).update((book, language, v.source) for v in variants)
     return len(variants)
 
 
-__all__ = ["Found", "apply_name", "found_for", "keep_found", "names_applied", "review_names", "take_back_name"]
+def _offered(window: Any) -> set[tuple[str, str, str]]:
+    offered = getattr(window, "_names_offered", None)
+    if offered is None:
+        offered = window._names_offered = set()
+    return offered
+
+
+def keep_page_found(window: Any, data: dict[str, Any]) -> int:
+    """What the pages read one by one found (``page_names``, `jobs.keep_page_names`: the names, and the lines
+    they point into without their Japanese), kept as what is found for the book and language when a name is new to
+    them in this session - none a run or the pages offered before: each name is offered once. The names found before
+    for the book stay as they were (a change made, and what Take back gives back), the new ones join them
+    (`_joined`). Not while a run is on, nor while the names' dialog is open (the next page offers it then). Returns
+    how many names are offered now (0: none)."""
+    book, language = str(data.get("book", "")), str(data.get("language", "") or "English")
+    variants = list(data.get("variants") or [])
+    offered = _offered(window)
+    if not any((book, language, v.source) not in offered for v in variants) or in_a_run(window):
+        return 0
+    dialog = getattr(window, "_names_dialog", None)
+    if dialog is not None and dialog.winfo_exists():
+        return 0
+    old = getattr(window, "_names_found", None)
+    if old is None or old.book != book or old.language != language:
+        old = None
+    window._names_found = found = _joined(old, book, language, variants, list(data.get("lines") or []))
+    offered.update((book, language, v.source) for v in found.variants)
+    return len(found.variants)
+
+
+def _joined(old: Found | None, book: str, language: str, variants: list[NameVariants],
+            lines: list[RunLine]) -> Found:
+    """*old*'s names (as they are: their lines, what a change made of them) and the names of *variants* it lacks, on
+    *lines*, as one `Found` that keeps only the names' own lines (bounded however often names join)."""
+    named = [(v, old.lines, old.done.get(v.source)) for v in old.variants] if old is not None else []
+    known = {v.source for v, _lines, _done in named}
+    named += [(v, lines, None) for v in variants if v.source not in known]
+    kept: list[RunLine] = []
+    out: list[NameVariants] = []
+    done: dict[str, tuple[str, BookStep, str | None, list[tuple[str, list[int]]], bool]] = {}
+    for v, its_lines, made in named:
+        used = set(v.lines) | {i for _s, at in v.renderings for i in at}
+        if made is not None:
+            used |= {i for _s, at in made[3] for i in at}
+        to: dict[int, int] = {}
+        for i in sorted(i for i in used if 0 <= i < len(its_lines)):
+            to[i] = len(kept)
+            kept.append(its_lines[i])
+
+        def moved(at: list[int]) -> list[int]:
+            return [to[i] for i in at if i in to]
+
+        joined = replace(v, renderings=[(s, moved(at)) for s, at in v.renderings], lines=moved(v.lines))
+        out.append(joined)
+        if made is not None:
+            done[joined.source] = (made[0], made[1], made[2], [(s, moved(at)) for s, at in made[3]], made[4])
+    return Found(book, language, out, kept, done)
+
+
+__all__ = ["Found", "apply_name", "found_for", "keep_found", "keep_page_found", "names_applied", "review_names",
+           "take_back_name"]

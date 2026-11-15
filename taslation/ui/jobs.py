@@ -67,6 +67,7 @@ from ..colophon import Colophon, find_colophon
 from ..colophon import precheck as colophon_precheck
 from ..i18n import _, load_ui_table, save_ui_entry
 from ..messages import Cancelled, Message, message_of
+from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from . import area, name_check
@@ -145,6 +146,33 @@ def recognised_books(request: Recognition) -> tuple[list[str], str]:
 WARNING_NOTE_MS = 3 * READING_NOTE_MS  # how long a warning stays on the page over the book (`JobsMixin._warn_unasked`)
 
 
+def keep_page_names(window: Any, result: Any, book: str, model: str, language: str) -> None:
+    """After a page read page by page (`JobsMixin._job_translate`), in the worker once the page is on its way: the lines
+    read on it in this session (a page drawn from the cache alone has no Japanese to look at, which is never stored)
+    kept for the session's name check (`name_variants.PageLines`, *window*'s ``_page_lines``: in memory only, never
+    written, at most `PAGE_LINES_MAX`, for one book, model and language at a time), their texts as the cache holds them
+    now; when the page brought a line new or changed, the names all of them render in more than one way go to the
+    window (``page_names``, with the lines without their Japanese, as a run's), which offers a name once
+    (`name_check.keep_page_found`). Nothing is said or logged; a failure here leaves the page as it is."""
+    pipeline = getattr(window, "pipeline", None)
+    if pipeline is None or getattr(pipeline, "cache", None) is None:
+        return
+    memo = getattr(window, "_page_lines", None)
+    if memo is None:
+        memo = window._page_lines = PageLines()
+    try:
+        if not memo.add((book, model, language), pipeline.page_lines(result)):
+            return
+        memo.retext(pipeline.stored_text())
+        lines = memo.lines()
+        found = find_variants(lines, pipeline.check_sheet())
+    except Exception:  # noqa: BLE001 - the name check is an offer: the page is shown already
+        return
+    if found:
+        window._post("page_names", book=book, language=language or "English", variants=found,
+                     lines=[line._replace(source="") for line in lines])
+
+
 def pump_soon(window: Any) -> None:
     """A job has started: *window*'s worker events are looked at EVENTS_BUSY_MS from now, not at the idle pace
     (`JobsMixin._poll_events`)."""
@@ -205,6 +233,10 @@ class JobsMixin:
         self._auto_before_batch: bool | None = None  # Auto before the batch turned it off
         self._batch_stop_asked = False  # Stop pressed before the batch's reader was made
         self._stop_asking = False  # the question before Stop is on show (`_ask_stop`)
+        # the lines of the pages read one by one, for the name check (the worker's; in memory only: `keep_page_names`)
+        self._page_lines = PageLines()
+        # (book, language, name) offered as rendered in more than one way this session, by a run or by the pages
+        self._names_offered: set[tuple[str, str, str]] = set()
 
     # ------------------------------------------------------------------ worker
     def _post(self, kind: str, **data: Any) -> None:
@@ -548,6 +580,7 @@ class JobsMixin:
             self._post("result", result=result)
             self._say_failed_save()
             self._look_for_colophon(image, result, book, model, language)
+            keep_page_names(self, result, book, model, language)
         finally:
             if held:
                 self.pipeline.restore_pages(held)
@@ -833,6 +866,8 @@ class JobsMixin:
             self._propose_renderings(data["changes"])
         elif kind == "names_applied":  # a name's renderings made one (`name_check.apply_name`)
             name_check.names_applied(self, data)
+        elif kind == "page_names":  # the pages read one by one render a name in more than one way
+            self._offer_page_names(name_check.keep_page_found(self, data))
         elif kind == "find":  # the book's text changed, or its cache is there: what the list of matches shows
             self._book_text_changed(data.get("lines", ()))
             refresh = getattr(self, "_refresh_corrections", None)  # (and "My corrections": a replacement, its undo)
@@ -2033,8 +2068,23 @@ class JobsMixin:
 
     def review_names(self) -> None:
         """The band's Review names... and Tools > Names rendered in more than one way...: the names the latest
-        whole-book run of the book in the boxes rendered in more than one way, to make one (`name_check`)."""
+        whole-book run of the book in the boxes, or the pages read one by one, rendered in more than one way, to make
+        one (`name_check`)."""
         name_check.review_names(self)
+
+    def _offer_page_names(self, names: int) -> None:
+        """*names* names (0: none new) found rendered in more than one way in the pages read one by one: offered
+        quietly on the band, with Review names... (the band of a run that ended keeps what it says and gets the line
+        too; a run's band while it runs is left alone). No box opens, and the focus stays where it is."""
+        if not names or in_a_run(self):
+            return
+        band = self._band
+        if band is not None and band.get("kind") == "scan":
+            return
+        if band is None:
+            band = self._band = {"kind": "names"}
+        band["page_names"] = names
+        self._show_band()
 
     def _book_start(self, book: str) -> str:
         """The start dialog's answer kept for *book* ("start", "page"; "" when none is), under another spelling of

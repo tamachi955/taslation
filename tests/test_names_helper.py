@@ -153,7 +153,7 @@ def test_what_a_run_found_is_for_its_book_and_language_only(window):
     window.lang_var.set("English")
     window.book_var.set("Another book")
     window.review_names()
-    assert window.said[-1].startswith("No whole-book run in this session found a name")
+    assert window.said[-1].startswith("Neither a whole-book run nor the pages read one by one in this session")
     nothing = SimpleNamespace(names=[], name_lines=[])
     assert name_check.keep_found(window, nothing, "Another book", "English") == 0
     assert window._names_found.book == "Book"  # (a run that found nothing keeps what the last one found)

@@ -15,18 +15,18 @@ an honorific is never taken for it; kinship words and titles before an honorific
 (`NOT_NAMES`); nor is a word that is the rendering of another name found. Scripts without capitals (Chinese,
 Korean, Thai) give nothing. A wrong suggestion is worse than a missed one, so every gate leans to saying nothing.
 
-Nothing here keeps or writes any text: the lines are the run's, in memory; the result holds the name as the Japanese
-writes it (to show the reader in the window), its renderings and where each comes - never printed nor logged.
-Standard library only."""
+Nothing here writes any text: the lines are a run's, or those of the pages read one by one in this session
+(`PageLines`, at most `PAGE_LINES_MAX`, in memory only); the result holds the name as the Japanese writes it (to show
+the reader in the window), its renderings and where each comes - never printed nor logged. Standard library only."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, NamedTuple, Sequence
+from typing import Any, Callable, Hashable, Iterable, NamedTuple, Sequence
 
 from .terms import FOLD_MIN_CHARS, HONORIFICS, fold_kana
 
@@ -40,6 +40,9 @@ OTHER_SHARE = 0.9  # ... for another rendering that does not spell the main one 
 ALIKE_RATIO = 0.75  # difflib's ratio of two renderings, folded, that spell one name
 MAIN_SHARE = 0.4  # the main rendering comes on at least this share of the name's lines that have any
 CAPITALS_SHARE = 0.8  # letters in capitals from this share on: lettering set in capitals (every word looks a name)
+# The lines of the pages read one by one kept for the name check (`PageLines`): a long volume's (some 200 pages of 10
+# to 15 lines); the oldest go first. `find_variants` takes some 0.1 s for this many.
+PAGE_LINES_MAX = 3000
 KANJI_RUN = (2, 4)  # a name in kanji: this many characters before the honorific
 _KATAKANA = "ァ-ヺー・"
 _KANJI = "一-鿿々〆"
@@ -76,6 +79,60 @@ class RunLine(NamedTuple):
     source: str
     text: str
     where: Any = None
+
+
+class PageLines:
+    """The lines of the pages read one by one in this session, for the name check (`find_variants`), as a run keeps its
+    own (`batch.BatchReader._keep_said`): each line's Japanese, its translation as stored and where it is stored. In
+    memory only, never written; at most *limit* of them (the lines seen longest ago go first); for one *scope* at a
+    time (the book, model and language: another starts them over). A line is kept by where it is stored, so a page
+    shown again adds nothing; its text follows what the cache holds (`retext`)."""
+
+    def __init__(self, limit: int = PAGE_LINES_MAX) -> None:
+        self.limit = max(1, int(limit))
+        self.scope: Hashable = None
+        self._lines: OrderedDict[Any, RunLine] = OrderedDict()
+
+    def __len__(self) -> int:
+        return len(self._lines)
+
+    @staticmethod
+    def _place(where: Any) -> Any:
+        fingerprint, box = where
+        return fingerprint, tuple(round(float(v), 4) for v in box)
+
+    def add(self, scope: Hashable, lines: Iterable[RunLine]) -> bool:
+        """*lines* (of a page just read) kept for *scope*; whether any is new or says something else than before."""
+        if scope != self.scope:
+            self.scope = scope
+            self._lines.clear()
+        changed = False
+        for line in lines:
+            if line.where is None or not line.source or not line.text:
+                continue
+            place = self._place(line.where)
+            before = self._lines.pop(place, None)
+            self._lines[place] = line  # (the latest seen last: the last to go)
+            changed = changed or before is None or before.text != line.text or before.source != line.source
+        while len(self._lines) > self.limit:
+            self._lines.popitem(last=False)
+        return changed
+
+    def retext(self, text_at: Callable[[Any], str | None]) -> None:
+        """Each line's text as *text_at*(where) says it is stored now (a name made one, Find and replace, the reader's
+        own correction); a line no longer stored (None, "") goes."""
+        for place, line in list(self._lines.items()):
+            text = text_at(line.where)
+            if not text:
+                del self._lines[place]
+            elif text != line.text:
+                self._lines[place] = line._replace(text=text)
+
+    def lines(self) -> list[RunLine]:
+        return list(self._lines.values())
+
+    def clear(self) -> None:
+        self._lines.clear()
 
 
 @dataclass
@@ -333,4 +390,5 @@ def changes(variants: NameVariants, lines: Sequence[RunLine], chosen: str) -> li
     return out
 
 
-__all__ = ["NameVariants", "RunLine", "changes", "find_variants", "romaji_like", "unify_text"]
+__all__ = ["PAGE_LINES_MAX", "NameVariants", "PageLines", "RunLine", "changes", "find_variants", "romaji_like",
+           "unify_text"]

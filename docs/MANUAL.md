@@ -209,6 +209,7 @@ The setting `flash_when_done = false` stops the flashing, and `sound_when_done =
 
 When the translation has finished, it also checks whether the same character's name is written more than one way in the translations ("竜司" split into "Ryuji" and "Ryūji", for example).
 If it finds any, the banner shows how many, with a "Review names..." button (it also opens from "Names rendered in more than one way..." in the "Tools" menu).
+The pages you translate one by one are checked the same way: when a name in them is written in two ways, the banner says so with the same button, quietly (no window opens, and each name is offered once a session).
 Each name is listed with its spellings and how many lines use each; choose the spelling to keep, or type one in "Other:", and press "Apply": the lines with the other spellings are changed to it.
 If "Keep it in the series sheet" is ticked (the default), it also goes into the character's rendering in the series sheet, and later translations use that spelling.
 Nothing is changed until you press "Apply". Only the name itself is changed, and only in the lines whose Japanese has that name; the rest of the line, the review flags, the notes to the reader and the positions stay as they are.
@@ -216,7 +217,7 @@ Nothing is changed until you press "Apply". Only the name itself is changed, and
 The names are found by fixed rules; no model is used. Only names that carry an honorific such as "さん", "くん" or "様" in the Japanese (2 or more katakana, or 2 to 4 kanji) are considered,
 and a name is shown only when the translations write it in two or more ways, each in separate lines, that look like spellings of the same name (missing a case is preferred to making a wrong suggestion).
 It does not appear for translations in languages without capital letters (Chinese, Korean, Thai and so on).
-The Japanese lines are only kept in memory while TASlation is open, and are written nowhere. So it covers only the lines translated in the last whole-book translation of this session, by that run.
+The Japanese lines are only kept in memory while TASlation is open, and are written nowhere. So it covers only the lines translated in this session: by the last whole-book translation, and on the pages translated one by one (at most some 3,000 lines, the oldest going first; a page shown from the cache has no Japanese to look at).
 
 Both modes use the same cache.
 

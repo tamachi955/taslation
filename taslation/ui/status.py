@@ -211,14 +211,21 @@ class StatusMixin:
             if action is not None:  # what the run waits for, where a button does it
                 buttons.insert(0, trouble.action_button(self, action))
             return [band_text(scan)], buttons
+        if kind == "names":  # names the pages read one by one render in more than one way (`_offer_page_names`)
+            return ([_("{n} name(s) rendered in more than one way in the pages read so far.").format(
+                n=band["page_names"])], [(_("Review names..."), self.review_names), (_("Close"), self.close_band)])
         lines = [rendered(band["summary"])]
         if band.get("resumed"):
             lines.append(_("Auto: follow page turns is on again."))
         if band.get("reader"):
             lines.append(_(READER_AFTER_RUN))
         buttons = [(_("Close"), self.close_band)]
-        if band.get("names"):  # the run rendered names in more than one way: one can be chosen for each
+        if band.get("page_names"):  # ... and the pages read one by one since: what is found now (`_offer_page_names`)
+            lines.append(_("{n} name(s) rendered in more than one way in the pages read so far.").format(
+                n=band["page_names"]))
+        elif band.get("names"):  # the run rendered names in more than one way: one can be chosen for each
             lines.append(_("{n} name(s) rendered in more than one way across the book.").format(n=band["names"]))
+        if band.get("names") or band.get("page_names"):
             buttons.insert(0, (_("Review names..."), self.review_names))
         held = self._held_readings()
         if held is not None:  # a Stop left pages read and not translated: they can be translated now
