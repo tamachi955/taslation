@@ -89,6 +89,7 @@ from .detect.tilt import Upright, ink_frame, lettering_tilt, region_ink
 from .annotations import (ERASE_ONLY, BookAnnotations, BookArea, Glossary, StyleGuide, clean_book_settings,
                           join_premises, page_side)
 from .review import OCR_UNSURE, flags_for
+from .terms import spelt_right
 from .textclean import clean_text
 from .config import Settings
 from PIL import ImageOps
@@ -1743,13 +1744,16 @@ class Pipeline:
 
     def ask_again(self, result: PageResult, region: TextRegion) -> str:
         """One more translation of *region* from the model, with the page's earlier lines, the premises and the
-        reader-made facts as context; "" when none came."""
+        reader-made facts as context, spelt as the series sheet spells (`terms.spelt_right`, as every fresh
+        translation is: the editor shows it before anything is saved); "" when none came."""
         if self.translator is None or not region.source_text or region.tag == ERASE_ONLY:
             return ""
         meta = region_meta(region)
         outs = self.translator.translate_page([region.source_text], self.page_context(result, region), self.premises(),
                                               meta=[meta] if meta else None)
-        text = balance_marks(((outs[0] if outs else "") or "").strip())
+        text = spelt_right(self.check_sheet(), region.source_text, ((outs[0] if outs else "") or "").strip(),
+                           region.speaker)
+        text = balance_marks(text)
         return text if text and self.real_translation(region.source_text, text) else ""
 
     def read_source(self, result: PageResult, region: TextRegion) -> str:
@@ -2465,15 +2469,18 @@ class Pipeline:
     def _translate_regions(self, regions: list[TextRegion], report: ProgressFn, fill: PageFill | None = None,
                            cancel: threading.Event | None = None, on_slow: SlowFn | None = None,
                            unit_box: Box | None = None) -> str:
-        """Translate the regions to translate (one request for all of them, in reading order), check and tighten
-        the translations, and set the regions' texts, statuses and flags; "" or the Message of what went
-        wrong. Lines the reply left without a usable translation (missing, empty, the Japanese copied) are asked
-        for again, a few consecutive ones at a time with their neighbours as context, then each on its own
-        (`ask_for_missing`); so are all of them when the request failed with an error that another request may not
-        repeat (`worth_asking_again`), and the error is what comes back only when that does not translate them
-        all. With *fill*, each translation is lettered as the translator hands it over (when it can,
-        `takes_items`), and the final ones (some changed by `tighten`) are settled on the page afterwards. With
-        *cancel*, `Cancelled` before the request, during it (a translator that takes ``cancel``) and after it."""
+        """Translate the regions to translate (one request for all of them, in reading order), spell them as the
+        series sheet spells (`terms.spelt_right`, as a whole-book run spells its replies: a name or term the model
+        wrote another way near enough, no model request), check and tighten the translations, and set the regions'
+        texts, statuses and flags; "" or the Message of what went wrong. Lines the reply left without a usable
+        translation (missing, empty, the Japanese copied) are asked for again, a few consecutive ones at a time with
+        their neighbours as context, then each on its own (`ask_for_missing`); so are all of them when the request
+        failed with an error that another request may not repeat (`worth_asking_again`), and the error is what comes
+        back only when that does not translate them all. With *fill*, each translation is lettered as the translator
+        hands it over (when it can, `takes_items`), and the final ones (some respelt, some changed by `tighten`) are
+        settled on the page afterwards. Only these fresh translations are respelt: a page's translations from the
+        cache are never changed here. With *cancel*, `Cancelled` before the request, during it (a translator that
+        takes ``cancel``) and after it."""
         todo = [r for r in regions if r.status == "untranslated"]
         if not todo:
             return ""
@@ -2521,6 +2528,8 @@ class Pipeline:
         if _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: asked once more, with its neighbours
             outputs = ask_again_romanised(self.translator, texts, outputs, context=self.context_pairs(),
                                           notes=self.premises(), meta=meta, call_args=call, cancel=cancel)[0]
+        sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are
+        outputs = [spelt_right(sheet, texts[i], out, str(meta[i].get("speaker", ""))) for i, out in enumerate(outputs)]
         entries = [{"ja": r.source_text, "text": out, "mask": r.mask, "kind": r.kind, "anchor": r.letter_box or r.text_box,
                     "x0": r.x0, "y0": r.y0, "meta": region_meta(r), "confidence": r.ocr_confidence,
                     "direction": direction_of(r)}

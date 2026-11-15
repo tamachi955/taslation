@@ -139,6 +139,64 @@ def test_the_editor_shows_the_region_and_reads_its_japanese_on_demand(hidden_roo
     d.destroy()
 
 
+def test_the_editor_says_when_the_model_in_use_does_not_read_the_hint(hidden_root):
+    from taslation import i18n
+
+    region = _region()
+    region.remark = "said to her teacher"
+    saved = []
+    d = review.EditBubbleDialog(hidden_root, region, [], on_save=saved.append, on_drop=lambda: None,
+                                on_ask=lambda mode, answer: True, reads_hints=False)
+    assert d.hint_unread is not None and d.hint_unread.winfo_manager() == "grid"
+    assert str(d.hint_unread.cget("text")) == review.HINT_UNREAD
+    d._save()
+    assert saved[-1]["note"] == "said to her teacher"  # the hint is kept all the same
+    plain = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None)
+    assert plain.hint_unread is None  # a model that reads it (or no model): nothing said
+    plain.destroy()
+    for code, catalog in CATALOGS.items():
+        assert (catalog.get(review.HINT_UNREAD, review.HINT_UNREAD) == review.HINT_UNREAD) == (code == "en"), code
+    try:
+        i18n.set_language("ja")
+        d = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None,
+                                    reads_hints=False)
+        assert str(d.hint_unread.cget("text")) == CATALOGS["ja"][review.HINT_UNREAD]
+        d.destroy()
+    finally:
+        i18n.set_language("en")
+
+
+def test_the_window_tells_the_editor_whether_the_model_in_use_reads_hints(cached, monkeypatch):
+    from taslation.translate.plamo import PlamoTranslator
+
+    pipeline, result = cached
+    made = []
+    monkeypatch.setattr(translator, "EditBubbleDialog", lambda *a, **k: (made.append(k), SimpleNamespace())[1])
+
+    class Opener:
+        _open_editor = app_mod.App._open_editor
+
+        def __init__(self):
+            self.pipeline, self.last_result, self.settings = pipeline, result, pipeline.settings
+
+        def _speaker_names(self):
+            return []
+
+        def _spelling_note(self):
+            return ""
+
+    w = Opener()
+    region = result.translated[0]
+    w._open_editor(region, result)
+    assert made[-1]["reads_hints"] is True  # a translator that says nothing is taken to read them
+    pipeline.translator = PlamoTranslator()  # (made, never asked: no request goes out)
+    w._open_editor(region, result)
+    assert made[-1]["reads_hints"] is False and made[-1]["on_ask"] is not None
+    pipeline.translator = None
+    w._open_editor(region, result)
+    assert made[-1]["reads_hints"] is True and made[-1]["on_ask"] is None  # no model to ask: nothing to say of it
+
+
 def test_the_editors_picture_is_a_crop_of_the_frame_in_memory():
     page = Image.new("RGB", (200, 100), "white")
     crop = editor_crop(page, (10, 20, 50, 60))

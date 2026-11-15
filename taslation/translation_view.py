@@ -7,7 +7,7 @@ and a list), so that the translation never waits for a picture:
 
 * `request` (units): a request to the model starts with these page units: the view goes to the page of the first;
 * `line` (unit, index, Japanese, text, speaker): the model answered a line (``on_item``: PLaMo line by line, Ollama as
-  its reply streams). Spelt as the series sheet spells (*spell*, the batch's `_spelt_right`, no model request) and
+  its reply streams). Spelt as the series sheet spells (*spell*, `terms.spelt_right`, no model request) and
   lettered when it is a real translation; the view goes to its page when it is on another;
 * `stored` (unit, texts): the unit's lines are stored (`Pipeline.commit_unit`): the page starts again from the cache's
   picture of it (`Pipeline.page_picture`), so that the provisional lines give way to the stored ones;

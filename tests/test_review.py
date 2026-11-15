@@ -80,7 +80,7 @@ def _region(x0, y0, x1, y1, text_box, source="魔法少女だ") -> TextRegion:
 
 def test_live_mode_flags_its_translations(settings):
     long = "Honestly, I cannot believe a magical girl would ever do something like this to me of all people, really."
-    tr = DictTranslator({"魔法少女だ": "A magic girl.", "はいそうです": long})
+    tr = DictTranslator({"魔法少女だ": "A witch.", "はいそうです": long})  # (a miss no respelling puts right)
     p = Pipeline(settings, ocr=None, translator=tr)
     p.glossary = sheet()
     a = _region(0, 0, 400, 300, (100, 100, 300, 200))

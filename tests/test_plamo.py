@@ -164,6 +164,24 @@ def test_one_raw_request_per_line_with_stops_context_and_temperature(stub):
     assert "<|plamo:msg|>一<|plamo:tag|>output" in second["prompt"]  # the line before, as an earlier pair
 
 
+def test_a_hint_a_kind_and_a_room_leave_the_prompt_as_it_is_and_the_editor_is_told(stub):
+    """PLaMo followed a hint too seldom to be given one (docs/OFFLINE_VERIFICATION.md, "A translator's hint and
+    PLaMo"): a line with a hint, a kind and a room goes as the same prompt as without them, and the translator says it
+    reads no hints (`base.reads_hints`), so that the region editor says so."""
+    from taslation.translate import DictTranslator
+    from taslation.translate.base import reads_hints
+
+    server, url = stub
+    tr = PlamoTranslator(url, seed=3)
+    premises = Premises(sheet().format(), sheet())
+    tr.translate_page(["魔導書だ"], [("前", "Before")], premises, meta=[{"speaker": "Aki"}])
+    tr.translate_page(["魔導書だ"], [("前", "Before")], premises,
+                      meta=[{"speaker": "Aki", "note": "said to her teacher", "kind": "shout", "room": 12}])
+    plain, hinted = generates(server)
+    assert hinted["prompt"] == plain["prompt"] and "teacher" not in hinted["prompt"]
+    assert not reads_hints(tr) and reads_hints(OllamaTranslator()) and reads_hints(DictTranslator({}))
+
+
 def test_a_line_asked_for_again_is_another_draw(stub):
     server, url = stub
     tr = PlamoTranslator(url, seed=1)

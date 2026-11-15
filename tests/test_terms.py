@@ -105,27 +105,28 @@ def _region(x0, y0, x1, y1, text_box, **kw) -> TextRegion:
 
 
 def test_a_missed_rendering_is_flagged_and_nothing_is_asked_again(settings):
-    tr = DictTranslator({"魔法少女だ": "A magic girl."})
+    tr = DictTranslator({"魔法少女だ": "A witch."})  # (no other spelling of the rendering: nothing to put right)
     p = Pipeline(settings, ocr=None, translator=tr)
     p.glossary = sheet()
     big = _region(0, 0, 400, 300, (100, 100, 300, 200))
     assert p._translate_regions([big], lambda _m: None) == ""
-    assert big.translated_text == "A magic girl." and "rendering" in big.flags and len(tr.calls) == 1
+    assert big.translated_text == "A witch." and "rendering" in big.flags and len(tr.calls) == 1
 
 
 def test_no_flag_when_the_check_is_off_or_there_is_no_sheet(settings):
     settings.enforce_terms = False
-    tr = DictTranslator({"魔法少女だ": "A magic girl."})
+    tr = DictTranslator({"魔法少女だ": "A witch."})
     p = Pipeline(settings, ocr=None, translator=tr)
     p.glossary = sheet()
     big = _region(0, 0, 400, 300, (100, 100, 300, 200))
     p._translate_regions([big], lambda _m: None)
-    assert big.translated_text == "A magic girl." and "rendering" not in big.flags
+    assert big.translated_text == "A witch." and "rendering" not in big.flags
     settings.enforce_terms = True
-    p = Pipeline(settings, ocr=None, translator=tr)  # no sheet handed over
+    tr = DictTranslator({"魔法少女だ": "A magic girl."})
+    p = Pipeline(settings, ocr=None, translator=tr)  # no sheet handed over: nothing flagged, nothing respelt
     big = _region(0, 0, 400, 300, (100, 100, 300, 200))
     p._translate_regions([big], lambda _m: None)
-    assert big.translated_text == "A magic girl." and "rendering" not in big.flags and len(tr.calls) == 2
+    assert big.translated_text == "A magic girl." and "rendering" not in big.flags and len(tr.calls) == 1
 
 
 

@@ -30,7 +30,15 @@ What the pipeline hands a translator maps to it like this:
 * the Japanese after a line (the request's own lines, then ``upcoming``) -> ``context`` for a line that goes on in
   the next bubble (`FOLLOW_OPEN`: the next one) and for a line asked alone, as a line asked again is
   (`FOLLOW_ALONE`: the next two), never past its page; not for the others, whose ``context`` stays the same from line
-  to line.
+  to line;
+* a region's hint for the model (the facts' ``note``), its kind and its room -> nothing (``reads_hints`` False, so
+  that the region editor says the hint is not read). Measured on 2026-11-15 with invented lines, three seeds each
+  (docs/OFFLINE_VERIFICATION.md, "A translator's hint and PLaMo"): a hint as a line of ``context``, the best of four
+  ways tried, was followed in 38 of 78 answers (17 without it), mended 21 of the 61 the model got wrong and spoilt
+  none; it settled readings of names and terms, which the series sheet settles every time (``glossary``), now and
+  then a pronoun or a number, and never the register or the people addressed. As a line of ``context`` the kind
+  "shout" gave 3 of 30 answers an exclamation mark (1 without it) and the room in characters brought none of 30
+  within it; the kind "sfx" made 14 of 30 romanised sound effects English ones (Gashan: Crash) and 3 a wrong one.
 
 Translating is all it does, as for the other translator: TASlation has no notes of the model's own, no review pass, no
 shortening and no alternatives (removed 2026-11-06). A line whose reply copied the Japanese or came back empty is asked
@@ -165,6 +173,7 @@ class PlamoTranslator(OllamaTranslator):
     with its own context size (`NUM_CTX`); *history_pairs*: the earlier pairs a line carries at most."""
 
     name = "plamo"
+    reads_hints = False  # a region's hint is not in the prompt: followed too seldom (the module's docstring)
 
     def __init__(self, url: str = "http://127.0.0.1:11434", model: str = PLAMO.ollama_name, timeout: float = 900.0,
                  temperature: float = 0.2, num_ctx: int = NUM_CTX, target_language: str = "English",

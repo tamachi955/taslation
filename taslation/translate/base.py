@@ -47,8 +47,19 @@ class Translator(Protocol):
         ``on_slow`` (optional, may be left out): called once, with the seconds waited,
         when the request has produced nothing for a while (the translator's
         ``slow_after``; a model that is still loading, say).
+
+        A translator may leave facts of ``meta`` unused; one that does not pass a
+        region's hint (``note``) on to its model says so with ``reads_hints = False``
+        (`reads_hints`), and the region editor tells the reader.
         """
         ...
+
+
+def reads_hints(translator: Any) -> bool:
+    """Whether *translator* passes a region's hint for the model (the reader's ``note`` in ``meta``) on to its model:
+    the chat translator does (`ollama.OllamaTranslator`), PLaMo does not (`plamo.PlamoTranslator.reads_hints`). One
+    that does not say is taken to (a test's stand-in, the echo)."""
+    return bool(getattr(translator, "reads_hints", True))
 
 
 def accepts(fn: Any, name: str) -> bool:

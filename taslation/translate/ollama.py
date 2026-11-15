@@ -176,6 +176,7 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 
 class OllamaTranslator:
     name = "ollama"
+    reads_hints = True  # a region's hint goes with its bubble as "note" (`build_messages`, `base.reads_hints`)
 
     def __init__(
         self,

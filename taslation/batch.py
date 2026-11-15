@@ -14,7 +14,7 @@ Two modes:
   nothing goes to disk, so nothing of a page can be read until the translation. *Translation*: once the reader says
   the book is done (`finish`), runs of pages (`chunk_bubbles`) are translated once with the series sheet and the whole
   story as context (the translations before them, the Japanese that comes next), and each run is stored as it comes; a
-  rendering the series sheet spells otherwise is put right without the model (`terms.rendering_variants`), the review
+  rendering the series sheet spells otherwise is put right without the model (`terms.spelt_right`), the review
   flags are set (`Pipeline.review`: no model request), a line left out or answered with the Japanese is asked for
   again, and a line never answered leaves its page `incomplete`. The model writes no notes of its own and reviews
   nothing (removed 2026-11-06): what it is told of the book is the series sheet the reader keeps.
@@ -189,7 +189,7 @@ from .notes import series_key
 from .regions import region_meta
 from .pipeline import EventFn, Pipeline, ScannedUnit, cancel_args, direction_of
 from .regions import PageResult
-from .terms import rename_text, rendering_variants
+from .terms import spelt_right
 from .translate import OllamaTranslator, TranslationError
 from .translate import base as _base
 from .translate.base import REASK_GROUP, accepts, ask_again_romanised, ask_for_missing, worth_asking_again
@@ -1837,7 +1837,7 @@ class BatchReader:
 
         A failed request is retried in two halves, and so is a reply with not one usable line; a single page unit
         whose request failed is asked for again a few lines at a time instead (not after a timeout). The reply gets
-        the renderings of the series sheet where it spells them otherwise (`_spelt_right`), is checked and
+        the renderings of the series sheet where it spells them otherwise (`terms.spelt_right`), is checked and
         tightened (`Pipeline.tighten`) and every page unit it completes is committed. For the lines it left without a
         usable translation (missing, empty, the Japanese copied: a cut-off or looping reply, an id left out) the model
         is asked again (`ask_for_missing`): a few consecutive lines at a time with their neighbours as context, then
@@ -1922,7 +1922,7 @@ class BatchReader:
             for k in lines:
                 ui, i = slots[k]
                 r = units[ui].japanese()[i]
-                text = self._spelt_right(texts[k], replies[k], str(meta[k].get("speaker", "")), sheet)
+                text = spelt_right(sheet, texts[k], replies[k], str(meta[k].get("speaker", "")))
                 entries.append({"ja": r.source_text, "text": text, "mask": r.mask, "kind": r.kind,
                                 "anchor": r.text_box, "x0": r.bbox[0], "y0": r.bbox[1], "meta": region_meta(r),
                                 "confidence": r.ocr_confidence, "direction": direction_of(r)})
@@ -2005,14 +2005,6 @@ class BatchReader:
         gets none: the page is translated when it is read in any case."""
         for unit in units:
             self.pipeline.commit_unit(unit, {})
-
-    @staticmethod
-    def _spelt_right(ja: str, text: str, speaker: str, sheet: Any) -> str:
-        """*text*, a translation of *ja*, with the renderings of the series sheet *sheet* where it spells them
-        otherwise: the near spellings `terms.rendering_variants` finds. No model request."""
-        if not text or sheet is None:
-            return text
-        return rename_text(text, rendering_variants(sheet, ja, text, speaker))
 
     def _run_pagewise(self, start: float) -> None:
         p = self.progress
@@ -2161,8 +2153,8 @@ class BatchReader:
             return None
         return TranslationView(self.pipeline, self.images, self.show, units,
                                lambda u: self._seq_of.get(id(u), 0),
-                               spell=lambda ja, text, speaker: self._spelt_right(ja, text, speaker,
-                                                                                 self.pipeline.check_sheet()),
+                               spell=lambda ja, text, speaker: spelt_right(self.pipeline.check_sheet(), ja, text,
+                                                                           speaker),
                                storing=self._storing, priority=lower_priority)
 
     def _translate_chunks(self, chunks: list[list[ScannedUnit]], units: list[ScannedUnit],

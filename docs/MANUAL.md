@@ -375,6 +375,8 @@ and the page can be edited.
 * **Editing a region**: opens with a double-click (or Enter while a region is selected). The formatting fields are folded into the "Formatting" button when the region has no formatting of its own. You can change the **speaker** (chosen from the series sheet's names), the **kind** (Speech,
   Thought, Shout, Narration, Sound effect, Handwritten, Erase only), whether the **sentence continues in the next bubble**, the **hint for the model** (a pun, who is addressed),
   and the translation. Enter starts a new line (the lettering keeps that line break too), and Ctrl+Enter saves.
+  PLaMo 3 Translate (the model of every target language but Brazilian Portuguese and Turkish, see "Choosing the model") does not read the hint, and the editor says so under it:
+  "Ask again" does not follow the hint then. The hint is kept with the book's page information, and Qwen3.5 4B or a model of your own reads it. The speaker and the series sheet's names and terms reach every model.
   With the kind set to "Erase only", the region's original lettering is only erased, and nothing is lettered there (as soon as you choose it, the page behind shows it erased).
   It is not sent for translation (in whole-book processing either), and it is counted neither as flagged for review nor as untranslated. The earlier translation stays in the cache, so setting the kind back letters it again.
   The change can be taken back with Ctrl+Z.
@@ -404,7 +406,8 @@ and the page can be edited.
   "Skip page" marks a page with nothing to translate, such as an advertisement or the viewer's own panel,
   and "Translate again" (not using the cache) translates the page again with the current premises.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
-  "Ask again" in the editor has the model translate that bubble again, with the lines before it as context (there is no feature that lists alternatives).
+  "Ask again" in the editor has the model translate that bubble again, with the lines before it as context (there is no feature that lists alternatives);
+  in its answer too, names and terms spelled differently from the series sheet are made consistent mechanically.
   To flag translations that contain a word the dictionary does not know as well, install `pyspellchecker` (`pip install pyspellchecker`;
   MIT licence; it keeps word lists for English, Spanish, French, Portuguese, German, Italian, Russian and Dutch on disk;
   the series sheet's names and renderings are exempt). When the spellcheck setting (`spellcheck`, on by default) is on but this package is not installed,
@@ -615,6 +618,8 @@ PLaMo 3 Translate is a model made only for translation. TASlation builds its PFM
 (the form the model's card recommends for production use; the model's own chat template is not used: the template in the earlier revision's file could not be told
 the target language through Ollama, and ended up translating back into Japanese, and the one in the current file builds the same prompt as TASlation). Each line is one request,
 which carries the earlier lines and their translations, the series sheet as reference information (for a line with a speaker set, that speaker too), and, as a glossary, the series sheet's renderings that appear in that line.
+A region's hint for the model is not passed: in a test with invented lines it was followed in 38 of 78 answers (17 without it), and never for the register or for who is addressed
+(docs/OFFLINE_VERIFICATION.md); the region editor says so.
 The context is 8192 tokens, and it takes about 1.9 GB of GPU memory. On OpenMantra (Japanese to English, whole books, three runs each with fixed seeds),
 its chrF was 5.9 higher than Qwen3.5 4B's (a bootstrap interval of roughly +4.7 to +7.2), and it was about twice as fast.
 It cannot write Brazilian Portuguese or Turkish (it answers in another language), so for these two only, Qwen3.5 4B translates, in the JSON chat format.

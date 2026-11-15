@@ -6,8 +6,9 @@ exactly what a Japanese term or name must become, so the check is plain string m
 passes, and a lowercase rendering may take a capital at the start of a sentence): a translation that misses a
 rendering gets the review flag "rendering" (`term_misses`, `review.flags_for`); nothing is asked of the model again
 (removed 2026-11-06). A translation that spells a rendering another way ("Ryuji" where the sheet says "Ryūji") is put
-right without the model (`rendering_variants`, `rename_text`). Which entries a line names (`_sheet_hits`) is also the
-PLaMo translator's glossary. Nothing here is printed.
+right without the model (`rendering_variants`, `rename_text`; `spelt_right` for a fresh translation, page by page as
+in a whole-book run). Which entries a line names (`_sheet_hits`) is also the PLaMo translator's glossary. Nothing here
+is printed.
 
 A term of two or more characters is also found through a kana fold (`fold_kana`: small kana to large, katakana to
 hiragana, on both sides, one character for one), because the OCR reads ピョ as ピヨ; there is no edit distance, which
@@ -338,6 +339,18 @@ def rendering_variants(glossary: Glossary | None, source: str, text: str, speake
         if spelt and (spelt, rendering) not in out:
             out.append((spelt, rendering))
     return out
+
+
+def spelt_right(glossary: Glossary | None, source: str, text: str, speaker: str = "") -> str:
+    """*text*, a fresh translation of *source*, with the renderings of the series sheet *glossary* where it spells
+    them otherwise: the near spellings `rendering_variants` finds, put in by `rename_text`. No model request; *text*
+    as it is without a sheet. The one correction of both ways of translating: a whole-book run's replies
+    (`batch.BatchReader._translate_units`, its translation view) and a page translated alone
+    (`Pipeline._translate_regions`, `Pipeline.ask_again`). Only what the model has just written goes through it, never
+    a translation already stored."""
+    if not text or glossary is None:
+        return text
+    return rename_text(text, rendering_variants(glossary, source, text, speaker))
 
 
 def rename_text(text: str, pairs: Sequence[tuple[str, str]]) -> str:

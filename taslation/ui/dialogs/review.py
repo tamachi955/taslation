@@ -35,6 +35,9 @@ REGION_KIND_WORDS = {"": "(not set)", "speech": "Speech", "thought": "Thought", 
 ERASE_ONLY_TIP = ("Erase only: the lettering is erased and nothing is set in its place; the region is not translated "
                   "and not counted as untranslated.")
 ASKING = {"again": "Asking the model for a new translation..."}
+# under the hint for the model, when the translation model in use does not read it (`translate.base.reads_hints`)
+HINT_UNREAD = ("The translation model in use does not read hints: Ask again does not follow this one. Names and terms "
+               "in the series sheet, and the speaker, do reach the model.")
 FLASH = "#fff4bf"  # the translation box, for a moment, when the model's new translation is put in it
 FLASH_MS = 1200
 # the formatting bar
@@ -377,7 +380,9 @@ class EditBubbleDialog(tk.Toplevel):
     place on the screen) the way to
     the region before or after this one; the editor closes without *on_cancel* (the window ends its preview). *at*:
     where the editor opens on the screen (the place the one before it had), else over *master*. *note*: a line the
-    window has to say once (the spellcheck that cannot run), under the header."""
+    window has to say once (the spellcheck that cannot run), under the header. *reads_hints*: whether the translation
+    model in use reads the hint for the model (`translate.base.reads_hints`); when it does not, a line under the hint
+    says so (`HINT_UNREAD`), and the hint is kept all the same."""
 
     def __init__(self, master: tk.Misc, region: Any, speakers: list[str], on_save: Callable[[dict[str, Any]], None],
                  on_drop: Callable[[], None], on_ask: Callable[[str, dict[str, str]], bool] | None = None,
@@ -388,7 +393,8 @@ class EditBubbleDialog(tk.Toplevel):
                  crop: Image.Image | None = None,
                  on_read: Callable[[Callable[[str, str], None]], bool] | None = None,
                  on_step: Callable[[int, dict[str, Any] | None, tuple[int, int]], None] | None = None,
-                 at: tuple[int, int] | None = None, note: str = "", clip: Any = None, font_memory: Any = None):
+                 at: tuple[int, int] | None = None, note: str = "", clip: Any = None, font_memory: Any = None,
+                 reads_hints: bool = True):
         super().__init__(master)
         self.title(_("Edit region"))
         self.transient(master)
@@ -445,10 +451,16 @@ class EditBubbleDialog(tk.Toplevel):
         ttk.Label(grid, text=_("Hint for the model (a pun, who is addressed):")).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.note_var = tk.StringVar(value=region.remark)
         ttk.Entry(grid, textvariable=self.note_var, width=64).grid(row=3, column=0, columnspan=4, sticky="we")
+        self.hint_unread: ttk.Label | None = None  # said when the translation model in use does not read the hint
+        if not reads_hints:
+            self.hint_unread = ttk.Label(grid, text=_(HINT_UNREAD), foreground="#5a5a5a", justify="left",
+                                         wraplength=480)
+            self.hint_unread.grid(row=4, column=0, columnspan=4, sticky="we")
+            self.hint_unread.bind("<Configure>", lambda e: wrap_label(self.hint_unread, e.width))
         ttk.Label(grid, text=_("Note to the reader (a pun, a reference the translation cannot carry):")).grid(
-            row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
+            row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.reader_var = tk.StringVar(value=getattr(region, "reader_note", ""))
-        ttk.Entry(grid, textvariable=self.reader_var, width=64).grid(row=5, column=0, columnspan=4, sticky="we")
+        ttk.Entry(grid, textvariable=self.reader_var, width=64).grid(row=6, column=0, columnspan=4, sticky="we")
         ttk.Label(frm, text=_("Translation (what is drawn in the region):")).pack(anchor="w", pady=(8, 0))
         style = getattr(region, "style", None) or RegionStyle()
         self._build_bar(frm, style, faces)

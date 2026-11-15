@@ -37,6 +37,7 @@ from ..render.slant import slanted_outline
 from .. import review as checks
 from ..review import rendering_changes, sheet_item_for
 from ..translate import TranslationError
+from ..translate.base import reads_hints
 from . import area, shortcuts
 from .constants import FIRST_PAGE, FORWARDED_KEYS, READER_AFTER_RUN, THIS_PAGE, book_read, in_a_run, viewer_rests
 from .dialogs import caches as boxes
@@ -1154,7 +1155,9 @@ class TranslatorMixin:
         page's regions in reading order (`_step_editor`). What the editor shows is lettered on the page behind it a
         moment after each change (`LivePreview`). The editor belongs to the page it opens on (*result*: the last one
         when None): Auto may turn the page behind it, and Save, Drop and the model's answers still go to that page. A
-        region of a page gone by now (a review list left open) is refused. *at*: where on the screen it opens."""
+        region of a page gone by now (a review list left open) is refused. *at*: where on the screen it opens. When
+        the translation model in use does not read a region's hint (`translate.base.reads_hints`: PLaMo), the editor
+        says so under it."""
         result = result if result is not None else self.last_result
         pipeline = self.pipeline
         if not holds(result, region):
@@ -1189,7 +1192,8 @@ class TranslatorMixin:
                                             r, result, preview, delta, data, place),
                                         at=at, note=self._spelling_note(),
                                         clip=self.format_clip() if hasattr(self, "format_clip") else None,
-                                        font_memory=FontMemory(self.settings.state_dir))
+                                        font_memory=FontMemory(self.settings.state_dir),
+                                        reads_hints=not can_ask or reads_hints(pipeline.translator))
 
     def _step_editor(self, region: Any, result: Any, preview: LivePreview | None, delta: int,
                      data: dict[str, Any] | None, at: tuple[int, int]) -> None:
