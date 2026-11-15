@@ -1153,7 +1153,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "th": "พร้อมกับการกะพริบ จะเล่นเสียงเริ่มต้นของระบบหนึ่งครั้ง",
     },
     # (the words with "its original: enlarged beside it, or in its place", and the rows of `hover_shows` and
-    # `hover_reveal` below: written by Claude, no native review)
+    # `hover_reveal` below: machine-translated, no native review)
     "In reading mode and the Reader role, with the translation on the page, a translated bubble the pointer rests on shows its original: enlarged beside it, or in its place (Under the pointer).": {
         "ja": "読書モードと読者の役割で、ページに訳文を出しているとき、ポインターを置いた訳済みの吹き出しに原文を出します。横に拡大して出すか、その場で出すかは「ポインターの下」で選びます。",
         "es": "En el modo lectura y con el rol de lector, con la traducción en la página, un globo traducido sobre el que se detiene el puntero muestra su original: ampliado a su lado, o en su sitio (Bajo el puntero).",

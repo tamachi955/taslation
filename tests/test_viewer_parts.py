@@ -123,7 +123,7 @@ def test_the_shared_programs_are_never_remembered_by_their_program(state):
 
 # ------------------------------------------------------------------ the next start
 def test_a_remembered_viewer_is_picked_automatically_at_the_next_start(state):
-    chat = _win(1, "Yomizuq画面翻訳アプリ - Claude - Google Chrome")
+    chat = _win(1, "Yomizuq画面翻訳アプリ - Chat - Google Chrome")
     notepad = _win(2, "notes.txt - Notepad", "Notepad", "notepad.exe")
     first = _win(3, "見本の物語 1 - Yomizuq - Google Chrome")
     assert choose_viewer([chat, notepad, first]) == (None, [])  # first use on this computer: the reader picks it

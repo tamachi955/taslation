@@ -164,7 +164,7 @@ def test_a_viewer_closed_and_opened_again_is_chosen_again_as_the_list_opens(scre
     assert w.selected is hidden
 
 
-CHAT = WindowInfo(hwnd=4, title="Yomizuq画面翻訳アプリ - Claude - Google Chrome", class_name="Chrome_WidgetWin_1", pid=4,
+CHAT = WindowInfo(hwnd=4, title="Yomizuq画面翻訳アプリ - Chat - Google Chrome", class_name="Chrome_WidgetWin_1", pid=4,
                   rect=(0, 0, 1600, 1000))
 STORE = WindowInfo(hwnd=5, title="見本の物語 1 - FOLIO☆QAT - Google Chrome", class_name="Chrome_WidgetWin_1", pid=5,
                     rect=(0, 0, 1000, 800))
@@ -175,7 +175,7 @@ BOOKISH = WindowInfo(hwnd=6, title="Book club notes - Google Chrome", class_name
 LEARNED = ("Yomizuq - Google Chrome", "Yomizuq for PC", "FOLIO☆QAT", "BookZumo!Reader", "ebookqat - Microsoft Edge",
            "Yomizuq", "見本の物語 1 - FOLIO☆QAT", "ズモリカ", "Yomizuq: 見本の物語 1", "【Yomizuq】 本")
 NEVER = ("Facebook - Google Chrome", "Book1 - Excel", "Bookmarks - Google Chrome", "Notebook - OneNote",
-         "notes.txt - Notepad", "Booking.com - Microsoft Edge", "Yomizuq画面翻訳アプリ - Claude - Google Chrome",
+         "notes.txt - Notepad", "Booking.com - Microsoft Edge", "Yomizuq画面翻訳アプリ - Chat - Google Chrome",
          "Yomizuq画面翻訳アプリ", "ebookqatese study notes", "My e-book sale - Google Chrome")
 
 

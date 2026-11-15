@@ -1,7 +1,7 @@
 """The window's strings for what a bubble under the pointer shows while reading and how (`ui.hover`, `ui.zoom`,
 `ui.in_place`): View's choices of the translation or the original on the page and of a panel beside the bubble or the
 bubble itself, their keys and status lines, a bubble's Japanese as text and its Copy buttons and keys
-(`ui.bubble_text`), and the help's lines on them. Written by Claude; no native review."""
+(`ui.bubble_text`), and the help's lines on them. Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ View's choice (`ui.hover`)

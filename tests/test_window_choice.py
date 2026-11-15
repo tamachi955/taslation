@@ -34,7 +34,7 @@ def _learned(*parts: str) -> None:
     viewerparts.change(lambda memory: memory.learn(parts))
 
 
-CHAT = _win(1, "Yomizuq画面翻訳アプリ - Claude - Google Chrome", size=1600)  # the larger one, as in the incident
+CHAT = _win(1, "Yomizuq画面翻訳アプリ - Chat - Google Chrome", size=1600)  # the larger one, as in the incident
 READER = _win(2, "Yomizuq - Google Chrome", size=1200)  # a store's reader whose tab is titled with its name alone
 NOTEPAD = _win(3, "Yomizuqメモ.txt - Notepad", "Notepad", size=600)  # "Yomizuq" in a longer run: no viewer
 STORE = _win(4, "見本の物語 1 - FOLIO☆QAT - Microsoft\u200b Edge", size=900)  # "<book> - <store>"; Edge's zero-width space
@@ -43,7 +43,7 @@ VIEWERS = ("Yomizuq", "FOLIO☆QAT", "ズモリカ")
 
 
 def test_a_browser_windows_tab_title():
-    assert READER.tab_title == "Yomizuq" and CHAT.tab_title == "Yomizuq画面翻訳アプリ - Claude"
+    assert READER.tab_title == "Yomizuq" and CHAT.tab_title == "Yomizuq画面翻訳アプリ - Chat"
     assert STORE.tab_title == "見本の物語 1 - FOLIO☆QAT"
     assert tab_title("Yomizuq — Mozilla Firefox", FIREFOX) == "Yomizuq"
     assert tab_title("Yomizuq — Mozilla Firefox Private Browsing", FIREFOX) == "Yomizuq"
@@ -77,7 +77,7 @@ def test_a_learned_viewers_name_or_book_must_be_a_word_of_the_title():
     for title in ("Yomizuq", "Yomizuq - Google Chrome", "Yomizuq for PC", "見本の物語 1 - FOLIO☆QAT", "FOLIO☆QAT",
                   "ズモリカ", "My Book | Reader", "Yomizuq｜見本の物語", "Yomizuq：見本の物語", "YOMIZUQ"):
         assert looks_like_viewer(title), title
-    for title in ("Yomizuq画面翻訳アプリ", "Yomizuq画面翻訳アプリ - Claude - Google Chrome", "Yomizuqアプリの使い方",
+    for title in ("Yomizuq画面翻訳アプリ", "Yomizuq画面翻訳アプリ - Chat - Google Chrome", "Yomizuqアプリの使い方",
                   "Yomizuqs", *NEVER):
         assert not looks_like_viewer(title), title
     assert looks_like_viewer(READER) and looks_like_viewer(STORE) and looks_like_viewer(APP)
@@ -114,7 +114,7 @@ def test_the_incident_a_query_names_the_readers_tab_not_the_chat_page():
     assert find_window("Yomizuq", wins) == READER and find_window("yomizuq", wins) == READER  # the exact tab title
     assert find_window("Yomizuq画面", wins) == CHAT  # the start of the chat page's tab title
     assert find_window("Yomizuq - Google Chrome", wins) == READER  # the exact title
-    assert find_window("  YOMIZUQ画面翻訳アプリ - claude - google chrome ", wins) == CHAT
+    assert find_window("  YOMIZUQ画面翻訳アプリ - chat - google chrome ", wins) == CHAT
 
 
 def test_the_rules_in_their_order_and_several_windows_named_alike():

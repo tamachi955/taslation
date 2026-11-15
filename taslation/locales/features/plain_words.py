@@ -1,6 +1,6 @@
 """The window's strings of the plain-words round: what used to have no help or no tooltip (the Translator role and the
 keys in the help, the menus' lines in the status bar, the tips of the region editor and the series sheet), the
-book's three plain settings. Terms as the window's catalogs have them. Written by Claude; no native review."""
+book's three plain settings. Terms as the window's catalogs have them. Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "Stop": {

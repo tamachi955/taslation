@@ -8,7 +8,7 @@ are what the reader types, as the book's own cover writes them. "Series" is word
 「シリーズ設定」, de „Serienblatt“, es «ficha de la serie», ko '시리즈 시트'); the Volume field's label as the volume
 of a book in a series (ja 「巻」, zh 「卷」, ko '권').
 
-Written by Claude; no native review."""
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ the two fields

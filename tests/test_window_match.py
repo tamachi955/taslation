@@ -10,7 +10,7 @@ YOMIZUQ = "Yomizuq - Google Chrome"  # an invented viewer, its tab titled with i
 def test_same_window_other_tab():
     assert same_book_window(YOMIZUQ, YOMIZUQ)
     assert not same_book_window("ホーム / X - Google Chrome", YOMIZUQ)
-    assert not same_book_window("Some chat - Claude - Google Chrome", YOMIZUQ)
+    assert not same_book_window("Some chat - Chat - Google Chrome", YOMIZUQ)
     assert not same_book_window("", YOMIZUQ)
 
 
@@ -18,9 +18,9 @@ def test_query_still_matches():
     assert same_book_window(YOMIZUQ, YOMIZUQ, query="yomizuq")
     assert not same_book_window("ホーム / X - Google Chrome", YOMIZUQ, query="yomizuq")
     # the tab switched to a chat page about the viewer: its name is not a word of that title, so the book is not there
-    assert not same_book_window("Yomizuq画面翻訳アプリ - Claude - Google Chrome", YOMIZUQ, query="yomizuq")
+    assert not same_book_window("Yomizuq画面翻訳アプリ - Chat - Google Chrome", YOMIZUQ, query="yomizuq")
     assert same_book_window("Yomizuq: 見本の物語 1 - Google Chrome", YOMIZUQ, query="Yomizuq")
-    chat = "Yomizuq画面翻訳アプリ - Claude - Google Chrome"  # picked by its own name, it stays itself
+    chat = "Yomizuq画面翻訳アプリ - Chat - Google Chrome"  # picked by its own name, it stays itself
     assert same_book_window(chat, chat, query="Yomizuq画面")
 
 

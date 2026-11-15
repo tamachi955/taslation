@@ -928,7 +928,7 @@ with it on three pages and came back well-formed.
 
 Decision: `qwen3.5:4b` became the default (config, example file, README,
 THIRD_PARTY); the Q4_K_M and Q6_K builds of Qwen3 4B and TranslateGemma
-were removed with `ollama rm`. Its vision weights went unused until the second-reader rule (below), turned off again by default after a gold transcription ("Claude as the judge, and a gold set"); at 4B
+were removed with `ollama rm`. Its vision weights went unused until the second-reader rule (below), turned off again by default after a gold transcription ("A cloud model as the judge, and a gold set"); at 4B
 they cost little. Prompt variants tried on the premises set at the same time
 (a rule to supply the subject English needs, a rule to write names exactly
 as rendered) did not beat the prompt as it is (40.7 of 45 with the renderings
@@ -1232,13 +1232,13 @@ text-only model, or speed; a model that takes no images is never sent
 pixels: the client asks the server). The judges were removed afterwards;
 the 4B is the only model on the machine again.
 
-Superseded the same night: judged by Claude against a blind transcription
+Superseded the same night: judged by a cloud model against a blind transcription
 of the lettering, the rule reads worse than manga-ocr alone, and the
 default went back to manga-ocr (next section).
 
-### Claude as the judge, and a gold set (2026-10-29)
+### A cloud model as the judge, and a gold set (2026-10-29)
 
-The owner asked whether Claude should be the judge instead of the pulled
+The owner asked whether a cloud model should be the judge instead of the pulled
 models, and allowed the crops to leave the machine for that (training
 opt-out on their account; the application itself gets no such feature,
 since an end user's opt-out cannot be guaranteed). Two blind passes over

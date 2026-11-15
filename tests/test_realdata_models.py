@@ -157,7 +157,7 @@ def test_a_model_bubbles_outline_stays(read_volume):
 
 
 # ------------------------------------------------------------------ the holdout findings of 2026-11-06 (screens judged by
-# Claude, every screen of this volume used for tuning since: the final check needs another volume)
+# a cloud model, every screen of this volume used for tuning since: the final check needs another volume)
 def _read_as_text(result):
     return [r for r in result.regions if r.status == "untranslated" and r.source_text]
 
