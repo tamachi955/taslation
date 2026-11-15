@@ -28,6 +28,12 @@ the author, the publisher, the ISBN; each optional, cleaned and bounded, never t
 without building its pages, which is what recognising a book by a page needs (`bookid.recognise`), and what finds
 a book's caches kept under another spelling of its name (`CacheStore.kept_name`: "Some Title 3巻" from before the
 Series and Volume fields, for "Some Title 3"; such a cache is read and written under its own name until renamed).
+
+The file also keeps the book's short lines for reuse (`BookCache.lines`, `linememo.LineMemo`; the ``lines`` field,
+before the pages, so that the other volumes of a series read it from the header: `CacheStore.line_memos`): each
+line's translation under a keyed hash of its normalised Japanese, never the Japanese. It goes wherever the cache
+goes (saved, merged, exported, imported, renamed, deleted with it); a bubble given a translation reused so is marked
+(`CachedBubble.reused`), which translator mode's region editor says.
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from typing import Any, Callable, Iterable, NamedTuple
 from . import protect
 from .atomic import write_atomic
 from .fingerprint import FINGERPRINT_BITS, FINGERPRINT_HEX_LEN, hamming
+from .linememo import LineMemo
 from .names import (
     DAMAGED, WINDOWS_DEVICES, Unreadable, check_schema, delete_files, drop_leftovers, file_names, files_of, is_copy,
     is_listed, language_key, load_object, pick, read_object, set_aside, slugify,
@@ -93,6 +100,7 @@ class CachedBubble:
     flags: list[str] = field(default_factory=list)  # why the translation deserves a look (cleared when the reader edits it)
     note: str = ""  # a note for the reader (a pun, a reference the translation cannot carry)
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`TextRegion.angle`; written when not 0)
+    reused: bool = False  # its translation is one kept for an identical line before it (`linememo`; written when so)
 
     def to_json(self) -> dict[str, Any]:
         d: dict[str, Any] = {"box": [round(v, 4) for v in self.box], "text": self.text}
@@ -104,6 +112,8 @@ class CachedBubble:
             d["note"] = self.note
         if self.angle:
             d["angle"] = round(self.angle, 2)
+        if self.reused:
+            d["reused"] = True
         return d
 
     @classmethod
@@ -118,7 +128,8 @@ class CachedBubble:
         flags = [str(f) for f in d.get("flags", []) if f]
         angle = _finite(d.get("angle", 0.0))
         return cls(box=box, text=str(d.get("text", "")), poly=poly, flags=flags,  # type: ignore[arg-type]
-                   note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0)
+                   note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0,
+                   reused=d.get("reused") is True)
 
 
 @dataclass
@@ -373,6 +384,10 @@ class BookCache:
         self._index: _PageIndex | None = None  # where the pages are by fingerprint, made when a page is placed
         self.details: dict[str, str] = {}  # the header's `DETAIL_FIELDS` that are known (the colophon's)
         self._details_set = False  # this process set them since its last save: they win over the file's
+        self.lines = LineMemo(self._lines_changed)  # the book's short lines kept for reuse (`linememo`)
+
+    def _lines_changed(self) -> None:
+        self.dirty = True
 
     def set_details(self, **details: Any) -> bool:
         """Keep what the colophon says of the book in the header (`DETAIL_FIELDS`: title, volume, author, publisher,
@@ -430,6 +445,7 @@ class BookCache:
         cache.created = str(data.get("created", cache.created))
         cache.updated = str(data.get("updated", cache.updated))
         cache.details = {name: value for name in DETAIL_FIELDS if (value := clean_detail(name, data.get(name)))}
+        cache.lines = LineMemo.from_json(data.get("lines"), cache._lines_changed)
         for raw in pages:
             try:
                 cache.pages.append(CachedPage.from_json(raw))
@@ -461,6 +477,7 @@ class BookCache:
         self.pages, self.created, self.updated, self.stamp = fresh.pages, fresh.created, fresh.updated, fresh.stamp
         if not self._details_set:  # the header's details as the file has them, unless this process set its own
             self.details = dict(fresh.details)
+        self.lines.take(fresh.lines)  # (in place, with this process's changes on top)
         self._index = None
         for fp in self.removed:
             self.pages = [p for p in self.pages if hamming(p.fingerprint, fp) > 6]
@@ -468,6 +485,7 @@ class BookCache:
             self._place(page)
 
     def to_json(self) -> dict[str, Any]:
+        lines = self.lines.to_json()
         return {
             "schema": SCHEMA_VERSION,
             "app": "taslation",
@@ -479,6 +497,7 @@ class BookCache:
             "created": self.created,
             "updated": self.updated,
             **{name: self.details[name] for name in DETAIL_FIELDS if self.details.get(name)},
+            **({"lines": lines} if lines else {}),  # (keyed hashes and translations: in the header, `line_memos`)
             "pages": [p.to_json() for p in sorted(self.pages, key=lambda p: p.seq)],  # last: `CacheStore.identities`
         }
 
@@ -505,6 +524,7 @@ class BookCache:
         self.stamp = _stamp(self.path)
         self.touched.clear()
         self.removed.clear()
+        self.lines.saved()
         self.dirty = self._details_set = False
 
     def _take_in(self) -> None:
@@ -584,12 +604,20 @@ class BookCache:
         """Replace whole-word renderings in every cached translation (old -> new); returns how many bubbles changed.
 
         This is the editor's consistency pass: when the series sheet settles on
-        a name, the pages translated before it get the same spelling.
+        a name, the pages translated before it get the same spelling, and so do
+        the lines kept for reuse (`lines`).
         """
         compiled = [(re.compile(r"(?<![A-Za-z\u00C0-\u024F])" + re.escape(old) + r"(?![A-Za-z\u00C0-\u024F])"), new)
                     for old, new in pairs if old and new and old != new]
         if not compiled:
             return 0
+
+        def renamed(text: str) -> str:
+            for rx, new in compiled:
+                text = rx.sub(new, text)
+            return text
+
+        self.lines.retext(renamed)
         changed = 0
         for page in self.pages:
             touched = False
@@ -608,8 +636,10 @@ class BookCache:
 
     def put_texts(self, edits: Iterable[TextEdit]) -> list[TextEdit]:
         """Make *edits*, each only where its bubble still holds its old text: the text is all that changes (flags,
-        note, the page's mark and every position stay, as in `rename`). Returns the edits that were made; a save writes
-        them, and a merging save keeps them as it keeps a page added."""
+        note, the page's mark and every position stay, as in `rename`). A line kept for reuse whose translation is the
+        old text of an edit made gets its new text too (`lines`: Find and replace changes the book's translations,
+        the lines to come among them). Returns the edits that were made; a save writes them, and a merging save keeps
+        them as it keeps a page added."""
         pages = {page.fingerprint: page for page in self.pages}
         made: list[TextEdit] = []
         for edit in edits:
@@ -623,6 +653,9 @@ class BookCache:
                     self.touched[page.fingerprint] = page
                     self.dirty = True
                     break
+        texts = {edit.old: edit.new for edit in made if edit.new.strip()}
+        if texts:
+            self.lines.retext(lambda text: texts.get(text, text))
         return made
 
     def remove(self, fingerprint: str, replace_within: int = 6) -> int:
@@ -897,9 +930,35 @@ class CacheStore:
                 "language": cache.language,
                 "pages": len(cache),
                 "bubbles": cache.bubble_count,
+                "lines": len(cache.lines),
                 "updated": cache.updated,
             })
         return out
+
+    def line_memos(self, series: str, language: str, but: str = "",
+                   series_of: Callable[[str], str] | None = None) -> list[LineMemo]:
+        """The lines kept for reuse (`BookCache.lines`) by the caches of the books of *series* in *language*, *but* the
+        book of that name, the most recently saved first: a book's series is *series_of* its name (default
+        `notes.series_key`; `linememo.series_lines` gives the series sheet's `notes.sheet_key`), alike but for letter
+        case and spaces (`linememo.same_series`). Read from the files' headers as `identities` reads them (a file read
+        before is read again only once it has changed), never written. Caches with no lines are left out."""
+        from .linememo import same_series
+        from .notes import series_key
+
+        found: list[tuple[str, LineMemo]] = []
+        for ident in self.identities():
+            if ident.book == but or language_key(ident.language) != language_key(language):
+                continue
+            if not same_series((series_of or series_key)(ident.book), series):
+                continue
+            read = self._identity_of(Path(ident.file))
+            if read is None:
+                continue
+            memo = LineMemo.from_json(read[0].get("lines"))
+            if len(memo):
+                found.append((str(read[0].get("updated", "")), memo))
+        found.sort(key=lambda item: item[0], reverse=True)
+        return [memo for _updated, memo in found]
 
     def delete(self, book: str, language: str | None = None,
                recycle: Callable[[list[Path]], Any] | None = None) -> bool:

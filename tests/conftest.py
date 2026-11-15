@@ -219,6 +219,9 @@ def sample_truth2() -> list[dict]:
 def settings(tmp_path: Path) -> Settings:
     s = Settings(state_dir=tmp_path / "state")
     s.validate()
+    # the tests count the model's requests on pages whose lines repeat (`helpers.FakeOcr` goes round six short lines):
+    # line reuse, on by default, would answer the repeats itself. tests/test_linememo.py turns it on for its own
+    s.reuse_lines = False
     return s
 
 

@@ -30,6 +30,11 @@ written with `write_atomic` as it is, its passphrase its only protection; an imp
 protected like every cache. The format is the same as before the caches were protected (2026-11-14), so an export of
 an earlier version imports.
 
+The short lines a cache keeps for reuse (`linememo`: keyed hashes of the lines, the book's secret for them, and
+their translations; never the Japanese) are part of its JSON, so they travel in the export with the pages: an import
+that merges adds them where the cache has nothing for the line (`LineMemo.join`), one that replaces takes them as
+they are.
+
 Every refusal is a BackupError with a sentence for the reader; a window tells the kinds apart by class:
 WrongPassphrase, BrokenPassphrase, UnreadableExport (from a newer TASlation), TooLarge, LibraryMissing, and
 plain BackupError for a damaged file. NameClash, an OSError, is the cache file that holds another book.
@@ -420,6 +425,7 @@ def import_cache(store: CacheStore, path: Path | str, passphrase: str, replace: 
         cache = store.open(incoming.book, incoming.model, incoming.language)
         for page in incoming.pages:
             cache.add(page)
+        cache.lines.join(incoming.lines)  # the short lines kept for reuse, where the cache has none of its own
         if not cache.details and incoming.details:  # the colophon's details, kept with the file's header
             cache.set_details(**incoming.details)
         cache.save()

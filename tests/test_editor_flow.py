@@ -184,6 +184,7 @@ def test_the_window_tells_the_editor_how_far_the_model_in_use_follows_a_hint(cac
 
     class Opener:
         _open_editor = app_mod.App._open_editor
+        _editor_note = app_mod.App._editor_note
 
         def __init__(self):
             self.pipeline, self.last_result, self.settings = pipeline, result, pipeline.settings
@@ -201,6 +202,11 @@ def test_the_window_tells_the_editor_how_far_the_model_in_use_follows_a_hint(cac
     pipeline.translator = PlamoTranslator()  # (made, never asked: no request goes out)
     w._open_editor(region, result)
     assert made[-1]["hint_support"] == "sometimes" and made[-1]["on_ask"] is not None
+    assert made[-1]["note"] == ""
+    region.reused_text = region.translated_text  # a translation reused from an identical line: said under the header
+    w._open_editor(region, result)
+    assert made[-1]["note"] == translator.REUSED_NOTE and made[-1]["hint_support"] == "sometimes"
+    region.reused_text = ""
     pipeline.translator = None
     w._open_editor(region, result)
     assert made[-1]["hint_support"] == "follows" and made[-1]["on_ask"] is None  # no model to ask: nothing to say

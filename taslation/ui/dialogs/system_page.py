@@ -131,6 +131,10 @@ class SystemPage(ttk.Frame):
         note = (_("Seconds a page: the mean of the last {count} pages lettered.").format(count=len(times)) if len(times)
                 else _("Seconds a page: none yet. They show once pages have been translated, and are kept when the window closes."))
         note += " " + _("Only an NVIDIA GPU with CUDA counts here; nothing is loaded to find out.")
+        tally = getattr(self.pipeline(), "line_tally", None)  # (`linememo.Tally`: counts only)
+        if tally is not None and tally.reused + tally.asked:
+            note += "\n" + _("Short lines reused this session without asking the model: {reused} of {lines}.").format(
+                reused=tally.reused, lines=tally.reused + tally.asked)
         self.note_var.set(in_lines(note, self.width))
 
     def _row(self, n: int, shown: tuple[str, str, str, str]) -> None:

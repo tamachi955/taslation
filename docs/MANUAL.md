@@ -486,6 +486,7 @@ and the page can be edited.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
   "Ask again" in the editor has the model translate that bubble again, with the lines before it as context (there is no feature that lists alternatives);
   in its answer too, names and terms spelled differently from the series sheet are made consistent mechanically.
+  A translation reused from an earlier identical line says so in the editor ("Reusing short lines"); "Ask again" gives a fresh one.
   To flag translations that contain a word the dictionary does not know as well, install `pyspellchecker` (`pip install pyspellchecker`;
   MIT licence; it keeps word lists for English, Spanish, French, Portuguese, German, Italian, Russian and Dutch on disk;
   the series sheet's names and renderings are exempt). When the spellcheck setting (`spellcheck`, on by default) is on but this package is not installed,
@@ -636,6 +637,44 @@ $env:TASLATION_PASSPHRASE = Read-Host -MaskInput               # PowerShell 7
 read -rs TASLATION_PASSPHRASE && export TASLATION_PASSPHRASE   # bash, zsh
 ```
 
+### Reusing short lines
+
+A short line already translated in the same book, or in another volume of the same series, gets that translation again
+without the model being asked (the setting `reuse_lines`, on by default; "Reuse the translation of a short line seen
+before" in "Tools > Settings..."). The same cry, reply or name called out comes back page after page: reusing its
+translation saves a request and keeps the line the same each time. It applies to lines of at most 10 characters, once
+differences that change no reading are evened out (full-width and half-width forms, spaces, "……" and "...", "〜" and
+"ー", "!?" and "！？！", a final "。"). A line whose sentence goes on in the next bubble or comes from the one before, and a
+line with a hint for the model, are always translated. The speaker and the kind you gave a line in translator mode are
+part of it: the same words said by someone else, or marked as a thought, are another line. Only translations made by
+the same model into the same language are reused, and never those of another series. The series is the one the
+series sheet goes by: the Series field, so a volume still kept under a name typed before the two fields ("Some Title
+3巻") shares its lines with "Some Title 4".
+
+* A translation you corrected in translator mode wins: later identical lines get your text. "Ask again" in the editor
+  asks the model; its answer, once saved, counts as your correction. When a translation was reused from an earlier
+  identical line, the editor says so. Ctrl+Z on a correction also takes back the line it kept.
+* "Translate again" and reading the whole book again ask the model for every line, and the new answers replace the
+  model's earlier ones (never your corrections).
+* What is kept is spelt as the series sheet spells, as the page shows it. Before it is reused, a kept translation is
+  held to the series sheet as it is now: a name spelt another way is put right, as in a translation just made, and a
+  translation that still misses a rendering the sheet asks for is not reused (the model is asked).
+* On OpenMantra's five short works, the lines this rule reuses were 3.5 % of the lines and saved about 3.5 % of the
+  translation time in a whole-book run (4.0 % and 3.8 % page by page). Translated afresh, those lines came no
+  measurably closer to the professional translations than the reused ones, and the other lines of their pages were
+  translated as well as without reuse (`docs/OFFLINE_VERIFICATION.md`, "Line reuse"). A longer book has more repeats.
+  What reuse risks: a first translation that misses comes back wherever the line does, until you correct it once (or
+  translate the page again).
+
+What is kept: in the book's cache file, for each such line, a keyed hash of the line (HMAC-SHA-256 with a random key of
+the book's own, kept in the same file) and its translation; the Japanese is not written. It is protected like the rest
+of the file, counted by `taslation cache list` ("line(s) kept for reuse"), deleted with the book's translations,
+carried by the encrypted export and brought back by an import (an import into a cache that has its own lines adds only
+the lines it lacks). Since the key is in the file, whoever can open the file (your Windows user, or anyone with an
+export and its passphrase) can test whether a line they guess was in the book, and a short exclamation is easy to
+guess. With the setting off nothing is reused or kept from then on; what was kept stays in the cache until the book's
+translations are deleted. The "System" page of "Settings" shows how many lines this session reused.
+
 ### Translating into other languages
 
 The target language is chosen in the "To:" box (or with `--language`, or the setting `target_language`).
@@ -779,7 +818,7 @@ The settings you change often can be changed in the window under "Tools > Settin
 the lettering size (80 to 130 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
 in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; whether to stay always on top; how a book starts (page by page, or the whole book first);
-and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends) are listed here too.
+and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before) are listed here too.
 For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
 it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
 On other computers, erasing works as with "Not used", and the model is not even loaded (the setting's row then says so).
@@ -818,7 +857,7 @@ For detection, the classical detection runs on the CPU, and when the layout mode
 and when only part of it is in video memory, it shows something like "GPU and CPU (60 % on the GPU)" (if no model is loaded, it says so).
 For erasing, the fill with the paper's colour runs on the CPU, and when the inpainting (LaMa) is used, the part on the drawing runs on the GPU (on the CPU with "Always, also on the CPU" and no GPU). Only NVIDIA GPUs with CUDA are counted as GPUs,
 and it neither loads a model nor starts Ollama to find out. The seconds are the average of the last 20 pages lettered, saved in `timings.json` in the state folder when the window closes (numbers only; nothing of the pages' content).
-"Look again" refreshes it. `taslation doctor` prints the same as "Where each stage runs:".
+"Look again" refreshes it. `taslation doctor` prints the same as "Where each stage runs:". Below, it says how many short lines this session reused without asking the model ("Reusing short lines"; counts only).
 
 The settings file `taslation.toml` is looked for in this order: the one given with `--config`, `./taslation.toml` in the folder it was run from, and `taslation.toml` in the state folder (`~/.taslation`,
 or the place in the environment variable `TASLATION_STATE_DIR`); the first one found is read (with none, the defaults apply).
@@ -848,6 +887,7 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
+reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
 sound_when_done = false      # ... and plays the system's default sound
 hover_shows = "original"     # reading mode and the Reader role: the translation on the page ("original" under the

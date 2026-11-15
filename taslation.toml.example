@@ -62,6 +62,7 @@ art_erase = "auto"            # with "fill", lettering on the drawing is inpaint
 cache_enabled = true
 fingerprint_max_distance = 36
 match_min_iou = 0.4
+reuse_lines = true            # a short line translated before in the book or its series gets that translation again, without a request (a correction of yours first); kept in the book's cache under a keyed hash of the line, never the Japanese
 
 # --- batch reading ---
 # The viewer's page keys, which the page keys you press in TASlation's window are passed on as: Left, Right, Up, Down,

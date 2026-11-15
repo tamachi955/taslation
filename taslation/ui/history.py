@@ -6,12 +6,13 @@ region editor's live preview is not a change: only what Save keeps is.
 
 A change (`Step`) is kept as copies of what the book's two stores held for the page before it and after it - the
 annotations (`annotations.PageAnnotations`: the reader's rectangles, the notes on the regions with the formatting of
-their lettering, the reading order, whether the page is skipped) and the cached translations (the bubbles of its `cache.CachedPage`) - and of the
-regions it touched as the window held them. Taking it back carries the stores from "after" to "before" only where the
-change made the two differ (`carry`), so that what else changed on the page meanwhile (a reading order set, a page
-completed) stays as it is; the regions are put back as they were (`put_back`) when the page on show is still the very
-one the change was made on, else the window reads the page again from the stores. Making a change again is the same
-the other way round.
+their lettering, the reading order, whether the page is skipped) and the cached translations (the bubbles of its
+`cache.CachedPage`, and the book's lines kept for reuse: `linememo`, so that taking back an edit takes back the line
+it kept) - and of the regions it touched as the window held them. Taking it back carries the stores from "after" to
+"before" only where the change made the two differ (`carry`), so that what else changed on the page meanwhile (a
+reading order set, a page completed) stays as it is; the regions are put back as they were (`put_back`) when the page
+on show is still the very one the change was made on, else the window reads the page again from the stores. Making a
+change again is the same the other way round.
 
 The window's thread records a change before its job runs (`EditHistory.record`); the worker fills it in
 (`Step.begin`, `Step.settle`) and carries it back and forth, in the order the jobs were queued.
@@ -42,12 +43,13 @@ KEPT_AS_IS = ("order", "order_hint")  # a region's place in the reading order is
 @dataclass(eq=False)
 class UnitState:
     """What the stores held for one page unit: a copy of its annotations and of its cached bubbles (None: the store
-    had none for it)."""
+    had none for it); the first unit's also the book's lines kept for reuse (`linememo.LineMemo.state`; None: none)."""
 
     fingerprint: str
     aspect: float
     page: PageAnnotations | None = None
     bubbles: list[CachedBubble] | None = None
+    lines: Any = None
 
 
 @dataclass(eq=False)
@@ -263,6 +265,9 @@ def unit_states(pipeline: Any, units: Sequence[Any]) -> list[UnitState]:
             hit = cache.lookup(u.fingerprint, u.aspect, pipeline.settings.fingerprint_max_distance, None)
             state.bubbles = [copy.deepcopy(b) for b in hit[0].bubbles] if hit is not None else None
         out.append(state)
+    memo = getattr(cache, "lines", None)
+    if out and memo is not None:  # (an edit keeps its line for the lines to come: `linememo.remember_edit`)
+        out[0].lines = memo.state()
     return out
 
 
@@ -366,7 +371,7 @@ def stores_differ(frm: Sequence[UnitState], to: Sequence[UnitState], scope: dict
             return True
         if _bubbles_changed(f.bubbles or [], t.bubbles or [], scope.get(i) if scope is not None else None):
             return True
-    return False
+    return bool(frm and to and frm[0].lines is not None and to[0].lines is not None and frm[0].lines != to[0].lines)
 
 
 def carry(pipeline: Any, frm: Sequence[UnitState], to: Sequence[UnitState], scope: dict[int, NBox] | None = None
@@ -403,6 +408,9 @@ def carry(pipeline: Any, frm: Sequence[UnitState], to: Sequence[UnitState], scop
                     cache.add(CachedPage(fingerprint=fingerprint, aspect=aspect, bubbles=bubbles, seq=-1,
                                          incomplete=hit is not None and hit[0].incomplete))
                 wrote_cache = True
+    memo = getattr(cache, "lines", None)
+    if memo is not None and frm and to and frm[0].lines is not None and to[0].lines is not None:
+        wrote_cache = memo.carry(frm[0].lines, to[0].lines) or wrote_cache  # the line an edit kept, too
     errors: list[str] = []
     for wrote, store in ((wrote_notes, ann), (wrote_cache, cache)):
         if wrote:

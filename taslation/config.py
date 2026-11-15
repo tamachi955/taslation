@@ -219,6 +219,10 @@ class Settings:
     fingerprint_max_distance: int = 36  # Hamming distance (of 320 bits) still considered the same page
     match_min_iou: float = 0.4  # cached bubble vs live bubble overlap needed to reuse a translation
     render_unmatched_cached: bool = False  # draw cached bubbles even where the live page shows no text region
+    # a short line translated before in the book or its series (same model and target language) gets that translation
+    # again without a request, a person's correction first; kept in the book's cache under a keyed hash of the line,
+    # never the Japanese (`linememo`). Off: every line is asked for, and nothing is kept for reuse
+    reuse_lines: bool = True
 
     # --- batch reading (follows the viewer) ---
     # The viewer's page keys, which a page key the person presses in TASlation's window is passed on as (names: Left,

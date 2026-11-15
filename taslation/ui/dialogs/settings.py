@@ -85,6 +85,8 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                "When a whole-book run finishes, or stops on a problem, while TASlation is not in front, its taskbar button flashes. TASlation does not take the focus."),
     SettingRow("sound_when_done", "Also play a sound when a whole-book run ends",
                "With the flash, the system's default sound plays once."),
+    SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
+               "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 

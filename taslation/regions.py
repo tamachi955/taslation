@@ -64,6 +64,12 @@ class TextRegion:
     tilt: Any = None  # the slant measured (`detect.tilt.Tilt`), or "set" when it came with the region; None = not yet
     char_quads: list[Any] = field(default_factory=list)  # a slanted model region: its characters' turned boxes (page)
     panel: Box | None = None  # the box of the panel it is in, when its page's panels were found (`detect.order_regions`)
+    reused_text: str = ""  # the translation kept for an identical line before it, given without the model (`linememo`)
+
+    @property
+    def reused(self) -> bool:
+        """Whether its translation is one reused from an identical line before it (not asked of the model)."""
+        return bool(self.reused_text) and self.reused_text == self.translated_text
 
     @property
     def bbox(self) -> Box:

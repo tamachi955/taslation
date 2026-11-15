@@ -56,7 +56,7 @@ from typing import Any, Callable, NamedTuple
 import numpy as np
 from PIL import Image
 
-from .. import health, viewerparts
+from .. import health, linememo, viewerparts
 from ..batch import BatchProgress, BatchReader, Readings, frames_differ, preflight, thumbnail
 from ..bookid import generic_book_name, identity_of, recognise, same_book_name
 from ..bookname import entry_for
@@ -474,10 +474,10 @@ class JobsMixin:
         self._post("ocr_loaded", ok=ocr is not None, error=error)
 
     def _ensure_cache(self, book: str, model: str, language: str) -> bool:
-        """The pipeline takes the book's stores (its cache, the reader's marks, the series sheet)
-        when the book or the language has changed. False, and the status line says why, when one of them cannot be
-        opened now (its file is locked or cannot be read, or holds another book's): the pipeline then has no cache,
-        and the job that asked translates nothing."""
+        """The pipeline takes the book's stores (its cache, the reader's marks, the series sheet, the short lines its
+        series' other volumes reuse: `linememo.series_lines`) when the book or the language has changed. False, and
+        the status line says why, when one of them cannot be opened now (its file is locked or cannot be read, or
+        holds another book's): the pipeline then has no cache, and the job that asked translates nothing."""
         language = language.strip() or "English"
         changed_language = language != self.settings.target_language
         self.settings.target_language = language
@@ -505,6 +505,8 @@ class JobsMixin:
                            values={"book": book, "error": str(e)})
                 return False
             self.pipeline.set_cache(cache)
+            # the lines its series (as the series sheet has it: `notes.sheet_key`) reuses
+            self.pipeline.series_lines = linememo.series_lines(self.store, cache, sheets=self.glossary_store)
             self.pipeline.reset_context()
             self.pipeline.set_annotations(annotations)
             self.pipeline.glossary = glossary
@@ -514,9 +516,9 @@ class JobsMixin:
     def _job_translate(self, image: Image.Image, book: str, model: str, language: str, complete: bool = False,
                        cancel: threading.Event | None = None, again: Any = None) -> None:
         """The page *image* read and translated, in the worker. *again* (a page's `PageResult`): "Translate again",
-        its cached translations forgotten first and put back when this translates nothing: Stop, a new page, Ollama
-        down, a job that fails. They may be the reader's own, and no undo brings them back. A save that failed is said
-        after the page (`Pipeline.save_error`)."""
+        every line asked of the model (none reused: `linememo`), its cached translations forgotten first and put back
+        when this translates nothing: Stop, a new page, Ollama down, a job that fails. They may be the reader's own,
+        and no undo brings them back. A save that failed is said after the page (`Pipeline.save_error`)."""
         held: list[Any] = []
         try:
             self._use_model(model, language)
@@ -528,7 +530,9 @@ class JobsMixin:
             try:
                 result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
                                                complete=complete, events=lambda kind, data: self._post(kind, **data),
-                                               cancel=cancel, on_slow=lambda seconds: self._post("slow", seconds=seconds))
+                                               cancel=cancel,
+                                               on_slow=lambda seconds: self._post("slow", seconds=seconds),
+                                               **({"reuse": False} if again is not None else {}))  # (again: all asked)
             except Cancelled:  # Stop, or a new page: nothing of this page reached the cache
                 self._post("page_cancelled")
                 return

@@ -2410,3 +2410,162 @@ the Japanese that follows a line (a bubble that goes on, asked by itself); the p
 passes). The kind "sfx" may help a sound effect the reader asks to be
 translated (sound effects are left as drawn by default, `translate_sfx`), but 3 of the 17 changes were wrong, and it
 was not tried on sound effects of real pages: not shipped.
+
+## Line reuse (2026-11-15)
+
+The owner's decision: a short line already translated in the book or its series takes that translation again, without
+a request (`taslation/linememo.py`, the setting `reuse_lines`), for speed and so that the same line reads the same. The
+rule was chosen on OpenMantra: its five works, 214 pages, 1,547 lines with a word in them (the gold transcription's
+lines of punctuation alone left out). Each work is a book here, so "within a book" is within one work, and nothing was
+measured across the volumes of a series. The scripts printed counts only, never a line.
+
+**(a) Repeats within a book.** A later occurrence is a line whose key (`linememo.normalise`: NFKC, no whitespace, a run
+of dots one ellipsis, of long-vowel marks, dashes and tildes one long-vowel mark, of ! and ? one mark, a symbol written
+twice once, a trailing full stop or comma off) came earlier in the same work; length in characters of the key.
+
+| Length | Lines | Later occurrences | Share of the lines |
+|---|---|---|---|
+| 1-2 | 101 | 25 | 24.8 % |
+| 3-4 | 297 | 25 | 8.4 % |
+| 5-6 | 225 | 10 | 4.4 % |
+| 7-10 | 330 | 1 | 0.3 % |
+| 11-15 | 329 | 0 | 0 |
+| 16+ | 265 | 0 | 0 |
+| All | 1,547 | 61 | 3.9 % |
+
+The key's merges add 3 later occurrences to the 58 of the bare text without whitespace (40 keys repeat instead of 38).
+Repeats grow with the book: 2.5 % of the lines of each work's first half were met before in it, 5.4 % of its second
+half. 22 keys occur in two or more works (never reused: they are other books).
+
+**(b) The professional translations of a repeated line.** For each later occurrence, whether the dataset's English and
+Chinese for it are those of the first occurrence (English lower-cased, punctuation off; Chinese letters and digits
+only), and the chrF of its English against the first one's.
+
+| Length | Later occurrences | English the same | Chinese the same | Both | chrF against the first |
+|---|---|---|---|---|---|
+| 1-2 | 25 | 64.0 % | 68.0 % | 48.0 % | 66.9 |
+| 3-4 | 25 | 36.0 % | 68.0 % | 24.0 % | 52.4 |
+| 5-6 | 10 | 40.0 % | 90.0 % | 40.0 % | 46.9 |
+| 7-10 | 1 | 0 | 0 | 0 | 0 |
+| All | 61 | 47.5 % | 70.5 % | 36.1 % | |
+
+By kind: kana of up to three (35 later occurrences) 48.6 % / 62.9 % the same, longer kana (10) 40.0 % / 90.0 %, with a
+kanji or other characters (16) 50.0 % / 75.0 %. So the translators gave a repeated line the same English only half the
+time: the reply fitted to its scene ("Huh?" here, "What?" there) as much as another sense, and this cannot tell the two
+apart. Hence (c) judges reuse against the reference, not against the first occurrence.
+
+**(c) Our model on identical lines.** The app's translator (PLaMo 3 Translate 2B through the owner's Ollama,
+`taslation-plamo3-translate-2b`, requests only) on every line with the gold geometry, as the whole-book run translates
+(`BatchReader._translation_pass`, two runs) and page by page (`Pipeline._translate_regions`, one run), with no reuse
+(the evaluation's pipelines have no cache). For each later occurrence: whether the model's translation equals its
+translation of the first occurrence (normalised as above), and the chrF against the professional English of the fresh
+translation and of the first occurrence's (what reuse would have set), paired, with a 95 % bootstrap interval (2,000
+resamples of the later occurrences). In the whole-book table each later occurrence counts twice, once per run.
+
+Whole-book run:
+
+| Length | Later occurrences | The same as the first | chrF fresh | chrF reused | Reused - fresh (95 %) |
+|---|---|---|---|---|---|
+| 1-2 | 50 | 98.0 % | 44.3 | 44.8 | +0.5 (-0.0, +1.2) |
+| 3-4 | 50 | 84.0 % | 37.4 | 39.2 | +1.9 (-4.1, +8.7) |
+| 5-6 | 20 | 100 % | 40.9 | 37.2 | -3.6 (-9.1, +0.0) |
+| 7-10 | 2 | 0 | 29.5 | 31.3 | +1.8 |
+| All | 122 | 91.0 % | 40.7 | 41.1 | +0.4 (-2.2, +3.2) |
+| Kana of up to three | 70 | 94.3 % | 41.7 | 41.5 | -0.1 (-2.1, +1.3) |
+| Longer kana | 20 | 85.0 % | 27.0 | 36.3 | +9.3 (-0.0, +23.3) |
+| With a kanji or other | 32 | 87.5 % | 46.9 | 43.0 | -4.0 (-10.2, +0.2) |
+
+Page by page (one run):
+
+| Length | Later occurrences | The same as the first | chrF fresh | chrF reused | Reused - fresh (95 %) |
+|---|---|---|---|---|---|
+| 1-2 | 25 | 84.0 % | 56.1 | 48.7 | -7.4 (-20.6, +2.9) |
+| 3-4 | 25 | 76.0 % | 42.5 | 40.6 | -1.9 (-14.4, +9.0) |
+| 5-6 | 10 | 100 % | 46.1 | 42.5 | -3.6 (-10.9, +0.2) |
+| 7-10 | 1 | 0 | 36.2 | 30.6 | -5.5 |
+| All | 61 | 82.0 % | 48.6 | 44.1 | -4.5 (-11.4, +2.3) |
+| Kana of up to three | 35 | 85.7 % | 47.6 | 44.3 | -3.3 (-10.9, +3.6) |
+| Longer kana | 10 | 80.0 % | 32.2 | 41.6 | +9.4 (-0.0, +28.0) |
+| With a kanji or other | 16 | 75.0 % | 60.8 | 45.0 | -15.8 (-32.9, -0.3) |
+
+("The same" compares letters and digits; chrF also sees punctuation, so a line "the same" can still differ a little.)
+The means rest on a few lines. Of the 57 later occurrences within the rule below, the model translated 4 and 5
+otherwise than the first time in the two whole-book runs and 10 page by page; most of those move chrF by less than 5,
+and the means are set by a handful that match the reference word for word one way and not the other (about 90 points
+each): page by page, one two-character line with a kanji, met twice more, whose first translation missed and whose
+later ones matched (the whole -15.8 of that kind), and in every run one longer kana line the other way (its +9.3 and
++9.4). Pooled over the three runs, within the rule: -0.4 (-3.3, +2.5), n = 171; kana alone +0.9 (-2.2, +4.3), with a
+kanji -4.4 (-11.0, +0.1).
+
+Between the two whole-book runs, 84.6 % of all lines got the same translation in the same place, and 96.0 % of the
+repeated ones (the page-by-page flow had one run): the model's answer to a short line hardly changes from run to run.
+
+**The rule.** At most 10 characters once normalised (`MAX_CHARS`), of any kind: within that length a reused
+translation is as close to the reference as a fresh one, within the noise in each flow and pooled, and longer lines
+hardly repeat (one later occurrence in 7-10 characters, none beyond). The one interval that misses 0 (page by page,
+with a kanji) is one line, so lines with a kanji are not left out. That line shows what reuse risks: a first
+translation that misses is repeated wherever the line comes back, where fresh requests would have varied; a correction
+in translator mode, made once, then reaches them all. Not a line that continues in the next bubble or from the one
+before (`translate.continuation`: a piece of a sentence; 327 of the 1,547 lines, 4 of the 61 later occurrences). The
+speaker and the kind the reader gave are part of the key, and a line with a hint for the model is never reused:
+OpenMantra has neither, so that is a choice of caution, not a measurement. The scope is one translator, model and
+target language. Only merges that change no reading: hiragana against katakana, small kana, ! against ?, and a
+trailing ellipsis stay apart. What is kept is the answer as the page got it, spelt as the series sheet spells
+(`terms.spelt_right`, which both ways of translating apply to a fresh answer); before it is set again, a kept
+translation is held to the sheet as it is now (a near spelling of a rendering put right by the same function, one
+still missing a rendering asked for again). The series is the one the series sheet goes by (`notes.sheet_key`: the
+Series field, so "Some Title 3巻" kept before the two fields and "Some Title 4" are one series).
+
+**What is stored, and what it reveals.** In the book's cache file (`lines`, before the pages), sealed with it: per
+translator, model and language, HMAC-SHA-256 of the key with a random 32-byte secret of the book's own, cut to 16 bytes,
+and the translation, marked when a person wrote it; the secret is in the same file. Never the Japanese:
+`tests/test_linememo.py` looks for it in the file's bytes and in the opened file. Whoever can open the file (its Windows
+user, or anyone with an export and its passphrase) sees the translations, which the cache holds anyway, how many short
+lines were kept, and, holding the secret, can test whether a line they guess was in the book; a short exclamation is
+easy to guess. Without the secret, two hashes of one line in two books cannot be told to be the same line. The file is
+listed, deleted, exported, imported and renamed as the cache is; an import into a cache that has lines of its own adds
+only those it lacks.
+
+**End to end, page by page.** The page-by-page flow once more with reuse on (the evaluation's pipeline given a cache
+that holds only a `LineMemo`, one per work), so that a page with a reused line sends the model a request without it:
+PLaMo then answers the page's other lines without the reused pair in their history (`PlamoTranslator.translate_page`
+carries the request's own lines done so far). Each line against the same line of the run without reuse:
+
+| Lines | n | The same as without reuse | chrF without | chrF with | With - without (95 %) |
+|---|---|---|---|---|---|
+| Reused | 61 | 83.6 % | 48.6 | 45.0 | -3.5 (-10.5, +2.9) |
+| Asked, on a page with a reused line | 330 | 83.9 % | 39.2 | 39.1 | -0.1 (-0.8, +0.6) |
+| Asked, on a page with none (run to run) | 1,156 | 83.7 % | 39.6 | 39.8 | +0.3 (-0.1, +0.7) |
+
+The lines asked beside a reused one differ from the run without reuse as often as the lines of pages with none, which
+are the run-to-run noise: leaving the reused pair out of the request costs them nothing measurable, so the request is
+left as it is. 62 lines were reused, 54 of them those the rule counted above; the other 8 are lines the pipeline's
+own judgment of a continuing sentence and its key let through where the analysis's approximations did not.
+
+**What it saves** (the whole-book row from the runs without reuse, the time of a request of a repeated line from the
+run's own timing of that line, else the run's mean; the page-by-page row measured with reuse on, its time from that
+run's own timing of the lines' first occurrences):
+
+| | Lines reused | Requests saved | Translation time saved |
+|---|---|---|---|
+| Whole-book run | 54 of 1,547 (3.5 %) | 54 of 1,434 (3.8 %) | 3.4 % and 3.5 % (about 20 s of 600 s, 35 s of 983 s) |
+| Page by page | 62 of 1,547 (4.0 %) | 63 of 1,607 (3.9 %) | 3.8 % (about 26 s of 698 s) |
+
+(A reused line is never part of a joined run, so each one is a request of its own saved.) These works are short (some 40
+pages); in a volume of some 200 pages, and across a series, more lines come back. The gain in time is small; what the
+rule buys is the same line read the same (the model rendered 9 % of the later occurrences otherwise in the whole-book
+runs, 18 % page by page), at no measured cost. So it is on by default.
+
+Requests took 0.42 s and 0.69 s on average in the two whole-book runs, and 0.54 s and 0.44 s page by page (without and
+with reuse): the GPU was shared with other work in some runs, so the shares are each run's own and the runs' times are
+not compared with each other.
+
+**Not shown here.** Lines across the volumes of a series; the speaker and kind in the key; a real volume's time; the
+whole-book run with reuse on, end to end (its saving above is counted from the runs without).
+`tests/test_linememo.py` covers the store (sealed, no Japanese in the file before or after it is opened), a later page,
+a line repeated within a page or a request, a correction winning and its Undo, Translate again and the whole book again,
+another model, language or series, volumes of one series under old and new spellings of their names, fresh answers
+kept as the sheet spells them and the sheet changed since, the setting off, export, import, delete, and the whole-book
+run. The region editor with the note that a translation was reused under its header and the line on how far the model
+follows a hint under the hint field: as wide as without the note in all 16 window languages, one or two lines taller
+(21 to 36 pixels; the tallest, Indonesian, 897 pixels against 861).

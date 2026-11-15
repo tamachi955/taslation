@@ -175,7 +175,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from . import colophon, fingerprint, health, recovery
+from . import colophon, fingerprint, health, linememo, recovery
 from .pageimages import MB, PageImages, memory_cap, pack, undo_of
 from .cache import INDEXED_WITHIN
 from .capture import (CaptureError, WindowInfo, behind_others, capture_window, client_rect_on_screen, frame_count,
@@ -1884,9 +1884,11 @@ class BatchReader:
         told = {"on_item": on_item} if accepts(translator.translate_page, "on_item") else {}
         if self._view is not None:
             self._view.request(units)
+        # a short line the book or its series translated before is not sent: it takes that translation (`linememo`)
+        plan = linememo.plan_for(self.pipeline, texts, meta, run, serve=not self.retranslate)
         try:
-            outputs = translator.translate_page(texts, prior, notes_text, upcoming,
-                                                meta=meta if any(meta) else None, **call, **told)
+            outputs = plan.ask(translator.translate_page, prior, notes_text, upcoming,
+                               meta=meta if any(meta) else None, **call, **told)
         except TranslationError as e:
             p.answering = 0
             error = message_of(e)
@@ -1904,10 +1906,11 @@ class BatchReader:
                 self._leave_for_reading(units)
                 return
             outputs = []  # the page unit's lines are asked for again, a few at a time
-        outputs = [str((outputs[k] if k < len(outputs) else "") or "").strip() for k in range(len(texts))]
+        outputs = plan.fill(outputs)  # (the lines reused in their places)
         if outputs and _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: once more, with neighbours
-            outputs = ask_again_romanised(translator, texts, outputs, context=prior, notes=notes_text, upcoming=upcoming,
-                                          meta=meta, call_args=call, cancel=self._stop)[0]
+            outputs = plan.served_back(ask_again_romanised(  # (a reused line was looked at when first answered)
+                translator, texts, plan.unserved(outputs), context=prior, notes=notes_text, upcoming=upcoming,
+                meta=meta, call_args=call, cancel=self._stop)[0])
         per_unit: list[dict[int, str]] = [{} for _ in units]
         per_unit_flags: list[dict[int, list[str]]] = [{} for _ in units]
         counted: list[set[int]] = [set() for _ in units]  # the lines of each unit stored and counted so far
@@ -1917,12 +1920,14 @@ class BatchReader:
 
         def settle(lines: list[int], replies: Sequence[str], context: list[tuple[str, str]]) -> None:
             """The *replies* of *lines* (indices into the run) spelt as the series sheet spells, checked and
-            tightened; the real translations kept for their page units, with their flags, and carried on as context."""
+            tightened; the real translations kept for their page units, with their flags, and carried on as context.
+            A reused line was held to the sheet already (`linememo.held_to`); the memo keeps the rest as spelt here."""
             entries: list[dict[str, Any]] = []
             for k in lines:
                 ui, i = slots[k]
                 r = units[ui].japanese()[i]
-                text = spelt_right(sheet, texts[k], replies[k], str(meta[k].get("speaker", "")))
+                text = (replies[k] if k in plan.served
+                        else spelt_right(sheet, texts[k], replies[k], str(meta[k].get("speaker", ""))))
                 entries.append({"ja": r.source_text, "text": text, "mask": r.mask, "kind": r.kind,
                                 "anchor": r.text_box, "x0": r.bbox[0], "y0": r.bbox[1], "meta": region_meta(r),
                                 "confidence": r.ocr_confidence, "direction": direction_of(r)})
@@ -1937,8 +1942,11 @@ class BatchReader:
                     recent.append((r.source_text, r_out))
 
         def commit(which: list[int]) -> list[int]:
-            """The page units *which* stored with what they have; the ones still incomplete."""
+            """The page units *which* stored with what they have, the lines kept for reuse first (`linememo`, saved
+            with the units); the ones still incomplete."""
             left: list[int] = []
+            plan.learn({k: per_unit[ui][i] for k, (ui, i) in enumerate(slots)
+                        if ui in which and i in per_unit[ui] and i not in counted[ui]})
             for ui in which:
                 unit = units[ui]
                 with self._storing:

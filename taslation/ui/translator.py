@@ -73,6 +73,8 @@ DIRECTION_CYCLE = ("", "down", "up", "stacked")
 SPELLING_OFF = ("Spelling is not checked: the spellcheck setting is on, but the optional pyspellchecker package is not "
                 "installed (pip install pyspellchecker; its word lists stay on this PC). This is said only once.")
 SPELLING_SAID = "spelling_unavailable_said"
+# the editor of a region whose translation was reused from an identical line before it (`linememo`), not asked for
+REUSED_NOTE = "This translation was reused from an earlier identical line; the model was not asked. Ask again gives a fresh one."
 # what the status line says on a click on the page that selects nothing
 CLICK_HINT = ("Translator mode: click a region to select it, drag it to move it, its handles to resize it or its round "
               "handle to rotate it, double-click to edit it, drag on empty space to add one.")
@@ -1151,6 +1153,12 @@ class TranslatorMixin:
             pass  # said again next time
         return _(SPELLING_OFF)
 
+    def _editor_note(self, region: Any) -> str:
+        """The lines under the region editor's header: that its translation was reused from an identical line before
+        it (`REUSED_NOTE`), and `_spelling_note`; "" for none."""
+        return "\n".join(n for n in (_(REUSED_NOTE) if getattr(region, "reused", False) else "",
+                                     self._spelling_note()) if n)
+
     def _open_editor(self, region: Any, result: Any = None, at: tuple[int, int] | None = None) -> None:
         """The region editor, its header naming the bubble's place on the page and its picture the region as the
         capture has it (`editor_crop`, in memory); the model can be asked from it when a translator is there, the
@@ -1160,7 +1168,8 @@ class TranslatorMixin:
         when None): Auto may turn the page behind it, and Save, Drop and the model's answers still go to that page. A
         region of a page gone by now (a review list left open) is refused. *at*: where on the screen it opens. How far
         the translation model in use follows a region's hint (`translate.base.hint_support`: PLaMo only sometimes) the
-        editor says under it."""
+        editor says under it. A translation reused from an identical line before it (`linememo`) is said to be one
+        (`REUSED_NOTE`, under the header)."""
         result = result if result is not None else self.last_result
         pipeline = self.pipeline
         if not holds(result, region):
@@ -1193,7 +1202,7 @@ class TranslatorMixin:
                                         if pipeline is not None else None,
                                         on_step=lambda delta, data, place, r=region: self._step_editor(
                                             r, result, preview, delta, data, place),
-                                        at=at, note=self._spelling_note(),
+                                        at=at, note=self._editor_note(region),
                                         clip=self.format_clip() if hasattr(self, "format_clip") else None,
                                         font_memory=FontMemory(self.settings.state_dir),
                                         hint_support=hint_support(pipeline.translator) if can_ask else HINT_FOLLOWS)

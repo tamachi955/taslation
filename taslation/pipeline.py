@@ -77,6 +77,7 @@ import numpy as np
 from PIL import Image
 
 from . import fingerprint as fp
+from . import linememo
 from .pageimages import ErasedRegion, PageImages, packed_mask, region_digest
 from .render.memo import ErasedRegions, ShownPages, changed_pixels, pixels_digest, signature
 from .devices import StageTimes
@@ -408,6 +409,7 @@ class ScannedRegion:
     room: int = 0  # characters of translation the region has room for at the size of its lettering (0 = plenty)
     aliases: tuple[Box, ...] = ()  # the boxes of the regions it was read in place of (a classical repeat of its lettering)
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`TextRegion.angle`)
+    reused_text: str = ""  # the translation kept for an identical line before it (`TextRegion.reused_text`)
 
     @property
     def is_japanese(self) -> bool:
@@ -463,7 +465,8 @@ def scanned_bubble(unit: ScannedUnit, region: ScannedRegion, text: str, flags: S
     pu = fp.PageUnit(unit.box, unit.fingerprint, unit.index)
     x0, y0 = region.bbox[0], region.bbox[1]
     poly = [pu.normalize((int(x) + x0, int(y) + y0, int(x) + x0, int(y) + y0))[:2] for x, y in region.poly]
-    return CachedBubble(box=pu.normalize(region.bbox), text=text, poly=poly, flags=list(flags), angle=region.angle)
+    return CachedBubble(box=pu.normalize(region.bbox), text=text, poly=poly, flags=list(flags), angle=region.angle,
+                        reused=bool(region.reused_text) and region.reused_text == text)
 
 
 def erases(region: Any) -> bool:
@@ -781,6 +784,11 @@ class Pipeline:
         self._context: deque[list[tuple[str, str]]] = deque(maxlen=max(0, settings.context_pages))
         self.book_names = BookNames()  # the book's names and the renderings they keep (memory only, `premises`)
         self.last_seq: int | None = None
+        # the lines its book reuses with its series' other volumes, when the window or the command line read them for
+        # the cache at hand (`linememo.series_lines`; else the cache's own: `linememo.held_lines`), and this session's
+        # count of the lines reused and asked (Settings > System)
+        self.series_lines: linememo.SeriesLines | None = None
+        self.line_tally = linememo.Tally()
 
     # ------------------------------------------------------------------
     def _before_gpu(self) -> None:
@@ -1106,7 +1114,7 @@ class Pipeline:
     def process(self, image: Image.Image, *, use_cache: bool = True, translate: bool = True,
                 progress: ProgressFn | None = None, complete: bool = False,
                 events: EventFn | None = None, cancel: threading.Event | None = None,
-                on_slow: SlowFn | None = None) -> PageResult:
+                on_slow: SlowFn | None = None, reuse: bool = True) -> PageResult:
         """Translate one capture. Every text region found goes to a page unit (`unit_for`), a region below or beside
         a unit that stops short of its page too; only what lies outside the capture area is left out. With
         *complete* (translator mode), a cached page is also completed: live text regions the cache has no bubble
@@ -1121,7 +1129,9 @@ class Pipeline:
         raised: between regions while reading, before and during the request to the model, before rendering; a
         page cancelled before its translation came back leaves nothing in the cache. *on_slow*(seconds) is called
         (once per request) when the model has said nothing for a while, with a translator that can tell (it takes
-        an ``on_slow`` argument)."""
+        an ``on_slow`` argument). A short line translated before in the book or its series is given that translation
+        (`linememo`, with the cache and ``reuse_lines``); *reuse* False ("Translate again") asks the model for every
+        line, and keeps its answers for the lines to come."""
         s = self.settings
         timer = _Timer()
         report = progress or (lambda _msg: None)
@@ -1209,7 +1219,8 @@ class Pipeline:
                 self._order_read(rgb, unit.box, unit_regions)
                 timer.lap("ocr")
                 if translate:
-                    err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box)
+                    err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
+                                                  reuse=reuse if use_cache else None)
                     timer.lap("translate")
                     if err:
                         result.error = err
@@ -1707,10 +1718,13 @@ class Pipeline:
         return CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=[], seq=-1)
 
     def set_translation(self, result: PageResult, region: TextRegion, text: str) -> bool:
-        """Store *text* as the translation of *region* (on its cached page) and redraw the result."""
+        """Store *text* as the translation of *region* (on its cached page) and redraw the result. A short line's is
+        kept as a person's translation for the identical lines to come (`linememo.remember_edit`)."""
         text = text.strip()
         if self.cache is None or region.unit >= len(result.units) or not text:
             return False
+        linememo.remember_edit(self, result, region, text)  # (saved with the page, below)
+        region.reused_text = ""
         unit = result.units[region.unit]
         page = self._page_for(unit)
         nbox = unit.normalize(region.bbox)
@@ -1718,6 +1732,7 @@ class Pipeline:
         if best is not None and box_iou(best.box, nbox) >= self.settings.match_min_iou:  # type: ignore[arg-type]
             best.text = text
             best.flags = []  # the reader has looked at it
+            best.reused = False
         else:
             poly = [unit.normalize((int(x) + region.x0, int(y) + region.y0, int(x) + region.x0, int(y) + region.y0))[:2]
                     for x, y in mask_polygon(region.mask)]
@@ -2468,7 +2483,7 @@ class Pipeline:
 
     def _translate_regions(self, regions: list[TextRegion], report: ProgressFn, fill: PageFill | None = None,
                            cancel: threading.Event | None = None, on_slow: SlowFn | None = None,
-                           unit_box: Box | None = None) -> str:
+                           unit_box: Box | None = None, reuse: bool | None = True) -> str:
         """Translate the regions to translate (one request for all of them, in reading order), spell them as the
         series sheet spells (`terms.spelt_right`, as a whole-book run spells its replies: a name or term the model
         wrote another way near enough, no model request), check and tighten the translations, and set the regions'
@@ -2480,7 +2495,10 @@ class Pipeline:
         hands it over (when it can, `takes_items`), and the final ones (some respelt, some changed by `tighten`) are
         settled on the page afterwards. Only these fresh translations are respelt: a page's translations from the
         cache are never changed here. With *cancel*, `Cancelled` before the request, during it (a translator that
-        takes ``cancel``) and after it."""
+        takes ``cancel``) and after it. A short line the book or its series translated before is not sent: it takes
+        that translation, held to the series sheet as it is now (`linememo.plan_for`), and what the model answers is
+        kept, respelt, for the lines to come; *reuse* False asks every line and keeps the answers ("Translate again"),
+        None neither reuses nor keeps."""
         todo = [r for r in regions if r.status == "untranslated"]
         if not todo:
             return ""
@@ -2503,33 +2521,37 @@ class Pipeline:
                     fill.draft(todo[index], text)
 
             extra["on_item"] = on_item
+        plan = linememo.plan_for(self, texts, meta, todo, serve=bool(reuse), learn=reuse is not None)
         failure: Message | str = ""
         try:
-            outputs = self.translator.translate_page(texts, self.context_pairs(), self.premises(),
-                                                     meta=meta if any(meta) else None, **extra)
+            outputs = plan.ask(self.translator.translate_page, self.context_pairs(), self.premises(),
+                               meta=meta if any(meta) else None, **extra)
         except TranslationError as e:
             failure = message_of(e)
-            if not worth_asking_again(failure):
+            if not worth_asking_again(failure) and not plan.served:
                 return failure
             outputs = []  # every line is asked for again below, a few at a time
         check_cancel(cancel)
-        outputs = [str(out or "").strip() for out in outputs[:len(todo)]] + [""] * max(0, len(todo) - len(outputs))
+        outputs = plan.fill(outputs)  # (the lines reused in their places)
 
         def usable(i: int, text: str) -> bool:
             return bool(text) and self.real_translation(texts[i], text)
 
         missing = [i for i in range(len(todo)) if not usable(i, outputs[i])]
-        if missing:
+        if missing and (not failure or worth_asking_again(failure)):
             again = ask_for_missing(self.translator, texts, outputs, usable, context=self.context_pairs(),
                                     notes=self.premises(), meta=meta, call_args=call, cancel=cancel,
                                     on_error=worth_asking_again, on_item=on_item)
             outputs = again.texts
             check_cancel(cancel)
         if _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: asked once more, with its neighbours
-            outputs = ask_again_romanised(self.translator, texts, outputs, context=self.context_pairs(),
-                                          notes=self.premises(), meta=meta, call_args=call, cancel=cancel)[0]
-        sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are
-        outputs = [spelt_right(sheet, texts[i], out, str(meta[i].get("speaker", ""))) for i, out in enumerate(outputs)]
+            outputs = plan.served_back(ask_again_romanised(  # (a reused line was looked at when first answered)
+                self.translator, texts, plan.unserved(outputs), context=self.context_pairs(), notes=self.premises(),
+                meta=meta, call_args=call, cancel=cancel)[0])
+        sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are; a reused
+        # line was held to the sheet already (`linememo.held_to`), and the memo keeps the answers as spelt here
+        outputs = [out if i in plan.served else spelt_right(sheet, texts[i], out, str(meta[i].get("speaker", "")))
+                   for i, out in enumerate(outputs)]
         entries = [{"ja": r.source_text, "text": out, "mask": r.mask, "kind": r.kind, "anchor": r.letter_box or r.text_box,
                     "x0": r.x0, "y0": r.y0, "meta": region_meta(r), "confidence": r.ocr_confidence,
                     "direction": direction_of(r)}
@@ -2545,6 +2567,7 @@ class Pipeline:
                 pairs.append((r.source_text, out))
             else:
                 r.status = "untranslated"
+        plan.learn_regions(todo)  # (kept for the lines to come; saved with the page)
         if pairs and self._context.maxlen:
             self._context.append(pairs)
         if fill is not None:
@@ -2619,7 +2642,7 @@ class Pipeline:
             poly = [unit.normalize((int(x) + r.x0, int(y) + r.y0, int(x) + r.x0, int(y) + r.y0))[:2]
                     for x, y in mask_polygon(r.mask)]
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
-                                        note=r.reader_note, angle=r.angle))
+                                        note=r.reader_note, angle=r.angle, reused=r.reused))
         page = CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=bubbles, seq=-1,
                           incomplete=any(r.status == "untranslated" for r in regions))
         page = self.cache.add(page)
@@ -2671,6 +2694,7 @@ class Pipeline:
             r.unit = unit.index
             r.flags = list(cb.flags)
             r.reader_note = cb.note
+            r.reused_text = cb.text if cb.reused else ""
             r.angle, r.tilt = cb.angle, "set"  # (the slant it was lettered at: the cache's, never measured again)
             regions.append(r)
         known = [r for r in regions if r.status == "translated" and any(q.from_model for q in live)]

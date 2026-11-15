@@ -478,9 +478,10 @@ def build_pipeline(settings: Settings, translator_kind: str = "ollama", book: st
         warm_ollama(settings, translator)
     ocr = build_ocr(settings) if with_ocr else None
     cache = None
+    store = CacheStore(settings.cache_dir)
     if book and settings.cache_enabled:
         if translator_kind == "ollama":
-            cache = CacheStore(settings.cache_dir).open(book, translator.model, settings.target_language)
+            cache = store.open(book, translator.model, settings.target_language)
         else:
             # The echo/none translators produce no translations, so there is nothing worth
             # caching - and the cache must never receive the original text.
@@ -498,6 +499,10 @@ def build_pipeline(settings: Settings, translator_kind: str = "ollama", book: st
             pipeline.set_annotations(annotations)
         sheets = GlossaryStore(settings.glossary_dir)
         glossary = sheets.open(series or sheet_key(sheets, book), settings.target_language)
+        if cache is not None:  # the short lines the other volumes of its series (*series*: that sheet's) reuse
+            from .linememo import series_lines
+
+            pipeline.series_lines = series_lines(store, cache, series or None, sheets=sheets)
         pipeline.glossary = glossary
         pipeline.glossary_text = glossary.format()
         if len(glossary):
@@ -1139,7 +1144,9 @@ def cmd_cache(args: argparse.Namespace, settings: Settings) -> int:
 
         for b in books:
             parts = split_name(b["book"])
-            print(f"{b['book']!r}: {b['pages']} page(s), {b['bubbles']} bubble(s), model {b['model']}, updated {b['updated']}")
+            lines = f", {b['lines']} line(s) kept for reuse" if b.get("lines") else ""
+            print(f"{b['book']!r}: {b['pages']} page(s), {b['bubbles']} bubble(s){lines}, model {b['model']}, "
+                  f"updated {b['updated']}")
             print(f"    series {parts.series!r}, volume {parts.volume or '-'}; {b['file']}")
         _say_not_here(settings)
         return 0
