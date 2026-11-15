@@ -169,10 +169,23 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("action", choices=["list", "delete", "path", "export", "import", "protect"])
     c.add_argument("target", nargs="?", metavar="BOOK|FILE", help="delete, export: the book; import: the file")
     c.add_argument("--out", type=Path,
-                   help="export: the file to write, encrypted with a passphrase (asked for, or TASLATION_PASSPHRASE)")
+                   help="export: the file to write, encrypted with a passphrase (asked for, or TASLATION_PASSPHRASE); "
+                        "it holds the translations with the book's page information and series sheet")
+    c.add_argument("--series", help="export: every cached volume of this series in the target language (--language), "
+                                    "in one file, in place of BOOK")
+    c.add_argument("--all", action="store_true", dest="every",
+                   help="export: every cached book in every language, in one file, in place of BOOK")
     c.add_argument("--force", action="store_true", help="export: write over the --out file when it exists")
     c.add_argument("--replace", action="store_true",
                    help="import: replace the book's cache instead of merging the file's pages into it")
+    c.add_argument("--list", action="store_true", dest="list_only",
+                   help="import: list the books the file holds, and import nothing")
+    c.add_argument("--book", action="append", dest="books", metavar="NAME",
+                   help="import: only this book of the file (again for several; default: all it holds)")
+    c.add_argument("--take-file", action="store_true",
+                   help="import: take the file as it is - its lines where you corrected the translation here, its "
+                        "page information in place of yours, its values where the series sheets say otherwise "
+                        "(default: yours stay; what the file adds is added)")
     c.add_argument("--confirm", action="store_true",
                    help="export, import: after the note on what the file is for, ask \"Continue? [y/N]\" before the "
                         "passphrase (without it the note is printed and nothing is asked: scripts)")
@@ -1266,6 +1279,11 @@ def _before_backup(note: str, confirm: bool) -> bool:
     print(textwrap.fill(note, width=NOTE_WIDTH, break_on_hyphens=False) + "\n", file=sys.stderr, flush=True)
     if not confirm:
         return True
+    return _continue()
+
+
+def _continue() -> bool:
+    """"Continue? [y/N]" on stderr, and whether the answer on stdin was yes (`_before_backup`)."""
     print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
     try:
         answer = sys.stdin.readline() if sys.stdin is not None else ""
@@ -1292,29 +1310,117 @@ def _passphrase(confirm: bool) -> str:
     return phrase
 
 
-def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> int:
-    """`cache export BOOK --out FILE [--force]` and `cache import FILE [--replace]`: a cache as a file encrypted
-    with a passphrase, for the reader's own backup or other computer. Once the command can go ahead, a note on
-    stderr says what the file is for (EXPORT_NOTE, IMPORT_NOTE) before the passphrase is asked for; with --confirm
-    an answer other than yes ends it there with status 1, nothing read or written. One line of result, never the
-    book's text; an existing --out file is written over only with --force."""
+def _export_list(args: argparse.Namespace, settings: Settings, store: Any) -> list[tuple[str, str]]:
+    """The (book, language) pairs `cache export` writes: BOOK in the target language, every cached volume of
+    --series in it, or with --all every cache in every language. SystemExit for none of them, several, or nothing to
+    export (before the passphrase is asked for)."""
     from . import backup
+    from .cache import language_key
+    from .linememo import same_series
+    from .notes import series_key
+
+    given = [name for name, value in (("BOOK", args.target), ("--series", args.series), ("--all", args.every))
+             if value]
+    if len(given) != 1 or args.out is None:
+        raise SystemExit("error: cache export needs a book name, --series NAME or --all, and --out FILE (see "
+                         "`taslation cache list`)")
+    if args.target:
+        backup.cache_file(store, args.target, settings.target_language)  # BackupError: no cache of it
+        return [(args.target, settings.target_language)]
+    caches = store.list()
+    if args.every:
+        found = [(b["book"], b["language"]) for b in caches]
+        if not found:
+            raise SystemExit(f"error: no caches in {store.cache_dir}")
+        return found
+    target = language_key(settings.target_language)
+    found = sorted({(b["book"], b["language"]) for b in caches if language_key(b["language"]) == target
+                    and same_series(series_key(b["book"]), args.series)})
+    if not found:
+        raise SystemExit(f"error: no cached volume of the series {args.series!r} in {settings.target_language} (see "
+                         "`taslation cache list`)")
+    return found
+
+
+def _exported_line(done: Any, books: list[tuple[str, str]], out: Path) -> str:
+    """`cache export`'s line of result: the book (or how many) and the pages, and what went with them."""
+    extra = []
+    if done.annotations:
+        extra.append(f"{done.annotations} book(s) of page information" if len(books) > 1 else "its page information")
+    if done.sheets:
+        extra.append(f"{done.sheets} series sheet(s)" if len(books) > 1 else "its series sheet")
+    with_them = f" with {' and '.join(extra)}" if extra else ""
+    if len(books) == 1:
+        return f"exported {books[0][0]!r}: {done.pages} page(s){with_them} to {out}"
+    return f"exported {done.books} book(s): {done.pages} page(s){with_them} to {out}"
+
+
+def _import_lines(result: Any, replace: bool, source: str) -> list[str]:
+    """`cache import`'s lines of result: one per book (its pages, merged or replacing its cache, with what the merge
+    did), then the page information and the series sheets, counts and names only."""
+    lines = []
+    for book in result.books:
+        if replace:
+            how = "replacing its cache"
+        else:
+            how = f"merged: {book.added} added, {book.replaced} replaced, {book.kept} of your correction(s) kept"
+        lines.append(f"imported {book.held.pages} page(s) into {book.held.book!r} in {book.held.language} ({how}) "
+                     f"from {source}")
+    if result.annotations_added or result.annotations_taken or result.annotations_kept:
+        kept = (f", {result.annotations_kept} kept as yours (--take-file takes the file's)"
+                if result.annotations_kept else "")
+        lines.append(f"page information: {result.annotations_added} added, {result.annotations_taken} taken from the "
+                     f"file{kept}")
+    if result.sheets_added or result.sheets_joined:
+        lines.append(f"series sheets: {result.sheets_added} added, {result.sheets_joined} joined yours "
+                     f"({result.sheet_terms} item(s) added, {result.sheet_taken} taken from the file, "
+                     f"{result.sheet_kept} kept as yours)")
+    return lines
+
+
+def _plan_lines(plan: Any, take: bool) -> list[str]:
+    """What an import is about to do, for stderr before it does it (and before --confirm asks again)."""
+    lines = [f"the import adds {plan.added} page(s), replaces {plan.replaced(not take)} and keeps "
+             f"{0 if take else plan.kept} of your correction(s) over the file's lines"]
+    if plan.differing:
+        lines.append(f"{len(plan.differing)} book(s) have page information of their own here: "
+                     + ("the file's is taken" if take else "yours stays (--take-file takes the file's)"))
+    conflicts = plan.keyed()
+    if conflicts:
+        lines.append(f"the series sheets here and the file's say otherwise in {len(conflicts)} place(s): "
+                     + ("the file's values are taken" if take else "yours stay (--take-file takes the file's)"))
+    return lines
+
+
+def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> int:
+    """`cache export BOOK|--series NAME|--all --out FILE [--force]` and `cache import FILE [--replace] [--list]
+    [--book NAME] [--take-file]`: books' translations with their page information and series sheets as a file
+    encrypted with a passphrase, for the reader's own backup or other computer. Once the command can go ahead, a note
+    on stderr says what the file is for (EXPORT_NOTE, IMPORT_NOTE) before the passphrase is asked for; with --confirm
+    an answer other than yes ends it there with status 1, nothing read or written. An import says on stderr what it
+    is about to do (pages added and replaced, corrections kept, what says otherwise) and, with --confirm, asks again
+    where that touches the reader's own (a correction, page information, a sheet's value).
+    Lines of result with counts and names, never the books' text; an existing --out file is written over only with
+    --force."""
+    from . import backup
+    from .rename import Stores
 
     confirm = getattr(args, "confirm", False)
+    stores = Stores(store, *Stores.of(settings)[1:])
     try:
         backup.require()
         if args.action == "export":
-            if not args.target or args.out is None:
-                raise SystemExit("error: cache export needs a book name and --out FILE (see `taslation cache list`)")
-            backup.cache_file(store, args.target, settings.target_language)  # before the passphrase is asked for
-            if args.out.exists() and not args.out.is_dir() and not args.force:  # a folder: export_cache says so
+            books = _export_list(args, settings, store)  # before the passphrase is asked for
+            if args.out.exists() and not args.out.is_dir() and not args.force:  # a folder: export_books says so
                 raise SystemExit(f"error: {args.out} exists; pass --force to overwrite")
             if not _before_backup(EXPORT_NOTE, confirm):
                 print("cancelled: nothing was exported", file=sys.stderr)
                 return 1
-            pages = backup.export_cache(store, args.target, args.out, _passphrase(confirm=True),
-                                        settings.target_language)
-            print(f"exported {args.target!r}: {pages} page(s) to {args.out}")
+            done = backup.export_books(stores, books, args.out, _passphrase(confirm=True))
+            print(_exported_line(done, books, args.out))
+            if done.left_out:
+                print(f"note: {done.left_out} file(s) of page information or series sheets could not be read here "
+                      f"and are not in the file", file=sys.stderr)
             return 0
         if not args.target:
             raise SystemExit("error: cache import needs the file to read")
@@ -1323,11 +1429,39 @@ def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> i
         if not _before_backup(IMPORT_NOTE, confirm):
             print("cancelled: nothing was imported", file=sys.stderr)
             return 1
-        book, pages = backup.import_cache(store, args.target, _passphrase(confirm=False), replace=args.replace)
+        opened = backup.open_export(args.target, _passphrase(confirm=False))
+        if args.list_only:
+            for held in opened.held:
+                parts = [f"{held.pages} page(s)", f"{held.bubbles} bubble(s)"]
+                if held.corrections:
+                    parts.append(f"{held.corrections} corrected by you")
+                if held.annotations:
+                    parts.append("with its page information")
+                if held.sheet:
+                    parts.append(f"with the series sheet of {held.sheet!r}")
+                print(f"{held.book!r} in {held.language}: {', '.join(parts)}")
+            return 0
+        chosen = None
+        if args.books:
+            chosen = [h.index for h in opened.held if h.book in set(args.books)]
+            missing = sorted(set(args.books) - {h.book for h in opened.held})
+            if missing:
+                raise SystemExit(f"error: the file holds no book {missing[0]!r} (see --list)")
+        take = bool(args.take_file)
+        plan = backup.plan_import(stores, opened, chosen)
+        for line in _plan_lines(plan, take):
+            print(f"note: {line}", file=sys.stderr)
+        yours = plan.kept or plan.differing or plan.keyed()  # something of the reader's own that stays or goes
+        if confirm and yours and not _continue():
+            print("cancelled: nothing was imported", file=sys.stderr)
+            return 1
+        answers = {key: True for key, _sheet, _c in plan.keyed()} if take else None
+        result = backup.apply_import(stores, opened, chosen, replace=args.replace, keep_corrections=not take,
+                                     take_annotations=take, answers=answers)
     except (backup.BackupError, OSError) as e:
         raise SystemExit(f"error: {e}") from None
-    print(f"imported {pages} page(s) into {book!r} ({'replacing its cache' if args.replace else 'merged'}) "
-          f"from {args.target}")
+    for line in _import_lines(result, args.replace, args.target):
+        print(line)
     return 0
 
 

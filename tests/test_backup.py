@@ -125,7 +125,11 @@ def test_the_file_shows_nothing_of_the_book(tmp_path):
         assert secret.encode("utf-8") not in blob, secret
         assert json.dumps(secret).encode("ascii") not in blob, secret  # nor as escaped JSON
     data = json.loads(backup.decrypt(blob, PASSPHRASE))
-    assert data["book"] == BOOK and data["model"] == MODEL and data["language"] == LANGUAGE
+    assert data["schema"] == backup.PAYLOAD_SCHEMA == 2 and data["kind"] == "export"
+    (entry,) = data["books"]
+    cache = entry["cache"]
+    assert cache["book"] == BOOK and cache["model"] == MODEL and cache["language"] == LANGUAGE
+    assert set(entry) == {"cache"} and data["annotations"] == data["sheets"] == []  # a cache store alone: its caches
     with pytest.raises(backup.BackupError, match="no cache for"):
         backup.export_cache(store, "Another book", out, PASSPHRASE)
     source = store.path_for(BOOK, LANGUAGE)
@@ -389,10 +393,26 @@ def _crafted_cache(**changes) -> dict:
     return {"schema": 1, "book": BOOK, "model": MODEL, "language": "English", "pages": [GOOD_PAGE], **changes}
 
 
+MARKS = {"schema": 1, "kind": "annotations", "book": BOOK, "updated": "2026-11-01T10:00:00",
+         "pages": [{"fp": FP_B, "aspect": 0.7, "add": [], "ignore": [[0.5, 0.5, 0.6, 0.6]]}], "settings": {},
+         "sequence": [], "reading_direction": "ltr"}
+SHEET = {"schema": 1, "kind": "glossary", "series": "秘密の本 Secret", "language": "English",
+         "updated": "2026-11-01T10:00:00", "entries": [{"term": "秘密", "rendering": "Secret"}], "characters": [],
+         "style": {}}
+
+
+def _bundle(*caches: dict, marks: dict | None = None, sheet: dict | None = None, **changes) -> dict:
+    """A payload of version 2 around *caches*, each with *marks* and *sheet* when given."""
+    links = {**({"annotations": 0} if marks else {}), **({"sheet": 0} if sheet else {})}
+    return {"schema": 2, "app": "taslation", "kind": "export", "books": [{"cache": c, **links} for c in caches],
+            "annotations": [marks] if marks else [], "sheets": [sheet] if sheet else [], **changes}
+
+
 @pytest.mark.parametrize("content", [
     pytest.param(b"[" * 100_000 + b"]" * 100_000, id="nested-too-deep"),  # was a RecursionError, uncaught
     pytest.param(b"\xff\xfe not UTF-8", id="not-utf8"), pytest.param(b"[]", id="a-list"),
     pytest.param(b"null", id="null"), pytest.param(_crafted_cache(schema=2), id="schema-2"),
+    pytest.param(_crafted_cache(schema=3), id="schema-3"),
     pytest.param(_crafted_cache(pages=5), id="pages-a-number"),
     pytest.param(_crafted_cache(pages={"0": GOOD_PAGE}), id="pages-a-dict"),
     pytest.param(_crafted_cache(book=["not", "a", "name"]), id="book-a-list"),
@@ -639,8 +659,10 @@ def test_each_kind_of_refusal_has_its_class(tmp_path, monkeypatch):
     with pytest.raises(backup.BrokenPassphrase, match="broken character"):
         backup.decrypt(blob, "correct horse battery \ud83c")
     store = CacheStore(tmp_path / "cache")
-    for content in (_crafted_cache(pages=[GOOD_PAGE, {**GOOD_PAGE, "fp": "zz"}]), _crafted_cache(schema=2),
-                    {"schema": 7, "volumes": {}}):
+    for content in (_crafted_cache(pages=[GOOD_PAGE, {**GOOD_PAGE, "fp": "zz"}]), _crafted_cache(schema=3),
+                    {"schema": 7, "volumes": {}}, _bundle(_crafted_cache(schema=2)),
+                    _bundle(_crafted_cache(), marks={**MARKS, "schema": 2}),
+                    _bundle(_crafted_cache(), sheet={**SHEET, "schema": 2})):
         with pytest.raises(backup.UnreadableExport, match="newer") as raised:
             backup.import_cache(store, _crafted(tmp_path, content), PASSPHRASE)
         assert "nothing was imported" in str(raised.value)

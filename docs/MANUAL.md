@@ -656,25 +656,38 @@ When there are files that cannot be opened on this computer, the window says at 
 Deleting the book or the series deletes such copies too.
 
 A book's cache can be made into a file encrypted with a passphrase, as a backup for yourself or to move it to another computer of your own ("Saved translations...",
-or `taslation cache export` and `taslation cache import`). The file contains the translations,
+or `taslation cache export` and `taslation cache import`). The file contains the translations, with the book's page information
+(the rectangles you added or skipped, speakers and notes, the book's settings and the order of its pages) and the series sheet the book reads in that language,
 so keep it to yourself. Without the passphrase, no one, TASlation included, can open it, and a forgotten passphrase cannot be recovered.
-Since the saved files cannot be read on another computer even when copied, this is the only way to move translations. Series sheets and page information cannot be exported, and stay on this computer.
+One file can hold several books: a whole series (`--series NAME`: every cached volume of the series in the target language) or every book (`--all`).
+It holds no page images and no line read from the pages, only what the saved files themselves hold.
+Since the saved files cannot be read on another computer even when copied, this is the only way to move translations, page information and series sheets.
 When an administrator resets your Windows password (changing it yourself is fine), when you move to a new Windows profile,
 or when Windows is reinstalled, the protected files can no longer be opened. If the translations matter to you, keep an exported file.
-The format of the exported file has not changed, so files exported by an earlier version can be imported too. Imported translations are saved protected as well.
+Files exported by an earlier version (one book's translations) can still be imported. An earlier version cannot import a file exported by this one:
+it says the file comes from a newer version and imports nothing. Imported files are saved protected as well.
 
 * Export and import each start with a warning. An exported file is for you alone (even if the book is yours, giving it to someone else infringes the author's rights),
   and you import only files you made yourself, on your own computer. "Cancel" there stops before you choose a file.
 * While you type the passphrase, what it still lacks is shown, and "Show" unmasks it. A full-width space is treated as an ordinary space.
   Without the extra package `cryptography`, export and import are greyed out.
-* Each import keeps the cache it changes beside it as `<cache>.before-import.<date>.json`,
-  so you can go back by hand. A wrong passphrase, a broken file, a file too large for a book's cache (over 5,000 pages,
-  or over 500 bubbles on a page), or pages made by a newer version of TASlation: in these cases it refuses without writing anything.
+* An import into a book that already has translations here merges them by default. The file's pages are added or take the place of yours,
+  but a translation you corrected here stays where the file's line for that bubble is the model's (or where the file has none),
+  unless you take the file as it is (`--take-file`; `--replace` replaces the whole cache). Before writing, the import says
+  how many pages it adds and replaces, and how many of your corrections it keeps.
+* Page information you already have here stays unless you take the file's. A series sheet you already have is joined with the file's,
+  as a rename joins two sheets: what the file adds is added, and where the two say different things, yours stays unless you take the file's.
+* `cache import FILE --list` lists the books a file holds without importing anything, and `--book NAME` (again for several) imports only those.
+* Each import keeps every file it changes (cache, page information, series sheet) beside it as `<name>.before-import.<date>.json`,
+  so you can go back by hand. A wrong passphrase, a broken file, a file too large (a book's cache over 5,000 pages,
+  or over 500 bubbles on a page; over 1,000 books or 100,000 pages in one file), or parts made by a newer version of TASlation: in these cases it refuses without writing anything.
+  An export too large to be read back from one file is refused as well: export fewer books at a time.
 * `cache export` does not overwrite an existing file unless you add `--force`.
 
 `cache export` and `cache import` only print what the file is for to standard error before asking for the passphrase,
 and ask nothing more, so they can run unattended from a script. With `--confirm` they ask "Continue? [y/N]",
-and anything but yes ends with exit status 1, reading and writing nothing. The passphrase is asked for without being shown. The environment variable
+and anything but yes ends with exit status 1, reading and writing nothing. An import whose file meets corrections, page information or sheet values of your own
+prints on standard error what it will do with them and, with `--confirm`, asks once more. The passphrase is asked for without being shown. The environment variable
 `TASLATION_PASSPHRASE` is for scripts only, because PowerShell's PSReadLine writes a line such as
 `$env:TASLATION_PASSPHRASE = "…"` to its history file (its filter for secrets reacts to
 "password" but not to "passphrase"). The safe way is to type it at the command's prompt.
@@ -744,8 +757,9 @@ taslation gui --reading        start in reading mode (the page alone, full scree
 taslation windows              list the windows that can be captured
 taslation doctor               check the models, fonts, Ollama, the network guard, and whether each stage runs on the GPU or the CPU
 taslation notice [--country CODE] [--reset]   show the legal notice of the start for a country (ISO code); --reset shows it again at the next start
-taslation cache export <book> --out FILE [--force] [--confirm]   export the translation cache to a file encrypted with your own passphrase (a backup for yourself, or for another computer of yours); --force overwrites an existing FILE
-taslation cache import FILE [--replace] [--confirm]    read that file back into the cache (merged with what is there, or replacing it)
+taslation cache export <book> --out FILE [--force] [--confirm]   export the book's translations, page information and series sheet to a file encrypted with your own passphrase (a backup for yourself, or for another computer of yours); --force overwrites an existing FILE
+taslation cache export --series NAME | --all --out FILE   every cached volume of a series in the target language, or every book, in one file
+taslation cache import FILE [--list] [--book NAME] [--take-file] [--replace] [--confirm]   read that file back (merged with what is there, your corrections, page information and sheet values kept unless --take-file; --replace replaces the cache); --list only lists the books it holds
 taslation batch --window "<title>" --book "My Book 1" [--max-pages N] [--no-context]   read the pages you turn; Enter when you have finished reading, Ctrl+C to stop
 taslation read --window "<title>" --book "My Book 1"   capture once, translate and preview
     (both take the book's name from the viewer window's title; a title with no book's name in it, such as
