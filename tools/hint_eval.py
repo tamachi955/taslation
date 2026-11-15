@@ -7,8 +7,9 @@ with a hint that settles what the Japanese leaves open (who did it, a he or a sh
 what a title means here, how politely, to whom) and a pattern a translation that follows the hint matches:
 
 * the hint as one line of ``context`` in four ways (``bare``: the hint alone; ``plain``: "Note: ..."; ``about``:
-  "About this line: ..."; ``note``: "Translator's note on the line: ..."), in English, once in Japanese, and once
-  after a made-up series sheet; against the prompt as the app builds it (no hint);
+  "About this line: ..."; ``note``: "Translator's note on the line: ..."), in English, once in Japanese, and the
+  ``bare`` and ``note`` ways after a made-up series sheet; against the prompt without a hint. ``bare`` is the way the
+  app gives PLaMo a hint (`PlamoTranslator._context`), "bare, after a sheet" the way with a series sheet;
 * hints that should change nothing, to see that a hint does no harm (no hint text in the answer, the same words);
 * the kind ("Kind of line: shout", "... sound effect (sfx)") and the room ("Room: the translation must fit in N
   characters", N = 60 % of the answer without it).
@@ -102,7 +103,7 @@ LABELS = {"bare": "{}", "plain": "Note: {}", "about": "About this line: {}",
 # hint conditions: name -> (the label, the hint's language, the sheet before it)
 HINTED = {"bare": ("bare", "en", False), "plain": ("plain", "en", False), "about": ("about", "en", False),
           "note": ("note", "en", False), "note, Japanese hint": ("note", "ja", False),
-          "note, after a sheet": ("note", "en", True)}
+          "note, after a sheet": ("note", "en", True), "bare, after a sheet": ("bare", "en", True)}
 
 
 def context(*parts: str) -> str:

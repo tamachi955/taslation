@@ -164,22 +164,75 @@ def test_one_raw_request_per_line_with_stops_context_and_temperature(stub):
     assert "<|plamo:msg|>一<|plamo:tag|>output" in second["prompt"]  # the line before, as an earlier pair
 
 
-def test_a_hint_a_kind_and_a_room_leave_the_prompt_as_it_is_and_the_editor_is_told(stub):
-    """PLaMo followed a hint too seldom to be given one (docs/OFFLINE_VERIFICATION.md, "A translator's hint and
-    PLaMo"): a line with a hint, a kind and a room goes as the same prompt as without them, and the translator says it
-    reads no hints (`base.reads_hints`), so that the region editor says so."""
+def _last_input(prompt: str) -> str:
+    return prompt.rsplit("<|plamo:msg|>", 2)[-2].split("<|plamo:tag|>")[0]
+
+
+def _context_block(prompt: str) -> str:
+    return prompt.split("<|plamo:tag|>context<|plamo:msg|>")[1].split("<|plamo:tag|>")[0]
+
+
+def test_a_hint_goes_once_into_its_own_lines_context_and_nowhere_else(stub):
+    """A region's hint for the model is a paragraph of its line's ``context``, after the speaker, the hint alone (the
+    way measured best: docs/OFFLINE_VERIFICATION.md, "A translator's hint and PLaMo"): once, in that block, and in no
+    other part of the prompt, which is otherwise the prompt without it; the next line's prompt holds the hinted line
+    and its answer as an earlier pair, never the hint. A kind and a room change nothing."""
     from taslation.translate import DictTranslator
-    from taslation.translate.base import reads_hints
+    from taslation.translate.base import hint_support
 
     server, url = stub
-    tr = PlamoTranslator(url, seed=3)
     premises = Premises(sheet().format(), sheet())
-    tr.translate_page(["魔導書だ"], [("前", "Before")], premises, meta=[{"speaker": "Aki"}])
-    tr.translate_page(["魔導書だ"], [("前", "Before")], premises,
-                      meta=[{"speaker": "Aki", "note": "said to her teacher", "kind": "shout", "room": 12}])
-    plain, hinted = generates(server)
-    assert hinted["prompt"] == plain["prompt"] and "teacher" not in hinted["prompt"]
-    assert not reads_hints(tr) and reads_hints(OllamaTranslator()) and reads_hints(DictTranslator({}))
+    hint = "said to her teacher"
+    PlamoTranslator(url, seed=3).translate_page(["魔導書だ", "次だ"], [("前", "Before")], premises,
+                                                meta=[{"speaker": "Aki", "kind": "shout", "room": 12}, {}])
+    PlamoTranslator(url, seed=3).translate_page(["魔導書だ", "次だ"], [("前", "Before")], premises,
+                                                meta=[{"speaker": "Aki", "note": "  said to her\nteacher ",
+                                                       "kind": "shout", "room": 12}, {}])
+    plain, plain_next, hinted, after = generates(server)
+    p = hinted["prompt"]
+    assert p.count(hint) == 1 and _context_block(p).endswith("Speaker of the line: Aki\n\n" + hint)
+    assert p == plain["prompt"].replace("Speaker of the line: Aki", "Speaker of the line: Aki\n\n" + hint, 1)
+    assert hint not in after["prompt"] and after["prompt"] == plain_next["prompt"]  # (the stub answers alike)
+    assert "<|plamo:msg|>魔導書だ<|plamo:tag|>output" in after["prompt"]  # the hinted line: an earlier pair only
+    assert hint_support(PlamoTranslator(url)) == "sometimes"  # what the region editor says under the hint
+    assert hint_support(OllamaTranslator()) == "follows" and hint_support(DictTranslator({})) == "follows"
+
+
+def test_a_line_without_a_hint_goes_as_it_went_and_one_with_a_hint_as_measured(stub):
+    """Without a hint (none, empty, blank) a line's prompt is the one it was before hints went to PLaMo, byte for
+    byte, a kind and a room or not; a line with nothing but a hint goes as `tools/hint_eval.py` measured it (``bare``:
+    the hint alone as the ``context``)."""
+    server, url = stub
+    premises = Premises(sheet().format(), sheet())
+    for facts in ({"speaker": "Aki"}, {"speaker": "Aki", "note": ""}, {"speaker": "Aki", "note": "  "},
+                  {"speaker": "Aki", "kind": "shout", "room": 12}):
+        PlamoTranslator(url, seed=3).translate_page(["魔導書だ"], [("前", "Before")], premises, meta=[facts])
+    before = pfml_prompt("魔導書だ", "en", premises.strip() + "\n\nSpeaker of the line: Aki", [("前", "Before")],
+                         glossary_for(premises, "魔導書だ", "Aki"))
+    assert [r["prompt"] for r in generates(server)] == [before] * 4
+    hint = "光 is a girl's name, read Hikari."
+    PlamoTranslator(url, seed=3).translate_page(["光、こっちに来て"], meta=[{"note": hint}])
+    assert generates(server)[-1]["prompt"] == pfml_prompt("光、こっちに来て", "en", hint)
+
+
+def test_a_joined_run_carries_no_hint_and_a_bubble_asked_by_itself_carries_its_own(stub):
+    """Bubbles whose sentence goes on are one request: one bubble's hint would be the reference of the others too, so
+    that request has none. When its answer does not split back, each bubble is asked by itself, and only the hinted
+    bubble's request carries the hint (before the Japanese that follows it)."""
+    server, url = stub
+    hint = "あいつ is a girl."
+    lines, meta = ["お前もしかして", "女か?"], [{"continues": True, "note": hint}, {}]
+    server.answer = lambda prompt: "Wait, are you...\na girl?" if "\n" in _last_input(prompt) else "EN"
+    assert PlamoTranslator(url, seed=1).translate_page(lines, meta=meta) == ["Wait, are you...", "a girl?"]
+    (joined_request,) = generates(server)
+    assert _last_input(joined_request["prompt"]) == "お前もしかして\n女か?" and hint not in joined_request["prompt"]
+    server.requests.clear()
+    server.answer = lambda prompt: "Wait, are you a girl?" if "\n" in _last_input(prompt) else "EN"
+    assert PlamoTranslator(url, seed=1).translate_page(lines, meta=meta) == ["EN", "EN"]
+    joined_request, first, second = generates(server)
+    assert hint not in joined_request["prompt"] and hint not in second["prompt"]
+    assert _last_input(first["prompt"]) == "お前もしかして" and _context_block(first["prompt"]) == hint + "\n\n女か?"
+    assert first["prompt"].count(hint) == 1
 
 
 def test_a_line_asked_for_again_is_another_draw(stub):

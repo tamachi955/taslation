@@ -35,9 +35,11 @@ REGION_KIND_WORDS = {"": "(not set)", "speech": "Speech", "thought": "Thought", 
 ERASE_ONLY_TIP = ("Erase only: the lettering is erased and nothing is set in its place; the region is not translated "
                   "and not counted as untranslated.")
 ASKING = {"again": "Asking the model for a new translation..."}
-# under the hint for the model, when the translation model in use does not read it (`translate.base.reads_hints`)
-HINT_UNREAD = ("The translation model in use does not read hints: Ask again does not follow this one. Names and terms "
-               "in the series sheet, and the speaker, do reach the model.")
+# under the hint for the model, when the translation model in use follows a hint only now and then
+# (`translate.base.hint_support` "sometimes": PLaMo, followed in about half of the answers of a test)
+HINT_SOMETIMES = ("This model follows a hint only sometimes (about half the time in a test), best for how a name or "
+                  "term is read and who or how many are meant. Names and terms that must always come out the same "
+                  "belong in the series sheet.")
 FLASH = "#fff4bf"  # the translation box, for a moment, when the model's new translation is put in it
 FLASH_MS = 1200
 # the formatting bar
@@ -380,9 +382,9 @@ class EditBubbleDialog(tk.Toplevel):
     place on the screen) the way to
     the region before or after this one; the editor closes without *on_cancel* (the window ends its preview). *at*:
     where the editor opens on the screen (the place the one before it had), else over *master*. *note*: a line the
-    window has to say once (the spellcheck that cannot run), under the header. *reads_hints*: whether the translation
-    model in use reads the hint for the model (`translate.base.reads_hints`); when it does not, a line under the hint
-    says so (`HINT_UNREAD`), and the hint is kept all the same."""
+    window has to say once (the spellcheck that cannot run), under the header. *hint_support*: how far the translation
+    model in use follows the hint for the model (`translate.base.hint_support`); when only sometimes, a line under the
+    hint says so (`HINT_SOMETIMES`); for a model that follows it, nothing is said."""
 
     def __init__(self, master: tk.Misc, region: Any, speakers: list[str], on_save: Callable[[dict[str, Any]], None],
                  on_drop: Callable[[], None], on_ask: Callable[[str, dict[str, str]], bool] | None = None,
@@ -394,7 +396,7 @@ class EditBubbleDialog(tk.Toplevel):
                  on_read: Callable[[Callable[[str, str], None]], bool] | None = None,
                  on_step: Callable[[int, dict[str, Any] | None, tuple[int, int]], None] | None = None,
                  at: tuple[int, int] | None = None, note: str = "", clip: Any = None, font_memory: Any = None,
-                 reads_hints: bool = True):
+                 hint_support: str = "follows"):
         super().__init__(master)
         self.title(_("Edit region"))
         self.transient(master)
@@ -451,12 +453,12 @@ class EditBubbleDialog(tk.Toplevel):
         ttk.Label(grid, text=_("Hint for the model (a pun, who is addressed):")).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.note_var = tk.StringVar(value=region.remark)
         ttk.Entry(grid, textvariable=self.note_var, width=64).grid(row=3, column=0, columnspan=4, sticky="we")
-        self.hint_unread: ttk.Label | None = None  # said when the translation model in use does not read the hint
-        if not reads_hints:
-            self.hint_unread = ttk.Label(grid, text=_(HINT_UNREAD), foreground="#5a5a5a", justify="left",
-                                         wraplength=480)
-            self.hint_unread.grid(row=4, column=0, columnspan=4, sticky="we")
-            self.hint_unread.bind("<Configure>", lambda e: wrap_label(self.hint_unread, e.width))
+        self.hint_line: ttk.Label | None = None  # said when the translation model in use follows a hint sometimes
+        if hint_support == "sometimes":
+            self.hint_line = ttk.Label(grid, text=_(HINT_SOMETIMES), foreground="#5a5a5a", justify="left",
+                                       wraplength=480)
+            self.hint_line.grid(row=4, column=0, columnspan=4, sticky="we")
+            self.hint_line.bind("<Configure>", lambda e: wrap_label(self.hint_line, e.width))
         ttk.Label(grid, text=_("Note to the reader (a pun, a reference the translation cannot carry):")).grid(
             row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.reader_var = tk.StringVar(value=getattr(region, "reader_note", ""))

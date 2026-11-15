@@ -31,14 +31,24 @@ What the pipeline hands a translator maps to it like this:
   the next bubble (`FOLLOW_OPEN`: the next one) and for a line asked alone, as a line asked again is
   (`FOLLOW_ALONE`: the next two), never past its page; not for the others, whose ``context`` stays the same from line
   to line;
-* a region's hint for the model (the facts' ``note``), its kind and its room -> nothing (``reads_hints`` False, so
-  that the region editor says the hint is not read). Measured on 2026-11-15 with invented lines, three seeds each
-  (docs/OFFLINE_VERIFICATION.md, "A translator's hint and PLaMo"): a hint as a line of ``context``, the best of four
-  ways tried, was followed in 38 of 78 answers (17 without it), mended 21 of the 61 the model got wrong and spoilt
-  none; it settled readings of names and terms, which the series sheet settles every time (``glossary``), now and
-  then a pronoun or a number, and never the register or the people addressed. As a line of ``context`` the kind
-  "shout" gave 3 of 30 answers an exclamation mark (1 without it) and the room in characters brought none of 30
-  within it; the kind "sfx" made 14 of 30 romanised sound effects English ones (Gashan: Crash) and 3 a wrong one.
+* a region's hint for the model (the facts' ``note``) -> a paragraph of its own in the ``context`` of that line,
+  after the speaker (`_hint`; that line's prompt then begins otherwise, and Ollama works it out anew);
+  ``hint_support`` "sometimes", which the region editor says under the hint. Only the
+  request of the line itself carries it: a run of bubbles joined into one request carries none (it would be the
+  reference of the run's other bubbles as well), but when the joined answer does not split back and each bubble is
+  asked by itself, that bubble's request does; and Ask again asks one bubble. No other line's prompt ever holds it:
+  the earlier pairs are the Japanese and the translations, the Japanese after a line is the Japanese. The answer to
+  a line with a hint is, like any answer, an earlier pair of the lines after it. A line without a hint goes as it
+  went before, byte for byte. Measured on 2026-11-15 with invented lines, three seeds each
+  (docs/OFFLINE_VERIFICATION.md, "A translator's hint and PLaMo"): the hint alone as a line of ``context``, the best
+  of four ways tried, was followed in 38 of 78 answers (17 without it), mended 21 of the 61 the model got wrong and
+  spoilt none; it did best for how a name or a term is read (which the series sheet settles every time, as
+  ``glossary``) and now and then a pronoun or a number, never the register or the people addressed; and hints that
+  should change nothing changed the words of 5 of 30 answers (a synonym, a full stop added): a hint can change the
+  wording of its own line where it need not;
+* a region's kind and its room -> nothing. As a line of ``context`` the kind "shout" gave 3 of 30 answers an
+  exclamation mark (1 without it) and the room in characters brought none of 30 within it; the kind "sfx" made 14 of
+  30 romanised sound effects English ones (Gashan: Crash) and 3 a wrong one.
 
 Translating is all it does, as for the other translator: TASlation has no notes of the model's own, no review pass, no
 shortening and no alternatives (removed 2026-11-06). A line whose reply copied the Japanese or came back empty is asked
@@ -61,7 +71,7 @@ import threading
 from typing import Any, Callable, Sequence
 
 from ..messages import Cancelled, Message
-from .base import TranslationError
+from .base import HINT_SOMETIMES, TranslationError
 from .continuation import MAX_JOINED, joined, runs, split_back
 from .models import PLAMO, plamo_code
 from .ollama import KEEP_ALIVE, OllamaTranslator, _ignore
@@ -173,7 +183,7 @@ class PlamoTranslator(OllamaTranslator):
     with its own context size (`NUM_CTX`); *history_pairs*: the earlier pairs a line carries at most."""
 
     name = "plamo"
-    reads_hints = False  # a region's hint is not in the prompt: followed too seldom (the module's docstring)
+    hint_support = HINT_SOMETIMES  # a region's hint is in its line's context, followed about half the time (above)
 
     def __init__(self, url: str = "http://127.0.0.1:11434", model: str = PLAMO.ollama_name, timeout: float = 900.0,
                  temperature: float = 0.2, num_ctx: int = NUM_CTX, target_language: str = "English",
@@ -241,12 +251,21 @@ class PlamoTranslator(OllamaTranslator):
         # each line's spaces made one; the line breaks kept (a joined request answers one line per bubble)
         return "\n".join(" ".join(line.split()) for line in clean(raw).splitlines() if line.strip())
 
-    def _context(self, notes: str, speaker: str = "", following: Sequence[str] = ()) -> str:
-        """The reference text of a line: the premises; for a line the reader gave a speaker, who says it; and the
+    @staticmethod
+    def _hint(facts: dict[str, Any]) -> str:
+        """The reader's hint for the model on a line (its facts' ``note``) as it goes into that line's ``context``:
+        the hint alone, on one line ("" for none)."""
+        return " ".join(str(facts.get("note", "") or "").split())
+
+    def _context(self, notes: str, speaker: str = "", following: Sequence[str] = (), hint: str = "") -> str:
+        """The reference text of a line: the premises; for a line the reader gave a speaker, who says it; the
+        reader's hint for the model on the line (*hint*: `_hint`, for the request of that line alone); and the
         Japanese that follows it (*following*), as the surrounding text the format's ``context`` is for."""
         parts = [str(notes or "").strip()]
         if speaker:
             parts.append(f"Speaker of the line: {speaker}")
+        if hint:
+            parts.append(hint)
         after = "\n".join(" ".join(str(t).split()) for t in following if str(t).strip())
         if after:
             parts.append(after)
@@ -269,14 +288,14 @@ class PlamoTranslator(OllamaTranslator):
 
     def _line(self, source: str, notes: str, history: Sequence[tuple[str, str]], speaker: str = "",
               cancel: threading.Event | None = None,
-              on_slow: Callable[[float], None] | None = None, following: Sequence[str] = ()) -> str:
+              on_slow: Callable[[float], None] | None = None, following: Sequence[str] = (), hint: str = "") -> str:
         """One line translated (or a joined run of them, a line break between bubbles), after the earlier pairs
-        *history*, with the premises *notes* and the Japanese *following* it as reference and the sheet's renderings
-        it names as glossary; another seed when it was asked for before (`_draw`). A single line comes back on one
-        line."""
+        *history*, with the premises *notes*, the reader's *hint* for this line and the Japanese *following* it as
+        reference and the sheet's renderings it names as glossary; another seed when it was asked for before
+        (`_draw`). A single line comes back on one line."""
         target = self.target_code
         max_tokens = max(128, 4 * len(source) + 64)
-        prompt = self._fit(source, target, self._context(notes, speaker, following), list(history),
+        prompt = self._fit(source, target, self._context(notes, speaker, following, hint), list(history),
                            glossary_for(notes, source, speaker), max_tokens)
         got = self._generate(prompt, max_tokens, self._draw(source), cancel, on_slow)
         return got if "\n" in source else " ".join(got.split())
@@ -342,6 +361,7 @@ class PlamoTranslator(OllamaTranslator):
                 raise Cancelled()
             speaker = str(facts[run[0]].get("speaker", "") or "")
             if len(run) > 1 and all(str(facts[k].get("speaker", "") or "") == speaker for k in run):
+                # (no hint: one bubble's hint would be the reference of the run's other bubbles too)
                 parts = split_back(self._line(joined([lines[k] for k in run]), notes, history, speaker, cancel,
                                               on_slow, self._following(lines, facts, after, run[-1])), len(run))
                 if parts is not None:
@@ -352,7 +372,7 @@ class PlamoTranslator(OllamaTranslator):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled()
                 took(k, self._line(lines[k], notes, history, str(facts[k].get("speaker", "") or ""), cancel, on_slow,
-                                   self._following(lines, facts, after, k)))
+                                   self._following(lines, facts, after, k), self._hint(facts[k])))
         if not any(out):
             raise TranslationError(Message("ollama.bad_answer", chars=0))
         return out

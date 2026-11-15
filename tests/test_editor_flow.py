@@ -139,34 +139,43 @@ def test_the_editor_shows_the_region_and_reads_its_japanese_on_demand(hidden_roo
     d.destroy()
 
 
-def test_the_editor_says_when_the_model_in_use_does_not_read_the_hint(hidden_root):
+def test_the_editor_says_when_the_model_in_use_follows_a_hint_only_sometimes(hidden_root):
+    """PLaMo is given the hint but follows it in about half of the answers of a test: the editor says so under the
+    hint, in the window's language; for a model that follows it (or no model), nothing."""
     from taslation import i18n
 
     region = _region()
     region.remark = "said to her teacher"
     saved = []
     d = review.EditBubbleDialog(hidden_root, region, [], on_save=saved.append, on_drop=lambda: None,
-                                on_ask=lambda mode, answer: True, reads_hints=False)
-    assert d.hint_unread is not None and d.hint_unread.winfo_manager() == "grid"
-    assert str(d.hint_unread.cget("text")) == review.HINT_UNREAD
+                                on_ask=lambda mode, answer: True, hint_support="sometimes")
+    assert d.hint_line is not None and d.hint_line.winfo_manager() == "grid"
+    assert str(d.hint_line.cget("text")) == review.HINT_SOMETIMES
+    assert "sometimes" in review.HINT_SOMETIMES and "series sheet" in review.HINT_SOMETIMES
     d._save()
-    assert saved[-1]["note"] == "said to her teacher"  # the hint is kept all the same
+    assert saved[-1]["note"] == "said to her teacher"
+    for support in ("follows", "anything else"):
+        plain = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None,
+                                        hint_support=support)
+        assert plain.hint_line is None, support  # a model that follows it: nothing said
+        plain.destroy()
     plain = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None)
-    assert plain.hint_unread is None  # a model that reads it (or no model): nothing said
+    assert plain.hint_line is None
     plain.destroy()
+    line = review.HINT_SOMETIMES
     for code, catalog in CATALOGS.items():
-        assert (catalog.get(review.HINT_UNREAD, review.HINT_UNREAD) == review.HINT_UNREAD) == (code == "en"), code
+        assert (catalog.get(line, line) == line) == (code == "en"), code
     try:
         i18n.set_language("ja")
         d = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None,
-                                    reads_hints=False)
-        assert str(d.hint_unread.cget("text")) == CATALOGS["ja"][review.HINT_UNREAD]
+                                    hint_support="sometimes")
+        assert str(d.hint_line.cget("text")) == CATALOGS["ja"][review.HINT_SOMETIMES]
         d.destroy()
     finally:
         i18n.set_language("en")
 
 
-def test_the_window_tells_the_editor_whether_the_model_in_use_reads_hints(cached, monkeypatch):
+def test_the_window_tells_the_editor_how_far_the_model_in_use_follows_a_hint(cached, monkeypatch):
     from taslation.translate.plamo import PlamoTranslator
 
     pipeline, result = cached
@@ -188,13 +197,13 @@ def test_the_window_tells_the_editor_whether_the_model_in_use_reads_hints(cached
     w = Opener()
     region = result.translated[0]
     w._open_editor(region, result)
-    assert made[-1]["reads_hints"] is True  # a translator that says nothing is taken to read them
+    assert made[-1]["hint_support"] == "follows"  # a translator that says nothing is taken to follow it
     pipeline.translator = PlamoTranslator()  # (made, never asked: no request goes out)
     w._open_editor(region, result)
-    assert made[-1]["reads_hints"] is False and made[-1]["on_ask"] is not None
+    assert made[-1]["hint_support"] == "sometimes" and made[-1]["on_ask"] is not None
     pipeline.translator = None
     w._open_editor(region, result)
-    assert made[-1]["reads_hints"] is True and made[-1]["on_ask"] is None  # no model to ask: nothing to say of it
+    assert made[-1]["hint_support"] == "follows" and made[-1]["on_ask"] is None  # no model to ask: nothing to say
 
 
 def test_the_editors_picture_is_a_crop_of_the_frame_in_memory():

@@ -2360,16 +2360,17 @@ them 10 lines with a hint that should change nothing, 10 shouts, 10 sound effect
 | the same, the hint written in Japanese | 35 | 18 of 61 | 0 |
 | a made-up series sheet alone | 21 | | |
 | the sheet, then "Translator's note on the line: " and the hint | 36 | 15 of 57 | 0 |
+| the sheet, then the hint alone (what the app sends with a series sheet) | 36 | 15 of 57 | 0 |
 
-The counts are those of the tool's run; the same requests asked once before (the same prompts and seeds, the server
-answering other requests as well) gave 18 of these 624 answers other words and moved one count by one (the "note"
-row had 31, 14 mended).
+The counts are those of the tool's run; the requests of the rows but the last, asked once before (the same prompts and
+seeds, the server answering other requests as well), gave 18 of their 624 answers other words and moved one count by
+one (the "note" row had 31, 14 mended).
 
 With the hint alone, by what it settles (without a hint in brackets): how a name is read 15 of 18 (12), a title 6 of 9
 (0), he or she 5 of 9 (0), one or many 6 of 12 (3), who did it 3 of 9 (0), what is meant 3 of 9 (2), to whom 0 of 6
 (0), how politely 0 of 6 (0). A name the hint gives another reading kept the model's: 海 came back "Umi" after "the
-Sea", never "Kai". The hints that should change nothing left the words as they were in 23 to 25 of 30 answers, the
-rest a synonym ("already" for "soon"); no answer held words of a hint. A line of ``context`` also made the model end
+Sea", never "Kai". The hints that should change nothing left the words as they were in 23 to 25 of 30 answers (25
+with the hint alone), the rest a synonym ("already" for "soon"); no answer held words of a hint. A line of ``context`` also made the model end
 a sentence with a full stop where it left it out without one ("Be quiet" / "Be quiet.").
 
 The kind and the room, as one line of ``context`` each: "Kind of line: shout" gave 3 of 30 shouts an exclamation mark
@@ -2378,14 +2379,34 @@ to an English sound word (ガシャン "Gashan" to "Crash", ゴクリ "Gokuri" t
 to "Zzzz"); "Room: the translation must fit in N characters", N being 60 % of the answer without it, brought none of
 30 answers within it, either way (60.7 and 59.5 characters on average).
 
-**Decision.** PLaMo is given no hint, kind or room; its prompt is what it was, byte for byte, with them or without
-(`tests/test_plamo.py`). A hint was followed in fewer than half of the answers, and well only where the series sheet
-already settles it every time (a name, a term: the PLaMo glossary), never for what a hint on one line is for: to whom,
-how politely. The translator says so (`reads_hints` False), and the region editor says under the hint, in every window
-language, that the model in use does not read it and that Ask again will not follow it, but the speaker and the
-series sheet do reach the model; the hint stays with the book's premises for a model that reads it.
+**Decision.** A first reading of these numbers left PLaMo without the hint: it was followed in fewer than half of the
+answers, best where the series sheet settles it every time (a name, a term: the PLaMo glossary), and never for to
+whom or how politely. It was decided the other way: a reader who writes a hint and presses Ask again is asking for
+exactly this attempt, and mending a third of the answers that were wrong without it, spoiling none that were right,
+is better than ignoring what they wrote. So the hint goes into the ``context`` of its own line, alone, after the
+speaker (`PlamoTranslator._context`): with nothing else it is the "hint alone" prompt above, with a series sheet the
+"sheet, then the hint alone" one (`tests/test_plamo.py` holds the app's prompt to the measured one). Asked through
+the app's own path (`PlamoTranslator.translate_page` with the region's note, seed 1), the 26 lines came back word for
+word as measured in 24 answers and followed the hint as often (12). A line without a hint goes as before, byte for
+byte; the kind and the room stay out.
+
+The hint of one line never reaches another line's prompt: the earlier pairs are the Japanese and the translations,
+the Japanese after a line is only the Japanese, and a run of bubbles joined into one request (a sentence that goes on
+in the next bubble) carries no hint, since it would be the reference of the run's other bubbles as well; when the
+joined answer does not split back and each bubble is asked by itself, the hinted bubble's request carries it, and Ask
+again asks one bubble. The answer to a line with a hint is, like every answer, an earlier pair of the lines after it.
+A hint can change the wording of its own line where it need not (5 of the 30 neutral answers with the hint alone: a
+synonym, a full stop added), and the manual says so.
+
+The translator says how far its model follows a hint (`hint_support`: "sometimes" for PLaMo, "follows" for the chat
+translator), and the region editor says under the hint, in every window language, that this model follows a hint
+only sometimes (about half the time in a test), best for how a name or term is read and who or how many are meant,
+and that names and terms that must always come out the same belong in the series sheet. The line takes two or three
+lines of text (34 to 49 pixels) and leaves the editor's width as it is in every window language.
 
 **Not shown here.** Lines of real books, other target languages than English, more seeds or another wording of the
-hints; the patterns are rough (a "she" anywhere passes). The kind "sfx" may help a sound effect the reader asks to be
+hints; a hint after a speaker ("Speaker of the line: ...", the prompt of a line the reader gave a speaker) or before
+the Japanese that follows a line (a bubble that goes on, asked by itself); the patterns are rough (a "she" anywhere
+passes). The kind "sfx" may help a sound effect the reader asks to be
 translated (sound effects are left as drawn by default, `translate_sfx`), but 3 of the 17 changes were wrong, and it
 was not tried on sound effects of real pages: not shipped.

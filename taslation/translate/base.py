@@ -48,18 +48,24 @@ class Translator(Protocol):
         when the request has produced nothing for a while (the translator's
         ``slow_after``; a model that is still loading, say).
 
-        A translator may leave facts of ``meta`` unused; one that does not pass a
-        region's hint (``note``) on to its model says so with ``reads_hints = False``
-        (`reads_hints`), and the region editor tells the reader.
+        A translator may leave facts of ``meta`` unused; how far its model follows a
+        region's hint (``note``) it says with ``hint_support`` (`hint_support`), and
+        the region editor tells the reader.
         """
         ...
 
 
-def reads_hints(translator: Any) -> bool:
-    """Whether *translator* passes a region's hint for the model (the reader's ``note`` in ``meta``) on to its model:
-    the chat translator does (`ollama.OllamaTranslator`), PLaMo does not (`plamo.PlamoTranslator.reads_hints`). One
-    that does not say is taken to (a test's stand-in, the echo)."""
-    return bool(getattr(translator, "reads_hints", True))
+HINT_FOLLOWS = "follows"  # the model is given the hint with its bubble and follows it (the chat translator)
+HINT_SOMETIMES = "sometimes"  # the model is given the hint and follows it only now and then (PLaMo, measured)
+
+
+def hint_support(translator: Any) -> str:
+    """How far the model of *translator* follows a region's hint for the model (the reader's ``note`` in ``meta``):
+    `HINT_FOLLOWS` for the chat translator (`ollama.OllamaTranslator`: the bubble's "note"), `HINT_SOMETIMES` for PLaMo
+    (`plamo.PlamoTranslator.hint_support`: a line of its ``context``, followed in about half of the answers of a
+    test), which the region editor says under the hint. One that does not say is taken to follow it (a test's
+    stand-in, the echo)."""
+    return str(getattr(translator, "hint_support", HINT_FOLLOWS) or HINT_FOLLOWS)
 
 
 def accepts(fn: Any, name: str) -> bool:

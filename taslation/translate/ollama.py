@@ -76,7 +76,7 @@ from urllib.parse import urlparse
 from ..health import is_default_model, pull_command
 from ..messages import Cancelled, Message
 from ..netguard import is_loopback_host
-from .base import TranslationError
+from .base import HINT_FOLLOWS, TranslationError
 
 POLL_S = 0.1  # how often a streamed request looks at its cancel event while it waits for the answer
 # How long Ollama keeps the model after a request (Settings.ollama_keep_alive). Long enough for a reader on
@@ -176,7 +176,7 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 
 class OllamaTranslator:
     name = "ollama"
-    reads_hints = True  # a region's hint goes with its bubble as "note" (`build_messages`, `base.reads_hints`)
+    hint_support = HINT_FOLLOWS  # a region's hint goes with its bubble as "note" (`build_messages`)
 
     def __init__(
         self,
