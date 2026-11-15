@@ -39,15 +39,13 @@ It does not upload, copy or share anything. The translations stay on your comput
 It is made, on purpose, so that it cannot become a way to read a book without the viewer. It saves only the translations, and even those are tied to a fingerprint of each page (the page fingerprint),
 so they are of no use unless the real page is on the screen.
 
-## Position on AI
+## About the use of AI
 
-TASlation uses machine-learning models to read the text, to translate it and to erase it. Its position on that is as follows.
+This program uses AI (machine-learning models) to read the text, to translate it and to erase it.
 
-* **What matters most is that the author and the publisher are paid.** TASlation can show a translation only over the real page that the viewer is showing. It is not a way to read without paying, nor a way to hand a book to others.
-* **The licence and the training data of each model it uses are published.** They are in `docs/THIRD_PARTY.md`. The two models that find and erase text on the artwork do not disclose where their training images came from, so the installer says so and lets you choose whether to install them.
-* **TASlation itself trains nothing.** No page and no translation leaves the computer, so none can be used to train anyone else's model either.
-* **Where a book has an official translation, buying that is best.** TASlation does not replace human translation; it helps you buy and read a book that has no translation yet. An automatic translation has errors, and the translations are neither published nor distributed.
-* **The author makes no money from this tool.** The OCR models' licence allows non-commercial use only (CC BY-NC-SA 4.0), and the translation model PLaMo is free only for non-commercial use. TASlation is free of charge, with no advertising, no donations taken and no paid version.
+* The models it uses, and the licence of each, are listed in `docs/THIRD_PARTY.md`.
+* The author makes no profit from this program. It is free, with no advertising, no donations and no paid version.
+* No further training takes place. No page and no translation leaves the computer, so none is used to train a model.
 
 ## What it does
 
