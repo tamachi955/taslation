@@ -24,7 +24,8 @@ themselves ("break"), and Ctrl+C and Ctrl+V copy and paste a region on the page,
 The viewer's page keys are Page > Page keys...'s (`dialogs.pagekeys`): shown read-only (`FIXED`), as are translator
 mode's mouse gestures (`FIXED_GESTURES`: a click and a drag, Shift while rotating, a drag on empty space, Shift+click,
 a Shift+drag band, and what acts on several selected). Over the full-screen viewer, F5, F11 and Esc are hot keys of
-their own (`overbook.OVER_HOTKEYS`) and keep those keys."""
+their own (`overbook.OVER_HOTKEYS`) and keep those keys; the keys of a bubble's Japanese and translation
+(`bubble_text.TEXT_ACTIONS`) are hot keys there too, as this keymap has them, while the pointer is on the page."""
 
 from __future__ import annotations
 
@@ -71,6 +72,11 @@ ACTIONS: tuple[Action, ...] = (
     Action("undo", "Undo", ("Control-z",)),
     Action("redo", "Redo", ("Control-y",)),
     Action("show_original", "Show original"),
+    Action("hover_shows", "Switch between the translation and the original on the page"),
+    Action("hover_reveal", "Switch between a panel and the bubble itself under the pointer"),
+    Action("show_japanese", "Show the Japanese of the bubble under the pointer, to select and copy", ("F2",)),
+    Action("copy_japanese", "Copy the Japanese of the bubble under the pointer", ("Shift-F2",)),
+    Action("copy_translation", "Copy the translation of the bubble under the pointer", ("Control-F2",)),
     Action("always_on_top", "Always on top"),
     Action("over_viewer", "Over the full-screen viewer"),
     Action("order_numbers", "Reading-order numbers"),

@@ -121,7 +121,8 @@ from .progress import (
     stage_of,
     status_word,
 )
-from .reading import ReadingMixin
+from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
+from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
 from . import shortcuts
 from .. import devices
@@ -537,6 +538,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         help_place = help_window.geometry() if help_window is not None and help_window.winfo_exists() else None
         find_kept = self._find_kept()  # find and replace too, with what it shows
         self._help = self._first_steps = None
+        bubbles_away(self)  # (the popup over a bubble goes with the widgets)
         for child in list(self.winfo_children()):
             child.destroy()
         self._build_ui()
@@ -587,6 +589,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.role_var = tk.StringVar(value=self.settings.role)
         self.book_var.trace_add("write", lambda *_a: self._book_for_role())  # a book opens in its role
         self._build_menus()
+        # View > Show original greyed while the page shows the original anyway (`hover.original_idle`)
+        self.role_var.trace_add("write", lambda *_a: self._sync_original_entry())
+        self._sync_original_entry()
         self._build_toolbar()
         self._build_strips()  # the setup banner and the scan band, between the toolbar and the page
 
@@ -642,7 +647,10 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         (`book_areas`), Copy format, Paste format (also on every region of a kind), Copy region and Paste region
         (`formats`), then Set kind..., Set text size... and Place in reading order... for the selected regions
         (`selection`), Tools has Saved translations..., Names rendered in more than one way... and Settings..., View
-        has Show original, Always on top, Over the full-screen viewer and Reading-order numbers, and Help, last, has how
+        has Show original, the choices of what the page and a bubble under the pointer show (`hover`: Translation on
+        the page, original under the pointer / Original on the page, translation under the pointer) and how that
+        bubble shows it (Under the pointer: a panel beside the bubble / the bubble itself), Always on top, Over
+        the full-screen viewer and Reading-order numbers, and Help, last, has how
         to use TASlation, the help's Keys topic (Keys...), the legal notice and About TASlation. An entry that is an
         action of `shortcuts.ACTIONS` shows its key as the keymap has it (`keyed`, `_show_keys`)."""
         menubar = tk.Menu(self)
@@ -693,6 +701,19 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_checkbutton(label=_("Show original"), variable=self.original_var, command=self._redisplay)
         keyed(view_menu, "show_original")
+        self._original_entry = (view_menu, int(view_menu.index("end")))  # greyed at times (`_sync_original_entry`)
+        # what the page and a bubble under the pointer show (`hover`), kept in the settings file
+        self.hover_var = tk.StringVar(self, value=hover_shows(self))
+        for value, label in HOVER_LABELS:
+            view_menu.add_radiobutton(label=_(label), value=value, variable=self.hover_var,
+                                      command=lambda: self._hover_chosen())
+            keyed(view_menu, "hover_shows")
+        # ... and how that bubble shows it: a panel beside it, or the bubble itself (`zoom`, `in_place`)
+        self.reveal_var = tk.StringVar(self, value=hover_reveal(self))
+        for value, label in REVEAL_LABELS:
+            view_menu.add_radiobutton(label=_(label), value=value, variable=self.reveal_var,
+                                      command=lambda: self._reveal_chosen())
+            keyed(view_menu, "hover_reveal")
         view_menu.add_checkbutton(label=_("Always on top"), variable=self.top_var, command=self._apply_on_top)
         keyed(view_menu, "always_on_top")
         view_menu.add_checkbutton(label=_("Over the full-screen viewer"), variable=self.over_var,
@@ -722,7 +743,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
                  _("Names rendered in more than one way"),
                  _("Change the lettering, the window and the optional page models."))
         tip_menu(self, view_menu, _("Show the page as it is in the viewer, without the translation."),
-                 _("Keep this window above the others."),
+                 *(_(t) for t in HOVER_TIPS), *(_(t) for t in REVEAL_TIPS), _("Keep this window above the others."),
                  _("Over a viewer in full screen, stay on top without taking its keys: you turn the pages there."),
                  _(ORDER_NUMBERS_TIP))
         tip_menu(self, help_menu, _("How to use TASlation, topic by topic."), _("Every key TASlation knows, in one list."),
@@ -883,7 +904,13 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         handlers: dict[str, Callable[[tk.Event], Any]] = {
             "translate_now": plain(self.translate_now), "reading_mode": plain(self.toggle_reading),
             "undo": lambda e: self._edit_key(e, self.undo_edit), "redo": lambda e: self._edit_key(e, self.redo_edit),
-            "show_original": flip(self.original_var, self._redisplay),
+            # (nothing while the page shows the original anyway: `hover.original_idle`)
+            "show_original": lambda e: None if original_idle(self) else flip(self.original_var, self._redisplay)(e),
+            "hover_shows": plain(lambda: self.flip_hover_shows()),
+            "hover_reveal": plain(lambda: self.flip_hover_reveal()),
+            "show_japanese": plain(lambda: self.show_japanese()),
+            "copy_japanese": plain(lambda: self.copy_japanese()),
+            "copy_translation": plain(lambda: self.copy_translation()),
             "always_on_top": flip(self.top_var, self._apply_on_top), "over_viewer": flip(self.over_var, self.toggle_over),
             "read_whole_book": plain(self.open_batch_dialog), "set_area": plain(self.set_area),
             "page_keys": plain(self.open_page_keys), "saved_translations": plain(self.open_caches),
@@ -951,6 +978,10 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         models made for the new choice and the pages of this session lettered anew."""
         for key, value in changed.items():
             setattr(self.settings, key, value)
+        if "hover_shows" in changed:  # (written into the settings file by the dialog already)
+            self.set_hover_shows(str(changed["hover_shows"]), save=False)
+        if "hover_reveal" in changed:
+            self.set_hover_reveal(str(changed["hover_reveal"]), save=False)
         if "always_on_top" in changed:
             self.top_var.set(bool(changed["always_on_top"]))
             self._apply_on_top()

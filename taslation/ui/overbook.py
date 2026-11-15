@@ -17,7 +17,10 @@ drawing.
 * TASlation's own keys while the viewer has the foreground are hot keys (`OVER_HOTKEYS`), registered only while the
   mode is on and the viewer or TASlation is in front, taken back when it ends and at closing: F5 (translate; the
   browser's own F5 would reload the book, which the store counts), and in reading mode F11 and Esc (leave it). F11
-  and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered.
+  and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered. The keys that
+  show and copy a bubble's Japanese and translation (`bubble_text`, F2, Shift+F2, Ctrl+F2 at first, as the keymap has
+  them) are hot keys too, in reading mode and the Reader role, only while the pointer is on TASlation's page or a
+  bubble's Japanese is pinned beside it (`_over_text_keys`).
 * Tk makes its window anew for its full screen (reading mode in and out), without the style, and activates it: the
   style goes on again and the foreground goes back to the viewer once (`_over_rewrapped`).
 * Where the reader put the window (`PLACE_TABLE` in ui.json): once it has been over the book - moved there with "Move
@@ -44,6 +47,8 @@ from ..capture import (
 )
 from ..capture.overlay import HotKeys, has_over, set_over
 from ..i18n import load_ui_flag, load_ui_table, save_ui_flag, save_ui_entry
+from . import shortcuts
+from .bubble_text import TEXT_ACTIONS, text_hotkeys
 from .layout import initial_geometry, kept_place
 
 OVER_TICK_MS = 100  # how often the window looks whether it should be over the book, and takes the hot keys pressed
@@ -401,6 +406,7 @@ class OverBookMixin:
     def _over_keys(self) -> None:
         on = self._over_on
         wanted = wanted_hotkeys(on, self.reading, self._over_owner() if on else "")
+        text = self._over_text_keys(wanted)
         keys = self._over_hotkeys
         if keys is None:
             if not wanted:
@@ -408,12 +414,31 @@ class OverBookMixin:
             keys = self._over_hotkeys = HotKeys.start()
             if keys is None:
                 return
-        for name in keys.registered - wanted:
-            keys.unregister(name)
+        held = getattr(self, "_over_text_held", {})
+        for name in keys.registered:
+            if name not in wanted and (name not in text or held.get(name) != text[name]):
+                keys.unregister(name)
         for name in sorted(wanted - keys.registered):
             keys.register(name, OVER_HOTKEYS[name])
+        for name in sorted(set(text) - keys.registered):
+            keys.register(name, text[name][1], text[name][0])
+        self._over_text_held = text
         for name in keys.take():
             self._over_hotkey(name)
+
+    def _over_text_keys(self, wanted: frozenset[str]) -> dict[str, tuple[int, int]]:
+        """The keys of a bubble's Japanese and translation to hold besides *wanted* (`bubble_text.text_hotkeys`:
+        action name -> (modifiers, virtual-key code)): only with those (the viewer or TASlation in front), in reading
+        mode or the Reader role, and while the pointer is on TASlation's page or a bubble's Japanese is pinned beside
+        it - so the viewer keeps them whenever they cannot be meant for TASlation -; never one of *wanted*'s keys."""
+        if not wanted or not (self.reading or self.role_var.get() == "reader"):
+            return {}
+        pointer = getattr(self, "_pointer_on_page", None)
+        if not (getattr(self, "_zoom_pinned", False) or (pointer is not None and pointer() is not None)):
+            return {}
+        fixed = {(0, OVER_HOTKEYS[name]) for name in wanted}
+        keymap = getattr(self, "keymap", None) or shortcuts.current()
+        return {name: code for name, code in text_hotkeys(keymap).items() if code not in fixed}
 
     def _over_hotkey(self, name: str) -> None:
         """A hot key pressed while the viewer had the foreground: what the same key does in TASlation's window."""
@@ -423,3 +448,5 @@ class OverBookMixin:
             self.toggle_reading()
         elif name == "Escape":
             self._on_escape()
+        elif name in TEXT_ACTIONS:
+            getattr(self, name)()

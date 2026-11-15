@@ -5,6 +5,7 @@ spaces, which leaves a Japanese or Chinese sentence in one piece and splits "TAS
 
 from __future__ import annotations
 
+import math
 import tkinter as tk
 import tkinter.font as tkfont
 from typing import Callable
@@ -35,6 +36,52 @@ ORDER_FONT = ("TkDefaultFont", 9, "bold")
 ORDER_EDGE = "#c8c8c8"  # the badge's outline: light, so that it shows on the dark canvas and tells it from a label
 
 
+Box = tuple[int, int, int, int]
+# A patch over the picture: (its box in image pixels, an RGBA picture of that box: what is opaque in it is drawn over
+# the image there, the rest is the image's own)
+Patch = tuple[Box, Image.Image]
+# How the picture is drawn: (the part of the image on show, in image pixels; that part's size; its size on the canvas;
+# where its top left corner is on the canvas)
+Fit = tuple[Box, tuple[int, int], tuple[int, int], tuple[int, int]]
+LANCZOS_REACH = 3  # source pixels the resampling filter reaches on each side of a pixel, times the reduction
+
+
+def patch_picture(image: Image.Image, patch: Patch, fit: Fit) -> tuple[tuple[int, int], Image.Image] | None:
+    """What *patch* looks like on the canvas over *image* drawn as *fit* says: the part of the canvas it covers
+    (the place of its top left corner) and the picture to draw there - the image there with the patch laid over it,
+    scaled as the whole picture is scaled, so that its edges meet the picture around it (the resampling of the whole
+    part, cut: the window resized with ``box`` takes in the pixels the filter reaches round it, `LANCZOS_REACH`, and
+    stops where the part does). None when none of it is on show."""
+    (px0, py0, px1, py1), picture = patch
+    (bx0, by0, bx1, by1), (pw, ph), (sw, sh), (x, y) = fit
+    qx0, qy0, qx1, qy1 = max(px0, bx0), max(py0, by0), min(px1, bx1), min(py1, by1)
+    if qx1 <= qx0 or qy1 <= qy0 or pw <= 0 or ph <= 0 or sw <= 0 or sh <= 0:
+        return None
+    if (sw, sh) == (pw, ph):  # drawn at its size: the pixels as they are
+        window = image.crop((qx0, qy0, qx1, qy1))
+        _lay(window, picture, (px0 - qx0, py0 - qy0))
+        return (x + qx0 - bx0, y + qy0 - by0), window
+    fx, fy = pw / sw, ph / sh  # the part's pixels for one of the canvas
+    ci0, ci1 = max(0, math.floor((qx0 - bx0) / fx)), min(sw, math.ceil((qx1 - bx0) / fx))
+    cj0, cj1 = max(0, math.floor((qy0 - by0) / fy)), min(sh, math.ceil((qy1 - by0) / fy))
+    if ci1 <= ci0 or cj1 <= cj0:
+        return None
+    sx0, sx1, sy0, sy1 = ci0 * fx, ci1 * fx, cj0 * fy, cj1 * fy  # those canvas pixels in the part's pixels
+    padx, pady = math.ceil(LANCZOS_REACH * max(1.0, fx)) + 2, math.ceil(LANCZOS_REACH * max(1.0, fy)) + 2
+    wx0, wx1 = max(0, math.floor(sx0) - padx), min(pw, math.ceil(sx1) + padx)
+    wy0, wy1 = max(0, math.floor(sy0) - pady), min(ph, math.ceil(sy1) + pady)
+    window = image.crop((bx0 + wx0, by0 + wy0, bx0 + wx1, by0 + wy1))
+    _lay(window, picture, (px0 - bx0 - wx0, py0 - by0 - wy0))
+    shown = window.resize((ci1 - ci0, cj1 - cj0), Image.LANCZOS, box=(sx0 - wx0, sy0 - wy0, sx1 - wx0, sy1 - wy0))
+    return (x + ci0, y + cj0), shown
+
+
+def _lay(window: Image.Image, picture: Image.Image, at: tuple[int, int]) -> None:
+    """*picture* (RGBA) laid over *window* at *at* (window pixels), where it is opaque."""
+    rgba = picture if picture.mode == "RGBA" else picture.convert("RGBA")
+    window.paste(rgba.convert(window.mode), at, rgba.getchannel("A"))
+
+
 def rounded_box(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, radius: float, **options) -> int:
     """A rectangle with rounded corners on *canvas* (a smoothed polygon: Tk has no such item)."""
     r = max(0.0, min(radius, (x1 - x0) / 2, (y1 - y0) / 2))
@@ -46,7 +93,8 @@ def rounded_box(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, r
 
 class ImageCanvas(tk.Canvas):
     """Canvas that shows one PIL image scaled to fit, re-fitting on resize (*inset* pixels clear of its edges, for
-    handles drawn on the picture's edges). Over the picture it can show outlined boxes (a page filling in), a busy
+    handles drawn on the picture's edges). Over the picture it can show a patch of other pixels (a bubble's other side
+    in place, while the pointer rests on it: `patch`, `set_patch`), outlined boxes (a page filling in), a busy
     badge with a turning spinner in the top right corner, a band across its middle in the badge's style, and a short
     note at the bottom; a message can take the picture's place, and with no picture a hint says what to do."""
 
@@ -63,6 +111,9 @@ class ImageCanvas(tk.Canvas):
         self._angle = 90
         self.scale = 1.0
         self.offset: tuple[float, float] = (0, 0)
+        self.patch: Patch | None = None  # drawn over the picture as part of it, under everything else (`patch_picture`)
+        self._fit: Fit | None = None  # how the picture was drawn last (None: no picture on show)
+        self._patch_photo: ImageTk.PhotoImage | None = None
         self.overlay: list[tuple[tuple[int, int, int, int], str, str]] = []  # (box in image pixels, colour, label)
         self.edged_tags: set[str] = {"chosen"}  # the tags `draw_frame` and the like draw two-tone (the selection)
         self.outlines: list[tuple[tuple[int, int, int, int], str, bool]] = []  # (box in image pixels, colour, dashed)
@@ -86,6 +137,25 @@ class ImageCanvas(tk.Canvas):
     def set_image(self, image: Image.Image | None) -> None:
         self._image = image
         self._redraw()
+
+    def set_patch(self, patch: Patch | None) -> None:
+        """*patch* over the picture now (None: none), with nothing else drawn again: just above the picture, under
+        the outlines, the labels, the badges and the notes; kept for every later redraw (`patch`)."""
+        self.patch = patch
+        self._draw_patch()
+
+    def _draw_patch(self) -> None:
+        self.delete("patch")
+        self._patch_photo = None
+        if self.patch is None or self._fit is None or self._image is None:
+            return
+        made = patch_picture(self._image, self.patch, self._fit)
+        if made is None:
+            return
+        (cx, cy), picture = made
+        self._patch_photo = ImageTk.PhotoImage(picture, master=self)
+        self.create_image(cx, cy, anchor="nw", image=self._patch_photo, tags="patch")
+        self.tag_raise("patch", "picture")
 
     def from_image_coords(self, x: float, y: float) -> tuple[int, int]:
         return (int(self.offset[0] + x * self.scale), int(self.offset[1] + y * self.scale))
@@ -250,7 +320,7 @@ class ImageCanvas(tk.Canvas):
     def _redraw(self) -> None:
         self._job = None
         self.delete("all")
-        self._shown = None
+        self._shown = self._fit = None
         w, h = self.winfo_width(), self.winfo_height()
         if w >= 2 and h >= 2:
             if self.message:
@@ -275,7 +345,9 @@ class ImageCanvas(tk.Canvas):
         self._photo = ImageTk.PhotoImage(shown)
         self.offset = (x - box[0] * self.scale, y - box[1] * self.scale)
         self._shown = (x, y, x + shown.width, y + shown.height)
-        self.create_image(x, y, anchor="nw", image=self._photo)
+        self.create_image(x, y, anchor="nw", image=self._photo, tags="picture")
+        self._fit = (box, part.size, shown.size, (int(x), int(y)))
+        self._draw_patch()
         boxes = []
         for (bx0, by0, bx1, by1), colour, label in self.overlay:
             cx0, cy0 = self.from_image_coords(bx0, by0)

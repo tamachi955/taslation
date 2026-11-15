@@ -72,8 +72,15 @@ class SettingRow:
 # window's settings at once (`App._settings_saved`), and the part reads ``settings.<key>`` whenever it acts. Its label
 # and tip need the 16 languages (`locales/features/settings_dialog.py`; `tests/test_settings_rows.py` checks them).
 EXTRA_ROWS: tuple[SettingRow, ...] = (
+    SettingRow("hover_shows", "On the page:",
+               "In reading mode and the Reader role: the page translated, a bubble under the pointer showing its original; or the page as the viewer shows it, a bubble under the pointer showing its translation. Also in the View menu.",
+               choices=(("original", "The translation (the original under the pointer)"),
+                        ("translation", "The original (the translation under the pointer)"))),
+    SettingRow("hover_reveal", "Under the pointer:",
+               "How a bubble under the pointer shows the other side: in a panel beside it, both in sight at once; or in the bubble itself, with the original lettering, or what was read as text, erased and set. Also in the View menu.",
+               choices=(("panel", "A panel beside the bubble"), ("in_place", "The bubble itself"))),
     SettingRow("bubble_zoom", "Enlarge the bubble under the pointer",
-               "In reading mode and the Reader role, a translated bubble the pointer rests on shows enlarged beside its original."),
+               "In reading mode and the Reader role, with the translation on the page, a translated bubble the pointer rests on shows its original: enlarged beside it, or in its place (Under the pointer)."),
     SettingRow("flash_when_done", "Flash the taskbar button when a whole-book run ends",
                "When a whole-book run finishes, or stops on a problem, while TASlation is not in front, its taskbar button flashes. TASlation does not take the focus."),
     SettingRow("sound_when_done", "Also play a sound when a whole-book run ends",

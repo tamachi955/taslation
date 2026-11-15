@@ -86,14 +86,24 @@ class Page(tk.Toplevel):
     """The page of the window (400 x 300 canvas pixels, the 800 x 600 frame at half size) and what the popup uses."""
 
     _watch_bubbles = A._watch_bubbles
+    _bubbles_motion = A._bubbles_motion
+    _bubbles_left = A._bubbles_left
+    _bubbles_away = A._bubbles_away
     _zoom_wanted = A._zoom_wanted
+    _zoom_filling = A._zoom_filling
+    _panel_wanted = A._panel_wanted
     _zoom_region_at = A._zoom_region_at
+    _zoom_box_at = A._zoom_box_at
+    _zoom_target_at = A._zoom_target_at
     _zoom_screen_box = A._zoom_screen_box
     _zoom_motion = A._zoom_motion
     _zoom_due = A._zoom_due
+    _zoom_valid = A._zoom_valid
     _zoom_pointer_on = A._zoom_pointer_on
+    _zoom_loose = A._zoom_loose
     _zoom_escape = A._zoom_escape
     _zoom_show = A._zoom_show
+    _zoom_place = A._zoom_place
     _zoom_watch = A._zoom_watch
     _zoom_hide = A._zoom_hide
     _page_regions = A._page_regions
@@ -182,9 +192,12 @@ def test_the_popup_holds_the_original_from_memory_and_the_translation_at_a_reada
     page.due()
     popup = page._zoom_popup
     assert popup is not None and page.shown == [popup] and bool(popup.overrideredirect())
-    picture, words = (lbl for lbl in sorted(_labels(popup), key=lambda lbl: bool(lbl.cget("text"))))
+    labels = _labels(popup)
+    picture = next(lbl for lbl in labels if str(lbl.cget("image")))
     assert (picture.image.width(), picture.image.height()) == (150, 300)  # the 100 x 200 crop, 1.5 times
-    assert str(words.cget("text")) == "A small line."  # the emphasis marks are the lettering's, not the reader's
+    # the emphasis marks are the lettering's, not the reader's; under it, the key that pins it with the Japanese
+    assert sorted(str(lbl.cget("text")) for lbl in labels if lbl is not picture) == [
+        "A small line.", "F2: its Japanese, to select and copy"]
     assert page._zoom_font.cget("size") == -22  # twice the readable size
     assert page.later[-1][0] == ZOOM_WATCH_MS
 

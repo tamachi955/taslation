@@ -94,18 +94,67 @@ reading mode starts as soon as the viewer is chosen.
 When you translate a book that has no name yet (in a browser viewer whose tab title is only the viewer's name, for example) in reading mode, those translations are not saved anywhere.
 When you leave reading mode, the book's name is asked for once; once you name it, the pages from then on are saved under that name (the page on show can be saved with F5).
 
-**Bubble zoom**: in reading mode, and in reader mode in the normal window, when you rest the pointer on a translated bubble for a moment, a small window appears beside it
-and shows the translation at a readable size, next to an enlargement of the original bubble (the Japanese). For a bubble that is hard to read (one flagged "small", a translation much longer than the original,
-or one shown on the screen smaller than the readable size `readable_font_size`) it appears after about 0.5 seconds, for other bubbles after about 1.2 seconds, so a pointer that merely
-passes over the page does not bring it up. The translation is shown at twice `readable_font_size` (22 pixels by default), and never smaller than on the page. The window never covers the bubble,
-and it disappears when the pointer leaves the bubble, on a click (the click goes to the viewer as before), on the wheel, a key or Esc, and when the page changes.
-The enlargement of the original is cut out of the page in memory and is not written to disk. The window takes no focus, so even over a full-screen viewer, keys reach the viewer.
-It opens when you rest the pointer, not on a click (since clicks on the page belong to the viewer). `bubble_zoom = false` in `taslation.toml` turns it off.
-
 Once you have read the whole book with the whole-book reading, every page is shown at once, which makes reading comfortable. Reading mode translates untranslated pages one page at a time,
 and a whole-book reading waits until you leave reading mode (reading mode does not start while a batch is running). The full-screen window covers the viewer,
 so the page can be taken only from what the viewer itself draws. Chromium-based viewers, such as the viewers read in a browser, do draw;
 with a viewer that does not, the page says so: press Esc and read in the normal window.
+
+### The bubble under the pointer: the original, the translation, and copying the Japanese
+
+In reading mode, and in the Reader role in the normal window, resting the pointer on a bubble shows that bubble's "other side".
+Two choices decide what the page shows and how the other side is shown. Both are in the View menu and in Tools > Settings..., and a choice applies at once to the page on show
+(nothing is translated again). They are kept in the settings file (`hover_shows`, `hover_reveal`).
+Each has a shortcut action ("Switch between the translation and the original on the page", "Switch between a panel and the bubble itself under the pointer"),
+with no key at first (Tools > Settings... > Shortcuts gives them one).
+
+* **On the page** (`hover_shows`): "Translation on the page, original under the pointer" (the default, `"original"`), or "Original on the page, translation under the pointer"
+  (`"translation"`). With the latter the page is exactly as the viewer shows it (nothing erased, nothing written), and the translation shows only on the bubble under the pointer.
+* **Under the pointer** (`hover_reveal`): "A panel beside the bubble" (the default, `"panel"`), or "The bubble itself" (`"in_place"`).
+
+| On the page | Under the pointer | Resting the pointer on a bubble |
+|---|---|---|
+| Translation | Panel | A small window beside it shows an enlargement of the original bubble and the translation at a readable size. |
+| Translation | The bubble itself | That bubble alone goes back to what the viewer shows (the original lettering) where it is, and back to the translation when the pointer leaves. |
+| Original | Panel | A small window beside it shows the translation alone, at a readable size, in the faces of its kind (a thought in italics, a shout in bold). For a bubble still being translated it says "This bubble is being translated..." with a running bar. |
+| Original | The bubble itself | That bubble alone is erased and its translation set where it is, exactly as the translated page has it. A bubble still waiting for its translation shows its outline. |
+
+**Which to choose**: the panel puts the original and the translation in sight at once, which suits holding one against the other as you read. The bubble itself shows the
+original font and lettering (which the panel's plain text cannot), and shows in place what was read as text, what was erased and how the translation is set,
+which suits finding a mistake of the OCR or of the detection (characters missed, a piece of the drawing erased).
+
+The wait before either shows is the same. With the translation on the page, a bubble that is hard to read (one flagged "small", a translation much longer than the original,
+or one shown on the screen smaller than the readable size `readable_font_size`) shows after about 0.5 seconds and other bubbles after about 1.2 seconds; with the original on the page,
+every bubble after about 0.5 seconds. So a pointer that merely passes over the page shows nothing. One bubble at a time;
+it goes back when the pointer leaves the bubble, on a click (the click goes to the viewer as before), on the wheel, a key or Esc, and when the page changes.
+It shows when you rest the pointer, not on a click (since clicks on the page belong to the viewer).
+The panel's translation is twice `readable_font_size` (22 pixels by default), and never smaller than on the page. The panel never covers the bubble and takes no focus,
+so even over a full-screen viewer, keys reach the viewer. The enlargement of the original, and the original lettering put back in place, are cut out of the page in memory and never written to disk.
+
+**View > Show original and the bubble zoom setting**: with the translation on the page, View > Show original shows the whole page as the viewer does
+(meanwhile the bubble itself shows nothing different; the panel still opens). With the original on the page, Show original is greyed in the Reader role
+and its key does nothing (reading mode turns Show original off as it starts). "Enlarge the bubble under the pointer" in Tools > Settings...
+(`bubble_zoom`) off shows nothing under the pointer while the translation is on the page. With the original on the page the pointer is the way to the translation,
+so the setting does not count there. In the Translator role's normal window the pointer selects and edits the regions, so whatever is chosen, the window shows the translated page with its frames as before.
+The page a whole-book run shows while it translates, and the page strip, are as they always were.
+
+**The bubble's Japanese as text, and copying**: in reading mode and in the Reader role you can do this with the bubble under the pointer
+(in every combination, and over a full-screen viewer too):
+
+* F2: opens the bubble's panel pinned, with its Japanese as text you can select, and the buttons "Copy the Japanese", "Copy the translation" and "Close".
+  It stays while the pointer moves to it, and closes with F2 again, Close, Esc, a click on the page, the wheel, and when the page changes.
+  With "The bubble itself" chosen, this is the panel there is, opened with F2.
+* Shift+F2: copies the bubble's Japanese to the clipboard (the part selected in the pinned panel, if any).
+* Ctrl+F2: copies the bubble's translation (without the lettering's marks).
+
+Tools > Settings... > Shortcuts changes the keys. For a page read in this session the Japanese is in memory. A page shown from the cache has none
+(the cache keeps no Japanese), so the first time it is asked for, the bubble's part of the capture in memory is read again (as translator mode's "Read the Japanese" does),
+and meanwhile "Reading the Japanese..." shows. The Japanese read is kept in memory with the page only, never written to disk or to a log.
+TASlation writes the clipboard only when you copy. A line of the book you copied stays on the clipboard until you copy something else, and other programs can read it there.
+Over a full-screen viewer these three keys are TASlation's only while the pointer is on TASlation's page or a panel is pinned,
+and the viewer's the rest of the time. No page key and no click is taken.
+
+Using the keyboard alone: F2, Shift+F2 and Ctrl+F2 act on the bubble under the pointer, so the pointer chooses the bubble.
+There is no key yet that steps from bubble to bubble in the Reader role (Tab moves the focus, and over a full-screen viewer the keys are the viewer's).
 
 ### Two ways to read
 
@@ -801,6 +850,10 @@ ocr_threads = 0              # CPU threads for the OCR model (0 = torch's defaul
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
 flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
 sound_when_done = false      # ... and plays the system's default sound
+hover_shows = "original"     # reading mode and the Reader role: the translation on the page ("original" under the
+                             # pointer), or the page as the viewer shows it ("translation" under the pointer)
+hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
+bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
 ```
 
 The size of the window's text can be changed with `ui_scale` (1.0 follows Windows' scaling; 0.5 to 3.0).

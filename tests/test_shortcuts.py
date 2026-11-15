@@ -18,6 +18,7 @@ from taslation.ui import app as app_mod
 from taslation.ui import shortcuts
 from taslation.ui.dialogs import help as help_mod
 from taslation.ui.dialogs import settings as dlg
+from taslation.ui.hover import HOVER_LABELS, REVEAL_LABELS
 from taslation.ui.shortcuts import ACTIONS, BY_NAME, Keymap, key_of_event, key_text, normal, sequences
 
 ALT = shortcuts.ALT_MASK
@@ -49,6 +50,8 @@ def test_the_table_s_keys_are_bound_as_they_always_were():
     assert bound == {"translate_now": ["<F5>"], "reading_mode": ["<F11>"],
                      "undo": ["<Control-Key-z>", "<Control-Lock-Key-Z>"], "redo": ["<Control-Key-y>", "<Control-Lock-Key-Y>"],
                      "how_to_use": ["<F1>"], "keys_help": ["<Shift-F1>"],
+                     # a bubble's Japanese and translation at hand (`bubble_text`)
+                     "show_japanese": ["<F2>"], "copy_japanese": ["<Shift-F2>"], "copy_translation": ["<Control-F2>"],
                      "edit_box": ["<Return>", "<KP_Enter>"], "remove_box": ["<Delete>"],
                      "text_direction": ["<Key-t>", "<Key-T>"],
                      # translator mode's keys of the region editing branch, in the table since its merge
@@ -122,7 +125,8 @@ def test_what_a_key_may_not_be(name, key, why):
 def test_a_page_key_may_be_plain_and_a_window_key_an_f_key_or_with_ctrl_or_alt():
     keymap = Keymap()
     assert keymap.problem("review", "r") is None and keymap.problem("review", "Control-r") is None
-    assert keymap.problem("settings", "F2") is None and keymap.problem("settings", "Alt-s") is None
+    assert keymap.problem("settings", "F3") is None and keymap.problem("settings", "Alt-s") is None
+    assert keymap.problem("settings", "F2") is not None  # (the Japanese of the bubble under the pointer's)
     assert keymap.problem("settings", "Control-comma") is None
 
 
@@ -158,7 +162,8 @@ def test_the_bindings_move_with_the_keys_and_what_the_parts_bound_is_let_go(hidd
     handlers = {a.name: (lambda e, n=a.name: calls.append(n)) for a in ACTIONS}
     bound = shortcuts.bind_keys({"window": window, "page": page}, Keymap(), handlers)
     assert set(window.bind()) == {"<Key-F5>", "<Key-F11>", "<Key-F1>", "<Shift-Key-F1>", "<Control-Key-z>",
-                                  "<Control-Lock-Key-Z>", "<Control-Key-y>", "<Control-Lock-Key-Y>"}
+                                  "<Control-Lock-Key-Z>", "<Control-Key-y>", "<Control-Lock-Key-Y>",
+                                  "<Key-F2>", "<Shift-Key-F2>", "<Control-Key-F2>"}  # (a bubble's text: `bubble_text`)
     assert set(page.bind()) == {"<Key-Return>", "<Key-KP_Enter>", "<Key-Delete>", "t", "T",  # (as Tk lists them)
                                 "<Key-Tab>", "<Shift-Key-Tab>", "<Alt-Key-Left>", "<Alt-Key-Right>", "<Alt-Key-Up>",
                                 "<Alt-Key-Down>", "<Control-Key-C>", "<Control-Shift-Key-c>", "<Control-Key-V>",
@@ -276,9 +281,11 @@ def test_the_menus_name_the_entries_they_hold_whatever_else_a_menu_has(hidden_ro
               "copy_region": "Copy region", "paste_region": "Paste region", "set_kind": "Set kind...",
               "set_text_size": "Set text size...", "place_in_order": "Place in reading order...",
               "order_numbers": "Reading-order numbers"}
-    assert sorted(name for _m, _i, name in w._menu_keys) == sorted(labels)
+    choices = {"hover_shows": {label for _v, label in HOVER_LABELS},
+               "hover_reveal": {label for _v, label in REVEAL_LABELS}}
+    assert sorted(name for _m, _i, name in w._menu_keys) == sorted([*labels, *choices, *choices])  # (two entries each)
     for menu, index, name in w._menu_keys:  # the keys in force from the start, before `_show_keys`
-        assert menu.entrycget(index, "label") == labels[name]
+        assert menu.entrycget(index, "label") in choices.get(name, {labels.get(name)})
         assert menu.entrycget(index, "accelerator") == shortcuts.current().shown(name)
     accelerators = {name: menu.entrycget(index, "accelerator") for menu, index, name in w._menu_keys}
     assert accelerators["copy_region"] == "Alt+C" and accelerators["copy_format"] == "Ctrl+Shift+C"

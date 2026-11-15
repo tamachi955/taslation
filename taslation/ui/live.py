@@ -94,7 +94,7 @@ from ..i18n import _
 from ..messages import Message
 from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
 from ..regions import PageResult
-from . import area
+from . import area, hover, in_place
 from .constants import (
     BLANK_SPREAD,
     BROWSER_MINIMISED,
@@ -453,6 +453,7 @@ class LiveViewMixin(BlackViewerMixin):
             reading and self._viewer_hidden) else ""
         # no viewer chosen yet: what to do, in the window's language (the live picture takes its place once one is)
         self.canvas.hint = _(NO_VIEWER) if self.selected is None else ""
+        in_place.refresh(self)  # (a bubble showing its other side in its place: drawn with the page, or gone)
         image, overlay, outlines = self._picture()
         self.canvas.overlay, self.canvas.outlines = overlay, outlines
         if image is None:
@@ -471,20 +472,29 @@ class LiveViewMixin(BlackViewerMixin):
         * else the last translated page while the viewer still shows that page - its lettering laid over the
           viewer's latest frame, so a toolbar or the pointer shows as it is now;
         * else the viewer's latest frame as it is (a page not translated yet, a page turned, the viewer's panels).
-        Show original leaves the lettering out. Reading is on the viewer only: the first is the one page of a
-        whole-book run's memory ever shown, as the run's progress while it translates; outside that, every picture is
-        the viewer's page (`strip`'s docstring), so that TASlation never lets a book be read without the viewer."""
+        Show original leaves the lettering out. With the original on the page and the translation under the
+        pointer (`hover.reverse_on`: `Settings.hover_shows` "translation", in reading mode or the Reader role), the
+        page being translated and the last translated page show as the viewer does too, without the outlines - but
+        for the box under the pointer whose translation has not come, where its bubble shows in its place
+        (`in_place.hovered_outline`; the panel beside it says so itself: `zoom`); a whole-book run's page stays as it
+        is. A bubble that shows its other side in its place is laid over this picture (`in_place.refresh`).
+        Reading is on the viewer only: the first is the one page of a whole-book run's memory ever shown, as the
+        run's progress while it translates; outside that, every picture is the viewer's page (`strip`'s docstring),
+        so that TASlation never lets a book be read without the viewer."""
         original = self.original_var.get()
         run = run_page_on_show(self)
         if run is not None:
             return (run.frame if original else run.image), [], run.outlines()
+        reverse = hover.reverse_on(self)
         fill = self._fill
         if fill is not None:
+            if reverse:
+                return fill.frame, [], in_place.hovered_outline(self, fill)
             image = fill.final if fill.final is not None else fill.page if fill.page is not None else fill.base
             return (fill.frame if original else image), [], ([] if fill.final is not None else fill.outlines())
         result, live = self.last_result, self._live
         if result is not None and (live is None or self._same_page(result, live)):
-            if original:
+            if original or reverse:
                 return (live if live is not None else result.original), self._overlay_items(), []
             return self._lettered(result, live), self._overlay_items(), []
         return live, [], []

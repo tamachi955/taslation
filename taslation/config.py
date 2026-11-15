@@ -249,7 +249,16 @@ class Settings:
     # over a viewer in full screen on the same monitor, the window stays on top without taking the foreground (the
     # viewer keeps the keys); View > Over the full-screen viewer turns it off for the next starts too (`ui.overbook`)
     over_book: bool = True
-    bubble_zoom: bool = True  # reading mode and the Reader role: a translated bubble the pointer rests on shows enlarged beside its original (`ui.zoom`)
+    # reading mode and the Reader role, the translation on the page: a translated bubble the pointer rests on shows its
+    # original (enlarged beside it, `ui.zoom`, or in its place, `ui.in_place`); off, nothing shows under the pointer
+    bubble_zoom: bool = True
+    # reading mode and the Reader role: what a bubble the pointer rests on shows, the page showing the other
+    # (`ui.hover`): "original" (the page translated, the bubble's original under the pointer: `bubble_zoom`) or
+    # "translation" (the page as the viewer shows it, the bubble's translation under the pointer); also the View menu
+    hover_shows: str = "original"
+    # ... and how that bubble shows the other side (`ui.hover`): "panel" (a panel beside it, both in sight at once) or
+    # "in_place" (the bubble itself, the original lettering or what was read, erased and set); also the View menu
+    hover_reveal: str = "panel"
     flash_when_done: bool = True  # a whole-book run that ends while TASlation is not in front flashes its taskbar button
     sound_when_done: bool = False  # ... and plays the system's default sound (`ui.attention`)
     follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
@@ -341,6 +350,10 @@ class Settings:
             raise ConfigError("follow must be 'events' or 'poll'")
         if self.role not in ("reader", "translator"):
             raise ConfigError("role must be 'reader' or 'translator'")
+        if self.hover_shows not in ("original", "translation"):
+            raise ConfigError("hover_shows must be 'original' or 'translation'")
+        if self.hover_reveal not in ("panel", "in_place"):
+            raise ConfigError("hover_reveal must be 'panel' or 'in_place'")
         if self.ui_language:
             from .i18n import UI_LANGUAGES
 

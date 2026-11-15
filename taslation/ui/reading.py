@@ -48,6 +48,9 @@ from .constants import (
 from .layout import place_window
 from .strip import place_strip
 from .viewers import looks_like_browser
+from .bubble_text import BubbleTextMixin
+from .hover import HoverChoiceMixin
+from .in_place import InPlaceMixin
 from .wrap import wrap_text
 from .zoom import BubbleZoomMixin
 
@@ -73,10 +76,21 @@ def key_label(key: str) -> str:
     return names.get(key, key)
 
 
-class ReadingMixin(BubbleZoomMixin):
-    """Reading mode and the window's size and place, and a bubble enlarged while reading (`zoom.BubbleZoomMixin`). A
-    part of `app.App` (no `__init__`: the state it uses is made by `App.__init__`; the other parts are reached through
-    ``self``)."""
+def bubbles_away(window: object) -> None:
+    """The page moves (reading mode in or out, the widgets made anew): no panel beside a bubble where it was
+    (`zoom`), nor a bubble showing its other side in its place (`in_place`), where the window has them."""
+    for name in ("_zoom_hide", "_reveal_hide"):
+        hide = getattr(window, name, None)
+        if hide is not None:
+            hide()
+
+
+class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin):
+    """Reading mode and the window's size and place, the panel beside a bubble while reading (`zoom.BubbleZoomMixin`)
+    or the bubble itself showing its other side (`in_place.InPlaceMixin`), what the page and the bubble under the
+    pointer show and how (`hover.HoverChoiceMixin`) and a bubble's Japanese and translation at hand
+    (`bubble_text.BubbleTextMixin`). A part of `app.App` (no `__init__`: the state it uses is made by `App.__init__`;
+    the other parts are reached through ``self``)."""
 
     # ------------------------------------------------------------------ the window's size and place
     def _track_geometry(self, event: tk.Event) -> None:
@@ -181,6 +195,7 @@ class ReadingMixin(BubbleZoomMixin):
         self._unkept_reading = 0  # pages translated here under a name that names no book (`_ask_name_after_reading`)
         self._original_saved = bool(self.original_var.get())
         self.original_var.set(False)
+        bubbles_away(self)
         monitor = self._window_monitor()  # taken before: Tk puts a full-screen window on the primary monitor
         self.reading = True
         self._viewer_hidden = False
@@ -294,6 +309,7 @@ class ReadingMixin(BubbleZoomMixin):
         saved, auto, alpha = self._reading_saved
         self.reading = False
         self._viewer_hidden = False
+        bubbles_away(self)
         self._hide_close()
         try:
             self.attributes("-fullscreen", False)

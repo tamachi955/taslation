@@ -1651,6 +1651,9 @@ class JobsMixin:
                             or (queued is not None and queued[0] == "batch")))
 
     def _on_escape(self) -> None:
+        if getattr(self, "_zoom_pinned", False):  # a bubble's Japanese pinned beside it (`bubble_text`): closed first
+            self._zoom_hide()
+            return
         if self._cancel_drag():  # a region being dragged, turned or drawn: back as it was
             return
         if self.reading:

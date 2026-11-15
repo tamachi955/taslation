@@ -235,6 +235,7 @@ class Filling:
     page: Image.Image | None = None  # the base with the regions lettered so far
     final: Image.Image | None = None  # the finished page
     mark: int = 0  # how many were lettered when the model was last asked (the badge counts from there)
+    texts: dict[int, str] = field(default_factory=dict)  # box -> the translation it was lettered with (memory only)
 
     def __post_init__(self) -> None:
         if not self.states:
@@ -256,3 +257,7 @@ class Filling:
             self.page = self.base.copy()
         self.page.paste(patch, (int(box[0]), int(box[1])))
         self.states[index] = "lettered" if text else "read"
+        if text:
+            self.texts[index] = text
+        else:
+            self.texts.pop(index, None)

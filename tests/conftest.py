@@ -135,6 +135,29 @@ def real_window_settings_left_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def real_settings_file_left_alone(monkeypatch):
+    """No test writes a settings file in this machine's own state folder or in the checkout by way of
+    `config.write_settings` (the View menu's choice of what the page shows writes it, and some stand-ins' settings
+    have the default, real state folder): there the write does nothing; a test's own file gets the real thing."""
+    from taslation import config
+
+    real_write = config.write_settings
+    checkout = Path(__file__).resolve().parents[1]
+
+    def write(path, values, example=None):
+        target = Path(path)
+        try:
+            folder = target.expanduser().resolve().parent
+        except (OSError, RuntimeError):
+            return target
+        if _real_state_folder(folder) or folder == checkout or checkout in folder.parents:
+            return target
+        return real_write(path, values, example)
+
+    monkeypatch.setattr(config, "write_settings", write)
+
+
+@pytest.fixture(autouse=True)
 def real_saved_files_left_alone(monkeypatch):
     """No test protects, or opens to count, the saved files of this machine's own state folder at a start (some
     stand-ins' settings have the default, real state folder): there `protect.migrate` and `protect.survey` find

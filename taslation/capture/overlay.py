@@ -145,8 +145,8 @@ def _register_class() -> bool:
 
 class HotKeys:
     """Keys of TASlation's that work while another window has the foreground: each one registered by name with
-    `register` (a key with no modifier, MOD_NOREPEAT), taken back with `unregister` or `clear`, and what was pressed
-    handed over by `take`. Made, used and closed on the thread that runs Tk's event loop (the hot keys are that
+    `register` (a key, with modifiers or none, MOD_NOREPEAT), taken back with `unregister` or `clear`, and what was
+    pressed handed over by `take`. Made, used and closed on the thread that runs Tk's event loop (the hot keys are that
     thread's, and its loop gives the message-only window its WM_HOTKEY). `start` gives None where there is none to
     be had."""
 
@@ -154,6 +154,7 @@ class HotKeys:
         self.hwnd = hwnd
         self._ids: dict[str, int] = {}  # name -> hot-key id, while registered
         self._names: dict[int, str] = {}
+        self._codes: dict[str, tuple[int, int]] = {}  # name -> (modifiers, virtual-key code), while registered
         self._next = 1
         _notes[hwnd] = []
 
@@ -169,21 +170,26 @@ class HotKeys:
     def registered(self) -> frozenset[str]:
         return frozenset(self._ids)
 
-    def register(self, name: str, vk: int) -> bool:
-        """The key *name* (virtual-key code *vk*) TASlation's from now on; False when another program has it (it is
-        then left to that program)."""
+    def register(self, name: str, vk: int, mods: int = 0) -> bool:
+        """The key *name* (virtual-key code *vk*, with RegisterHotKey's modifiers *mods*: MOD_ALT 1, MOD_CONTROL 2,
+        MOD_SHIFT 4) TASlation's from now on; False when another program has it (it is then left to that program).
+        A name registered with another key before is let go of that one first."""
         if name in self._ids:
-            return True
+            if self._codes.get(name) == (mods, vk):
+                return True
+            self.unregister(name)
         hot = self._next
         self._next += 1
-        if not user32.RegisterHotKey(self.hwnd, hot, MOD_NOREPEAT, vk):
+        if not user32.RegisterHotKey(self.hwnd, hot, MOD_NOREPEAT | mods, vk):
             return False
         self._ids[name] = hot
         self._names[hot] = name
+        self._codes[name] = (mods, vk)
         return True
 
     def unregister(self, name: str) -> None:
         hot = self._ids.pop(name, None)
+        self._codes.pop(name, None)
         if hot is not None:
             user32.UnregisterHotKey(self.hwnd, hot)
             self._names.pop(hot, None)
