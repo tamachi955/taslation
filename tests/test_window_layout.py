@@ -67,6 +67,7 @@ class Bars(tk.Toplevel):
     open_page_keys = _noop
     set_area = clear_area = translate_now = enter_reading = _on_role_changed = toggle_order = toggle_skip = _noop
     retranslate_page = open_book_settings = open_review = open_corrections = open_find_replace = undo_edit = redo_edit = _turn_direction = open_batch_dialog = stop_batch = _noop
+    open_lines_to_review = _noop
     _redisplay = _apply_on_top = open_glossary = open_caches = review_names = _rescan_windows = _noop
     _on_window_selected = open_notice = _on_ui_language = toggle_over = _noop
     open_about = open_help = open_keys = _noop
@@ -178,7 +179,8 @@ def test_translator_tools_follow_the_role_on_the_strip(hidden_root):
     assert not w._tool_strip.winfo_manager()  # the reader role: translator mode's strip is not there
     assert [str(b.cget("text")) for b in w.tool_btns] == [
         "Reading order", "Skip page", "Translate again", "Book settings...", "Series sheet...", "Review...",
-        "My corrections...", "Find and replace...", "Text direction (T)", "Undo (Ctrl+Z)", "Redo (Ctrl+Y)"]
+        "My corrections...", "Lines to review...", "Find and replace...", "Text direction (T)", "Undo (Ctrl+Z)",
+        "Redo (Ctrl+Y)"]
     assert all(str(b.cget("state")) == "disabled" for b in w.tool_btns)
     w.role_var.set("translator")
     w._sync_tools()

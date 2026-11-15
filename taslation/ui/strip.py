@@ -6,7 +6,9 @@ Japanese, the translation - that say how far that page is, and a line on how muc
   run's ``page_stage`` events may come in any order; the latest one for a stage wins.
 * `PageStrip`: the strip itself, a canvas that scrolls sideways. A bar says its state three ways - its letter, its
   colour and its pattern (empty, a moving stripe, filled, crossed, hatched) - never by colour alone. While any bar is
-  at work one `after` timer moves the stripes of all of them, and none runs while nothing works.
+  at work one `after` timer moves the stripes of all of them, and none runs while nothing works. A page with lines
+  worth a look (as "Lines to review" lists them, from the cache alone: `mark_pages_to_review`) has a pennant with "!"
+  on it in its thumbnail's top right corner, and its tooltip says how many.
 * `StripMixin`: the window's side (a part of `app.App`): the events, and the click on a thumbnail (`_pick_page`): the
   status line says how to read that page - open it in the viewer, where TASlation shows its translation over it - and
   nothing else happens: no page of the run's memory goes on the page area, and no key or click goes to the viewer.
@@ -85,6 +87,14 @@ FAILED = "#d55e00"  # vermillion, filled and crossed
 SKIPPED = "#6e6e6e"  # grey, hatched
 CHOSEN = "#ffd400"  # the outline of the page being translated, on show (as a chosen region's handles)
 MISSED = "#cc79a7"  # reddish purple, dotted: a page that went by before it could be taken
+# a page with lines worth a look ("Lines to review"): a pennant with "!" on it at the thumbnail's top right corner, its
+# shape and its mark saying it as well as its colour (bluish green, of the same set), outlined in the ground's colour
+REVIEW = "#009e73"
+REVIEW_MARK = "#000000"  # the "!" on it
+REVIEW_W, REVIEW_H = 13, 14  # the pennant's size
+REVIEW_TAG = "review"
+REVIEW_REFRESH_MS = 400  # an open "Lines to review" is made again this long after the run's last translated page
+REVIEW_LINE = "{n} line(s) on this page are worth a look: Lines to review... lists them."
 
 
 def stage_letter(stage: str) -> str:
@@ -110,12 +120,13 @@ def bar_tip(stage: str, state: str) -> str:
     return line
 
 
-def page_tip(seq: int, missed: bool = False) -> str:
+def page_tip(seq: int, missed: bool = False, review: int = 0) -> str:
     """What a thumbnail's tooltip says, and its click in the status line (`StripMixin._pick_page`): a page is read in
-    the viewer, never from the strip."""
+    the viewer, never from the strip; with *review*, how many of its lines are worth a look (`REVIEW_LINE`)."""
     if missed:
         return _("Page {n} went by before it could be taken. Turn back to it in the viewer and it is read like any other.").format(n=seq)
-    return _("Page {n} of this run. To read it, open it in the viewer: TASlation shows the translation over it.").format(n=seq)
+    line = _("Page {n} of this run. To read it, open it in the viewer: TASlation shows the translation over it.").format(n=seq)
+    return line + (" " + _(REVIEW_LINE).format(n=review) if review else "")
 
 
 # ------------------------------------------------------------------ the state
@@ -127,6 +138,8 @@ class PageCell:
     fingerprint: str = ""
     thumb: Image.Image | None = None
     stages: dict[str, str] = field(default_factory=lambda: {s: "waiting" for s in STAGES})
+    review: int = 0  # its lines worth a look, as the cache of *book* holds them (`mark_pages_to_review`)
+    book: str = ""
 
     @property
     def unfinished(self) -> bool:
@@ -216,6 +229,17 @@ class StripModel:
 
     def working(self) -> bool:
         return any(cell.working for cell in self.pages.values())
+
+    def set_review(self, seq: int, lines: int, book: str = "") -> bool:
+        """The page *seq* has *lines* lines worth a look in the cache of *book*; True when that changed its mark."""
+        cell = self.pages.get(seq)
+        if cell is None:
+            return False
+        cell.book = book or cell.book
+        if cell.review == max(0, int(lines)):
+            return False
+        cell.review = max(0, int(lines))
+        return True
 
     def unfinished(self) -> list[int]:
         """The pages a stage of which has not ended yet, in the strip's order."""
@@ -364,8 +388,22 @@ class PageStrip(ttk.Frame):
         if self.chosen == seq:
             c.create_rectangle(mid - half - 2, top - 2, mid + half + 1, bottom + 1, outline=CHOSEN, width=2,
                                tags=(tag,))
+        if cell.review and not cell.missed:
+            self._draw_review(mid + half, top, tag)
         for row, stage in enumerate(STAGES):
             self._draw_bar(index, row, stage, cell.stages[stage], tag)
+
+    def _draw_review(self, right: int, top: int, tag: str) -> None:
+        """The pennant of a page with lines worth a look, in the thumbnail's top right corner: a flag cut in at its
+        end, with "!" on it (its shape and its mark say it, not its colour alone)."""
+        c = self.canvas
+        x1, y0 = right - 1, top + 1
+        x0, y1 = x1 - REVIEW_W, y0 + REVIEW_H
+        notch = (x0 + 4, (y0 + y1) // 2)
+        c.create_polygon(x0, y0, x1, y0, x1, y1, x0, y1, *notch, fill=REVIEW, outline=GROUND, width=1,
+                         tags=(tag, REVIEW_TAG))
+        c.create_text((x0 + x1) // 2 + 2, (y0 + y1) // 2, text="!", fill=REVIEW_MARK, font=self._font,
+                      tags=(tag, REVIEW_TAG))
 
     def _draw_bar(self, index: int, row: int, stage: str, state: str, tag: str) -> None:
         c = self.canvas
@@ -454,7 +492,8 @@ class PageStrip(ttk.Frame):
         if seq is None:
             return ""
         if stage is None:
-            return page_tip(seq, self.model.pages[seq].missed)
+            cell = self.model.pages[seq]
+            return page_tip(seq, cell.missed, cell.review)
         return bar_tip(stage, self.model.pages[seq].stages[stage])
 
     def _clicked(self, event: tk.Event) -> None:
@@ -591,6 +630,67 @@ def close_warning(window: Any) -> str | None:
     return None
 
 
+ENDED_TRANSLATING = ("done", "failed", "skipped")  # a page's translation stage at an end: its lines are in the cache
+
+
+def _lines_to_review(cache: Any, by_fingerprint: dict[str, Any], cell: PageCell, within: int) -> int:
+    """How many lines of *cell*'s page are worth a look in *cache*: its page by the cell's fingerprint, else (a page
+    whose translation ended) the page the pipeline would take for it (within *within* bits)."""
+    from .dialogs.review_list import lines_on_page
+
+    page = by_fingerprint.get(cell.fingerprint)
+    if page is None and within and cell.stages.get("translate") in ENDED_TRANSLATING:
+        hit = cache.lookup(cell.fingerprint, 0.0, within)
+        page = hit[0] if hit is not None else None
+    return lines_on_page(page) if page is not None else 0
+
+
+def mark_pages_to_review(window: Any, seqs: Any = None) -> None:
+    """The strip's pages (*seqs*: those; None: every one) marked by how many of their lines are worth a look
+    ("Lines to review": flagged as they were translated, or with a note for the reader), as the pipeline's cache holds
+    them, from the cache alone. The strip knows the pages of this session's run only: those are the ones marked; a
+    page marked from another book's cache is left as it is (the window holds another book now). A cell whose mark
+    changed is drawn again."""
+    model = getattr(window, "_strip_model", None)
+    strip = getattr(window, "page_strip", None)
+    pipeline = getattr(window, "pipeline", None)
+    cache = getattr(pipeline, "cache", None)
+    if model is None or strip is None or cache is None or not model.pages:
+        return
+    book = str(getattr(cache, "book", "") or "")
+    within = int(getattr(getattr(pipeline, "settings", None), "fingerprint_max_distance", 0) or 0)
+    by_fingerprint = {page.fingerprint: page for page in list(cache.pages)}
+    for seq in list(model.order if seqs is None else seqs):
+        cell = model.pages.get(seq)
+        if cell is None or not cell.fingerprint or (cell.book and cell.book != book):
+            continue
+        if model.set_review(seq, _lines_to_review(cache, by_fingerprint, cell, within), book):
+            try:
+                strip.page_changed(seq, False)
+            except tk.TclError:
+                pass
+
+
+def _review_list_later(window: Any) -> None:
+    """An open "Lines to review" made again a moment after the run's last translated page (one for a group)."""
+    shown = getattr(window, "_to_review", None)
+    if shown is None or getattr(window, "_review_list_due", None) is not None:
+        return
+
+    def due() -> None:
+        window._review_list_due = None
+        try:
+            if shown.winfo_exists():
+                shown.fill()
+        except tk.TclError:
+            pass
+
+    try:
+        window._review_list_due = window.after(REVIEW_REFRESH_MS, due)
+    except (AttributeError, tk.TclError):
+        window._review_list_due = None
+
+
 def release_run_images(window: Any) -> None:
     """Let go of the last whole-book run's page pictures the pipeline holds (`Pipeline.release_page_images`): the
     window closes. Until then they serve the render alone - the erase done ahead, for a page the viewer shows
@@ -674,6 +774,15 @@ class StripMixin:
         if not self._strip_shown:
             self._strip_shown = True
             place_strip(self)
+        if data.get("stage") == "translate" and data.get("state") in ENDED_TRANSLATING:
+            # its lines are in the cache now: its mark, without a second drawing, and the open list made again
+            cache = getattr(getattr(self, "pipeline", None), "cache", None)
+            if cache is not None:
+                within = int(getattr(getattr(self.pipeline, "settings", None), "fingerprint_max_distance", 0) or 0)
+                cell = model.pages[seq]
+                pages = {page.fingerprint: page for page in list(cache.pages)}
+                model.set_review(seq, _lines_to_review(cache, pages, cell, within), str(getattr(cache, "book", "")))
+            _review_list_later(self)
         self.page_strip.page_changed(seq, new)
 
     def _on_batch_memory(self, data: dict[str, Any]) -> None:
@@ -692,5 +801,9 @@ class StripMixin:
         cell = self._strip_model.pages.get(seq)
         if cell is not None and cell.missed:
             self.say("Page {n} went by before it could be taken. Turn back to it in the viewer and it is read like any other.", n=seq)
+            return
+        if cell is not None and cell.review:  # (and how many of its lines are worth a look: `page_tip`)
+            review = cell.review
+            self.status(lambda: page_tip(seq, False, review))
             return
         self.say("Page {n} of this run. To read it, open it in the viewer: TASlation shows the translation over it.", n=seq)

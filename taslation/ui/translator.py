@@ -395,8 +395,8 @@ class TranslatorMixin:
     # ------------------------------------------------------------------ the tools
     def _build_translator_tools(self, parent: tk.Misc) -> None:
         """Translator mode's strip under the toolbar: its tools in groups that flow into rows as the toolbar's do
-        (reading order, skip page, translate again; book settings, series sheet, review, my corrections; find and
-        replace, the selected region's text direction, undo, redo)
+        (reading order, skip page, translate again; book settings, series sheet, review, my corrections, lines to
+        review; find and replace, the selected region's text direction, undo, redo)
         and a line on what the pointer does on the page: these tools are here and nowhere else. `_sync_tools` shows it
         while the Translator role is chosen; reading mode hides it with the toolbar. Ctrl+Y makes again what Ctrl+Z took
         back. The buttons and the line name the keys as the keymap has them (`KEYED_TOOLS`, `hint_text`; again after a
@@ -417,7 +417,9 @@ class TranslatorMixin:
                     _("The names, terms and style the translations of this series keep to.")),
                    (_("Review..."), self.open_review, _("List the text areas of this page that are worth a look.")),
                    (_("My corrections..."), self.open_corrections,
-                    _("List the translations you corrected in this book, page by page."))),
+                    _("List the translations you corrected in this book, page by page.")),
+                   (_("Lines to review..."), self.open_lines_to_review,
+                    _("List the lines of the whole book that are worth a look, page by page."))),
                   ((_("Find and replace..."), self.open_find_replace,
                     _("Search this book's translations and replace a word on every page.")),
                    ("Text direction", self._turn_direction,
@@ -1383,20 +1385,37 @@ class TranslatorMixin:
         """Translator mode's "My corrections...": the translations the person wrote in the book of the Book field,
         page by page (`dialogs.corrections.CorrectionsDialog`), from its cache alone; the list already open is made
         again and brought to the front. Selecting a row only says its page: nothing goes to the viewer."""
-        from .dialogs.corrections import CorrectionsDialog
+        from .dialogs import corrections
 
-        shown = getattr(self, "_corrections", None)
+        self._open_book_list("_corrections", lambda: corrections.CorrectionsDialog(self, self._correction_rows))
+
+    def open_lines_to_review(self) -> None:
+        """Translator mode's "Lines to review...": every line of the book of the Book field worth a look, page by page
+        (`dialogs.review_list.LinesToReviewDialog`: flagged as it was translated, or with a note for the reader), from
+        its cache alone, with what the checks of the lettering found on the page on show; as "My corrections", the
+        list already open is made again and brought to the front, and selecting a row only says its page: nothing goes
+        to the viewer."""
+        from .dialogs import review_list
+
+        self._open_book_list("_to_review", lambda: review_list.LinesToReviewDialog(self, self._review_list_rows))
+
+    def _open_book_list(self, attr: str, make: Callable[[], Any]) -> None:
+        """A list of the book's lines by page (`dialogs.page_list`) kept in *attr*: the one open made again and
+        brought to the front, else *make*() opens it. When another book was chosen since the last page, the worker
+        opens its cache (as the next page would, and as Find does), and the list is made again then (the "find"
+        event: `_refresh_corrections`)."""
+        shown = getattr(self, attr, None)
         if shown is not None and shown.winfo_exists():
             shown.fill()
             shown.lift()
         else:
-            self._corrections = CorrectionsDialog(self, self._correction_rows)
+            setattr(self, attr, make())
         book, language = self.book_var.get().strip(), self.lang_var.get().strip() or "English"
         if (self.pipeline is not None and book and not generic_book_name(book) and not self.busy
                 and getattr(self, "batch", None) is None and not getattr(self, "_batching", False)
-                and self._book_cache() is None):  # another book chosen since the last page: the worker opens its
-            model = self.model_var.get().strip()  # cache (as the next page would, and as Find does); the list then
-            self._jobs.put(lambda: (self._ensure_cache(book, model, language), self._post("find")))  # is made again
+                and self._book_cache() is None):
+            model = self.model_var.get().strip()
+            self._jobs.put(lambda: (self._ensure_cache(book, model, language), self._post("find")))
 
     def _correction_rows(self) -> list[Any] | None:
         """The rows of "My corrections" (`BookCache.corrections`): of the cache of the book and language in the boxes
@@ -1407,14 +1426,40 @@ class TranslatorMixin:
         cache = self._book_cache()
         return cache.corrections() if cache is not None else []
 
+    def _review_list_rows(self) -> list[Any] | None:
+        """The rows of "Lines to review" (`review_list.book_lines`): of the cache of the book and language in the
+        boxes, with what the checks of the lettering found on the page on show when it is a page of that cache
+        (`review_list.with_lettering`; those are kept nowhere); none while it is being opened; None while the Book
+        field names no book."""
+        from .dialogs.review_list import book_lines, with_lettering
+
+        book = self.book_var.get().strip()
+        if not book or generic_book_name(book):
+            return None
+        cache = self._book_cache()
+        if cache is None:
+            return []
+        rows = book_lines(cache)
+        pipeline = self.pipeline
+        settings = getattr(pipeline, "settings", None)
+        if self.last_result is not None and settings is not None and getattr(pipeline, "cache", None) is cache:
+            rows = with_lettering(rows, cache, self.last_result, settings)
+        return rows
+
     def _refresh_corrections(self) -> None:
-        """The translations may have changed: the open "My corrections" list is made again."""
-        shown = getattr(self, "_corrections", None)
-        try:
-            if shown is not None and shown.winfo_exists():
-                shown.fill()
-        except tk.TclError:
-            pass
+        """The translations may have changed (a page's result, an edit, a replacement, its undo): the open lists of
+        the book's lines - "My corrections", "Lines to review" - are made again, and the page strip marks again the
+        pages with lines worth a look (`strip.mark_pages_to_review`)."""
+        for attr in ("_corrections", "_to_review"):
+            shown = getattr(self, attr, None)
+            try:
+                if shown is not None and shown.winfo_exists():
+                    shown.fill()
+            except tk.TclError:
+                pass
+        from .strip import mark_pages_to_review
+
+        mark_pages_to_review(self)
 
     # ------------------------------------------------------------------ undo and redo
     def undo_edit(self) -> None:

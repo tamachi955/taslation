@@ -280,6 +280,7 @@ class Listing(FindWindow):
 
     _corrections = None
     open_corrections = app_mod.App.open_corrections
+    _open_book_list = app_mod.App._open_book_list
     _correction_rows = app_mod.App._correction_rows
     _refresh_corrections = app_mod.App._refresh_corrections
 

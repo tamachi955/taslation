@@ -245,6 +245,7 @@ reads the pages you turn and translates them all together once you have finished
    The page area shows the page being translated. Each time the model translates a line, its translation is lettered in its bubble; the lines not translated yet stay as in the original, outlined.
    Once the translations go into the cache, the page shows as the cache has it (until then they are provisional, and nothing of them is saved anywhere).
    When the translation moves on to the next page, so does the page area, and the page strip below outlines that page. The strip only shows how far each page has come: clicking a thumbnail does not show that page.
+   A page with lines worth a look (as "Lines to review..." lists them) gets a small pennant with "!" in its thumbnail's top right corner once it is translated, and its tooltip says how many.
    To read it, open the page in the viewer, and the translation is shown over it. When a page's picture is no longer in memory, only the banner and the strip move on.
    When the translation ends (also when you stop it, or when it fails), the page area goes back to the viewer's page at once.
    The time left is computed from the speed since the first line was done, so the time to load the model is not included. It is not shown until the speed can be trusted: 8 lines or more, and 15 seconds or more.
@@ -405,7 +406,7 @@ the folder where the cache, series sheets and settings are kept, and where the R
 ### Translator mode
 
 The window has two roles. As **Reader**, keys and clicks on the page go to the viewer. Switch to **Translator** with "Translator" in the toolbar,
-and below the toolbar appear translator mode's tools (Reading order, Skip page, Translate again, Book settings, Series sheet, Review, My corrections, Find and replace, Text direction, Undo, Redo; all of them are only here) and
+and below the toolbar appear translator mode's tools (Reading order, Skip page, Translate again, Book settings, Series sheet, Review, My corrections, Lines to review, Find and replace, Text direction, Undo, Redo; all of them are only here) and
 a line explaining the mouse actions and keys ("Click: select · drag: move · drag a handle: resize · drag the round handle: rotate (Shift: 15° steps) · double-click: edit · drag on empty space: add · Delete: drop · T: text direction · Ctrl+Z: undo · Ctrl+Y: redo · Tab: next region · Alt+arrow keys: move by 1 px"; the keys shown are those set in "Shortcuts" in "Settings", and actions whose key was removed are left out),
 and the page can be edited.
 
@@ -496,6 +497,11 @@ and the page can be edited.
 * "My corrections..." lists the translations you corrected yourself in this book, page by page, from the saved translations alone.
   Selecting one says which page it is on; nothing is sent to the viewer, so you turn to that page yourself.
   The model's answer to "Ask again", saved as it came, is not your correction; a spelling made consistent by the series sheet or the name check leaves a line as it was.
+* "Lines to review..." lists every line of this book worth a look, page by page, from the saved translations alone: the lines flagged for review as they were translated
+  (the reasons are those of "Review...", as `taslation review` lists them) and those with a note to the reader. For the page on show it also lists what the checks of its lettering found
+  (those are worked out as a page is lettered and are not saved, so other pages show only their flags). "Show:" narrows the list to one reason, and a click on the
+  "Page" or "Why" heading sorts it. Selecting a line says which page it is on; nothing is sent to the viewer, so you turn to that page yourself and edit it there with "Review...".
+  The list follows each translated page and each change. In the page strip of a whole-book run, a page with such lines has a pennant with "!" on its thumbnail.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
   It also lists the regions whose automatic lettering could not be set well: letters touching the bubble's edge, the text
   off the bubble's centre (as when one translation for two joined bubbles is set in one of them), a word split with a
