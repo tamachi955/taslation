@@ -26,10 +26,7 @@ The pages in the recording are from the [OpenMantra dataset](https://github.com/
 
 ## Why it was made
 
-TASlation starts from one point: the author and the publisher are paid.
-
 Buy the book from a store that sells the Japanese edition, open it in that store's viewer, and read it in your own language. You read the same thing as readers in Japan, at the same price and at the same time, and the money goes to the author and the publisher.
-It is a tool for buying and reading a book that has no translation yet, or whose translation you would have to wait for, instead of reading it without paying.
 
 To do that, it reads the Japanese in the speech bubbles of the page the viewer shows, translates it on your own computer, redraws the bubbles with the translation and shows them on the screen.
 It does not upload, copy or share anything. The translations stay on your computer, and there is no feature to save, export or distribute pages.
