@@ -20,7 +20,8 @@ from PIL import Image
 from taslation import config
 from taslation.config import ConfigError, Settings
 from taslation.i18n import FEATURE_LANGUAGES
-from taslation.locales.features import bubble_panel, bubble_steps, settings_dialog as settings_texts
+from taslation.locales.features import bubble_panel, bubble_self_test, bubble_steps
+from taslation.locales.features import settings_dialog as settings_texts
 from taslation.regions import PageResult, TextRegion
 from taslation.ui import app as app_mod
 from taslation.ui import bubble_text, hover, in_place, overbook, zoom
@@ -85,6 +86,8 @@ def test_every_new_line_of_the_window_is_in_every_language():
     for key in steps:
         assert set(bubble_steps.TEXTS[key]) == set(FEATURE_LANGUAGES), key
     assert "no native review" in bubble_steps.__doc__
+    assert set(bubble_self_test.TEXTS[zoom.SHOW_TRANSLATION]) == set(FEATURE_LANGUAGES)
+    assert "no native review" in bubble_self_test.__doc__
     for row in settings_dialog.EXTRA_ROWS[:3]:
         assert row.key in ("hover_shows", "hover_reveal", "bubble_zoom")
         for key in (row.label, row.tip, *(label for _v, label in row.choices)):
@@ -490,10 +493,68 @@ def test_the_key_pins_the_panel_with_the_japanese_to_select_in_either_way(make, 
         w.point(750, 550)  # the pointer leaves the bubble (for the panel): it stays
         assert w._zoom_popup is not None and w.later[-1][1].__name__ != "_zoom_due"
         w.point(150, 200)
-        w.show_japanese()  # the key again on that bubble
+        w.show_japanese()  # the key again on that bubble (with the original on the page: its translation first)
+        if shows == "translation":
+            assert w._zoom_popup is not None and w._zoom_veiled is None
+            w.show_japanese()
         assert w._zoom_popup is None
         assert w.clipboard == []  # nothing on the clipboard but by a copy
     assert JAPANESE not in caplog.text
+
+
+def _words(w):
+    """The lines the panel shows (its labels laid out in it: one made and held back is not)."""
+    return [str(label.cget("text")) for label in _labels(w._zoom_popup) if label.winfo_manager()]
+
+
+def _buttons(w):
+    return [str(button.cget("text")) for button in _labels(w._zoom_popup, "TButton") if button.winfo_manager()]
+
+
+def test_with_the_original_on_the_page_the_pinned_panel_holds_the_translation_back_until_asked(make, caplog):
+    caplog.set_level(logging.DEBUG)
+    for reveal in ("panel", "in_place"):
+        w = make("translation", reveal)
+        regions = w.last_result.regions
+        regions[0].source_text = JAPANESE
+        w.point(150, 200)
+        w.show_japanese()
+        line = next(widget for widget in _labels(w._zoom_popup, "Text") if isinstance(widget, SelectableLine))
+        assert line.get("1.0", "end-1c") == JAPANESE and "A small thought." not in _words(w), reveal  # Japanese alone
+        assert "Show the translation (F2)" in _buttons(w) and "Close" in _buttons(w)  # (F2 shows it first)
+        w.copy_translation()  # Ctrl+F2 copies it all the same, unseen
+        assert w.clipboard[-1] == ("append", "A small thought.") and "A small thought." not in _words(w)
+        w.show_japanese()  # F2 again: the translation shows where the button was, the panel stays
+        assert w._zoom_pinned and "A small thought." in _words(w)
+        assert "Show the translation (F2)" not in _buttons(w) and "Close (F2)" in _buttons(w)
+        w.next_bubble()  # another bubble: held back again
+        assert w._zoom_for[1] is regions[1] and "A WIDE SHOUT." not in _words(w)
+        button = next(b for b in _labels(w._zoom_popup, "TButton") if "Show the translation" in str(b.cget("text")))
+        button.invoke()  # the button does what F2 does
+        assert "A WIDE SHOUT." in _words(w) and "Close (F2)" in _buttons(w)
+        w.show_japanese()  # then F2 closes it
+        assert w._zoom_popup is None
+        w.point(150, 200)  # a rest of the pointer shows the translation at once, as ever
+        if reveal == "panel":
+            w.due("_zoom_due")
+            assert "A small thought." in _words(w) and not any("Show the translation" in t for t in _buttons(w))
+        else:
+            w.due("_reveal_due")
+            assert w.canvas.patch is not None
+    assert JAPANESE not in caplog.text
+
+
+def test_with_the_translation_on_the_page_the_pinned_panel_shows_it_at_once_as_ever(make):
+    for reveal in ("panel", "in_place"):
+        w = make("original", reveal)
+        w.point(150, 200)
+        w.show_japanese()
+        assert "A small thought." in _words(w) and not any("Show the translation" in t for t in _buttons(w)), reveal
+        assert "Close (F2)" in _buttons(w) and w._zoom_veiled is None
+        w.copy_translation()
+        assert w.clipboard[-1] == ("append", "A small thought.")
+        w.show_japanese()  # the key again closes it at once
+        assert w._zoom_popup is None
 
 
 def test_copying_puts_the_text_on_the_clipboard_then_and_only_then(make, caplog):

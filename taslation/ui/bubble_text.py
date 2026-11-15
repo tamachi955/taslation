@@ -9,7 +9,9 @@ translates. In reading mode and in the Reader role, in both modes of `Settings.h
   alone with the original on the page): text to select with the mouse, copied with the popup's Copy the Japanese (the
   part selected, or all of it) or Copy the translation (`_panel_text`). A bubble shown in its place goes back first.
   It stays while the pointer leaves the bubble for it, and goes with its Close, the key again, Esc, a click on the
-  page or the wheel, and once its page is not on show any more (`zoom.BubbleZoomMixin._zoom_watch`).
+  page or the wheel, and once its page is not on show any more (`zoom.BubbleZoomMixin._zoom_watch`). With the
+  original on the page it opens with the Japanese alone and a "Show the translation" button: the key again (or the
+  button) shows the translation first, and closes it only after that (`zoom.BubbleZoomMixin._zoom_unveil`).
 * Step (the keys of "next_bubble", F3, and "previous_bubble", Shift+F3): the same popup pinned on the next or the
   previous bubble of the page in reading order (the regions' order, the bubbles the key of "show_japanese" opens on),
   from the pinned one, else the one under the pointer, else from the first or the last; at either end it stays where
@@ -104,7 +106,8 @@ class BubbleTextMixin:
     def show_japanese(self) -> None:
         """The key of "show_japanese": the popup of the bubble under the pointer pinned with its Japanese
         (`_pin_bubble`); the key again - on that bubble, off the bubbles, or with the pointer not moved since it was
-        pinned (`_text_bubble`) - closes it."""
+        pinned (`_text_bubble`) - shows the translation a popup pinned with the original on the page holds back
+        (`zoom.BubbleZoomMixin._zoom_unveil`), else closes it."""
         if not self._text_usable():
             self.say(NOT_HERE)
             return
@@ -112,7 +115,9 @@ class BubbleTextMixin:
         if getattr(self, "_zoom_pinned", False):
             shown = getattr(self, "_zoom_for", None)
             if found is None or (shown is not None and shown[1] is found[1]):
-                self._zoom_hide()
+                unveil = getattr(self, "_zoom_unveil", None)
+                if unveil is None or not unveil():
+                    self._zoom_hide()
                 return
         if found is None:
             self.say(NO_BUBBLE)
@@ -346,14 +351,19 @@ class BubbleTextMixin:
         note = tk.Label(box, text="", fg=colours["hint"], bg=ground, justify="left", wraplength=width)
         bar = ttk.Progressbar(box, mode="indeterminate", length=120)
         keymap = getattr(self, "keymap", None) or shortcuts.current()
+        veiled = getattr(self, "_zoom_veiled", None)  # (the translation held back: the key shows it first)
         buttons = tk.Frame(inner, bg=ground)
         buttons.pack(side="top", anchor="w", pady=(10, 0))
         for i, (label, name, step) in enumerate(((COPY_JAPANESE, "copy_japanese", lambda: self.copy_japanese()),
                                                  (COPY_TRANSLATION, "copy_translation",
                                                   lambda: self.copy_translation()),
                                                  (CLOSE, "show_japanese", lambda: self._zoom_hide()))):
-            button = ttk.Button(buttons, text=shortcuts.with_keys(label, name, keymap), command=step, takefocus=0)
+            text = shortcuts.with_keys(label, name, keymap)
+            button = ttk.Button(buttons, text=_(label) if name == "show_japanese" and veiled else text, command=step,
+                                takefocus=0)
             button.pack(side="left", padx=(0 if i == 0 else 6, 0))
+            if name == "show_japanese" and veiled:  # Close names the key once the translation shows
+                veiled[3].append(lambda b=button, t=text: b.configure(text=t))
             if name == "copy_translation" and not str(getattr(region, "translated_text", "") or "").strip():
                 button.configure(state="disabled")
         shortcuts.bind_on([popup], keymap, {name: (lambda _e, n=name: getattr(self, n)()) for name in TEXT_ACTIONS})

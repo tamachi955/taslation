@@ -143,8 +143,10 @@ The page a whole-book run shows while it translates, and the page strip, are as 
 * F2: opens the bubble's panel pinned, with its Japanese as text you can select, and the buttons "Copy the Japanese", "Copy the translation" and "Close".
   It stays while the pointer moves to it, and closes with F2 again, Close, Esc, a click on the page, the wheel, and when the page changes.
   With "The bubble itself" chosen, this is the panel there is, opened with F2.
+  With the original on the page, the pinned panel opens with the Japanese alone and a "Show the translation" button, so that you read the Japanese first:
+  F2 again (or the button) shows the translation, and F2 after that closes the panel. A panel pinned on another bubble holds its translation back again.
 * Shift+F2: copies the bubble's Japanese to the clipboard (the part selected in the pinned panel, if any).
-* Ctrl+F2: copies the bubble's translation (without the lettering's marks).
+* Ctrl+F2: copies the bubble's translation (without the lettering's marks), also while the panel holds it back.
 * F3 / Shift+F3: opens the same pinned panel on the next / previous bubble of the page in reading order (from the pinned one, else from the bubble under the pointer, else from the first / last).
   At the first or the last bubble the panel stays and the status line says so. With "The bubble itself" chosen, it is this panel too.
 

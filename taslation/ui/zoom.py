@@ -34,6 +34,12 @@ bubble itself instead: `in_place`):
   (`HOLD_MS` within `STILL_PX`, for a touch screen, where there is no hover: `_hold_press`) or a right click on one
   (Windows makes a touch held still a right click while its "press and hold" is on). The release of such a press is
   TASlation's; a tap or a click goes on to the viewer exactly as ever.
+* Pinned with the original on the page (`hover.reverse_on`): the reader reads the Japanese and looks at the
+  translation only when asked (to test oneself, or to take the Japanese as text unspoilt), so the pinned panel opens
+  with the Japanese alone and a "Show the translation" button where the translation goes (`SHOW_TRANSLATION`,
+  `_zoom_unveil`: the button, or the key of "show_japanese" again, which closes the panel only then). Every panel
+  pinned anew, on another bubble too, holds it back again. The panel that opens on a rest of the pointer shows the
+  translation at once as ever; the key of "copy_translation" copies it either way.
 * Focus: the panel is a borderless window, as a tooltip is (Tk shows such a window without activating it, measured:
   the active window and the focus stay where they were), with WS_EX_NOACTIVATE on it besides (`capture.overlay
   .set_over`), so over the full-screen viewer the viewer keeps the foreground and the keys; and it takes no click
@@ -77,6 +83,7 @@ FILL_WAIT = "This bubble is being translated..."  # the panel of a box of the pa
 FILL_SHOWN = ("found", "read", "lettered")  # the states of such a box the panel opens on (not one without text)
 HOLD_MS = 600  # a press on a bubble held this long ...
 STILL_PX = 6  # ... moving no more than this (canvas pixels; as a click that is no drag) pins its panel
+SHOW_TRANSLATION = "Show the translation"  # the button of a panel pinned with the original on the page
 
 Box = tuple[int, int, int, int]
 
@@ -484,8 +491,9 @@ class BubbleZoomMixin:
           of the bubble's kind (`faces`); for a box of the page filling in, its translation once lettered, else a
           line that it is being translated with a running bar;
         * *pinned*: and under it the bubble's Japanese to select and its Copy buttons
-          (`BubbleTextMixin._panel_text`), the panel staying while the pointer leaves the bubble; else the key that
-          pins it (`ZOOM_HINT`), on a bubble of the translated page."""
+          (`BubbleTextMixin._panel_text`), the panel staying while the pointer leaves the bubble - with the original
+          on the page, the translation held back behind a "Show the translation" button (`_zoom_unveil`) -; else
+          the key that pins it (`ZOOM_HINT`), on a bubble of the translated page."""
         filling = isinstance(region, FillBox)
         reverse = filling or reverse_on(self)
         result = region.fill if filling else self.last_result
@@ -528,22 +536,31 @@ class BubbleZoomMixin:
             picture = tk.Label(top, image=photo, bg=colours["ground"], borderwidth=0)
             picture.image = photo  # (kept with the label)
             picture.pack(side="top" if stacked else "left", anchor="w" if stacked else "n")
+        panel = getattr(self, "_panel_text", None)
+        pinned = pinned and panel is not None and not filling
+        keymap = getattr(self, "keymap", None) or shortcuts.current()
+        self._zoom_veiled = None
         if lines:
             words = tk.Label(top, text=lines, font=font, fg=colours["text"], bg=colours["ground"], justify="left")
-            words.pack(side="top" if stacked or shown is None else "left", anchor="w" if stacked else "n",
-                       **({"pady": (8, 0)} if stacked else {"padx": (10, 0)} if shown is not None else {}))
+            place = {"side": "top" if stacked or shown is None else "left", "anchor": "w" if stacked else "n",
+                     **({"pady": (8, 0)} if stacked else {"padx": (10, 0)} if shown is not None else {})}
+            if pinned and reverse:  # the original on the page: the Japanese first, the translation when asked
+                button = ttk.Button(top, text=shortcuts.with_keys(SHOW_TRANSLATION, "show_japanese", keymap),
+                                    command=self._zoom_unveil, takefocus=0)
+                button.pack(side="top", anchor="w")
+                self._zoom_veiled = (words, place, button, [])
+            else:
+                words.pack(**place)
         elif filling:  # its translation is on the way
             tk.Label(top, text=_(FILL_WAIT), fg=colours["text"], bg=colours["ground"], justify="left",
                      wraplength=width).pack(side="top", anchor="w")
             bar = ttk.Progressbar(top, mode="indeterminate", length=120)
             bar.pack(side="top", anchor="w", pady=(6, 0))
             bar.start(15)
-        panel = getattr(self, "_panel_text", None)
-        pinned = pinned and panel is not None and not filling
         if pinned:
             panel(popup, inner, region, result, width, font)
         elif not filling:
-            key = (getattr(self, "keymap", None) or shortcuts.current()).shown("show_japanese")
+            key = keymap.shown("show_japanese")
             if key:
                 tk.Label(inner, text=_(ZOOM_HINT).format(key=key), fg=colours["hint"], bg=colours["ground"],
                          justify="left").pack(side="top", anchor="w", pady=(6, 0))
@@ -560,6 +577,27 @@ class BubbleZoomMixin:
         self._zoom_font = font
         reveal(popup)
         self._zoom_watch_job = self.after(ZOOM_WATCH_MS, self._zoom_watch)
+
+    def _zoom_unveil(self) -> bool:
+        """The translation a panel pinned with the original on the page holds back (`_zoom_show`), shown where its
+        "Show the translation" button was (that button, or the key of "show_japanese" again:
+        `BubbleTextMixin.show_japanese`), and the panel placed again for its new size; False when none is held back
+        (the key closes the panel then)."""
+        veiled, popup = getattr(self, "_zoom_veiled", None), getattr(self, "_zoom_popup", None)
+        if veiled is None or popup is None:
+            return False
+        self._zoom_veiled = None
+        words, place, button, then = veiled
+        try:
+            button.destroy()
+            words.pack(**place)
+            for step in then:  # (the panel's Close names the key again: `BubbleTextMixin._panel_text`)
+                step()
+            popup.update_idletasks()
+            self._zoom_place(popup, (popup.winfo_reqwidth(), popup.winfo_reqheight()))
+        except tk.TclError:  # (the panel is going)
+            pass
+        return True
 
     def _zoom_place(self, popup: tk.Toplevel, size: tuple[int, int]) -> None:
         """*popup* of *size* beside its bubble (`zoom_place`, within the page area, else the work area; else in the
@@ -623,6 +661,7 @@ class BubbleZoomMixin:
         self._zoom_target = self._zoom_for = None
         self._zoom_pinned = False
         self._zoom_pinned_at = None  # (where the pointer was as it was pinned: `BubbleTextMixin._pin_bubble`)
+        self._zoom_veiled = None  # (the translation a pinned panel holds back: `_zoom_unveil`)
         self._zoom_japanese = None  # (the pinned panel's line of Japanese: `BubbleTextMixin._panel_text`)
         popup, self._zoom_popup = getattr(self, "_zoom_popup", None), None
         if popup is None:
