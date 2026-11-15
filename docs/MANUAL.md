@@ -895,7 +895,7 @@ Switch models with `--model NAME` or `ollama_model` in the settings file (`"auto
 The settings you change often can be changed in the window under "Tools > Settings...": the smallest and largest lettering size; the size below which a translation is put on the list for a second look (Review);
 the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
-in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; whether to stay always on top; how a book starts (page by page, or the whole book first);
+in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; the window's colours (light, dark, or as Windows is set); whether to stay always on top; how a book starts (page by page, or the whole book first);
 and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before) are listed here too.
 Under the rows for the bubble under the pointer are "Panel text size" (`panel_font_size`: 0, automatic, or 6 to 72 points) and "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default); a number out of these bounds is not saved.
 For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
@@ -911,6 +911,10 @@ Enter installs them ([Y/n]); elsewhere Enter does not ([y/N]). A run without a c
 Running `python setup_models.py` by hand asks the same way, and what Enter means is decided by whether PyTorch can use a CUDA GPU (the same judgement as "Only with a GPU"). With `--agreed`, it installs them without asking.
 "Save" writes to `taslation.toml` and takes effect at once (the page on show is re-set from the cache). The file's comments and other lines stay as they are.
 The size of the window's text changes when you save, but it reaches every part of the window only after a restart.
+The window's colours are "As Windows is set" (the default: the app mode in Windows' colour settings, looked at when TASlation starts and whenever its window comes to the front), "Light" (Windows' own look, as before) or "Dark"
+(dark grounds with light text in the window, its dialogs and their title bars; the menu bar keeps Windows' colours). They change as soon as you save.
+The page, the frames drawn on it and the page list keep their own colours in either. While Windows' high contrast is on, TASlation uses Windows' colours whatever this setting says (the row says so).
+In the settings file it is `theme` (`"system"`, `"light"` or `"dark"`).
 
 "Open settings file" opens `taslation.toml`, with every setting in it, in a text editor. If there is no file, it first makes one from `taslation.toml.example`.
 In the file it makes, every setting is a description with `#` at the start of the line, and removing the `#` turns that setting on (no default value is written in, so if a later version changes a default, you get the new default).

@@ -39,7 +39,7 @@ from .. import review as checks
 from ..review import rendering_changes, sheet_item_for
 from ..translate import TranslationError
 from ..translate.base import HINT_FOLLOWS, hint_support
-from . import area, shortcuts
+from . import area, shortcuts, theme
 from .constants import FIRST_PAGE, FORWARDED_KEYS, READER_AFTER_RUN, THIS_PAGE, book_read, in_a_run, viewer_rests
 from .dialogs import caches as boxes
 from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, review_rows
@@ -84,7 +84,7 @@ FRAME_COLOUR = "#ffd400"  # the selected region's frame and handles (two-tone: `
 NEW_REGION_COLOUR, DRAG_TAG = "#4da3ff", "drag-rect"  # the rectangle a drag on empty space draws, two-tone too
 BAND_TAG = "band-rect"  # the rubber band a Shift+drag draws to select the regions inside it (the selection's colour)
 FRAMES_KEPT = 64  # turned frames kept (`_frame_of`), by region
-HINT_COLOUR = "#4a4a4a"
+HINT_COLOUR = theme.LIGHT["tool_hint"]  # the strip's line on what the pointer does (light: `theme.colour("tool_hint")`)
 HAND = "hand2"  # the pointer over a region that a click selects
 TOOLBAR_GAP = (10, 4)  # between the toolbar's groups and its rows (and the strip's)
 # what the status line says once a change is taken back (Ctrl+Z) or made again (Ctrl+Y), by the kind of change
@@ -502,7 +502,7 @@ class TranslatorMixin:
                 self.tool_btns.append(button)
                 if text in keyed:
                     self._keyed_tools.append((button, text, keyed[text]))
-        hint = ttk.Label(strip, text=hint_text(keymap), anchor="w", justify="left", foreground=HINT_COLOUR,
+        hint = ttk.Label(strip, text=hint_text(keymap), anchor="w", justify="left", foreground=theme.colour("tool_hint"),
                          padding=(8, 0, 8, 4))
         hint.pack(fill="x")
         hint.bind("<Configure>", lambda e: wrap_label(hint, e.width - 16))

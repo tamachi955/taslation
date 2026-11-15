@@ -254,6 +254,9 @@ class Settings:
     # the size of the window's text, times what Windows sets for its monitor (1.0 = as Windows has it): applied at the
     # start and again whenever the window moves to a monitor of another scale (`ui.scaling`)
     ui_scale: float = 1.0
+    # the window's colours (`ui.theme`): "system" (as Windows has its apps: the app mode, read from the registry),
+    # "light" (Windows' own look) or "dark"; Windows' high contrast comes first, whatever this says
+    theme: str = "system"
     always_on_top: bool = False  # the window starts above the others (as View > Always on top, or gui --on-top)
     auto_interval_ms: int = 700
     # over a viewer in full screen on the same monitor, the window stays on top without taking the foreground (the
@@ -367,6 +370,8 @@ class Settings:
             raise ConfigError("batch_memory_mb must be 64 or more (MB of page images a whole-book run keeps in memory)")
         if not MIN_UI_SCALE <= float(self.ui_scale) <= MAX_UI_SCALE:
             raise ConfigError(f"ui_scale must be between {MIN_UI_SCALE} and {MAX_UI_SCALE} (1.0: as Windows sets it)")
+        if self.theme not in ("system", "light", "dark"):
+            raise ConfigError("theme must be 'system', 'light' or 'dark'")
         if self.scan_mode not in ("book", "page"):
             raise ConfigError("scan_mode must be 'book' or 'page'")
         if self.follow not in ("events", "poll"):

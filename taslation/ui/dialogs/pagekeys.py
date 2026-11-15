@@ -10,10 +10,10 @@ from typing import Any, Callable
 
 from ...i18n import _
 from ...pagekeys import BUILTIN_PRESETS, KEY_NAMES, MEANINGS, PageKeys, normal_key, page_keys_for, same_key, valid_key
+from .. import theme
 from ..banner import break_lines
 from ..layout import place_window
 from ..tooltip import tip
-from .caches import ERROR_COLOUR
 
 PRESET_LABELS = {  # the built-in presets as the dialog names them
     "right-to-left": "Right-to-left reading: Left arrow turns to the next page",
@@ -84,7 +84,7 @@ class PageKeysDialog(tk.Toplevel):
             ttk.Entry(grid, textvariable=self.vars[m], width=12).grid(row=i, column=1, sticky="w", padx=(6, 0))
         ttk.Label(frm, justify="left", wraplength=WRAP_PX, text=_("Key names: {names}.").format(
             names=", ".join(KEY_NAMES))).pack(anchor="w", pady=(6, 0))
-        ttk.Label(frm, textvariable=self.error_var, foreground=ERROR_COLOUR, wraplength=WRAP_PX).pack(anchor="w",
+        ttk.Label(frm, textvariable=self.error_var, foreground=theme.colour("error"), wraplength=WRAP_PX).pack(anchor="w",
                                                                                                     pady=(6, 0))
 
         btns = ttk.Frame(frm)

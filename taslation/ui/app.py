@@ -125,7 +125,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import shortcuts
+from . import shortcuts, theme
 from .. import devices
 from .status import StatusMixin
 from .strip import StripMixin, close_warning, release_run_images
@@ -212,6 +212,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             apply_scale(self, settings.ui_scale)
         except tk.TclError:
             pass
+        # the window's colours, before any widget is made (the legal notice's too): Windows' own look as it always
+        # was, or dark as the setting or Windows' app mode has it; Windows' high contrast first (`theme`)
+        theme.apply(self, getattr(settings, "theme", "system"))
         self.minsize(*(min(m, s) for m, s in zip(MIN_SIZE, (self.winfo_screenwidth() - 40, self.winfo_screenheight() - 90))))
         state_dir = Path(settings.state_dir)
         # where the reader put the window last, once it had been over the book (overbook: the next start opens there,
@@ -361,6 +364,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self.after(FIRST_STEPS_MS, self._warn_ignored)
         self.bind_class("Toplevel", "<Map>", self._first_steps_wait, add="+")
         self.bind("<Escape>", self._escape_key)  # (the other keys: `_bind_shortcuts`)
+        self.bind("<Activate>", self._colours_again, add="+")  # Windows' app mode or high contrast changed meanwhile
         for name in PAGE_KEY_CLASSES:  # (after the class's own binding: the command has run)
             self.bind_class(name, "<ButtonRelease-1>", self._after_control, add="+")
         self.bind_class("TCombobox", "<<ComboboxSelected>>", self._after_control, add="+")
@@ -623,7 +627,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.status_bar = bar
         self.status_var = tk.StringVar(value=_("Starting..."))
         self.guard_var = tk.StringVar(value="")  # a warning, once the offline guard has blocked something
-        self.guard_label = ttk.Label(bar, textvariable=self.guard_var, anchor="e", justify="right", foreground="#b3261e")
+        self.guard_label = ttk.Label(bar, textvariable=self.guard_var, anchor="e", justify="right",
+                                     foreground=theme.colour("error"))
         self.guard_label.pack(side="right")
         self.progress_holder = ttk.Frame(bar, width=90, height=16)  # keeps the bar's place while it is hidden
         self.progress_holder.pack(side="right", padx=(8, 8))
@@ -772,7 +777,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         label = ttk.Label(viewer, text=_("Viewer:"))
         label.pack(side="left")
         zero = max(1, tkfont.nametofont("TkTextFont").measure("0"))
-        ttk.Style(self).configure("Viewer.TCombobox", postoffset=(0, 0, (VIEWER_LIST_CHARS - VIEWER_CHARS) * zero, 0))
+        theme.style(self, "Viewer.TCombobox", postoffset=(0, 0, (VIEWER_LIST_CHARS - VIEWER_CHARS) * zero, 0))
         self.window_box = ttk.Combobox(viewer, textvariable=self.window_var, state="readonly", width=VIEWER_CHARS,
                                        style="Viewer.TCombobox", postcommand=self._rescan_windows)
         self.window_box.pack(side="left", padx=(4, 0))
@@ -997,10 +1002,23 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._dpi_watch.rescale()
         if "ollama_num_gpu" in changed:  # (the translators send it from their next request on)
             apply_num_gpu(self, changed["ollama_num_gpu"])
+        if "theme" in changed:  # the window and its dialogs take the new colours at once
+            self._colours_again()
         if set(changed) & PAGE_SETTINGS:
             self._jobs.put(self._job_settings_changed)
             if self.last_result is not None and not self.busy and self.batch is None:
                 self._start_translate(self.last_result.original, complete=True)
+
+    def _colours_again(self, event: tk.Event | None = None) -> None:
+        """The colours the setting stands for now (`theme.apply`: nothing happens while they stay as they are): when
+        it is saved, and when the window comes to the front (*event*: Windows' app mode or its high contrast may have
+        changed meanwhile). The strips over the page are drawn anew in the new ones."""
+        if event is not None and event.widget is not self:
+            return
+        before = theme.mode()
+        if theme.apply(self, str(getattr(self.settings, "theme", "system"))) != before:
+            self._show_banner()
+            self._show_band()
 
     def _job_settings_changed(self) -> None:
         """(worker) The settings of the page changed: the detectors and page models made for them (nothing is loaded

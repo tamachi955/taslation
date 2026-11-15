@@ -12,7 +12,7 @@ import tkinter.font as tkfont
 from tkinter import ttk
 from typing import Any
 
-from . import layout
+from . import layout, theme
 from .wrap import wrap_text
 
 TIP_DELAY_MS = 500
@@ -39,7 +39,11 @@ def tip_place(size: tuple[int, int], box: Box, pointer: tuple[int, int], work: B
 
 
 def tip_colours(widget: tk.Misc) -> tuple[str, str]:
-    """The tip's background and text colours: the system's tooltip colours where Tk knows them, else the theme's."""
+    """The tip's background and text colours: the dark mode's (`theme`) while the window is dark, else the system's
+    tooltip colours where Tk knows them, else the ttk theme's."""
+    dark = theme.tooltip_colours()
+    if dark is not None:
+        return dark
     try:
         widget.winfo_rgb("SystemInfoBackground")
         widget.winfo_rgb("SystemInfoText")
@@ -117,8 +121,12 @@ class Tooltip:
             tip.overrideredirect(True)
             tip.attributes("-topmost", True)  # the window may be always on top, or full screen
             back, fore = tip_colours(widget)
+            # (dark: an edge of its own colour; Tk draws a solid relief in a shade of the ground, unseen there)
+            edge = ({"borderwidth": 0, "highlightthickness": 1, "highlightbackground": theme.colour("tip_border"),
+                     "highlightcolor": theme.colour("tip_border")} if theme.is_dark() else
+                    {"borderwidth": 1, "relief": "solid"})
             tk.Label(tip, text=self.lines(), justify="left", font="TkDefaultFont", background=back, foreground=fore,
-                     borderwidth=1, relief="solid", padx=6, pady=3).pack()
+                     padx=6, pady=3, **edge).pack()
             tip.update_idletasks()
             pointer = widget.winfo_pointerxy()
             x, y = widget.winfo_rootx(), widget.winfo_rooty()

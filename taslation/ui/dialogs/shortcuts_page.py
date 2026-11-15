@@ -12,11 +12,12 @@ from tkinter import ttk
 from typing import Any, Callable
 
 from ...i18n import _
+from .. import theme
 from ..shortcuts import ACTIONS, BY_NAME, Keymap, fixed_rows, key_of_event
 from ..tooltip import tip
 from .caches import in_lines
 
-FIXED_COLOUR = "#6b6b6b"  # the rows of the keys this page does not change
+FIXED_COLOUR = theme.LIGHT["note"]  # the rows of the keys this page does not change (light: `theme.colour("note")`)
 ROWS_SHOWN = 12  # lines of the list
 NO_MESSAGE = ""  # what the message line says once a key is set
 
@@ -39,7 +40,7 @@ class ShortcutsPage(ttk.Frame):
         self.tree.heading("key", text=_("Key"), anchor="w")
         self.tree.column("#0", width=34 * zero, stretch=True)
         self.tree.column("key", width=16 * zero, stretch=True)
-        self.tree.tag_configure("fixed", foreground=FIXED_COLOUR)
+        self.tree.tag_configure("fixed", foreground=theme.colour("note"))
         bar = ttk.Scrollbar(body, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=bar.set)
         bar.pack(side="right", fill="y")
@@ -67,7 +68,7 @@ class ShortcutsPage(ttk.Frame):
         self.capture.bind("<KeyPress>", self._take)
         self.capture.bind("<FocusOut>", lambda _e: self._stop())
         note = _("Over the full-screen viewer, F5, F11 and Esc keep their keys. The keys apply once you press Save.")
-        ttk.Label(self, text=in_lines(note, width), justify="left", foreground=FIXED_COLOUR).pack(
+        ttk.Label(self, text=in_lines(note, width), justify="left", foreground=theme.colour("note")).pack(
             anchor="w", pady=(6, 0))
         self.show()
 

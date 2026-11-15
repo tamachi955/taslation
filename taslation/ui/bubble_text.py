@@ -48,16 +48,17 @@ from typing import Any, Callable
 
 from ..i18n import _
 from ..render.lettering import strip_marks
-from . import shortcuts
+from . import shortcuts, theme
 from .dialogs.review import NOT_READ, READING, SelectableLine
-from .zoom import STILL_PX, ZOOM_COLOURS, text_target
+from .zoom import STILL_PX, text_target, zoom_colours
 
 # the actions' names, the mixin's methods too
 TEXT_ACTIONS = ("show_japanese", "copy_japanese", "copy_translation", "next_bubble", "previous_bubble")
 # the virtual-key codes of the keys a hot key can be (`hotkey_code`) besides the letters, the digits and F1-F24
 NAMED_VK = {"Return": 0x0D, "BackSpace": 0x08, "Delete": 0x2E, "Insert": 0x2D, "Pause": 0x13}
 MOD_ALT, MOD_CONTROL, MOD_SHIFT = 0x1, 0x2, 0x4  # RegisterHotKey's modifiers
-SELECTED = ("#3d6fb6", "#ffffff")  # the Japanese selected in the popup: background, text
+SELECTED = ("#3d6fb6", "#ffffff")  # the Japanese selected in the popup: background, text ...
+CONTRAST_SELECTED = ("SystemHighlight", "SystemHighlightText")  # ... while Windows' high contrast is on
 # what is said (in the window's language)
 NO_BUBBLE = "Rest the pointer on a bubble of the translated page first."
 NO_TRANSLATION = "This bubble has no translation."
@@ -339,14 +340,15 @@ class BubbleTextMixin:
         "Reading the Japanese..." with a running bar while it is read (`_japanese_of`), or why none was; then Copy
         the Japanese, Copy the translation and Close, each named with its key. The actions' keys and Esc work in the
         popup too, once a click to select there has given it the keys."""
-        colours = ZOOM_COLOURS
+        colours = zoom_colours()
+        selected = CONTRAST_SELECTED if theme.mode() == theme.CONTRAST_MODE else SELECTED
         ground = colours["ground"]
         box = tk.Frame(inner, bg=ground)
         box.pack(side="top", anchor="w", fill="x", pady=(10, 0))
         var = tk.StringVar(popup, value="")
         line = SelectableLine(box, var, wraplength=width)
-        line.configure(font=font, background=ground, foreground=colours["text"], selectbackground=SELECTED[0],
-                       inactiveselectbackground=SELECTED[0], selectforeground=SELECTED[1],
+        line.configure(font=font, background=ground, foreground=colours["text"], selectbackground=selected[0],
+                       inactiveselectbackground=selected[0], selectforeground=selected[1],
                        width=max(10, width // max(1, font.measure("0"))))
         note = tk.Label(box, text="", fg=colours["hint"], bg=ground, justify="left", wraplength=width)
         bar = ttk.Progressbar(box, mode="indeterminate", length=120)

@@ -21,6 +21,7 @@ from ...annotations import (
 from ...i18n import _
 from ...render import resolve_font, split_face
 from ...render.fonts import font_families
+from .. import theme
 from ..banner import break_lines
 from ..font_memory import FontMemory, StarButton, font_choices
 from ..layout import fit_combobox, place_window
@@ -386,7 +387,7 @@ class GlossaryDialog(tk.Toplevel):
             self.font_status.configure(text=_("Installed here: {file}").format(file=Path(split_face(spec.path)[0]).name), foreground="")
         else:
             self.font_status.configure(text=_("Not installed on this computer: the automatic font is used instead."),
-                                       foreground="#c03030")
+                                       foreground=theme.colour("warning"))
 
     def _check_kind_font(self, kind: str) -> None:
         """Beside a kind's font entry: whether that font is installed on this computer."""
@@ -399,7 +400,7 @@ class GlossaryDialog(tk.Toplevel):
         if spec:
             label.configure(text=_("Installed here: {file}").format(file=Path(split_face(spec.path)[0]).name), foreground="")
         else:
-            label.configure(text=_("Not installed on this computer: the automatic font is used instead."), foreground="#c03030")
+            label.configure(text=_("Not installed on this computer: the automatic font is used instead."), foreground=theme.colour("warning"))
 
     def _style_shown(self) -> StyleGuide:
         """The style guide as its fields show it."""

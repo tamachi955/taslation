@@ -5,7 +5,8 @@ create_settings_file`, at the place the settings are read from: `config.settings
 
 What it holds (`KEYS`): the lettering's smallest and largest size and the size under which a translation is listed
 for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book may have its own: `book_settings`), capitals,
-slanted lettering; the window's text size (`ui_scale`, `ui.scaling`), always on top, how a book
+slanted lettering; the window's text size (`ui_scale`, `ui.scaling`), its colours (`theme`, `ui.theme`: as Windows
+is set, light or dark, said to wait while Windows' high contrast is on), always on top, how a book
 starts (page by page or the whole book first, with what a store's terms make of that: `start.terms_note`); the two
 optional page models (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither
 says where its training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
@@ -52,12 +53,13 @@ from ...config import (
 )
 from ...i18n import _, load_ui_table, save_ui_entry
 from ...render import artwork
+from .. import theme
 from ..layout import place_window
 from ..scaling import UI_SCALES, clamp_scale
 from ..shortcuts import Keymap
 from ..shortcuts import current as keys_in_force
 from ..tooltip import tip
-from .caches import ERROR_COLOUR, in_lines
+from .caches import in_lines
 from .shortcuts_page import ShortcutsPage
 from .system_page import SystemPage
 from .start import terms_note
@@ -164,7 +166,7 @@ SHOWN_ROWS = shown_rows()
 SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # (ollama_num_gpu: on the System page, `system_page.SystemPage.num_gpu`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
+        "theme", "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
         *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
@@ -176,6 +178,11 @@ SIZE_RANGE = (0, 200)  # what a size box steps through (the bounds are checked o
 DETECT_CHOICES = (("off", "Not used"), ("auto", "Only with the inpainting"), ("on", "Always used"))
 # art_erase's three values (`artwork.runs_here`): never; only where torch has a CUDA GPU (the default); always, the CPU too
 ERASE_CHOICES = (("off", "Not used"), ("auto", "Only with a GPU"), ("lama", "Always, also on the CPU"))
+# the window's colours (`theme`: applied at once by `App._settings_saved`); the words: `locales/features/window_theme.py`
+THEME_CHOICES = (("system", "As Windows is set"), ("light", "Light"), ("dark", "Dark"))
+THEME_TIP = ("The window's colours: light, dark, or as Windows has them for apps (the app mode in Windows' colour "
+             "settings). The page keeps its own. While Windows' high contrast is on, the window takes Windows' colours.")
+CONTRAST_TEXT = "Windows' high contrast is on: the window takes Windows' colours."
 TEXT_CHARS = 58  # the dialog's sentences are broken at so many "0" widths of its font: as many words at any scale
 IGNORED_TABLE, IGNORED_ENTRY = "settings", "ignored"  # where ui.json keeps the unknown keys named last
 PAGE_MODELS_TEXT = ("Two optional models: a layout model (comic-text-and-bubble-detector, tagged Apache-2.0) that "
@@ -316,22 +323,33 @@ class SettingsDialog(tk.Toplevel):
         box = ttk.Combobox(window, textvariable=self.scale, values=scales, state="readonly", width=7)
         box.grid(row=0, column=1, sticky="w", padx=(8, 0))
         tip(_("The size of this window's text, times what Windows sets for the monitor (100 %: as Windows has it)."), name, box)
+        name = ttk.Label(window, text=_("Colours:"))
+        name.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.colours_var = tk.StringVar(self, value=self._shown(THEME_CHOICES, getattr(settings, "theme", "system")))
+        shown = [_(label) for _value, label in THEME_CHOICES]
+        box = ttk.Combobox(window, textvariable=self.colours_var, values=shown, state="readonly",
+                           width=max(-(-tkfont.nametofont("TkDefaultFont").measure(s) // zero) for s in shown) + 2)
+        box.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        tip(_(THEME_TIP), name, box)
+        if theme.high_contrast():  # the choice waits while Windows' high contrast is on (`theme.effective`)
+            ttk.Label(window, text=in_lines(_(CONTRAST_TEXT), self.text_width), justify="left").grid(
+                row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.on_top = tk.BooleanVar(self, value=bool(settings.always_on_top))
         check = ttk.Checkbutton(window, text=_("Always on top"), variable=self.on_top)
-        check.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         tip(_("Keep this window above the others."), check)
         name = ttk.Label(window, text=_("A book starts:"))
-        name.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        name.grid(row=4, column=0, sticky="w", pady=(4, 0))
         modes = ttk.Frame(window)
-        modes.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        modes.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
         self.mode = tk.StringVar(self, value="book" if settings.scan_mode == "book" else "page")
         for value, word in (("page", "Page by page"), ("book", "Whole book first")):
             ttk.Radiobutton(modes, text=_(word), value=value, variable=self.mode,
                             command=self._show_terms).pack(side="left", padx=(0, 8))
         tip(_("Page by page: each page is translated as you turn to it. Whole book first: TASlation reads the pages you turn, then translates the whole book."), name)
         self.terms_label = ttk.Label(window, justify="left")
-        self.terms_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        self._extra_rows(window, "window", 4)
+        self.terms_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self._extra_rows(window, "window", 6)
 
         models = ttk.LabelFrame(general, text=_("Optional page models"), padding=8)
         models.pack(fill="x", pady=(10, 0))
@@ -481,6 +499,7 @@ class SettingsDialog(tk.Toplevel):
         out["uppercase"] = bool(self.uppercase.get())
         out["slant_text"] = bool(self.slant.get())
         out["ui_scale"] = scale_of(self.scale.get())
+        out["theme"] = self._value(THEME_CHOICES, self.colours_var.get())
         out["always_on_top"] = bool(self.on_top.get())
         out["scan_mode"] = self.mode.get()
         out["detect_model"] = self._value(DETECT_CHOICES, self.detect.get())
@@ -503,7 +522,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _say(self, text: str, error: bool = False) -> None:
         self.message_var.set(in_lines(text, self.text_width) if text else "")
-        self.message_label.configure(foreground=ERROR_COLOUR if error else "")
+        self.message_label.configure(foreground=theme.colour("error") if error else "")
 
     # ------------------------------------------------------------------ Save and Open
     def save(self) -> bool:

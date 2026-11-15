@@ -86,6 +86,7 @@ scan_mode = "page"            # "page": page by page (default); "book": read and
 role = "reader"               # "reader" | "translator" (mark text, fix translations, keep a glossary)
 ui_language = ""              # window language: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
 ui_scale = 1.0                # size of the window's text, times what Windows sets for its monitor (0.5-3.0; also Tools > Settings...)
+theme = "system"              # the window's colours: "system" (as Windows' app mode), "light" or "dark"; Windows' high contrast comes first (also Tools > Settings...)
 always_on_top = false         # the window starts above the others (View > Always on top for this session; gui --on-top)
 auto_interval_ms = 700
 over_book = true              # over a viewer in full screen on the same monitor, stay on top without taking its keys (View > Over the full-screen viewer)

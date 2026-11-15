@@ -66,7 +66,7 @@ from ..capture.overlay import set_over
 from ..config import HOVER_DELAY_RANGE, PANEL_FONT_RANGE
 from ..i18n import _
 from ..render.lettering import strip_marks
-from . import layout, shortcuts
+from . import layout, shortcuts, theme
 from .hover import hover_usable, reveal_wanted, reverse_on
 from .strip import run_page_on_show
 from .wrap import wrap_text
@@ -85,7 +85,10 @@ PANEL_TEXT_MOST = 0.08  # a text size set by hand (`panel_text_px`): at most thi
 PANEL_TEXT_LEAST = 16  # a panel larger than the work area (`fit_panel`): its text made smaller down to this (px) ...
 PANEL_SHRINK = 0.85  # ... by this factor a step
 ZOOM_GAP = 12  # pixels between the bubble and the popup
-ZOOM_COLOURS = {"edge": "#5c5c5c", "ground": "#1d1d1d", "text": "#f2f2f2", "hint": "#b4b4b4"}
+ZOOM_COLOURS = {"edge": "#5c5c5c", "ground": "#1d1d1d", "text": "#f2f2f2", "hint": "#b4b4b4"}  # over the page: dark
+# ... and while Windows' high contrast is on, Windows' own (`theme`)
+CONTRAST_ZOOM = {"edge": "SystemWindowFrame", "ground": "SystemWindow", "text": "SystemWindowText",
+                 "hint": "SystemGrayText"}
 ZOOM_HINT = "{key}: its Japanese, to select and copy"  # the panel's last line, with the key of "show_japanese"
 FILL_WAIT = "This bubble is being translated..."  # the panel of a box of the page filling in, before its translation
 FILL_SHOWN = ("found", "read", "lettered")  # the states of such a box the panel opens on (not one without text)
@@ -94,6 +97,11 @@ STILL_PX = 6  # ... moving no more than this (canvas pixels; as a click that is 
 SHOW_TRANSLATION = "Show the translation"  # the button of a panel pinned with the original on the page
 
 Box = tuple[int, int, int, int]
+
+
+def zoom_colours() -> dict[str, str]:
+    """The popup's colours: its own dark ones, over the page in every theme; Windows' while high contrast is on."""
+    return CONTRAST_ZOOM if theme.mode() == theme.CONTRAST_MODE else ZOOM_COLOURS
 
 
 def zoom_text_px(readable: int, shown_px: float) -> int:
@@ -606,7 +614,7 @@ class BubbleZoomMixin:
         width = int(min(width, (work[2] - work[0]) * 0.45))
         text = strip_marks(region.text if filling else str(region.translated_text or ""))
         lines = wrapped(text, width, font)
-        colours = ZOOM_COLOURS
+        colours = zoom_colours()
         popup = tk.Toplevel(self)
         popup.withdraw()
         popup.overrideredirect(True)

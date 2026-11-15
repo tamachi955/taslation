@@ -21,7 +21,7 @@ from ...i18n import _
 from ...regions import ERASED
 from ...review import reason_label
 from ...textclean import clean_reading
-from .. import shortcuts
+from .. import shortcuts, theme
 from ..layout import FlowBar, fit_combobox, place_window, wrap_label
 from ..font_memory import StarButton, font_choices
 from ..progress import status_word
@@ -41,7 +41,7 @@ ASKING = {"again": "Asking the model for a new translation..."}
 HINT_SOMETIMES = ("This model follows a hint only sometimes (about half the time in a test), best for how a name or "
                   "term is read and who or how many are meant. Names and terms that must always come out the same "
                   "belong in the series sheet.")
-FLASH = "#fff4bf"  # the translation box, for a moment, when the model's new translation is put in it
+FLASH = theme.LIGHT["flash"]  # the translation box, for a moment, when the model's new translation is put in it (light)
 FLASH_MS = 1200
 # the formatting bar
 PREVIEW_MS = 300  # after the last change in the editor, this long until the page behind it shows the region again
@@ -85,7 +85,7 @@ FIT_REASONS = {"no-fit": "text does not fit", "font-missing": "font not installe
                "off-centre": "text set off the bubble's centre", "hyphenated": "a word split with a hyphen",
                "lone-word": "a short word alone on a line", "hourglass": "a line much narrower than those round it",
                "low-contrast": "letters hard to see on their ground"}
-FIT_COLOUR = "#c03030"
+FIT_COLOUR = theme.LIGHT["warning"]  # what the lettering could not do as formatted (light: `theme.colour("warning")`)
 # the region as the page has it, at the top of the editor: at most this many pixels across and down, enlarged at most so
 CROP_ROOM, CROP_ENLARGE = (460, 200), 2.0
 READING = "Reading the Japanese..."
@@ -506,7 +506,7 @@ class EditBubbleDialog(tk.Toplevel):
             n=number, total=total, state=status_word(region.status))).pack(anchor="w")
         self.note_label: ttk.Label | None = None
         if note:
-            self.note_label = ttk.Label(frm, text=note, foreground="#5a5a5a", justify="left", wraplength=480)
+            self.note_label = ttk.Label(frm, text=note, foreground=theme.colour("hint"), justify="left", wraplength=480)
             self.note_label.pack(anchor="w", fill="x", pady=(2, 0))
             self.note_label.bind("<Configure>", lambda e: wrap_label(self.note_label, e.width))
         self._build_original(frm, crop)
@@ -536,7 +536,7 @@ class EditBubbleDialog(tk.Toplevel):
         ttk.Entry(grid, textvariable=self.note_var, width=64).grid(row=3, column=0, columnspan=4, sticky="we")
         self.hint_line: ttk.Label | None = None  # said when the translation model in use follows a hint sometimes
         if hint_support == "sometimes":
-            self.hint_line = ttk.Label(grid, text=_(HINT_SOMETIMES), foreground="#5a5a5a", justify="left",
+            self.hint_line = ttk.Label(grid, text=_(HINT_SOMETIMES), foreground=theme.colour("hint"), justify="left",
                                        wraplength=480)
             self.hint_line.grid(row=4, column=0, columnspan=4, sticky="we")
             self.hint_line.bind("<Configure>", lambda e: wrap_label(self.hint_line, e.width))
@@ -548,7 +548,7 @@ class EditBubbleDialog(tk.Toplevel):
         style = getattr(region, "style", None) or RegionStyle()
         self._build_bar(frm, style, faces)
         self.fit_var = tk.StringVar(value="")  # what the lettering could not do as formatted
-        self.fit_label = ttk.Label(frm, textvariable=self.fit_var, foreground=FIT_COLOUR, justify="left", wraplength=480)
+        self.fit_label = ttk.Label(frm, textvariable=self.fit_var, foreground=theme.colour("warning"), justify="left", wraplength=480)
         self.fit_label.pack(anchor="w", fill="x")
         self.fit_label.bind("<Configure>", lambda e: wrap_label(self.fit_label, e.width))
         self.show_fit(getattr(region, "letter_flags", ()))
@@ -559,8 +559,7 @@ class EditBubbleDialog(tk.Toplevel):
         self.text.edit_modified(False)
         self.text.bind("<<Modified>>", self._text_changed)
         self.text.bind("<Control-Return>", lambda _e: (self._save(), "break")[1])
-        self._text_bg = str(self.text.cget("background"))
-        ttk.Label(frm, text=_("Enter starts a new line; Ctrl+Enter saves."), foreground="#5a5a5a").pack(anchor="w")
+        ttk.Label(frm, text=_("Enter starts a new line; Ctrl+Enter saves."), foreground=theme.colour("hint")).pack(anchor="w")
         line = ttk.Frame(frm)  # while the model is asked: a running bar and a line; then what came
         line.pack(fill="x", pady=(6, 0))
         self.busy_bar = ttk.Progressbar(line, mode="indeterminate", length=80)
@@ -781,9 +780,8 @@ class EditBubbleDialog(tk.Toplevel):
         self._bold_font.configure(weight="bold")
         self._italic_font = base.copy()
         self._italic_font.configure(slant="italic")
-        look = ttk.Style(self)
-        look.configure("FormatBold.TCheckbutton", font=self._bold_font)
-        look.configure("FormatItalic.TCheckbutton", font=self._italic_font)
+        theme.style(self, "FormatBold.TCheckbutton", font=self._bold_font)  # (set again in a new theme)
+        theme.style(self, "FormatItalic.TCheckbutton", font=self._italic_font)
         self.format_btn = ttk.Button(parent, style="Toolbutton", command=self._toggle_bar)
         self.format_btn.pack(anchor="w")
         self.bar = bar = FlowBar(parent, padding=(0, 4), gap=(12, 4))
@@ -1189,12 +1187,13 @@ class EditBubbleDialog(tk.Toplevel):
     def _flash(self) -> None:
         if self._flash_job is not None:
             self.after_cancel(self._flash_job)
-        self.text.configure(background=FLASH)
+        self.text.configure(background=theme.colour("flash"))
 
         def back() -> None:
             self._flash_job = None
             try:
-                self.text.configure(background=self._text_bg)
+                # (a text box's ground in the colours in force: they may have changed since the box was made)
+                self.text.configure(background=theme.colour("field"))
             except tk.TclError:  # the editor is gone
                 pass
 

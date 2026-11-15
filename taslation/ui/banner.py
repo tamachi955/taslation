@@ -23,14 +23,17 @@ from tkinter import ttk
 from typing import Any, Callable, Iterable, Sequence
 
 from ..i18n import _, current
+from . import theme
 from .progress import code_of, rendered
 from .wrap import wrap_text
 
 # setup lines that only inform (translating works); translator.other_model: Qwen translates while PLaMo is not installed
 NOTICE_CODES = frozenset({"health.other_model", "health.chosen_other_model", "translator.other_model"})
-PROBLEM_COLOURS = ("#fff4ce", "#1f1f1f")  # a setup problem: dark text on amber
-NOTICE_COLOURS = ("#e5f1fb", "#1f1f1f")  # a notice: dark text on pale blue
-BAND_COLOURS = ("#1f3b63", "#ffffff")  # the scan band: white on dark blue, unlike anything the viewer shows
+# the strips' colours as the light mode has them (ground, text); `theme.strip_colours` gives them in the mode the window
+# shows (dark: light text on a dark amber or blue; the band stays as it is; high contrast: Windows' colours)
+PROBLEM_COLOURS = (theme.LIGHT["problem_ground"], theme.LIGHT["banner_text"])  # a setup problem: dark text on amber
+NOTICE_COLOURS = (theme.LIGHT["notice_ground"], theme.LIGHT["banner_text"])  # a notice: dark text on pale blue
+BAND_COLOURS = (theme.LIGHT["band_ground"], theme.LIGHT["band_text"])  # the scan band: white on dark blue, unlike anything the viewer shows
 # how each window language groups the digits of a number ("1,900", "1.900", "1 900"); four digits stay whole in
 # Spanish and Polish, as their style guides have it
 _DIGIT_GROUPS = {"de": ".", "es": ".", "pt": ".", "it": ".", "nl": ".", "id": ".", "vi": ".", "tr": ".",
@@ -215,15 +218,16 @@ class Strip(tk.Frame):
     `set` changes what it shows; the window packs it and takes it away."""
 
     def __init__(self, master: tk.Misc, colours: tuple[str, str], pad: tuple[int, int] = (10, 5)):
-        super().__init__(master, bg=colours[0], bd=0, highlightthickness=0)
-        self.colours = colours
+        ground = theme.strip_colours(colours)[0]
+        super().__init__(master, bg=ground, bd=0, highlightthickness=0)
+        self.colours = colours  # as the light mode has them: each `set` shows them in the mode the window shows
         self.lines: list[str] = []  # the lines as they were given (unbroken)
         self.labels: list[tk.Label] = []  # one per line, as wide as the strip (its colours to the edges)
         self.buttons: list[ttk.Button] = []
         self.bar: ttk.Progressbar | None = None  # a determinate bar under the lines (`show_fraction`), made when asked
         self._pad = pad
-        self.text_box = tk.Frame(self, bg=colours[0], bd=0, highlightthickness=0)
-        self.button_box = tk.Frame(self, bg=colours[0], bd=0, highlightthickness=0)  # packed while it has buttons
+        self.text_box = tk.Frame(self, bg=ground, bd=0, highlightthickness=0)
+        self.button_box = tk.Frame(self, bg=ground, bd=0, highlightthickness=0)  # packed while it has buttons
         self.text_box.pack(side="left", fill="both", expand=True)
         self._width = 0
         self.bind("<Configure>", lambda _e: self._wrap())
@@ -242,8 +246,9 @@ class Strip(tk.Frame):
             else:
                 label.pack(fill="x", anchor="w")
             self.labels.append(label)
+        self._ground()
         for i, label in enumerate(self.labels):
-            bg, fg = (colours[i] if colours and i < len(colours) else self.colours)
+            bg, fg = theme.strip_colours(colours[i] if colours and i < len(colours) else self.colours)
             label.configure(bg=bg, fg=fg)
         self.lines = lines
         if [b.cget("text") for b in self.buttons] != [str(text) for text, _command in buttons]:
@@ -267,6 +272,13 @@ class Strip(tk.Frame):
     def texts(self) -> list[str]:
         """The lines on show, unbroken."""
         return list(self.lines)
+
+    def _ground(self) -> None:
+        """The strip's own ground in the mode the window shows (it may have changed since: `theme.apply`)."""
+        ground = theme.strip_colours(self.colours)[0]
+        for frame in (self, self.text_box, self.button_box):
+            if str(frame.cget("bg")) != ground:
+                frame.configure(bg=ground)
 
     def show_fraction(self, fraction: float | None) -> None:
         """A determinate bar under the lines at *fraction* (0 to 1); None takes it away."""
@@ -345,7 +357,9 @@ class SetupBanner(Strip):
                 self.labels.append(label)
                 self.row_buttons.append(button)
             self._signature = signature
-        for row, label, button, (_line, (bg, fg), action) in zip(self.rows, self.labels, self.row_buttons, rows):
+        self._ground()
+        for row, label, button, (_line, colours, action) in zip(self.rows, self.labels, self.row_buttons, rows):
+            bg, fg = theme.strip_colours(colours)
             row.configure(bg=bg)
             label.configure(bg=bg, fg=fg)
             if button is not None and action is not None:

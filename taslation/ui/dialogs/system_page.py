@@ -24,6 +24,7 @@ from ... import devices
 from ...devices import STAGE_NAMES, StageTimes, seconds_text
 from ...i18n import _
 from ...translate.ollama import NUM_GPU_MOST, num_gpu_value
+from .. import theme
 from ..tooltip import tip
 from .caches import in_lines
 
@@ -32,7 +33,7 @@ NUM_GPU_TEXT = ("Empty: Ollama decides (the fastest). 0: the processor only, whi
                 "several times slower. A number: that many of the model's layers on the GPU, the rest on the processor.")
 NUM_GPU_PROBLEM = "The layers on the GPU: leave the box empty, or a whole number from 0 to {most}."
 POLL_MS = 100  # how often the page looks whether the thread is done
-NOTE_COLOUR = "#6b6b6b"
+NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
 GAP = 10  # pixels between the columns
 LABEL_PAD = 4  # pixels a label takes round its text: the text is broken this much short of its column
@@ -87,7 +88,7 @@ class SystemPage(ttk.Frame):
         self.state_var = tk.StringVar(self, value="")
         ttk.Label(row, textvariable=self.state_var).pack(side="left", padx=(8, 0))
         self.note_var = tk.StringVar(self, value="")
-        ttk.Label(self, textvariable=self.note_var, justify="left", foreground=NOTE_COLOUR).pack(anchor="w", pady=(8, 0))
+        ttk.Label(self, textvariable=self.note_var, justify="left", foreground=theme.colour("note")).pack(anchor="w", pady=(8, 0))
         layers = ttk.Frame(self)
         layers.pack(fill="x", anchor="w", pady=(12, 0))
         name = ttk.Label(layers, text=_(NUM_GPU_LABEL))
@@ -95,7 +96,7 @@ class SystemPage(ttk.Frame):
         self.num_gpu = tk.StringVar(self, value=str(getattr(settings, "ollama_num_gpu", "") or "").strip())
         box = ttk.Entry(layers, textvariable=self.num_gpu, width=6)
         box.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        line = ttk.Label(layers, text=in_lines(_(NUM_GPU_TEXT), width), justify="left", foreground=NOTE_COLOUR)
+        line = ttk.Label(layers, text=in_lines(_(NUM_GPU_TEXT), width), justify="left", foreground=theme.colour("note"))
         line.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(NUM_GPU_TEXT), name, box)
         self.looked = False
@@ -185,7 +186,7 @@ class SystemPage(ttk.Frame):
         cell = ttk.Frame(self.table)
         cell.grid(row=n, column=1, sticky="nw", padx=(0, GAP), pady=pad)
         ttk.Label(cell, text=in_lines(where, self.widths[1] - LABEL_PAD), justify="left").pack(anchor="w")
-        ttk.Label(cell, text=in_lines(what, self.widths[1] - LABEL_PAD), justify="left", foreground=NOTE_COLOUR).pack(anchor="w")
+        ttk.Label(cell, text=in_lines(what, self.widths[1] - LABEL_PAD), justify="left", foreground=theme.colour("note")).pack(anchor="w")
         took = ttk.Label(self.table, text=secs, justify="left")
         took.grid(row=n, column=2, sticky="nw", pady=pad)
         self._cells += [name, cell, took]

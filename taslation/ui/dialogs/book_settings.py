@@ -22,11 +22,11 @@ from typing import Any, Callable
 
 from ...annotations import BOOK_SETTING_BOUNDS, BOOK_SETTING_KEYS
 from ...i18n import _
+from .. import theme
 from ..book_areas import USE_FOR_SERIES, USE_FOR_SERIES_TIP, use_areas_for_series
 from ..layout import fit_combobox, place_window
 from ..tooltip import tip
 from . import caches
-from .caches import ERROR_COLOUR
 from .help import explain_button
 from .settings import percent, percent_of, text_scale_choices
 
@@ -72,7 +72,7 @@ NOTHING_TO_CLEAR_SERIES = ("This book has no choices of its own: the series' def
                            "already.")
 CLEARED_SERIES = ("Cleared: the series' defaults apply to this book again, and your own settings where the series has "
                   "none. Undo puts its choices back.")
-HINT_COLOUR = "#5a5a5a"
+HINT_COLOUR = theme.LIGHT["hint"]  # the dimmed lines, in the light mode (`theme.colour("hint")`)
 
 
 def area_line(area: Any) -> str:
@@ -130,7 +130,7 @@ class BookSettingsDialog(tk.Toplevel):
             var = tk.BooleanVar(self, value=bool(current.get(key, self._fallback(key))))
             self.choices[key] = var
             ttk.Checkbutton(grid, text=_(word), variable=var).grid(row=i, column=0, columnspan=3, sticky="w", pady=1)
-            self.hints[key] = ttk.Label(grid, text=_(FROM_SERIES), foreground=HINT_COLOUR)
+            self.hints[key] = ttk.Label(grid, text=_(FROM_SERIES), foreground=theme.colour("hint"))
             self.hints[key].grid(row=i, column=3, sticky="w", padx=(6, 0))
             var.trace_add("write", lambda *_args, k=key: self._sync_hint(k))
         row = len(CHOICES)
@@ -170,7 +170,7 @@ class BookSettingsDialog(tk.Toplevel):
             self.sides[key] = ttk.Label(grid, text=self._side_text(key))
             self.sides[key].grid(row=i, column=2, sticky="w")
         self._sync_hints()
-        self.problem = ttk.Label(frm, text="", foreground=ERROR_COLOUR, justify="left")
+        self.problem = ttk.Label(frm, text="", foreground=theme.colour("error"), justify="left")
         self.problem.pack(anchor="w")
         self.series_var = tk.StringVar(self, value="")  # the line that names the series (`_series_line`)
         if pipeline.annotations is not None and hasattr(pipeline.annotations, "areas"):
@@ -363,8 +363,9 @@ class BookSettingsDialog(tk.Toplevel):
             self.share_areas_btn = ttk.Button(side, text=_(USE_FOR_SERIES), command=self._share_areas)
             self.share_areas_btn.pack(fill="x", pady=(4, 0))
             tip(_(USE_FOR_SERIES_TIP).format(series=self._series_name()), self.share_areas_btn)
-        self.no_areas = ttk.Label(frm, text=_(NO_AREAS), wraplength=420, justify="left", foreground=HINT_COLOUR)
-        self.areas_hint = ttk.Label(frm, text="", wraplength=420, justify="left", foreground=HINT_COLOUR)
+        self.no_areas = ttk.Label(frm, text=_(NO_AREAS), wraplength=420, justify="left",
+                                  foreground=theme.colour("hint"))
+        self.areas_hint = ttk.Label(frm, text="", wraplength=420, justify="left", foreground=theme.colour("hint"))
         self._shown_areas: list[Any] = []
         self._show_areas()
 
@@ -432,7 +433,7 @@ class BookSettingsDialog(tk.Toplevel):
         button.pack(side="left")
         tip(_(SHARE_TIP).format(series=self._series_name()), button)
         self.series_var.set(self._series_line())
-        ttk.Label(row, textvariable=self.series_var, wraplength=300, justify="left", foreground=HINT_COLOUR).pack(
+        ttk.Label(row, textvariable=self.series_var, wraplength=300, justify="left", foreground=theme.colour("hint")).pack(
             side="left", padx=(8, 0))
 
     def _series_line(self) -> str:

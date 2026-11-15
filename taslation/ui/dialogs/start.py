@@ -17,10 +17,10 @@ from ... import viewerparts
 from ...bookid import GENERIC_NAMES, generic_book_name
 from ...i18n import _
 from ...notes import TEMPORARY_STAMP
+from .. import theme
 from ..banner import break_lines
 from ..book_fields import BookFields, refused_line
 from ..layout import dialog_keys, place_by_book
-from .caches import ERROR_COLOUR
 
 WRAP = 470  # pixels: the dialog's text is broken into lines this wide
 HINTS = ("recognised", "several", "colophon", "last")  # what the start dialog says of the names it offers
@@ -101,7 +101,7 @@ class StartDialog(tk.Toplevel):
             self.fields = BookFields(frm, self.name_var, series_chars=36, on_refused=self._refused)
             self.fields.pack(fill="x")
         self.entry = self.fields.series
-        self.refused_label = ttk.Label(frm, justify="left", foreground=ERROR_COLOUR)  # shown when a volume is refused
+        self.refused_label = ttk.Label(frm, justify="left", foreground=theme.colour("error"))  # shown when a volume is refused
         if ask:
             question = ttk.Label(frm, justify="left")
             question.configure(text=break_lines(_("Read the whole book first? Turn the pages at your own pace, in the viewer or with the page keys in this window: TASlation reads each page you turn, and never turns one itself. When you reach the end, press Finished reading, and it translates the whole book with the whole story in view (about an hour for a 190-page volume on a mid-range GPU). Stop ends the run at any time."), WRAP, question))
@@ -224,7 +224,7 @@ class ColophonOffer(tk.Toplevel):
         self.fields = BookFields(frm, self.name_var, series_chars=36, on_refused=self._refused)
         self.fields.set_parts(title, volume)
         self.fields.pack(fill="x", pady=(10, 0))
-        self.refused_label = ttk.Label(frm, justify="left", foreground=ERROR_COLOUR)
+        self.refused_label = ttk.Label(frm, justify="left", foreground=theme.colour("error"))
         row = ttk.Frame(frm)
         row.pack(fill="x", pady=(14, 0))
         keep = ttk.Button(row, text=_("Keep"), command=lambda: self._answer(False))

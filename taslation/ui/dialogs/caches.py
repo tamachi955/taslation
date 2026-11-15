@@ -21,6 +21,7 @@ from ...capture import foreground_window, give_foreground
 from ...cache import CacheStore
 from ...i18n import _
 from ...recycle import to_recycle_bin
+from .. import theme
 from ..book_fields import BookFields, refused_line
 from ..layout import fit_columns, place_window, wrap_label
 from ..tooltip import tip
@@ -28,7 +29,7 @@ from ..wrap import wrap_line
 from .help import explain_button
 from .import_review import ImportChoice, ImportReviewDialog
 
-ERROR_COLOUR = "#b3261e"  # a line that says what went wrong, as the window's other warnings
+ERROR_COLOUR = theme.LIGHT["error"]  # a line that says what went wrong, in the light mode (`theme.colour("error")`)
 WARNING_ICON = "::tk::icons::warning"  # the stock icon of Tk's own message boxes (Tk makes it as it starts)
 ICONS = {"warning": (WARNING_ICON, "warning"), "info": ("::tk::icons::information", "info"),
          "question": ("::tk::icons::question", "questhead")}  # a box's icon: Tk's stock image, the bitmap without it
@@ -301,7 +302,7 @@ class PassphraseDialog(tk.Toplevel):
         self.show_box = ttk.Checkbutton(frm, text=_("Show"), variable=self.show_var, command=self._show)
         self.show_box.grid(row=row, column=1, sticky="w", padx=(6, 0), pady=(2, 0))
         self.hint_var = tk.StringVar(self, value="")
-        self.hint = ttk.Label(frm, textvariable=self.hint_var, justify="left", foreground=ERROR_COLOUR)
+        self.hint = ttk.Label(frm, textvariable=self.hint_var, justify="left", foreground=theme.colour("error"))
         self.hint.grid(row=row + 1, column=0, columnspan=2, sticky="w", pady=(4, 0))
         field = self.entries[0].winfo_reqwidth()
         self.intro_width = max(label.winfo_reqwidth() for label in labels) + 6 + field  # as wide as labels and fields
@@ -405,7 +406,7 @@ class RenameBookDialog(tk.Toplevel):
         self.fields = BookFields(frm, self.name_var, series_chars=34,
                                  on_refused=lambda text: self.hint_var.set(refused_line(text)))
         self.fields.pack(fill="x")
-        ttk.Label(frm, textvariable=self.hint_var, foreground=ERROR_COLOUR, wraplength=self.text_width,
+        ttk.Label(frm, textvariable=self.hint_var, foreground=theme.colour("error"), wraplength=self.text_width,
                   justify="left").pack(anchor="w", pady=(4, 0))
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=(10, 0))
@@ -559,7 +560,7 @@ class CachesDialog(tk.Toplevel):
     def _say(self, text: str, error: bool = False) -> None:
         """The line under Export and Import: what the last export or import did, a failure in red."""
         self.backup_var.set(text)
-        self.backup_line.configure(foreground=ERROR_COLOUR if error else "")
+        self.backup_line.configure(foreground=theme.colour("error") if error else "")
 
     # ------------------------------------------------------------------ the list
     def _fill(self, select: str | Sequence[str] | None = None, book: str | None = None) -> None:
