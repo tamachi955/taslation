@@ -6,7 +6,11 @@ take a moment), so the dialog never waits.
 
 The list is a grid of labels broken to their column's width (`caches.in_lines`), not a fixed-width table: a GPU's
 name, a model's or a longer language's words then take another line instead of being cut off. Each stage has where it
-runs and, under it in grey, what runs there."""
+runs and, under it in grey, what runs there.
+
+Under it, the one setting of where things run that the dialog holds: how many of the translation model's layers
+Ollama puts on the GPU (``ollama_num_gpu``: empty, the server decides; 0, the processor only; a number of layers), a
+box with a line on what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM`)."""
 
 from __future__ import annotations
 
@@ -19,8 +23,14 @@ from typing import Any, Callable
 from ... import devices
 from ...devices import STAGE_NAMES, StageTimes, seconds_text
 from ...i18n import _
+from ...translate.ollama import NUM_GPU_MOST, num_gpu_value
+from ..tooltip import tip
 from .caches import in_lines
 
+NUM_GPU_LABEL = "Translation model's layers on the GPU:"
+NUM_GPU_TEXT = ("Empty: Ollama decides (the fastest). 0: the processor only, which leaves the GPU free and translates "
+                "several times slower. A number: that many of the model's layers on the GPU, the rest on the processor.")
+NUM_GPU_PROBLEM = "The layers on the GPU: leave the box empty, or a whole number from 0 to {most}."
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = "#6b6b6b"
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -78,7 +88,36 @@ class SystemPage(ttk.Frame):
         ttk.Label(row, textvariable=self.state_var).pack(side="left", padx=(8, 0))
         self.note_var = tk.StringVar(self, value="")
         ttk.Label(self, textvariable=self.note_var, justify="left", foreground=NOTE_COLOUR).pack(anchor="w", pady=(8, 0))
+        layers = ttk.Frame(self)
+        layers.pack(fill="x", anchor="w", pady=(12, 0))
+        name = ttk.Label(layers, text=_(NUM_GPU_LABEL))
+        name.grid(row=0, column=0, sticky="w")
+        self.num_gpu = tk.StringVar(self, value=str(getattr(settings, "ollama_num_gpu", "") or "").strip())
+        box = ttk.Entry(layers, textvariable=self.num_gpu, width=6)
+        box.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        line = ttk.Label(layers, text=in_lines(_(NUM_GPU_TEXT), width), justify="left", foreground=NOTE_COLOUR)
+        line.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(NUM_GPU_TEXT), name, box)
         self.looked = False
+
+    # ------------------------------------------------------------------ the layers on the GPU
+    def num_gpu_value(self) -> str:
+        """What the layers' box says, as ``ollama_num_gpu`` keeps it: "" (empty: the server decides) or a whole number
+        written plainly ("020" is "20"); what is neither, as it was typed (`num_gpu_problem` says so)."""
+        text = self.num_gpu.get().strip()
+        try:
+            layers = num_gpu_value(text)
+        except ValueError:
+            return text
+        return "" if layers is None else str(layers)
+
+    def num_gpu_problem(self) -> str | None:
+        """What is wrong with the layers' box (in the window's language), None when nothing is."""
+        try:
+            num_gpu_value(self.num_gpu_value())
+        except ValueError:
+            return _(NUM_GPU_PROBLEM).format(most=NUM_GPU_MOST)
+        return None
 
     # ------------------------------------------------------------------ looking
     def refresh(self, wait: bool = False) -> None:

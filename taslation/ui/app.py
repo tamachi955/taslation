@@ -86,6 +86,7 @@ from .book_areas import IGNORE_EVERYWHERE, IGNORE_TIP, AreaMixin
 from .book_fields import BookFields, fields_committed, kept_name, refused_line
 from .font_memory import FontMemory
 from .dialogs.settings import PAGE_SETTINGS, SettingsDialog, warn_ignored
+from .gpu_release import RELEASE_ENTRY, RELEASE_TIP, apply_num_gpu, release_now
 from .history import EditHistory
 from .jobs import JobsMixin
 from .layout import (
@@ -644,7 +645,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         (Clear area is in the Set area dialog), then translator mode's Ignore this area on all pages of this book
         (`book_areas`), Copy format, Paste format (also on every region of a kind), Copy region and Paste region
         (`formats`), then Set kind..., Set text size... and Place in reading order... for the selected regions
-        (`selection`), Tools has Saved translations..., Names rendered in more than one way... and Settings..., View
+        (`selection`), Tools has Saved translations..., Names rendered in more than one way..., Settings... and
+        Release the model now (`gpu_release`), View
         has Show original, the choices of what the page and a bubble under the pointer show (`hover`: Translation on
         the page, original under the pointer / Original on the page, translation under the pointer) and how that
         bubble shows it (Under the pointer: a panel beside the bubble / the bubble itself), Always on top, Over
@@ -695,6 +697,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         tools.add_command(label=_("Names rendered in more than one way..."), command=self.review_names)
         tools.add_command(label=_("Settings..."), command=self.open_settings)
         keyed(tools, "settings")
+        tools.add_separator()  # the GPU memory of TASlation's models given back now (`gpu_release`)
+        tools.add_command(label=_(RELEASE_ENTRY), command=lambda: release_now(self))
         menubar.add_cascade(label=_("Tools"), menu=tools)
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_checkbutton(label=_("Show original"), variable=self.original_var, command=self._redisplay)
@@ -739,7 +743,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
                  *(_(t) for t in PAGE_SELECTION_TIPS))
         tip_menu(self, tools, _("See and delete the translations and notes kept on this computer."),
                  _("Names rendered in more than one way"),
-                 _("Change the lettering, the window and the optional page models."))
+                 _("Change the lettering, the window and the optional page models."), _(RELEASE_TIP))
         tip_menu(self, view_menu, _("Show the page as it is in the viewer, without the translation."),
                  *(_(t) for t in HOVER_TIPS), *(_(t) for t in REVEAL_TIPS), _("Keep this window above the others."),
                  _("Over a viewer in full screen, stay on top without taking its keys: you turn the pages there."),
@@ -986,6 +990,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._apply_on_top()
         if "ui_scale" in changed:
             self._dpi_watch.rescale()
+        if "ollama_num_gpu" in changed:  # (the translators send it from their next request on)
+            apply_num_gpu(self, changed["ollama_num_gpu"])
         if set(changed) & PAGE_SETTINGS:
             self._jobs.put(self._job_settings_changed)
             if self.last_result is not None and not self.busy and self.batch is None:

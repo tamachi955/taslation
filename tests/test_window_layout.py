@@ -160,7 +160,7 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
                                          "Copy region", "Paste region", "Set kind...", "Set text size...",
                                          "Place in reading order..."]
     assert _menu_labels(menus["Tools"]) == ["Saved translations...", "Names rendered in more than one way...",
-                                              "Settings..."]
+                                              "Settings...", "Release the model now"]
     assert _menu_labels(menus["View"]) == ["Show original", "Translation on the page, original under the pointer",
                                          "Original on the page, translation under the pointer",
                                          "Under the pointer: a panel beside the bubble",

@@ -167,12 +167,13 @@ def choose(setting: Any, target_language: str, installed: Iterable[str] | None) 
 
 def make_translator(settings: Any, model: TranslatorModel | str | None = None, *, seed: int | None = None) -> Any:
     """The translator for *model* (a `TranslatorModel` or an Ollama name; default: the one the settings want for their
-    target language, `wanted_name`), set up from *settings* (URL, timeout, temperature, keep_alive, target language):
+    target language, `wanted_name`), set up from *settings* (URL, timeout, temperature, keep_alive, the layers on the
+    GPU, target language):
     a `PlamoTranslator` for PLaMo, an `OllamaTranslator` (the chat prompts) for Qwen and for any
     other Ollama model. A known model chosen by the language carries it as ``auto_model``, so that a missing model is
     said as ``translator.model_missing``. *seed*: Ollama's sampling seed for every request (the evaluation tools; the
     app sends none)."""
-    from .ollama import OllamaTranslator
+    from .ollama import OllamaTranslator, num_gpu_value
     from .plamo import PlamoTranslator
 
     if model is None:
@@ -180,7 +181,8 @@ def make_translator(settings: Any, model: TranslatorModel | str | None = None, *
     known = model if isinstance(model, TranslatorModel) else by_ollama_name(model)
     name = model.ollama_name if isinstance(model, TranslatorModel) else str(model)
     common = dict(timeout=settings.ollama_timeout, temperature=settings.ollama_temperature,
-                  target_language=settings.target_language, keep_alive=settings.ollama_keep_alive, seed=seed)
+                  target_language=settings.target_language, keep_alive=settings.ollama_keep_alive, seed=seed,
+                  num_gpu=num_gpu_value(getattr(settings, "ollama_num_gpu", "")))
     if known is PLAMO:
         translator: Any = PlamoTranslator(settings.ollama_url, name, **common)
     else:

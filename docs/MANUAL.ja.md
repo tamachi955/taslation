@@ -900,6 +900,10 @@ Esc とページ送りのキー、翻訳者モードのマウスの操作は灰�
 消去は紙の色の塗りつぶしが CPU で、インペイント（LaMa）を使うときは絵の上が GPU で動きます（「いつも使う（CPU でも）」で GPU がなければ CPU）。GPU として数えるのは CUDA が使える NVIDIA の GPU だけで、
 調べるためにモデルを読み込んだり Ollama を起動したりはしません。秒数は最近写植した20ページの平均で、ウィンドウを閉じるときに状態フォルダの `timings.json` に保存します（数値だけで、ページの内容は入りません）。
 「もう一度調べる」で表示を更新します。同じ内容は `taslation doctor` も「Where each stage runs:」として出力します。その下に、このセッションでモデルに尋ねずに使い回した短いセリフの数を表示します（「短いセリフの使い回し」。数だけです）。
+さらにその下の「翻訳モデルの GPU に置く層の数」（`ollama_num_gpu`）で、Ollama が翻訳モデルのどれだけを GPU に置くかを決められます。両方の翻訳器（PLaMo と Qwen）に効きます。
+空欄（既定）は Ollama に任せ、要求はこれまでとまったく同じです。`0` は CPU だけで動かして GPU を空け（翻訳は数倍遅くなります）、数を入れるとモデルのその数の層を GPU に置き、残りを CPU で動かします。
+Ollama の要求の `num_gpu` オプションとして送ります。保存すると次の要求から使います（すでに読み込まれているモデルは、そのために読み込み直しで少し待つことがあります）。
+層の数を指定したときは、モデルが GPU と CPU に分かれていても読み込み直したり知らせたりしません（そう指定したためです）。空欄か 0〜999 の整数以外は保存しません。
 
 設定ファイル `taslation.toml` は、`--config` で指定したもの、実行したフォルダの `./taslation.toml`、状態フォルダ（`~/.taslation`、
 または環境変数 `TASLATION_STATE_DIR` の場所）の `taslation.toml` の順に探し、最初に見つかったものを読みます（どれもなければ既定値）。
@@ -926,6 +930,7 @@ art_erase = "auto"           # with "fill", lettering on the drawing is inpainte
 detect_model = "off"         # (opt-in for now: "auto") the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs), "on", "off"
 ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: "2h", "90s", seconds; "-1" never
                              # unloads, "0" unloads after every request
+ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
@@ -989,6 +994,12 @@ Ollama のモデルは必要なときだけ GPU メモリに載せます。起�
 読み終えてメモと翻訳に移るときに読み込みます。処理の終わり（停止や失敗を含む）とウィンドウを閉じたときには、すぐに解放します。
 `ollama_keep_alive = "-1"` にすると以前と同じく、起動時に OCR モデルより先に読み込み、解放しません。
 読み込んだモデルの一部しかグラフィックボードに載らなかったときは、もう一度読み込み直し、それでも載らなければその旨を知らせます。
+ゲームなどほかのプログラムのために GPU のメモリーをすぐ空けたいときは、「ツール > モデルを今すぐ解放」を使います。TASlation がこのセッションで読み込んだか使った翻訳モデルを、
+Ollama の API の通常の要求（そのモデルに `keep_alive` 0）で解放し、ページ用モデル（レイアウトモデルと LaMa）もメモリーを返します。`ollama_keep_alive = "-1"` のときも解放します。
+ほかのプログラムが同じ Ollama に読み込んだモデルには触れず、Ollama 自体を止めたり起動したりもしません。OCR は CPU で動くのでそのまま残り、
+ページ用モデルを一度 GPU で動かしたときに PyTorch が作った CUDA のコンテキスト（数百 MB）も、ウィンドウを閉じるまで残ります。
+何を解放したかはステータス行に出ます。翻訳中や、翻訳が始まるのを待っている間、一冊通しの処理の間は解放せず、その旨をステータス行に出します。
+次に翻訳が必要な行が出たときは、いつもどおりモデルを読み込み直します。
 Ollama は、TASlation が使うあいだだけ動きます。翻訳するときに Ollama が動いていなければ、TASlation は Ollama のサーバー（`ollama serve`）を
 表示しないウィンドウで起動し（Ollama のアプリは起動しません）、起動したことを状態フォルダーの `ollama-started.json` に書き残します
 （プロセスの番号、プログラム、起動した時刻、使っている TASlation だけで、本の文字は入りません）。ウィンドウを閉じたとき、または翻訳した `taslation` のコマンドが終わったときに、

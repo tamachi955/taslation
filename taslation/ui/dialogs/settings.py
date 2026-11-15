@@ -15,7 +15,8 @@ the row says it is not used here (`NO_GPU_TEXT`).
 Three pages (a notebook): General, those settings; Shortcuts, the window's keys (`shortcuts_page.ShortcutsPage`
 over `shortcuts.Keymap`, saved into the state folder with the same Save and applied at once by *on_keys*); System,
 what each stage of a page runs on and the seconds a page there (`system_page.SystemPage`, looked at when first
-shown).
+shown), and how many of the translation model's layers Ollama puts on the GPU (``ollama_num_gpu``, saved with the
+others).
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
 `Settings` has the key, written and applied like the others.
@@ -97,8 +98,9 @@ def shown_rows(rows: tuple[SettingRow, ...] = EXTRA_ROWS) -> tuple[SettingRow, .
 
 
 SHOWN_ROWS = shown_rows()
+# (ollama_num_gpu: on the System page, `system_page.SystemPage.num_gpu`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS))
+        "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS), "ollama_num_gpu")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
 PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "detect_model", "art_erase",
@@ -395,6 +397,7 @@ class SettingsDialog(tk.Toplevel):
         for spec in SHOWN_ROWS:
             var = self.extra[spec.key]
             out[spec.key] = self._value(spec.choices, var.get()) if spec.choices else bool(var.get())
+        out["ollama_num_gpu"] = self.system.num_gpu_value()  # (the System page's box, as typed when it is none)
         return out
 
     def changed(self) -> dict[str, Any]:
@@ -415,7 +418,8 @@ class SettingsDialog(tk.Toplevel):
         except ValueError:
             problem = size_problem(-1, -1, -1)
         else:
-            problem = size_problem(values["min_font_size"], values["max_font_size"], values["readable_font_size"])
+            problem = (size_problem(values["min_font_size"], values["max_font_size"], values["readable_font_size"])
+                       or self.system.num_gpu_problem())
         if problem:
             self._say(problem, error=True)
             return False

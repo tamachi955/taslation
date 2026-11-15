@@ -14,6 +14,7 @@ ollama_timeout = 900.0
 ollama_temperature = 0.2
 ollama_num_ctx = 16384        # the chat translator's context window (0 = server default; a batch request needs ~10K); PLaMo has its own (8192)
 ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the first line to translate loads it, the end of a whole-book run or closing the window releases it. "-1": load it at the start and never unload
+ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Tools > Settings... > System). Tools > Release the model now gives the GPU memory back at once
 target_language = "English"
 context_pages = 2             # live mode: previous pages given to the model as context (memory only)
 

@@ -56,6 +56,13 @@ Ollama reading 5.0 GB free throughout, since the driver moves the others' memory
 aside. A model that does land partly on the CPU translates 4 times slower (14.5
 against 63 tokens/s at 55 %). So the check is a net, for a card or a system that
 behaves otherwise, and letting the GPU models go keeps them from being paged around.
+
+``num_gpu`` (the setting ``ollama_num_gpu``, `num_gpu_value`): None, the default, sends nothing and leaves it to the
+server, as before (the requests are what they were, byte for byte); a number goes with every request and every
+warm-up as Ollama's ``num_gpu`` option, the number of the model's layers it puts on the GPU (0: the processor only).
+The option's name is the one Ollama's own options carry (``NumGPU json:"num_gpu"``); a model split on purpose is
+neither loaded again nor said to be partly on the CPU. `release_now` (Tools > Release the model now) unloads the
+models this translator had Ollama load or use, whatever ``keep_alive`` says, and names those that were loaded.
 """
 
 from __future__ import annotations
@@ -110,6 +117,31 @@ def keep_alive_value(value: Any) -> int | float | str:
     if _DURATION_RE.fullmatch(text):
         return text
     raise ValueError(f"not a keep_alive: {value!r} (a duration such as \"30m\" or \"2h\", or seconds such as \"-1\")")
+
+
+NUM_GPU_MOST = 999  # the most layers ``ollama_num_gpu`` may name (Ollama puts no more on the GPU than the model has)
+
+
+def num_gpu_value(value: Any) -> int | None:
+    """*value* (``ollama_num_gpu``: "", "0", "20", 20) as Ollama's ``num_gpu`` option takes it: None for an empty
+    value (nothing sent: the server decides), else the number of the model's layers on the GPU, 0 to `NUM_GPU_MOST`
+    (0: the processor only). ValueError for anything else."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"not a number of layers: {value!r}")
+    if isinstance(value, int):
+        number = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if not text.isdigit() or not text.isascii():
+            raise ValueError(f"not a number of layers: {value!r}")
+        number = int(text)
+    if not 0 <= number <= NUM_GPU_MOST:
+        raise ValueError(f"not a number of layers: {value!r} (0 to {NUM_GPU_MOST})")
+    return number
 
 
 def never_unloads(value: Any) -> bool:
@@ -189,6 +221,7 @@ class OllamaTranslator:
         slow_after: float = 20.0,
         keep_alive: Any = KEEP_ALIVE,
         seed: int | None = None,
+        num_gpu: int | None = None,
     ):
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not is_loopback_host(parsed.hostname):
@@ -209,6 +242,9 @@ class OllamaTranslator:
         # Ollama's sampling seed (``options.seed``) for every request; None (the app): none is sent and every answer
         # is a fresh draw. The evaluation tools fix it so that two runs of the same prompts agree
         self.seed = seed
+        # Ollama's ``num_gpu`` (the layers on the GPU, 0: the processor only) for every request and warm-up; None (the
+        # default): none is sent and the server decides, as before (``ollama_num_gpu``, `num_gpu_value`)
+        self.num_gpu = num_gpu_value(num_gpu)
         self.target_language = target_language
         self.keep_alive = keep_alive_value(keep_alive)  # every request's keep_alive, as Ollama takes it
         self._supports_think: bool | None = None  # learned from the server on the first request
@@ -404,6 +440,12 @@ class OllamaTranslator:
             return True
         return ":" not in want and any(m.split(":", 1)[0] == want for m in models)
 
+    def _gpu_option(self, options: dict[str, Any]) -> dict[str, Any]:
+        """*options* with ``num_gpu`` when the translator has one (`num_gpu`); left as they are when it has none."""
+        if self.num_gpu is not None:
+            options["num_gpu"] = int(self.num_gpu)
+        return options
+
     def _chat(self, messages: list[dict[str, str]], fmt: Any, max_tokens: int = 0,
               on_text: Callable[[str], None] | None = None, cancel: threading.Event | None = None,
               on_slow: Callable[[float], None] | None = None) -> str:
@@ -415,6 +457,7 @@ class OllamaTranslator:
         options: dict[str, Any] = {"temperature": self.temperature}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
+        self._gpu_option(options)
         if self.seed is not None:
             options["seed"] = int(self.seed)
         if max_tokens > 0:
@@ -478,6 +521,7 @@ class OllamaTranslator:
         options: dict[str, Any] = {"num_predict": 1, "temperature": 0}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
+        self._gpu_option(options)  # (loaded with the layers the requests ask for, so that none loads it again)
         payload: dict[str, Any] = {"model": model or self.model,
                                    "messages": [{"role": "user", "content": WARM_UP_PROMPT}], "stream": False,
                                    "options": options,
@@ -540,13 +584,14 @@ class OllamaTranslator:
         self._free_gpu()
         seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
         share = self.gpu_share(model)
-        if partly_on_gpu(share):
+        checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
+        if checked and partly_on_gpu(share):
             self.release(model, wait=True)
             self._free_gpu()
             seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
             share = self.gpu_share(model)
         self._say(loaded_message(model, seconds))
-        if partly_on_gpu(share):
+        if checked and partly_on_gpu(share):
             self._say(Message("ollama.partly_on_gpu", model=model, percent=round(float(share or 0) * 100)))
 
     def release(self, model: str | None = None, wait: bool = False) -> None:
@@ -557,14 +602,39 @@ class OllamaTranslator:
         if never_unloads(self.keep_alive):
             return
         for name in [model] if model else sorted(self._used):
-            self._used.discard(name)
+            self._release(name, wait)
+
+    def _release(self, name: str, wait: bool) -> bool:
+        """Ollama unloads *name* now (with *wait*, until /api/ps no longer has it, `RELEASE_WAIT_S` at most); whether
+        the request to unload was answered. Never raises; starts nothing."""
+        self._used.discard(name)
+        try:
+            self._unload(name)
+            end = time.monotonic() + RELEASE_WAIT_S
+            while wait and self._loaded(name) is not None and time.monotonic() < end:
+                time.sleep(POLL_S)
+        except TranslationError:
+            return False
+        return True
+
+    def release_now(self) -> list[str]:
+        """Tools > Release the model now: every model this translator had Ollama load or use this session unloaded at
+        once, whatever ``keep_alive`` says (even "-1": the next request loads it again, `ensure_loaded`), and waited
+        for; the names of those Ollama had loaded (asked /api/ps first: one gone already is not named, and nothing is
+        sent for it). A model this translator never used is never asked to go, so another program's model stays.
+        Never raises: Ollama not answering holds nothing. Starts nothing."""
+        released: list[str] = []
+        for name in sorted(self._used):
             try:
-                self._unload(name)
-                end = time.monotonic() + RELEASE_WAIT_S
-                while wait and self._loaded(name) is not None and time.monotonic() < end:
-                    time.sleep(POLL_S)
-            except TranslationError:
+                held = self._loaded(name) is not None
+            except TranslationError as e:  # down: it holds nothing; a server without /api/ps: asked all the same
+                held = e.message.code == "ollama.http_error"
+            if not held:
+                self._used.discard(name)
                 continue
+            if self._release(name, wait=True):
+                released.append(name)
+        return released
 
     def _unload(self, name: str) -> None:
         """Ollama unloads *name* now: a chat with no message and ``keep_alive`` 0. Raises `TranslationError`."""

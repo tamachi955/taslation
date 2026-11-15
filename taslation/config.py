@@ -159,6 +159,10 @@ class Settings:
     # model, and the end of a whole-book run or the window closed releases it; "-1": loaded at the start, before the
     # OCR model, and never released (`translate.ollama.never_unloads`).
     ollama_keep_alive: str = "5m"
+    # How many of the model's layers Ollama puts on the GPU (its ``num_gpu`` option, for both translators): empty, the
+    # default, sends nothing and the server decides, as before; "0": the processor only, the GPU left free for
+    # something else; a number: that many layers on the GPU, the rest on the processor (`translate.ollama.num_gpu_value`)
+    ollama_num_gpu: str = ""
     target_language: str = "English"
     context_pages: int = 2  # live mode: previous pages passed to the model as context (memory only)
 
@@ -322,13 +326,18 @@ class Settings:
             raise ConfigError("art_erase must be 'auto', 'lama' or 'off'")
         if self.detect_model not in ("auto", "on", "off"):
             raise ConfigError("detect_model must be 'auto', 'on' or 'off'")
-        from .translate.ollama import keep_alive_value
+        from .translate.ollama import NUM_GPU_MOST, keep_alive_value, num_gpu_value
 
         try:
             keep_alive_value(self.ollama_keep_alive)
         except ValueError as e:
             raise ConfigError("ollama_keep_alive must be a duration such as '30m' or '2h', or seconds such as '600' "
                               f"('-1': never unload, '0': unload after every request); got {self.ollama_keep_alive!r}") from e
+        try:
+            num_gpu_value(self.ollama_num_gpu)
+        except ValueError as e:
+            raise ConfigError(f"ollama_num_gpu must be empty (the server decides), 0 (the processor only) or the number "
+                              f"of the model's layers on the GPU, up to {NUM_GPU_MOST}; got {self.ollama_num_gpu!r}") from e
         if self.min_font_size < 4 or self.max_font_size < self.min_font_size:
             raise ConfigError("font sizes out of range")
         if self.readable_font_size and not self.min_font_size <= self.readable_font_size <= self.max_font_size:
@@ -645,4 +654,7 @@ def _coerce(data: dict[str, Any]) -> dict[str, Any]:
     keep_alive = out.get("ollama_keep_alive")
     if isinstance(keep_alive, (int, float)) and not isinstance(keep_alive, bool):
         out["ollama_keep_alive"] = str(keep_alive)  # ollama_keep_alive = -1 in the file: seconds, as "-1" says them
+    layers = out.get("ollama_num_gpu")
+    if isinstance(layers, int) and not isinstance(layers, bool):
+        out["ollama_num_gpu"] = str(layers)  # ollama_num_gpu = 0 in the file: as "0" says it
     return out

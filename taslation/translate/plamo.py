@@ -56,7 +56,8 @@ for again by the pipeline (`base.ask_for_missing`); every request for a line thi
 with another sampling seed (`_draw`), so that it is a new draw, not the same answer again.
 
 Everything else is `OllamaTranslator`'s: the loopback-only connection without proxies, the model loaded on demand and
-released (`ensure_loaded`, `release`, `warm_up`, `gpu_share`, ``before_load``, ``on_status``, ``keep_alive``), Ollama
+released (`ensure_loaded`, `release`, `release_now`, `warm_up`, `gpu_share`, ``before_load``, ``on_status``,
+``keep_alive``, the layers on the GPU ``num_gpu`` in every request and warm-up when it is set), Ollama
 started again when a request finds it gone (``revive``), the fixed ``seed`` of the evaluation tools, and the same
 `TranslationError` message codes; a model that is not installed is ``translator.model_missing`` when the target
 language chose it (``auto_model``). A request given ``cancel`` or ``on_slow`` is streamed, so that Stop ends it at
@@ -188,9 +189,9 @@ class PlamoTranslator(OllamaTranslator):
     def __init__(self, url: str = "http://127.0.0.1:11434", model: str = PLAMO.ollama_name, timeout: float = 900.0,
                  temperature: float = 0.2, num_ctx: int = NUM_CTX, target_language: str = "English",
                  slow_after: float = 20.0, keep_alive: Any = KEEP_ALIVE, seed: int | None = None,
-                 history_pairs: int = HISTORY_PAIRS):
+                 history_pairs: int = HISTORY_PAIRS, num_gpu: int | None = None):
         super().__init__(url, model, timeout, temperature, num_ctx or NUM_CTX, target_language, slow_after, keep_alive,
-                         seed)
+                         seed, num_gpu)
         self.history_pairs = history_pairs
         self._asked: dict[str, int] = {}  # line -> how often it was asked for (`_draw`)
         self._asked_lock = threading.Lock()
@@ -223,6 +224,7 @@ class PlamoTranslator(OllamaTranslator):
                                    "stop": list(STOPS), "num_predict": int(max_tokens)}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
+        self._gpu_option(options)  # (only with ``num_gpu`` set: the server decides otherwise)
         if self.seed is not None:
             options["seed"] = int(self.seed) + int(offset)
         elif offset:
@@ -308,7 +310,7 @@ class PlamoTranslator(OllamaTranslator):
 
         from .ollama import WARM_UP_TIMEOUT, keep_alive_value
 
-        options: dict[str, Any] = {"num_ctx": self.num_ctx} if self.num_ctx else {}
+        options: dict[str, Any] = self._gpu_option({"num_ctx": self.num_ctx} if self.num_ctx else {})
         payload: dict[str, Any] = {"model": model or self.model, "prompt": "", "options": options,
                                    "keep_alive": self.keep_alive if keep_alive is None else keep_alive_value(keep_alive)}
         self._used.add(payload["model"])
