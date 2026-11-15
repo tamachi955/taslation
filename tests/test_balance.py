@@ -1,8 +1,10 @@
-"""Lines balanced once the size is chosen, the size and the lines' places unmoved, within the line breaks the reader
-kept, with stressed spans, hyphens, condensing and scripts wrapped by character respected, the greedy lines kept where
-no balanced ones exist, no line of a lone short word ("I" on an oval's top line, "you." at its foot; not in CJK)
-where the bubble's shape allows another way at the same size; and the lettering of a page kept alike: a cap of a multiple of the page's median per kind, that
-leaves shouts and a size the reader set alone and gives one region lettered on its own what it gets on its page."""
+"""Lines balanced: in a rectangle once the size is chosen (the size and the lines' places unmoved), along a bubble's
+body by the line planner at the size the greedy fill reaches (the block up to half a line off its place); within the
+line breaks the reader kept, with stressed spans, hyphens, condensing and scripts wrapped by character respected, the
+greedy lines kept where no balanced ones exist, no line of a lone short word ("I" on an oval's top line, "you." at its
+foot; not in CJK) where the bubble's shape allows another way at the same size; and the lettering of a page kept
+alike: a cap of a multiple of the page's median per kind, that leaves shouts and a size the reader set alone and gives
+one region lettered on its own what it gets on its page."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -16,7 +18,7 @@ from taslation.pipeline import PageFill, Pipeline
 from taslation.regions import TextRegion
 from taslation.render import covers, find_font, styled_font, typeset
 from taslation.render.typeset import (TextFormat, _balanced_lines, _display_width, _line_rooms, _NO_LINE_START,
-                                      _shape_room, layout_formatted, layout_text, page_caps, wrap_lines)
+                                      layout_formatted, layout_text, page_caps, wrap_lines)
 
 TEXT = "You have got the academic ability to get into a top university so why aim for a third-rate one?"
 
@@ -35,7 +37,9 @@ def _ellipse(w=240, h=320):
 
 
 def _both(monkeypatch, layout):
-    """What *layout*() gives greedy, and balanced."""
+    """What *layout*() gives greedy, and balanced (along a bubble's body the size not traded for a better block,
+    SIZE_TRADE 0: the size the greedy fill reaches)."""
+    monkeypatch.setattr(typeset, "SIZE_TRADE", 0.0)
     monkeypatch.setattr(typeset, "BALANCE_LINES", False)
     greedy = layout()
     monkeypatch.setattr(typeset, "BALANCE_LINES", True)
@@ -78,7 +82,7 @@ def test_the_size_and_the_places_stay_and_every_line_fits_its_room(monkeypatch):
     assert [(x, y) for _t, x, y in fit.lines] == [(x, y) for _t, x, y in greedy.lines]
     assert " ".join(_texts(fit)) == TEXT
     assert _texts(fit) != _texts(greedy)
-    rooms = _line_rooms(fit, _shape_room(mask, typeset.SHAPE_PAD, None))
+    rooms = _line_rooms(fit)
     assert all(fit.font.width(t) <= room for t, room in zip(_texts(fit), rooms))
 
 
@@ -99,7 +103,8 @@ def test_a_line_break_of_the_reader_stays(monkeypatch):
     lines = _texts(fit)
     assert lines[:2] == ["A short one.", ""] and fit.size == greedy.size
     assert " ".join(lines[2:]) == text.split("\n")[2]
-    assert [y for _t, _x, y in fit.lines] == [y for _t, _x, y in greedy.lines]
+    # the block may sit up to half a line off the greedy fill's place, where its lines are better shared out there
+    assert abs(fit.lines[0][2] - greedy.lines[0][2]) <= 0.5 * fit.line_height + 1
 
 
 def test_text_aligned_to_a_side_wraps_as_in_a_word_processor(monkeypatch):
@@ -120,14 +125,23 @@ def test_no_line_lies_wholly_inside_a_stressed_span():
     assert " ".join(lines) == " ".join(tokens)
 
 
-def test_a_hyphenated_paragraph_stays_as_the_rescue_set_it(monkeypatch):
+def test_a_hyphen_of_the_rescue_is_placed_with_the_lines_at_a_syllable(monkeypatch):
+    """Along a bubble's body the rescue's hyphens are the line planner's own (`_plan_lines`), not a greedy fill's
+    kept as it was: never a smaller size than the greedy fill reaches, the words read back, at most one hyphen, each
+    at one of its word's hyphenation points."""
     font = _font()
     mask = _ellipse(90, 200)
     text = "Extraordinary circumstances notwithstanding everything"
     greedy, fit = _both(monkeypatch, lambda: layout_text(mask, text, font))
     if not fit.hyphens:
         pytest.skip("this font sets the text without a hyphen")
-    assert _texts(fit) == _texts(greedy)
+    lines = _texts(fit)
+    assert fit.size >= greedy.size and fit.hyphens == 1
+    assert " ".join("".join(t[:-1] if t.endswith("-") else t + " " for t in lines).split()) == text
+    for line, after in zip(lines, lines[1:]):
+        if line.endswith("-"):
+            head = line.split()[-1][:-1]
+            assert len(head) in typeset.hyphen_points(head + after.split()[0])
 
 
 def test_condensed_lines_are_measured_as_condensed(monkeypatch):
@@ -136,7 +150,7 @@ def test_condensed_lines_are_measured_as_condensed(monkeypatch):
     text = "Ten years later on a summer evening"
     greedy, fit = _both(monkeypatch, lambda: layout_text(mask, text, font))
     assert fit.size == greedy.size and fit.condense == greedy.condense
-    rooms = _line_rooms(fit, _shape_room(mask, typeset.SHAPE_PAD, None))
+    rooms = _line_rooms(fit)
     assert rooms is not None and all(fit.font.width(t) <= r for t, r in zip(_texts(fit), rooms))
 
 
@@ -173,8 +187,8 @@ def test_without_a_valid_way_the_greedy_lines_stay(monkeypatch):
 
 
 def _unmoved(monkeypatch, layout):
-    """What *layout*() gives with the block kept nearest the centre (ORPHAN_SHIFT 0, as before), and as it is."""
-    monkeypatch.setattr(typeset, "ORPHAN_SHIFT", 0.0)
+    """What *layout*() gives with no cost for a lone short word (COST_LONE 0), and as it is."""
+    monkeypatch.setattr(typeset, "COST_LONE", 0.0)
     before = layout()
     monkeypatch.undo()
     return before, layout()
@@ -191,7 +205,7 @@ def _lone(line: str, first: bool) -> bool:
 
 def _fits_its_rooms(fit, mask) -> bool:
     """Every line no wider than the mask's run at its rows (what hangs past a CJK line's end aside)."""
-    rooms = _line_rooms(fit, _shape_room(mask, typeset.SHAPE_PAD, None))
+    rooms = _line_rooms(fit)
     script = typeset.script_of("".join(_texts(fit)))
     hang = "".join(_NO_LINE_START)
     return rooms is not None and all(_display_width(fit.font, t.rstrip(hang), script) <= room
@@ -264,6 +278,33 @@ def test_a_balanced_cjk_line_of_one_character_costs_nothing_more_and_keeps_its_l
     assert lines is not None and lines == _balanced_lines(tokens, rooms, font, "jp")
     assert "".join(lines) == "".join(tokens) and not any(t[0] in _NO_LINE_START for t in lines)
     assert lines[-1] == "ね。"  # (the closing mark hangs with the last character, as before)
+
+
+def _rounded(w: int, h: int, r: int) -> np.ndarray:
+    mask = np.zeros((h, w), np.uint8)
+    mask[r:h - r, :] = mask[:, r:w - r] = 255
+    yy, xx = np.mgrid[0:h, 0:w]
+    for cx, cy in ((r, r), (w - 1 - r, r), (r, h - 1 - r), (w - 1 - r, h - 1 - r)):
+        mask[(xx - cx) ** 2 + (yy - cy) ** 2 <= r * r] = 255
+    return mask
+
+
+def test_what_hangs_at_a_cjk_lines_end_stays_inside_the_bubble():
+    """A full-width mark that may not start a line hangs past the room at the end of the one before; a line is centred
+    with it, so along a bubble's body what is wider than the margin allows counts against the room: no ink of a short,
+    wide bubble's lines past its outline."""
+    text = "そんなこと、一度も言ってないよ！"
+    spec = find_font(text=text, language="Japanese")
+    if not spec.path or not covers(spec.path, text):
+        pytest.skip("no Japanese font on this computer")
+    mask = np.pad(_rounded(174, 69, 12), 3)  # room round it: ink past the outline is not cut off by the page's edge
+    fit = layout_text(mask, text, spec.path, max_size=28, script="jp")
+    assert "".join(_texts(fit)) == text and fit.method == "shape"
+    page = Image.new("L", (180, 75), 255)
+    for t, x, y in fit.lines:
+        fit.font.draw(page, x - fit.font.width(t) / 2.0, y, t, 0)
+    ink = np.asarray(page) < 128
+    assert ink.any() and not (ink & (mask == 0)).any()
 
 
 def test_a_first_line_of_one_short_word_is_penalised_like_a_last_one():

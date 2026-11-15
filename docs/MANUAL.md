@@ -484,6 +484,9 @@ and the page can be edited.
   "Skip page" marks a page with nothing to translate, such as an advertisement or the viewer's own panel,
   and "Translate again" (not using the cache) translates the page again with the current premises.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
+  It also lists the regions whose automatic lettering could not be set well: letters touching the bubble's edge, the text
+  off the bubble's centre (as when one translation for two joined bubbles is set in one of them), a word split with a
+  hyphen, a short word alone on a line, a line much narrower than those round it, or letters hard to see on their ground.
   "Ask again" in the editor has the model translate that bubble again, with the lines before it as context (there is no feature that lists alternatives);
   in its answer too, names and terms spelled differently from the series sheet are made consistent mechanically.
   A translation reused from an earlier identical line says so in the editor ("Reusing short lines"); "Ask again" gives a fresh one.

@@ -217,7 +217,7 @@ def test_a_layout_is_made_once_for_the_same_text_in_the_same_shape(monkeypatch):
     other[50, 50] = 0
     typeset.layout_text(other, "Where are you going?", None, 9, 40)  # another shape
     assert len(made) == 3
-    monkeypatch.setattr(typeset, "SHAPE_PAD", typeset.SHAPE_PAD * 2)  # a setting of the module
+    monkeypatch.setattr(typeset, "MARGIN_EM", typeset.MARGIN_EM * 2)  # a setting of the module
     typeset.layout_text(mask, "Where are you going?", None, 9, 40)
     assert len(made) == 4
     _forget_layouts()

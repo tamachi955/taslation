@@ -2713,3 +2713,100 @@ On flat grey the MAE went from 32.31 to 0.01, on gradients from 20.32 to 0.89.
 
 **Not shown here.** The live window and a whole book on the viewer; the gated volume tests that read the owner's
 development snapshots (`tests/test_realdata_models.py`); lettering of colour.
+
+## Lines planned over the bubble's body (2026-11-15)
+
+The automatic lettering along a bubble's shape was rebuilt (`render/typeset.py`, `shape_layout`): the tail is cut off
+by an opening before the bubble is measured, two bubbles joined at a neck are also tried one at a time, every line is
+as wide as the body over the rows its ink covers round one shared centre axis, with a margin of 0.3 of the size (at
+least 3 px) instead of 5 % of the bubble, and at each size the words are shared out by a dynamic programme over break
+points (an oval block in an oval, breaks priced by the language: free after a sentence, dearer inside a clause, after
+an English article, preposition or conjunction, inside a name, at a hyphenation point, before a lone short word). The
+size is found from an upper bound and may give up to a fifth for a block with fewer defects (lone words, hyphens, an
+hourglass), but not for a column of a word or two a line, where those are the way a narrow bubble is set, nor for text
+a cap holds. The rescue at the limit hyphenates two letters before and three after a point, and takes one hyphen at
+most where the text fits whole at a smaller size, else at most as many as its first size needs. In Japanese and
+Chinese a mark that may not start a line still hangs past the end of the line before, but only as far as the margin
+allows: the line is centred with it, and a full-width mark hung whole ran past the outline. The automatic
+lettering now also says what is still wrong with it (`lettering_flags`): the review list names letters at the
+bubble's edge, a block off the bubble's centre, a hyphenated word, a word of three letters or fewer alone on a line,
+an hourglass (both but in a column) and letters hard to see on their ground.
+
+**How it was measured.** `tools/typeset_eval.py` (rewritten for this): a fixed, seeded corpus of 240 synthetic
+cases, 60 invented lines (English of 1 to 40 words, long words, invented names, punctuation, stressed words; long
+German, Spanish and French words; two Japanese lines; one Arabic line) in four of six bubble shapes each (ellipses,
+round-cornered boxes, clouds, ellipses with a tail, two bubbles joined at a neck, narrow tall ones), set by
+`letter_text` as `Pipeline._set_text` calls it, on the comic lettering font of the development machine. *size/fit* is
+the size against the largest at which the text fits at all (every word whole, each line anywhere in its rows, 0.3 em
+off the outline, any number of lines). Base: the code of 9c7bf8e (`git archive`), the same yardstick; both run one
+after the other on the development machine (the CPU only), twice.
+
+| All 240 cases | Base | Now |
+|---|---|---|
+| size / largest that fits (mean) | 1.021 | 0.993 |
+| cases under 0.9 of it (joined bubbles: 37.5 % / 65.0 %) | 9.2 % | 12.5 % |
+| cases with ink outside the bubble / nearer the outline than 0.25 em | 3 / 7.1 % | 1 / 0.4 % |
+| words hyphenated (in all cases) | 45 | 28 |
+| first / inner / last line a lone short word (of cases on 2+ lines) | 28.1 / 24.5 / 22.4 % | 25.0 / 17.2 / 19.3 % |
+| English line ends on a weak word (per 100) | 18.0 | 11.0 |
+| lines starting with punctuation of the line before | 4 | 0 |
+| hourglass / widest line first or last (round bubbles, 3+ lines) | 29.2 / 16.8 % | 17.6 / 11.9 % |
+| distance of the line widths from an oval's | 0.159 | 0.147 |
+| block's centre off the body's centroid, x / y (mean) | 4.4 / 5.3 % | 1.9 / 3.1 % |
+| cases more than 5 % off | 30.8 % | 18.8 % |
+| ms per layout, mean / 95th percentile (three pairs of runs; the first two before the last changes) | 7.3 / 25.8, 8.4 / 27.6, 8.3 / 28.2 | 8.4 / 23.2, 9.2 / 25.0, 9.2 / 24.4 |
+| pages of six: 90th / 10th percentile of size, largest / median | 1.738, 1.241 | 1.751, 1.251 |
+
+| By shape: size/fit, hourglass, off > 5 % | Base | Now |
+|---|---|---|
+| ellipse | 1.019, 15.6 %, 17.5 % | 1.007, 6.2 %, 20.0 % |
+| round-cornered box | 1.046, -, 12.5 % | 1.043, -, 7.5 % |
+| cloud | 1.022, 14.7 %, 10.0 % | 1.007, 16.7 %, 10.0 % |
+| ellipse with a tail | 1.012, 6.2 %, 22.5 % | 1.008, 6.5 %, 10.0 % |
+| two joined at a neck | 0.919, 42.9 %, 100 % | 0.868, 3.2 %, 52.5 % |
+| narrow | 1.110 (17.5 % too tight), 65.7 %, 22.5 % | 1.027 (none), 51.4 %, 12.5 % |
+
+The size is a little lower than before for two reasons, both meant: the margin grows with the size (before, 5 % of
+the bubble let large lettering run within a few pixels of the outline: 7.1 % of the cases too tight, 17.5 % of the
+narrow ones), and a translation for two joined bubbles is set in one of them rather than across the neck (the
+yardstick's largest size spans the neck; the review list now says "text set off the bubble's centre" there, for the
+reader to share the text out). The lettering checks flag 22.9 % of these cases (off the centre 10.8 %, nearly all
+joined bubbles; a hyphenated word 10.0 %, the corpus being heavy in long words; an hourglass 1.7 %, a lone word
+1.2 %, letters at the edge 0.4 %) and cost about 0.5 ms a drawn bubble. On the first fixture page three bubbles come
+out at 52, 60 and 56 points instead of 58, 64 and 58, on the second at 62, 60 and 56 instead of 64, 64 and 58 (the
+margin), the rest at their sizes; `tests/test_ink.py`'s pixel digests were made again on the new code.
+
+The room a translator is told a small bubble has (`text_room`, at the size of the original lettering) asks the same
+body whether the probe words fit, every word whole, without planning the block and without the last resort (which,
+3 px off the outline, would count room the lettering does not use: a 60 x 40 box at 17 px held 12 characters that
+way, 6 as set). It is 15 to 25 % larger than before with the new margin and far quicker, which a page pays once per
+bubble before its first request:
+
+| Mask, size | Base: characters, ms | Now: characters, ms |
+|---|---|---|
+| box 60 x 40, 11 / 17 px | 12, 13.1 / 6, 1.0 | 18, 9.1 / 6, 1.3 |
+| box 400 x 300, 11 / 17 px | 1386, 1777 / 588, 357 | 1716, 29 / 714, 14 |
+| ellipse 200 x 260, 11 / 17 px | 450, 58.5 / 174, 31.8 | 540, 15.1 / 204, 8.0 |
+| ellipse 400 x 500, 11 / 17 px | 1854, 1434 / 762, 336 | 2220, 91 / 876, 36 |
+
+(Planned in full, as `shape_layout` before, the new body layout took 159 and 678 ms for the two ellipses at 17 px, and
+a test that cancels a line asked again after one second, `tests/test_reask.py`, found it not yet asked.)
+
+**Tried and not kept** (each measured on the corpus): a margin of 0.35 to 0.45 em (lower sizes, no better blocks);
+dearer lone words (`COST_LONE` 0.25: no change), weak line ends (`COST_WEAK` 0.2) or clause breaks (0.04: no gain);
+a lone word counted only where it fills under half its line's room or under 0.25 to 0.5 of the widest (more sizes
+kept, but lone first lines in ovals came back); a smaller price per defect in the trade (`TRADE_PER_DEFECT` 0.07:
+worse blocks) and no trade at all (size/fit 0.999, but lone first lines 26.6 %, hourglasses 22.6 %); the column rule
+at 1.6 words a line instead of 2 (more narrow bubbles set smaller, by eye no better); the column rule also in the
+choice between a joined bubble's lobes (the whole body won with a text along the neck); a page cap of 1.2 or 1.25
+times the median instead of 1.3 (the page spread falls to 1.18 / 1.21 largest over median, but nothing here says
+whether readers want large bubbles held that close, so the cap stays). The name rule (no break inside a name) is
+not applied in a rectangle, where no language is known, nor in German, where every noun has a capital. A lone
+character on a Japanese or Chinese line priced like a lone word took "か。" off the end of an oval block but broke
+inside a word instead (今日はと / ても), as the rule against it in CJK foresaw; not kept.
+
+**Not shown here.** A real book's pages (the corpus is synthetic; the earlier OpenMantra series, `--openmantra`, was
+not run again), Arabic in a tiny cloud (the one case that still overflows: its measured ink is a Latin font's),
+Japanese in an oval that now ends on one character and its full stop (the block follows the oval, and nothing in a
+script wrapped by character tells a word from the next), and whether the review list's new reasons help or only add
+to it on real pages.

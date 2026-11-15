@@ -17,8 +17,8 @@ from taslation.regions import TextRegion
 from taslation.render import letter_text, erase_region, find_font, make_lettering, shape_layout, styled_font
 from taslation.render import typeset
 from taslation.render.lettering import Lettering
-from taslation.render.typeset import (CONDENSE_STEPS, NO_FIT, SHAPE_PAD, TextFormat, _candidate_rects, _fit_at,
-                                      _hyphenate, hyphen_points, layout_formatted, layout_text)
+from taslation.render.typeset import (CONDENSE_STEPS, MARGIN_EM, MARGIN_PX, NO_FIT, TextFormat, _candidate_rects,
+                                      _fit_at, _hyphenate, hyphen_points, layout_formatted, layout_text)
 from taslation.translate import DictTranslator
 from taslation.ui.dialogs import review
 
@@ -47,14 +47,16 @@ def _words(fit) -> str:
 # ------------------------------------------------------------------ hyphenation
 def test_hyphen_points_are_syllable_like_and_never_in_short_digit_or_capital_words():
     assert hyphen_points("wonderful") == [3, 6] and hyphen_points("children") == [4]  # won-der-ful, chil-dren
-    assert hyphen_points("extraordinarily") == [7, 9, 11] and hyphen_points("probably") == [3, 5]
+    assert hyphen_points("extraordinarily") == [2, 7, 9, 11] and hyphen_points("probably") == [3, 5]
+    assert hyphen_points("impossible") == [2, 5, 7] and hyphen_points("unbelievably") == [2, 4, 7, 9]  # im-, un-
+    # (two letters may stand before a hyphen, three must follow it: never "-ly" alone on a line)
     assert hyphen_points("backpacker") == [4] and hyphen_points("laughter") == [5]  # never inside ck or gh
     assert 3 in hyphen_points("Entschuldigung") and hyphen_points("complètement")  # accented Latin letters too
     for word in ("amazing", "shield", "HIYOOOOOOO", "UNBELIEVABLE", "R2D2R2D2R2", "привет-привет", "seven77seven",
                  "dont'worryaboutit"):
         assert hyphen_points(word) == [], word  # under 8 letters, capitals, a digit, another script, an apostrophe
     for word in ("transformation", "understanding", "impossible", "naturellement", "Schwierigkeiten"):
-        assert all(3 <= p <= len(word) - 3 for p in hyphen_points(word)), word
+        assert all(2 <= p <= len(word) - 3 for p in hyphen_points(word)), word  # two letters before, three after
     assert _hyphenate("*extraordinarily*,", "lgc", lambda head: len(head) <= 10) == ("*extraor-", "dinarily*,")
     assert _hyphenate("extraordinarily", "lgc", lambda head: False) is None  # no point whose part fits
     assert _hyphenate("extraordinarily", "jp", lambda head: True) is None  # Latin scripts only
@@ -219,15 +221,15 @@ def test_where_neither_is_needed_the_lettering_is_byte_identical(fixture, reques
 
 # ------------------------------------------------------------------ the margin
 def test_no_glyph_touches_the_bubble_edge_within_a_pixel():
-    """What the shape layout's margin (SHAPE_PAD) keeps: plain, italic and bold lettering on ellipses of several
-    sizes, with and without the rescue, never within a pixel of the mask's edge."""
+    """What the shape layout's margin (MARGIN_EM of the size, MARGIN_PX at least) keeps: plain, italic and bold
+    lettering on ellipses of several sizes, with and without the rescue, never within a pixel of the mask's edge."""
     spec = find_font()
     if not spec.path:
         pytest.skip("no font file on this computer")
     looks = [make_lettering(spec, "", False, False), make_lettering(spec, "", True, False), make_lettering(spec, "", False, True)]
     texts = ["Hello there!", "Where are you going?", "Why on earth did you weld the hatch shut?!", "WHAT?!",
              "Extraordinarily unbelievable!"]
-    assert SHAPE_PAD == 0.05
+    assert MARGIN_EM == 0.3 and MARGIN_PX == 3
     for w, h in ((80, 110), (160, 220), (260, 200), (100, 260)):
         mask = _ellipse(w, h)
         inside = (mask > 0).astype(np.uint8)

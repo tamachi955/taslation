@@ -1,7 +1,7 @@
 """The region editor's formatting bar (bold, italic, font, size, condensing to fit, alignment, line and letter spacing,
 Reset formatting), the line under it on what the lettering could not do as formatted, the review list's reasons for
-that, the editor's hint on Enter and Ctrl+Enter, and what the status line says when the formatting cannot be
-stored."""
+that and for what the checks of an automatic lettering found, the editor's hint on Enter and Ctrl+Enter, and what the
+status line says when the formatting cannot be stored."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ---------------------------------------------------------------- the formatting bar
@@ -205,6 +205,66 @@ TEXTS: dict[str, dict[str, str]] = {
         "tr": "fontta bu harfler yok", "id": "font tidak punya huruf ini", "vi": "phông chữ thiếu ký tự",
         "zh": "字体缺少这些字符", "zh-tw": "字型缺少這些字元", "ko": "글꼴에 이 글자가 없음",
         "th": "ฟอนต์ไม่มีตัวอักษรเหล่านี้",
+    },
+    # what the checks of an automatic lettering found
+    "letters touch the bubble's edge": {
+        "ja": "文字が吹き出しの縁に触れている", "es": "las letras tocan el borde del globo",
+        "pt": "as letras tocam a borda do balão", "fr": "les lettres touchent le bord de la bulle",
+        "de": "Buchstaben berühren den Blasenrand", "it": "le lettere toccano il bordo del fumetto",
+        "nl": "letters raken de rand van de ballon", "pl": "litery dotykają krawędzi dymka",
+        "ru": "буквы касаются края облачка", "tr": "harfler balonun kenarına değiyor",
+        "id": "huruf menyentuh tepi balon", "vi": "chữ chạm mép bóng thoại", "zh": "文字碰到气泡边缘",
+        "zh-tw": "文字碰到對話框邊緣", "ko": "글자가 말풍선 가장자리에 닿음",
+        "th": "ตัวอักษรชิดขอบบอลลูนคำพูด",
+    },
+    "text set off the bubble's centre": {
+        "ja": "文字が吹き出しの中央からずれている", "es": "texto desplazado del centro del globo",
+        "pt": "texto fora do centro do balão", "fr": "texte décentré dans la bulle",
+        "de": "Text nicht in der Blasenmitte", "it": "testo fuori dal centro del fumetto",
+        "nl": "tekst niet in het midden van de ballon", "pl": "tekst poza środkiem dymka",
+        "ru": "текст смещён от центра облачка", "tr": "metin balonun ortasında değil",
+        "id": "teks tidak di tengah balon", "vi": "chữ lệch khỏi giữa bóng thoại", "zh": "文字偏离气泡中心",
+        "zh-tw": "文字偏離對話框中心", "ko": "텍스트가 말풍선 중앙에서 벗어남",
+        "th": "ข้อความไม่อยู่กลางบอลลูนคำพูด",
+    },
+    "a word split with a hyphen": {
+        "ja": "単語がハイフンで分割されている", "es": "una palabra cortada con guion", "pt": "uma palavra dividida com hífen",
+        "fr": "un mot coupé par un trait d'union", "de": "ein Wort mit Bindestrich getrennt",
+        "it": "una parola spezzata con un trattino", "nl": "een woord afgebroken met een koppelteken",
+        "pl": "słowo podzielone dywizem", "ru": "слово разбито переносом", "tr": "kelime tireyle bölünmüş",
+        "id": "kata dipenggal dengan tanda hubung", "vi": "một từ bị ngắt bằng gạch nối", "zh": "单词被连字符断开",
+        "zh-tw": "單字被連字號斷開", "ko": "단어가 하이픈으로 나뉨",
+        "th": "คำถูกตัดด้วยยัติภังค์",
+    },
+    "a short word alone on a line": {
+        "ja": "短い単語が1語だけの行がある", "es": "una palabra corta sola en una línea",
+        "pt": "uma palavra curta sozinha numa linha", "fr": "un mot court seul sur une ligne",
+        "de": "ein kurzes Wort allein in einer Zeile", "it": "una parola breve da sola su una riga",
+        "nl": "een kort woord alleen op een regel", "pl": "krótkie słowo samo w wierszu",
+        "ru": "короткое слово одно в строке", "tr": "kısa bir kelime satırda tek başına",
+        "id": "kata pendek sendirian di satu baris", "vi": "một từ ngắn nằm riêng một dòng", "zh": "短词独占一行",
+        "zh-tw": "短詞獨占一行", "ko": "짧은 단어 하나만 있는 줄",
+        "th": "คำสั้นอยู่บรรทัดเดียวลำพัง",
+    },
+    "a line much narrower than those round it": {
+        "ja": "前後の行よりずっと短い行がある", "es": "una línea mucho más estrecha que las de alrededor",
+        "pt": "uma linha muito mais estreita que as vizinhas", "fr": "une ligne bien plus étroite que ses voisines",
+        "de": "eine Zeile viel schmaler als die um sie", "it": "una riga molto più stretta di quelle vicine",
+        "nl": "een regel veel smaller dan die eromheen", "pl": "wiersz dużo węższy od sąsiednich",
+        "ru": "строка намного уже соседних", "tr": "çevresindekilerden çok daha dar bir satır",
+        "id": "baris jauh lebih sempit dari sekitarnya", "vi": "một dòng hẹp hơn nhiều so với các dòng quanh nó",
+        "zh": "某行比前后行窄得多", "zh-tw": "某行比前後行窄得多", "ko": "앞뒤 줄보다 훨씬 좁은 줄",
+        "th": "บรรทัดที่แคบกว่าบรรทัดรอบข้างมาก",
+    },
+    "letters hard to see on their ground": {
+        "ja": "文字が背景に対して見えにくい", "es": "letras difíciles de ver sobre su fondo",
+        "pt": "letras difíceis de ver sobre o fundo", "fr": "lettres peu lisibles sur leur fond",
+        "de": "Buchstaben auf dem Grund schwer zu sehen", "it": "lettere poco visibili sullo sfondo",
+        "nl": "letters slecht zichtbaar op hun achtergrond", "pl": "litery słabo widoczne na tle",
+        "ru": "буквы плохо видны на фоне", "tr": "harfler zeminde zor görünüyor",
+        "id": "huruf sulit terlihat di latarnya", "vi": "chữ khó nhìn trên nền", "zh": "文字在背景上难以看清",
+        "zh-tw": "文字在背景上難以看清", "ko": "배경 위에서 글자가 잘 보이지 않음",
+        "th": "ตัวอักษรมองเห็นยากบนพื้นหลัง",
     },
     # ---------------------------------------------------------------- the status line
     "Could not store the formatting: give the book a name first (the Book field).": {

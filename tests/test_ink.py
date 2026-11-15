@@ -22,7 +22,7 @@ from taslation.i18n import CATALOGS, set_language
 from taslation.pipeline import Pipeline
 from taslation.regions import TextRegion
 from taslation.render import find_font
-from taslation.render.typeset import TextFormat, letter_text
+from taslation.render.typeset import LOW_CONTRAST, TextFormat, letter_text
 from taslation.translate import DictTranslator
 from taslation.ui.dialogs import review
 
@@ -104,23 +104,24 @@ def font_identity() -> tuple[str, int]:
 
 
 # made before the ink could be set (on the code of 933328b; the cases made again there when TEXT got its invented
-# name), on the font they name: a computer whose automatic font is another file letters other pixels, and checks the
-# old arguments against the new ones only
+# name, and those set along a bubble's body made again when its layout was rebuilt: lines planned over the body with
+# a margin of the size), on the font they name: a computer whose automatic font is another file letters other
+# pixels, and checks the old arguments against the new ones only
 GOLDEN: dict[str, object] = {
     "font": ("comicbd.ttf", 255972),
-    "plain": "2cbe892dad08611a",
-    "dark": "7e45ea956e48b758",
-    "art": "7e01f4cabf1983dc",
-    "outline-on": "2058c67e6a82143f",
-    "outline-off": "80bbc2f98242063e",
+    "plain": "ea9a41b93ff6dee4",
+    "dark": "b0b0504b7e1eab0a",
+    "art": "8f976f27a5e09516",
+    "outline-on": "5e6a405f2bc0637c",
+    "outline-off": "56b5a0688a033775",
     "formatted": "8210f6e268099f23",
     "formatted-overflow": "27ae3889d946c5e1",
-    "slanted": "b3b7890be6c927d9",
-    "turned": "f9a8858d8dc0d615",
+    "slanted": "040521f644f1cfd4",
+    "turned": "d5a246ed995e2152",
     "stacked": "305bf8ef17914411",
     "stacked-slanted": "1bc246b71218707a",
-    "sample_page": "288f7e8a1a151eb3",
-    "sample_page2": "61d12727f2653615",
+    "sample_page": "e425f860f681ee0b",
+    "sample_page2": "461a94c023daec16",
 }
 AUTOMATIC = {"color": None, "outline_color": None}  # the ink's own arguments, automatic
 
@@ -176,7 +177,8 @@ def test_a_text_colour_colours_the_letters_on_every_path_and_moves_none(name):
     ground, base = _ground(name)
     old, was = lettered_with(name)
     red, done = lettered_with(name, {"color": RED})
-    assert done == was  # the same size, flags and layout: the colour moves no line
+    assert (done.size, done.won) == (was.size, was.won)  # the same size and layout: the colour moves no line ...
+    assert set(done.flags) - {LOW_CONTRAST} == set(was.flags)  # ... (red on a dark ground is hard to see: checked)
     assert _iou(_drawn(red, base), _drawn(old, base)) > 0.95  # the same letters at the same places (edges blend)
     assert _near(red, RED)[_drawn(red, base)].mean() > 0.2 and not _near(old, RED).any()  # (an outline on art too)
     automatic = (0, 0, 0) if ground == (255, 255, 255) else (255, 255, 255)
@@ -185,7 +187,9 @@ def test_a_text_colour_colours_the_letters_on_every_path_and_moves_none(name):
 
 def test_the_outline_forced_on_or_off_and_in_its_own_colour():
     plain, on = lettered("plain"), lettered("plain", {"outline": True})
-    assert np.array_equal(on, lettered("outline-on")) and not np.array_equal(on, plain)
+    # (the automatic outline round black letters on white paper is white: it shows only where it runs over another
+    # line's letters, so that it is drawn at all is told in a colour of its own, below)
+    assert np.array_equal(on, lettered("outline-on"))
     assert np.array_equal(lettered("art", {"outline": False}), lettered("outline-off"))
     assert not np.array_equal(lettered("art"), lettered("outline-off"))  # on a drawing the outline is automatic
     blue, done = lettered_with("plain", {"outline": True, "outline_color": BLUE})

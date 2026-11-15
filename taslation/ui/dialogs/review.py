@@ -78,8 +78,12 @@ LINE_SPACING_STEPS = ("0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1
 FIT_LINES = {"no-fit": "The text does not fit at this size: it runs to the edge of the bubble and is cut off there.",
              "font-missing": "The font \"{font}\" is not installed on this computer: the automatic font is used instead.",
              "font-glyphs": "The font \"{font}\" has no letters for this text: the automatic font is used instead."}
-# ... and the review list's reasons
-FIT_REASONS = {"no-fit": "text does not fit", "font-missing": "font not installed", "font-glyphs": "font lacks these letters"}
+# ... and the review list's reasons, with what the checks of an automatic lettering found (`typeset.LETTER_CHECKS`)
+FIT_REASONS = {"no-fit": "text does not fit", "font-missing": "font not installed",
+               "font-glyphs": "font lacks these letters", "tight": "letters touch the bubble's edge",
+               "off-centre": "text set off the bubble's centre", "hyphenated": "a word split with a hyphen",
+               "lone-word": "a short word alone on a line", "hourglass": "a line much narrower than those round it",
+               "low-contrast": "letters hard to see on their ground"}
 FIT_COLOUR = "#c03030"
 # the region as the page has it, at the top of the editor: at most this many pixels across and down, enlarged at most so
 CROP_ROOM, CROP_ENLARGE = (460, 200), 2.0
