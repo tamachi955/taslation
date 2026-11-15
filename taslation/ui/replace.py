@@ -10,6 +10,11 @@ is lettered again at once; the others come from the cache when they are next sho
 empty stays as it is (an edit cannot empty a line either). A name replaced everywhere that the series sheet has as a
 rendering is offered to the sheet, one question (`_propose_renderings`).
 
+The window's "Look in:" may be "All volumes of the series" (it is "This book" whenever the window opens): Replace all
+then counts the matches in the series' other volumes kept in the language (`series_scope`, as `taslation glossary
+apply` finds them), asks with each volume's count, and replaces in this book (one change for Ctrl+Z, as before) and
+in each other volume, saved at once beyond Ctrl+Z with a copy of its file kept beside it (`_replace_in_series`).
+
 Text of the book goes to the reader's own window and nowhere else: never to a log or a console."""
 
 from __future__ import annotations
@@ -22,9 +27,24 @@ from ..bookid import generic_book_name
 from ..cache import BookCache, TextEdit, language_key
 from ..i18n import _
 from ..regions import box_iou
+from .dialogs import caches as boxes
 from .history import BookStep, owner
+from .series_scope import (VolumeCount, change_volumes, changed_lines, changed_somewhere, count_in_volumes,
+                           in_the_worker, series_volumes, volume_lines, volume_store)
 
 REACH = 32  # characters shown either side of a match
+# Replace all with "All volumes of the series" (`ReplaceMixin._replace_in_series`): what is said while the other
+# volumes are counted, the question with each volume's count and its button, and what is said when there is nothing
+# to ask about
+COUNTING = "Counting the lines in the other volumes of the series..."
+SERIES_QUESTION = ("Replace \"{find}\" with \"{replace}\" in every volume of the series?\n\nThis book: {n} line(s); "
+                   "Ctrl+Z takes it back.\nThe other volumes:\n{volumes}\n\nThe other volumes are changed and saved at "
+                   "once, and Ctrl+Z does not reach them. A copy of each of their files as it was is kept beside it "
+                   "(<file>.before-replace.<date>.json). To take the change back, replace the other way round in all "
+                   "volumes, or put that copy back in place of the file.")
+REPLACE_EVERYWHERE = "Replace in all volumes"
+NO_MATCH_ANYWHERE = "No match in any volume of the series."
+NO_OTHER_VOLUMES = "No other volume of this series is kept in {language}: only this book was looked at."
 # scripts written without spaces between words, or with a word's endings on it (Korean): a neighbouring letter there
 # says nothing of where a word ends, so that "Whole word" looks at the letters of the others only
 UNSPACED = ("฀-໿က-႟ᄀ-ᇿក-៿぀-ヿ㐀-鿿가-힯豈-﫿"
@@ -172,7 +192,8 @@ class ReplaceMixin:
         if self._find is not None and self._find.winfo_exists():
             self._find.bring_up()
             return
-        self._find = FindReplaceDialog(self, self._find_hits, self._replace_in_book, self.undo_edit, self.redo_edit, kept)
+        self._find = FindReplaceDialog(self, self._find_hits, self._replace_in_book, self.undo_edit, self.redo_edit, kept,
+                                       on_replace_series=self._replace_in_series)
 
     def _find_kept(self) -> dict[str, Any] | None:
         """What the open window shows, to be shown again once the widgets are built anew; None when none is open."""
@@ -232,10 +253,12 @@ class ReplaceMixin:
         return find_hits(cache, query), ""
 
     # ------------------------------------------------------------------ the change
-    def _replace_in_book(self, query: Query, text: str, picked: set[Any] | None) -> bool:
+    def _replace_in_book(self, query: Query, text: str, picked: set[Any] | None,
+                         also: Callable[[], list[Line]] | None = None) -> bool:
         """Replace with *text* the matches of *query* whose keys are in *picked* (None: every one), as one change. In
-        the worker, which alone changes the cache, and on what the cache holds then. False, and the status line says
-        why, while a page or a batch is at work: nothing was asked."""
+        the worker, which alone changes the cache, and on what the cache holds then; *also*, in the same job after it,
+        makes the change in the other volumes of the series (`_replace_in_series`) and gives the lines that say so.
+        False, and the status line says why, while a page or a batch is at work: nothing was asked."""
         if self.pipeline is None or self.busy or self.batch is not None or self._batching:
             self.say("TASlation is at work on a page. Try again when it is done.")
             return False
@@ -259,17 +282,18 @@ class ReplaceMixin:
                 step.edits = cache.put_texts(edits)
                 step.state = "done" if step.edits else "empty"
                 lines = self._stored(pipeline, result, step.edits)
+                elsewhere = also() if also is not None else []  # (the other volumes: saved at once)
                 if step.edits and not lines:
                     lines.append(("Replaced in {n} text area(s) on {pages} page(s). Ctrl+Z takes it back.",
                                   {"n": len(step.edits), "pages": len({e.fingerprint for e in step.edits})}))
                     rendering = sheet_rendering(pipeline.check_sheet(), query) if len(chosen) == len(hits) else None
                     if rendering is not None and text.strip():
                         offer.append((rendering, text.strip()))
-                elif not step.edits:
+                elif not step.edits and not changed_somewhere(elsewhere):
                     lines.append(("Nothing was changed.", {}))
                 if left:
                     lines.append(("{n} text area(s) stay as they were: a translation cannot be left empty.", {"n": left}))
-                self._post("find", lines=lines)
+                self._post("find", lines=lines + elsewhere)
             finally:
                 if step.state == "pending":
                     step.state = "failed"
@@ -278,6 +302,58 @@ class ReplaceMixin:
                 self._post("propose", changes=offer)
 
         self._jobs.put(job)
+        return True
+
+    def _replace_in_series(self, query: Query, text: str) -> bool:
+        """Find and replace's Replace all with "All volumes of the series": the other volumes of the book's series in
+        the language chosen (`series_scope.series_volumes`, as `taslation glossary apply` finds them) are read in the
+        worker and their lines counted; the question names each volume with its count, says that the others are
+        saved at once, beyond Ctrl+Z, and how to take them back. Yes replaces every match in this book as Replace all
+        does (one change that Ctrl+Z takes back, the lines marked as the person's) and, in the same job, in each other
+        volume, saved at once with a copy of its file kept beside it (`series_scope.change_volumes`; marked as the
+        person's too). A series with no other volume kept in the language: this book's Replace all, and a line says
+        why. False, and the status line says why, while a page or a batch is at work."""
+        if self.pipeline is None or self.busy or self.batch is not None or self._batching:
+            self.say("TASlation is at work on a page. Try again when it is done.")
+            return False
+        cache = self._book_cache()
+        if cache is None:
+            self._refresh_find()
+            return False
+        pipeline = self.pipeline
+        store, book, language = volume_store(self, cache), cache.book, cache.language
+
+        def edits_of(volume: BookCache) -> list[TextEdit]:
+            return replacements(find_hits(volume, query), text)[0]
+
+        def work() -> tuple[list[str], list[VolumeCount]]:  # the worker: it alone opens the caches
+            books = series_volumes(store, book, language)
+            return books, count_in_volumes(store, books, language, edits_of)
+
+        def still() -> bool:  # the window has not moved on to another book or language meanwhile
+            return self.pipeline is pipeline and self._book_cache() is cache
+
+        def then(found: tuple[list[str], list[VolumeCount]]) -> None:
+            books, counts = found
+            if not still():
+                return
+            if not books:
+                self._replace_in_book(query, text, None, also=lambda: [(NO_OTHER_VOLUMES, {"language": language})])
+                return
+            here = len(edits_of(cache))
+            if not here and not any(c.lines for c in counts):
+                self._book_text_changed([(NO_MATCH_ANYWHERE, {})])
+                return
+            find = self._find
+            parent = find if find is not None and find.winfo_exists() else self
+            question = _(SERIES_QUESTION).format(find=query.text, replace=text, n=here, volumes=volume_lines(counts))
+            if not boxes.ask(parent, question, _(REPLACE_EVERYWHERE), _("Cancel")) or not still():
+                return
+            self._replace_in_book(query, text, None,
+                                  also=lambda: changed_lines(change_volumes(store, books, language, edits_of)))
+
+        self.say(COUNTING)
+        in_the_worker(self, work, then)
         return True
 
     def _stored(self, pipeline: Any, result: Any, edits: Sequence[TextEdit]) -> list[Line]:
@@ -318,4 +394,5 @@ class ReplaceMixin:
         self._jobs.put(job)
 
 
-__all__ = ["Hit", "Query", "ReplaceMixin", "around", "find_hits", "reletter", "replacements", "sheet_rendering"]
+__all__ = ["Hit", "NO_MATCH_ANYWHERE", "NO_OTHER_VOLUMES", "Query", "REPLACE_EVERYWHERE", "ReplaceMixin",
+           "SERIES_QUESTION", "around", "find_hits", "reletter", "replacements", "sheet_rendering"]

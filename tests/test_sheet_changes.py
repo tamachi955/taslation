@@ -55,6 +55,7 @@ class Renames(Window):
     """Translator mode with what the series sheet's offer and a replacement across the book use."""
 
     _offer_sheet_renames = app_mod.App._offer_sheet_renames
+    _ask_sheet_renames = app_mod.App._ask_sheet_renames
     _rename_in_book = app_mod.App._rename_in_book
     _propose_renderings = app_mod.App._propose_renderings
     _refresh_premises = app_mod.App._refresh_premises

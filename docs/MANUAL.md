@@ -518,7 +518,8 @@ and the page can be edited.
   "Skip page"; setting the reading order; "Translate again"),
   and "Redo" (Ctrl+Y) applies them again. Changes on other pages can be taken back when that page is shown again.
   Taking back "Translate again" brings back the page's earlier translations. A translate-again that ended without translating anything (a stop, for example) is not something to take back.
-* "Find and replace..." (a translator-mode button) searches and replaces across all the translations of the current book in the current language.
+* "Find and replace..." (a translator-mode button) searches and replaces across all the translations of the current book in the current language
+  (and, if you choose so under "Look in:", in the other volumes of its series too).
   Use it, for example, to correct a wrong character name throughout a volume at once. You can keep reading the book with the window open, and as you type, the matches
   are listed with their page numbers and the text around them (the match is between `«` and `»`; the page number is not the book's printed page number,
   but the order in which the page entered the cache). "Match case" and "Whole word" narrow the search. "Whole word" does not look for word boundaries next to
@@ -536,6 +537,14 @@ and the page can be edited.
   The series sheet does not change on its own. Only when the words replaced with "Replace all" were a rendering in the series sheet does it ask, once, as for a region edit,
   whether to use the new rendering. When only some lines were replaced, it does not ask. Undoing does not take back a change to the series sheet.
   Nothing can be replaced during a batch or while a page is being processed. Press it again once that is over.
+
+  "Look in:" says where "Replace all" replaces: "This book" (what the window starts with every time it opens) or "All volumes of the series".
+  With the second, the list still shows this book, and "Replace all" first counts the matches in the other volumes of the book's series kept in the same language
+  (found as `taslation glossary apply` finds them: by the series name), shows the count volume by volume, and asks.
+  "Replace in all volumes" replaces in this book as "Replace all" does (Ctrl+Z takes it back) and in each other volume, where the change is saved at once
+  and Ctrl+Z does not reach it. Before a volume is changed, a copy of its file as it was is kept beside it (`<file>.before-replace.<date>.json`, protected as the cache is);
+  to take the change back, replace the other way round in all volumes, or put that copy back in place of the file. The lines replaced there are marked as your corrections too.
+  "Replace selected" always stays in this book.
 * "Book settings..." saves the detection and OCR values that suit this book (thresholds, text-block detection, sound effects) and this book's lettering size
   ("Lettering size" and "Largest size"; "As in Settings" and an empty box mean the values in "Tools > Settings..."), together with the book's premises,
   without changing your own settings. "Apply to this book" re-sets the page on show from the cache (nothing is translated again).
@@ -564,6 +573,10 @@ and the page can be edited.
   and asks whether to give them the new one. "Apply to the {n} line(s)" replaces it, word by word, in that book's translations in that language in the cache (changing "Miyu"
   leaves "Miyuki" alone; the page on show is lettered again at once). The replacement is one change as a whole, and Ctrl+Z takes it back, as with Find and replace.
   If a page is being processed, it asks once that is over; during a whole-book run it replaces nothing, and says so (you can correct it with "Find and replace" once the run is over).
+  When other volumes of the series kept in the same language use the old rendering too, the question lists them with their lines, and its box
+  "All volumes of the series" (unticked at first) gives them the new one as well; when only other volumes use it, it asks about them alone.
+  The other volumes are saved at once and Ctrl+Z does not reach them; a copy of each file as it was is kept beside it (`<file>.before-replace.<date>.json`).
+  To take it back, change the rendering back and apply it to all volumes, or put that copy back. These lines are not marked as your corrections, in this book or in the others.
 
 The speaker, kind, continuation mark and note go with each bubble, and the series sheet is placed before the bubbles, when they are given to the model. They are saved in
 `~/.taslation/annotations/<book>.json` and

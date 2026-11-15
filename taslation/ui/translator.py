@@ -46,6 +46,8 @@ from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, rev
 from .history import BookStep, Step, carry, owner, page_units, put_back, stores_differ, unit_states
 from .layout import FlowBar, wrap_label
 from .progress import rendered
+from .series_scope import (ALL_VOLUMES, VolumeCount, change_volumes, changed_lines, changed_somewhere,
+                           count_in_volumes, in_the_worker, series_volumes, volume_lines, volume_store)
 from .sheet_changes import rename_edits, shown_pairs
 from .tooltip import tip
 
@@ -114,6 +116,17 @@ AGAIN_KEEPS = ("Translate this page again? Its present translations are replaced
                "corrected: they stay as they are.")
 REPLACE_MINE_TOO = "Replace the lines I corrected too"
 SHEET_IN_A_RUN = "The lines already translated were not changed: a run is reading the book. Find and replace can change them once it is done."
+# ... and when other volumes of the series use the earlier rendering too (`_ask_sheet_renames`): under the offer, the
+# volumes with their lines and the box that takes them too (with its button); or the offer for them alone
+SHEET_OTHERS_TOO = ("Other volumes of the series use it too:\n{volumes}\n\nTick the box to give them the new one as "
+                    "well. They are saved at once, and Ctrl+Z does not reach them; a copy of each file as it was is kept "
+                    "beside it (<file>.before-replace.<date>.json). To take it back, change the rendering back here and "
+                    "apply it to all volumes, or put that copy back.")
+SHEET_GIVE = "Give them the new one"
+SHEET_OTHERS_ONLY = ("No line of this book uses the series sheet's earlier rendering ({changes}), but other volumes of "
+                     "the series do:\n{volumes}\n\nGive them the new one? They are saved at once, and Ctrl+Z does not "
+                     "reach them; a copy of each file as it was is kept beside it (<file>.before-replace.<date>.json). "
+                     "To take it back, change the rendering back here, or put that copy back.")
 SHEET_WAIT_MS = 300  # how often the offer looks whether the window is free (a page at work) or the cache is open
 
 
@@ -304,11 +317,14 @@ class TranslatorMixin:
             self._jobs.put(lambda: self._refresh_premises(book, language))
 
     def _rename_in_book(self, pipeline: Any, cache: Any, pairs: list[tuple[str, str]],
-                        line: Callable[[BookStep], tuple[str, dict[str, Any]]]) -> BookStep:
+                        line: Callable[[BookStep], tuple[str, dict[str, Any]]],
+                        also: Callable[[], list[tuple[str, dict[str, Any]]]] | None = None) -> BookStep:
         """The worker gives every translated line of *cache* (the pipeline's) the new renderings of *pairs* (old ->
         new, whole words: `sheet_changes.rename_edits`), on what the cache holds then, as one change on no page in
         particular that Ctrl+Z takes back (`history.BookStep`, as a replacement across the book); the page on show is
-        lettered again (`_stored`) and *line* of the step is said, or what went wrong."""
+        lettered again (`_stored`) and *line* of the step is said, or what went wrong. *also*, in the same job after
+        it, gives the other volumes of the series the new renderings (saved at once, beyond Ctrl+Z:
+        `series_scope.change_volumes`) and the lines that say so; *line* is not said then while this book had none."""
         step = BookStep(owner(pipeline))
         self.history.record(step, pipeline.settings.fingerprint_max_distance)
         result = self.last_result
@@ -319,7 +335,10 @@ class TranslatorMixin:
                 step.edits = cache.put_texts(rename_edits(cache, pairs))
                 step.state = "done" if step.edits else "empty"
                 lines = self._stored(pipeline, result, step.edits)
-                self._post("find", lines=lines or [line(step)])
+                elsewhere = also() if also is not None else []
+                if not lines and (step.edits or not changed_somewhere(elsewhere)):
+                    lines = [line(step)]
+                self._post("find", lines=lines + elsewhere)
             finally:
                 if step.state == "pending":
                     step.state = "failed"
@@ -332,8 +351,11 @@ class TranslatorMixin:
         """The series sheet of *book* in *language* (open in its dialog, *parent*) gave terms or characters another
         rendering (*pairs*: old, new): when lines already translated have the old one, the reader is told how many and
         asked whether they get the new one (`SHEET_OFFER`); yes renames them as one change (`_rename_in_book`). The
-        book's cache is opened by the worker first when the window holds another one; while a page is at work the
-        question waits until it is done; during a run nothing is offered, and a line says why."""
+        lines of the other volumes of the series kept in the language are counted first, in the worker
+        (`series_scope`, as `taslation glossary apply` finds the volumes), and the question offers them too
+        (`_ask_sheet_renames`: this book unless its box is ticked). The book's cache is opened by the worker first
+        when the window holds another one; while a page is at work the question waits until it is done; during a run
+        nothing is offered, and a line says why."""
         pairs = [(old, new) for old, new in pairs if old and new and old != new]
         pipeline = self.pipeline
         if not pairs or pipeline is None or not book or generic_book_name(book):
@@ -371,19 +393,62 @@ class TranslatorMixin:
         if self.busy:  # a page at work: asked once it is done
             self.after(SHEET_WAIT_MS, lambda: self._offer_sheet_renames(pairs, book, language, parent, waited))
             return
-        count = len(rename_edits(cache, pairs))
-        if not count:
+        store, volume_language = volume_store(self, cache), cache.language
+
+        def edits_of(volume: Any) -> list[Any]:
+            return rename_edits(volume, pairs)
+
+        def work() -> tuple[list[str], list[VolumeCount]]:  # the worker: the other volumes of the series, counted
+            books = series_volumes(store, cache.book, volume_language)
+            return books, count_in_volumes(store, books, volume_language, edits_of)
+
+        def moved_on() -> bool:
+            return self.pipeline is not pipeline or getattr(pipeline, "cache", None) is not cache or in_a_run(self)
+
+        def then(found: tuple[list[str], list[VolumeCount]]) -> None:
+            if moved_on():
+                return
+            if self.busy:  # a page began meanwhile: asked once it is done
+                self.after(SHEET_WAIT_MS, lambda: then(found))
+                return
+            books, counts = found
+            self._ask_sheet_renames(pipeline, cache, pairs, parent, store, books, counts, edits_of, moved_on)
+
+        in_the_worker(self, work, then)
+
+    def _ask_sheet_renames(self, pipeline: Any, cache: Any, pairs: list[tuple[str, str]], parent: tk.Misc | None,
+                           store: Any, books: list[str], counts: list[VolumeCount],
+                           edits_of: Callable[[Any], list[Any]], moved_on: Callable[[], bool]) -> None:
+        """The offer of `_offer_sheet_renames`, its lines counted in this book and, volume by volume, in the other
+        volumes of the series (*counts*, `series_scope.count_in_volumes`). With none in another volume, the question of
+        before; with some there too, the same question names each volume with its count, says that the other volumes
+        are saved at once, beyond Ctrl+Z, and how to take them back, and its box "All volumes of the series" (unticked:
+        this book only) takes them too; with lines in other volumes only, it asks about those. Yes renames as one
+        change for Ctrl+Z in this book (`_rename_in_book`) and, with the other volumes, in each of them, saved at once
+        with a copy of its file kept beside it (`series_scope.change_volumes`)."""
+        here = len(rename_edits(cache, pairs))
+        elsewhere = sum(c.lines for c in counts)
+        if not here and not elsewhere:
             return
         box_parent = parent if parent is not None and parent.winfo_exists() else self
-        if not boxes.ask(box_parent, _(SHEET_OFFER).format(n=count, changes=shown_pairs(pairs)),
-                         _(SHEET_APPLY).format(n=count), _(SHEET_LEAVE)):
-            return
-        if self.pipeline is not pipeline or getattr(pipeline, "cache", None) is not cache or in_a_run(self):
-            return  # the window moved on while the question was up
+        changes = shown_pairs(pairs)
+        if not elsewhere:
+            go, series = boxes.ask(box_parent, _(SHEET_OFFER).format(n=here, changes=changes),
+                                   _(SHEET_APPLY).format(n=here), _(SHEET_LEAVE)), False
+        elif not here:
+            go, series = boxes.ask(box_parent, _(SHEET_OTHERS_ONLY).format(changes=changes, volumes=volume_lines(counts)),
+                                   _(SHEET_APPLY).format(n=elsewhere), _(SHEET_LEAVE)), True
+        else:
+            text = (_(SHEET_OFFER).format(n=here, changes=changes) + "\n\n"
+                    + _(SHEET_OTHERS_TOO).format(volumes=volume_lines(counts)))
+            go, series = boxes.ask_choice(box_parent, text, _(ALL_VOLUMES), _(SHEET_GIVE), _(SHEET_LEAVE))
+        if not go or moved_on():
+            return  # (the window moved on while the question was up)
         self.say("Storing your changes...")
+        also = ((lambda: changed_lines(change_volumes(store, books, cache.language, edits_of))) if series else None)
         self._rename_in_book(pipeline, cache, pairs, lambda step: (
             (SHEET_APPLIED, {"n": len(step.edits), "pages": len({e.fingerprint for e in step.edits})})
-            if step.edits else ("Nothing was changed.", {})))
+            if step.edits else ("Nothing was changed.", {})), also=also)
 
     def _refresh_premises(self, book: str, language: str) -> None:
         """The worker: the pipeline takes the book's premises again; a store that cannot be opened is said."""

@@ -1,6 +1,7 @@
 """Find and replace across the book (`FindReplaceDialog`), from Translator > Find and replace... and the button of the
 translator strip: a window that blocks nothing, whose list of matches (page and the line around each) follows what is
 typed. Nothing is written until a Replace button is pressed. The search and the change are the window's (`ui.replace`).
+"Look in:" (This book, as the window opens; All volumes of the series) says where Replace all replaces.
 
 Ctrl+Z and Ctrl+Y work here as in the window: a dialog's keys do not reach it by themselves."""
 
@@ -13,11 +14,20 @@ from typing import Any, Callable
 from ...i18n import _
 from ..layout import place_window
 from ..replace import Hit, Query, around
+from ..series_scope import ALL_VOLUMES, THIS_BOOK
 from ..tooltip import tip
 
 REFRESH_MS = 120  # after the last key: a word typed fast is searched once
 MAX_ROWS = 500  # rows in the list: a single letter can match thousands of times (the count and Replace all take every one)
 LINE_WRAP = 660  # pixels
+# "Look in:": where Replace all replaces - this book (whenever the window opens), or every volume of the series
+# (`replace.ReplaceMixin._replace_in_series`: counted volume by volume and asked first); the list shows this book
+BOOK, SERIES = "book", "series"
+LOOK_IN = "Look in:"
+SCOPE_TIP = ("All volumes of the series: Replace all also replaces in the other volumes of this series kept in this "
+             "language, after it shows how many lines each has. They are saved at once; Ctrl+Z takes back this book "
+             "only. Replace selected stays in this book.")
+SERIES_NOTE = "The list shows this book; Replace all counts every volume first and asks."
 
 
 class FindReplaceDialog(tk.Toplevel):
@@ -28,9 +38,10 @@ class FindReplaceDialog(tk.Toplevel):
 
     def __init__(self, master: tk.Misc, search: Callable[[Query], tuple[list[Hit], str]],
                  on_replace: Callable[[Query, str, set[Any] | None], bool], on_undo: Callable[[], None],
-                 on_redo: Callable[[], None], kept: dict[str, Any] | None = None):
+                 on_redo: Callable[[], None], kept: dict[str, Any] | None = None,
+                 on_replace_series: Callable[[Query, str], bool] | None = None):
         super().__init__(master)
-        self.search, self.on_replace = search, on_replace
+        self.search, self.on_replace, self.on_replace_series = search, on_replace, on_replace_series
         kept = kept or {}
         self.title(_("Find and replace"))
         self.transient(master)
@@ -43,6 +54,8 @@ class FindReplaceDialog(tk.Toplevel):
         self.replace_var = tk.StringVar(self, kept.get("replace", ""))
         self.case_var = tk.BooleanVar(self, kept.get("case", False))
         self.word_var = tk.BooleanVar(self, kept.get("word", False))
+        # where Replace all replaces: this book (always when the window opens), or every volume of the series
+        self.scope_var = tk.StringVar(self, kept.get("scope", BOOK) if on_replace_series is not None else BOOK)
         self.count_var = tk.StringVar(self, "")
         self.said_var = tk.StringVar(self, "")
 
@@ -50,6 +63,7 @@ class FindReplaceDialog(tk.Toplevel):
         frm.pack(fill="both", expand=True)
         frm.columnconfigure(1, weight=1)
         frm.rowconfigure(4, weight=1)
+        self.scope_row: ttk.Frame | None = None
         label = ttk.Label(frm, text=_("Find:"))
         label.grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.find_entry = ttk.Entry(frm, textvariable=self.find_var)
@@ -60,14 +74,26 @@ class FindReplaceDialog(tk.Toplevel):
         self.replace_entry = ttk.Entry(frm, textvariable=self.replace_var)
         self.replace_entry.grid(row=1, column=1, sticky="ew", pady=(4, 0))
         tip(_("What goes in their place. Nothing changes until you press a Replace button."), label, self.replace_entry)
-        boxes = ttk.Frame(frm)
-        boxes.grid(row=2, column=1, sticky="w", pady=(4, 0))
+        options = ttk.Frame(frm)  # the boxes, and under them where Replace all replaces
+        options.grid(row=2, column=1, sticky="w", pady=(4, 0))
+        boxes = ttk.Frame(options)
+        boxes.pack(side="top", anchor="w")
         case = ttk.Checkbutton(boxes, text=_("Match case"), variable=self.case_var)
         case.pack(side="left")
         tip(_("Tell capitals from small letters."), case)
         word = ttk.Checkbutton(boxes, text=_("Whole word"), variable=self.word_var)
         word.pack(side="left", padx=(10, 0))
         tip(_("Only where it stands as a word of its own, not inside a longer one."), word)
+        if on_replace_series is not None:
+            self.scope_row = ttk.Frame(options)
+            self.scope_row.pack(side="top", anchor="w", pady=(4, 0))
+            label = ttk.Label(self.scope_row, text=_(LOOK_IN))
+            label.pack(side="left")
+            for value, words in ((BOOK, THIS_BOOK), (SERIES, ALL_VOLUMES)):
+                choice = ttk.Radiobutton(self.scope_row, text=_(words), value=value, variable=self.scope_var)
+                choice.pack(side="left", padx=(6, 0))
+                tip(_(SCOPE_TIP), choice)
+            tip(_(SCOPE_TIP), label)
         ttk.Label(frm, textvariable=self.count_var, anchor="w", justify="left", wraplength=LINE_WRAP).grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(8, 2))
         listed = ttk.Frame(frm)
@@ -95,7 +121,7 @@ class FindReplaceDialog(tk.Toplevel):
         tip(_("Replace every match in the book. Ctrl+Z takes it all back."), self.all_btn)
         ttk.Button(btns, text=_("Close"), command=self.destroy).pack(side="right")
 
-        for var in (self.find_var, self.case_var, self.word_var):
+        for var in (self.find_var, self.case_var, self.word_var, self.scope_var):
             var.trace_add("write", self._typed)
         self.bind("<FocusIn>", lambda _e: self.refresh())  # the cache, the book or the language may have changed
         self.bind("<Escape>", lambda _e: self.destroy())
@@ -113,7 +139,12 @@ class FindReplaceDialog(tk.Toplevel):
     def kept(self) -> dict[str, Any]:
         """What the window shows, for the window a language switch builds anew."""
         return {"find": self.find_var.get(), "replace": self.replace_var.get(), "case": self.case_var.get(),
-                "word": self.word_var.get(), "place": self.geometry()}
+                "word": self.word_var.get(), "scope": self.scope_var.get(), "place": self.geometry()}
+
+    @property
+    def series(self) -> bool:
+        """Whether Replace all replaces in every volume of the series ("Look in:")."""
+        return self.on_replace_series is not None and self.scope_var.get() == SERIES
 
     def bring_up(self) -> None:
         self.lift()
@@ -158,15 +189,18 @@ class FindReplaceDialog(tk.Toplevel):
         if not self.find_var.get():
             return ""
         if not self.hits:
-            return _("No match.")
+            return _("No match.") + (" " + _(SERIES_NOTE) if self.series else "")
         line = _("{n} match(es) on {pages} page(s).").format(n=len(self.hits), pages=len({h.page for h in self.hits}))
         if len(self.hits) > len(self.rows):
             line += " " + _("The first {shown} are listed; Replace all takes every one.").format(shown=len(self.rows))
+        if self.series:
+            line += " " + _(SERIES_NOTE)
         return line
 
     def _sync_buttons(self) -> None:
         self.selected_btn["state"] = "normal" if self.tree.selection() else "disabled"
-        self.all_btn["state"] = "normal" if self.hits else "disabled"
+        # (all volumes: another volume may have a match where this book has none)
+        self.all_btn["state"] = "normal" if self.hits or (self.series and self.find_var.get()) else "disabled"
 
     def picked(self) -> set[Any]:
         """The keys of the matches selected in the list."""
@@ -179,8 +213,12 @@ class FindReplaceDialog(tk.Toplevel):
             self.on_replace(self.query(), self.replace_var.get(), picked)
 
     def replace_all(self) -> None:
+        """Every match in this book, or with "All volumes of the series" in every volume (`on_replace_series`: counted
+        and asked first)."""
         self.update_list()
-        if self.hits:
+        if self.series and self.find_var.get():
+            self.on_replace_series(self.query(), self.replace_var.get())  # type: ignore[misc]
+        elif self.hits:
             self.on_replace(self.query(), self.replace_var.get(), None)
 
     def destroy(self) -> None:
@@ -193,4 +231,4 @@ class FindReplaceDialog(tk.Toplevel):
         super().destroy()
 
 
-__all__ = ["FindReplaceDialog", "MAX_ROWS"]
+__all__ = ["BOOK", "FindReplaceDialog", "MAX_ROWS", "SERIES"]
