@@ -17,6 +17,13 @@ the model, which still produces every translation on the reader's machine:
   Per book: detection settings that suit the book, the sequence of page
   fingerprints, the reading direction, and the areas the reader ignores on
   every page of it (`BookArea`: a watermark, a page number, a banner).
+* **Series defaults** per series (``~/.taslation/annotations/series/<series>.json``, `SeriesDefaults`): the
+  detection settings, reading direction and areas a new volume of the series starts from. A book that had no
+  annotations of its own when it was first opened follows its series (`BookAnnotations.follows_series`, kept in its
+  file): where it has no value of its own, its series' default is in force, and its own value always wins once set.
+  A book whose annotations were kept before (no such mark) goes by its own values alone, as before. The series is
+  the book's Series field when its name has a volume (`series_of`), told apart from another letter case and spaces
+  aside (`series_id`); a book of one volume, or with a temporary name, has none.
 * **Series sheet** per series (``~/.taslation/glossary/<series>[.<language>].json``):
   the glossary (terms as written in the book with the rendering to use), the
   character sheet (gender, age, first-person pronoun, speech style, role, how
@@ -53,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from . import protect
+from .bookname import clean_series, split_name
 from .config import TEXT_SCALE_RANGE
 from .fingerprint import FINGERPRINT_HEX_LEN, hamming
 from .names import StoreFiles, load_object, read_object
@@ -101,6 +109,12 @@ STYLE_FIELDS = ("honorifics", "tone", "font")  # the style guide's policies comp
 # language; each says its schema number and its kind
 ANNOTATION_FILES = StoreFiles("the annotations", "book", schema=SCHEMA_VERSION, kind="annotations")
 SHEET_FILES = StoreFiles("the series sheet", "series", "language", schema=SCHEMA_VERSION, kind="glossary")
+# a series' defaults (`SeriesDefaults`): a file per series in this folder of the annotations folder, which records the
+# series by its key (`series_id`) and as it was written
+SERIES_DIRNAME = "series"
+SERIES_DEFAULT_FILES = StoreFiles("the series' defaults", "key", schema=SCHEMA_VERSION, kind="series_defaults")
+SERIES_NOTE = ("What a new volume of the series starts from: detection settings, the reading direction and the areas "
+               "ignored on every page. No page images, no page text, no translations.")
 
 
 # An area the reader ignores on every page of the book (`BookArea`): made from a region they dropped, grown a little
@@ -554,18 +568,138 @@ def clean_book_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
+def _same_areas(a: list[BookArea], b: list[BookArea]) -> bool:
+    """Whether the lists *a* and *b* hold the very same areas, in any order."""
+    return len(a) == len(b) and set(a) == set(b)
+
+
 class BookAnnotations:
-    """Everything readers recorded about one book (one JSON file)."""
+    """Everything readers recorded about one book (one JSON file). Its detection settings, reading direction and
+    areas are the book's own (`own_settings`, `own_direction`, `own_areas`: what its file keeps) and, for a book that
+    follows its series (`follows_series`), the series' defaults where it has none of its own (`inherited`, linked by
+    `AnnotationStore.open`, never kept in the book's file): `settings`, `reading_direction` and `areas` are the ones
+    in force. Its areas are its own list as a whole, or else its series' (`own_areas` None)."""
 
     def __init__(self, path: Path, book: str):
         self.path = Path(path)
         self.book = book
         self.pages: list[PageAnnotations] = []
-        self.settings: dict[str, Any] = {}  # detection/OCR overrides for this book (BOOK_SETTING_KEYS)
+        self.own_settings: dict[str, Any] = {}  # this book's own detection/OCR overrides (BOOK_SETTING_KEYS)
         self.sequence: list[tuple[str, float]] = []  # (fingerprint, aspect) of the pages in the order first scanned
-        self.reading_direction: str = ""  # "" (unknown = rtl) | "rtl" | "ltr"
-        self.areas: list[BookArea] = []  # the areas ignored on every page of the book
+        self.own_direction: str = ""  # this book's own: "" (none: its series', else rtl) | "rtl" | "ltr"
+        # the areas ignored on every page of the book, its own; None: none of its own, its series' (`follows_series`)
+        self.own_areas: list[BookArea] | None = []
+        self.follows_series = False  # where the book has no value of its own, its series' default is in force
+        self.inherited: SeriesDefaults | None = None  # the series' defaults it follows (`link_series`)
+        self.series_store: SeriesDefaultsStore | None = None  # where its series' defaults are kept (`link_series`)
+        self.series_name = ""  # its series (`series_of`), "" for none
         self.updated = _now()
+
+    # --- what is in force: the book's own values over its series' defaults --------------------------------------
+    @property
+    def settings(self) -> dict[str, Any]:
+        """The detection/OCR settings in force for the book: its own over its series' defaults (where it follows
+        them); without any of those, the book's own dict itself."""
+        inherited = self.inherited.settings if self.inherited is not None else {}
+        return {**inherited, **self.own_settings} if inherited else self.own_settings
+
+    @settings.setter
+    def settings(self, value: dict[str, Any] | None) -> None:
+        self.own_settings = dict(value or {})
+
+    @property
+    def reading_direction(self) -> str:
+        """The reading direction in force: the book's own, else its series' default (where it follows it), else ""
+        (read right to left)."""
+        return self.own_direction or (self.inherited.reading_direction if self.inherited is not None else "")
+
+    @reading_direction.setter
+    def reading_direction(self, value: str) -> None:
+        """The book's own direction ("" for none: its series' default is in force again, where it follows it)."""
+        self.own_direction = value if value in READING_DIRECTIONS else ""
+
+    @property
+    def areas(self) -> list[BookArea]:
+        """The areas ignored on every page of the book: its own list, else its series' (a copy)."""
+        if self.own_areas is not None:
+            return self.own_areas
+        return list(self.inherited.areas) if self.inherited is not None else []
+
+    @areas.setter
+    def areas(self, value: list[BookArea]) -> None:
+        self.own_areas = list(value)
+
+    def inherited_settings(self) -> dict[str, Any]:
+        """The series' default settings the book follows ({} for a book that follows none)."""
+        return dict(self.inherited.settings) if self.inherited is not None else {}
+
+    @property
+    def inherited_direction(self) -> str:
+        """The series' default reading direction the book follows ("" for none)."""
+        return self.inherited.reading_direction if self.inherited is not None else ""
+
+    @property
+    def areas_from_series(self) -> bool:
+        """Whether the areas in force are the series' (the book has no list of its own, and the series has areas)."""
+        return self.own_areas is None and self.inherited is not None and bool(self.inherited.areas)
+
+    def _keep_areas(self, areas: list[BookArea]) -> None:
+        """*areas* as the book's own list; for a book that follows its series, none of its own when they are exactly
+        the series' areas (it follows them again: Ctrl+Z after a change gives the series' areas back)."""
+        if self.follows_series and self.inherited is not None and _same_areas(areas, self.inherited.areas):
+            self.own_areas = None
+        else:
+            self.own_areas = list(areas)
+
+    # --- the series' defaults ---------------------------------------------------------------------------------
+    def link_series(self, store: "SeriesDefaultsStore") -> None:
+        """The book's series' defaults as kept in *store*: where its values can be kept as the series' defaults
+        (`share_settings`, `share_areas`) and, for a book that follows its series, what is in force where it has no
+        value of its own (`inherited`). A book of one volume, or with a temporary name, has no series
+        (`series_of`). OSError when the series' file cannot be opened now."""
+        self.series_store = store
+        self.series_name = series_of(self.book)
+        self.inherited = store.open(self.series_name) if self.follows_series and self.series_name else None
+
+    @property
+    def can_share(self) -> bool:
+        """Whether the book's values can be kept as its series' defaults: it has a series, and the store is known."""
+        return self.series_store is not None and bool(self.series_name)
+
+    def _series_defaults(self) -> "SeriesDefaults":
+        if self.series_store is None or not self.series_name:
+            raise ValueError(f"{self.book!r} belongs to no series")
+        return self.series_store.open(self.series_name)  # (as kept now: what another part saved stays)
+
+    def share_settings(self, direction: str | None = None) -> "SeriesDefaults":
+        """The settings in force for the book and its reading direction (*direction*, "rtl" or "ltr"; None: the one
+        in force) kept as its series' defaults, saved; the series' areas stay as they are. A book that follows its
+        series has them in force from now on where it has no value of its own; the book's own values stay its own.
+        Returns the defaults saved. ValueError for a book without a series (`can_share`); OSError (and
+        FileExistsError) when the file cannot be written."""
+        defaults = self._series_defaults()
+        defaults.settings = clean_book_settings(self.settings)
+        chosen = direction if direction in ("rtl", "ltr") else self.reading_direction
+        defaults.reading_direction = chosen if chosen in READING_DIRECTIONS else ""
+        defaults.save()
+        if self.follows_series:
+            self.inherited = defaults
+        return defaults
+
+    def share_areas(self) -> bool:
+        """The areas in force for the book kept as its series' areas, saved; the series' settings and direction stay
+        as they are. A book that follows its series uses the series' areas from then on (its own list goes, being the
+        same). Returns whether the book's own values changed (the caller saves the book). ValueError for a book
+        without a series; OSError when the file cannot be written."""
+        defaults = self._series_defaults()
+        defaults.areas = list(self.areas)[:MAX_AREAS]
+        defaults.save()
+        if not self.follows_series:
+            return False
+        self.inherited = defaults
+        before = self.own_areas
+        self._keep_areas(self.areas)
+        return before is not None and self.own_areas is None
 
     @classmethod
     def load(cls, path: Path) -> "BookAnnotations":
@@ -588,7 +722,8 @@ class BookAnnotations:
                 self.pages.append(PageAnnotations.from_json(raw))
             except (ValueError, TypeError, KeyError):
                 continue
-        self.settings = clean_book_settings(data.get("settings") if isinstance(data.get("settings"), dict) else None)
+        self.follows_series = data.get("follows_series") is True
+        self.own_settings = clean_book_settings(data.get("settings") if isinstance(data.get("settings"), dict) else None)
         seq: list[tuple[str, float]] = []
         for raw in (data.get("sequence") or [])[:MAX_PAGES]:
             try:
@@ -599,10 +734,12 @@ class BookAnnotations:
                 continue
         self.sequence = seq
         direction = _text(data.get("reading_direction"), 3)
-        self.reading_direction = direction if direction in READING_DIRECTIONS else ""
-        self.areas = _areas(data.get("areas"))
+        self.own_direction = direction if direction in READING_DIRECTIONS else ""
+        # a book that follows its series and keeps no list of areas uses the series' areas
+        self.own_areas = _areas(data.get("areas")) if "areas" in data or not self.follows_series else None
 
     def to_json(self) -> dict[str, Any]:
+        """The book's file: its own values only, never what it takes from its series' defaults."""
         d: dict[str, Any] = {
             "schema": SCHEMA_VERSION,
             "app": "taslation",
@@ -611,12 +748,14 @@ class BookAnnotations:
             "book": self.book,
             "updated": self.updated,
             "pages": [p.to_json() for p in self.pages if not p.is_empty],
-            "settings": dict(self.settings),
+            "settings": dict(self.own_settings),
             "sequence": [{"fp": fp, "aspect": round(aspect, 4)} for fp, aspect in self.sequence],
-            "reading_direction": self.reading_direction,
+            "reading_direction": self.own_direction,
         }
-        if self.areas:  # (a file without any stays as it was)
-            d["areas"] = [a.to_json() for a in self.areas]
+        if self.follows_series:  # (a file of a book that does not stays as it was)
+            d["follows_series"] = True
+        if self.own_areas or (self.follows_series and self.own_areas is not None):
+            d["areas"] = [a.to_json() for a in self.own_areas or []]  # (none of its own: no list; [] while it follows)
         return d
 
     def save(self) -> None:
@@ -687,25 +826,31 @@ class BookAnnotations:
 
     def add_area(self, area: BookArea) -> bool:
         """*area* ignored on every page of the book from now on; False when one alike is there already, or the book
-        has `MAX_AREAS` of them."""
-        if any(area.same(a) for a in self.areas) or len(self.areas) >= MAX_AREAS:
+        has `MAX_AREAS` of them. A book that uses its series' areas gets a list of its own: those and this one."""
+        current = self.areas
+        if any(area.same(a) for a in current) or len(current) >= MAX_AREAS:
             return False
-        self.areas.append(area)
+        self._keep_areas([*current, area])
         return True
 
     def remove_area(self, area: BookArea) -> bool:
-        """The area alike *area* (`BookArea.same`) no longer ignored; False when there is none."""
-        keep = [a for a in self.areas if not a.same(area)]
-        removed = len(keep) != len(self.areas)
-        self.areas = keep
-        return removed
+        """The area alike *area* (`BookArea.same`) no longer ignored; False when there is none. A book that uses its
+        series' areas gets a list of its own: the others."""
+        current = self.areas
+        keep = [a for a in current if not a.same(area)]
+        if len(keep) == len(current):
+            return False
+        self._keep_areas(keep)
+        return True
 
     def areas_for(self, side: str, aspect: float) -> list[BookArea]:
         """The areas that apply to a page on *side* (`page_side`) of width / height *aspect*."""
         return [a for a in self.areas if a.applies(side, aspect)]
 
     def set_settings(self, overrides: dict[str, Any] | None) -> dict[str, Any]:
-        self.settings = clean_book_settings(overrides)
+        """*overrides* as the book's own settings (`clean_book_settings`; {}: none, its series' defaults and the
+        reader's own settings apply); returns the settings in force."""
+        self.own_settings = clean_book_settings(overrides)
         return dict(self.settings)
 
     def record_sequence(self, fingerprint: str, aspect: float, max_distance: int = 6) -> bool:
@@ -720,10 +865,11 @@ class BookAnnotations:
 class AnnotationStore:
     """The reader's annotations, one JSON file per book: ``<book>.json``, or ``<book>-<hash>.json`` when that one holds
     another book whose name gives the same file name (`names.pick`, by the book each file records). No file is
-    renamed."""
+    renamed. The series' defaults are kept in its folder `SERIES_DIRNAME` (`series`)."""
 
     def __init__(self, annotations_dir: Path):
         self.annotations_dir = Path(annotations_dir)
+        self.series = SeriesDefaultsStore(self.annotations_dir / SERIES_DIRNAME)
 
     def path_for(self, book: str) -> Path:
         """The annotations file of *book*: the plain name while there is none or it holds this very book (or records
@@ -735,13 +881,20 @@ class AnnotationStore:
         cannot read (damaged, of another kind, written by a newer TASlation) is first set aside as ``<file
         stem>.unreadable-<date>.json``, never written over (`StoreFiles.load`). A file of another book is never read
         as this one's (FileExistsError); one that records no book is this one's and gets its name at the next save.
-        OSError when the file cannot be opened."""
+        A book with no annotations of its own yet that has a series (`series_of`) follows it: it starts from the
+        series' defaults, and keeps following them where it has no value of its own (`BookAnnotations.follows_series`,
+        `link_series`); a book with a file of its own follows them only when the file says so. OSError when the file,
+        or its series' defaults, cannot be opened."""
         path = self.path_for(book)
         loaded = ANNOTATION_FILES.load(path, book, None, lambda data: BookAnnotations.from_json(data, path))
         if loaded is None:
-            return BookAnnotations(path, book)
-        ann, _owner = loaded
-        ann.book = book
+            ann = BookAnnotations(path, book)
+            if series_of(book):
+                ann.follows_series, ann.own_areas = True, None
+        else:
+            ann, _owner = loaded
+            ann.book = book
+        ann.link_series(self.series)
         return ann
 
     def list(self) -> list[dict[str, Any]]:
@@ -776,6 +929,133 @@ class AnnotationStore:
         goes only under one of the book's own two file names, or as a copy set aside from one of them. Another book
         whose name starts the same or gives the same file name keeps its annotations."""
         return ANNOTATION_FILES.delete(self.annotations_dir, book)
+
+
+# --- a series' defaults: what a new volume starts from -----------------------------------------------------------
+
+def series_of(book: str) -> str:
+    """The series whose defaults the book named *book* follows: its Series field (`bookname.split_name`) when the name
+    has a volume ("Title 3", "Title 第三巻", "Title (3)" and "Title Vol. 3" are all the series "Title"); "" for a book
+    of one volume, a temporary name or none, which has no series defaults."""
+    parts = split_name(book)
+    return parts.series if parts.series and parts.volume else ""
+
+
+def series_id(series: str) -> str:
+    """What tells one series from another: the series with letter case and spaces aside, as `bookname.book_key` tells
+    books apart ("Some Title", "some title" and "Ｓｏｍｅ　Ｔｉｔｌｅ" are one)."""
+    return "".join(clean_series(series).casefold().split())
+
+
+class SeriesDefaults:
+    """What a new volume of one series starts from (one JSON file, `SeriesDefaultsStore`): the detection/OCR settings
+    (`BOOK_SETTING_KEYS`), the reading direction ("" for none) and the areas ignored on every page (`BookArea`: boxes
+    in the page's own terms, so the same place on a page of another size; a page of another shape is left alone, as
+    within one volume). Written by a book's Book settings ("Save as the series' default", "Use these areas for the
+    series": `BookAnnotations.share_settings`, `share_areas`)."""
+
+    def __init__(self, path: Path, series: str):
+        self.path = Path(path)
+        self.series = clean_series(series)  # as the reader wrote it last
+        self.key = series_id(series)  # what the file records it by
+        self.settings: dict[str, Any] = {}
+        self.reading_direction = ""
+        self.areas: list[BookArea] = []
+        self.updated = _now()
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.settings or self.reading_direction or self.areas)
+
+    @classmethod
+    def load(cls, path: Path) -> "SeriesDefaults":
+        """The defaults in the file at *path* (protected or plain, `_load_json`); ValueError for another schema."""
+        return cls.from_json(_load_json(path), path)
+
+    @classmethod
+    def from_json(cls, data: Any, path: Path) -> "SeriesDefaults":
+        """The defaults a file's JSON *data* holds, kept at *path*; ValueError for another schema."""
+        if not isinstance(data, dict) or data.get("schema") != SCHEMA_VERSION:
+            raise ValueError(f"unsupported series defaults schema in {path}")
+        series = _text(data.get("series"), 300) or _text(data.get("key"), 300) or "untitled"
+        d = cls(path, series)
+        if isinstance(data.get("key"), str) and data["key"]:
+            d.key = data["key"]
+        d.updated = str(data.get("updated", d.updated))
+        d.settings = clean_book_settings(data.get("settings") if isinstance(data.get("settings"), dict) else None)
+        direction = _text(data.get("reading_direction"), 3)
+        d.reading_direction = direction if direction in READING_DIRECTIONS else ""
+        d.areas = _areas(data.get("areas"))
+        return d
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema": SCHEMA_VERSION,
+            "app": "taslation",
+            "kind": "series_defaults",
+            "note": SERIES_NOTE,
+            "key": self.key,
+            "series": self.series,
+            "updated": self.updated,
+            "settings": dict(self.settings),
+            "reading_direction": self.reading_direction,
+            "areas": [a.to_json() for a in self.areas],
+        }
+
+    def save(self) -> None:
+        """Write the file, protected and all or nothing, as a book's annotations are (`_write_json`); a file there
+        that this version cannot read (written meanwhile) is set aside first, never written over (`StoreFiles.claim`)."""
+        self.updated = _now()
+        self.path = SERIES_DEFAULT_FILES.claim(self.path, self.key)
+        _write_json(self.path, self.to_json())
+
+
+class SeriesDefaultsStore:
+    """The series' defaults, one JSON file per series (`series_id`): ``<key>.json``, or ``<key>-<hash>.json`` when that
+    one holds another series whose key gives the same file name (`names.pick`). No file is renamed."""
+
+    def __init__(self, folder: Path):
+        self.folder = Path(folder)
+
+    def path_for(self, series: str) -> Path:
+        """The file of *series*' defaults (`names.pick`; FileExistsError when both names hold other series)."""
+        return SERIES_DEFAULT_FILES.pick(self.folder, series_id(series))
+
+    def open(self, series: str) -> SeriesDefaults:
+        """The defaults of *series* from its file, or empty ones a save puts there. A file this version cannot read
+        is first set aside, never written over (`StoreFiles.load`); OSError when the file cannot be opened now."""
+        key = series_id(series)
+        path = SERIES_DEFAULT_FILES.pick(self.folder, key)
+        loaded = SERIES_DEFAULT_FILES.load(path, key, None, lambda data: SeriesDefaults.from_json(data, path))
+        if loaded is None:
+            return SeriesDefaults(path, series)
+        defaults, _owner = loaded
+        defaults.series, defaults.key = clean_series(series), key
+        return defaults
+
+    def find(self, book: str) -> SeriesDefaults | None:
+        """The defaults of the series of the book named *book* (`series_of`); None for a book without a series."""
+        series = series_of(book)
+        return self.open(series) if series else None
+
+    def list(self) -> list[dict[str, Any]]:
+        """The defaults of every series kept (not copies kept beside them nor files this version cannot read): per
+        series its *file*, *series*, how many *settings* and *areas*, the *reading_direction* and *updated*."""
+        out: list[dict[str, Any]] = []
+        if not self.folder.is_dir():
+            return out
+        for path in sorted(self.folder.glob("*.json")):
+            data = read_object(path)
+            if data is None or not SERIES_DEFAULT_FILES.listed(path, data):
+                continue
+            try:
+                SERIES_DEFAULT_FILES.check(data)
+                d = SeriesDefaults.from_json(data, path)
+            except Exception:  # names.Unreadable among them
+                continue
+            out.append({"file": str(path), "series": d.series, "settings": len(d.settings), "areas": len(d.areas),
+                        "reading_direction": d.reading_direction, "updated": d.updated})
+        return out
 
 
 # --- series sheet: glossary, characters, style ------------------------------------------------
@@ -1348,7 +1628,8 @@ __all__ = [
     "HONORIFIC_POLICIES", "INK_NAMES", "LETTERING_KINDS", "LETTER_SPACINGS", "LINE_SPACINGS", "LetteringStyle",
     "MAX_BOXES_PER_PAGE", "MAX_CHARACTERS", "MAX_PAGES", "MAX_TERMS", "NBOX_REACH", "PageAnnotations", "Premises",
     "REGION_KINDS",
-    "RegionNote", "RegionStyle", "Review", "STORE_KINDS", "STYLE_FIELDS", "STYLE_SIZES", "StyleGuide", "VALIGNS",
+    "RegionNote", "RegionStyle", "Review", "SERIES_DEFAULT_FILES", "SERIES_DIRNAME", "STORE_KINDS", "STYLE_FIELDS",
+    "STYLE_SIZES", "SeriesDefaults", "SeriesDefaultsStore", "StyleGuide", "VALIGNS",
     "apply_review", "clean_book_settings", "compare_sheets", "format_glossary", "format_sheet", "ink_code", "ink_of",
-    "join_premises", "page_side",
+    "join_premises", "page_side", "series_id", "series_of",
 ]

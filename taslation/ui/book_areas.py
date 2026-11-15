@@ -6,7 +6,13 @@ window). Adding one is one change across the book (`BookAreas`, a `history.BookS
 takes back whichever page is on show; the page on show is read again from the stores when the area touches it.
 Detection leaves out what lies mostly inside an area (`Pipeline._annotate`), on a page on show and in a whole-book
 run alike; Book settings lists the areas and removes one, with its Undo (`dialogs.book_settings`). Nothing of a page
-is kept: an area is four numbers, a side and the page's shape."""
+is kept: an area is four numbers, a side and the page's shape.
+
+Book settings' Use these areas for the series (`use_areas_for_series`) keeps the areas in force for the book as its
+series' areas (`annotations.SeriesDefaults`), which a new volume of the series starts with. An area is in the page's
+own terms (0..1 of its width and height, the page cropped to its ink as within one volume) with the page's width /
+height, so it lies at the same place on a volume captured at another size, and leaves a volume whose pages have
+another shape alone (`BookArea.applies`)."""
 
 from __future__ import annotations
 
@@ -40,6 +46,12 @@ SELECT_FIRST = "Select a region first (click it)."
 NO_BOOK = "Could not record the rectangle: give the book a name first (the Book field)."
 SAVE_FAILED = "Could not save the change: {error}"
 OFFER_POLL_MS = 100  # how often the question after a drop looks whether the drop is stored and the window free
+# Book settings' button that keeps the areas listed as the series' areas, its tip, and what it says once they are
+USE_FOR_SERIES = "Use these areas for the series"
+USE_FOR_SERIES_TIP = ("Start every new volume of {series} with the areas listed here. A volume that has areas of its "
+                      "own keeps them.")
+AREAS_SHARED = "Saved: a new volume of {series} starts with these {n} area(s)."
+AREAS_SHARED_NONE = "Saved: a new volume of {series} starts with no areas ignored."
 
 
 class BookAreas(BookStep):
@@ -92,6 +104,19 @@ def touches(result: Any, area: BookArea, inside: bool = True) -> bool:
                     and not r.kind.startswith("manual") and area.holds(unit.normalize(r.bbox))):
                 return True
     return False
+
+
+def use_areas_for_series(pipeline: Any) -> tuple[str, dict[str, Any]]:
+    """Use these areas for the series: the areas in force for the pipeline's book kept as its series' areas
+    (`BookAnnotations.share_areas`), which a new volume of the series starts with; the book's own file is saved when the
+    book takes the series' areas again (it follows its series, and its own list was the same). Nothing on the book's
+    pages changes. Returns what to say: a key (`AREAS_SHARED`, `AREAS_SHARED_NONE`) and its values. ValueError for a
+    book without a series; OSError when the series' file cannot be written."""
+    annotations = pipeline.annotations
+    if annotations.share_areas():
+        pipeline.save_annotations()
+    n = len(annotations.areas)
+    return (AREAS_SHARED if n else AREAS_SHARED_NONE), {"series": annotations.series_name, "n": n}
 
 
 def _save_error(pipeline: Any) -> str:
@@ -229,5 +254,6 @@ class AreaMixin:
         self._jobs.put(job)
 
 
-__all__ = ["AREA_QUESTION", "AreaMixin", "BookAreas", "IGNORE_EVERYWHERE", "IGNORE_TIP", "area_for", "covered",
-           "dropped_elsewhere", "touches"]
+__all__ = ["AREAS_SHARED", "AREAS_SHARED_NONE", "AREA_QUESTION", "AreaMixin", "BookAreas", "IGNORE_EVERYWHERE",
+           "IGNORE_TIP", "USE_FOR_SERIES", "USE_FOR_SERIES_TIP", "area_for", "covered", "dropped_elsewhere", "touches",
+           "use_areas_for_series"]

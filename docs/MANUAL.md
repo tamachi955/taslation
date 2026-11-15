@@ -539,6 +539,13 @@ and the page can be edited.
   and leaves the window open. Meanwhile "Undo" brings the cleared settings back. Below that, the areas ignored on every page of this book are listed
   with the pages they apply to (All pages, Right-hand pages, Left-hand pages) and their position (in % of the page's width and height), and "Remove area" (or the Delete key in the list)
   removes the selected area at once (text is looked for there again). "Undo" takes back the last thing done in this window (Clear all, or removing an area).
+
+  The volumes of a series can share these values. "Save as the series' default" applies the values shown to this book and keeps them (the choices, the sizes, the other settings and the reading direction) as its series' defaults;
+  "Use these areas for the series", beside the areas, keeps the areas listed as the series' areas. A volume opened for the first time (nothing of its own kept yet) starts from its series' defaults and follows them wherever it has no value of its own:
+  such a value is marked "(the series' default)", "As the series' default" or "(series' default: ...)", a value set for the volume always wins, and "Clear all" goes back to the series' defaults (your own settings where the series has none).
+  The areas are the series' list as a whole until you remove or add one in the volume; then the volume keeps its own list. The series is the Series field of a book that has a volume number (letter case and spaces aside);
+  a book without a volume has no series defaults, and a book whose annotations were kept before goes by its own values as before. Areas are kept relative to the page and its shape, so they fit a volume captured at another size,
+  and a volume whose pages have another shape is left alone. The series' defaults are kept in `~/.taslation/annotations/series/`, protected as the annotations are.
 * "Series sheet..." keeps, for each series, terms (the term and its rendering or spelling), characters (gender, age, first-person pronoun, way of speaking, role, how they address other characters)
   and a style guide (the policy on honorifics, tone, house rules, the lettering font the series suggests, and per kind the typeface and the text colour, outline and outline colour). The colours and outline per kind become "Auto" for the regions of that kind, and a colour and outline set for a region in the editor take precedence over them. Everything except the typefaces
   is told to the model before it translates. Only facts go in, never the book's dialogue. The lettering font is given by its family name, such as Comic
