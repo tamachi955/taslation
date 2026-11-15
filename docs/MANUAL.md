@@ -124,10 +124,13 @@ which suits finding a mistake of the OCR or of the detection (characters missed,
 
 The wait before either shows is the same. With the translation on the page, a bubble that is hard to read (one flagged "small", a translation much longer than the original,
 or one shown on the screen smaller than the readable size `readable_font_size`) shows after about 0.5 seconds and other bubbles after about 1.2 seconds; with the original on the page,
-every bubble after about 0.5 seconds. So a pointer that merely passes over the page shows nothing. One bubble at a time;
+every bubble after about 0.5 seconds. So a pointer that merely passes over the page shows nothing.
+"Delay under the pointer" in Tools > Settings... (`hover_delay_ms`, 450 by default) changes both waits: that many milliseconds, and about 2.7 times as long for the other bubbles; 0 shows at once. One bubble at a time;
 it goes back when the pointer leaves the bubble, on a click (the click goes to the viewer as before), on the wheel, a key or Esc, and when the page changes.
 It shows when you rest the pointer, not on a click (since clicks on the page belong to the viewer).
-The panel's translation is twice `readable_font_size` (22 pixels by default), and never smaller than on the page. The panel never covers the bubble and takes no focus,
+The panel's translation is twice `readable_font_size` (22 pixels by default), and never smaller than on the page.
+With "Panel text size" in Tools > Settings... (`panel_font_size`, in points; 0, the default, keeps that automatic size) it is the size you set, which grows with the window's text size and the monitor's scaling as the rest of the window's text does, up to about 8 % of the screen's height;
+a panel that would not fit on the screen has its text made smaller until it does. The panel never covers the bubble and takes no focus,
 so even over a full-screen viewer, keys reach the viewer. The enlargement of the original, and the original lettering put back in place, are cut out of the page in memory and never written to disk.
 
 **View > Show original and the bubble zoom setting**: with the translation on the page, View > Show original shows the whole page as the viewer does
@@ -863,10 +866,11 @@ Switch models with `--model NAME` or `ollama_model` in the settings file (`"auto
 ### Settings
 
 The settings you change often can be changed in the window under "Tools > Settings...": the smallest and largest lettering size; the size below which a translation is put on the list for a second look (Review);
-the lettering size (80 to 130 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
+the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
 in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; whether to stay always on top; how a book starts (page by page, or the whole book first);
 and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before) are listed here too.
+Under the rows for the bubble under the pointer are "Panel text size" (`panel_font_size`: 0, automatic, or 6 to 72 points) and "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default); a number out of these bounds is not saved.
 For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
 it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
 On other computers, erasing works as with "Not used", and the model is not even loaded (the setting's row then says so).
@@ -923,7 +927,7 @@ ollama_num_ctx = 16384       # the chat translator's context window (a batch req
 target_language = "English"
 uppercase = false            # scanlation-style capitals (Latin script only)
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
-text_scale = 1.0             # the lettering size: 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
+text_scale = 1.0             # the lettering size (0.5-2.0): 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering"
 spellcheck = true            # flag a word the dictionary does not know (needs `pip install pyspellchecker`, offline word lists)
 take_columns_beyond = false  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (a book setting too)
@@ -947,6 +951,8 @@ hover_shows = "original"     # reading mode and the Reader role: the translation
                              # pointer), or the page as the viewer shows it ("translation" under the pointer)
 hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
+panel_font_size = 0          # the panel's text in points (6-72, following ui_scale and the monitor); 0: automatic
+hover_delay_ms = 450         # the wait before a bubble under the pointer shows its other side (0-3000; 0: at once)
 ```
 
 The size of the window's text can be changed with `ui_scale` (1.0 follows Windows' scaling; 0.5 to 3.0).

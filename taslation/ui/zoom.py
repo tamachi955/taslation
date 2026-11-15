@@ -13,12 +13,16 @@ bubble itself instead: `in_place`):
 
 * When: after `ZOOM_DELAY_MS` on a bubble that is hard to read where it is (`hard_to_read`: flagged "small" or
   "long", or lettered on the screen under `Settings.readable_font_size`) and on every bubble with the original on
-  the page, after `ZOOM_REST_MS` on any other one, so that a pointer passing over the page opens nothing. Not in the
-  Translator role's normal window, where the pointer selects and edits the regions; with the translation on the page,
-  not with `Settings.bubble_zoom` off.
+  the page, after `ZOOM_REST_MS` on any other one, so that a pointer passing over the page opens nothing; with
+  `Settings.hover_delay_ms` other than 450, that many milliseconds and 8/3 as many (`hover_delays`; 0: at once). Not
+  in the Translator role's normal window, where the pointer selects and edits the regions; with the translation on
+  the page, not with `Settings.bubble_zoom` off.
 * Size: the translation at twice the readable size and never smaller than it is lettered on the screen
-  (`zoom_text_px`); the crop as large as the page shows it or larger, beside the text (above it for a wide bubble).
-  Under them, the key that pins the panel with the bubble's Japanese (`ZOOM_HINT`, when that action has one).
+  (`zoom_text_px`), or at the points of `Settings.panel_font_size`, which follow the window's text size and the
+  monitor's scaling (`panel_text_px`, at most `PANEL_TEXT_MOST` of the work area's height); the crop as large as the
+  page shows it or larger, beside the text (above it for a wide bubble). Under them, the key that pins the panel with
+  the bubble's Japanese (`ZOOM_HINT`, when that action has one). A panel larger than the work area has its text made
+  smaller until it fits (`fit_panel`), and is cut to it when even that is not enough.
 * Where: beside the bubble, never over it (so never under the pointer: no flicker), within the page area when it fits
   there, else within the monitor's work area (`zoom_place`). One bubble at a time: the pointer on another bubble
   takes the panel away, and that one's opens after the same rest.
@@ -59,6 +63,7 @@ from PIL import Image, ImageTk
 from ..annotations import DEFAULT_LETTERING, LetteringStyle
 from ..capture import IS_WINDOWS
 from ..capture.overlay import set_over
+from ..config import HOVER_DELAY_RANGE, PANEL_FONT_RANGE
 from ..i18n import _
 from ..render.lettering import strip_marks
 from . import layout, shortcuts
@@ -76,6 +81,9 @@ READABLE_DEFAULT = 11  # the readable size when the setting is 0 (no flag "small
 ZOOM_CROP_TIMES = 1.5  # the original: this many times its size on the page (at least as on the screen) ...
 ZOOM_CROP_SHARE = (0.4, 0.55)  # ... and at most this share of the monitor's work area (width, height)
 ZOOM_TEXT_EMS = 16  # the text wraps at about this many times its size
+PANEL_TEXT_MOST = 0.08  # a text size set by hand (`panel_text_px`): at most this share of the work area's height
+PANEL_TEXT_LEAST = 16  # a panel larger than the work area (`fit_panel`): its text made smaller down to this (px) ...
+PANEL_SHRINK = 0.85  # ... by this factor a step
 ZOOM_GAP = 12  # pixels between the bubble and the popup
 ZOOM_COLOURS = {"edge": "#5c5c5c", "ground": "#1d1d1d", "text": "#f2f2f2", "hint": "#b4b4b4"}
 ZOOM_HINT = "{key}: its Japanese, to select and copy"  # the panel's last line, with the key of "show_japanese"
@@ -95,6 +103,81 @@ def zoom_text_px(readable: int, shown_px: float) -> int:
     base = readable if readable and readable > 0 else READABLE_DEFAULT
     px = max(ZOOM_TEXT_TIMES * base, ZOOM_ON_SCREEN * max(0.0, shown_px))
     return int(round(min(ZOOM_TEXT_PX[1], max(ZOOM_TEXT_PX[0], px))))
+
+
+def _whole(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def panel_text_px(chosen: Any, readable: int, shown_px: float, per_point: float, work: Box) -> int:
+    """The panel's text size in pixels. *chosen* (`Settings.panel_font_size`) 0, automatic: `zoom_text_px` of
+    *readable* and *shown_px*, as ever. Else *chosen* points (within `PANEL_FONT_RANGE`) at *per_point* pixels a point
+    - Tk's scaling, the monitor's DPI times `Settings.ui_scale` (`pixels_per_point`), as the window's own text is drawn
+    at -, at most `PANEL_TEXT_MOST` of the work area's height (*work*; never under the automatic size's
+    `ZOOM_TEXT_PX` bound), whatever the bubble's lettering."""
+    points = _whole(chosen, 0)
+    if points <= 0:
+        return zoom_text_px(readable, shown_px)
+    points = max(PANEL_FONT_RANGE[0], min(PANEL_FONT_RANGE[1], points))
+    most = max(float(ZOOM_TEXT_PX[1]), (work[3] - work[1]) * PANEL_TEXT_MOST)
+    return max(1, int(round(min(points * max(0.1, float(per_point)), most))))
+
+
+def pixels_per_point(widget: tk.Misc) -> float:
+    """Tk's scaling for *widget* (pixels per point: the monitor's DPI / 72 times `Settings.ui_scale`, `ui.scaling`);
+    96 DPI's where Tk does not say."""
+    try:
+        return float(widget.tk.call("tk", "scaling"))
+    except (tk.TclError, ValueError, TypeError, AttributeError):
+        return 96 / 72
+
+
+def hover_delays(settings: Any) -> tuple[int, int]:
+    """How long the pointer rests on a bubble before its other side shows (milliseconds), by
+    `Settings.hover_delay_ms`: on a bubble hard to read where it is and on every one with the original on the page,
+    then on any other one 8/3 as long - at 450, the default, `ZOOM_DELAY_MS` and `ZOOM_REST_MS` exactly; at 0, at
+    once. A value out of `HOVER_DELAY_RANGE` (or none) is taken to the nearer bound (or the default)."""
+    delay = _whole(getattr(settings, "hover_delay_ms", ZOOM_DELAY_MS), ZOOM_DELAY_MS)
+    delay = max(HOVER_DELAY_RANGE[0], min(HOVER_DELAY_RANGE[1], delay))
+    return delay, int(round(delay * ZOOM_REST_MS / ZOOM_DELAY_MS))
+
+
+def wrapped(text: str, width: int, font: tkfont.Font) -> str:
+    """*text* in lines of at most *width* pixels in *font* (`wrap.wrap_text`), as the panel shows it."""
+    return "\n".join(line.rstrip(" ") for part in wrap_text(text, width, font.measure) for line in part)
+
+
+def fit_panel(popup: tk.Toplevel, size: tuple[int, int], work: Box, font: tkfont.Font | None,
+              words: tuple[tk.Label, str, int] | None) -> tuple[int, int]:
+    """*popup* of *size* made to fit the work area *work*, its size then. A panel that fits is left exactly as it is.
+    One wider or taller than the work area has its text (*font*, which the panel's lines of text are set in) made
+    smaller by `PANEL_SHRINK` a step, down to `PANEL_TEXT_LEAST` pixels (or the size it had, were it smaller), the
+    translation wrapped again (*words*: its label, its text and the width it wraps at); when even that is not enough,
+    the panel is cut to the work area."""
+    room = (max(1, work[2] - work[0]), max(1, work[3] - work[1]))
+    w, h = size
+    if w <= room[0] and h <= room[1]:
+        return size
+    try:
+        px = abs(int(font.cget("size"))) if font is not None else 0
+        least = min(px, PANEL_TEXT_LEAST)
+        while (w > room[0] or h > room[1]) and px > least:
+            px = max(least, int(px * PANEL_SHRINK))
+            font.configure(size=-px)  # (every line of the panel set in it follows)
+            if words is not None:
+                label, text, width = words
+                label.configure(text=wrapped(text, width, font))
+            popup.update_idletasks()
+            w, h = popup.winfo_reqwidth(), popup.winfo_reqheight()
+        if w > room[0] or h > room[1]:
+            w, h = min(w, room[0]), min(h, room[1])
+            popup.geometry(f"{w}x{h}")
+    except (tk.TclError, ValueError):  # (the panel is going)
+        pass
+    return w, h
 
 
 def hard_to_read(region: Any, scale: float, readable: int) -> bool:
@@ -424,8 +507,8 @@ class BubbleZoomMixin:
     # ------------------------------------------------------------------ the pointer
     def _zoom_motion(self, event: tk.Event) -> None:
         """The pointer moved on the page: onto another bubble, the panel of the one before goes and this one's is due
-        (`ZOOM_DELAY_MS`, or `ZOOM_REST_MS` on a bubble that reads well on a translated page); off the bubbles it
-        goes. A panel pinned with a bubble's Japanese stays, and none other opens meanwhile."""
+        (`ZOOM_DELAY_MS`, or `ZOOM_REST_MS` on a bubble that reads well on a translated page; `hover_delays`); off the
+        bubbles it goes. A panel pinned with a bubble's Japanese stays, and none other opens meanwhile."""
         if getattr(self, "_zoom_pinned", False):
             return
         target = self._zoom_target_at(event.x, event.y)
@@ -437,7 +520,8 @@ class BubbleZoomMixin:
         readable = int(getattr(self.settings, "readable_font_size", 0) or 0)
         soon = isinstance(target, FillBox) or reverse_on(self) or hard_to_read(target, self.canvas.scale, readable)
         self._zoom_target = target
-        self._zoom_job = self.after(ZOOM_DELAY_MS if soon else ZOOM_REST_MS, self._zoom_due)
+        soon_ms, rest_ms = hover_delays(getattr(self, "settings", None))
+        self._zoom_job = self.after(soon_ms if soon else rest_ms, self._zoom_due)
 
     def _zoom_due(self) -> None:
         """The pointer rested on the bubble: its panel, if it is still there and the pointer on it."""
@@ -505,7 +589,8 @@ class BubbleZoomMixin:
             return
         work = layout.work_area(self, *pointer)
         readable = int(getattr(self.settings, "readable_font_size", 0) or 0)
-        px = zoom_text_px(readable, float(getattr(region, "font_size", 0) or 0) * canvas.scale)
+        px = panel_text_px(getattr(self.settings, "panel_font_size", 0), readable,
+                           float(getattr(region, "font_size", 0) or 0) * canvas.scale, pixels_per_point(self), work)
         bold, italic = (False, False) if not reverse or filling else faces(region, getattr(self, "pipeline", None))
         family = tkfont.nametofont("TkDefaultFont").actual("family")
         font = tkfont.Font(family=family, size=-px, weight="bold" if bold else "normal",
@@ -520,7 +605,7 @@ class BubbleZoomMixin:
         width = max(ZOOM_TEXT_EMS * px, shown[0] if stacked else 0)
         width = int(min(width, (work[2] - work[0]) * 0.45))
         text = strip_marks(region.text if filling else str(region.translated_text or ""))
-        lines = "\n".join(line.rstrip(" ") for part in wrap_text(text, width, font.measure) for line in part)
+        lines = wrapped(text, width, font)
         colours = ZOOM_COLOURS
         popup = tk.Toplevel(self)
         popup.withdraw()
@@ -540,8 +625,10 @@ class BubbleZoomMixin:
         pinned = pinned and panel is not None and not filling
         keymap = getattr(self, "keymap", None) or shortcuts.current()
         self._zoom_veiled = None
+        self._zoom_words = None  # (the translation's label, its text and width: wrapped again by `fit_panel`)
         if lines:
             words = tk.Label(top, text=lines, font=font, fg=colours["text"], bg=colours["ground"], justify="left")
+            self._zoom_words = (words, text, width)
             place = {"side": "top" if stacked or shown is None else "left", "anchor": "w" if stacked else "n",
                      **({"pady": (8, 0)} if stacked else {"padx": (10, 0)} if shown is not None else {})}
             if pinned and reverse:  # the original on the page: the Japanese first, the translation when asked
@@ -570,11 +657,11 @@ class BubbleZoomMixin:
                 canvas.winfo_rooty() + canvas.winfo_height())
         within = (max(page[0], work[0]), max(page[1], work[1]), min(page[2], work[2]), min(page[3], work[3]))
         self._zoom_where = (bubble, within, work, pointer)
+        self._zoom_font = font  # (before the place: `fit_panel` makes it smaller for a panel larger than the screen)
         self._zoom_place(popup, size)
         self._zoom_popup, self._zoom_for = popup, (result, region)
         self._zoom_pinned = pinned
         self._zoom_state = region.state if filling else ""  # (a box lettered meanwhile: its panel is made anew)
-        self._zoom_font = font
         reveal(popup)
         self._zoom_watch_job = self.after(ZOOM_WATCH_MS, self._zoom_watch)
 
@@ -602,8 +689,9 @@ class BubbleZoomMixin:
     def _zoom_place(self, popup: tk.Toplevel, size: tuple[int, int]) -> None:
         """*popup* of *size* beside its bubble (`zoom_place`, within the page area, else the work area; else in the
         work area's corner away from the pointer), as `_zoom_show` found them; again when it grew (a pinned panel's
-        Japanese read)."""
+        Japanese read). First made to fit the work area when it is larger (`fit_panel`)."""
         bubble, within, work, pointer = self._zoom_where
+        size = fit_panel(popup, size, work, getattr(self, "_zoom_font", None), getattr(self, "_zoom_words", None))
         place = (zoom_place(size, bubble, within) or zoom_place(size, bubble, work)
                  or fallback_place(size, pointer, work))
         popup.geometry(f"+{place[0]}+{place[1]}")
@@ -662,6 +750,7 @@ class BubbleZoomMixin:
         self._zoom_pinned = False
         self._zoom_pinned_at = None  # (where the pointer was as it was pinned: `BubbleTextMixin._pin_bubble`)
         self._zoom_veiled = None  # (the translation a pinned panel holds back: `_zoom_unveil`)
+        self._zoom_words = None  # (the translation's label: `fit_panel`)
         self._zoom_japanese = None  # (the pinned panel's line of Japanese: `BubbleTextMixin._panel_text`)
         popup, self._zoom_popup = getattr(self, "_zoom_popup", None), None
         if popup is None:

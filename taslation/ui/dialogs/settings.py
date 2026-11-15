@@ -4,7 +4,7 @@ an "Open settings file" button for all the others, which makes the file first wh
 create_settings_file`, at the place the settings are read from: `config.settings_file`).
 
 What it holds (`KEYS`): the lettering's smallest and largest size and the size under which a translation is listed
-for review, the lettering size (`text_scale`, `TEXT_SCALES`; a book may have its own: `book_settings`), capitals,
+for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book may have its own: `book_settings`), capitals,
 slanted lettering; the window's text size (`ui_scale`, `ui.scaling`), always on top, how a book
 starts (page by page or the whole book first, with what a store's terms make of that: `start.terms_note`); the two
 optional page models (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither
@@ -19,7 +19,9 @@ shown), and how many of the translation model's layers Ollama puts on the GPU (`
 others).
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
-`Settings` has the key, written and applied like the others.
+`Settings` has the key, written and applied like the others. A whole number is one line in `NUMBER_ROWS` (a
+`NumberRow`: a box with arrows, checked on Save): the panel's text size and the delay under the pointer
+(``panel_font_size``, ``hover_delay_ms``), under the hover rows of the window section.
 
 `warn_ignored`: the keys of the file this version does not know, named once in a box of the window's own (the names
 only; the same names are not named again: ``ui.json``).
@@ -37,7 +39,17 @@ from pathlib import Path
 from tkinter import ttk
 from typing import Any, Callable
 
-from ...config import LAMA_MODEL, LAYOUT_MODEL, ConfigError, Settings, create_settings_file, settings_file, write_settings
+from ...config import (
+    HOVER_DELAY_RANGE,
+    LAMA_MODEL,
+    LAYOUT_MODEL,
+    PANEL_FONT_RANGE,
+    ConfigError,
+    Settings,
+    create_settings_file,
+    settings_file,
+    write_settings,
+)
 from ...i18n import _, load_ui_table, save_ui_entry
 from ...render import artwork
 from ..layout import place_window
@@ -97,15 +109,69 @@ def shown_rows(rows: tuple[SettingRow, ...] = EXTRA_ROWS) -> tuple[SettingRow, .
     return tuple(row for row in rows if row.key in FIELDS)
 
 
+@dataclass(frozen=True)
+class NumberRow:
+    """A setting the dialog asks for as a whole number in a box (`NUMBER_ROWS`): the `Settings` field *key*; *label*
+    and *tip* in English (the 16 languages in `locales/features/panel_size.py`); *bounds* (lowest, highest) and, with
+    *zero*, 0 besides (automatic), checked on Save (`number_problem`, which *problem* says them in); *step*: the box's
+    arrows; in *section*, right under the row of the setting *after* (at the section's end where that row is not
+    shown)."""
+
+    key: str
+    label: str
+    tip: str
+    bounds: tuple[int, int]
+    problem: str
+    zero: bool = False
+    step: int = 1
+    section: str = "window"
+    after: str = "bubble_zoom"
+
+    def fits(self, value: Any) -> bool:
+        """Whether *value* is a whole number this row takes."""
+        if not isinstance(value, int) or isinstance(value, bool):
+            return False
+        return (self.zero and value == 0) or self.bounds[0] <= value <= self.bounds[1]
+
+
+# the panel beside a bubble under the pointer (`ui.zoom`), under the rows of how a bubble shows its other side
+NUMBER_ROWS: tuple[NumberRow, ...] = (
+    NumberRow("panel_font_size", "Panel text size (points, 0: automatic):",
+              "The size of the text in the panel beside a bubble under the pointer, in points. It grows with the window's text size and the monitor's scaling, and the panel always stays on the screen. 0: automatic (about twice the review size).",
+              PANEL_FONT_RANGE, "The panel text size: 0 (automatic) or a whole number from {low} to {high} points.",
+              zero=True),
+    NumberRow("hover_delay_ms", "Delay under the pointer (milliseconds):",
+              "How long the pointer rests on a bubble before its other side shows: this long on a bubble that is hard to read and on every bubble while the original is on the page, about 2.7 times as long on the others. 450: 0.45 and 1.2 seconds. 0: at once.",
+              HOVER_DELAY_RANGE, "The delay under the pointer: a whole number from {low} to {high} milliseconds.",
+              step=50),
+)
+
+
+def number_problem(row: NumberRow, value: Any) -> str | None:
+    """What is wrong with *value* for the number row *row* (in the window's language), None when nothing is."""
+    return None if row.fits(value) else _(row.problem).format(low=row.bounds[0], high=row.bounds[1])
+
+
+def whole_number(text: str) -> int | str:
+    """A number box's text as a whole number; the text itself when it is none (`number_problem` says so on Save)."""
+    try:
+        return int(str(text).strip())
+    except ValueError:
+        return str(text).strip()
+
+
 SHOWN_ROWS = shown_rows()
+SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # (ollama_num_gpu: on the System page, `system_page.SystemPage.num_gpu`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS), "ollama_num_gpu")
+        "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
+        *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
 PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "detect_model", "art_erase",
                            *(row.key for row in SHOWN_ROWS if row.page)})
-TEXT_SCALES = tuple(round(0.8 + 0.05 * i, 2) for i in range(11))  # the lettering sizes offered: 80 % to 130 %
+# the lettering sizes offered: 80 % to 130 % by 5, then on to 200 % by 10 (`config.TEXT_SCALE_RANGE`)
+TEXT_SCALES = (*(round(0.8 + 0.05 * i, 2) for i in range(11)), *(round(1.4 + 0.1 * i, 2) for i in range(7)))
 SIZE_RANGE = (0, 200)  # what a size box steps through (the bounds are checked on Save: `size_problem`)
 DETECT_CHOICES = (("off", "Not used"), ("auto", "Only with the inpainting"), ("on", "Always used"))
 # art_erase's three values (`artwork.runs_here`): never; only where torch has a CUDA GPU (the default); always, the CPU too
@@ -235,6 +301,7 @@ class SettingsDialog(tk.Toplevel):
         check.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_("Lettering set at a slant is turned upright to be read, and the translation is lettered at the same slant. Off: everything upright."), check)
         self.extra: dict[str, tk.Variable] = {}
+        self.numbers: dict[str, tk.StringVar] = {}  # (the boxes of `SHOWN_NUMBERS`)
         self._extra_rows(letters, "lettering", 6)
 
         window = ttk.LabelFrame(general, text=_("The window"), padding=8)
@@ -329,7 +396,9 @@ class SettingsDialog(tk.Toplevel):
             pass
 
     def _extra_rows(self, frame: ttk.LabelFrame, section: str, row: int) -> None:
-        """The rows of `SHOWN_ROWS` in *section*, in *frame* from grid row *row* on (`self.extra`: their variables)."""
+        """The rows of `SHOWN_ROWS` in *section*, in *frame* from grid row *row* on (`self.extra`: their variables),
+        each number row of the section (`SHOWN_NUMBERS`) under the row it goes after, else at the end."""
+        numbers = [spec for spec in SHOWN_NUMBERS if spec.section == section]
         for spec in SHOWN_ROWS:
             if spec.section != section:
                 continue
@@ -353,6 +422,28 @@ class SettingsDialog(tk.Toplevel):
                 tip(_(spec.tip), *widgets)
             self.extra[spec.key] = var
             row += 1
+            for number in [n for n in numbers if n.after == spec.key]:
+                numbers.remove(number)
+                self._number_row(frame, number, row)
+                row += 1
+        for number in numbers:
+            self._number_row(frame, number, row)
+            row += 1
+
+    def _number_row(self, frame: ttk.LabelFrame, spec: NumberRow, row: int) -> None:
+        """The number row *spec* in *frame* at grid row *row*: its label and a box with arrows (`self.numbers`)."""
+        name = ttk.Label(frame, text=_(spec.label))
+        name.grid(row=row, column=0, sticky="w", pady=(4, 0))
+        var = tk.StringVar(self, value=str(getattr(self.settings, spec.key)))
+        low, high = spec.bounds
+        if spec.zero:  # (0 and then the bounds: the arrows skip what Save would refuse)
+            box = ttk.Spinbox(frame, values=(0, *range(low, high + 1, spec.step)), textvariable=var, width=6)
+        else:
+            box = ttk.Spinbox(frame, from_=low, to=high, increment=spec.step, textvariable=var, width=6)
+        var.set(str(getattr(self.settings, spec.key)))  # (as the file has it, also where the arrows do not stop)
+        box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
+        tip(_(spec.tip), name, box)
+        self.numbers[spec.key] = var
 
     @staticmethod
     def _shown(choices: tuple[tuple[str, str], ...], value: str) -> str:
@@ -397,8 +488,14 @@ class SettingsDialog(tk.Toplevel):
         for spec in SHOWN_ROWS:
             var = self.extra[spec.key]
             out[spec.key] = self._value(spec.choices, var.get()) if spec.choices else bool(var.get())
+        for spec in SHOWN_NUMBERS:  # (as typed when it is no whole number: `number_problem` says so on Save)
+            out[spec.key] = whole_number(self.numbers[spec.key].get())
         out["ollama_num_gpu"] = self.system.num_gpu_value()  # (the System page's box, as typed when it is none)
         return out
+
+    def number_problem(self, values: dict[str, Any]) -> str | None:
+        """What is wrong with the number boxes' *values* (`number_problem`), the first one; None when nothing is."""
+        return next((p for p in (number_problem(spec, values.get(spec.key)) for spec in SHOWN_NUMBERS) if p), None)
 
     def changed(self) -> dict[str, Any]:
         """The fields that differ from the settings in force."""
@@ -419,7 +516,7 @@ class SettingsDialog(tk.Toplevel):
             problem = size_problem(-1, -1, -1)
         else:
             problem = (size_problem(values["min_font_size"], values["max_font_size"], values["readable_font_size"])
-                       or self.system.num_gpu_problem())
+                       or self.number_problem(values) or self.system.num_gpu_problem())
         if problem:
             self._say(problem, error=True)
             return False

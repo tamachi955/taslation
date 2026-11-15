@@ -96,7 +96,9 @@ PAGE_MODELS = (LAYOUT_MODEL, LAMA_MODEL)
 
 CONFIG_FILENAME = "taslation.toml"
 MIN_UI_SCALE, MAX_UI_SCALE = 0.5, 3.0  # the bounds of `Settings.ui_scale`
-TEXT_SCALE_RANGE = (0.5, 2.0)  # the bounds of `Settings.text_scale` (the dialogs offer 80-130 %)
+TEXT_SCALE_RANGE = (0.5, 2.0)  # the bounds of `Settings.text_scale` (the dialogs offer 80-200 %)
+PANEL_FONT_RANGE = (6, 72)  # `Settings.panel_font_size` when it is set (points; 0 besides: automatic)
+HOVER_DELAY_RANGE = (0, 3000)  # the bounds of `Settings.hover_delay_ms` (milliseconds)
 
 
 def default_models_dir() -> Path:
@@ -267,6 +269,14 @@ class Settings:
     # ... and how that bubble shows the other side (`ui.hover`): "panel" (a panel beside it, both in sight at once) or
     # "in_place" (the bubble itself, the original lettering or what was read, erased and set); also the View menu
     hover_reveal: str = "panel"
+    # the text of the panel beside a bubble (`ui.zoom.panel_text_px`): 0, automatic (twice readable_font_size, at least
+    # 1.25 times the bubble's lettering on the screen, 16-44 px); else this many points, which follow ui_scale and the
+    # monitor's scaling as the window's text does, at most a share of the work area's height (PANEL_FONT_RANGE)
+    panel_font_size: int = 0
+    # how long the pointer rests on a bubble before its other side shows (`ui.zoom.hover_delays`): this long on a
+    # bubble hard to read where it is and on every one with the original on the page, 8/3 as long on the others
+    # (450: 0.45 s and 1.2 s; 0: at once; HOVER_DELAY_RANGE)
+    hover_delay_ms: int = 450
     flash_when_done: bool = True  # a whole-book run that ends while TASlation is not in front flashes its taskbar button
     sound_when_done: bool = False  # ... and plays the system's default sound (`ui.attention`)
     follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
@@ -367,6 +377,16 @@ class Settings:
             raise ConfigError("hover_shows must be 'original' or 'translation'")
         if self.hover_reveal not in ("panel", "in_place"):
             raise ConfigError("hover_reveal must be 'panel' or 'in_place'")
+        size = self.panel_font_size
+        if (not isinstance(size, int) or isinstance(size, bool)
+                or (size != 0 and not PANEL_FONT_RANGE[0] <= size <= PANEL_FONT_RANGE[1])):
+            raise ConfigError(f"panel_font_size must be 0 (automatic) or a whole number of points from "
+                              f"{PANEL_FONT_RANGE[0]} to {PANEL_FONT_RANGE[1]}; got {size!r}")
+        delay = self.hover_delay_ms
+        if (not isinstance(delay, int) or isinstance(delay, bool)
+                or not HOVER_DELAY_RANGE[0] <= delay <= HOVER_DELAY_RANGE[1]):
+            raise ConfigError(f"hover_delay_ms must be a whole number of milliseconds from {HOVER_DELAY_RANGE[0]} to "
+                              f"{HOVER_DELAY_RANGE[1]} (450: as before, 0: at once); got {delay!r}")
         if self.ui_language:
             from .i18n import UI_LANGUAGES
 

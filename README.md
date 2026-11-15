@@ -301,7 +301,7 @@ An Ollama installed for TASlation is left not starting with Windows, and it tell
 2. Start TASlation from "TASlation" in the Start menu, and choose the viewer's window in the "Viewer" list (once you have chosen it, it is chosen automatically from then on).
 3. In the TASlation window, press a page key or click the page to turn it, and the translated page is shown (to read it large: reading mode, F11).
 
-How to operate it is explained in the app, under "Help > How to use...". The settings you change often, such as the lettering size (80 to 130 %, which can also be set per book) and the size of the window's text, and the window's keys (shortcuts), can be changed in "Tools > Settings...". Whether each stage runs on the GPU or the CPU, and how many seconds a page took, can be checked on the "System" page of the same dialog and with `taslation doctor`.
+How to operate it is explained in the app, under "Help > How to use...". The settings you change often, such as the lettering size (80 to 200 %, which can also be set per book) and the size of the window's text, and the window's keys (shortcuts), can be changed in "Tools > Settings...". Whether each stage runs on the GPU or the CPU, and how many seconds a page took, can be checked on the "System" page of the same dialog and with `taslation doctor`.
 Settings, the command line and the rest are described in detail in [docs/MANUAL.md](docs/MANUAL.md).
 
 ## Limitations

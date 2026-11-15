@@ -151,15 +151,19 @@ def in_force(tmp_path, monkeypatch):
     return Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models", config_path=tmp_path / "taslation.toml")
 
 
-def test_the_settings_dialog_offers_80_to_130_percent_and_saves_the_size(hidden_root, in_force):
+def test_the_settings_dialog_offers_80_to_200_percent_and_saves_the_size(hidden_root, in_force):
     got = []
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
     assert d.text_scale.get() == "100 %" and "text_scale" in dlg.KEYS and "text_scale" in dlg.PAGE_SETTINGS
-    assert dlg.text_scale_choices(1.0) == [f"{n} %" for n in range(80, 135, 5)]
+    assert dlg.text_scale_choices(1.0) == [*(f"{n} %" for n in range(80, 135, 5)), *(f"{n} %" for n in range(140, 210, 10))]
     assert dlg.text_scale_choices(0.72)[0] == "72 %" and dlg.percent_of("85 %") == 0.85
+    assert dlg.text_scale_choices(1.65) == sorted(dlg.text_scale_choices(1.0) + ["165 %"], key=dlg.percent_of)
     d.text_scale.set("90 %")
     assert d.save() is True and got == [{"text_scale": 0.9}]
     assert Settings.from_toml(in_force.config_path).text_scale == 0.9
+    d.text_scale.set("200 %")  # the largest offered: the most the file takes
+    assert d.save() is True and got[-1] == {"text_scale": 2.0}
+    assert Settings.from_toml(in_force.config_path).text_scale == 2.0
 
 
 def _book_pipeline(settings, current):

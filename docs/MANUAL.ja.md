@@ -122,10 +122,13 @@ OCR や検出の誤り（読み落とした文字、絵まで消した部分な�
 
 出るまでの間はどちらも同じです。ページに訳文を出しているときは、読みにくい吹き出し（「小さい」の印が付いたもの、原文よりずっと長い訳、
 画面上で読みやすい大きさ `readable_font_size` 未満に表示されているもの）で約0.5秒、ほかの吹き出しで約1.2秒、ページに原文を出しているときは
-どの吹き出しも約0.5秒なので、ページの上をポインターが通り過ぎるだけでは何も出ません。一度に1つの吹き出しだけで、
+どの吹き出しも約0.5秒なので、ページの上をポインターが通り過ぎるだけでは何も出ません。
+待つ時間は「ツール > 設定...」の「ポインターの下で待つ時間」（`hover_delay_ms`、既定は 450）で変えられます。その時間（ミリ秒）と、ほかの吹き出しではそのおよそ2.7倍になり、0 ならすぐに出ます。一度に1つの吹き出しだけで、
 ポインターが吹き出しを離れたとき、クリックしたとき（クリックはこれまでどおりビューアに渡ります）、ホイール、キー、Esc、ページが変わったときに元に戻ります。
 開くのはクリックではなくポインターを置いたときです（ページのクリックはビューアのものなので）。
-パネルの訳文は `readable_font_size` の2倍（既定で22ピクセル）で、ページ上より小さくはしません。パネルは吹き出しに重ねず、フォーカスを取らないので、
+パネルの訳文は `readable_font_size` の2倍（既定で22ピクセル）で、ページ上より小さくはしません。
+「ツール > 設定...」の「パネルの文字の大きさ」（`panel_font_size`、ポイント。既定の 0 はこの自動の大きさ）を決めるとその大きさになり、ウィンドウのほかの文字と同じく、ウィンドウの文字の大きさとモニターの拡大率に合わせて大きくなります（画面の高さのおよそ 8 % まで）。
+画面に収まらないパネルは、収まるまで文字を小さくします。パネルは吹き出しに重ねず、フォーカスを取らないので、
 全画面のビューアの上でもキーはビューアに届きます。原文の拡大も、その場に戻す元の写植も、メモリ上のページから切り出すもので、ディスクには書きません。
 
 **「表示 > 原文を表示」と吹き出しの拡大の設定**: ページに訳文を出しているときは、「表示 > 原文を表示」でページ全体をビューアのままにできます
@@ -857,10 +860,11 @@ Qwen3 4B は 30B をわずかに下回りました（162行のうち 30B の訳�
 ### 設定
 
 よく変える設定は、ウィンドウの「ツール > 設定...」で変えられます。写植の最小と最大の大きさ、これより小さく組んだ訳文を見直しの一覧（レビュー）に入れる大きさ、
-写植の大きさ（80〜130 %。100 % は吹き出しに収まる最大の大きさのままで、90 % ならすべての訳文を1割小さく組みます。
+写植の大きさ（80〜200 %。100 % は吹き出しに収まる最大の大きさのままで、90 % ならすべての訳文を1割小さく組みます。
 100 % より大きくしても、吹き出しと最大の大きさは超えず、ページ内で大きさをそろえるために抑えられていた訳文だけが大きくなります。
 設定ファイルでは `text_scale`、本ごとの値は翻訳者モードの「この本の設定...」）、大文字で組むか、傾いた文字を同じ傾きで組むか、ウィンドウの文字の大きさ、常に手前に表示するか、本の始め方（1ページずつか、先に1冊まるごとか）、
 任意のページ用モデル（レイアウトモデルとインペイント）を使うかどうかです。ほかの機能の設定（ポインターを置いた吹き出しの拡大表示、1冊まるごとの読み取りが終わったときのタスクバーのボタンの点滅と音、前に出た短いセリフの訳の使い回し）も、ここに並びます。
+ポインターの下の吹き出しの行の下には「パネルの文字の大きさ」（`panel_font_size`: 0 で自動、または 6〜72 ポイント）と「ポインターの下で待つ時間」（`hover_delay_ms`: 0〜3000 ミリ秒、既定は 450）があります。範囲外の数は保存しません。
 インペイント（絵の上の文字を LaMa で消して絵を補う）は「使わない」「GPU があるときだけ」「いつも使う（CPU でも）」から選びます。既定は「GPU があるときだけ」で、
 モデルが入っていて、TASlation が使える GPU（CUDA が使える NVIDIA の GPU。PyTorch が CUDA で使えるもの）があるパソコンでだけ使います。
 そうでないパソコンでは「使わない」と同じ消し方になり、このモデルを読み込むこともありません（その場合は、設定の欄にその旨を表示します）。
@@ -917,7 +921,7 @@ ollama_num_ctx = 16384       # the chat translator's context window (a batch req
 target_language = "English"
 uppercase = false            # scanlation-style capitals (Latin script only)
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
-text_scale = 1.0             # the lettering size: 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
+text_scale = 1.0             # the lettering size (0.5-2.0): 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering"
 spellcheck = true            # flag a word the dictionary does not know (needs `pip install pyspellchecker`, offline word lists)
 take_columns_beyond = false  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (a book setting too)
@@ -941,6 +945,8 @@ hover_shows = "original"     # reading mode and the Reader role: the translation
                              # pointer), or the page as the viewer shows it ("translation" under the pointer)
 hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
+panel_font_size = 0          # the panel's text in points (6-72, following ui_scale and the monitor); 0: automatic
+hover_delay_ms = 450         # the wait before a bubble under the pointer shows its other side (0-3000; 0: at once)
 ```
 
 ウィンドウの文字の大きさは `ui_scale` で変えられます（1.0 が Windows の拡大率どおり。0.5〜3.0）。

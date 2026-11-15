@@ -15,7 +15,8 @@ leaves - the other way of showing what the panel beside a bubble shows (`zoom`, 
   lettering; once the page is done, the bubble under the pointer shows at once (the pointer has rested there).
 
 When: after the panel's delays (`zoom.ZOOM_DELAY_MS` with the original on the page or on a bubble hard to read where
-it is, `zoom.ZOOM_REST_MS` on any other one), so that a pointer passing over the page changes nothing. Until the
+it is, `zoom.ZOOM_REST_MS` on any other one; `Settings.hover_delay_ms`: `zoom.hover_delays`), so that a pointer
+passing over the page changes nothing. Until the
 pointer leaves the bubble - `REVEAL_HOLD_PX` round it still keep it, so that a pointer on its edge does not make it
 come and go. One bubble at a time: the pointer on another bubble takes it away, and that one shows after the same
 rest. It is drawn over the picture as a part of it (`preview.ImageCanvas.set_patch`), nothing else drawn again; it
@@ -36,7 +37,7 @@ from ..regions import ERASED
 from .hover import reveal_wanted, reverse_on
 from .preview import Patch
 from .strip import run_page_on_show
-from .zoom import FILL_SHOWN, ZOOM_DELAY_MS, ZOOM_REST_MS, ZOOM_WATCH_MS, hard_to_read
+from .zoom import FILL_SHOWN, ZOOM_WATCH_MS, hard_to_read, hover_delays
 
 REVEAL_HOLD_PX = 6  # canvas pixels round a bubble whose other side shows: the pointer there keeps it on show
 
@@ -270,7 +271,8 @@ class InPlaceMixin:
             readable = int(getattr(self.settings, "readable_font_size", 0) or 0)
             soon = hard_to_read(target.key, self.canvas.scale, readable)
         self._reveal_pending = target
-        self._reveal_job = self.after(ZOOM_DELAY_MS if soon else ZOOM_REST_MS, self._reveal_due)
+        soon_ms, rest_ms = hover_delays(getattr(self, "settings", None))  # (`Settings.hover_delay_ms`, as the panel's)
+        self._reveal_job = self.after(soon_ms if soon else rest_ms, self._reveal_due)
 
     def _reveal_due(self) -> None:
         """The pointer rested on the bubble: its other side in its place, if it may still show and the pointer is on

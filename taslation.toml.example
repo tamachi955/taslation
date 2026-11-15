@@ -49,7 +49,7 @@ margins = [0, 0, 0, 0]        # left, top, right, bottom pixels of the capture t
 font_path = ""                # empty = the series sheet's font where installed, then models/fonts (setup_models.py --font), then Windows fonts
 min_font_size = 9
 max_font_size = 64
-text_scale = 1.0              # the lettering's size: 0.9 sets every translation a tenth smaller, 1.2 larger where the page's sizes held it back (never over its bubble or max_font_size); a book can have its own (Book settings... in translator mode)
+text_scale = 1.0              # the lettering's size (0.5-2.0; the dialogs offer 80-200 %): 0.9 sets every translation a tenth smaller, 1.2 larger where the page's sizes held it back (never over its bubble or max_font_size); a book can have its own (Book settings... in translator mode)
 line_spacing = 1.12
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
 spellcheck = true            # flag a word the dictionary does not know (pip install pyspellchecker; offline word lists)
@@ -92,6 +92,8 @@ over_book = true              # over a viewer in full screen on the same monitor
 bubble_zoom = true            # reading mode and the Reader role, the translation on the page: a translated bubble the pointer rests on shows enlarged beside its original
 hover_shows = "original"      # reading mode and the Reader role: "original" (the page translated, the panel beside a bubble under the pointer shows its original) | "translation" (the page as the viewer shows it, the panel shows the bubble's translation); also View menu, Tools > Settings...
 hover_reveal = "panel"        # how a bubble under the pointer shows the other side: "panel" (beside it: both in sight at once) | "in_place" (the bubble itself: the original lettering, or what was read as text, erased and set); also View menu, Tools > Settings...
+panel_font_size = 0           # the panel's text in points (6-72; it follows ui_scale and the monitor's scaling, at most 8 % of the screen's height, and the panel stays on the screen); 0: automatic (twice readable_font_size, at least 1.25 times the bubble's lettering on the screen, 16-44 px)
+hover_delay_ms = 450          # how long the pointer rests on a bubble before its other side shows (0-3000): this long on a bubble hard to read and on every one with the original on the page, 8/3 as long on the others (450: 0.45 s and 1.2 s; 0: at once)
 flash_when_done = true        # a whole-book run that finishes or stops with a problem while TASlation is not in front flashes its taskbar button (no focus taken)
 sound_when_done = false       # ... and plays the system's default sound
 follow = "events"             # "events": the viewer is captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
