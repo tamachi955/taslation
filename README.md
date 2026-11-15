@@ -9,8 +9,6 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is showing,
 translates it on this computer, and shows the translation laid over the page. It sends no image data and no translations outside. It is a tool that assists a lawful act: translating, to read it, a document you bought for yourself.
 
-**What you read is the Japanese edition you bought. The money goes to the author and the publisher.**
-
 ## See it working
 
 ![The TASlation introduction: beside the viewer, a page is translated, corrected, and a whole book is translated](docs/media/taslation-intro.gif)
