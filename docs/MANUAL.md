@@ -391,6 +391,11 @@ and you choose "Keep the series'" or "Take this book's" (you can also choose for
 with "Cancel" the name stays as it is, and the colophon's title is offered again next time. This table appears only in the translator role. In the reader role it does not ask, and merges keeping the series' value in every row.
 If there is nothing to answer, it merges at once and shows how many entries were added, how many were taken from this book, and how many were kept as the series had them.
 
+The series' defaults (see "Book settings...") follow too when the new name belongs to another series. If the new series has none yet, the old series' defaults are moved to it,
+or copied when other volumes are still kept under the old series, so that those keep theirs. If the new series already has defaults of its own, they stay as they are, and so do the old series'.
+A book that was following its series keeps the values that were in force for it: if the new series' defaults (or none, for a name without a volume) would give it others,
+the values it took from the old series become its own, and it no longer follows a series.
+
 Nothing else is overwritten. If translations or page information under the new name already exist, nothing is moved,
 and the files in the way are shown.
 
@@ -560,7 +565,7 @@ and the page can be edited.
   removes the selected area at once (text is looked for there again). "Undo" takes back the last thing done in this window (Clear all, or removing an area).
 
   The volumes of a series can share these values. "Save as the series' default" applies the values shown to this book and keeps them (the choices, the sizes, the other settings and the reading direction) as its series' defaults;
-  "Use these areas for the series", beside the areas, keeps the areas listed as the series' areas. A volume opened for the first time (nothing of its own kept yet) starts from its series' defaults and follows them wherever it has no value of its own:
+  "Use these areas for the series", beside the areas (and in the "Page" menu, greyed while the book has no series), keeps the areas listed as the series' areas. A volume opened for the first time (nothing of its own kept yet) starts from its series' defaults and follows them wherever it has no value of its own:
   such a value is marked "(the series' default)", "As the series' default" or "(series' default: ...)", a value set for the volume always wins, and "Clear all" goes back to the series' defaults (your own settings where the series has none).
   The areas are the series' list as a whole until you remove or add one in the volume; then the volume keeps its own list. The series is the Series field of a book that has a volume number (letter case and spaces aside);
   a book without a volume has no series defaults, and a book whose annotations were kept before goes by its own values as before. Areas are kept relative to the page and its shape, so they fit a volume captured at another size,
@@ -662,11 +667,11 @@ Deleting the book or the series deletes such copies too.
 
 A book's cache can be made into a file encrypted with a passphrase, as a backup for yourself or to move it to another computer of your own ("Saved translations...",
 or `taslation cache export` and `taslation cache import`). The file contains the translations, with the book's page information
-(the rectangles you added or skipped, speakers and notes, the book's settings and the order of its pages) and the series sheet the book reads in that language,
-so keep it to yourself. Without the passphrase, no one, TASlation included, can open it, and a forgotten passphrase cannot be recovered.
+(the rectangles you added or skipped, speakers and notes, the book's settings and the order of its pages), the series sheet the book reads in that language
+and its series' defaults (one copy for all the volumes of a series in the file), so keep it to yourself. Without the passphrase, no one, TASlation included, can open it, and a forgotten passphrase cannot be recovered.
 One file can hold several books: in "Saved translations...", every row chosen; on the command line, a whole series (`--series NAME`: every cached volume of the series in the target language) or every book (`--all`).
 It holds no page images and no line read from the pages, only what the saved files themselves hold.
-Since the saved files cannot be read on another computer even when copied, this is the only way to move translations, page information and series sheets.
+Since the saved files cannot be read on another computer even when copied, this is the only way to move translations, page information, series sheets and series' defaults.
 When an administrator resets your Windows password (changing it yourself is fine), when you move to a new Windows profile,
 or when Windows is reinstalled, the protected files can no longer be opened. If the translations matter to you, keep an exported file.
 Files exported by an earlier version (one book's translations) can still be imported. An earlier version cannot import a file exported by this one:
@@ -680,13 +685,13 @@ it says the file comes from a newer version and imports nothing. Imported files 
   but a translation you corrected here stays where the file's line for that bubble is the model's (or where the file has none),
   unless you take the file as it is (`--take-file`; `--replace` replaces the whole cache). Before writing, the import says
   how many pages it adds and replaces, and how many of your corrections it keeps.
-* Page information you already have here stays unless you take the file's. A series sheet you already have is joined with the file's,
+* Page information you already have here stays unless you take the file's, and so do series' defaults you already have here. A series sheet you already have is joined with the file's,
   as a rename joins two sheets: what the file adds is added, and where the two say different things, yours stays unless you take the file's.
-* In "Saved translations...", an import of a file that holds several books, or that meets corrections, page information or sheet values of your own,
+* In "Saved translations...", an import of a file that holds several books, or that meets corrections, page information, series' defaults or sheet values of your own,
   first shows what the file holds and what the import would do, and nothing is written until you press "Import": you choose the books,
-  "Keep my corrections" (the default) or "Take the file as it is", "Keep mine" or "Take the file's" for the page information, and for each place where the series sheets differ.
+  "Keep my corrections" (the default) or "Take the file as it is", "Keep mine" or "Take the file's" for the page information and for the series' defaults, and for each place where the series sheets differ.
 * `cache import FILE --list` lists the books a file holds without importing anything, and `--book NAME` (again for several) imports only those.
-* Each import keeps every file it changes (cache, page information, series sheet) beside it as `<name>.before-import.<date>.json`,
+* Each import keeps every file it changes (cache, page information, series sheet, series' defaults) beside it as `<name>.before-import.<date>.json`,
   so you can go back by hand. A wrong passphrase, a broken file, a file too large (a book's cache over 5,000 pages,
   or over 500 bubbles on a page; over 1,000 books or 100,000 pages in one file), or parts made by a newer version of TASlation: in these cases it refuses without writing anything.
   An export too large to be read back from one file is refused as well: export fewer books at a time.
@@ -694,7 +699,7 @@ it says the file comes from a newer version and imports nothing. Imported files 
 
 `cache export` and `cache import` only print what the file is for to standard error before asking for the passphrase,
 and ask nothing more, so they can run unattended from a script. With `--confirm` they ask "Continue? [y/N]",
-and anything but yes ends with exit status 1, reading and writing nothing. An import whose file meets corrections, page information or sheet values of your own
+and anything but yes ends with exit status 1, reading and writing nothing. An import whose file meets corrections, page information, series' defaults or sheet values of your own
 prints on standard error what it will do with them and, with `--confirm`, asks once more. The passphrase is asked for without being shown. The environment variable
 `TASLATION_PASSPHRASE` is for scripts only, because PowerShell's PSReadLine writes a line such as
 `$env:TASLATION_PASSPHRASE = "…"` to its history file (its filter for secrets reacts to
@@ -765,9 +770,9 @@ taslation gui --reading        start in reading mode (the page alone, full scree
 taslation windows              list the windows that can be captured
 taslation doctor               check the models, fonts, Ollama, the network guard, and whether each stage runs on the GPU or the CPU
 taslation notice [--country CODE] [--reset]   show the legal notice of the start for a country (ISO code); --reset shows it again at the next start
-taslation cache export <book> --out FILE [--force] [--confirm]   export the book's translations, page information and series sheet to a file encrypted with your own passphrase (a backup for yourself, or for another computer of yours); --force overwrites an existing FILE
+taslation cache export <book> --out FILE [--force] [--confirm]   export the book's translations, page information, series sheet and series' defaults to a file encrypted with your own passphrase (a backup for yourself, or for another computer of yours); --force overwrites an existing FILE
 taslation cache export --series NAME | --all --out FILE   every cached volume of a series in the target language, or every book, in one file
-taslation cache import FILE [--list] [--book NAME] [--take-file] [--replace] [--confirm]   read that file back (merged with what is there, your corrections, page information and sheet values kept unless --take-file; --replace replaces the cache); --list only lists the books it holds
+taslation cache import FILE [--list] [--book NAME] [--take-file] [--replace] [--confirm]   read that file back (merged with what is there, your corrections, page information, series' defaults and sheet values kept unless --take-file; --replace replaces the cache); --list only lists the books it holds
 taslation batch --window "<title>" --book "My Book 1" [--max-pages N] [--no-context]   read the pages you turn; Enter when you have finished reading, Ctrl+C to stop
 taslation read --window "<title>" --book "My Book 1"   capture once, translate and preview
     (both take the book's name from the viewer window's title; a title with no book's name in it, such as

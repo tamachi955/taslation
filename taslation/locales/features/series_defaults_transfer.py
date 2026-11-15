@@ -1,0 +1,83 @@
+"""The window's strings for a series' defaults (`annotations.SeriesDefaults`) beyond Book settings: what the Saved
+translations dialog says of them after an export and an import (`ui.dialogs.caches`), the import review's choice where
+the defaults here differ from the file's (`ui.dialogs.import_review`), and the tip of Page > Use these areas for the
+series (`ui.book_areas`; the entry's label is Book settings' button, in `series_defaults`). Terms as those dialogs have
+them: the series' defaults ja 「シリーズの既定値」, de „Vorgaben der Serie“, fr « valeurs par défaut de la série »; the
+areas ja 「範囲」, de „Stellen“, fr « emplacements »; "Keep mine" / "Take the file's" as the review's other choices.
+
+Machine-translated; no native review."""
+
+TEXTS: dict[str, dict[str, str]] = {
+    "The series defaults you have here for {n} series differ from the file's:": {
+        "ja": "ここにある {n} シリーズの既定値が、ファイルのものと違います:",
+        "es": "Los valores predeterminados de {n} serie(s) que tienes aquí difieren de los del archivo:",
+        "pt": "Os padrões de {n} série(s) que você tem aqui diferem dos do arquivo:",
+        "fr": "Les valeurs par défaut de {n} série(s) que vous avez ici diffèrent de celles du fichier :",
+        "de": "Die Vorgaben von {n} Serie(n), die Sie hier haben, weichen von denen der Datei ab:",
+        "it": "I predefiniti di {n} serie che hai qui sono diversi da quelli del file:",
+        "nl": "De standaardwaarden van {n} serie(s) die u hier hebt, verschillen van die van het bestand:",
+        "pl": "Domyślne ustawienia serii ({n}), które masz tutaj, różnią się od tych z pliku:",
+        "ru": "Значения по умолчанию для серий ({n}), которые есть здесь, отличаются от тех, что в файле:",
+        "tr": "Burada bulunan {n} serinin varsayılanları dosyadakilerden farklı:",
+        "id": "Bawaan {n} seri yang Anda miliki di sini berbeda dari milik berkas:",
+        "vi": "Mặc định của {n} bộ truyện bạn có ở đây khác với của tệp:",
+        "zh": "你这里 {n} 个系列的默认值与文件中的不同：",
+        "zh-tw": "你這裡 {n} 個系列的預設值與檔案中的不同：",
+        "ko": "여기에 있는 시리즈 {n}개의 기본값이 파일의 것과 다릅니다:",
+        "th": "ค่าเริ่มต้นของซีรีส์ {n} เรื่องที่คุณมีที่นี่ต่างจากของไฟล์:",
+    },
+    "Series defaults: {added} added, {taken} taken from the file, {kept} kept as yours.": {
+        "ja": "シリーズの既定値: 追加 {added}、ファイルのものを採用 {taken}、あなたのものを維持 {kept}。",
+        "es": "Valores predeterminados de la serie: {added} añadido(s), {taken} tomado(s) del archivo, {kept} conservado(s) como los tuyos.",
+        "pt": "Padrões da série: {added} adicionado(s), {taken} tirado(s) do arquivo, {kept} mantido(s) como os seus.",
+        "fr": "Valeurs par défaut de série : {added} ajoutée(s), {taken} prise(s) du fichier, {kept} gardée(s) comme les vôtres.",
+        "de": "Vorgaben der Serie: {added} hinzugefügt, {taken} aus der Datei übernommen, {kept} als Ihre behalten.",
+        "it": "Predefiniti della serie: {added} aggiunti, {taken} presi dal file, {kept} tenuti come i tuoi.",
+        "nl": "Standaardwaarden van series: {added} toegevoegd, {taken} uit het bestand genomen, {kept} als de uwe behouden.",
+        "pl": "Domyślne ustawienia serii: dodane: {added}, wzięte z pliku: {taken}, zachowane twoje: {kept}.",
+        "ru": "Значения серий по умолчанию: добавлено — {added}, взято из файла — {taken}, оставлено ваших — {kept}.",
+        "tr": "Seri varsayılanları: {added} eklendi, {taken} dosyadan alındı, {kept} sizinki olarak kaldı.",
+        "id": "Bawaan seri: {added} ditambahkan, {taken} diambil dari berkas, {kept} tetap milik Anda.",
+        "vi": "Mặc định của bộ truyện: thêm {added}, lấy theo tệp {taken}, giữ bản của bạn {kept}.",
+        "zh": "系列默认值：新增 {added}，采用文件的 {taken}，保留你的 {kept}。",
+        "zh-tw": "系列預設值：新增 {added}，採用檔案的 {taken}，保留你的 {kept}。",
+        "ko": "시리즈 기본값: 추가 {added}, 파일 것을 사용 {taken}, 내 것 유지 {kept}.",
+        "th": "ค่าเริ่มต้นของซีรีส์: เพิ่ม {added} ใช้ของไฟล์ {taken} คงของคุณไว้ {kept}",
+    },
+    "Also with them: the defaults of {n} series.": {
+        "ja": "シリーズ {n} 件の既定値も入っています。",
+        "es": "También: los valores predeterminados de {n} serie(s).",
+        "pt": "Também: os padrões de {n} série(s).",
+        "fr": "Aussi : les valeurs par défaut de {n} série(s).",
+        "de": "Außerdem: die Vorgaben von {n} Serie(n).",
+        "it": "Inoltre: i predefiniti di {n} serie.",
+        "nl": "Ook: de standaardwaarden van {n} serie(s).",
+        "pl": "Także: domyślne ustawienia serii ({n}).",
+        "ru": "А также: значения по умолчанию для серий ({n}).",
+        "tr": "Ayrıca: {n} serinin varsayılanları.",
+        "id": "Juga: bawaan {n} seri.",
+        "vi": "Kèm theo cả: mặc định của {n} bộ truyện.",
+        "zh": "另外还有：{n} 个系列的默认值。",
+        "zh-tw": "另外還有：{n} 個系列的預設值。",
+        "ko": "그리고: 시리즈 {n}개의 기본값.",
+        "th": "และ: ค่าเริ่มต้นของซีรีส์ {n} เรื่อง",
+    },
+    "Start every new volume of this book's series with the areas this book ignores on all pages. A volume that has areas of its own keeps them.": {
+        "ja": "この本が全ページで無視している範囲から、この本のシリーズの新しい巻をすべて始めます。自分の範囲がある巻はそれを使い続けます。",
+        "es": "Cada tomo nuevo de la serie de este libro empieza con las zonas que este libro ignora en todas las páginas. Un tomo con zonas propias las conserva.",
+        "pt": "Cada novo volume da série deste livro começa com as áreas que este livro ignora em todas as páginas. Um volume com áreas próprias as mantém.",
+        "fr": "Chaque nouveau tome de la série de ce livre commence avec les emplacements que ce livre ignore sur toutes les pages. Un tome qui a ses propres emplacements les garde.",
+        "de": "Jeder neue Band der Serie dieses Buchs beginnt mit den Stellen, die dieses Buch auf allen Seiten ignoriert. Ein Band mit eigenen Stellen behält diese.",
+        "it": "Ogni nuovo volume della serie di questo libro parte dalle zone che questo libro ignora in tutte le pagine. Un volume con zone proprie le mantiene.",
+        "nl": "Elk nieuw deel van de serie van dit boek begint met de plekken die dit boek op alle pagina's negeert. Een deel met eigen plekken houdt die.",
+        "pl": "Każdy nowy tom serii tej książki zaczyna od miejsc, które ta książka ignoruje na wszystkich stronach. Tom z własnymi miejscami je zachowuje.",
+        "ru": "Каждый новый том серии этой книги начнётся с участков, которые эта книга игнорирует на всех страницах. Том со своими участками сохранит их.",
+        "tr": "Bu kitabın serisinin her yeni cildi, bu kitabın tüm sayfalarda yok saydığı alanlarla başlar. Kendi alanları olan bir cilt onları korur.",
+        "id": "Setiap volume baru dari seri buku ini dimulai dengan area yang diabaikan buku ini di semua halaman. Volume yang punya area sendiri tetap memakainya.",
+        "vi": "Mọi tập mới của bộ truyện của sách này sẽ bắt đầu với các khu vực mà sách này bỏ qua trên mọi trang. Tập có khu vực riêng vẫn giữ chúng.",
+        "zh": "本书所属系列的每个新卷都从本书在所有页面上忽略的范围开始。已有自己范围的卷保留它们。",
+        "zh-tw": "本書所屬系列的每個新卷都從本書在所有頁面上忽略的範圍開始。已有自己範圍的卷保留它們。",
+        "ko": "이 책의 시리즈의 새 권은 모두 이 책이 모든 페이지에서 무시하는 범위로 시작합니다. 자기 범위가 있는 권은 그것을 유지합니다.",
+        "th": "เล่มใหม่ทุกเล่มของซีรีส์ของหนังสือเล่มนี้จะเริ่มด้วยพื้นที่ที่หนังสือเล่มนี้ละเว้นในทุกหน้า เล่มที่มีพื้นที่ของตัวเองจะเก็บไว้ตามเดิม",
+    },
+}

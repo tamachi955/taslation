@@ -20,28 +20,37 @@ written until 2026-11-16, is one cache file's JSON as the cache store saves it (
 one book in one language. Version 2 is a bundle of one book or several::
 
     {"schema": 2, "app": "taslation", "kind": "export", "note": ...,
-     "books": [{"cache": <a cache's JSON>, "annotations": <index>, "sheet": <index>}, ...],
+     "books": [{"cache": <a cache's JSON>, "annotations": <index>, "sheet": <index>, "defaults": <index>}, ...],
      "annotations": [<a book's page information, as its store saves it>, ...],
-     "sheets": [<a series sheet in one language, as its store saves it>, ...]}
+     "sheets": [<a series sheet in one language, as its store saves it>, ...],
+     "defaults": [<a series' defaults, as their store saves them>, ...]}
 
 Each entry of ``books`` is one book's cache in one language, with the index of the book's page information
 (`annotations.BookAnnotations`: regions added and ignored, the areas ignored on every page, the book's settings and
-reading direction, the speakers and kinds of its regions and their formatting) and of the series sheet in that
-language (`annotations.Glossary`, the one the book reads: `notes.sheet_key`) when there are such files; several
-volumes of a series share one sheet, several languages of a book its page information. Each part is the plain JSON its
-store would save, read through the store's own loader (so the protection of the file is undone, `protect.py`) and
-written on import by the store's own save (so it is protected again); nothing is added to what those files hold. The
-version before reads a bundle's ``schema`` 2 as a cache of a newer TASlation and refuses it with that sentence
-(`UnreadableExport`); this version reads both, and refuses a later one the same way.
+reading direction, the speakers and kinds of its regions and their formatting), of the series sheet in that
+language (`annotations.Glossary`, the one the book reads: `notes.sheet_key`) and of its series' defaults
+(`annotations.SeriesDefaults`: the settings, reading direction and areas a new volume of the series starts from, the
+file of `series_id(series_of(book))`) when there are such files; several volumes of a series share one sheet and one
+file of defaults, several languages of a book its page information. Each part is the plain JSON its store would save,
+read through the store's own loader (so the protection of the file is undone, `protect.py`) and written on import by
+the store's own save (so it is protected again); nothing is added to what those files hold. The version before reads
+a bundle's ``schema`` 2 as a cache of a newer TASlation and refuses it with that sentence (`UnreadableExport`); this
+version reads both, and refuses a later one the same way.
+
+``defaults`` (the list, and the index in a book's entry) came to schema 2 after it was first written, on 2026-11-16,
+before any release carried schema 2: both are optional, a bundle without them is read as one whose series have no
+defaults, and a reader of schema 2 that does not know them leaves them alone (it reads only the keys it knows), so
+the schema number stayed 2.
 
 Reading a file trusts nothing in it before the tag is checked: a file larger than an export can be is refused
 before it is read, a header with other fields or with scrypt parameters costing more than twice what this
 version writes before any key is derived, and nothing is unpacked before the tag holds. What the passphrase
 opens is checked too (it may come from someone else): per book at most MAX_PAGES pages (a cache is one book's, and a
 volume has some 200; the file size cap alone would let in some 500,000) of at most MAX_BUBBLES_PER_PAGE bubbles
-each, at most MAX_BOOKS books and MAX_TOTAL_PAGES pages in one file, page information and sheets within the bounds their
-stores read, every page readable, no number that is not finite, the strings without control characters, and each
-book's cache file must be that book's, never another one whose name gives the same file. An export over those caps is
+each, at most MAX_BOOKS books and MAX_TOTAL_PAGES pages in one file, page information, sheets and series' defaults
+within the bounds their stores read, every page readable, no number that is not finite, the strings without control
+characters, a book's series' defaults those of its own series, and each book's cache file must be that book's, never
+another one whose name gives the same file. An export over those caps is
 refused the same way, and so is one whose payload would unpack to more than MAX_PAYLOAD (some 200 volumes of 200
 pages): a library larger than that goes in several files, a series or a few at a time.
 
@@ -58,8 +67,10 @@ with *replace* the file replaces the book's cache, header and all. The book's pa
 none here; where it has some, the reader's own stays unless they take the file's. The series sheet is added where the
 series has none here in that language; otherwise the file's sheet joins it as a rename joins two sheets
 (`annotations.compare_sheets`, `apply_review`): what it adds is taken over, and where the two say otherwise the sheet
-here keeps its value unless the reader answered to take the file's. Every file an import changes is kept beside as it
-was, ``<file>.before-import.<date>.json``. Everything is read and checked before anything is written.
+here keeps its value unless the reader answered to take the file's. A series' defaults are added where the series has
+none here (or empty ones); where it has others, the reader's stay unless they take the file's (its whole file: the
+defaults are a few values that belong together). Every file an import changes is kept beside as it was,
+``<file>.before-import.<date>.json``. Everything is read and checked before anything is written.
 
 The short lines a cache keeps for reuse (`linememo`: keyed hashes of the lines, the book's secret for them, and
 their translations; never the Japanese) are part of its JSON, so they travel in the export with the pages: an import
@@ -92,7 +103,8 @@ from . import protect
 from .atomic import write_atomic
 
 if TYPE_CHECKING:
-    from .annotations import AnnotationStore, BookAnnotations, Conflict, Glossary, GlossaryStore, Review
+    from .annotations import (AnnotationStore, BookAnnotations, Conflict, Glossary, GlossaryStore, Review,
+                              SeriesDefaults, SeriesDefaultsStore)
     from .cache import BookCache, CachedPage, CacheStore
 
 MAGIC = b"TASLATION-CACHE-1"
@@ -116,8 +128,8 @@ MAX_BUBBLES_PER_PAGE = 500  # bubbles one page may hold, far more than a page of
 MAX_BOOKS = 1000  # caches (a book in one language each) one export may hold; so many page informations and sheets too
 MAX_TOTAL_PAGES = 100_000  # pages of all of them together: some 500 volumes of 200 pages, more than MAX_PAYLOAD lets in
 PAYLOAD_SCHEMA = 2  # the payload's version this one writes (1: a cache's JSON alone, still read; see the docstring)
-PAYLOAD_NOTE = ("The reader's own translations, page information and series sheets of the books listed, for their "
-                "own computers. No page images, no page text.")
+PAYLOAD_NOTE = ("The reader's own translations, page information, series sheets and series defaults of the books "
+                "listed, for their own computers. No page images, no page text.")
 MATCH_IOU = 0.4  # a bubble of the file is the one here whose box it overlaps so much (`config.Settings.match_min_iou`)
 INSTALL_HINT = "the encrypted export needs the cryptography package: pip install cryptography"
 _CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")  # what a terminal would act on rather than show
@@ -326,6 +338,12 @@ def _parts(stores: Any) -> tuple["CacheStore", "AnnotationStore | None", "Glossa
     return stores.cache, getattr(stores, "annotations", None), getattr(stores, "sheets", None)
 
 
+def _defaults_store(marks_store: "AnnotationStore | None") -> "SeriesDefaultsStore | None":
+    """Where the series' defaults are kept: the folder of them in the store of page information (`AnnotationStore.series`);
+    None without one (a store that keeps none: an export carries none, an import takes none)."""
+    return getattr(marks_store, "series", None) if marks_store is not None else None
+
+
 class _LeftOut(Exception):
     """A file of page information or a series sheet that cannot be read here (another Windows user's or computer's,
     damaged, a newer TASlation's, held by another program now)."""
@@ -392,16 +410,46 @@ def _sheet_here(store: "GlossaryStore", series: str, language: str) -> tuple[Pat
     return path, _part(SHEET_FILES, path, series, language, parse)
 
 
+def _defaults_here(store: "SeriesDefaultsStore", series: str) -> tuple[Path | None, "SeriesDefaults | None"]:
+    """Where the defaults of *series* are in *store* (None: both their file names hold other series) and what they
+    hold (None: none), as the store opens them (the series as written here, its key); _LeftOut when the file cannot be
+    read here."""
+    from .annotations import SERIES_DEFAULT_FILES, SeriesDefaults, series_id
+    from .bookname import clean_series
+
+    key = series_id(series)
+    try:
+        path = store.path_for(series)
+    except FileExistsError:
+        return None, None
+
+    def parse(data: dict[str, Any]) -> "SeriesDefaults":
+        defaults = SeriesDefaults.from_json(data, path)
+        defaults.series, defaults.key = clean_series(series), key
+        return defaults
+
+    return path, _part(SERIES_DEFAULT_FILES, path, key, None, parse)
+
+
+def _same_defaults(a: "SeriesDefaults", b: "SeriesDefaults") -> bool:
+    """Whether two series' defaults hold the same values: settings, reading direction, and the same areas in any
+    order (the series as written and the date aside)."""
+    return (a.settings == b.settings and a.reading_direction == b.reading_direction
+            and len(a.areas) == len(b.areas) and set(a.areas) == set(b.areas))
+
+
 @dataclass
 class Exported:
-    """What an export wrote: the books (a cache in one language each) and their pages, the files of page information
-    and the series sheets that went with them, and how many such files could not be read here and were left out."""
+    """What an export wrote: the books (a cache in one language each) and their pages, the files of page information,
+    the series sheets and the series' defaults that went with them, and how many such files could not be read here and
+    were left out."""
 
     books: int = 0
     pages: int = 0
     annotations: int = 0
     sheets: int = 0
     left_out: int = 0
+    defaults: int = 0
 
 
 def _no_store_file(out: Path, folders: Iterable[tuple[Path, str]]) -> None:
@@ -414,12 +462,14 @@ def _no_store_file(out: Path, folders: Iterable[tuple[Path, str]]) -> None:
 
 def export_books(stores: Any, books: Sequence[tuple[str, str]], path: Path | str, passphrase: str) -> Exported:
     """Write the caches of *books* ((book, language) pairs; one given twice is written once) to *path*, encrypted with
-    *passphrase*, in one file: with *stores* a `rename.Stores`, each with the book's page information and the series
-    sheet the book reads in that language, where it has such files; a `cache.CacheStore` alone carries the caches
-    alone. The file appears whole or not at all (written beside it first, readable by its owner only where the system
-    has such permissions). BackupError (TooLarge over the caps), and nothing written, when a book has no cache in its
-    language or it cannot be read, or the books are more than one file takes; a file of page information or a sheet
-    that cannot be read here is left out of the file and counted (`Exported.left_out`)."""
+    *passphrase*, in one file: with *stores* a `rename.Stores`, each with the book's page information, the series
+    sheet the book reads in that language and its series' defaults, where it has such files (defaults that hold
+    nothing are no file to carry); a `cache.CacheStore` alone carries the caches alone. The file appears whole or not
+    at all (written beside it first, readable by its owner only where the system has such permissions). BackupError
+    (TooLarge over the caps), and nothing written, when a book has no cache in its language or it cannot be read, or
+    the books are more than one file takes; a file of page information, a sheet or a series' defaults that cannot be
+    read here is left out of the file and counted (`Exported.left_out`)."""
+    from .annotations import series_id, series_of
     from .cache import BookCache, language_key
     from .notes import sheet_key
 
@@ -429,6 +479,7 @@ def export_books(stores: Any, books: Sequence[tuple[str, str]], path: Path | str
     if out.is_dir():
         raise BackupError(f"{out} is a folder; give the name of the file to write")
     cache_store, marks_store, sheet_store = _parts(stores)
+    defaults_store = _defaults_store(marks_store)
     wanted: dict[tuple[str, str], tuple[str, str]] = {}
     for book, language in books:
         wanted.setdefault((book, language_key(language)), (book, language))
@@ -447,8 +498,10 @@ def export_books(stores: Any, books: Sequence[tuple[str, str]], path: Path | str
     entries: list[dict[str, Any]] = []
     marks: list[dict[str, Any]] = []
     sheets: list[dict[str, Any]] = []
+    defaults: list[dict[str, Any]] = []
     marks_at: dict[str, int | None] = {}  # book -> its page information's index (None: it has none)
     sheets_at: dict[tuple[str, str], int | None] = {}  # (series, language key) -> its sheet's index
+    defaults_at: dict[str, int | None] = {}  # a series' key (`series_id`) -> the index of its defaults
     for book, _language, source in sources:
         try:
             cache = BookCache.load(source)
@@ -487,14 +540,29 @@ def export_books(stores: Any, books: Sequence[tuple[str, str]], path: Path | str
                     sheets.append(sheet.to_json())
             if sheets_at[key] is not None:
                 entry["sheet"] = sheets_at[key]
+        own_series = series_of(book) if defaults_store is not None else ""
+        if own_series:  # (a book of one volume, or with a temporary name, has no series' defaults)
+            defaults_key = series_id(own_series)
+            if defaults_key not in defaults_at:
+                defaults_at[defaults_key] = None
+                try:
+                    _path, found_defaults = _defaults_here(defaults_store, own_series)  # type: ignore[arg-type]
+                except _LeftOut:
+                    found_defaults, done.left_out = None, done.left_out + 1
+                if found_defaults is not None and not found_defaults.is_empty:
+                    defaults_at[defaults_key] = len(defaults)
+                    defaults.append(found_defaults.to_json())
+            if defaults_at[defaults_key] is not None:
+                entry["defaults"] = defaults_at[defaults_key]
         entries.append(entry)
     payload = json.dumps({"schema": PAYLOAD_SCHEMA, "app": "taslation", "kind": "export", "note": PAYLOAD_NOTE,
-                          "books": entries, "annotations": marks, "sheets": sheets}, ensure_ascii=False).encode("utf-8")
+                          "books": entries, "annotations": marks, "sheets": sheets, "defaults": defaults},
+                         ensure_ascii=False).encode("utf-8")
     if len(payload) > MAX_PAYLOAD and len(entries) > 1:
         raise TooLarge("these books are larger than TASlation reads back from one file; export fewer at a time")
     blob = encrypt(payload, passphrase)
     write_atomic(out, blob)
-    done.books, done.annotations, done.sheets = len(entries), len(marks), len(sheets)
+    done.books, done.annotations, done.sheets, done.defaults = len(entries), len(marks), len(sheets), len(defaults)
     return done
 
 
@@ -662,12 +730,35 @@ def _incoming_sheet(raw: Any) -> "Glossary":
     return sheet
 
 
+def _incoming_defaults(raw: Any) -> "SeriesDefaults":
+    """A series' defaults a bundle holds (*raw*, their JSON), read as their store reads a file: checked (`_head`, the
+    series as written a name too, at most `annotations.MAX_AREAS` areas), cleaned (`_clean_tree`)."""
+    from .annotations import MAX_AREAS, SCHEMA_VERSION, SeriesDefaults
+
+    _head(raw, "series_defaults", "key", SCHEMA_VERSION, "a series' defaults")
+    series = raw.get("series", "")
+    if not isinstance(series, str) or len(series) > MAX_NAME:
+        raise BackupError("damaged file")
+    _lists_within(raw, {"areas": MAX_AREAS}, "a series' defaults")
+    if raw.get("settings") is not None and not isinstance(raw.get("settings"), dict):
+        raise BackupError("damaged file")
+    try:
+        defaults = SeriesDefaults.from_json(_clean_tree(raw), Path())
+    except BackupError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError, RecursionError):
+        raise BackupError("damaged file") from None
+    except MemoryError:
+        raise TooLarge("the file is larger than TASlation reads") from None
+    return defaults
+
+
 @dataclass
 class Held:
     """One book's translations in one language that an export file holds (`open_export`), as a list shows them: its
     place in the file, the book and the language, its pages and bubbles, how many of those a person wrote
-    (`CachedBubble.edited`), whether the book's page information comes with it, and the series whose sheet in that
-    language does ("" for none)."""
+    (`CachedBubble.edited`), whether the book's page information comes with it, the series whose sheet in that
+    language does ("" for none) and the series whose defaults do ("" for none)."""
 
     index: int
     book: str
@@ -677,13 +768,15 @@ class Held:
     corrections: int
     annotations: bool
     sheet: str
+    defaults: str = ""
 
 
 @dataclass
 class Opened:
     """An export file opened and checked, nothing written (`open_export`): the version of its payload
     (`PAYLOAD_SCHEMA`), what it holds (*held*, a `Held` per book in the file's order) and the parts themselves; per
-    book, the index of its page information and of its sheet (*links*, None for none)."""
+    book, the index of its page information and of its sheet (*links*, None for none) and of its series' defaults
+    (*defaults_links*, None for none)."""
 
     version: int
     held: list[Held]
@@ -691,6 +784,8 @@ class Opened:
     annotations: list["BookAnnotations"] = field(default_factory=list)
     sheets: list["Glossary"] = field(default_factory=list)
     links: list[tuple[int | None, int | None]] = field(default_factory=list)
+    defaults: list["SeriesDefaults"] = field(default_factory=list)
+    defaults_links: list[int | None] = field(default_factory=list)
 
     def chosen(self, books: Iterable[int] | None = None) -> list[int]:
         """The indices of *books* (None: all) the file holds, in the file's order, each once."""
@@ -700,19 +795,22 @@ class Opened:
         return [i for i in range(len(self.held)) if i in wanted]
 
 
-def _held(index: int, cache: "BookCache", marks: bool, sheet: str) -> Held:
+def _held(index: int, cache: "BookCache", marks: bool, sheet: str, defaults: str = "") -> Held:
     return Held(index, cache.book, cache.language, len(cache.pages), cache.bubble_count,
-                sum(1 for page in cache.pages for b in page.bubbles if b.edited), marks, sheet)
+                sum(1 for page in cache.pages for b in page.bubbles if b.edited), marks, sheet, defaults)
 
 
 def _bundle(data: dict[str, Any]) -> Opened:
     """What a payload of version 2 holds (*data*), all of it read and checked (see the module's docstring)."""
+    from .annotations import series_id, series_of
     from .cache import language_key
 
     books, marks, sheets = data.get("books"), data.get("annotations", []), data.get("sheets", [])
-    if not isinstance(books, list) or not isinstance(marks, list) or not isinstance(sheets, list) or not books:
+    defaults = data.get("defaults", [])  # (optional: see the module's docstring)
+    if (not isinstance(books, list) or not isinstance(marks, list) or not isinstance(sheets, list)
+            or not isinstance(defaults, list) or not books):
         raise BackupError("damaged file")
-    if max(len(books), len(marks), len(sheets)) > MAX_BOOKS:
+    if max(len(books), len(marks), len(sheets), len(defaults)) > MAX_BOOKS:
         raise TooLarge(f"the file holds more than {MAX_BOOKS} books; nothing was imported")
     total = sum(len(e["cache"]["pages"]) for e in books if isinstance(e, dict) and isinstance(e.get("cache"), dict)
                 and isinstance(e["cache"].get("pages"), list))
@@ -721,27 +819,34 @@ def _bundle(data: dict[str, Any]) -> Opened:
                        f"was imported")
     read_marks = [_incoming_marks(raw) for raw in marks]
     read_sheets = [_incoming_sheet(raw) for raw in sheets]
-    opened = Opened(PAYLOAD_SCHEMA, [], [], read_marks, read_sheets, [])
+    read_defaults = [_incoming_defaults(raw) for raw in defaults]
+    opened = Opened(PAYLOAD_SCHEMA, [], [], read_marks, read_sheets, [], read_defaults, [])
     for entry in books:
         if not isinstance(entry, dict) or not isinstance(entry.get("cache"), dict):
             raise BackupError("damaged file")
         cache = _incoming_cache(entry["cache"])
-        a, s = entry.get("annotations"), entry.get("sheet")
-        for ref, count in ((a, len(read_marks)), (s, len(read_sheets))):
+        a, s, d = entry.get("annotations"), entry.get("sheet"), entry.get("defaults")
+        for ref, count in ((a, len(read_marks)), (s, len(read_sheets)), (d, len(read_defaults))):
             if ref is not None and (type(ref) is not int or not 0 <= ref < count):
                 raise BackupError("damaged file")
         if a is not None and read_marks[a].book != cache.book:
             raise BackupError("damaged file")
         if s is not None and language_key(read_sheets[s].language) != language_key(cache.language):
             raise BackupError("damaged file")
+        if d is not None and (not series_of(cache.book) or read_defaults[d].key != series_id(series_of(cache.book))
+                              or series_id(read_defaults[d].series) != read_defaults[d].key):
+            raise BackupError("damaged file")  # the defaults of another series than the book's (or of none)
         opened.held.append(_held(len(opened.caches), cache, a is not None,
-                                 read_sheets[s].series if s is not None else ""))
+                                 read_sheets[s].series if s is not None else "",
+                                 read_defaults[d].series if d is not None else ""))
         opened.caches.append(cache)
         opened.links.append((a, s))
+        opened.defaults_links.append(d)
     if (len({c.owner for c in opened.caches}) != len(opened.caches)
             or len({m.book for m in read_marks}) != len(read_marks)
-            or len({(g.series, language_key(g.language)) for g in read_sheets}) != len(read_sheets)):
-        raise BackupError("damaged file")  # a book, its page information or a sheet twice: which one would win?
+            or len({(g.series, language_key(g.language)) for g in read_sheets}) != len(read_sheets)
+            or len({x.key for x in read_defaults}) != len(read_defaults)):
+        raise BackupError("damaged file")  # a book, its page information, a sheet or defaults twice: which would win?
     return opened
 
 
@@ -779,7 +884,8 @@ class BookPlan:
     is a cache of it here (*exists*), the file's pages none of which is here (*added*), the pages here the file
     changes (*replaced*, keeping the reader's corrections; *replaced_as_is*, taking the file as it is) and the
     reader's corrections it keeps over the file's lines (*kept*: their text differs, or the file has no line there).
-    *annotations* and *sheet*: the index in the file of the book's page information and of its sheet."""
+    *annotations*, *sheet* and *defaults*: the index in the file of the book's page information, of its sheet and of
+    its series' defaults."""
 
     held: Held
     target: Path
@@ -790,6 +896,7 @@ class BookPlan:
     kept: int = 0
     annotations: int | None = None
     sheet: int | None = None
+    defaults: int | None = None
 
 
 @dataclass
@@ -799,6 +906,19 @@ class MarksPlan:
     file's)."""
 
     book: str
+    index: int
+    target: Path
+    state: str
+
+
+@dataclass
+class DefaultsPlan:
+    """What an import does to one series' defaults (the series as the book that brings them writes it): *state* "new"
+    (none here, or none that hold anything, or a file this version cannot read, which the save sets aside: the file's
+    are added), "same" (here with the same values: nothing to do) or "differs" (the reader's own here: kept unless
+    they take the file's)."""
+
+    series: str
     index: int
     target: Path
     state: str
@@ -835,11 +955,12 @@ class SheetPlan:
 @dataclass
 class ImportPlan:
     """What an import of the books chosen of a file would do (`plan_import`), nothing written: per book, per file of
-    page information, per series sheet."""
+    page information, per series sheet, per series' defaults."""
 
     books: list[BookPlan] = field(default_factory=list)
     annotations: list[MarksPlan] = field(default_factory=list)
     sheets: list[SheetPlan] = field(default_factory=list)
+    defaults: list[DefaultsPlan] = field(default_factory=list)
 
     @property
     def pages(self) -> int:
@@ -861,6 +982,11 @@ class ImportPlan:
         """The books whose page information here is not the file's: kept, unless the reader takes the file's."""
         return [m for m in self.annotations if m.state == "differs"]
 
+    @property
+    def differing_defaults(self) -> list[DefaultsPlan]:
+        """The series whose defaults here are not the file's: kept, unless the reader takes the file's."""
+        return [d for d in self.defaults if d.state == "differs"]
+
     def keyed(self) -> list[tuple[tuple[str, ...], SheetPlan, "Conflict"]]:
         """Every conflict of the sheets that join, with the key its answer goes under (`SheetPlan.key`), sheet by
         sheet."""
@@ -868,13 +994,16 @@ class ImportPlan:
                 for c in sheet.review.conflicts]
 
     def only(self, books: Iterable[int]) -> "ImportPlan":
-        """The plan for the books of *books* (indices in the file) alone, with their page information and sheets."""
+        """The plan for the books of *books* (indices in the file) alone, with their page information, sheets and
+        series' defaults."""
         wanted = set(books)
         chosen = [b for b in self.books if b.held.index in wanted]
         marks = {b.annotations for b in chosen if b.annotations is not None}
         sheets = {b.sheet for b in chosen if b.sheet is not None}
+        defaults = {b.defaults for b in chosen if b.defaults is not None}
         return ImportPlan(chosen, [m for m in self.annotations if m.index in marks],
-                          [s for s in self.sheets if s.index in sheets])
+                          [s for s in self.sheets if s.index in sheets],
+                          [d for d in self.defaults if d.index in defaults])
 
 
 def _cache_target(store: "CacheStore", incoming: "BookCache") -> Path:
@@ -963,8 +1092,8 @@ def plan_import(stores: Any, opened: Opened, books: Iterable[int] | None = None)
     """What importing the books *books* (indices in the file; None: all) of *opened* into *stores* (`rename.Stores`, or
     a `CacheStore` alone, which takes the caches alone) would do, nothing written (see the module's docstring): the
     counts per book, the state of each book's page information here, each series sheet added or joined with its
-    conflicts (each *take* False). NameClash when a file the import would write holds another book or series (both
-    its file names); OSError when a cache here cannot be opened now."""
+    conflicts (each *take* False), the state of each series' defaults here. NameClash when a file the import would
+    write holds another book or series (both its file names); OSError when a cache here cannot be opened now."""
     cache_store, marks_store, sheet_store = _parts(stores)
     plan = ImportPlan()
     for i in opened.chosen(books):
@@ -972,7 +1101,8 @@ def plan_import(stores: Any, opened: Opened, books: Iterable[int] | None = None)
         target = _cache_target(cache_store, incoming)
         here = _cache_here(target, incoming)
         marks, sheet = opened.links[i] if i < len(opened.links) else (None, None)
-        book = BookPlan(opened.held[i], target, here is not None, annotations=marks, sheet=sheet)
+        defaults = opened.defaults_links[i] if i < len(opened.defaults_links) else None
+        book = BookPlan(opened.held[i], target, here is not None, annotations=marks, sheet=sheet, defaults=defaults)
         plan.books.append(book)
         if here is None:
             book.added = len(incoming.pages)
@@ -1017,15 +1147,35 @@ def plan_import(stores: Any, opened: Opened, books: Iterable[int] | None = None)
             review = None if mine_sheet is None else compare_sheets(mine_sheet, theirs_sheet)
             plan.sheets.append(SheetPlan(theirs_sheet.series, theirs_sheet.language, index, target, review,
                                          mine_sheet))
+    defaults_store = _defaults_store(marks_store)
+    if defaults_store is not None:
+        from .annotations import series_of
+
+        series_at: dict[int, str] = {}  # the defaults' index -> the series as the first book that brings them writes it
+        for b in plan.books:
+            if b.defaults is not None:
+                series_at.setdefault(b.defaults, series_of(opened.caches[b.held.index].book))
+        for index, series in series_at.items():
+            try:
+                target = defaults_store.path_for(series)
+            except FileExistsError as e:
+                raise NameClash(str(e)) from None
+            try:
+                _path, mine_defaults = _defaults_here(defaults_store, series)
+            except _LeftOut:  # (the save sets the file aside first, as the store does)
+                mine_defaults = None
+            state = ("new" if mine_defaults is None or mine_defaults.is_empty
+                     else "same" if _same_defaults(mine_defaults, opened.defaults[index]) else "differs")
+            plan.defaults.append(DefaultsPlan(series, index, target, state))
     return plan
 
 
 @dataclass
 class ImportResult:
     """What an import did (`apply_import`): per book its `BookPlan` as it was done (*replaced* and *kept* as the
-    reader chose: taking the file as it is keeps none), and the page information and series sheets: added where there
-    were none, taken in place of the reader's own, kept as theirs; sheets joined, with what they added, the conflicts
-    where the file's value was taken and those kept."""
+    reader chose: taking the file as it is keeps none), and the page information, series sheets and series' defaults:
+    added where there were none, taken in place of the reader's own, kept as theirs; sheets joined, with what they
+    added, the conflicts where the file's value was taken and those kept."""
 
     books: list[BookPlan] = field(default_factory=list)
     annotations_added: int = 0
@@ -1036,6 +1186,9 @@ class ImportResult:
     sheet_terms: int = 0
     sheet_taken: int = 0
     sheet_kept: int = 0
+    defaults_added: int = 0
+    defaults_taken: int = 0
+    defaults_kept: int = 0
 
     @property
     def pages(self) -> int:
@@ -1067,17 +1220,19 @@ def _keep_copy(path: Path) -> None:
 
 def apply_import(stores: Any, opened: Opened, books: Iterable[int] | None = None, *, replace: bool = False,
                  keep_corrections: bool = True, take_annotations: bool = False,
-                 answers: Mapping[tuple[str, ...], bool] | None = None) -> ImportResult:
+                 answers: Mapping[tuple[str, ...], bool] | None = None, take_defaults: bool = False) -> ImportResult:
     """Import the books *books* (indices in the file; None: all) of *opened* into *stores* (`rename.Stores`, or a
     `CacheStore` alone, which takes the caches alone), as `plan_import`, made again first, says (the files may have
     changed since the reader saw the plan): each book's pages join its cache (with *keep_corrections* the reader's
     corrections stay where the file's line is none of a person's; with *replace* the file's cache replaces the book's,
     header and all), its page information is added where it has none (*take_annotations*: also in place of the
     reader's own), its series sheet added or joined (*answers*: a conflict's key, `SheetPlan.key`, to True for "take
-    the file's"; the sheet here keeps its value for any other). What each file held is kept beside it first
+    the file's"; the sheet here keeps its value for any other), its series' defaults added where the series has none
+    (*take_defaults*: also in place of the reader's own). What each file held is kept beside it first
     (``<file>.before-import.<date>.json``). NameClash, and nothing written, when a file the import would write holds
     another book or series; an OSError when a file cannot be written."""
-    from .annotations import BookAnnotations, Glossary, apply_review
+    from .annotations import BookAnnotations, Glossary, SeriesDefaults, apply_review, series_id
+    from .bookname import clean_series
 
     plan = plan_import(stores, opened, books)
     cache_store, marks_store, sheet_store = _parts(stores)
@@ -1141,14 +1296,30 @@ def apply_import(stores: Any, opened: Opened, books: Iterable[int] | None = None
             result.sheet_terms += counts["terms"]
             result.sheet_taken += counts["taken"]
             result.sheet_kept += len(sheet.review.conflicts) - counts["taken"]
+    for defaults in plan.defaults:  # (none without a store of them: `plan_import`)
+        if defaults.state == "same":
+            continue
+        if defaults.state == "differs" and not take_defaults:
+            result.defaults_kept += 1
+            continue
+        written_defaults = SeriesDefaults.from_json(opened.defaults[defaults.index].to_json(), defaults.target)
+        written_defaults.series, written_defaults.key = clean_series(defaults.series), series_id(defaults.series)
+        if defaults.state == "differs":
+            _keep_copy(defaults.target)
+        written_defaults.save()  # (a file there this version cannot read is set aside first, as the store does)
+        if defaults.state == "new":
+            result.defaults_added += 1
+        else:
+            result.defaults_taken += 1
     return result
 
 
 def import_cache(stores: Any, path: Path | str, passphrase: str, replace: bool = False,
                  keep_corrections: bool = True) -> tuple[str, int]:
     """Read an export file into *stores* (`rename.Stores`, or a `CacheStore` alone: then its caches alone), all of it
-    (`open_export`, `apply_import`: the reader's corrections, page information and sheet values kept where the file says
-    otherwise, unless *keep_corrections* is False; with *replace* the file's caches replace the books'). Nothing is
+    (`open_export`, `apply_import`: the reader's corrections, page information, sheet values and series' defaults kept
+    where the file says otherwise, the corrections unless *keep_corrections* is False; with *replace* the file's caches
+    replace the books'). Nothing is
     written for a wrong passphrase, a damaged file or one with what this version cannot read (BackupError and its
     kinds), nor when a file it would write holds another book (NameClash, an OSError: only for two names with the same
     hash, since a book whose name gives the file name of another's gets a file of its own); what was there is kept
@@ -1162,5 +1333,5 @@ __all__ = ["MAGIC", "SUFFIX", "KDF", "MIN_PASSPHRASE", "PASSPHRASE_ENV", "MAX_PA
            "MAX_BOOKS", "MAX_TOTAL_PAGES", "PAYLOAD_SCHEMA", "BackupError", "LibraryMissing",
            "WrongPassphrase", "BrokenPassphrase", "UnreadableExport", "TooLarge", "NameClash", "require",
            "passphrase_length", "check_passphrase", "encrypt", "decrypt", "cache_file", "export_cache", "export_books",
-           "Exported", "Held", "Opened", "open_export", "BookPlan", "MarksPlan", "SheetPlan", "ImportPlan",
+           "Exported", "Held", "Opened", "open_export", "BookPlan", "MarksPlan", "DefaultsPlan", "SheetPlan", "ImportPlan",
            "plan_import", "ImportResult", "apply_import", "import_cache"]

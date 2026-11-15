@@ -3,12 +3,15 @@ every page that a series keeps (`annotations.SeriesDefaults`, a file per series 
 no annotations of its own yet follows them where it has no value of its own; its own values win, clearing them falls
 back to the series' defaults; a book of one volume has none; older spellings of a volume's name find the same
 defaults; a book whose annotations were kept before is left as it was. Book settings saves the values as the series'
-defaults and says beside a value that it is the series'. On the real stores and pipeline, with fake OCR and
-translator; names invented."""
+defaults and says beside a value that it is the series', and so does the Page menu's Use these areas for the series
+(greyed while it cannot act). A rename into another series moves the defaults, copies them while another volume
+follows them, keeps the new series' own, and a book that followed its series keeps the values it had in force. On the
+real stores and pipeline, with fake OCR and translator; names invented."""
 
 from __future__ import annotations
 
 import json
+import tkinter as tk
 from types import SimpleNamespace
 
 import pytest
@@ -17,9 +20,10 @@ from helpers import EN_TEXTS, FakeOcr, store_json
 from taslation import protect
 from taslation.annotations import (SERIES_DIRNAME, AnnotationStore, BookAnnotations, BookArea, SeriesDefaults,
                                    SeriesDefaultsStore, series_id, series_of)
-from taslation.cache import CacheStore
+from taslation.cache import CacheStore, CachedBubble, CachedPage
 from taslation.config import Settings
 from taslation.pipeline import Pipeline
+from taslation.rename import RenameRefused, Stores, plan_rename, rename_book
 from taslation.translate import DictTranslator
 from taslation.ui import book_areas
 from taslation.ui.dialogs import book_settings as dlg
@@ -364,3 +368,241 @@ def test_stand_in_annotations_without_a_series_still_work(hidden_root, no_placin
     assert d.series_values == {} and not any(h.winfo_manager() for h in d.hints.values())
     d._apply()
     assert applied == [{"text_scale": 1.1}]
+
+
+# ------------------------------------------------------------------ the Page menu's Use these areas for the series
+class _Window(book_areas.AreaMixin):
+    """The window's part that the Page menu's entry uses: the pipeline, the Book box, the status line."""
+
+    def __init__(self, ann, book=None):
+        self.saved = 0
+        self.pipeline = SimpleNamespace(annotations=ann, save_annotations=self._save)
+        self.book_var = SimpleNamespace(get=lambda: ann.book if book is None else book)
+        self.busy, self.batch, self.said = False, None, []
+
+    def _save(self):
+        self.saved += 1
+        self.pipeline.annotations.save()
+
+    def say(self, key, /, **values):
+        self.said.append(key.format(**values))
+
+
+def _entry(hidden_root, w):
+    menu = tk.Menu(hidden_root, tearoff=0)
+    menu.add_command(label=book_areas.USE_FOR_SERIES, command=w.use_areas_for_series_now, state="disabled")
+    w._series_areas_entry = (menu, 0)
+    return menu
+
+
+def test_the_page_menu_entry_keeps_the_book_s_areas_as_the_series(hidden_root, store):
+    ann = store.open(f"{SERIES} 16")
+    ann.add_area(NUMBER_AREA)
+    ann.add_area(TITLE_AREA)
+    ann.save()
+    w = _Window(ann)
+    menu = _entry(hidden_root, w)
+    w._sync_series_areas_entry()  # (the menu's postcommand)
+    assert menu.entrycget(0, "state") == "normal"
+    menu.invoke(0)
+    assert w.said == [book_areas.AREAS_SHARED.format(series=SERIES, n=2)] and w.saved == 1
+    assert store.series.open(SERIES).areas == [NUMBER_AREA, TITLE_AREA] and ann.own_areas is None
+    assert store.open(f"{SERIES} 17").areas == [NUMBER_AREA, TITLE_AREA]  # a new volume starts with them
+    menu.destroy()
+
+
+def test_the_page_menu_entry_is_greyed_while_it_cannot_act(hidden_root, store, monkeypatch):
+    ann = store.open(f"{SERIES} 16")
+    ann.add_area(NUMBER_AREA)
+    w = _Window(ann)
+    menu = _entry(hidden_root, w)
+    for change, back in ((lambda: setattr(w, "busy", True), lambda: setattr(w, "busy", False)),
+                         (lambda: setattr(w, "batch", object()), lambda: setattr(w, "batch", None)),
+                         (lambda: setattr(w, "_batching", True), lambda: setattr(w, "_batching", False)),
+                         (lambda: setattr(w, "book_var", SimpleNamespace(get=lambda: f"{SERIES} 17")),
+                          lambda: setattr(w, "book_var", SimpleNamespace(get=lambda: f" {SERIES} 16 ")))):
+        change()  # a job, a whole-book run (also while it starts), another book typed in the Book box
+        w._sync_series_areas_entry()
+        assert menu.entrycget(0, "state") == "disabled"
+        w.use_areas_for_series_now()
+        assert w.said == [] and not store.series.path_for(SERIES).exists()
+        back()
+        w._sync_series_areas_entry()
+        assert menu.entrycget(0, "state") == "normal"
+    for book in (SERIES, "Untitled 2026-11-16 0930"):  # a book of one volume, a temporary name: no series
+        w.pipeline.annotations = store.open(book)
+        w.book_var = SimpleNamespace(get=lambda b=book: b)
+        w._sync_series_areas_entry()
+        assert menu.entrycget(0, "state") == "disabled" and not w.series_areas_ready()
+    w.pipeline.annotations = None  # no book read yet
+    w._sync_series_areas_entry()
+    assert menu.entrycget(0, "state") == "disabled"
+    menu.destroy()
+    w._sync_series_areas_entry()  # (a menu gone with its window: nothing to grey)
+
+    def refuse(self):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(SeriesDefaults, "save", refuse)
+    w.pipeline.annotations, w.book_var = ann, SimpleNamespace(get=lambda: ann.book)
+    w.use_areas_for_series_now()
+    assert len(w.said) == 1 and w.said[0].startswith("Could not save the series' defaults:")
+
+
+# ------------------------------------------------------------------ a rename into another series
+def _following(store, book):
+    """A volume that follows its series (nothing of its own but a region ignored on one page, so a file)."""
+    ann = store.open(book)
+    ann.add_box("f" * 80, 0.7, (0.8, 0.8, 0.9, 0.9), "ignore")
+    ann.save()
+    return ann
+
+
+def _in_force(ann):
+    return dict(ann.settings), ann.rtl, list(ann.areas)
+
+
+def _values(path):
+    data = store_json(path)
+    return data["settings"], data["reading_direction"], data["areas"]
+
+
+def _files(*roots):
+    return {str(p.relative_to(root)): p.read_bytes() for root in roots if root.is_dir() for p in root.rglob("*")
+            if p.is_file()}
+
+
+def test_a_rename_moves_the_defaults_when_no_other_volume_has_them(settings, store):
+    _series_from(store)  # volume 16, the only one kept
+    old_path = store.series.path_for(SERIES)
+    values = _values(old_path)
+    stores = Stores.of(settings)
+    plan = plan_rename(stores, f"{SERIES} 16", "Harbor Lights 16")
+    assert (plan.defaults, plan.values_kept) == ("moved", False) and old_path.exists()  # a plan writes nothing
+    result = rename_book(stores, f"{SERIES} 16", "Harbor Lights 16")
+    assert (result.defaults, result.values_kept, result.left) == ("moved", False, [])
+    fresh = AnnotationStore(settings.annotations_dir)
+    new_path = fresh.series.path_for("Harbor Lights")
+    assert not old_path.exists() and protect.is_protected(new_path.read_bytes()) and _values(new_path) == values
+    assert (store_json(new_path)["key"], store_json(new_path)["series"]) == ("harborlights", "Harbor Lights")
+    assert [row["series"] for row in fresh.series.list()] == ["Harbor Lights"]
+    renamed = fresh.open("Harbor Lights 16")
+    assert renamed.follows_series and renamed.areas == [NUMBER_AREA] and renamed.inherited.series == "Harbor Lights"
+    assert _in_force(fresh.open("Harbor Lights 17"))[1:] == (False, [NUMBER_AREA])  # the next volume starts from them
+
+
+@pytest.mark.parametrize("kept_as", ["annotations", "cache"])
+def test_a_rename_copies_the_defaults_another_volume_still_follows(settings, store, kept_as):
+    _series_from(store)
+    if kept_as == "annotations":
+        _following(store, f"{SERIES} 17")
+    else:  # a volume with a cache alone
+        cache = CacheStore(settings.cache_dir).open(f"{SERIES} 17", "m")
+        cache.add(CachedPage(fingerprint="e" * 80, aspect=0.7, bubbles=[CachedBubble(box=(0.1, 0.1, 0.2, 0.2),
+                                                                                     text="Hello")]))
+        cache.save()
+    values = _values(store.series.path_for(SERIES))
+    result = rename_book(Stores.of(settings), f"{SERIES} 16", "Harbor Lights 16")
+    assert (result.defaults, result.values_kept) == ("copied", False)
+    fresh = AnnotationStore(settings.annotations_dir)
+    assert _values(fresh.series.path_for(SERIES)) == _values(fresh.series.path_for("Harbor Lights")) == values
+    assert sorted(row["series"] for row in fresh.series.list()) == ["Harbor Lights", SERIES]
+    assert fresh.open(f"{SERIES} 17").areas == [NUMBER_AREA] and fresh.open("Harbor Lights 16").follows_series
+
+
+def test_a_rename_into_a_series_with_defaults_keeps_them_and_the_book_its_values(settings, store):
+    _series_from(store)  # Lantern Quay's: text size 1.2, left to right, the page number ignored
+    in_force = _in_force(_following(store, f"{SERIES} 17"))
+    theirs = store.series.open("Harbor Lights")
+    theirs.settings, theirs.reading_direction = {"text_scale": 0.8}, "rtl"
+    theirs.save()
+    before = _files(settings.annotations_dir / SERIES_DIRNAME)
+    stores = Stores.of(settings)
+    plan = plan_rename(stores, f"{SERIES} 17", "Harbor Lights 17")
+    assert (plan.defaults, plan.values_kept) == ("kept", True)
+    result = rename_book(stores, f"{SERIES} 17", "Harbor Lights 17")
+    assert (result.defaults, result.values_kept) == ("kept", True)
+    assert _files(settings.annotations_dir / SERIES_DIRNAME) == before  # neither series' defaults written over
+    fresh = AnnotationStore(settings.annotations_dir)
+    renamed = fresh.open("Harbor Lights 17")
+    assert not renamed.follows_series and _in_force(renamed) == in_force  # what it had in force, now its own
+    assert renamed.own_settings == in_force[0] and renamed.own_areas == [NUMBER_AREA]
+    assert fresh.open("Harbor Lights 18").settings == {"text_scale": 0.8} and fresh.open("Harbor Lights 18").rtl
+    assert _in_force(fresh.open(f"{SERIES} 18")) == in_force  # the old series keeps its own for its volumes
+
+
+def test_a_rename_into_a_series_with_the_same_defaults_keeps_following(settings, store):
+    old = _series_from(store).inherited
+    _following(store, f"{SERIES} 17")
+    same = store.series.open("Harbor Lights")
+    same.settings, same.reading_direction, same.areas = dict(old.settings), old.reading_direction, list(old.areas)
+    same.areas.reverse()  # (one area: the same list in any order)
+    same.save()
+    result = rename_book(Stores.of(settings), f"{SERIES} 17", "Harbor Lights 17")
+    assert (result.defaults, result.values_kept) == ("kept", False)
+    renamed = AnnotationStore(settings.annotations_dir).open("Harbor Lights 17")
+    assert renamed.follows_series and renamed.own_settings == {} and renamed.own_areas is None
+
+
+def test_a_rename_out_of_any_series_or_into_one_from_none_keeps_the_values_in_force(settings, store):
+    _series_from(store)
+    in_force = _in_force(_following(store, f"{SERIES} 17"))
+    old_values = _values(store.series.path_for(SERIES))
+    result = rename_book(Stores.of(settings), f"{SERIES} 17", "Harbor Lights")  # one volume: no series
+    assert (result.defaults, result.values_kept) == ("", True)
+    fresh = AnnotationStore(settings.annotations_dir)
+    alone = fresh.open("Harbor Lights")
+    assert not alone.follows_series and _in_force(alone) == in_force
+    assert _values(fresh.series.path_for(SERIES)) == old_values  # (no series to give them to: they stay)
+    # a volume of a series without defaults, into one that has some: what it had (its own, nothing else) stays
+    pebble = store.open("Pebble Harbor 3")
+    pebble.set_settings({"text_scale": 1.1})
+    pebble.save()
+    in_force = _in_force(pebble)
+    result = rename_book(Stores.of(settings), "Pebble Harbor 3", f"{SERIES} 3")
+    assert (result.defaults, result.values_kept) == ("", True)
+    renamed = AnnotationStore(settings.annotations_dir).open(f"{SERIES} 3")
+    assert not renamed.follows_series and _in_force(renamed) == in_force == ({"text_scale": 1.1}, True, [])
+    assert not AnnotationStore(settings.annotations_dir).series.path_for("Pebble Harbor").exists()
+
+
+def test_a_rename_leaves_alone_a_book_that_follows_no_series_and_a_series_that_stays(settings, store):
+    old = BookAnnotations(store.path_for(f"{SERIES} 5"), f"{SERIES} 5")  # kept before the series' defaults
+    old.set_settings({"detect_text_blocks": False})
+    old.save()
+    _series_from(store)
+    before = {k: v for k, v in store_json(old.path).items() if k not in ("updated", "book")}
+    result = rename_book(Stores.of(settings), f"{SERIES} 5", "Harbor Lights 5")
+    assert (result.defaults, result.values_kept) == ("copied", False)  # (volume 16 still follows them)
+    fresh = AnnotationStore(settings.annotations_dir)
+    after = store_json(fresh.path_for("Harbor Lights 5"))
+    assert {k: v for k, v in after.items() if k not in ("updated", "book")} == before
+    assert not fresh.open("Harbor Lights 5").follows_series
+    one = store.open("Harbor Lights")  # a book of one volume follows nothing: into a series, nothing of it changes
+    one.set_settings({"text_scale": 0.9})
+    one.save()
+    result = rename_book(Stores.of(settings), "Harbor Lights", "Harbor Lights 1")
+    assert (result.defaults, result.values_kept) == ("", False)
+    assert AnnotationStore(settings.annotations_dir).open("Harbor Lights 1").settings == {"text_scale": 0.9}
+    # the series stays (another volume number, another spelling): its defaults stay where they are, as they are
+    before = _files(settings.annotations_dir / SERIES_DIRNAME)
+    _following(store, f"{SERIES} 17")
+    for old_name, new_name in ((f"{SERIES} 17", f"{SERIES} 18"), (f"{SERIES} 18", f"{SERIES} 第十九巻")):
+        result = rename_book(Stores.of(settings), old_name, new_name)
+        assert (result.defaults, result.values_kept) == ("", False)
+        assert AnnotationStore(settings.annotations_dir).open(new_name).follows_series
+    assert _files(settings.annotations_dir / SERIES_DIRNAME) == before
+
+
+@pytest.mark.parametrize("unreadable", ["old", "new"])
+def test_a_rename_refuses_when_a_series_defaults_file_cannot_be_read(settings, store, unreadable):
+    _series_from(store)
+    path = store.series.path_for(SERIES if unreadable == "old" else "Harbor Lights")
+    path.write_bytes(b"not a file of series defaults")
+    before = _files(settings.annotations_dir, settings.cache_dir)
+    stores = Stores.of(settings)
+    with pytest.raises(RenameRefused):
+        plan_rename(stores, f"{SERIES} 16", "Harbor Lights 16")
+    with pytest.raises(RenameRefused):
+        rename_book(stores, f"{SERIES} 16", "Harbor Lights 16")
+    assert _files(settings.annotations_dir, settings.cache_dir) == before

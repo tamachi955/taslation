@@ -448,11 +448,12 @@ class CachesDialog(tk.Toplevel):
     otherwise, then its files moved), and the list follows once the window is done. Open folder shows where the files
     are.
 
-    Export writes the rows chosen to one file encrypted with a passphrase, each book with its page information and the
-    series sheet it reads (`backup.export_books`; the stores are the window's, *annotations* and *sheets*, else the
-    caches alone); Import reads one back (`backup.open_export`, `backup.plan_import`), after a review
-    (`import_review.ImportReviewDialog`) when the file holds several books or meets corrections, page information or
-    sheet values of the reader's own, and imports what the reader chose (`backup.apply_import`). A line above Export and
+    Export writes the rows chosen to one file encrypted with a passphrase, each book with its page information, the
+    series sheet it reads and its series' defaults (`backup.export_books`; the stores are the window's, *annotations*
+    and *sheets*, else the caches alone); Import reads one back (`backup.open_export`, `backup.plan_import`), after a
+    review (`import_review.ImportReviewDialog`) when the file holds several books or meets corrections, page
+    information, series' defaults or sheet values of the reader's own, and imports what the reader chose
+    (`backup.apply_import`). A line above Export and
     Import says what such a file is for and that it holds the translated text; each of them first shows a warning
     (`WarningBox`) before it asks for a file: an export's file holds the book's translated text and is for the reader
     alone, an import is only of a file the reader made; Cancel there does nothing else. The line below them says what
@@ -808,6 +809,8 @@ class CachesDialog(tk.Toplevel):
             if done.annotations or done.sheets:
                 more.append(_("With them: the page information of {marks} book(s) and {sheets} series sheet(s).").format(
                     marks=done.annotations, sheets=done.sheets))
+            if getattr(done, "defaults", 0):
+                more.append(_("Also with them: the defaults of {n} series.").format(n=done.defaults))
             if done.left_out:
                 more.append(_("{n} file(s) that cannot be opened on this computer were left out.").format(n=done.left_out))
             self._say(" ".join([line, *more]))
@@ -823,8 +826,9 @@ class CachesDialog(tk.Toplevel):
     def _import(self) -> None:
         """A file made by an export, once the reader has read that it must be one of their own and chosen Continue:
         what it holds is read and checked, and what an import would do counted (nothing written); the review asks
-        what to import when the file holds several books or meets corrections, page information or sheet values of
-        the reader's own (Cancel there: nothing is imported); then its pages replace the same pages of each book's
+        what to import when the file holds several books or meets corrections, page information, series' defaults or
+        sheet values of the reader's own (Cancel there: nothing is imported); then its pages replace the same pages of
+        each book's
         cache here and join the others, the reader's corrections kept unless they took the file as it is."""
         if not self._backup_ready:
             return
@@ -846,7 +850,7 @@ class CachesDialog(tk.Toplevel):
             self._import_failed(e)
             return
         choice = ImportChoice(list(range(len(opened.held))))
-        if len(opened.held) > 1 or plan.kept or plan.differing or plan.keyed():
+        if len(opened.held) > 1 or plan.kept or plan.differing or plan.differing_defaults or plan.keyed():
             choice = self._review(opened, plan, Path(path).name)
             if choice is None or not choice.books:
                 return  # Cancel: nothing is imported
@@ -858,7 +862,7 @@ class CachesDialog(tk.Toplevel):
         try:
             result = self._busy(lambda: backup.apply_import(
                 self.stores, opened, choice.books, keep_corrections=choice.keep_corrections,
-                take_annotations=choice.take_annotations, answers=choice.answers))
+                take_annotations=choice.take_annotations, answers=choice.answers, take_defaults=choice.take_defaults))
         except backup.LibraryMissing:
             self._missing()
             return
@@ -869,7 +873,8 @@ class CachesDialog(tk.Toplevel):
         if self.on_changed:
             for book in books:
                 self.on_changed(book)
-        if result.annotations_added or result.annotations_taken or result.sheets_added or result.sheets_joined:
+        if (result.annotations_added or result.annotations_taken or result.sheets_added or result.sheets_joined
+                or getattr(result, "defaults_added", 0) or getattr(result, "defaults_taken", 0)):
             self._premises_changed()
         if len(result.books) == 1:
             book = result.books[0].held.book
@@ -902,6 +907,10 @@ class CachesDialog(tk.Toplevel):
         if result.sheets_added or result.sheets_joined:
             said.append(_("Series sheets: {added} added, {joined} joined with yours ({taken} value(s) taken from the file, {kept} kept as yours).").format(
                 added=result.sheets_added, joined=result.sheets_joined, taken=result.sheet_taken, kept=result.sheet_kept))
+        added, taken, kept = (getattr(result, name, 0) for name in ("defaults_added", "defaults_taken", "defaults_kept"))
+        if added or taken or kept:
+            said.append(_("Series defaults: {added} added, {taken} taken from the file, {kept} kept as yours.").format(
+                added=added, taken=taken, kept=kept))
         return said
 
     def _premises_changed(self) -> None:

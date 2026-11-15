@@ -170,7 +170,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("target", nargs="?", metavar="BOOK|FILE", help="delete, export: the book; import: the file")
     c.add_argument("--out", type=Path,
                    help="export: the file to write, encrypted with a passphrase (asked for, or TASLATION_PASSPHRASE); "
-                        "it holds the translations with the book's page information and series sheet")
+                        "it holds the translations with the book's page information, series sheet and series "
+                        "defaults")
     c.add_argument("--series", help="export: every cached volume of this series in the target language (--language), "
                                     "in one file, in place of BOOK")
     c.add_argument("--all", action="store_true", dest="every",
@@ -184,8 +185,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="import: only this book of the file (again for several; default: all it holds)")
     c.add_argument("--take-file", action="store_true",
                    help="import: take the file as it is - its lines where you corrected the translation here, its "
-                        "page information in place of yours, its values where the series sheets say otherwise "
-                        "(default: yours stay; what the file adds is added)")
+                        "page information and series defaults in place of yours, its values where the series sheets "
+                        "say otherwise (default: yours stay; what the file adds is added)")
     c.add_argument("--confirm", action="store_true",
                    help="export, import: after the note on what the file is for, ask \"Continue? [y/N]\" before the "
                         "passphrase (without it the note is printed and nothing is asked: scripts)")
@@ -1349,7 +1350,10 @@ def _exported_line(done: Any, books: list[tuple[str, str]], out: Path) -> str:
         extra.append(f"{done.annotations} book(s) of page information" if len(books) > 1 else "its page information")
     if done.sheets:
         extra.append(f"{done.sheets} series sheet(s)" if len(books) > 1 else "its series sheet")
-    with_them = f" with {' and '.join(extra)}" if extra else ""
+    if getattr(done, "defaults", 0):
+        extra.append(f"the defaults of {done.defaults} series" if len(books) > 1 else "its series' defaults")
+    listed = " and ".join(extra) if len(extra) < 3 else f"{', '.join(extra[:-1])} and {extra[-1]}"
+    with_them = f" with {listed}" if extra else ""
     if len(books) == 1:
         return f"exported {books[0][0]!r}: {done.pages} page(s){with_them} to {out}"
     return f"exported {done.books} book(s): {done.pages} page(s){with_them} to {out}"
@@ -1375,6 +1379,10 @@ def _import_lines(result: Any, replace: bool, source: str) -> list[str]:
         lines.append(f"series sheets: {result.sheets_added} added, {result.sheets_joined} joined yours "
                      f"({result.sheet_terms} item(s) added, {result.sheet_taken} taken from the file, "
                      f"{result.sheet_kept} kept as yours)")
+    added, taken, kept = (getattr(result, name, 0) for name in ("defaults_added", "defaults_taken", "defaults_kept"))
+    if added or taken or kept:
+        lines.append(f"series defaults: {added} added, {taken} taken from the file"
+                     + (f", {kept} kept as yours (--take-file takes the file's)" if kept else ""))
     return lines
 
 
@@ -1385,6 +1393,9 @@ def _plan_lines(plan: Any, take: bool) -> list[str]:
     if plan.differing:
         lines.append(f"{len(plan.differing)} book(s) have page information of their own here: "
                      + ("the file's is taken" if take else "yours stays (--take-file takes the file's)"))
+    if plan.differing_defaults:
+        lines.append(f"{len(plan.differing_defaults)} series have other defaults here: "
+                     + ("the file's are taken" if take else "yours stay (--take-file takes the file's)"))
     conflicts = plan.keyed()
     if conflicts:
         lines.append(f"the series sheets here and the file's say otherwise in {len(conflicts)} place(s): "
@@ -1419,8 +1430,8 @@ def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> i
             done = backup.export_books(stores, books, args.out, _passphrase(confirm=True))
             print(_exported_line(done, books, args.out))
             if done.left_out:
-                print(f"note: {done.left_out} file(s) of page information or series sheets could not be read here "
-                      f"and are not in the file", file=sys.stderr)
+                print(f"note: {done.left_out} file(s) of page information, series sheets or series defaults could not "
+                      f"be read here and are not in the file", file=sys.stderr)
             return 0
         if not args.target:
             raise SystemExit("error: cache import needs the file to read")
@@ -1439,6 +1450,8 @@ def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> i
                     parts.append("with its page information")
                 if held.sheet:
                     parts.append(f"with the series sheet of {held.sheet!r}")
+                if getattr(held, "defaults", ""):
+                    parts.append(f"with the series defaults of {held.defaults!r}")
                 print(f"{held.book!r} in {held.language}: {', '.join(parts)}")
             return 0
         chosen = None
@@ -1451,13 +1464,14 @@ def _cache_backup(args: argparse.Namespace, settings: Settings, store: Any) -> i
         plan = backup.plan_import(stores, opened, chosen)
         for line in _plan_lines(plan, take):
             print(f"note: {line}", file=sys.stderr)
-        yours = plan.kept or plan.differing or plan.keyed()  # something of the reader's own that stays or goes
+        # something of the reader's own that stays or goes
+        yours = plan.kept or plan.differing or plan.differing_defaults or plan.keyed()
         if confirm and yours and not _continue():
             print("cancelled: nothing was imported", file=sys.stderr)
             return 1
         answers = {key: True for key, _sheet, _c in plan.keyed()} if take else None
         result = backup.apply_import(stores, opened, chosen, replace=args.replace, keep_corrections=not take,
-                                     take_annotations=take, answers=answers)
+                                     take_annotations=take, answers=answers, take_defaults=take)
     except (backup.BackupError, OSError) as e:
         raise SystemExit(f"error: {e}") from None
     for line in _import_lines(result, args.replace, args.target):

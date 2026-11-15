@@ -49,6 +49,8 @@ class Bars(tk.Toplevel):
     _sync_tools = app_mod.App._sync_tools
     _target_typed = app_mod.App._target_typed
     _target_set = app_mod.App._target_set
+    _sync_series_areas_entry = app_mod.App._sync_series_areas_entry
+    series_areas_ready = app_mod.App.series_areas_ready
 
     def __init__(self, root):
         super().__init__(root)
@@ -156,6 +158,7 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
              for i in range(int(w.menubar.index("end")) + 1) if w.menubar.type(i) == "cascade"}
     assert list(menus) == ["Page", "Tools", "View", "Language", "Help"]
     assert _menu_labels(menus["Page"]) == ["Set area...", "Page keys...", "Ignore this area on all pages of this book",
+                                         "Use these areas for the series",
                                          "Copy format", "Paste format", "Paste format on every region of this kind...",
                                          "Copy region", "Paste region", "Set kind...", "Set text size...",
                                          "Place in reading order..."]
@@ -171,6 +174,27 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
     assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Reading mode (F11)", "Reader", "Translator",
                                     "Read whole book...", "Stop (Esc)"])
     set_language("en")
+
+
+def test_use_these_areas_for_the_series_is_greyed_until_the_book_has_a_series(hidden_root):
+    w = Bars(hidden_root)
+    w.build("en")
+    page = next(w.menubar.nametowidget(w.menubar.entrycget(i, "menu")) for i in range(int(w.menubar.index("end")) + 1)
+                if w.menubar.type(i) == "cascade" and w.menubar.entrycget(i, "label") == "Page")
+    entry = next(i for i in range(int(page.index("end")) + 1)
+                 if page.type(i) == "command" and page.entrycget(i, "label") == "Use these areas for the series")
+    assert w._series_areas_entry == (page, entry)
+    assert str(page.entrycget(entry, "state")) == "disabled"  # no book read yet
+    w.tk.call(page.cget("postcommand"))  # the menu opens
+    assert str(page.entrycget(entry, "state")) == "disabled"
+    w.pipeline, w.busy = SimpleNamespace(annotations=SimpleNamespace(can_share=True, book="Lantern Quay 2")), False
+    w.book_var.set("Lantern Quay 2")
+    w.tk.call(page.cget("postcommand"))
+    assert str(page.entrycget(entry, "state")) == "normal"
+    w.pipeline.annotations.can_share = False  # a book of one volume: no series
+    w.tk.call(page.cget("postcommand"))
+    assert str(page.entrycget(entry, "state")) == "disabled"
+    w.destroy()
 
 
 def test_translator_tools_follow_the_role_on_the_strip(hidden_root):

@@ -37,6 +37,16 @@ result names it.
 A moved cache keeps the details its header had (`cache.DETAIL_FIELDS`); a colophon's *details* go into the header of
 every cache moved, and of the book's cache in the language it is read in (made when the book has none there, as the
 window keeps a colophon's details).
+
+The series' defaults (`annotations.SeriesDefaults`: the settings, reading direction and areas a new volume starts
+from, one file per series key, `series_id(series_of(name))`) follow a rename that gives the book another series key
+(`_plan_defaults`). Where the new series has no defaults yet, the old series' go there: moved when no other book is
+kept under the old series (a cache in any language, or annotations: `_other_volumes`), copied when one is, so that the
+other volumes keep theirs. Where the new series has defaults of its own, those stay as they are and the old series'
+stay where they are. A book that follows its series (`BookAnnotations.follows_series`) keeps the values that were in
+force for it: when the new series' defaults (or none, for a name without a series) would give it others, the values
+it took from the old series are written into its moved file as its own, and it no longer follows a series. A file of
+defaults that cannot be read, or one in the way, refuses the rename as any other file does.
 """
 
 from __future__ import annotations
@@ -49,12 +59,13 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
 
 from .annotations import (
-    ANNOTATION_FILES, SHEET_FILES, AnnotationStore, Conflict, Glossary, GlossaryStore, Review, apply_review,
-    compare_sheets,
+    ANNOTATION_FILES, SERIES_DEFAULT_FILES, SHEET_FILES, AnnotationStore, BookAnnotations, Conflict, Glossary,
+    GlossaryStore, Review, SeriesDefaults, apply_review, compare_sheets, series_id, series_of,
 )
 from . import protect
 from .atomic import write_atomic
 from .bookid import generic_book_name
+from .bookname import clean_series
 from .cache import DETAIL_FIELDS, CacheStore, clean_detail, language_key, stored_book
 from .cache import SCHEMA_VERSION as CACHE_SCHEMA
 from .messages import Message
@@ -127,6 +138,8 @@ class RenamePlan:
     old_series: str
     new_series: str
     sheets: list[SheetJoin] = field(default_factory=list)
+    defaults: str = ""  # what the series' defaults do (`RenameResult.defaults`)
+    values_kept: bool = False  # the book's values in force become its own (`RenameResult.values_kept`)
 
     @property
     def series_moved(self) -> bool:
@@ -167,6 +180,10 @@ class RenameResult:
     taken: int = 0  # conflicts where the book's value was taken
     kept: int = 0  # conflicts kept as the series' sheet had them
     left: list[str] = field(default_factory=list)  # old files that could not be deleted: they are still there
+    # the old series' defaults (`_plan_defaults`): "moved" or "copied" to the new series, "kept" (the new series has
+    # its own, which stay; the old series' stay too), "" (nothing to do: the series key stays, or the old has none)
+    defaults: str = ""
+    values_kept: bool = False  # the book followed its series: the values in force for it are its own now
 
     @property
     def series_moved(self) -> bool:
@@ -175,8 +192,8 @@ class RenameResult:
 
     @property
     def files(self) -> int:
-        """How many files moved (or joined)."""
-        return self.caches + self.annotations + self.sheets
+        """How many files moved (or joined), a copy of the series' defaults among them."""
+        return self.caches + self.annotations + self.sheets + (self.defaults in ("moved", "copied"))
 
 
 @dataclass(frozen=True)
@@ -231,6 +248,7 @@ class _Plan:
     moves: list[_Move] = field(default_factory=list)
     joins: list[_Join] = field(default_factory=list)
     languages: set[str] = field(default_factory=set)  # the keys of the languages whose caches move
+    drop_defaults: tuple[_Kind, str] | None = None  # the old series' defaults that moved: deleted after the writes
 
 
 def _key(path: Path) -> str:
@@ -501,6 +519,119 @@ def _delete(kind: _Kind, name: str, written: set[str], left: list[str]) -> None:
         drop_leftovers(path)
 
 
+def _defaults_kind(stores: Stores) -> _Kind | None:
+    """The series' defaults as a rename sees them (the folder of `AnnotationStore.series`); None for a store of
+    annotations that keeps none."""
+    shelf = getattr(stores.annotations, "series", None)
+    if shelf is None:
+        return None
+    return _Kind("the series' defaults", Path(shelf.folder), SERIES_DEFAULT_FILES.owner_of, False,
+                 SERIES_DEFAULT_FILES.check)
+
+
+def _defaults_of(data: dict[str, Any], path: Path) -> SeriesDefaults:
+    """The series' defaults whose JSON *data* the file at *path* holds; RenameRefused when they cannot be taken."""
+    try:
+        return SeriesDefaults.from_json(data, path)
+    except _PARSE_ERRORS:
+        raise _damaged(path) from None
+
+
+def _other_volumes(stores: Stores, old: str, key: str) -> bool:
+    """Whether a book other than *old* is kept under the series *key* (`series_id(series_of(book))`): one with a cache
+    in any language (the caches' headers, `CacheStore.identities`) or with annotations. True when that cannot be told
+    now (a copy is the safe answer: nothing of another volume's is taken from it)."""
+
+    def other(book: Any) -> bool:
+        return isinstance(book, str) and book != old and series_id(series_of(book)) == key
+
+    try:
+        identities = getattr(stores.cache, "identities", None)
+        books = [entry.book for entry in identities()] if identities is not None else [
+            entry["book"] for entry in stores.cache.list()]
+        if any(other(book) for book in books):
+            return True
+        return any(other(entry.get("book")) for entry in stores.annotations.list())
+    except OSError:
+        return True
+
+
+def _in_force(book: BookAnnotations, defaults: SeriesDefaults | None) -> tuple[Any, ...]:
+    """What is in force for *book*, a book that follows its series, with *defaults* its series' (None: none): its
+    settings, its reading direction (right to left where none is set) and its areas, in any order."""
+    book.inherited = defaults
+    areas = list(book.areas)
+    return dict(book.settings), "ltr" if book.reading_direction == "ltr" else "rtl", len(areas), frozenset(areas)
+
+
+def _keep_in_force(move: _Move, book: BookAnnotations, defaults: SeriesDefaults | None) -> None:
+    """The annotations *move* writes with the values in force for *book* under its old series' *defaults* as its
+    own (`_in_force`): its settings, its reading direction and its areas; it no longer follows a series, so that
+    another series' defaults never change them. The rest of its file stays as it was."""
+    book.inherited = defaults
+    data = {key: value for key, value in move.data.items() if key != "follows_series"}
+    data["settings"] = dict(book.settings)
+    data["reading_direction"] = book.reading_direction
+    data["areas"] = [area.to_json() for area in book.areas]
+    move.data = data
+
+
+def _plan_defaults(stores: Stores, plan: _Plan, old: str, new: str, marks: list[_Move]) -> None:
+    """What the rename of *old* to *new* does with the series' defaults (see the module's docstring), added to *plan*:
+    a move that writes the old series' defaults for the new series (moved: the old file is deleted afterwards,
+    `_Plan.drop_defaults`; or copied), and the book's annotations (*marks*, its move) with the values in force kept as
+    its own where the new series would give it others. Nothing when the series key stays, or the old name has none
+    and the book does not follow one. RenameRefused for a file of defaults that cannot be read, or one in the way."""
+    kind = _defaults_kind(stores)
+    if kind is None:
+        return
+    old_series, new_series = series_of(old), series_of(new)
+    old_key, new_key = series_id(old_series), series_id(new_series)
+    if old_key == new_key:
+        return  # (one series: its defaults stay where they are)
+    book: BookAnnotations | None = None
+    move = marks[0] if marks else None
+    if move is not None:
+        try:
+            book = BookAnnotations.from_json(move.data, move.source)
+        except _PARSE_ERRORS:
+            raise _damaged(move.source) from None
+        if not book.follows_series:
+            book = None  # (it goes by its own values alone: nothing of a series is in force for it)
+    before: SeriesDefaults | None = None
+    source: _Source | None = None
+    if old_key:
+        found = _sources(kind, old_key)
+        if found:
+            source = found[0]
+            before = _defaults_of(source.data, source.path)
+            if before.is_empty:
+                before, source = None, None  # (nothing to carry)
+    if before is None and book is None:
+        return
+    after: SeriesDefaults | None = None
+    if new_key:
+        what = f"the series' defaults of {clean_series(new_series)!r}"
+        shared = source is not None and _other_volumes(stores, old, old_key)
+        free = {_key(source.path)} if source is not None and not shared else set()
+        target, there = _meeting(kind, new_key, None, free, what)
+        if there is not None:
+            after = _defaults_of(there, target)
+            if before is not None:
+                plan.result.defaults = "kept"  # the new series' own stay, and so do the old series'
+        elif source is not None and before is not None:
+            data = {**source.data, "key": new_key, "series": clean_series(new_series), "updated": _now()}
+            plan.moves.append(_Move(what, source.path, target, data))
+            plan.result.defaults = "copied" if shared else "moved"
+            if not shared:
+                plan.drop_defaults = (kind, old_key)
+            after = before
+    if book is not None and move is not None and _in_force(book, before) != _in_force(book, after):
+        _keep_in_force(move, book, before)
+        plan.result.values_kept = True
+    plan.view.defaults, plan.view.values_kept = plan.result.defaults, plan.result.values_kept
+
+
 def moving_series(sheets: GlossaryStore, old: str) -> str:
     """The series whose sheet goes with the book *old* when a rename gives it another series: the one it reads
     (`notes.sheet_key`) - its series, or the sheet the parser before 2026-11-15 kept for this book alone ("Title
@@ -539,11 +670,14 @@ def _plan(stores: Stores, old: str, new: str, details: Mapping[str, Any] | None 
 
     marks = _sources(annotations, old)
     free = {_key(s.path) for s in marks}
+    mark_moves: list[_Move] = []
     for s in marks:
         what = f"the annotations of {new!r}"
         target = _target(annotations, new, None, free, what)
-        moves.append(_Move(what, s.path, target, {**s.data, "book": new}))
+        mark_moves.append(_Move(what, s.path, target, {**s.data, "book": new}))
+    moves.extend(mark_moves)
     result.annotations = len(marks)
+    _plan_defaults(stores, plan, old, new, mark_moves)  # the series' defaults, where the series key changes
 
     if result.series_moved:  # the whole sheet goes with the book, or joins the new series'
         sources = _sources(sheets, old_series)
@@ -574,7 +708,8 @@ def rename_book(stores: Stores, old: str, new: str, language: str | None = None,
                 details: Mapping[str, Any] | None = None, answers: Answers | None = None) -> RenameResult:
     """Move everything kept under the book name *old* to *new* (see the module's docstring): the cache in every
     language, the reader's annotations and, when the series of *new* (`notes.series_key`) is another than *old*'s, the
-    series sheet in every language. Where the new series has a sheet in a language already, the book's joins it;
+    series sheet in every language and the series' defaults (moved, copied or left, the book's values in force kept:
+    `_plan_defaults`). Where the new series has a sheet in a language already, the book's joins it;
     *answers* (a conflict's key, `conflict_key`, to True for "take this book's value": what the review answered on
     `plan_rename`'s plan) decide the conflicts of the plan
     made again now, each one without an answer keeping the series' value. *details* (a colophon's: title, volume,
@@ -598,6 +733,8 @@ def rename_book(stores: Stores, old: str, new: str, language: str | None = None,
     _delete(annotations, old, written, result.left)
     if result.series_moved:
         _delete(sheets, result.old_series, written, result.left)
+    if plan.drop_defaults is not None:  # the old series' defaults moved to the new series (no other volume has them)
+        _delete(*plan.drop_defaults, written, result.left)
 
     known = plan.details
     if known and language is not None and language_key(language) not in plan.languages:

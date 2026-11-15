@@ -1,7 +1,8 @@
 """The export that takes everything to another computer of the reader's: a book's translations with its page
-information and the series sheet it reads, several books in one file (a series, the whole library), and an import
-that lists what a file holds, keeps the reader's corrections, page information and sheet values unless they take the
-file's, and leaves a copy of every file it changes. Files of an earlier version (one cache alone) still import."""
+information, the series sheet it reads and its series' defaults, several books in one file (a series, the whole
+library), and an import that lists what a file holds, keeps the reader's corrections, page information, series'
+defaults and sheet values unless they take the file's, and leaves a copy of every file it changes. Files of an earlier
+version (one cache alone), and bundles without series' defaults, still import."""
 from __future__ import annotations
 
 import json
@@ -11,9 +12,9 @@ import pytest
 
 pytest.importorskip("cryptography")
 
-from taslation import backup  # noqa: E402
+from taslation import backup, protect  # noqa: E402
 from taslation.annotations import (  # noqa: E402
-    AnnotationStore, BookAnnotations, BookArea, CharacterSheet, Glossary, GlossaryStore,
+    MAX_AREAS, AnnotationStore, BookAnnotations, BookArea, CharacterSheet, Glossary, GlossaryStore, SeriesDefaults,
 )
 from taslation.cache import BookCache, CacheStore, CachedBubble, CachedPage  # noqa: E402
 from taslation.cli import main  # noqa: E402
@@ -78,6 +79,24 @@ def _sheet(stores: Stores, series: str = SERIES, rendering: str = "Hanako", lang
     return sheet
 
 
+NUMBER_AREA = BookArea.around((0.45, 0.95, 0.55, 0.98), "right", 0.71)  # a page number on the right-hand pages
+
+
+def _defaults(stores: Stores, series: str = SERIES, scale: float = 1.2, direction: str = "ltr",
+              areas=(NUMBER_AREA,)) -> SeriesDefaults:
+    """The defaults a new volume of *series* starts from, as Book settings saves them."""
+    defaults = stores.annotations.series.open(series)
+    defaults.settings = {"text_scale": scale, "translate_sfx": False}
+    defaults.reading_direction = direction
+    defaults.areas = list(areas)
+    defaults.save()
+    return defaults
+
+
+def _values(defaults: SeriesDefaults) -> tuple:
+    return defaults.settings, defaults.reading_direction, defaults.areas
+
+
 def _texts(cache: BookCache) -> dict[str, list[str]]:
     return {p.fingerprint: [b.text for b in p.bubbles] for p in cache.pages}
 
@@ -101,7 +120,8 @@ def _payload(path) -> dict:
 
 
 def _files(*folders) -> dict[str, bytes]:
-    return {f"{folder.name}/{p.name}": p.read_bytes() for folder in folders if folder.is_dir() for p in folder.iterdir()}
+    return {f"{folder.name}/{p.name}": p.read_bytes() for folder in folders if folder.is_dir() for p in folder.iterdir()
+            if p.is_file()}
 
 
 # ------------------------------------------------------------------ the parts, there and back
@@ -275,6 +295,94 @@ def test_the_series_sheet_joins_the_one_here_as_a_rename_joins_them(tmp_path):
     assert [s["series"] for s in laptop.sheets.list()] == [SERIES]
 
 
+def test_the_series_defaults_go_once_for_all_its_volumes_and_a_new_volume_there_starts_from_them(tmp_path):
+    home, laptop = _stores(tmp_path / "home"), _stores(tmp_path / "laptop")
+    _cache(home, VOL1, _page(FP_A, _bubble(BOX_1, "Volume one")))
+    _cache(home, VOL2, _page(FP_B, _bubble(BOX_1, "Volume two")))
+    _cache(home, VOL2, _page(FP_B, _bubble(BOX_1, "Tome deux")), language="French")
+    _cache(home, OTHER, _page(FP_C, _bubble(BOX_1, "A series without defaults")))
+    _cache(home, SERIES, _page(FP_D, _bubble(BOX_1, "One volume: no series")))
+    theirs = _defaults(home)
+    _defaults(home, series="Unread Shelf")  # the defaults of a series none of the books is of: not in the file
+    out = tmp_path / "x.stcache"
+    done = backup.export_books(home, [(b["book"], b["language"]) for b in home.cache.list()], out, PASSPHRASE)
+    assert (done.books, done.defaults, done.left_out) == (5, 1, 0)
+    data = _payload(out)
+    assert [(d["key"], d["series"]) for d in data["defaults"]] == [("lanternquay", SERIES)]  # one copy for the series
+    linked = {(e["cache"]["book"], e["cache"]["language"]): e.get("defaults") for e in data["books"]}
+    assert linked == {(VOL1, "English"): 0, (VOL2, "English"): 0, (VOL2, "French"): 0, (OTHER, "English"): None,
+                      (SERIES, "English"): None}
+
+    opened = backup.open_export(out, PASSPHRASE)
+    assert sorted((h.book, h.language, h.defaults) for h in opened.held) == [
+        (SERIES, "English", ""), (VOL1, "English", SERIES), (VOL2, "English", SERIES), (VOL2, "French", SERIES),
+        (OTHER, "English", "")]
+    laptop.annotations.series.open(SERIES).save()  # defaults that hold nothing are none
+    plan = backup.plan_import(laptop, opened)
+    assert [(d.series, d.state) for d in plan.defaults] == [(SERIES, "new")] and not plan.differing_defaults
+    only_other = [h.index for h in opened.held if h.book == OTHER]
+    assert plan.only(only_other).defaults == [] and len(plan.only([only_other[0], 0, 1]).defaults) == 1
+    result = backup.apply_import(laptop, opened)
+    assert (result.defaults_added, result.defaults_taken, result.defaults_kept) == (1, 0, 0)
+    path = laptop.annotations.series.path_for(SERIES)
+    assert path.name == "lanternquay.json" and protect.is_protected(path.read_bytes())  # saved as the store saves it
+    assert _values(laptop.annotations.series.open(SERIES)) == _values(theirs)
+    assert [row["series"] for row in laptop.annotations.series.list()] == [SERIES]
+    new = laptop.annotations.open(f"{SERIES} 3")  # a new volume on this computer starts from them
+    assert new.follows_series and new.settings == theirs.settings and not new.rtl and new.areas == [NUMBER_AREA]
+
+
+def test_the_series_defaults_here_are_kept_unless_the_file_is_taken(tmp_path, monkeypatch):
+    real_strftime = time.strftime
+    monkeypatch.setattr(time, "strftime", lambda fmt, *a: real_strftime(fmt.replace("%H%M%S", "120000"), *a))
+    home, laptop = _stores(tmp_path / "home"), _stores(tmp_path / "laptop")
+    _cache(home, VOL1, _page(FP_A, _bubble(BOX_1, "Line")))
+    theirs = _defaults(home, scale=1.2, direction="ltr")
+    out = tmp_path / "x.stcache"
+    backup.export_cache(home, VOL1, out, PASSPHRASE)
+    _defaults(laptop, scale=0.9, direction="rtl", areas=())  # my own here, not the file's
+    path = laptop.annotations.series.path_for(SERIES)
+    mine_bytes = path.read_bytes()
+    plan = backup.plan_import(laptop, backup.open_export(out, PASSPHRASE))
+    assert [(d.series, d.state) for d in plan.defaults] == [(SERIES, "differs")] and plan.differing_defaults
+    result = backup.apply_import(laptop, backup.open_export(out, PASSPHRASE))  # by default: mine stay
+    assert (result.defaults_added, result.defaults_taken, result.defaults_kept) == (0, 0, 1)
+    assert path.read_bytes() == mine_bytes and not list(path.parent.glob("*.before-import.*.json"))
+    result = backup.apply_import(laptop, backup.open_export(out, PASSPHRASE), take_defaults=True)
+    assert (result.defaults_added, result.defaults_taken, result.defaults_kept) == (0, 1, 0)
+    assert _values(laptop.annotations.series.open(SERIES)) == _values(theirs)
+    (copy,) = path.parent.glob("*.before-import.*.json")
+    assert copy.read_bytes() == mine_bytes  # what was mine, kept beside
+    assert [row["series"] for row in laptop.annotations.series.list()] == [SERIES]  # a copy is no series' file
+    plan = backup.plan_import(laptop, backup.open_export(out, PASSPHRASE))
+    assert [d.state for d in plan.defaults] == ["same"]  # as the file has them now: nothing to ask
+    # the same values in another order of the areas, under another spelling of the series, are the same
+    again = laptop.annotations.series.open("lantern  QUAY")
+    again.areas = list(reversed(again.areas))
+    again.save()
+    assert [d.state for d in backup.plan_import(laptop, backup.open_export(out, PASSPHRASE)).defaults] == ["same"]
+
+
+def test_a_bundle_without_series_defaults_still_imports(tmp_path):
+    """The defaults came to schema 2 as an optional part: a bundle written before them has none, and imports."""
+    home = _stores(tmp_path / "home")
+    _cache(home, VOL1, _page(FP_A, _bubble(BOX_1, "Line")))
+    _marks(home, VOL1)
+    _defaults(home)
+    out = tmp_path / "x.stcache"
+    backup.export_cache(home, VOL1, out, PASSPHRASE)
+    data = _payload(out)
+    assert data["schema"] == 2 and data["books"][0]["defaults"] == 0
+    del data["defaults"]
+    del data["books"][0]["defaults"]
+    laptop = _stores(tmp_path / "laptop")
+    opened = backup.open_export(_sealed(tmp_path, data), PASSPHRASE)
+    assert opened.version == 2 and opened.defaults == [] and opened.held[0].defaults == ""
+    result = backup.apply_import(laptop, opened)
+    assert result.annotations_added == 1 and result.defaults_added == 0
+    assert not laptop.annotations.series.list()
+
+
 # ------------------------------------------------------------------ several books in one file
 def test_a_series_and_the_whole_library_in_one_file_and_an_import_of_some_of_it(tmp_path):
     home, laptop = _stores(tmp_path / "home"), _stores(tmp_path / "laptop")
@@ -336,21 +444,24 @@ def test_the_caps_of_one_file(tmp_path, monkeypatch):
 def test_the_file_holds_nothing_the_saved_files_do_not(tmp_path):
     """No line read from a page is ever kept, so none is in an export: what the decrypted payload holds is what the
     source files hold (their own strings: translations, the reader's notes and speakers, the sheet's Japanese terms
-    as the reader wrote them), and the payload's own few words."""
+    as the reader wrote them, the series' defaults), and the payload's own few words."""
     home = _stores(tmp_path / "home")
     _cache(home, VOL1, _page(FP_A, _bubble(BOX_1, "This is the secret room.", edited=True)))
     _marks(home, VOL1)
     _sheet(home)
+    _defaults(home)
     out = tmp_path / "x.stcache"
     backup.export_cache(home, VOL1, out, PASSPHRASE)
     payload = backup.decrypt(out.read_bytes(), PASSPHRASE).decode("utf-8")
     assert PAGE_LINE not in payload and json.dumps(PAGE_LINE) not in payload
+    assert len(json.loads(payload)["defaults"]) == 1  # the series' defaults are in it, and in what is checked
     sources = set()
-    for path in (home.cache.path_for(VOL1), home.annotations.path_for(VOL1), home.sheets.path_for(SERIES)):
+    for path in (home.cache.path_for(VOL1), home.annotations.path_for(VOL1), home.sheets.path_for(SERIES),
+                 home.annotations.series.path_for(SERIES)):
         sources |= _strings(store_json(path))
     found = _strings(json.loads(payload))
     assert found - sources == {"taslation", "export", backup.PAYLOAD_NOTE} - sources
-    assert {TERM, NAME, "わし", "Hanako", "a pun on her name", "This is the secret room."} <= found
+    assert {TERM, NAME, "わし", "Hanako", "a pun on her name", "This is the secret room.", "lanternquay"} <= found
 
 
 def _sealed(tmp_path, payload: dict):
@@ -365,10 +476,14 @@ MARKS = {"schema": 1, "kind": "annotations", "book": VOL1, "pages": [], "setting
          "reading_direction": "rtl"}
 SHEET = {"schema": 1, "kind": "glossary", "series": SERIES, "language": "English", "entries": [], "characters": [],
          "style": {"honorifics": "keep"}}
+DEFAULTS = {"schema": 1, "kind": "series_defaults", "key": "lanternquay", "series": SERIES,
+            "settings": {"text_scale": 1.2}, "reading_direction": "ltr", "areas": []}
+AREA = {"box": [0.45, 0.95, 0.55, 0.98], "side": "right", "aspect": 0.71}
 
 
-def _bundle(*books, marks=(MARKS,), sheets=(SHEET,)) -> dict:
-    return {"schema": 2, "books": list(books), "annotations": list(marks), "sheets": list(sheets)}
+def _bundle(*books, marks=(MARKS,), sheets=(SHEET,), defaults=(DEFAULTS,)) -> dict:
+    return {"schema": 2, "books": list(books), "annotations": list(marks), "sheets": list(sheets),
+            "defaults": list(defaults)}
 
 
 @pytest.mark.parametrize("payload", [
@@ -389,13 +504,33 @@ def _bundle(*books, marks=(MARKS,), sheets=(SHEET,)) -> dict:
     pytest.param(_bundle({"cache": {**CACHE, "schema": 2}}), id="a-cache-of-a-newer-version"),
     pytest.param(_bundle({"cache": CACHE}, marks=({**MARKS, "schema": 2},)), id="page-information-of-a-newer-version"),
     pytest.param({"schema": 2, "books": "all"}, id="books-not-a-list"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 1}), id="no-such-series-defaults"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": "0"}), id="a-defaults-index-not-a-number"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "key": "pebbleharbor"},)),
+                 id="defaults-of-another-series"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "series": "Pebble Harbor"},)),
+                 id="defaults-named-for-another-series"),
+    pytest.param(_bundle({"cache": {**CACHE, "book": "Lantern Quay"}, "defaults": 0}), id="defaults-of-a-book-of-no-series"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, {"cache": {**CACHE, "book": VOL2}, "defaults": 1},
+                         defaults=(DEFAULTS, DEFAULTS)), id="the-defaults-of-a-series-twice"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "schema": 2},)),
+                 id="defaults-of-a-newer-version"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "kind": "annotations"},)),
+                 id="defaults-of-another-kind"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "areas": [AREA] * (MAX_AREAS + 1)},)),
+                 id="too-many-areas"),
+    pytest.param(_bundle({"cache": CACHE, "defaults": 0}, defaults=({**DEFAULTS, "settings": ["text_scale"]},)),
+                 id="settings-not-a-mapping"),
+    pytest.param({**_bundle({"cache": CACHE}), "defaults": {"0": DEFAULTS}}, id="defaults-not-a-list"),
 ])
 def test_hostile_bundles_are_refused_and_nothing_is_written(tmp_path, payload):
     laptop = _stores(tmp_path / "laptop")
     _cache(laptop, VOL1, _page(FP_A, _bubble(BOX_1, "Mine")))
     _marks(laptop, VOL1)
     _sheet(laptop)
-    folders = (laptop.cache.cache_dir, laptop.annotations.annotations_dir, laptop.sheets.glossary_dir)
+    _defaults(laptop)
+    folders = (laptop.cache.cache_dir, laptop.annotations.annotations_dir, laptop.sheets.glossary_dir,
+               laptop.annotations.series.folder)
     before = _files(*folders)
     with pytest.raises(backup.BackupError):
         backup.import_cache(laptop, _sealed(tmp_path, payload), PASSPHRASE)
@@ -404,14 +539,16 @@ def test_hostile_bundles_are_refused_and_nothing_is_written(tmp_path, payload):
 
 def test_control_characters_in_page_information_and_sheets_are_dropped(tmp_path):
     evil = "\x1b]0;owned\x07\x9b"
-    payload = _bundle({"cache": CACHE, "annotations": 0, "sheet": 0},
+    payload = _bundle({"cache": CACHE, "annotations": 0, "sheet": 0, "defaults": 0},
                       marks=({**MARKS, "settings": {"erase_mode": "outline" + evil}},),
-                      sheets=({**SHEET, "series": SERIES + evil, "entries": [{"term": TERM + evil, "rendering": "H"}]},))
+                      sheets=({**SHEET, "series": SERIES + evil, "entries": [{"term": TERM + evil, "rendering": "H"}]},),
+                      defaults=({**DEFAULTS, "settings": {"erase_mode": "classic" + evil}},))
     laptop = _stores(tmp_path / "laptop")
     backup.import_cache(laptop, _sealed(tmp_path, payload), PASSPHRASE)
     assert laptop.annotations.open(VOL1).settings == {"erase_mode": "outline]0;owned"}
     (listed,) = laptop.sheets.list()
     assert listed["series"] == SERIES + "]0;owned" and laptop.sheets.open(listed["series"]).get(TERM + "]0;owned")
+    assert laptop.annotations.series.open(SERIES).settings == {"erase_mode": "classic]0;owned"}
 
 
 def test_a_file_that_cannot_be_read_here_is_left_out_and_counted(tmp_path):
@@ -420,10 +557,15 @@ def test_a_file_that_cannot_be_read_here_is_left_out_and_counted(tmp_path):
     _sheet(home)
     home.annotations.annotations_dir.mkdir(parents=True)
     home.annotations.path_for(VOL1).write_bytes(b"not a file of page information")
+    home.annotations.series.folder.mkdir(parents=True)
+    home.annotations.series.path_for(SERIES).write_bytes(b"not a file of series defaults")
+    _cache(home, VOL2, _page(FP_B, _bubble(BOX_1, "Line")))  # a second volume of that series: the file counts once
     out = tmp_path / "x.stcache"
-    done = backup.export_books(home, [(VOL1, "English")], out, PASSPHRASE)
-    assert (done.annotations, done.sheets, done.left_out) == (0, 1, 1)
+    done = backup.export_books(home, [(VOL1, "English"), (VOL2, "English")], out, PASSPHRASE)
+    assert (done.annotations, done.sheets, done.defaults, done.left_out) == (0, 1, 0, 2)
     assert home.annotations.path_for(VOL1).read_bytes() == b"not a file of page information"  # never set aside
+    assert home.annotations.series.path_for(SERIES).read_bytes() == b"not a file of series defaults"
+    assert "defaults" not in _payload(out)["books"][0]
 
 
 def test_an_import_never_writes_into_another_series_sheet(tmp_path, monkeypatch):
@@ -470,17 +612,18 @@ def test_the_commands_export_a_series_or_everything_and_import_some_of_it(cli, m
     _cache(home, OTHER, _page(FP_C, _bubble(BOX_1, "Another")))
     _marks(home, VOL1)
     _sheet(home)
+    _defaults(home)
     series, everything = cli / "series.stcache", cli / "all.stcache"
     assert main(["cache", "export", "--series", SERIES, "--out", str(series)]) == 0
     line = capsys.readouterr().out.strip()
-    assert line == (f"exported 2 book(s): 2 page(s) with 1 book(s) of page information and 1 series sheet(s) to "
-                    f"{series}")
+    assert line == (f"exported 2 book(s): 2 page(s) with 1 book(s) of page information, 1 series sheet(s) and the "
+                    f"defaults of 1 series to {series}")
     assert sorted(h.book for h in backup.open_export(series, PASSPHRASE).held) == [VOL1, VOL2]
     assert main(["cache", "export", "--all", "--out", str(everything)]) == 0
     assert "exported 4 book(s): 4 page(s)" in capsys.readouterr().out
     assert main(["cache", "export", VOL1, "--out", str(cli / "one.stcache")]) == 0
-    assert capsys.readouterr().out.strip() == (f"exported {VOL1!r}: 1 page(s) with its page information and its "
-                                               f"series sheet to {cli / 'one.stcache'}")
+    assert capsys.readouterr().out.strip() == (f"exported {VOL1!r}: 1 page(s) with its page information, its series "
+                                               f"sheet and its series' defaults to {cli / 'one.stcache'}")
     for argv, said in ((["cache", "export", VOL1, "--all", "--out", str(cli / "z.stcache")], "--series NAME or --all"),
                        (["cache", "export", "--series", "Nothing Here", "--out", str(cli / "z.stcache")],
                         "no cached volume of the series 'Nothing Here'")):
@@ -491,7 +634,8 @@ def test_the_commands_export_a_series_or_everything_and_import_some_of_it(cli, m
     assert main(["cache", "import", str(everything), "--list"]) == 0
     listed = capsys.readouterr().out.strip().splitlines()
     assert len(listed) == 4 and f"{VOL1!r} in English: 1 page(s), 1 bubble(s), with its page information, with the " \
-                                f"series sheet of {SERIES!r}" in listed
+                                f"series sheet of {SERIES!r}, with the series defaults of {SERIES!r}" in listed
+    assert f"{OTHER!r} in English: 1 page(s), 1 bubble(s)" in listed
     assert not (cli / "laptop" / "cache").exists()  # a list writes nothing
     assert main(["cache", "import", str(everything), "--book", VOL2]) == 0
     lines = capsys.readouterr().out.strip().splitlines()
@@ -500,7 +644,7 @@ def test_the_commands_export_a_series_or_everything_and_import_some_of_it(cli, m
                      f"imported 1 page(s) into {VOL2!r} in French (merged: 1 added, 0 replaced, 0 of your correction(s) "
                      f"kept) from {everything}"]
     assert lines[2:] == ["series sheets: 1 added, 0 joined yours (0 item(s) added, 0 taken from the file, 0 kept as "
-                         "yours)"]
+                         "yours)", "series defaults: 1 added, 0 taken from the file"]
     laptop = _stores(cli / "laptop")
     assert sorted((b["book"], b["language"]) for b in laptop.cache.list()) == [(VOL2, "English"), (VOL2, "French")]
     with pytest.raises(SystemExit, match="holds no book 'Nothing'"):
@@ -512,21 +656,30 @@ def test_the_command_keeps_yours_unless_told_to_take_the_file(cli, monkeypatch, 
     _cache(home, VOL1, _page(FP_A, _bubble(BOX_1, "Theirs")))
     _marks(home, VOL1, speaker="Hanako")
     _sheet(home, rendering="Hana")
+    _defaults(home, scale=1.2)
     out = cli / "x.stcache"
     backup.export_cache(home, VOL1, out, PASSPHRASE)
     here = _stores(cli / "state")
     _cache(here, VOL1, _page(FP_A, _bubble(BOX_1, "Mine", edited=True)))
     _marks(here, VOL1, speaker="The Keeper")
     _sheet(here, rendering="Hanako")
+    _defaults(here, scale=0.9)
     assert main(["cache", "import", str(out)]) == 0
     captured = capsys.readouterr()
     assert "keeps 1 of your correction(s)" in captured.err and "yours stays (--take-file" in captured.err
+    assert "1 series have other defaults here: yours stay (--take-file takes the file's)" in captured.err
     assert "kept as yours (--take-file takes the file's)" in captured.out
+    assert ("series defaults: 0 added, 0 taken from the file, 1 kept as yours (--take-file takes the file's)"
+            in captured.out.splitlines())
     assert _texts(here.cache.open(VOL1, MODEL)) == {FP_A: ["Mine"]}
     assert here.annotations.open(VOL1).page(FP_A, 0.71).note_at(BOX_1).speaker == "The Keeper"
     assert here.sheets.open(SERIES).get(TERM).rendering == "Hanako"
+    assert here.annotations.series.open(SERIES).settings["text_scale"] == 0.9
     assert main(["cache", "import", str(out), "--take-file"]) == 0
-    assert "1 taken from the file" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "1 taken from the file" in captured.out and "the file's are taken" in captured.err
+    assert "series defaults: 0 added, 1 taken from the file" in captured.out.splitlines()
     assert _texts(here.cache.open(VOL1, MODEL)) == {FP_A: ["Theirs"]}
     assert here.annotations.open(VOL1).page(FP_A, 0.71).note_at(BOX_1).speaker == "Hanako"
     assert here.sheets.open(SERIES).get(TERM).rendering == "Hana"
+    assert here.annotations.series.open(SERIES).settings["text_scale"] == 1.2

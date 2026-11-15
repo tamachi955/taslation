@@ -344,9 +344,42 @@ def test_the_review_dialog_lists_the_books_counts_the_choice_and_asks_only_what_
     plan = backup.plan_import(_stores(tmp_path / "empty"), opened)  # nothing of the reader's own: no question
     r = ImportReviewDialog(hidden_root, opened, plan, "home.stcache")
     r.withdraw()
-    assert r.corrections_box is None and r.marks_box is None and r.choices == []
+    assert r.corrections_box is None and r.marks_box is None and r.defaults_box is None and r.choices == []
     r.cancel()
     assert r.choice is None and not r.winfo_exists()
+
+
+def test_series_defaults_of_the_readers_own_bring_the_review_and_stay_unless_taken(hidden_root, tmp_path, monkeypatch,
+                                                                                    quick_keys):
+    book = f"{SERIES} 3"
+    home, out = _file_of(tmp_path, [(book, 2, False)])
+    theirs = home.annotations.series.open(SERIES)
+    theirs.settings = {"text_scale": 1.2}
+    theirs.save()
+    backup.export_books(home, [(book, "English")], out, PASSPHRASE)
+    here = _stores(tmp_path / "laptop")
+    mine = here.annotations.series.open(SERIES)
+    mine.settings = {"text_scale": 0.9}
+    mine.save()
+    opened = backup.open_export(out, PASSPHRASE)
+    r = ImportReviewDialog(hidden_root, opened, backup.plan_import(here, opened), "home.stcache")
+    r.withdraw()
+    assert r.defaults_box is not None and r.corrections_box is None and r.marks_box is None
+    r.defaults_var.set("take")
+    r.apply()
+    assert r.choice == ImportChoice([0], take_defaults=True)
+
+    reviewed = _importing(monkeypatch, out, review=lambda opened, plan: ImportChoice([0]))  # the defaults: mine stay
+    d = _dialog(hidden_root, here)
+    d._import()
+    assert len(reviewed) == 1 and [x.state for x in reviewed[0][1].defaults] == ["differs"]  # one book, yet asked
+    assert here.annotations.series.open(SERIES).settings == {"text_scale": 0.9}
+    assert d.backup_var.get().endswith("Series defaults: 0 added, 0 taken from the file, 1 kept as yours.")
+    _importing(monkeypatch, out, review=lambda opened, plan: ImportChoice([0], take_defaults=True))
+    d._import()
+    assert here.annotations.series.open(SERIES).settings == {"text_scale": 1.2}
+    assert d.backup_var.get().endswith("Series defaults: 0 added, 1 taken from the file, 0 kept as yours.")
+    d.destroy()
 
 
 # ------------------------------------------------------------------ Rename...

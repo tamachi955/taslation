@@ -82,7 +82,7 @@ from .dialogs.help import FIRST_STEPS_FLAG, KEYS_TOPIC, FirstSteps, HelpWindow, 
 from .dialogs.notice import NoticeDialog, notice_due
 from .dialogs.review import EditBubbleDialog, ReviewDialog, review_rows
 from .dialogs.book_settings import BookSettingsDialog
-from .book_areas import IGNORE_EVERYWHERE, IGNORE_TIP, AreaMixin
+from .book_areas import IGNORE_EVERYWHERE, IGNORE_TIP, SERIES_AREAS_TIP, USE_FOR_SERIES, AreaMixin
 from .book_fields import BookFields, fields_committed, kept_name, refused_line
 from .font_memory import FontMemory
 from .dialogs.settings import PAGE_SETTINGS, SettingsDialog, warn_ignored
@@ -642,8 +642,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
     def _build_menus(self) -> None:
         """The menu bar: what is used seldom, one place each; what is used all the time is on the toolbar, and
         translator mode's tools are on its strip, each in that one place alone. Page has Set area... and Page keys...
-        (Clear area is in the Set area dialog), then translator mode's Ignore this area on all pages of this book
-        (`book_areas`), Copy format, Paste format (also on every region of a kind), Copy region and Paste region
+        (Clear area is in the Set area dialog), then translator mode's Ignore this area on all pages of this book, Use
+        these areas for the series (greyed while the book has no series; `book_areas`), Copy format, Paste format (also
+        on every region of a kind), Copy region and Paste region
         (`formats`), then Set kind..., Set text size... and Place in reading order... for the selected regions
         (`selection`), Tools has Saved translations..., Names rendered in more than one way..., Settings... and
         Release the model now (`gpu_release`), View
@@ -663,7 +664,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._menu_keys.append((menu, int(menu.index("end")), name))
             menu.entryconfigure("end", accelerator=keymap.shown(name))
 
-        page = tk.Menu(menubar, tearoff=0)
+        # (Use these areas for the series is greyed while it cannot act: looked at when the menu opens, `book_areas`)
+        page = tk.Menu(menubar, tearoff=0, postcommand=lambda: self._sync_series_areas_entry())
         page.add_command(label=_("Set area..."), command=self.set_area)
         keyed(page, "set_area")
         page.add_command(label=_("Page keys..."), command=self.open_page_keys)
@@ -672,6 +674,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         # region copied and pasted (`formats`)
         page.add_command(label=_(IGNORE_EVERYWHERE), command=lambda: self.ignore_area_everywhere())
         keyed(page, "ignore_area")
+        page.add_command(label=_(USE_FOR_SERIES), command=lambda: self.use_areas_for_series_now(), state="disabled")
+        self._series_areas_entry = (page, int(page.index("end")))
         page.add_command(label=_("Copy format"), command=lambda: self.copy_format())
         keyed(page, "copy_format")
         page.add_command(label=_("Paste format"), command=lambda: self.paste_format())
@@ -739,7 +743,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         help_menu.add_command(label=_("About TASlation"), command=self.open_about)
         menubar.add_cascade(label=_("Help"), menu=help_menu)
         tip_menu(self, page, _("Mark the part of the viewer's window that shows the page."),
-                 _("The keys that turn pages in your viewer."), _(IGNORE_TIP), *(_(t) for t in PAGE_FORMAT_TIPS),
+                 _("The keys that turn pages in your viewer."), _(IGNORE_TIP), _(SERIES_AREAS_TIP),
+                 *(_(t) for t in PAGE_FORMAT_TIPS),
                  *(_(t) for t in PAGE_SELECTION_TIPS))
         tip_menu(self, tools, _("See and delete the translations and notes kept on this computer."),
                  _("Names rendered in more than one way"),

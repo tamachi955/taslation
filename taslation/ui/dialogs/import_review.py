@@ -4,9 +4,11 @@ holds, each with its series, volume, language and pages, and whether it is new h
 them chosen at first, the reader picks some or all -; a line of counts for the books chosen (pages added, pages
 replaced, the reader's own corrections kept); where the reader corrected translations here that the file has
 otherwise, "Keep my corrections" (the default) or "Take the file as it is"; where the page information here differs
-from the file's, "Keep mine" (the default) or "Take the file's"; and where the series sheets here say otherwise than
-the file's, a row each (`conflicts.ConflictRows`: the values as the sheets keep them, never a line of the book),
-"Keep yours" at first. Import gives the reader's choice (`ImportChoice`), Cancel (Esc, closing it) none."""
+from the file's, "Keep mine" (the default) or "Take the file's"; the same for the series' defaults here that differ
+from the file's (`annotations.SeriesDefaults`: what a new volume of the series starts from); and where the series
+sheets here say otherwise than the file's, a row each (`conflicts.ConflictRows`: the values as the sheets keep them,
+never a line of the book), "Keep yours" at first. Import gives the reader's choice (`ImportChoice`), Cancel (Esc,
+closing it) none."""
 
 from __future__ import annotations
 
@@ -29,13 +31,15 @@ LIST_ROWS = 8  # books on show before the list scrolls
 @dataclass
 class ImportChoice:
     """What the reader chose to import (`ImportReviewDialog`): the books (indices in the file), whether their
-    corrections here stay, whether the file's page information takes the place of theirs, and per conflict of the
-    sheets (`backup.SheetPlan.key`) True for "take the file's"."""
+    corrections here stay, whether the file's page information takes the place of theirs, per conflict of the
+    sheets (`backup.SheetPlan.key`) True for "take the file's", and whether the file's series' defaults take the place
+    of theirs."""
 
     books: list[int]
     keep_corrections: bool = True
     take_annotations: bool = False
     answers: dict[tuple[str, ...], bool] = field(default_factory=dict)
+    take_defaults: bool = False
 
 
 def counts_line(plan: "ImportPlan", keep_corrections: bool) -> str:
@@ -93,6 +97,12 @@ class ImportReviewDialog(tk.Toplevel):
         if plan.differing:
             self.marks_box = self._pair(frm, _("The page information you have here for {n} book(s) differs from the file's:").format(
                 n=len(plan.differing)), self.marks_var, ("keep", _("Keep mine")), ("take", _("Take the file's")))
+        self.defaults_var = tk.StringVar(self, value="keep")
+        self.defaults_box: ttk.Frame | None = None
+        differing_defaults = getattr(plan, "differing_defaults", [])
+        if differing_defaults:
+            self.defaults_box = self._pair(frm, _("The series defaults you have here for {n} series differ from the file's:").format(
+                n=len(differing_defaults)), self.defaults_var, ("keep", _("Keep mine")), ("take", _("Take the file's")))
         keyed = plan.keyed()
         self.choices: list[tuple[tuple[str, ...], tk.StringVar]] = []
         self.rows: list[tuple[str, str, str]] = []
@@ -158,7 +168,7 @@ class ImportReviewDialog(tk.Toplevel):
         if not books:
             return
         self.choice = ImportChoice(books, self.corrections_var.get() == "keep", self.marks_var.get() == "take",
-                                   self.answers())
+                                   self.answers(), self.defaults_var.get() == "take")
         self.destroy()
 
     def cancel(self) -> None:

@@ -35,8 +35,9 @@ plain file name holds another one whose name gives the same file name, the file
 is ``<book>-<hash>.json`` (``<series>-<hash>[.<language>].json``) instead
 (`names.py`). Each is written protected at rest, so that only the Windows user
 who saved it can open it, on this computer (`protect.py`; a plain file of an
-earlier version is read as it is). Neither has an export: they stay on the
-computer they were made on. A file this version cannot read (damaged, written
+earlier version is read as it is). They leave the computer they were made on
+only in the reader's encrypted export (`backup.py`), the series' defaults with
+them. A file this version cannot read (damaged, written
 by a newer TASlation, or protected for another Windows user or computer) is
 kept beside as ``<file stem>.unreadable-<date>.json`` before a fresh one takes
 its place, never written over (`names.set_aside`).

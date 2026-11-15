@@ -8,14 +8,16 @@ Detection leaves out what lies mostly inside an area (`Pipeline._annotate`), on 
 run alike; Book settings lists the areas and removes one, with its Undo (`dialogs.book_settings`). Nothing of a page
 is kept: an area is four numbers, a side and the page's shape.
 
-Book settings' Use these areas for the series (`use_areas_for_series`) keeps the areas in force for the book as its
-series' areas (`annotations.SeriesDefaults`), which a new volume of the series starts with. An area is in the page's
-own terms (0..1 of its width and height, the page cropped to its ink as within one volume) with the page's width /
-height, so it lies at the same place on a volume captured at another size, and leaves a volume whose pages have
-another shape alone (`BookArea.applies`)."""
+Book settings' Use these areas for the series (`use_areas_for_series`), and the Page menu's entry of that name
+(`AreaMixin.use_areas_for_series_now`, greyed while the book has no series: `series_areas_ready`), keep the areas in
+force for the book as its series' areas (`annotations.SeriesDefaults`), which a new volume of the series starts with.
+An area is in the page's own terms (0..1 of its width and height, the page cropped to its ink as within one volume)
+with the page's width / height, so it lies at the same place on a volume captured at another size, and leaves a
+volume whose pages have another shape alone (`BookArea.applies`)."""
 
 from __future__ import annotations
 
+import tkinter as tk
 from typing import Any
 
 from ..annotations import BookAnnotations, BookArea, unit_side
@@ -52,6 +54,11 @@ USE_FOR_SERIES_TIP = ("Start every new volume of {series} with the areas listed 
                       "own keeps them.")
 AREAS_SHARED = "Saved: a new volume of {series} starts with these {n} area(s)."
 AREAS_SHARED_NONE = "Saved: a new volume of {series} starts with no areas ignored."
+# the Page menu's entry of the same name (`USE_FOR_SERIES`): what the status line says while the pointer is on it, and
+# when the series' file cannot be written (Book settings' line, `dialogs.book_settings.SHARE_FAILED`)
+SERIES_AREAS_TIP = ("Start every new volume of this book's series with the areas this book ignores on all pages. A "
+                    "volume that has areas of its own keeps them.")
+SERIES_AREAS_FAILED = "Could not save the series' defaults: {error}"
 
 
 class BookAreas(BookStep):
@@ -126,7 +133,45 @@ def _save_error(pipeline: Any) -> str:
 
 
 class AreaMixin:
-    """The areas ignored on every page of the book, from translator mode. A part of `app.App`."""
+    """The areas ignored on every page of the book, from translator mode, and the Page menu's Use these areas for the
+    series. A part of `app.App`."""
+
+    def series_areas_ready(self) -> bool:
+        """Whether Page > Use these areas for the series can act now: the book in the Book box is the one whose
+        annotations the window holds, it has a series (`BookAnnotations.can_share`: its name has a volume), and no job
+        nor whole-book run is on."""
+        annotations = getattr(getattr(self, "pipeline", None), "annotations", None)
+        if annotations is None or not getattr(annotations, "can_share", False):
+            return False
+        book_var = getattr(self, "book_var", None)
+        if book_var is not None and getattr(annotations, "book", None) != book_var.get().strip():
+            return False
+        return not getattr(self, "busy", False) and not in_a_run(self)
+
+    def _sync_series_areas_entry(self) -> None:
+        """The Page menu's Use these areas for the series greyed unless it can act (`series_areas_ready`): when the
+        menu opens (its postcommand)."""
+        entry = getattr(self, "_series_areas_entry", None)
+        if entry is None:
+            return
+        menu, index = entry
+        try:
+            menu.entryconfigure(index, state="normal" if self.series_areas_ready() else "disabled")
+        except tk.TclError:
+            pass
+
+    def use_areas_for_series_now(self) -> None:
+        """Page > Use these areas for the series: the areas in force for the book kept as its series' areas, as Book
+        settings' button keeps them (`use_areas_for_series`); the status line says what was saved, or why it was not.
+        Nothing on the page changes. Only while the entry can act (`series_areas_ready`)."""
+        if not self.series_areas_ready():
+            return
+        try:
+            key, values = use_areas_for_series(self.pipeline)
+        except (OSError, ValueError) as e:
+            self.say(SERIES_AREAS_FAILED, error=e)
+            return
+        self.say(key, **values)
 
     def ignore_area_everywhere(self) -> None:
         """Page > Ignore this area on all pages of this book: the selected region's place (`area_for`) ignored on
@@ -255,5 +300,5 @@ class AreaMixin:
 
 
 __all__ = ["AREAS_SHARED", "AREAS_SHARED_NONE", "AREA_QUESTION", "AreaMixin", "BookAreas", "IGNORE_EVERYWHERE",
-           "IGNORE_TIP", "USE_FOR_SERIES", "USE_FOR_SERIES_TIP", "area_for", "covered", "dropped_elsewhere", "touches",
-           "use_areas_for_series"]
+           "IGNORE_TIP", "SERIES_AREAS_FAILED", "SERIES_AREAS_TIP", "USE_FOR_SERIES", "USE_FOR_SERIES_TIP", "area_for",
+           "covered", "dropped_elsewhere", "touches", "use_areas_for_series"]
