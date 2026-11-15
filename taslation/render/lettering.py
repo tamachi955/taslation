@@ -7,7 +7,9 @@ otherwise: a shear for italic, a thin stroke for bold. So every font works, in e
 never show on the page. The region editor may also add room between the characters (letter spacing, *tracking*):
 each character is then set at its place in the run plus that room, with the marks that combine with it. A text that
 would otherwise drop a size may be set condensed (*condense*, at most 8 % narrower): the line is drawn at twice the
-size and brought back to size narrower than it is high, so it works with every font.
+size and brought back to size narrower than it is high, so it works with every font. A run in Devanagari or Bengali is
+measured and drawn shaped (`shaping`: its conjuncts and vowel signs as the font forms them), with the same styles; a
+conjunct then keeps its letters together under letter spacing.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from . import shaping
 from .fonts import FontSpec, FontT, _key, face_of, font_faces, load_font
 
 ITALIC_SHEAR = 0.21  # tangent of the lean of a synthetic italic
@@ -150,12 +153,17 @@ def _joins(ch: str) -> bool:
             or ch in "‍︎️")
 
 
+_VIRAMAS = frozenset("\u094d\u09cd")  # Devanagari's and Bengali's: the letter after one makes a conjunct with it
+
+
 def clusters(text: str) -> list[tuple[int, str]]:
-    """The characters of *text* as letter spacing sets them apart: each with the marks that combine with it, and
-    where it starts in *text*."""
+    """The characters of *text* as letter spacing sets them apart: each with the marks that combine with it (and,
+    where the script is shaped, a conjunct's letters together: a letter after a virama), and where it starts in
+    *text*."""
     out: list[tuple[int, str]] = []
+    viramas = _VIRAMAS if shaping.available() else frozenset()  # (drawn letter by letter: as before)
     for i, ch in enumerate(text):
-        if out and (_joins(ch) or out[-1][1].endswith("‍")):
+        if out and (_joins(ch) or out[-1][1].endswith("‍") or (out[-1][1][-1] in viramas and ch.isalpha())):
             start, cur = out[-1]
             out[-1] = (start, cur + ch)
         else:
@@ -184,6 +192,30 @@ class Face:
 
     def font(self, size: int) -> FontT:
         return load_font(self.path, size, self.bold_variation, self.weight)
+
+
+def _run_length(face: Face, size: int, text: str) -> float:
+    """*text*'s advance in *face* at *size*: shaped where its script needs it (`shaping.for_text`), else as Pillow lays
+    it out."""
+    shaper = shaping.for_text(face.path, size, face.bold_variation, face.weight, text)
+    return shaper.length(text) if shaper is not None else _length(face.font(size), text)
+
+
+def _put(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, face: Face, size: int, fill: object,
+         stroke_width: int = 0, stroke_fill: object = None) -> None:
+    """`ImageDraw.text` of *text* in *face* at *size*, shaped where its script needs it (`shaping.for_text`)."""
+    shaper = shaping.for_text(face.path, size, face.bold_variation, face.weight, text)
+    if shaper is not None:
+        shaper.draw(draw, xy, text, fill, stroke_width, stroke_fill)
+    else:
+        draw.text(xy, text, font=face.font(size), fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
+
+
+def shaped_rows(face: Face, size: int, text: str) -> tuple[int, int] | None:
+    """The rows *text*'s ink covers below a line's top in *face* at *size* when its script is shaped
+    (`shaping.Shaper.rows`); None when Pillow lays it out (its own ``getbbox`` then says)."""
+    shaper = shaping.for_text(face.path, size, face.bold_variation, face.weight, text)
+    return shaper.rows(text) if shaper is not None else None
 
 
 class StyledFont:
@@ -239,7 +271,7 @@ class StyledFont:
         runs = split_runs(text)
         for run, stressed in runs:
             face = self.emph if stressed else self.base
-            total += _length(face.font(self.size), run) + 2 * face.stroke
+            total += _run_length(face, self.size, run) + 2 * face.stroke
         if self.lettering.tracking:  # the room between two characters, the last one's after it left out
             total += self.lettering.tracking * max(0, len(clusters("".join(run for run, _ in runs))) - 1)
         if len(self._widths) >= 4096:
@@ -264,40 +296,38 @@ class StyledFont:
             return
         draw = ImageDraw.Draw(image)
         tracking = self.lettering.tracking
+        size = self.size
         for run, stressed in split_runs(text):
             face = self.emph if stressed else self.base
-            font = face.font(self.size)
             if tracking:
-                pieces = [(cluster, _length(font, run[:start]) + n * tracking)
+                pieces = [(cluster, _run_length(face, size, run[:start]) + n * tracking)
                           for n, (start, cluster) in enumerate(clusters(run))]
                 if outline is not None:
                     colour, width = outline
                     for cluster, dx in pieces:
                         if face.shear:
-                            _draw_sheared(image, face, self.size, x + dx, y, cluster, colour, face.stroke + width)
+                            _draw_sheared(image, face, size, x + dx, y, cluster, colour, face.stroke + width)
                         else:
-                            draw.text((x + dx + face.stroke, y), cluster, font=font, fill=colour,
-                                      stroke_width=face.stroke + width, stroke_fill=colour)
+                            _put(draw, (x + dx + face.stroke, y), cluster, face, size, colour, face.stroke + width,
+                                 colour)
                 for cluster, dx in pieces:
                     if face.shear:
-                        _draw_sheared(image, face, self.size, x + dx, y, cluster, fill)
+                        _draw_sheared(image, face, size, x + dx, y, cluster, fill)
                     else:
-                        draw.text((x + dx + face.stroke, y), cluster, font=font, fill=fill, stroke_width=face.stroke,
-                                  stroke_fill=fill)
-                x += _length(font, run) + 2 * face.stroke + tracking * len(pieces)
+                        _put(draw, (x + dx + face.stroke, y), cluster, face, size, fill, face.stroke, fill)
+                x += _run_length(face, size, run) + 2 * face.stroke + tracking * len(pieces)
                 continue
             if outline is not None:
                 colour, width = outline
                 if face.shear:
-                    _draw_sheared(image, face, self.size, x, y, run, colour, face.stroke + width)
+                    _draw_sheared(image, face, size, x, y, run, colour, face.stroke + width)
                 else:
-                    draw.text((x + face.stroke, y), run, font=font, fill=colour, stroke_width=face.stroke + width,
-                              stroke_fill=colour)
+                    _put(draw, (x + face.stroke, y), run, face, size, colour, face.stroke + width, colour)
             if face.shear:
-                _draw_sheared(image, face, self.size, x, y, run, fill)
+                _draw_sheared(image, face, size, x, y, run, fill)
             else:
-                draw.text((x + face.stroke, y), run, font=font, fill=fill, stroke_width=face.stroke, stroke_fill=fill)
-            x += _length(font, run) + 2 * face.stroke
+                _put(draw, (x + face.stroke, y), run, face, size, fill, face.stroke, fill)
+            x += _run_length(face, size, run) + 2 * face.stroke
 
     def _draw_condensed(self, image: Image.Image, x: float, y: float, text: str, fill: tuple[int, int, int],
                         outline: tuple[tuple[int, int, int], int] | None) -> None:
@@ -333,9 +363,9 @@ def _draw_sheared(image: Image.Image, face: Face, size: int, x: float, y: float,
     ascent, descent = _metrics(big)
     h = ascent + descent + 2 * stroke + 4
     lean = int(face.shear * h) + 4
-    w = int(round(_length(big, text))) + 2 * stroke + lean + 4
+    w = int(round(_run_length(face, 2 * size, text))) + 2 * stroke + lean + 4
     mask = Image.new("L", (max(2, w), max(2, h)), 0)
-    ImageDraw.Draw(mask).text((stroke, stroke), text, font=big, fill=255, stroke_width=stroke, stroke_fill=255)
+    _put(ImageDraw.Draw(mask), (stroke, stroke), text, face, 2 * size, 255, stroke, 255)
     baseline = ascent + stroke
     leant = mask.transform(mask.size, Image.AFFINE, (1, face.shear, -face.shear * baseline, 0, 1, 0),
                            resample=Image.BILINEAR)

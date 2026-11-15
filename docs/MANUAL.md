@@ -691,8 +691,11 @@ The target language is chosen in the "To:" box (or with `--language`, or the set
 The cache and the series sheet are saved per language, and the lettering switches to a font for that script. The model that translates is decided by the target language
 (see "Choosing the model"). The quality depends on how good the model is in that language. When tried with Qwen3.5 4B,
 Spanish, Chinese and Korean were good, and Arabic was visibly worse.
-Indic scripts are drawn one character at a time (because the text layout engine that comes with Pillow does not shape glyphs). Everything else
-is set correctly, including Arabic and Hebrew, which are written from right to left.
+Hindi and Bengali are shaped with HarfBuzz (the `uharfbuzz` package that install.cmd installs): conjuncts, vowel signs
+and the reph are set as the font forms them. Where that package is missing, their letters are drawn one by one, and
+the banner above the page says so (run install.cmd again). Everything else is set correctly too, including Arabic and
+Hebrew, which are written from right to left; only Hebrew's vowel points, which translations seldom have, may sit on
+the letter next to theirs.
 
 ### Command line
 

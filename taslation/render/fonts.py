@@ -245,9 +245,7 @@ def load_font(path: str | None, size: int, bold_variation: bool = False, weight:
             font = ImageFont.truetype(file, size, index=index)
             if bold_variation:
                 try:
-                    axes = font.get_variation_axes()
-                    values = [weight if a.get("name") in (b"Weight", "Weight") else int(a.get("default", 100)) for a in axes]
-                    font.set_variation_by_axes(values)
+                    font.set_variation_by_axes(weight_axes(font, weight))
                 except Exception:
                     pass
             return font
@@ -257,6 +255,13 @@ def load_font(path: str | None, size: int, bold_variation: bool = False, weight:
         return ImageFont.load_default(size)  # Pillow >= 10.1 ships a scalable default
     except TypeError:  # pragma: no cover - very old Pillow
         return ImageFont.load_default()
+
+
+def weight_axes(font: ImageFont.FreeTypeFont, weight: int) -> list[float]:
+    """The values `load_font` gives a variable font's axes in their order: *weight* on its weight axis, every other
+    axis at its default (raises where the font has no axes)."""
+    axes = font.get_variation_axes()
+    return [weight if a.get("name") in (b"Weight", "Weight") else int(a.get("default", 100)) for a in axes]
 
 
 # --- fonts by name -------------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from ..i18n import _
 from ..messages import FOLLOW_UPS, JOINER, Message
 from ..pipeline import summary as page_summary
 from ..regions import PageResult
+from ..render.shaping import letter_by_letter
 from . import taskbar, trouble
 from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, band_fraction, band_text,
                      blocking, busy_title, is_notice)
@@ -150,6 +151,8 @@ class StatusMixin:
         button that fixes it where the window can (`trouble.setup_button`: Start translator again, Download model);
         then what keeps the window from reading the viewer, with its button (`trouble.viewer_trouble`, `_trouble`:
         Choose viewer, Show viewer, Move TASlation aside); the translator on the processor (`_on_cpu`, with Close);
+        a target language whose script this computer cannot shape (`render.shaping.letter_by_letter`, with Close:
+        once a session);
         after them, while a whole-book scan waits for the setup, that it does."""
         held = self._scan_held and bool(blocking(self._health))
         rows: list[tuple[str, tuple[str, str], Any]] = [
@@ -162,6 +165,11 @@ class StatusMixin:
         seconds = getattr(self, "_on_cpu", None)
         if seconds:
             rows.append((trouble.cpu_line(seconds), NOTICE_COLOURS, (_("Close"), self._close_cpu_line)))
+        target = getattr(self, "lang_var", None)
+        language = target.get().strip() if target is not None else ""
+        if not getattr(self, "_unshaped_closed", False) and letter_by_letter(language):  # (`render.shaping`)
+            rows.append((_("Lettering in {language} cannot be shaped on this computer: its letters are drawn one by one, so conjuncts and vowel signs come out wrong. Run install.cmd again to install what is missing.").format(
+                language=_(language)), NOTICE_COLOURS, (_("Close"), self._close_unshaped_line)))
         if held:
             rows.append((_("The whole book is not read yet: first fix what the lines above the page say. Until then TASlation translates page by page."), NOTICE_COLOURS, None))
         self.setup_banner.show_rows(rows)
@@ -170,6 +178,11 @@ class StatusMixin:
     def _close_cpu_line(self) -> None:
         """The processor's notice closed: not said again this session."""
         self._on_cpu = None
+        self._show_banner()
+
+    def _close_unshaped_line(self) -> None:
+        """The notice that the target language's lettering cannot be shaped closed: not said again this session."""
+        self._unshaped_closed = True
         self._show_banner()
 
     def _watch_trouble(self, now: float | None = None) -> None:

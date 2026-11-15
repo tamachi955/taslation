@@ -30,6 +30,7 @@ from taslation.regions import PageResult
 from taslation import viewerparts
 from taslation.ui import app as app_mod
 from taslation.ui import banner, jobs, progress, taskbar, trouble
+from taslation.ui import status as status_module
 from taslation.ui.dialogs import caches
 from taslation.ui.dialogs.batch import BatchDialog
 from taslation.ui.dialogs.start import StartDialog, generic_book_name
@@ -190,6 +191,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _place_strip = A._place_strip
     _show_banner = A._show_banner
     _close_cpu_line = A._close_cpu_line
+    _close_unshaped_line = A._close_unshaped_line
     _watch_trouble = A._watch_trouble
     restart_translator = A.restart_translator
     download_model = A.download_model
@@ -804,6 +806,27 @@ def test_the_banner_speaks_the_windows_language_and_says_it_again_after_a_switch
     set_language("de")
     flow._show_banner()  # what _rebuild_ui does
     assert flow.setup_banner.texts()[0].startswith("Das Übersetzungsprogramm läuft nicht,")
+
+
+def test_a_target_language_this_computer_cannot_shape_is_said_until_closed(flow, monkeypatch):
+    """Without uharfbuzz (`render.shaping.letter_by_letter`), Hindi and Bengali are lettered letter by letter: the
+    banner says so, in the window's language, until it is closed, and not again that session."""
+    monkeypatch.setattr(status_module, "letter_by_letter", lambda language: language in ("Hindi", "Bengali"))
+    flow._show_banner()
+    assert flow.setup_banner.texts() == []  # English: nothing to say
+    flow.lang_var.set("Hindi")
+    flow._show_banner()
+    assert flow.setup_banner.texts() == ["Lettering in Hindi cannot be shaped on this computer: its letters are drawn "
+                                         "one by one, so conjuncts and vowel signs come out wrong. Run install.cmd "
+                                         "again to install what is missing."]
+    set_language("ja")
+    flow._show_banner()
+    assert flow.setup_banner.texts()[0].startswith("この PC ではヒンディー語の文字を正しく組めません。")
+    flow._close_unshaped_line()
+    assert flow.setup_banner.texts() == []
+    flow.lang_var.set("Bengali")
+    flow._show_banner()
+    assert flow.setup_banner.texts() == []  # closed: not said again this session
 
 
 # ------------------------------------------------------------------ Messages in the window's language

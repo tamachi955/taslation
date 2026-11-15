@@ -25,9 +25,14 @@ hourglass; in a column of a word or two a line, hyphens alone). The checks of
 the lettering (`lettering_flags`) say what is still wrong with the block chosen.
 
 Scripts: Latin-like text wraps at spaces; Chinese, Japanese and Thai wrap
-between characters; Arabic and Hebrew are laid out right-to-left (Arabic
-letters are joined with ``arabic_reshaper``). Pillow builds without libraqm
-cannot shape Indic scripts; those render letter by letter.
+between characters; Arabic and Hebrew are laid out right-to-left by turning
+the line round (`display_form`: Arabic letters are joined with
+``arabic_reshaper`` first, a run of digits or Latin keeps its order, brackets
+are mirrored; no more of the bidirectional algorithm than that). Devanagari
+and Bengali wrap at spaces and are shaped with HarfBuzz (`render.shaping`):
+measured and drawn as the font forms them, conjuncts, vowel signs before their
+consonant and the reph included. Where uharfbuzz is missing they are drawn
+letter by letter, as Pillow without libraqm draws them, and the window says so.
 
 A line break in the translation ends a line wherever it is. The reader may
 also format a region in the region editor, as a word processor's text box
@@ -86,7 +91,7 @@ from PIL import Image
 
 from ..regions import Box, TextRegion
 from .fonts import NO_SPACE_SCRIPTS, RTL_SCRIPTS, FontT, drawable, script_of
-from .lettering import Lettering, StyledFont, emphasis_marks, strip_marks, styled_font
+from .lettering import Lettering, StyledFont, emphasis_marks, shaped_rows, strip_marks, styled_font
 
 try:  # MIT; joins Arabic letters into their contextual forms
     import arabic_reshaper  # type: ignore
@@ -1218,15 +1223,16 @@ def _ink_rows(font: Any, text: str, script: str = "") -> tuple[int, int]:
         parts: Any = set(plain) - {" "}
     else:
         parts = (plain,)
-    faces = ([(face.font(font.size), face.stroke) for face in {font.base, font.emph}] if isinstance(font, StyledFont)
-             else [(font, 0)])
+    faces = ([(face, face.font(font.size), face.stroke) for face in {font.base, font.emph}]
+             if isinstance(font, StyledFont) else [(None, font, 0)])
     top, bottom = 10**6, -(10**6)
-    for loaded, stroke in faces:
+    for face, loaded, stroke in faces:
         for part in parts:
-            a, b = _rows_of(loaded, part)
+            shaped = shaped_rows(face, font.size, part) if face is not None else None  # Devanagari, Bengali
+            a, b = shaped if shaped is not None else _rows_of(loaded, part)
             if b > a:
                 top, bottom = min(top, a - stroke), max(bottom, b + stroke)
-    return (top, bottom) if bottom > top else _rows_of(faces[0][0], "H")
+    return (top, bottom) if bottom > top else _rows_of(faces[0][1], "H")
 
 
 def _defects(pieces: _Pieces, ends: list[int], widths: list[int], round_room: bool) -> float:

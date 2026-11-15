@@ -1050,12 +1050,15 @@ class JobsMixin:
     def _follow_target(self) -> None:
         """The "To:" box has another language (on the Tk thread): the model follows it (`_choose_model`; the worker
         makes the translator for it with the next job, `_use_model`), and the setup is checked again for it in a
-        thread of its own, so that the banner says at once when the language's model is not installed."""
+        thread of its own, so that the banner says at once when the language's model is not installed; the banner
+        says at once too whether its script can be shaped here (`StatusMixin._show_banner`)."""
         language = self.lang_var.get().strip() or "English"
         if language == getattr(self, "_check_language", None):
             return
         self._check_language = language
         self._choose_model()
+        if getattr(self, "setup_banner", None) is not None:
+            self._show_banner()
         if self.ready and not self._health_checking:
             self._health_checking = True
             threading.Thread(target=self._check_in_background, name="taslation-setup-check", daemon=True).start()

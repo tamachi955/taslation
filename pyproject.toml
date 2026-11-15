@@ -28,6 +28,8 @@ dependencies = [
   "transformers>=5.0",
   "jaconv>=0.3",
   "arabic-reshaper>=3.0",
+  # HarfBuzz, to shape Devanagari and Bengali (render/shaping.py); without it they are drawn letter by letter
+  "uharfbuzz>=0.57",
   # the viewer's frames (Windows.Graphics.Capture); without it capture falls back on PrintWindow
   "windows-capture==2.0.1; sys_platform == 'win32'",
 ]

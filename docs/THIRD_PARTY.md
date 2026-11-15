@@ -147,6 +147,7 @@ Qwen3.5 4B is Apache-2.0: no step of its own beyond the yes to the download.
 | transformers | Apache-2.0 | the layout model's definition; reads local files only |
 | jaconv | MIT | full-width marks in what the OCR reads |
 | arabic-reshaper | MIT | joins Arabic letters into their contextual forms for rendering |
+| [uharfbuzz](https://github.com/harfbuzz/uharfbuzz) | Apache-2.0; the [HarfBuzz](https://github.com/harfbuzz/harfbuzz) library built into its wheel is under HarfBuzz's MIT-style "Old MIT" licence | shapes Devanagari and Bengali (conjuncts, vowel signs before their consonant, the reph) for the lettering; the glyphs are drawn by Pillow's own FreeType (`taslation/render/shaping.py`). Pillow's built-in shaping (libraqm) is not used: on Windows it needs a FriBiDi DLL, which is LGPL and not shipped |
 | cryptography (optional: the `backup` extra, or `pip install cryptography`) | Apache-2.0 or BSD-3-Clause | AES-256-GCM for the encrypted export of the translation cache |
 | Tkinter | Python Software Foundation License | GUI (ships with Python) |
 
