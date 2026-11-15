@@ -116,7 +116,7 @@ def test_the_editor_shows_the_region_and_reads_its_japanese_on_demand(hidden_roo
     assert len(asked_to_read) == 1 and not asked and d.busy_var.get() == "Reading the Japanese..."
     assert all(str(b.cget("state")) == "disabled" for b in (d.save_btn, ask_again, d.read_btn))
     asked_to_read[0]("今日はいい天気だね", "")  # the window hands the reading over: the question goes on
-    assert region.source_text == "今日はいい天気だね" and d.source_var.get() == "Read as: 今日はいい天気だね"
+    assert region.source_text == "今日はいい天気だね" and d.source_field.text() == "今日はいい天気だね"
     assert d.source_label.winfo_manager() == "pack" and not d.read_btn.winfo_manager() and asked == ["again"]
     d.destroy()
 
@@ -135,7 +135,7 @@ def test_the_editor_shows_the_region_and_reads_its_japanese_on_demand(hidden_roo
     assert d.busy_var.get() == "The reading model is not loaded yet. Try again in a moment."
     d.destroy()
     d = review.EditBubbleDialog(hidden_root, _region(), [], on_save=lambda data: None, on_drop=lambda: None)
-    assert d.source_var.get() == "Read as: 今日はいい天気だね" and not d.read_btn.winfo_manager()  # read on this page
+    assert d.source_field.text() == "今日はいい天気だね" and not d.read_btn.winfo_manager()  # read on this page
     d.destroy()
 
 

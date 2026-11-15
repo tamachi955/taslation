@@ -31,4 +31,15 @@ def looks_like_a_line(value: str) -> bool:
     return bool(JAPANESE_LINE_RE.search(value))
 
 
-__all__ = ["clean_text", "looks_like_a_line"]
+READING_LIMIT = 500  # characters of a reading a person types (a bubble's Japanese is far shorter)
+
+
+def clean_reading(value: Any, limit: int = READING_LIMIT) -> str:
+    """A reading of a region's Japanese as a person typed it (the region editor's "Read as:"): one line, as the OCR
+    gives it (line breaks dropped, no space put in their place), controls removed, the ends trimmed, at most *limit*
+    characters. Held in memory only, as every reading is."""
+    s = CONTROL_RE.sub("", "".join(str(value or "").splitlines()))
+    return s.strip()[:limit]
+
+
+__all__ = ["READING_LIMIT", "clean_reading", "clean_text", "looks_like_a_line"]

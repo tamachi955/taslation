@@ -466,6 +466,9 @@ and the page can be edited.
   At the top of the editor, the region as it originally looks is shown, cut out of the captured screen (an image in memory only, saved nowhere).
   A page shown from the cache has no Japanese (the cache keeps only translations), so "Read the Japanese" reads it again there and then;
   "Read as:" then appears, and "Ask again" can be used too (if you press "Ask again" without having read it, it reads first).
+  Where the Japanese was misread, correct it in the "Read as:" field: "Ask again" translates your reading, and so does everything that reads that bubble again in this session
+  ("Translate again", reading it again from the cache, moving it, a whole-book run). Where nothing was read, the field appears after a reading, to type the Japanese in.
+  Your reading stays in memory only and is never saved; "Save" keeps only the translation, and Ctrl+Z takes back the translation, not the reading.
   "Previous (Alt+↑)" and "Next (Alt+↓)" move to editing the region before or after in reading order (the keys can be changed in "Shortcuts"). If you changed something, it is saved before moving, as "Save" does
   (Ctrl+Z takes it back as one change); if you changed nothing, nothing is written.
   If you try to close it with Esc or the window's close button with changes made, it asks whether to discard them ("Keep editing" is the default).

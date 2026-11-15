@@ -20,6 +20,7 @@ from ...annotations import (ALIGNS, DIRECTIONS, ERASE_ONLY, INK_NAMES, LETTER_SP
 from ...i18n import _
 from ...regions import ERASED
 from ...review import reason_label
+from ...textclean import clean_reading
 from .. import shortcuts
 from ..layout import FlowBar, fit_combobox, place_window, wrap_label
 from ..font_memory import StarButton, font_choices
@@ -88,6 +89,9 @@ FIT_COLOUR = "#c03030"
 # the region as the page has it, at the top of the editor: at most this many pixels across and down, enlarged at most so
 CROP_ROOM, CROP_ENLARGE = (460, 200), 2.0
 READING = "Reading the Japanese..."
+# the tip of "Read as:", the reading a person may correct (`ReadingField`; `locales.features.corrections`)
+READING_TIP = ("What was read here. Correct it where it was misread: Ask again then translates your reading, and so "
+               "does this page translated again in this session. Your reading is never saved.")
 NOT_READ = {"none": "No Japanese was read in this region.",
             "no-ocr": "The reading model is not loaded yet. Try again in a moment."}
 # the editor's way to the region before (-1) or after (+1) it in reading order, and its key
@@ -187,6 +191,75 @@ class SelectableLine(tk.Text):
         except (tk.TclError, ValueError):
             pass
         super().destroy()
+
+
+class ReadingField(tk.Text):
+    """The region editor's reading of the Japanese ("Read as:"), which the person may correct: one line of text
+    (Enter adds no line break, pasting drops them; the line wraps at *wraplength* pixels and the field is as many
+    lines high as it takes), Tab and Shift+Tab move on as in an entry. In memory only: what it holds goes nowhere
+    but to the model asked (Ask again) and to the region (Save)."""
+
+    def __init__(self, master: tk.Misc, value: str = "", wraplength: int = 480):
+        font = tkfont.nametofont("TkDefaultFont")
+        super().__init__(master, width=max(10, wraplength // max(1, font.measure("0"))), height=1, wrap="char",
+                         font=font, relief="solid", borderwidth=1, padx=2, pady=1, undo=True, exportselection=True)
+        for key in ("<Return>", "<KP_Enter>"):
+            self.bind(key, lambda _e: "break")
+        self.bind("<Tab>", lambda _e: self._move(True))
+        self.bind("<Shift-Tab>", lambda _e: self._move(False))
+        self.bind("<<Paste>>", self._paste)
+        self.bind("<Configure>", lambda _e: self._fit())
+        self.bind("<<Modified>>", self._modified)
+        self.set_text(value)
+
+    def set_text(self, value: str) -> None:
+        self.delete("1.0", "end")
+        self.insert("1.0", "".join(str(value or "").splitlines()))
+        self.edit_reset()  # Ctrl+Z in the field takes back typing, not the reading it was given
+        self.edit_modified(False)
+        self._fit()
+
+    def text(self) -> str:
+        return self.get("1.0", "end-1c")
+
+    def _move(self, forward: bool) -> str:
+        """Tab (*forward*) and Shift+Tab: the focus to the next or the previous field, never a tab character."""
+        try:
+            widget = self.tk_focusNext() if forward else self.tk_focusPrev()
+        except tk.TclError:  # (Tk's focus order not to be had: the focus stays)
+            widget = None
+        if widget is not None:
+            widget.focus_set()
+        return "break"
+
+    def _paste(self, _event: tk.Event) -> str:
+        try:
+            pasted = self.clipboard_get()
+        except tk.TclError:
+            return "break"
+        try:
+            self.delete("sel.first", "sel.last")
+        except tk.TclError:  # nothing selected
+            pass
+        self.insert("insert", "".join(pasted.splitlines()))
+        return "break"
+
+    def _modified(self, _event: tk.Event) -> None:
+        if self.edit_modified():
+            self.edit_modified(False)
+            self._fit()
+
+    def _fit(self) -> None:
+        """As many lines high as the text takes at the width it has."""
+        try:
+            counted = self.count("1.0", "end-1c", "displaylines")
+        except tk.TclError:
+            return
+        if isinstance(counted, tuple):
+            counted = counted[0]
+        lines = max(1, int(counted or 0) + 1)
+        if int(self.cget("height")) != lines:
+            self.configure(height=lines)
 
 
 def _number(text: str) -> float | None:
@@ -377,10 +450,11 @@ class EditBubbleDialog(tk.Toplevel):
     close button ask first when something was changed (`changed`, `close_asked`).
 
     At the top, *crop* (the region as the page has it, a picture in memory) and the Japanese read there ("Read as:",
-    text that can be selected and copied but not edited: `SelectableLine`);
+    a field the person may correct a misreading in: `ReadingField`; Ask again hands the model the reading as it stands
+    there, in *on_ask*'s answer as "source", and Save hands it on as the data's "source": memory only, never stored);
     where there is none (a page shown from the cache, which keeps no Japanese), "Read the Japanese" asks *on_read*
     (called with `show_reading`, which it calls once the reading is done; False: it cannot read now) and Ask again reads
-    it first. Previous and Next (Alt+Up, Alt+Down, or the keys the reader gave `shortcuts`' editor_previous and
+    it first; once a reading came to nothing, the field is there to type it in. Previous and Next (Alt+Up, Alt+Down, or the keys the reader gave `shortcuts`' editor_previous and
     editor_next, bound with Copy format and Paste format's: `shortcuts.bind_on`; the first and the last region of
     *place* have no way on) hand *on_step*(-1 or 1, what is to be saved or None when nothing changed, the editor's
     place on the screen) the way to
@@ -411,7 +485,9 @@ class EditBubbleDialog(tk.Toplevel):
         self.families = families
         self.font_memory = font_memory  # the starred and recent families (`font_memory.FontMemory`), or None
         self._family_names: list[str] = []  # the installed families, once looked up
-        self.answer: dict[str, str] = {}  # what went wrong while the model was asked ("error"), filled by the worker
+        # the reading the model is asked to translate ("source"), and what went wrong meanwhile ("error", filled by the
+        # worker)
+        self.answer: dict[str, str] = {}
         self._flash_job: str | None = None
         self._preview_job: str | None = None
         self._saved = self._closed = False
@@ -554,29 +630,41 @@ class EditBubbleDialog(tk.Toplevel):
             self.crop_label = ttk.Label(box, image=self._crop_photo, relief="solid", borderwidth=1)
             self.crop_label.pack(anchor="w")
             tip(_("The region as it is on the page."), self.crop_label)
-        self.source_var = tk.StringVar(self, value="")
-        # selectable and copied with Ctrl+C, never edited (`SelectableLine`); in memory only
-        self.source_label = SelectableLine(box, self.source_var, wraplength=480)
+        # "Read as:" and the reading, which the person may correct (`ReadingField`); in memory only
+        self.source_label = ttk.Frame(box)
+        ttk.Label(self.source_label, text=_("Read as: ").strip()).pack(side="left", anchor="n", padx=(0, 4))
+        self.source_field = ReadingField(self.source_label, self._region_reading(), wraplength=440)
+        self.source_field.pack(side="left", fill="x", expand=True)
+        self.source_field.bind("<Control-Return>", lambda _e: (self._save(), "break")[1])
+        tip(_(READING_TIP), self.source_field)
+        # where the OCR read nothing it may be typed in: the field is there once a reading was tried
+        self._tried = getattr(self.region, "status", "") == "ocr-empty"
         self.read_btn = ttk.Button(box, text=_("Read the Japanese"), command=self.read)
         tip(_("Read the Japanese of this region from the page again, to see it here and to ask the model again. Nothing of it is kept."),
             self.read_btn)
         self._show_source()
 
-    def _source(self) -> str:
+    def _region_reading(self) -> str:
         return str(getattr(self.region, "source_text", "") or "")
 
+    def _source(self) -> str:
+        """The reading the editor holds: the region's, as the person may have corrected it (`clean_reading`)."""
+        return clean_reading(self.source_field.text())
+
     def _show_source(self) -> None:
-        """"Read as:" with the region's Japanese, or "Read the Japanese" while it has none (when it can be read)."""
+        """"Read as:" with the region's Japanese (to correct), or "Read the Japanese" while it has none (when it can be
+        read), and the field to type it in once a reading came to nothing."""
         text = self._source()
-        self.source_var.set(_("Read as: ") + text if text else "")
-        if text:
-            self.read_btn.pack_forget()
+        if text or self._tried:
             if not self.source_label.winfo_manager():
-                self.source_label.pack(anchor="w", fill="x", pady=(4, 0))
+                self.source_label.pack(anchor="w", fill="x", pady=(4, 0), before=self.read_btn
+                                       if self.read_btn.winfo_manager() else None)
         else:
             self.source_label.pack_forget()
-            if self.on_read is not None and not self.read_btn.winfo_manager():
-                self.read_btn.pack(anchor="w", pady=(4, 0))
+        if text:
+            self.read_btn.pack_forget()
+        elif self.on_read is not None and not self.read_btn.winfo_manager():
+            self.read_btn.pack(anchor="w", pady=(4, 0))
 
     def read(self) -> None:
         """Read the Japanese (the button, and Ask again with none yet): the window reads it in its worker and hands
@@ -602,8 +690,13 @@ class EditBubbleDialog(tk.Toplevel):
         self.busy_bar.pack_forget()
         self._set_buttons("normal")
         mode, self._ask_after = self._ask_after, None
+        self._tried = True
         if text and not self._source():
-            self.region.source_text = text
+            if not self._region_reading():
+                self.region.source_text = text
+            self.source_field.set_text(text)
+            if isinstance(getattr(self, "_initial", None), dict):
+                self._initial["source"] = self._source()  # (read, not changed: nothing to keep)
         self._show_source()
         if not self._source():
             self.busy_var.set(_(NOT_READ[error]) if error in NOT_READ else (error or _(NOT_READ["none"])))
@@ -1046,7 +1139,7 @@ class EditBubbleDialog(tk.Toplevel):
                 self._ask_after = mode
                 self.read()
             return
-        self.answer = {}
+        self.answer = {"source": self._source()}  # the reading to translate, as the person may have corrected it
         self.set_asking(mode)
         if self.on_ask(mode, self.answer) is False:  # the model cannot be asked now
             self.show_answers(mode, [])
@@ -1126,4 +1219,4 @@ class EditBubbleDialog(tk.Toplevel):
         return {"text": self.text.get("1.0", "end").strip(), "speaker": self.speaker_var.get().strip(),
                 "kind": kind_of(self.kind_var.get().strip()), "continues": bool(self.cont_var.get()),
                 "note": self.note_var.get().strip(), "reader_note": self.reader_var.get().strip(),
-                "style": self.style()}
+                "style": self.style(), "source": self._source()}

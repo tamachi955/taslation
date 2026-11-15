@@ -1325,7 +1325,8 @@ class TranslatorMixin:
 
     def _ask_model(self, region: Any, mode: str, answer: dict[str, str] | None = None, result: Any = None) -> bool:
         """From the editor: one more translation of the region ("again"), on the page *result* the editor was opened
-        on. The answers go to the open editor
+        on, of the reading in *answer*'s "source" (the editor's "Read as:", which the person may have corrected; the
+        region's own reading when there is none). The answers go to the open editor
         (`EditBubbleDialog.show_answers`), whatever happens, with the model's error in *answer* when there was one.
         False when the model cannot be asked."""
         result, pipeline = result if result is not None else self.last_result, self.pipeline
@@ -1337,7 +1338,8 @@ class TranslatorMixin:
         def job() -> None:
             texts: list[str] = []
             try:
-                texts = [pipeline.ask_again(result, region)]
+                source = str(answer.get("source") or "")
+                texts = [pipeline.ask_again(result, region, source) if source else pipeline.ask_again(result, region)]
             except TranslationError as e:
                 answer["error"] = rendered(message_of(e))
             finally:  # the editor waits for the answers: they come in any case
@@ -1515,7 +1517,10 @@ class TranslatorMixin:
         """The editor's Save: on the page *result* it was opened on (none: the last one), which Auto may have turned
         by now, the region's premises, its note for the reader, the formatting of its lettering and its translation
         stored, the page lettered again; one change to take back (Ctrl+Z), of *kind* ("rotate": the rotate handle's,
-        `_rotate_region`; "direction": T's, `_turn_direction`). A region that left that page meanwhile is refused."""
+        `_rotate_region`; "direction": T's, `_turn_direction`). A region that left that page meanwhile is refused.
+        A reading the person corrected ("source": the editor's "Read as:") the region takes first, in memory only
+        (`Pipeline.correct_reading`): no change of the stores, and none Ctrl+Z takes back; the translation is kept
+        for that reading (`linememo.remember_edit`)."""
         result, pipeline = result if result is not None else self.last_result, self.pipeline
         if pipeline is None or result is None:
             return
@@ -1524,12 +1529,16 @@ class TranslatorMixin:
             return
         text = str(data.get("text", "")).strip()
         style = data.get("style")
+        reading = str(data.get("source") or "")
         step = self._record(kind, result)
         self._go_busy()
         self.say("Storing your changes...")
 
         def job() -> None:
             try:
+                correct = getattr(pipeline, "correct_reading", None)
+                if reading and correct is not None and reading != getattr(region, "source_text", ""):
+                    correct(result, region, reading)
                 step.begin(pipeline, [region])
                 pipeline.set_region_note(result, region, str(data.get("speaker", "")), str(data.get("kind", "")),
                                          bool(data.get("continues")), str(data.get("note", "")))

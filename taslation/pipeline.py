@@ -91,7 +91,7 @@ from .annotations import (ERASE_ONLY, READING_DIRECTIONS, BookAnnotations, BookA
                           clean_book_settings, join_premises, unit_side)
 from .review import OCR_UNSURE, flags_for
 from .terms import spelt_right
-from .textclean import clean_text
+from .textclean import clean_reading, clean_text
 from .config import Settings
 from PIL import ImageOps
 
@@ -420,6 +420,21 @@ class ScannedRegion:
         """The erase mask rebuilt from the outline (for fitting a translation without the page image)."""
         return polygon_mask([(int(x), int(y)) for x, y in self.poly], self.bbox[2] - self.bbox[0],
                             self.bbox[3] - self.bbox[1])
+
+
+CORRECTIONS_HELD = 500  # readings a person corrected that a session keeps (`Pipeline.corrected_readings`)
+
+
+@dataclass
+class CorrectedReading:
+    """A reading a person corrected in the region editor (`Pipeline.correct_reading`): on the page of *fingerprint*,
+    in the box *box* (normalised to its page unit), where the OCR read *misread* ("" when it read nothing), *text* is
+    read. For the rest of the session only: memory, never stored, never logged."""
+
+    fingerprint: str
+    box: tuple[float, float, float, float]
+    misread: str
+    text: str
 
 
 @dataclass
@@ -789,6 +804,9 @@ class Pipeline:
         # count of the lines reused and asked (Settings > System)
         self.series_lines: linememo.SeriesLines | None = None
         self.line_tally = linememo.Tally()
+        # the readings a person corrected this session (`correct_reading`), newest last: taken wherever the same
+        # misreading is read at the same place again (`_take_corrections`). Memory only: never stored, never logged
+        self.corrected_readings: deque[CorrectedReading] = deque(maxlen=CORRECTIONS_HELD)
 
     # ------------------------------------------------------------------
     def _before_gpu(self) -> None:
@@ -1240,6 +1258,7 @@ class Pipeline:
                         result.error = err
             elif unit_regions:
                 self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
+                self._take_corrections(unit, unit_regions)
                 self._order_read(rgb, unit.box, unit_regions)
                 timer.lap("ocr")
                 if translate:
@@ -1384,6 +1403,7 @@ class Pipeline:
             su = ScannedUnit(index=unit.index, box=unit.box, fingerprint=unit.fingerprint, aspect=unit.aspect)
             left_out = (self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
                         if unit_regions else [])
+            self._take_corrections(unit, unit_regions)
             self._order_read(rgb, unit.box, unit_regions)
             for r in unit_regions:
                 if keep_regions and (r.status == "untranslated" and r.source_text or r.status == ERASED) \
@@ -1710,6 +1730,7 @@ class Pipeline:
         if todo:
             self._ocr_regions(rgb, todo, report, fill, cancel, [r for r in regions if r.status == "translated"],
                               unit_box=unit.box)
+            self._take_corrections(unit, todo)
             regions[:] = [r for r in regions if r.status != "repeated"]
             self._order_read(rgb, unit.box, regions)  # what was read now, in its place among the translations
             todo = [r for r in regions if any(r is t for t in todo)]
@@ -1781,26 +1802,30 @@ class Pipeline:
                 pairs.append((r.source_text, r.translated_text))
         return pairs[-limit:]
 
-    def ask_again(self, result: PageResult, region: TextRegion) -> str:
+    def ask_again(self, result: PageResult, region: TextRegion, source: str | None = None) -> str:
         """One more translation of *region* from the model, with the page's earlier lines, the premises and the
         reader-made facts as context, spelt as the series sheet spells (`terms.spelt_right`, as every fresh
-        translation is: the editor shows it before anything is saved); "" when none came."""
-        if self.translator is None or not region.source_text or region.tag == ERASE_ONLY:
+        translation is: the editor shows it before anything is saved); "" when none came. *source*: the Japanese to
+        translate as the person corrected it in the editor ("Read as:", `textclean.clean_reading`; nothing of it is
+        kept here); the region's own reading when None or empty."""
+        source = clean_reading(source) if source else ""
+        source = source or region.source_text
+        if self.translator is None or not source or region.tag == ERASE_ONLY:
             return ""
         meta = region_meta(region)
-        outs = self.translator.translate_page([region.source_text], self.page_context(result, region), self.premises(),
+        outs = self.translator.translate_page([source], self.page_context(result, region), self.premises(),
                                               meta=[meta] if meta else None)
-        text = spelt_right(self.check_sheet(), region.source_text, ((outs[0] if outs else "") or "").strip(),
-                           region.speaker)
+        text = spelt_right(self.check_sheet(), source, ((outs[0] if outs else "") or "").strip(), region.speaker)
         text = balance_marks(text)
-        return text if text and self.real_translation(region.source_text, text) else ""
+        return text if text and self.real_translation(source, text) else ""
 
     def read_source(self, result: PageResult, region: TextRegion) -> str:
         """The Japanese of *region* read again from the capture *result* was made from, as a page's reading reads it
         (charspot, then what all the readers settle on; memoised by the crop's pixels, in memory only): for the region
         editor of a page shown from the cache, whose regions carry no Japanese since the cache keeps none. The
-        region's `source_text` and `ocr_confidence` take the reading; its status and translation stay, and nothing
-        is stored. "" without the OCR, or when nothing is read there."""
+        region's `source_text` and `ocr_confidence` take the reading - the person's reading where they corrected this
+        misreading here this session (`_take_corrections`); its status and translation stay, and nothing is stored.
+        "" without the OCR, or when nothing is read there."""
         if self.ocr is None:
             return ""
         rgb = np.asarray(result.original)
@@ -1808,8 +1833,71 @@ class Pipeline:
         reading = self._read(rgb, region, region.text_box, view)
         reading = self._settle(rgb, region, region.text_box, reading, view)
         region.source_text = reading.text
+        region.ocr_reading = None
         region.ocr_confidence = min(reading.score, SPLIT_CONFIDENCE) if reading.split else reading.score
-        return reading.text
+        if region.unit < len(result.units):
+            self._take_corrections(result.units[region.unit], [region], keep_status=True)
+        return region.source_text
+
+    def correct_reading(self, result: PageResult, region: TextRegion, text: str) -> bool:
+        """The person's reading *text* of *region* in place of the OCR's (the region editor's "Read as:", cleaned by
+        `textclean.clean_reading`): `source_text` takes it, `ocr_reading` keeps what the OCR read, and wherever the
+        same misreading is read at the same place this session it is read as *text* (`_take_corrections`: the page
+        translated again, read again from the cache, its region moved, a whole-book run). The OCR's reading given back
+        undoes it. A region the OCR read nothing in, or nothing it took for Japanese, is Japanese to translate now.
+        Held in memory only, as every reading is: nothing is stored or logged, nothing translated (Ask again and
+        Save do that). False when *text* is empty or the reading already is *text*."""
+        text = clean_reading(text)
+        if not text or text == region.source_text:
+            return False
+        misread = region.source_text if region.ocr_reading is None else region.ocr_reading
+        unit = result.units[region.unit] if region.unit < len(result.units) else None
+        if unit is not None:
+            self._forget_correction(unit, unit.normalize(region.bbox))
+        if text == misread:  # back to what the OCR read
+            region.source_text, region.ocr_reading = misread, None
+            return True
+        region.source_text, region.ocr_reading = text, misread
+        region.ocr_confidence, region.ocr_split = 1.0, False  # (the person's reading is no unsure one)
+        if region.status in ("ocr-empty", "not-japanese"):
+            region.status = "untranslated"
+        if unit is not None:
+            self.corrected_readings.append(CorrectedReading(unit.fingerprint, unit.normalize(region.bbox), misread, text))
+        return True
+
+    def _forget_correction(self, unit: fp.PageUnit, nbox: tuple[float, float, float, float]) -> None:
+        """The corrected readings held for the place *nbox* on *unit*'s page go (a new one takes their place)."""
+        s = self.settings
+        gone = [c for c in self.corrected_readings
+                if fp.hamming(c.fingerprint, unit.fingerprint) <= s.fingerprint_max_distance
+                and box_iou(c.box, nbox) >= s.match_min_iou]  # type: ignore[arg-type]
+        for c in gone:
+            self.corrected_readings.remove(c)
+
+    def _take_corrections(self, unit: fp.PageUnit, regions: Sequence[TextRegion], keep_status: bool = False) -> None:
+        """*regions* of *unit*, just read: one whose reading is a misreading a person corrected at the same place this
+        session (`correct_reading`; the same page within ``fingerprint_max_distance`` bits, the box ``match_min_iou``)
+        is read as they corrected it, a sure reading, and Japanese to translate (unless *keep_status*: a region read
+        again for the editor, `read_source`). Nothing is stored."""
+        if not self.corrected_readings or not regions:
+            return
+        s = self.settings
+        held = [c for c in self.corrected_readings
+                if fp.hamming(c.fingerprint, unit.fingerprint) <= s.fingerprint_max_distance]
+        if not held:
+            return
+        for r in regions:
+            if r.ocr_reading is not None or r.status in (ERASED, "repeated", "dropped") or r.tag == ERASE_ONLY:
+                continue
+            nbox = unit.normalize(r.bbox)
+            hit = next((c for c in reversed(held) if c.misread == r.source_text
+                        and box_iou(c.box, nbox) >= s.match_min_iou), None)  # type: ignore[arg-type]
+            if hit is None:
+                continue
+            r.source_text, r.ocr_reading = hit.text, hit.misread
+            r.ocr_confidence, r.ocr_split = 1.0, False
+            if not keep_status and r.status in ("ocr-empty", "not-japanese"):
+                r.status = "untranslated"
 
     def set_reader_note(self, result: PageResult, region: TextRegion, note: str) -> bool:
         """Store *note* (a note for the reader; "" for none) with the region's cached translation."""
@@ -2003,6 +2091,7 @@ class Pipeline:
         self.save_annotations()
 
         kept = (region.source_text, region.translated_text, region.status, list(region.flags), region.ocr_confidence)
+        misread = region.ocr_reading  # (a reading the person corrected: the OCR's reading of it again is no change)
         translated = region.status == "translated" and bool(region.translated_text)
         fresh = manual_region(rgb, box, s.dark_threshold)
         region.x0, region.y0, region.x1, region.y1 = box
@@ -2017,14 +2106,25 @@ class Pipeline:
         grew = box[0] < old_box[0] or box[1] < old_box[1] or box[2] > old_box[2] or box[3] > old_box[3]
         if self.ocr is not None and (grew or not translated):
             self._ocr_regions(rgb, [region], report)
+            region.ocr_reading = None
+            if misread is not None and region.source_text == misread:  # the same misreading: read as corrected
+                region.source_text, region.ocr_reading, region.ocr_confidence = kept[0], misread, 1.0
+                if region.status in ("ocr-empty", "not-japanese"):
+                    region.status = "untranslated"
             if translated and (region.status != "untranslated" or region.source_text == kept[0]):
                 # nothing new came in: the translation stays
                 region.source_text, region.translated_text, region.status, region.flags, region.ocr_confidence = kept
+                region.ocr_reading = misread
             elif region.status == "untranslated":
                 region.translated_text = ""
                 err = self._translate_regions([region], report)
                 if err:
                     result.error = err
+        if misread is not None:
+            self._forget_correction(old_unit, old_nbox)
+        if region.ocr_reading is not None:  # the person's reading goes with the region to its new place
+            self.corrected_readings.append(CorrectedReading(unit.fingerprint, nbox, region.ocr_reading,
+                                                            region.source_text))
 
         if self.cache is not None:
             page = self._page_for(old_unit)

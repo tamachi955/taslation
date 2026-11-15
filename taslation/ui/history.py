@@ -38,6 +38,7 @@ SAME = 1e-3  # two normalised boxes this close are the same box (a saved file ke
 NEAR = 0.5  # cached bubbles overlapping this much belong to the same region
 OWN_PAGE = 6  # bits: the annotations a change writes are those of the page this near (`BookAnnotations.page`)
 KEPT_AS_IS = ("order", "order_hint")  # a region's place in the reading order is the page's, not the change's
+READING = ("source_text", "ocr_reading", "ocr_confidence", "ocr_split")  # a reading the person corrected stays
 
 
 @dataclass(eq=False)
@@ -226,9 +227,11 @@ def index_of(regions: Sequence[Any], region: Any) -> int | None:
 
 
 def assign(region: Any, state: Any) -> None:
-    """*region* (the window's object) takes the fields of the copy *state*, but its place in the reading order."""
+    """*region* (the window's object) takes the fields of the copy *state*, but its place in the reading order, and a
+    reading the person corrected (`Pipeline.correct_reading`: no change of the stores, and not one that is undone)."""
+    corrected = getattr(region, "ocr_reading", None) is not None
     for f in fields(state):
-        if f.name not in KEPT_AS_IS:
+        if f.name not in KEPT_AS_IS and not (corrected and f.name in READING):
             setattr(region, f.name, getattr(state, f.name))
     region.flags = list(state.flags)
 

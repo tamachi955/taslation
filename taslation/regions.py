@@ -65,6 +65,9 @@ class TextRegion:
     char_quads: list[Any] = field(default_factory=list)  # a slanted model region: its characters' turned boxes (page)
     panel: Box | None = None  # the box of the panel it is in, when its page's panels were found (`detect.order_regions`)
     reused_text: str = ""  # the translation kept for an identical line before it, given without the model (`linememo`)
+    # what the OCR read, once a person corrected the reading in the region editor (`Pipeline.correct_reading`; ""
+    # when it read nothing): `source_text` is then the person's. None: the OCR's reading stands. Memory only
+    ocr_reading: str | None = None
 
     @property
     def reused(self) -> bool:
