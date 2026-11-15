@@ -9,6 +9,8 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is showing,
 translates it on this computer, and shows the translation laid over the page. It sends no image data and no translations outside. It is a tool that assists a lawful act: translating, to read it, a document you bought for yourself.
 
+**What you read is the Japanese edition you bought. The money goes to the author and the publisher.**
+
 ## See it working
 
 ![The TASlation introduction: beside the viewer, a page is translated, corrected, and a whole book is translated](docs/media/taslation-intro.gif)
@@ -26,14 +28,26 @@ The pages in the recording are from the [OpenMantra dataset](https://github.com/
 
 ## Why it was made
 
-TASlation is a tool for people who buy manga legitimately and want to read it properly. It reads the Japanese in the speech bubbles of the page the viewer shows,
-translates it on your own computer, redraws the bubbles with the translation and shows them on the screen. It does not upload, copy or share anything.
-The translations stay on your computer, and there is no feature to save, export or distribute pages.
+TASlation starts from one point: the author and the publisher are paid.
+
+Buy the book from a store that sells the Japanese edition, open it in that store's viewer, and read it in your own language. You read the same thing as readers in Japan, at the same price and at the same time, and the money goes to the author and the publisher.
+It is a tool for buying and reading a book that has no translation yet, or whose translation you would have to wait for, instead of reading it without paying.
+
+To do that, it reads the Japanese in the speech bubbles of the page the viewer shows, translates it on your own computer, redraws the bubbles with the translation and shows them on the screen.
+It does not upload, copy or share anything. The translations stay on your computer, and there is no feature to save, export or distribute pages.
 
 It is made, on purpose, so that it cannot become a way to read a book without the viewer. It saves only the translations, and even those are tied to a fingerprint of each page (the page fingerprint),
 so they are of no use unless the real page is on the screen.
 
-Buy the book from a store that sells the Japanese edition, open it in that store's viewer, and read it in your own language. The publisher and the author are paid, and you can read the same thing as readers in Japan, at the same price and at the same time.
+## Position on AI
+
+TASlation uses machine-learning models to read the text, to translate it and to erase it. Its position on that is as follows.
+
+* **What matters most is that the author and the publisher are paid.** TASlation can show a translation only over the real page that the viewer is showing. It is not a way to read without paying, nor a way to hand a book to others.
+* **It does not regard the use of published works for machine learning as unlawful or wrongful.** Japan's Copyright Act permits, as a rule, their use for information analysis (Article 30-4; not where it would unreasonably prejudice the copyright holder's interests). Other countries treat this differently.
+* **The licence and the training data of each model it uses are published.** They are in `docs/THIRD_PARTY.md`. The two models that find and erase text on the artwork do not disclose where their training images came from, so the installer says so and lets you choose whether to install them.
+* **TASlation itself trains nothing.** No page and no translation leaves the computer, so none can be used to train anyone else's model either.
+* **Where a book has an official translation, buying that is best.** TASlation does not replace human translation; it helps you buy and read a book that has no translation yet. An automatic translation has errors, and the translations are neither published nor distributed.
 
 ## What it does
 
