@@ -25,7 +25,9 @@ takes its place, never written over (`names.set_aside`).
 The file's header may also say what the book is as its colophon names it (`DETAIL_FIELDS`: the title, the volume,
 the author, the publisher, the ISBN; each optional, cleaned and bounded, never text from a page's bubbles), and
 `CacheStore.identities` reads the book, the language, those details and the page fingerprints of every cache
-without building its pages, which is what recognising a book by a page needs (`bookid.recognise`).
+without building its pages, which is what recognising a book by a page needs (`bookid.recognise`), and what finds
+a book's caches kept under another spelling of its name (`CacheStore.kept_name`: "Some Title 3巻" from before the
+Series and Volume fields, for "Some Title 3"; such a cache is read and written under its own name until renamed).
 """
 
 from __future__ import annotations
@@ -794,6 +796,31 @@ class CacheStore:
             for key in [k for k in self._read if k not in present]:
                 del self._read[key]  # a file gone (deleted, renamed by hand) is forgotten
         return out
+
+    def kept_name(self, book: str) -> str:
+        """The name the caches of *book* are kept under: *book* itself when a cache records it (in any language) or
+        none records a name of the same book; else the name of the caches of the same book under another spelling
+        (`bookname.same_book`: the same series and volume, "Title 3巻" or "Title 第三巻" for "Title 3"), the one with
+        the most pages when there are several. So that a cache kept under an older spelling is found, and read and
+        written under its own name, until the book is renamed (`rename.py`). Reads the headers only (`identities`);
+        a folder that cannot be read gives *book*."""
+        if not str(book or "").strip():
+            return book
+        try:
+            entries = self.identities()
+        except OSError:
+            return book
+        if any(entry.book == book for entry in entries):
+            return book
+        from .bookname import same_book
+
+        pages: dict[str, int] = {}
+        for entry in entries:
+            if same_book(entry.book, book):
+                pages[entry.book] = pages.get(entry.book, 0) + len(entry.pages)
+        if not pages:
+            return book
+        return max(sorted(pages), key=lambda name: pages[name])
 
     def path_for(self, book: str, language: str = "English") -> Path:
         """The cache file of *book* in *language*: one per book and target language, so switching languages never

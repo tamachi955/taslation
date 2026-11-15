@@ -344,6 +344,22 @@ def files_of(folder: Path, name: str, owner_of: OwnerOf, any_language: bool = Tr
     return found
 
 
+def has_files(folder: Path, name: str, owner_of: OwnerOf, any_language: bool = True) -> bool:
+    """Whether *folder* keeps a file of *name*: one under one of the name's own file names (in any language with
+    *any_language*) that records exactly this name; a copy kept beside one is none. Reads only the files whose names
+    are the name's (another name that starts the same, "Title 2" for "Title", is not opened)."""
+    slug = slugify(name)
+    language_part = r"(?:\.[\w-]+)?" if any_language else ""
+    own = re.compile(re.escape(os.path.normcase(slug)) + f"(?:-{name_hash(name)})?" + language_part + r"\.json")
+    for path in sorted(folder.glob(glob.escape(slug) + "*.json")):
+        if is_copy(path) or not own.fullmatch(os.path.normcase(path.name)):
+            continue
+        there = owner_of(path)
+        if there is not None and there[0] == name:
+            return True
+    return False
+
+
 def leftovers(path: Path) -> list[Path]:
     """What a save of the file at *path* that stopped halfway may have left beside it: its temporary files (they hold
     the same data), as `atomic.write_atomic` names them, and the fixed ``<file>.tmp`` of earlier versions."""
@@ -469,10 +485,15 @@ class StoreFiles:
         """Delete the files of *name* in every language, with the copies set aside from them (`delete_files`)."""
         return delete_files(folder, name, self.owner_of, any_language=self.language_field is not None)
 
+    def has(self, folder: Path, name: str) -> bool:
+        """Whether *folder* keeps a file of *name*, in any language (`has_files`)."""
+        return has_files(folder, name, self.owner_of, any_language=self.language_field is not None)
+
 
 __all__ = [
     "DAMAGED", "NEWER", "NOT_HERE", "WINDOWS_DEVICES", "Owner", "OwnerOf", "SetAside", "StoreFiles", "Unreadable",
-    "check_schema", "claim", "delete_files", "drop_leftovers", "file_names", "files_of", "is_copy", "is_listed",
+    "check_schema", "claim", "delete_files", "drop_leftovers", "file_names", "files_of", "has_files", "is_copy",
+    "is_listed",
     "language_key", "leftovers", "load_object", "name_hash", "owns", "pick", "read_object", "set_aside", "slugify",
     "take_set_aside",
 ]

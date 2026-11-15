@@ -1,5 +1,6 @@
 """The review of a rename whose book's series sheet joins the sheet the new series has already (`RenameReviewDialog`,
-opened by the colophon's Use when the plan has conflicts: `rename.plan_rename`, `ui/jobs.py`): where the two sheets
+opened by the colophon's Use, or by Rename to the one spelling of a book's name, when the plan has conflicts:
+`rename.plan_rename`, `ui/jobs.py`): the new name as its Series and Volume, then where the two sheets
 say otherwise, a row each - what it is, the series' value, this book's, Keep the series' / Take this book's (All
 series', All this book's) -. Rename renames
 the book with the answers, Cancel (Esc, closing it) keeps its name. The rows are `conflicts.ConflictRows` (with
@@ -13,6 +14,7 @@ from tkinter import ttk
 from typing import TYPE_CHECKING, Callable
 
 from ...i18n import _
+from ..book_fields import parts_line
 from ..layout import place_window
 from .conflicts import WIDTH, ConflictRows, conflict_texts
 
@@ -35,6 +37,10 @@ class RenameReviewDialog(tk.Toplevel):
         frm = ttk.Frame(self, padding=10)
         frm.pack(fill="both", expand=True)
         keyed = plan.keyed()
+        # the new name as its two fields (`book_fields.parts_line`)
+        self.name_line = ttk.Label(frm, text=_("The new name: {parts}").format(parts=parts_line(plan.new)),
+                                   wraplength=WIDTH, justify="left")
+        self.name_line.pack(anchor="w", pady=(0, 6))
         self.rows: list[tuple[str, str, str]] = []  # what each row shows
         self.choices: list[tuple[tuple[str, ...], tk.StringVar]] = []  # each conflict's key and choice
         if keyed:

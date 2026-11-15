@@ -956,17 +956,19 @@ def test_the_caches_dialog_takes_the_size_of_its_content(tmp_path, hidden_root, 
         d.update_idletasks()
         assert not d.wm_geometry().startswith("760x520")  # no fixed size
         head = tkfont.nametofont("TkHeadingFont")
-        for column in ("#0", "pages", "bubbles", "language", "updated"):
+        for column in ("#0", "volume", "pages", "bubbles", "language", "updated"):
             heading = str(d.tree.heading(column, "text"))
             assert int(d.tree.column(column, "width")) >= head.measure(heading) + 20, (code, heading)
         item = d.tree.get_children()[0]
-        assert d.tree.set(item, "language") == "German" and tuple(d.tree.cget("columns")) == ("pages", "bubbles", "language", "updated")
+        assert d.tree.set(item, "language") == "German" and tuple(d.tree.cget("columns")) == (
+            "volume", "pages", "bubbles", "language", "updated")
         assert tuple(d.notes_tree.cget("columns") if hasattr(d, "notes_tree") else ()) in ((), ("language", "volumes", "updated"))
         assert not hasattr(d, "path_var") and not hasattr(d, "notes_path_var")  # Open folder shows where the files are
         assert not [c for c in d._frame.winfo_children() if c.winfo_class() == "TScrollbar"]
         d.tree.selection_set(item)
         d._sync_buttons()
-        tree_width = sum(int(d.tree.column(c, "width")) for c in ("#0", "pages", "bubbles", "language", "updated"))
+        tree_width = sum(int(d.tree.column(c, "width"))
+                         for c in ("#0", "volume", "pages", "bubbles", "language", "updated"))
         for label in d._explanations:
             assert 0 < int(str(label.cget("wraplength"))) <= tree_width
         d.destroy()

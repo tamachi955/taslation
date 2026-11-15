@@ -491,7 +491,10 @@ def book_for_title(title: str, store: Any = None, memory: Memory | None = None) 
     """The book a viewer's window *title* is read as (`book_key_from_title`), found again where what TASlation keeps
     says so (*store*, a `cache.CacheStore`): a book kept under the fuller name the title gave before a viewer's part
     of it was learned; a book kept when this version first ran under the title's name with one segment fewer (the
-    lists an earlier version had cut the viewer's name off; that segment is learned as the viewer's)."""
+    lists an earlier version had cut the viewer's name off; that segment is learned as the viewer's). Else the name
+    the title's series and volume make (`bookname.split_name`: "Title 3" for the title's "Title 第3巻", the one
+    spelling the Book fields make), or a book kept under another spelling of it (`cache.CacheStore.kept_name`:
+    "Title 3巻" kept before). A name that may be the viewer's own (`unconfirmed`) stays as the title gives it."""
     memory = memory if memory is not None else current()
     book = book_key_from_title(title, memory)
     if store is None or generic(book, memory) or kept_names(store, book):
@@ -500,15 +503,20 @@ def book_for_title(title: str, store: Any = None, memory: Memory | None = None) 
     if tab != book and kept_names(store, tab):
         return tab
     found = spans(tab)
-    if len(found) < 2 or not memory.old_books:
+    if len(found) >= 2 and memory.old_books:
+        for drop, rest in ((found[-1], tab[:found[-2][1]]), (found[0], tab[found[1][0]:])):
+            segment = tab[drop[0]:drop[1]]
+            old = memory.old_book(rest.strip())
+            if old and learnable(segment) and not memory.is_book(segment) and kept_names(store, old):
+                change(lambda m: m.learn([segment]))
+                return old
+    if unconfirmed(title, book, memory):
         return book
-    for drop, rest in ((found[-1], tab[:found[-2][1]]), (found[0], tab[found[1][0]:])):
-        segment = tab[drop[0]:drop[1]]
-        old = memory.old_book(rest.strip())
-        if old and learnable(segment) and not memory.is_book(segment) and kept_names(store, old):
-            change(lambda m: m.learn([segment]))
-            return old
-    return book
+    from .bookname import split_name
+
+    standard = split_name(book).name or book
+    kept = getattr(store, "kept_name", None)
+    return kept(standard) if kept is not None else standard
 
 
 def unconfirmed(title: str, name: str, memory: Memory | None = None) -> bool:

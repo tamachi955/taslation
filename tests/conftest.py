@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from taslation import health, names, ollama_start, protect, viewerparts
+from taslation import bookname, health, names, ollama_start, protect, viewerparts
 from taslation.config import Settings
 from taslation.detect import layout
 from taslation.ocr.charspot import check_model_dir
@@ -98,6 +98,22 @@ def nothing_learned_of_real_viewers(monkeypatch):
         return real_use(None if state_dir is None or _real_state_folder(state_dir) else state_dir)
 
     monkeypatch.setattr(viewerparts, "use", use)
+    yield
+    real_use(None)
+
+
+@pytest.fixture(autouse=True)
+def no_real_book_names_remembered(monkeypatch):
+    """Each test starts with no book's name remembered as the reader's fields split it (`bookname.remember`), and
+    none reads what this machine's own state folder remembers (some stand-ins' settings have the default, real state
+    folder: there what is remembered stays in memory); what a test remembered is gone after it."""
+    real_use = bookname.use
+    real_use(None)
+
+    def use(state_dir):
+        return real_use(None if state_dir is None or _real_state_folder(state_dir) else state_dir)
+
+    monkeypatch.setattr(bookname, "use", use)
     yield
     real_use(None)
 

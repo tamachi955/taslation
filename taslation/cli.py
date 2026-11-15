@@ -32,6 +32,44 @@ def _utf8_console() -> None:
             pass
 
 
+def _book_parts(parser: argparse.ArgumentParser, series_help: str | None = None) -> None:
+    """--series and --volume: the book's name as the window's two fields give it (`_given_book`)."""
+    parser.add_argument("--series", help=series_help or "the book's series: with --volume (or alone, a book of one "
+                                                        "volume) it names the book, in place of --book")
+    parser.add_argument("--volume", help="the book's volume, with --series: a number (3, ３, ③, 三, 第3巻 are all 3; "
+                                         "10.5), or 上, 中, 下, 前編, 後編")
+
+
+def _given_book(args: argparse.Namespace, settings: Settings | None = None) -> str | None:
+    """The book the command line names: ``--book NAME`` in the one spelling its series and volume make
+    (`bookname.split_name`: "Some Title 3" for "Some Title 第3巻"), else ``--series`` with ``--volume`` (or alone: a
+    book of one volume), composed as the window's two fields are (`bookname.compose`; what the parser would split
+    otherwise is remembered as the reader's split, `bookname.remember`); found again in the cache folder of
+    *settings* under an older spelling of the same name ("Some Title 3巻" kept before: `cache.CacheStore.kept_name`).
+    A ``--book`` that names no book, or a temporary name, stays as given. None when none names a book. SystemExit for
+    ``--volume`` without ``--series`` or with ``--book``, and for a volume that is no volume."""
+    from . import bookname
+    from .bookid import generic_book_name
+    from .cache import CacheStore
+
+    book, series, volume = (getattr(args, name, None) for name in ("book", "series", "volume"))
+    if volume is not None and (not (series or "").strip() or (book or "").strip()):
+        raise SystemExit("error: --volume goes with --series (the book's series), not alone nor with --book")
+    if book is not None and book.strip():
+        if generic_book_name(book) or bookname.is_temporary(book):
+            return book  # (refused, or kept as it is, by the command)
+        name = bookname.split_name(book).name or book
+    elif series is not None and series.strip():
+        try:
+            name = bookname.remember(series, volume or "")
+        except ValueError:
+            raise SystemExit(f"error: --volume {volume!r} is no volume: give its number (3, ３, 三, 第3巻), or 上, 中, "
+                             "下, 前編, 後編; an edition such as 完全版 belongs to the series") from None
+    else:
+        return None
+    return CacheStore(settings.cache_dir).kept_name(name) if settings is not None else name
+
+
 def build_parser() -> argparse.ArgumentParser:
     from .i18n import UI_LANGUAGES
 
@@ -61,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     g = sub.add_parser("gui", help="open the reader window (default)")
     g.add_argument("--window", help="pick the viewer window whose title contains this text")
     g.add_argument("--book", help="name used for the translation cache (default: derived from the window title)")
+    _book_parts(g)
     g.add_argument("--auto", action=argparse.BooleanOptionalAction, default=True,
                    help="Auto (on by default): every page turn in the viewer is translated; --no-auto starts with it off")
     g.add_argument("--on-top", action="store_true",
@@ -87,11 +126,13 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--translator", choices=["ollama", "echo", "none"], default="ollama")
     t.add_argument("--no-translate", action="store_true", help="detect and OCR only")
     t.add_argument("--book", help="use/fill the translation cache for this book name")
+    _book_parts(t)
     t.add_argument("--json", action="store_true", help="print the full result as JSON")
 
     r = sub.add_parser("read", help="capture the viewer window once, translate it and show the result")
     r.add_argument("--window", required=True)
     r.add_argument("--book")
+    _book_parts(r)
     r.add_argument("--translator", choices=["ollama", "echo", "none"], default="ollama")
     r.add_argument("--json", action="store_true")
 
@@ -99,7 +140,9 @@ def build_parser() -> argparse.ArgumentParser:
                                      "(press Enter when you have finished the book)")
     b.add_argument("--window", required=True, help="viewer window title (substring)")
     b.add_argument("--book", help="cache name (default: derived from the window title)")
-    b.add_argument("--series", help="series name for the series sheet (default: book name without volume number)")
+    _book_parts(b, series_help="the book's series: with --volume (or alone, a book of one volume) it names the book "
+                               "as the window's two fields do; with --book, the series sheet's series (default: the "
+                               "book's name without its volume)")
     b.add_argument("--max-pages", type=int)
     b.add_argument("--wait", type=float, default=600.0,
                    help="seconds to wait for the viewer window to appear before giving up (default 600)")
@@ -111,7 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     rv = sub.add_parser("review", help="list the cached translations flagged for a second look (set small, a "
                                         "rendering missed, far longer or shorter than the Japanese, the OCR unsure)")
-    rv.add_argument("--book", required=True, help="the book (see `taslation cache list`)")
+    rv.add_argument("--book", help="the book (see `taslation cache list`); or name it with --series and --volume")
+    _book_parts(rv)
     rv.add_argument("--language", default=argparse.SUPPRESS,  # as given before the command, or the configured one
                     help="target language of the cache (default: the configured one)")
     rv.add_argument("--notes", action="store_true", help="also list the notes for the reader kept with the translations")
@@ -146,6 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
     gl.add_argument("rendering", nargs="?", help="how to write it in the target language (set)")
     gl.add_argument("--note", default="", help="who or what it is, tone (set)")
     gl.add_argument("--book", help="apply: the cached volume to fix (default: every cached volume of the series)")
+    gl.add_argument("--volume", help="apply: the cached volume of the series to fix, by its number (as --book "
+                                     "\"<series> <volume>\")")
     gl.add_argument("--rename", action="append", default=[], metavar="OLD=NEW",
                     help="apply: an extra rendering to replace, e.g. --rename Hja=Hya (repeatable)")
     gl.add_argument("--dry-run", action="store_true", help="apply: only report what would change")
@@ -416,7 +462,7 @@ def build_pipeline(settings: Settings, translator_kind: str = "ollama", book: st
     answer: `start_ollama_for`), the OCR engine (*with_ocr*), the book's stores. *warm_first*: a model the settings keep
     for good is loaded before the OCR model (`warm_ollama`; the Ollama translator only)."""
     from .cache import CacheStore
-    from .notes import series_key
+    from .notes import sheet_key
     from .pipeline import Pipeline
 
     starter = None
@@ -450,7 +496,8 @@ def build_pipeline(settings: Settings, translator_kind: str = "ollama", book: st
                   file=sys.stderr)
         else:
             pipeline.set_annotations(annotations)
-        glossary = GlossaryStore(settings.glossary_dir).open(series or series_key(book), settings.target_language)
+        sheets = GlossaryStore(settings.glossary_dir)
+        glossary = sheets.open(series or sheet_key(sheets, book), settings.target_language)
         pipeline.glossary = glossary
         pipeline.glossary_text = glossary.format()
         if len(glossary):
@@ -711,9 +758,10 @@ def cmd_translate(args: argparse.Namespace, settings: Settings) -> int:
     _notice_once(settings)
     if not args.image.is_file():
         raise SystemExit(f"error: {args.image} not found")
-    pipeline = build_pipeline(settings, args.translator, args.book)
+    book = _given_book(args, settings)
+    pipeline = build_pipeline(settings, args.translator, book)
     image = Image.open(args.image)
-    result = pipeline.process(image, use_cache=bool(args.book), translate=not args.no_translate, progress=_progress)
+    result = pipeline.process(image, use_cache=bool(book), translate=not args.no_translate, progress=_progress)
     pipeline.release_translator()
     _print_result(result, args.json)
     if args.show:
@@ -766,7 +814,7 @@ def cmd_read(args: argparse.Namespace, settings: Settings) -> int:
     _notice_once(settings)
     enable_dpi_awareness()
     win = _pick_window(args.window)
-    book = _book_name(args.book, win.title, settings)
+    book = _book_name(_given_book(args, settings), win.title, settings)
     print(f"capturing {win.label()}  (cache: {book})")
     enlarged = _enlarged(win.hwnd, settings)
     try:
@@ -797,13 +845,15 @@ def cmd_batch(args: argparse.Namespace, settings: Settings) -> int:
     from .batch import BatchReader
     from .capture import enable_dpi_awareness
 
-    from .notes import series_key
+    from .annotations import GlossaryStore
+    from .bookname import clean_series
+    from .notes import sheet_key
 
     _notice_once(settings)
     enable_dpi_awareness()
     win = _pick_window(args.window, wait=max(0.0, args.wait))
-    book = _book_name(args.book, win.title, settings)
-    series = args.series or series_key(book)
+    book = _book_name(_given_book(args, settings), win.title, settings)
+    series = clean_series(args.series) or sheet_key(GlossaryStore(settings.glossary_dir), book)
     pipeline = build_pipeline(settings, args.translator, book, series=series, warm_first=True)
     cache_note = str(pipeline.cache.path) if pipeline.cache is not None else "(disabled)"
     mode = "page by page" if args.no_context else "whole book (every page you turn is read, then translated)"
@@ -973,9 +1023,19 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
         return 0
     if args.action == "apply":
         from . import protect
+        from .bookid import same_book_name
         from .cache import CacheStore
         from .notes import series_key
 
+        if args.volume is not None:  # the series' volume: the book its two fields name
+            if args.book:
+                raise SystemExit("error: apply takes --book or --volume, not both")
+            from .bookname import volume_of
+
+            if not volume_of(args.volume):
+                raise SystemExit(f"error: --volume {args.volume!r} is no volume: give its number (3, ３, 三, 第3巻), or "
+                                 "上, 中, 下, 前編, 後編")
+            args.book = _given_book(argparse.Namespace(series=args.series, volume=args.volume), settings)
         pairs: list[tuple[str, str]] = []
         for item in args.rename:
             if "=" not in item:
@@ -988,8 +1048,9 @@ def cmd_glossary(args: argparse.Namespace, settings: Settings) -> int:
             return 0
         print("renderings: " + ", ".join(f"{old} -> {new}" for old, new in pairs))
         store = CacheStore(settings.cache_dir)
-        books = [b for b in store.list() if (args.book and b["book"] == args.book) or
-                 (not args.book and series_key(b["book"]) == args.series and b.get("language", "English") == settings.target_language)]
+        books = [b for b in store.list() if (args.book and same_book_name(b["book"], args.book)) or
+                 (not args.book and same_book_name(series_key(b["book"]), args.series)
+                  and b.get("language", "English") == settings.target_language)]
         for entry in books:
             cache = store.open(entry["book"], "", settings.target_language)
             changed = cache.rename(pairs)
@@ -1028,6 +1089,11 @@ def cmd_review(args: argparse.Namespace, settings: Settings) -> int:
 
     store = CacheStore(settings.cache_dir)
     target = args.language or settings.target_language
+    book = _given_book(args, settings)
+    if book is None:
+        raise SystemExit("error: name the book with --book NAME, or with --series and --volume (see `taslation cache "
+                         "list`)")
+    args.book = book
     cache = store.open(args.book, "", target)
     pages = sorted(cache.pages, key=lambda pg: (pg.seq if pg.seq >= 0 else 10**9, pg.fingerprint))
     with_notes = getattr(args, "notes", False)
@@ -1069,9 +1135,12 @@ def cmd_cache(args: argparse.Namespace, settings: Settings) -> int:
         books = store.list()
         if not books:
             print(f"no caches in {store.cache_dir}")
+        from .bookname import split_name
+
         for b in books:
+            parts = split_name(b["book"])
             print(f"{b['book']!r}: {b['pages']} page(s), {b['bubbles']} bubble(s), model {b['model']}, updated {b['updated']}")
-            print(f"    {b['file']}")
+            print(f"    series {parts.series!r}, volume {parts.volume or '-'}; {b['file']}")
         _say_not_here(settings)
         return 0
     if args.action in ("export", "import"):
@@ -1294,7 +1363,8 @@ def cmd_gui(args: argparse.Namespace, settings: Settings) -> int:
     if overrides:
         settings = settings.with_overrides(**overrides)
         settings.validate()
-    return run_app(settings, window_query=args.window, book=args.book, auto=getattr(args, "auto", True),
+    return run_app(settings, window_query=args.window, book=_given_book(args, settings),
+                   auto=getattr(args, "auto", True),
                    on_top=getattr(args, "on_top", False) or bool(settings.always_on_top),
                    reading=getattr(args, "reading", False))
 
@@ -1357,7 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         args.command = "gui"
         args.window = None
-        args.book = None
+        args.book = args.series = args.volume = None
         args.auto = True
         args.on_top = False
         args.reading = False
@@ -1370,9 +1440,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "gui":  # <state dir>/log.txt: what went wrong and on what, never what is read
         errorlog.setup(settings)
-    from . import viewerparts
+    from . import bookname, viewerparts
 
     viewerparts.use(settings.state_dir)  # what was learned of the viewers on this computer (`_book_name`)
+    bookname.use(settings.state_dir)  # the books whose two fields the reader split unlike the parser
     # Nothing but the local Ollama port, from here on.
     netguard.install(settings.ollama_port)
     try:

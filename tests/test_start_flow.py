@@ -1586,6 +1586,45 @@ def test_an_old_cache_kept_under_the_viewers_name_is_renamed_and_the_start_that_
     assert flow.status_var.get().startswith("This book is now called 見本の物語 3. Moved along: 1 translation file(s), 0 ")
 
 
+def test_a_book_kept_under_an_older_spelling_is_read_under_it_and_offered_the_one_spelling(flow, monkeypatch):
+    from taslation.ui.dialogs.start import StandardNameOffer
+
+    offers = []
+
+    def offer(master, old, new, on_answer):
+        dialog = StandardNameOffer(master, old, new, on_answer)
+        dialog.withdraw()
+        offers.append(dialog)
+        return dialog
+
+    monkeypatch.setattr(jobs, "StandardNameOffer", offer)
+    _keep_book(flow, "Star Road 第3巻", _page(1))  # kept before the Series and Volume fields
+    flow._keep_book_start("Star Road 第3巻", "start")
+    # the start dialog's answer, as the two fields make it: the book's files under the old spelling are found
+    flow._book_answer("page", "Star Road 3", generic=True)
+    assert flow.book_var.get() == "Star Road 第3巻" and flow._book_start("Star Road 3") == "start"
+    flow._handle_event("translate_done", {})  # a page done: the one spelling offered, once a session
+    assert len(offers) == 1 and flow._start_dialog is offers[0]
+    assert "Star Road 第3巻" in str(offers[0].label.cget("text")) and "Star Road 3?" in str(offers[0].label.cget("text"))
+    offers[0].buttons[1].invoke()  # Not now: the book stays under its old name, where everything is found
+    assert flow._start_dialog is None and flow.book_var.get() == "Star Road 第3巻"
+    assert flow.status_var.get() == "Star Road 第3巻 keeps its name for now; its translations are found under it as before."
+    flow._handle_event("translate_done", {})
+    assert len(offers) == 1 and [e["book"] for e in flow.store.list()] == ["Star Road 第3巻"]
+    flow._standard_asked.clear()  # a later session
+    flow._handle_event("translate_done", {})
+    offers[1].buttons[0].invoke()  # Rename: the colophon's rename, with no colophon
+    flow.run_jobs()
+    assert flow.book_var.get() == "Star Road 3" and [(e["book"], e["pages"]) for e in flow.store.list()] == [
+        ("Star Road 3", 1)]
+    assert flow.status_var.get().startswith("This book is now called Star Road 3. Moved along: 1 translation file(s), 1 ")
+    assert [e["book"] for e in flow.annotation_store.list()] == ["Star Road 3"]
+    assert [e["series"] for e in flow.glossary_store.list()] == ["Star Road"]  # the series' sheet stays its own
+    assert flow._book_start("Star Road 3") == "start"  # what was kept under the old spelling still holds
+    flow._handle_event("translate_done", {})
+    assert len(offers) == 2
+
+
 def test_the_pipeline_takes_the_renamed_files(flow, monkeypatch, tmp_path):
     _keep_book(flow, "Star Road 3", _page(1))
     flow._ensure_cache = A._ensure_cache.__get__(flow)  # the real one

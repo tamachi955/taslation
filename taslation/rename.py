@@ -6,7 +6,10 @@ language. `rename_book` moves them from *old* to *new*: each file is read, given
 ``book``, an annotations file's ``book``, a sheet's ``series``), written where its store puts the new name's file
 (`names.pick`; `atomic.write_atomic`), and then the old name's files are deleted with the copies kept beside them
 (`names.files_of`). The series sheet moves only when the new name gives another series ("Star Road 3" and "Star Road
-4" are one series): then the whole sheet goes, as it is the series'. Otherwise it stays where it is. (Translator's
+4" are one series): then the whole sheet goes, as it is the series'. Otherwise it stays where it is. The sheet that
+goes is the one the book reads (`moving_series`): a sheet the parser before 2026-11-15 kept for this book alone
+("Some Title 第一巻": kanji numerals were no volume to it) goes to the book's series, or joins its sheet; this is how
+a book kept under an older spelling is brought to the name its two fields make (`bookname.compose`). (Translator's
 notes of the model's own were kept per series until 2026-11-06; files of them an earlier version left are not moved.)
 
 When the new series has a sheet of its own in a language already (its volume 1 was renamed to the full title
@@ -59,7 +62,7 @@ from .names import (
     DAMAGED, Owner, OwnerOf, Unreadable, check_schema, drop_leftovers, file_names, files_of, is_copy, load_object,
     pick,
 )
-from .notes import series_key
+from .notes import series_key, sheet_key
 
 Answers = Mapping[tuple[str, ...], bool]  # a conflict's key (`conflict_key`) -> take this book's value
 _PARSE_ERRORS = (ValueError, TypeError, KeyError, AttributeError, IndexError, OverflowError, RecursionError)
@@ -498,6 +501,18 @@ def _delete(kind: _Kind, name: str, written: set[str], left: list[str]) -> None:
         drop_leftovers(path)
 
 
+def moving_series(sheets: GlossaryStore, old: str) -> str:
+    """The series whose sheet goes with the book *old* when a rename gives it another series: the one it reads
+    (`notes.sheet_key`) - its series, or the sheet the parser before 2026-11-15 kept for this book alone ("Title
+    第一巻", a kanji volume it did not know) -, but not a sheet that is another series' by today's parser and that the
+    book only read as the old parser did ("Title" for "Title 完全版 3"): that one stays for its own books, and nothing
+    moves."""
+    kept = sheet_key(sheets, old)
+    if kept != series_key(old) and series_key(kept) == kept:
+        return series_key(old)
+    return kept
+
+
 def _plan(stores: Stores, old: str, new: str, details: Mapping[str, Any] | None = None) -> _Plan:
     """Every check of a rename of *old* to *new* made and every file read, nothing written: what goes where (the
     joined sheets' data still to be made from the answers: `_answer`). RenameRefused for what stands in the way."""
@@ -507,7 +522,7 @@ def _plan(stores: Stores, old: str, new: str, details: Mapping[str, Any] | None 
         raise RenameRefused(f"{new!r} names no book; give the book its own name", Message("rename.no_name"))
     if new == old:
         raise RenameRefused(f"the book is called {old!r} already", Message("rename.same_name", book=old))
-    old_series, new_series = series_key(old), series_key(new)
+    old_series, new_series = moving_series(stores.sheets, old), series_key(new)
     caches, annotations, sheets = kinds = _kinds(stores)
     plan = _Plan(RenamePlan(old, new, old_series, new_series), RenameResult(old, new, old_series, new_series), kinds,
                  _details(details))
@@ -596,4 +611,4 @@ def rename_book(stores: Stores, old: str, new: str, language: str | None = None,
 
 
 __all__ = ["Answers", "RenamePlan", "RenameRefused", "RenameResult", "SheetJoin", "Stores",
-           "conflict_key", "plan_rename", "rename_book"]
+           "conflict_key", "moving_series", "plan_rename", "rename_book"]

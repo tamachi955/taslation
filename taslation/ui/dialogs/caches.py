@@ -15,6 +15,7 @@ from tkinter import filedialog, ttk
 from typing import Any, Callable
 
 from ... import backup
+from ...bookname import split_name
 from ...capture import foreground_window, give_foreground
 from ...cache import CacheStore
 from ...i18n import _
@@ -327,7 +328,8 @@ class CachesDialog(tk.Toplevel):
     book's cache selected), or, from the start, that both need the optional cryptography package when it is not
     installed (both disabled then). The dialog takes the size of what it shows in the window's language: the
     columns as wide as their headings and cells, the times in local time (`shown_time`), the explanations wrapped
-    to the dialog's width. Open folder shows where the files are. Delete takes the selected row's book in the row's
+    to the dialog's width; a row's book as its Series and Volume (`bookname.split_name`, a name kept under an older
+    spelling too). Open folder shows where the files are. Delete takes the selected row's book in the row's
     language alone, after a question that says so (Keep them has the focus), and moves its files to the Recycle Bin
     (`recycle.to_recycle_bin`), where they can be restored; when the bin does not take them nothing is deleted and
     the dialog says so."""
@@ -349,7 +351,8 @@ class CachesDialog(tk.Toplevel):
         frm = ttk.Frame(self, padding=8)
         frm.pack(fill="both", expand=True)
         self._frame = frm
-        self.tree = ttk.Treeview(frm, columns=("pages", "bubbles", "language", "updated"),
+        # the book's name as its Series (the tree's own text) and Volume (`bookname.split_name`)
+        self.tree = ttk.Treeview(frm, columns=("volume", "pages", "bubbles", "language", "updated"),
                                  show="tree headings", height=7)
         self.tree.pack(fill="both", expand=True, pady=(0, 2))
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._sync_buttons())
@@ -419,12 +422,13 @@ class CachesDialog(tk.Toplevel):
         self._entries = {}
         rows = []
         for b in self.store.list():
-            values = (b["pages"], b["bubbles"], b.get("language", ""), shown_time(b["updated"]))
-            item = self.tree.insert("", "end", text=b["book"], values=values)
+            parts = split_name(b["book"])
+            values = (parts.volume, b["pages"], b["bubbles"], b.get("language", ""), shown_time(b["updated"]))
+            item = self.tree.insert("", "end", text=parts.series or b["book"], values=values)
             self._entries[item] = b
-            rows.append((b["book"], *values))
+            rows.append((parts.series or b["book"], *values))
         width = fit_columns(self.tree, (
-            ("#0", _("Book"), ["A book title of some length"], 300),
+            ("#0", _("Series"), ["A book title of some length"], 300), ("volume", _("Volume"), ["10.5"], 100),
             ("pages", _("Pages"), ["9999"], 120), ("bubbles", _("Bubbles"), ["99999"], 140),
             ("language", _("Language"), ["Portuguese (Brazil)"], 200),
             ("updated", _("Updated"), ["2026-12-31 23:59"], 200)), rows)
@@ -453,7 +457,7 @@ class CachesDialog(tk.Toplevel):
             self._say(_("Select one in the list first."))
             return
         for item in items:
-            book = self.tree.item(item, "text")
+            book = str(self._entries.get(item, {}).get("book", "") or self.tree.item(item, "text"))
             language = str(self._entries.get(item, {}).get("language", "") or "English")
             if self.in_use(book):  # the list and its selection stay
                 self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)

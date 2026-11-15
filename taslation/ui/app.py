@@ -33,7 +33,7 @@ from typing import Any, Callable
 import numpy as np
 from PIL import Image
 
-from .. import jurisdictions, notice, protect, viewerparts
+from .. import bookname, jurisdictions, notice, protect, viewerparts
 from ..annotations import AnnotationStore, GlossaryStore
 from ..batch import BatchReader, keep_awake, release_awake
 from ..cache import CacheStore, viewer_key_from_title
@@ -50,7 +50,7 @@ from ..i18n import (
     save_ui_language,
     set_language,
 )
-from ..notes import series_key
+from ..notes import sheet_key
 from ..ollama_start import finish_all
 from ..translate.models import wanted_name
 from ..pagekeys import Profiles
@@ -83,6 +83,7 @@ from .dialogs.notice import NoticeDialog, notice_due
 from .dialogs.review import EditBubbleDialog, ReviewDialog, review_rows
 from .dialogs.book_settings import BookSettingsDialog
 from .book_areas import IGNORE_EVERYWHERE, IGNORE_TIP, AreaMixin
+from .book_fields import BookFields, fields_committed, kept_name, refused_line
 from .font_memory import FontMemory
 from .dialogs.settings import PAGE_SETTINGS, SettingsDialog, warn_ignored
 from .history import EditHistory
@@ -138,7 +139,8 @@ from .wrap import is_cjk, wrap_line, wrap_text
 FIRST_STEPS_MS = 800  # the first start's popup comes this long after the window, once nothing modal is up ...
 FIRST_STEPS_RETRY_MS = 1000  # ... looked for again this often
 TARGET_TABLE, TARGET_ENTRY = "translation", "language"  # where ui.json keeps the "To:" box
-VIEWER_CHARS, BOOK_CHARS = 18, 14  # the toolbar's boxes, in "0" widths: narrow enough for one row at the first size ...
+VIEWER_CHARS, BOOK_CHARS = 18, 10  # the toolbar's boxes, in "0" widths: narrow enough for one row at the first size ...
+VOLUME_CHARS = 3  # (the book's Series box, and its Volume box beside it: "999"; "10.5" scrolls)
 VIEWER_LIST_CHARS = 40  # ... and the Viewer list wider than its box as it opens (the style's postoffset), for whole titles
 PAGE_KEY_CLASSES = ("TButton", "TCheckbutton", "TRadiobutton")  # controls that take the focus from the page when clicked
 
@@ -245,6 +247,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         # before any store reads them (once; `protect_saved_files`); the worker's start says how many (`_job_init`)
         self._protection = protect_saved_files(state_dir)
         viewerparts.use(settings.state_dir)  # what was learned of the viewers on this computer (an older folder: once)
+        bookname.use(settings.state_dir)  # the books whose Series and Volume the reader split unlike the parser
         settings.target_language = first_target(state_dir, settings.target_language, code, first_start)
         self._target_kept = settings.target_language  # what ui.json holds of the "To:" box, or will
         self.store = CacheStore(settings.cache_dir)
@@ -787,16 +790,17 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         radio.pack(side="left", padx=(6, 0))
         tip(_("You correct: select, move, edit and add the text areas on the page."), radio)
 
-        book = bar.group()
-        label = ttk.Label(book, text=_("Book:"))
-        label.pack(side="left")
-        book_entry = ttk.Entry(book, textvariable=self.book_var, width=BOOK_CHARS)
-        book_entry.pack(side="left", padx=(4, 0))
-        for sequence in ("<KeyPress>", "<KeyRelease>"):
-            book_entry.bind(sequence, lambda e: self._book_key(e))
-        for sequence in ("<FocusOut>", "<Return>", "<KP_Enter>"):  # a name typed: what it says of the title
-            book_entry.bind(sequence, lambda _e: self._book_typed(), add="+")
-        tip(_("The book's name. Its translations are kept under this name."), label, book_entry)
+        book = bar.group()  # the book's name as Series and Volume, bound to book_var (`book_fields`)
+        fields = BookFields(book, self.book_var, series_chars=BOOK_CHARS, volume_chars=VOLUME_CHARS, short=True,
+                            resolve=lambda name: kept_name(self, name),
+                            on_commit=lambda _name: fields_committed(self), on_refused=lambda text: self.status(
+                                lambda: refused_line(text)))
+        fields.pack(side="left")
+        for entry in (fields.series, fields.volume):
+            for sequence in ("<KeyPress>", "<KeyRelease>"):
+                entry.bind(sequence, lambda e: self._book_key(e), add="+")
+        tip(_("The book's series: what its volumes share, an edition such as 完全版 included. With the volume it names the book its translations are kept under."), fields.series_label, fields.series)
+        tip(_("The volume's number (3, 10.5) or 上, 中, 下, 前編, 後編; empty for a book of one volume. 第3巻, Vol. 3 and ③ are taken as 3."), fields.volume_label, fields.volume)
 
         batch = bar.group()
         self.batch_btn = ttk.Button(batch, text=_("Read whole book..."), command=self.open_batch_dialog)
@@ -838,7 +842,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             return
         book = self.book_var.get().strip()
         language = self.lang_var.get().strip() or "English"
-        GlossaryDialog(self, self.glossary_store, series_key(book), language,
+        GlossaryDialog(self, self.glossary_store, sheet_key(self.glossary_store, book), language,
                        on_change=lambda: self._premises_changed(book, language), fonts_dir=self.settings.fonts_dir,
                        on_renamed=lambda pairs, sheet: self._offer_sheet_renames(pairs, book, language, sheet),
                        font_memory=FontMemory(self.settings.state_dir))

@@ -49,6 +49,7 @@ import numpy as np
 
 from . import fingerprint as fp
 from . import viewerparts
+from .bookname import same_book
 from .cache import DETAIL_FIELDS, INDEXED_WITHIN, CacheStore, clean_detail, language_key, viewer_key_from_title
 
 # what a viewer's window title leaves for a book's name when it names no book on any computer: nothing, a new tab, a
@@ -80,12 +81,11 @@ def generic_book_name(name: str) -> bool:
 
 
 def same_book_name(a: str, b: str) -> bool:
-    """Whether the names *a* and *b* name the book alike: the same once NFKC-normalised (full-width letters and
-    digits), letter case and spaces aside ("見本の物語 3" and "見本の物語３")."""
-    def key(name: str) -> str:
-        return "".join(unicodedata.normalize("NFKC", str(name or "")).casefold().split())
-
-    return key(a) == key(b)
+    """Whether the names *a* and *b* name one book: by their (series, volume) pair as the two fields split them
+    (`bookname.same_book`: "Some Title 3", "Some Title 3巻", "Some Title 第三巻" and "Some Title (3)" are one book),
+    or the same once NFKC-normalised (full-width letters and digits), letter case and spaces aside ("見本の物語 3"
+    and "見本の物語３"), as before the two fields."""
+    return same_book(str(a or ""), str(b or ""))
 
 
 # ------------------------------------------------------------------ the name last given in a viewer
@@ -270,15 +270,21 @@ def _aspect_differs(a: float, b: float, tolerance: float) -> bool:
 
 def identity_of(store: CacheStore, book: str, language: str | None = None) -> dict[str, str]:
     """What the colophon said of *book*, as its cache's header keeps it (`cache.DETAIL_FIELDS`): from its cache in
-    *language* when that has it, else from one in another language; {} when none has."""
-    best: dict[str, str] = {}
-    for entry in store.identities():
-        if entry.book != book or not entry.details:
-            continue
-        if language is not None and language_key(entry.language) == language_key(language):
-            return dict(entry.details)
-        best = best or dict(entry.details)
-    return best
+    *language* when that has it, else from one in another language; {} when none has. The caches kept under *book*
+    itself come first, then those of the same book under another spelling (`same_book_name`: "Title 3巻" for "Title
+    3")."""
+    entries = [entry for entry in store.identities() if entry.details]
+    for exact in (True, False):
+        best: dict[str, str] = {}
+        for entry in entries:
+            if (entry.book == book) != exact or (not exact and not same_book_name(entry.book, book)):
+                continue
+            if language is not None and language_key(entry.language) == language_key(language):
+                return dict(entry.details)
+            best = best or dict(entry.details)
+        if best:
+            return best
+    return {}
 
 
 def _agreeing(near: dict[int, dict[Any, int]], pages: int) -> dict[int, int]:

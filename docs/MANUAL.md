@@ -136,7 +136,7 @@ the banner shows once roughly how many seconds a page takes to translate. "Close
 Next, a small dialog asks for the book's name (in page-by-page mode too, if the book has no name yet, the same is asked on the first page).
 The cache and the series sheet are saved under this name. Some viewers read in a browser have a tab title that is only the viewer's name, whatever book is open,
 and with such a title it always asks (a viewer's or a browser's name is never used as the book's name).
-Which part of a title is the viewer's name is learned on this computer: when you choose a second book in the same viewer, or type the book's name without the viewer's part in the "Book" box. From then on that part is left out of the book's name. For the first book the whole title may show in the "Book" box; correct the name there. A browser-based viewer whose tab shows only its own name asks for the book's name first, and your answer teaches it that the title names no book.
+Which part of a title is the viewer's name is learned on this computer: when you choose a second book in the same viewer, or type the book's name without the viewer's part in the "Series" and "Volume" fields. From then on that part is left out of the book's name. For the first book the whole title may show in the "Series" field; correct the name there. A browser-based viewer whose tab shows only its own name asks for the book's name first, and your answer teaches it that the title names no book.
 What is learned (the titles and program file names of the windows you chose as the viewer, and which parts of titles are a viewer's or a book's) is kept only in `~/.taslation/viewers.json` on this computer. It never goes into a cache export or a log, and it is never sent anywhere. Deleting the file only means choosing the viewer once more.
 A book you have named once is recognised from its translated pages, whatever capture area you read it with, and its name is filled in. If several books look alike, the candidates are offered in the box's list,
 and if it cannot tell, the name last given with the same viewer is filled in ("Last time with this viewer: ...").
@@ -288,10 +288,38 @@ class name, so the keys and the capture area set while it showed "000.jpg" are u
 the defaults from "Apply to all viewers", then `taslation.toml`. On the command line, `taslation keys list` /
 `show --viewer TITLE` / `apply left-to-right --viewer TITLE` / `set --all --next Right --prev Left` do the same.
 
+### The book's name: series and volume
+
+A book's name is given in two fields, "Series" and "Volume" (in the toolbar, in the dialog at the start of a book, and in the colophon's offer).
+The translations, the information attached to pages and the series sheet are saved under the one name these two make. As they are joined in only one way,
+"3巻", "３" and "第三巻" no longer make three books that differ only in how the volume was written.
+
+* Series: the name the volumes share. An edition such as "完全版" belongs here too. The series sheet is saved under this name.
+* Volume: a number (half-width digits, no leading zeros; a decimal such as 10.5 is allowed). Full-width digits, circled numbers such as ① or ❸ and kanji numerals from 一 to 九百九十九 can be typed as well,
+  and "第3巻", "3巻", "Vol. 3", "#3" and "(3)" all become 3 (when you leave the field, it shows the way the volume is saved).
+  The only volumes that are not numbers are 上, 中, 下, 前編 and 後編 (上巻, 前篇 and the like count as the same). Anything else is refused, with the reason shown.
+  For a book of one volume, leave it empty.
+* The name is "series volume" (one half-width space), or the series alone when there is no volume. Full-width letters and digits become half-width, and runs of spaces become one.
+
+A name that arrives as one string, such as a viewer window's title or the name of an older cache, is split into the two fields by finding the volume at its end (written as above,
+or before an imprint such as "(見本コミックス)"). A title that ends in a digit with no separator ("Some Title13" and the like), a four-digit number with no volume mark
+(a year, for example) and brackets with no volume before them stay part of the title. If the split is wrong, correct the fields. A split you corrected
+(for example "Gate 51" as the series with no volume) is remembered in `~/.taslation/ui.json` on this computer, and that name is treated that way from then on.
+
+Translations saved before this version under a spelling such as "Some Title 3巻" are found as they are when the fields say "Some Title" and "3", and are read and written under their old name
+(the same series and the same volume make the same book). Nothing is renamed by itself. For such a book, once each time TASlation starts,
+it offers to rename the book to the one spelling. "Rename" moves the translations, the information attached to pages and the series sheet, as the colophon's rename does (next section;
+if the series sheets disagree, the table to answer comes first). With "Not now" the old name stays, and everything works as before.
+The answer kept per book about how to start it, and its role, carry over after the rename. A series sheet that an earlier version kept under a whole name with a kanji volume
+("第一巻" and the like) as its series is found and used too, and moves along when the book is renamed.
+
+On the command line, `--series` and `--volume` name the book the same way. A name given with `--book` is split as one string by the same rules
+and put in the one spelling (if translations were saved under an older spelling, they are read and written under that name).
+
 ### The colophon and renaming the book
 
 Near the end of a volume, TASlation reads the colophon (title, volume, author, publisher, ISBN), saves it in the cache's header,
-and offers the colophon's title as the book's name, once per book. Choose "Use" or "Keep".
+and offers the colophon's title as the book's name, once per book. The name is shown in the "Series" and "Volume" fields, so you can correct it. Choose "Use" or "Keep".
 
 When there are files under the book's current name (the name you typed first, or an old cache saved under the viewer's name), "Use" renames the book.
 The translations in every language and the information attached to pages, and the series sheet too if the new name belongs to another series, are moved to the new name,
@@ -507,9 +535,9 @@ is taken as print, not dialogue, and left as it is.
 ### The translation cache and backups
 
 The cache is in `~/.taslation/cache/<book>.json`,
-one file per target language (the book's name comes from the viewer window's title and can be changed in the "Book" box; books that give the same file name, such as "My:Book 1" and "My
+one file per target language (the book's name comes from the viewer window's title and can be changed in the "Series" and "Volume" fields; books that give the same file name, such as "My:Book 1" and "My
 Book 1", get `<book>-<hash>.json`). "Saved translations..." in the "Tools" menu
-lists and deletes caches. "Delete" moves only the file of the selected row's book, in that row's language, to the Windows Recycle Bin
+lists and deletes caches (the list shows each book as its series and volume). "Delete" moves only the file of the selected row's book, in that row's language, to the Windows Recycle Bin
 (the translations in other languages stay). The confirmation's default button is "Keep them", and the file can be restored from the Recycle Bin. When it cannot be moved to the Recycle Bin
 (on a drive without one, for example), nothing is deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader.
 The model never writes notes about the story to keep (note files that an old version wrote in
@@ -583,9 +611,11 @@ taslation batch --window "<title>" --book "My Book 1" [--max-pages N] [--no-cont
 taslation read --window "<title>" --book "My Book 1"   capture once, translate and preview
     (both take the book's name from the viewer window's title; a title with no book's name in it, such as
      "<viewer> - Google Chrome" with only the viewer's name, is refused, so give --book NAME)
+taslation read --window "<title>" --series "My Book" --volume 1   the book's name as its series and volume (--volume 第1巻, ① and 一 are 1 too; a book of one volume: --series alone)
+    (batch, read, gui, review and translate take them; --volume goes with --series, never with --book)
 taslation translate page.png --show    translate an image file of your own (writes nothing)
 taslation translate page.png --translator echo --no-translate   detection and OCR only
-taslation review --book <book> [--notes]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader
+taslation review --book <book> | --series S --volume V [--notes]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader
 taslation cache list | delete <book> | path
 taslation cache protect        protect the saved files that are not protected yet, and show the counts (also done at every start)
 taslation glossary list | show <series> | set <series> <term> <rendering> [--note ..] | delete <series> [term]

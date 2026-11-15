@@ -1170,6 +1170,11 @@ class GlossaryStore:
         (or records none), else the hashed one; FileExistsError when both hold other series (two names, one hash)."""
         return SHEET_FILES.pick(self.glossary_dir, series, language)
 
+    def has(self, series: str) -> bool:
+        """Whether a sheet of *series* is kept, in any language (`names.has_files`: a copy set aside is none); what
+        `notes.sheet_key` asks to find a sheet kept under the series key of before 2026-11-15."""
+        return self.glossary_dir.is_dir() and SHEET_FILES.has(self.glossary_dir, series)
+
     def open(self, series: str, language: str = "English") -> Glossary:
         """The sheet of *series* in *language* from its file (`path_for`), or a new one a save puts there. A file
         this version cannot read (damaged, of another kind, written by a newer TASlation) is first set aside as

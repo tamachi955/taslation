@@ -271,6 +271,55 @@ def test_batch_and_read_refuse_a_window_title_that_names_no_book_unless_given_on
     assert viewer.books == ["Star Road 1", "Star Road 2"]
 
 
+@pytest.mark.parametrize("command", ["batch", "read"])
+def test_series_and_volume_name_the_book_as_the_windows_two_fields_do(viewer, command):
+    with pytest.raises(Reached):
+        main([command, "--window", "Yomizuq", "--series", " Star  Road ", "--volume", "第3巻"])
+    with pytest.raises(Reached):
+        main([command, "--window", "Yomizuq", "--series", "Star Road 外伝"])  # a book of one volume
+    with pytest.raises(Reached):
+        main([command, "--window", "Yomizuq", "--book", "Star Road (4)"])  # one string: in the one spelling
+    assert viewer.books == ["Star Road 3", "Star Road 外伝", "Star Road 4"]
+    with pytest.raises(SystemExit) as refused:
+        main([command, "--window", "Yomizuq", "--series", "Star Road", "--volume", "完全版"])
+    assert refused.value.code == ("error: --volume '完全版' is no volume: give its number (3, ３, 三, 第3巻), or 上, 中, "
+                                  "下, 前編, 後編; an edition such as 完全版 belongs to the series")
+    for given in (["--volume", "3"], ["--book", "Star Road 3", "--volume", "3"]):
+        with pytest.raises(SystemExit) as refused:
+            main([command, "--window", "Yomizuq", *given])
+        assert refused.value.code == "error: --volume goes with --series (the book's series), not alone nor with --book"
+    assert len(viewer.books) == 3  # nothing was read under a refused name
+
+
+def _flagged_cache(tmp_path, book: str) -> None:
+    from taslation.cache import CacheStore, CachedBubble, CachedPage
+    from taslation.config import Settings
+
+    cache = CacheStore(tmp_path / "state" / "cache").open(book, Settings().ollama_model, "English")
+    cache.add(CachedPage(fingerprint="a" * 80, aspect=0.7, seq=0, bubbles=[
+        CachedBubble(box=(0.1, 0.1, 0.3, 0.2), text="Line", flags=["rendering"])]))
+    cache.save()
+
+
+def test_a_book_kept_under_an_older_spelling_is_found_by_its_series_and_volume(tmp_path, capsys):
+    _flagged_cache(tmp_path, "Star Road 第3巻")  # kept before the two fields
+    for given in (["--series", "Star Road", "--volume", "3"], ["--series", "Star Road", "--volume", "③"],
+                  ["--book", "Star Road 3"], ["--book", "Star Road 第3巻"]):
+        assert main(["review", *given]) == 0
+        assert "1 of 1 cached translation(s) flagged" in capsys.readouterr().out, given
+    with pytest.raises(SystemExit) as refused:
+        main(["review"])
+    assert refused.value.code == ("error: name the book with --book NAME, or with --series and --volume (see "
+                                  "`taslation cache list`)")
+    assert main(["cache", "list"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("'Star Road 第3巻': 1 page(s), 1 bubble(s), model ")
+    assert out[1].startswith("    series 'Star Road', volume 3; ")
+    from taslation.cache import CacheStore
+
+    assert [e["book"] for e in CacheStore(tmp_path / "state" / "cache").list()] == ["Star Road 第3巻"]  # not renamed
+
+
 def test_annotations_list_counts_what_each_book_has_and_never_its_text(tmp_path, capsys):
     import json
 

@@ -25,11 +25,12 @@ from PIL import Image
 
 from ..annotations import CharacterSheet, RegionStyle
 from ..bookid import generic_book_name
+from ..bookname import entry_for
 from ..cache import language_key
 from ..capture import CaptureError, caption_rows, post_click
 from ..i18n import _, load_ui_flag, load_ui_table, save_ui_entry, save_ui_flag
 from ..messages import message_of
-from ..notes import series_key
+from ..notes import sheet_key
 from ..pipeline import unit_for
 from ..render.fonts import font_families
 from .font_memory import FontMemory
@@ -137,8 +138,9 @@ def hint_text(keymap: shortcuts.Keymap) -> str:
 
 
 def chosen_role(state_dir: Any, book: str) -> str:
-    """The role the reader chose for *book* ("reader" or "translator"); "" for none."""
-    role = load_ui_table(Path(state_dir), ROLE_TABLE).get(book, "")
+    """The role the reader chose for *book* ("reader" or "translator"); "" for none. Under another spelling of the
+    same book too (`bookname.entry_for`: chosen before it was renamed to the one spelling)."""
+    role = entry_for(load_ui_table(Path(state_dir), ROLE_TABLE), book)
     return role if role in ("reader", "translator") else ""
 
 
@@ -245,7 +247,7 @@ class TranslatorMixin:
             return
         merged = self.pipeline.check_sheet()
         try:
-            sheet = self.glossary_store.open(series_key(book), language)
+            sheet = self.glossary_store.open(sheet_key(self.glossary_store, book), language)
         except OSError as e:  # the file is locked, or another series has its name
             self.say("Could not open the series sheet: {error}", error=e)
             return
@@ -582,7 +584,8 @@ class TranslatorMixin:
         if not book:
             return []
         try:
-            return self.glossary_store.open(series_key(book), self.lang_var.get().strip() or "English").speaker_names()
+            language = self.lang_var.get().strip() or "English"
+            return self.glossary_store.open(sheet_key(self.glossary_store, book), language).speaker_names()
         except OSError as e:  # the file is locked, or another series has its name
             self.say("Could not open the series sheet: {error}", error=e)
             return []

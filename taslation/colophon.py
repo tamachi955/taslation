@@ -34,6 +34,7 @@ from PIL import Image
 
 from . import fingerprint as fp
 from .bookid import ISBN_DASHES, isbn_key
+from .bookname import compose
 
 INK = 128  # a pixel darker than this is ink
 SPARSE = 0.03  # a part of the page with ink on less than this share of it may hold a colophon ...
@@ -82,8 +83,12 @@ class Colophon:
 
     @property
     def name(self) -> str:
-        """The book's name from it: the title and the volume ("見本の物語 3")."""
-        return f"{self.title} {self.volume}".strip()
+        """The book's name from it: the title as the Series field and the volume as the Volume field, composed as a
+        name the reader gives is (`bookname.compose`: "見本の物語 3")."""
+        try:
+            return compose(self.title, self.volume)
+        except ValueError:  # (a volume no colophon gives: digits are read)
+            return f"{self.title} {self.volume}".strip()
 
     def details(self) -> dict[str, str]:
         """The fields a cache's header keeps (`cache.DETAIL_FIELDS`)."""

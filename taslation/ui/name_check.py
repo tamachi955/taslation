@@ -21,7 +21,7 @@ from ..annotations import CharacterSheet
 from ..cache import TextEdit
 from ..i18n import _
 from ..name_variants import NameVariants, RunLine, changes
-from ..notes import series_key
+from ..notes import sheet_key
 from .history import BookStep, owner
 
 
@@ -77,7 +77,7 @@ def _sheet_put(window: Any, book: str, language: str, name: str, rendering: str 
     """The series sheet's character *name* given *rendering* (None: taken out); returns whether it was written and
     the rendering it had (None: no such character). Said in the status line when the sheet cannot be written."""
     try:
-        sheet = window.glossary_store.open(series_key(book), language)
+        sheet = window.glossary_store.open(sheet_key(window.glossary_store, book), language)
     except OSError as e:
         window.say("Could not open the series sheet: {error}", error=e)
         return False, None

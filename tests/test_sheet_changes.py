@@ -188,7 +188,7 @@ def test_the_editors_rename_of_a_rendering_is_one_change_for_ctrl_z(renames, mon
     sheet.set("ピヨ", "Piyo")
     sheet.save()
     start = w.lines()
-    monkeypatch.setattr(translator, "series_key", lambda book: book)
+    monkeypatch.setattr(translator, "sheet_key", lambda sheets, book: book)
     monkeypatch.setattr(translator, "sheet_item_for", lambda merged, old: ("term", "ピヨ") if old == "Piyo" else None)
     w.pipeline.check_sheet = lambda: sheet
     _answer(monkeypatch, True)

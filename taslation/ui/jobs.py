@@ -28,7 +28,10 @@ Around them:
   translate (`_look_for_colophon`) or by the whole-book scan (`BatchProgress.colophon`), offers its name once
   (`_offer_colophon`; with files kept under the book's name, Use renames them: `_plan_rename`, where the book's
   series sheet says otherwise than the sheet of the new name's series the review asks first, `RenameReviewDialog`,
-  then `_rename_book`) and leaves its details in the cache's header;
+  then `_rename_book`) and leaves its details in the cache's header; a name given is the one spelling its Series and
+  Volume make, or the older one a cache of the same book is kept under (`book_fields.kept_name`), and a book kept
+  under an older spelling is offered once a session to be renamed to the one spelling, the same way
+  (`book_fields.offer_standard_name`);
 * the scan band while a scan runs and after it (`ScanState`), with Stop: a whole-book run that holds more than
   `FEW_PAGES` pages asks first, and Esc in a run always does (`_ask_stop`, `dialogs.stop`: Keep reading, Stop
   without translating, Translate the pages read), and a stopped run's readings are translated from the band
@@ -56,6 +59,7 @@ from PIL import Image
 from .. import health, viewerparts
 from ..batch import BatchProgress, BatchReader, Readings, frames_differ, preflight, thumbnail
 from ..bookid import generic_book_name, identity_of, recognise, same_book_name
+from ..bookname import entry_for
 from ..cache import CacheStore, language_key
 from ..capture import IS_WINDOWS, CaptureError, WindowInfo, is_black
 from ..colophon import MAX_READS as COLOPHON_READS
@@ -63,7 +67,7 @@ from ..colophon import Colophon, find_colophon
 from ..colophon import precheck as colophon_precheck
 from ..i18n import _, load_ui_table, save_ui_entry
 from ..messages import Cancelled, Message, message_of
-from ..notes import is_temporary_name, series_key
+from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from . import area, name_check
 from .attention import tell_run_ended
@@ -74,7 +78,8 @@ from .dialogs import caches as boxes
 from .dialogs.batch import BatchDialog
 from .dialogs.rename_review import RenameReviewDialog
 from .dialogs.review import review_rows
-from .dialogs.start import ColophonOffer, StartDialog
+from .book_fields import kept_name, offer_standard_name
+from .dialogs.start import ColophonOffer, StandardNameOffer, StartDialog
 from .dialogs.stop import ask_stop
 from .trouble import DOWN_CODES, cpu_page_seconds, ollama_compute
 from .progress import LOADING, SLOW, Filling, asks_model, code_of, progress_line, reads_page, rendered
@@ -184,6 +189,7 @@ class JobsMixin:
         self._run_read: tuple[str, str, str] = ("", "", "")
         self._colophon_found: tuple[str, str, str, Colophon] | None = None  # (book, model, language, colophon) to offer
         self._colophon_asked: set[str] = set()  # books whose colophon's name was offered (or said) this session
+        self._standard_asked: set[str] = set()  # books under an older spelling offered the one spelling this session
         self._colophon_reads: dict[str, int] = {}  # book -> its pages read in full as a colophon this session (worker)
         self._page_cancel: threading.Event | None = None  # the page translation that runs (Stop cancels it)
         self._cancel_why = ""  # "stop" or "page": why it was cancelled
@@ -492,7 +498,7 @@ class JobsMixin:
             try:
                 cache = self.store.open(book, model, language)
                 annotations = self.annotation_store.open(book)
-                glossary = self.glossary_store.open(series_key(book), language)
+                glossary = self.glossary_store.open(sheet_key(self.glossary_store, book), language)
             except OSError as e:  # a file that exists but cannot be opened now is never replaced: said, and left
                 self.pipeline.set_cache(None)
                 self._post("status", key="Could not open the files TASlation keeps for {book}: {error}. Nothing was translated; close what holds the file (another TASlation, a backup tool), then try again.",
@@ -578,7 +584,7 @@ class JobsMixin:
         if self.pipeline is None or not book or generic_book_name(book):
             return
         try:
-            glossary = self.glossary_store.open(series_key(book), language)
+            glossary = self.glossary_store.open(sheet_key(self.glossary_store, book), language)
             annotations = self.annotation_store.open(book)
         except OSError as e:  # locked, cannot be read now, or another book's file (FileExistsError)
             self._post("status", key="Could not open the files TASlation keeps for {book}: {error}. The translations go on with the book's premises as they were.",
@@ -632,7 +638,7 @@ class JobsMixin:
 
             reader = BatchReader(self.pipeline, hwnd, settings, on_progress=progress, max_pages=max_pages,
                                  context_mode=context_mode,
-                                 book=book, series=series_key(book) if book else "", title=title,
+                                 book=book, series=sheet_key(self.glossary_store, book) if book else "", title=title,
                                  query=self.window_query, own_windows=own_windows, preflight=problems,
                                  show=lambda kind, data: self._post(kind, **data),
                                  readings=self._left_readings(book, model, language), keep_readings=True,
@@ -837,6 +843,7 @@ class JobsMixin:
                 self._redisplay()
             if self._colophon_found is not None:  # one that waited for reading mode to end
                 self._offer_colophon()
+            offer_standard_name(self)  # a book kept under an older spelling of its name (`book_fields`)
             self._run_queued()
         elif kind == "batch_page":
             self._batch_page(data["image"])
@@ -1286,7 +1293,7 @@ class JobsMixin:
 
         def answer(choice: str | None, name: str) -> None:
             self._start_dialog = None
-            name = " ".join(str(name).split())
+            name = kept_name(self, name)  # the one spelling, or an older one the book's files are kept under
             if choice is None or (generic_book_name(name) and not viewerparts.held(name)):
                 self._start_pending, self._start_whole = None, None  # the start that waited asks at the next page
                 self.say("Give the book a name first (the Book field).")
@@ -1340,7 +1347,8 @@ class JobsMixin:
                 self._book_scanned, self._scanned_book = True, book
                 self.say("Not now: this book is translated page by page until you close TASlation. To read it whole, press Read whole book...")
             return
-        name = " ".join(str(name).split()) or self.book_var.get().strip()
+        # the one spelling, or an older one the book's files are kept under (`book_fields.kept_name`)
+        name = kept_name(self, " ".join(str(name).split()) or self.book_var.get().strip())
         before = self.book_var.get().strip()
         if generic or name != before:
             self._book_named(name)  # what the name says of the title (a name held back is released)
@@ -1413,8 +1421,8 @@ class JobsMixin:
         if not generic and identity_of(self.store, current, language):
             return  # offered in an earlier session: the cache's header has the colophon's details
         rename = self._kept_under(current)
-        offer = ColophonOffer(self, col.title, col.volume,
-                              lambda use: self._colophon_answer(use, current, model, language, col, rename))
+        offer = ColophonOffer(self, col.title, col.volume, lambda use, name=None: self._colophon_answer(
+            use, current, model, language, col, rename, name))
         self._start_dialog = offer
         label = getattr(offer, "label", None)
         if rename and label is not None:  # the question is the rename's
@@ -1427,18 +1435,22 @@ class JobsMixin:
             place_window(offer, self)  # centred again, with its new size
 
     def _colophon_answer(self, use: bool, book: str, model: str, language: str, col: Colophon,
-                         rename: bool = False) -> None:
+                         rename: bool = False, name: str | None = None) -> None:
         """The colophon's name offered: Use renames the book's files kept under the old name (*rename*:
         `_plan_rename`; the Book box follows once they have moved), or puts the name into the Book box when nothing
-        was kept; Keep leaves the name. The details go to the cache of the name the book ends up with. A start that
-        waited goes on (after the rename). The name used is the viewer's last book too (`_remember_viewer_name`)."""
+        was kept; Keep leaves the name. *name* is what the offer's Series and Volume fields made of the colophon's
+        (corrected by the reader, maybe); without it, the colophon's own. Put into the Book box, it is the spelling
+        a cache of the same book is kept under already, if one is (`book_fields.kept_name`). The details go to the
+        cache of the name the book ends up with. A start that waited goes on (after the rename). The name used is
+        the viewer's last book too (`_remember_viewer_name`)."""
         self._start_dialog = None
+        given = " ".join(str(name or "").split()) or col.name
         if use and rename:
-            self._plan_rename(book, col.name, model, language, col)
+            self._plan_rename(book, given, model, language, col)
             return
         target = book
         if use:
-            target = col.name
+            target = kept_name(self, given)
             self._book_named(target)
             self.book_var.set(target)
             self._book_edited = True
@@ -1448,8 +1460,9 @@ class JobsMixin:
         self._keep_details(target, model, language, col)
         self._resume_start()
 
-    def _plan_rename(self, old: str, new: str, model: str, language: str, col: Colophon) -> None:
-        """Before the book *old* is renamed to *new*, the colophon's name: the rename's plan (`rename.plan_rename`,
+    def _plan_rename(self, old: str, new: str, model: str, language: str, col: Colophon | None) -> None:
+        """Before the book *old* is renamed to *new*, the colophon's name (*col*; None: the one spelling its Series
+        and Volume make, `book_fields.offer_standard_name`): the rename's plan (`rename.plan_rename`,
         on the Tk thread: every check made, the book's files and the new series' sheet read, nothing
         written; 20 to 75 ms for two caches of 200 pages). A rename that cannot be made is said, and the book keeps
         its name. Where the book's series sheet says otherwise than the sheet the new
@@ -1484,14 +1497,18 @@ class JobsMixin:
 
         def keep() -> None:
             self._start_dialog = None
-            self.say("{book} keeps its name; the name on the last page of the book is offered again next time.", book=old)
+            if col is None:
+                self.say("{book} keeps its name for now; its translations are found under it as before.", book=old)
+            else:
+                self.say("{book} keeps its name; the name on the last page of the book is offered again next time.", book=old)
             self._resume_start()
 
         self._start_dialog = RenameReviewDialog(self, plan, on_apply=rename, on_cancel=keep)
 
-    def _rename_book(self, old: str, new: str, model: str, language: str, col: Colophon,
+    def _rename_book(self, old: str, new: str, model: str, language: str, col: Colophon | None,
                      answers: dict[tuple[str, ...], bool] | None = None) -> None:
-        """Rename the book *old* to *new*, the colophon's name (`rename.rename_book`, with the review's *answers*), in
+        """Rename the book *old* to *new*, the colophon's name (*col*; None: the one spelling of its name, with no
+        details to keep) (`rename.rename_book`, with the review's *answers*), in
         the worker: its caches, annotations and series sheet move (or join the new series' sheet),
         the colophon's details go into the renamed cache, and the pipeline takes the renamed files
         (`_follow_rename`). Meanwhile the window is busy, so no page is read under the old name; the outcome comes
@@ -1499,7 +1516,7 @@ class JobsMixin:
         from ..rename import RenameRefused, Stores, rename_book
 
         stores = Stores(self.store, self.annotation_store, self.glossary_store)
-        details, language = col.details(), language.strip() or "English"
+        details, language = (col.details() if col is not None else None), language.strip() or "English"
         answers = dict(answers or {})
         self._go_busy()
         self.say("Renaming {book} to {name}...", book=old, name=new)
@@ -1984,9 +2001,10 @@ class JobsMixin:
         name_check.review_names(self)
 
     def _book_start(self, book: str) -> str:
-        """The start dialog's answer kept for *book* ("start", "page"; "" when none is)."""
+        """The start dialog's answer kept for *book* ("start", "page"; "" when none is), under another spelling of
+        the same book too (`bookname.entry_for`: kept before it was renamed to the one spelling)."""
         try:
-            kept = load_ui_table(self.settings.state_dir, BOOK_STARTS).get(book, "")
+            kept = entry_for(load_ui_table(self.settings.state_dir, BOOK_STARTS), book)
         except OSError:
             return ""
         return kept if kept in ("start", "page") else ""
