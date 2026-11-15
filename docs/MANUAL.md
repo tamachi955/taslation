@@ -635,9 +635,13 @@ is taken as print, not dialogue, and left as it is.
 The cache is in `~/.taslation/cache/<book>.json`,
 one file per target language (the book's name comes from the viewer window's title and can be changed in the "Series" and "Volume" fields; books that give the same file name, such as "My:Book 1" and "My
 Book 1", get `<book>-<hash>.json`). "Saved translations..." in the "Tools" menu
-lists and deletes caches (the list shows each book as its series and volume). "Delete" moves only the file of the selected row's book, in that row's language, to the Windows Recycle Bin
-(the translations in other languages stay). The confirmation's default button is "Keep them", and the file can be restored from the Recycle Bin. When it cannot be moved to the Recycle Bin
-(on a drive without one, for example), nothing is deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader.
+lists and deletes caches (the list shows each book as its series and volume, with its pages, bubbles, the file's size, language and last change,
+and under it how many files, pages and bytes there are in all). A click on a heading sorts the list by that column, a second click the other way round;
+at first it goes by series, volume and language. Ctrl+click and Shift+click choose several rows, Ctrl+A all of them. "Delete" moves only the files of the chosen rows' books, each in its row's language, to the Windows Recycle Bin
+(the translations in other languages stay), after one question that names the book, or how many and which. The confirmation's default button is "Keep them", and the files can be restored from the Recycle Bin. When a file cannot be moved to the Recycle Bin
+(on a drive without one, for example), it is not deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before.
+"Rename..." gives the one book chosen a new name in its Series and Volume fields; the rename then goes as the window's own does (the review first where the series sheets
+say otherwise), its translations in every language, page information and series sheet moving along, and the list follows once it is done. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader.
 The model never writes notes about the story to keep (note files that an old version wrote in
 `~/.taslation/series` are left as they are, unread; delete them if you do not need them).
 
@@ -659,7 +663,7 @@ A book's cache can be made into a file encrypted with a passphrase, as a backup 
 or `taslation cache export` and `taslation cache import`). The file contains the translations, with the book's page information
 (the rectangles you added or skipped, speakers and notes, the book's settings and the order of its pages) and the series sheet the book reads in that language,
 so keep it to yourself. Without the passphrase, no one, TASlation included, can open it, and a forgotten passphrase cannot be recovered.
-One file can hold several books: a whole series (`--series NAME`: every cached volume of the series in the target language) or every book (`--all`).
+One file can hold several books: in "Saved translations...", every row chosen; on the command line, a whole series (`--series NAME`: every cached volume of the series in the target language) or every book (`--all`).
 It holds no page images and no line read from the pages, only what the saved files themselves hold.
 Since the saved files cannot be read on another computer even when copied, this is the only way to move translations, page information and series sheets.
 When an administrator resets your Windows password (changing it yourself is fine), when you move to a new Windows profile,
@@ -677,6 +681,9 @@ it says the file comes from a newer version and imports nothing. Imported files 
   how many pages it adds and replaces, and how many of your corrections it keeps.
 * Page information you already have here stays unless you take the file's. A series sheet you already have is joined with the file's,
   as a rename joins two sheets: what the file adds is added, and where the two say different things, yours stays unless you take the file's.
+* In "Saved translations...", an import of a file that holds several books, or that meets corrections, page information or sheet values of your own,
+  first shows what the file holds and what the import would do, and nothing is written until you press "Import": you choose the books,
+  "Keep my corrections" (the default) or "Take the file as it is", "Keep mine" or "Take the file's" for the page information, and for each place where the series sheets differ.
 * `cache import FILE --list` lists the books a file holds without importing anything, and `--book NAME` (again for several) imports only those.
 * Each import keeps every file it changes (cache, page information, series sheet) beside it as `<name>.before-import.<date>.json`,
   so you can go back by hand. A wrong passphrase, a broken file, a file too large (a book's cache over 5,000 pages,

@@ -1,6 +1,7 @@
-"""The Caches dialog (list and delete the translation caches; export a cache to an
-encrypted file, import one), the warning it shows before an export or an import, the passphrase it asks for, and
-what it says when an import fails. Also TASlation's own message box (`WarningBox`) and the two ways the whole window
+"""The Caches dialog (the library: list, sort, rename and delete the translation caches; export one or more of them,
+with their page information and series sheets, to an encrypted file, import one), the warning it shows before an
+export or an import, the passphrase it asks for, the new name it asks for (`RenameBookDialog`), and what it says
+when an import fails. Also TASlation's own message box (`WarningBox`) and the two ways the whole window
 uses it in place of Windows' message boxes, whose buttons speak Windows' language and which come up behind a
 full-screen viewer: `ask` (a question, two buttons named for what they do) and `tell` (one OK)."""
 
@@ -12,7 +13,7 @@ import tkinter.font as tkfont
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from ... import backup
 from ...bookname import split_name
@@ -20,10 +21,12 @@ from ...capture import foreground_window, give_foreground
 from ...cache import CacheStore
 from ...i18n import _
 from ...recycle import to_recycle_bin
+from ..book_fields import BookFields, refused_line
 from ..layout import fit_columns, place_window, wrap_label
 from ..tooltip import tip
 from ..wrap import wrap_line
 from .help import explain_button
+from .import_review import ImportChoice, ImportReviewDialog
 
 ERROR_COLOUR = "#b3261e"  # a line that says what went wrong, as the window's other warnings
 WARNING_ICON = "::tk::icons::warning"  # the stock icon of Tk's own message boxes (Tk makes it as it starts)
@@ -37,6 +40,14 @@ WARNING_CHARS = 62  # the warning box's lines are broken at so many "0" widths o
 DELETE_QUESTION = "Move the saved translations of {book} in {language} to the Recycle Bin? Its saved translations in other languages stay. You can restore the file from the Recycle Bin."
 NOT_DELETED = "Nothing was deleted: the saved translations of {book} in {language} could not go to the Recycle Bin. Open folder shows the file; delete it there if you want it gone."
 IN_THE_BIN = "The saved translations of {book} in {language} are in the Recycle Bin; restore them from there to have them back."
+# the same for several rows chosen at once: one question, naming how many and which (`NAMES_SHOWN` of them at most)
+DELETE_MANY_QUESTION = "Move these {n} saved translations to the Recycle Bin: {names}? Each is one book in one language; the books' translations in other languages stay. You can restore the files from the Recycle Bin."
+NOT_ALL_DELETED = "{n} of them could not go to the Recycle Bin and were not deleted: {names}. Open folder shows the files; delete them there if you want them gone."
+IN_THE_BIN_MANY = "{n} saved translations are in the Recycle Bin; restore them from there to have them back."
+NAMES_SHOWN = 5
+COLUMNS = ("volume", "pages", "bubbles", "size", "language", "updated")  # the list's, after the Series (its own text)
+ARROWS = (" ▲", " ▼")  # after the heading the list is sorted by, once the reader chose it: up, down
+RENAME_POLL_MS = 300  # how often the list looks whether the window's rename is done
 
 
 def in_lines(text: str, width: int, font: str = "TkDefaultFont") -> str:
@@ -59,6 +70,45 @@ def shown_time(stamp: Any) -> str:
         return when.strftime("%Y-%m-%d %H:%M")
     except (ValueError, OverflowError, OSError):
         return text
+
+
+def shown_size(size: int) -> str:
+    """A file's size as the list shows it: kilobytes (rounded up) below a megabyte, else megabytes to one decimal."""
+    if size < 1024 * 1024:
+        return _("{n} KB").format(n=-(-max(0, size) // 1024))
+    return _("{n} MB").format(n=f"{size / (1024 * 1024):.1f}")
+
+
+def names_line(entries: Sequence[dict[str, Any]]) -> str:
+    """The books of *entries* (rows of the list), each with its language, `NAMES_SHOWN` at most and an ellipsis."""
+    names = [f"{e.get('book', '')} ({e.get('language', '')})" for e in entries]
+    return ", ".join(names[:NAMES_SHOWN]) + (", …" if len(names) > NAMES_SHOWN else "")
+
+
+def _volume_key(volume: str) -> tuple[int, float, str]:
+    """A volume as the list sorts it: none first, then by number (3 before 10), then the others (上, 下) by text."""
+    if not volume:
+        return (0, 0.0, "")
+    try:
+        return (1, float(volume), "")
+    except ValueError:
+        return (2, 0.0, volume)
+
+
+def sort_key(column: str | None, entry: dict[str, Any]) -> tuple[Any, ...]:
+    """Where the row of *entry* (with its "series", "volume" and "size") goes when the list is sorted by *column*
+    (None: by series, then volume, then language); the series and the volume break ties."""
+    series = (str(entry.get("series", "")).casefold(), _volume_key(str(entry.get("volume", ""))),
+              str(entry.get("language", "")).casefold())
+    if column in ("pages", "bubbles", "size"):
+        return (int(entry.get(column, 0) or 0), *series)
+    if column == "volume":
+        return (series[1], series[0], series[2])
+    if column == "language":
+        return (series[2], series[0], series[1])
+    if column == "updated":
+        return (str(entry.get("updated", "")), *series)
+    return series
 
 
 def _backup_error(name: str) -> type | None:
@@ -333,31 +383,104 @@ class PassphraseDialog(tk.Toplevel):
             self.hint_var.set(self.hint_text(force=True))
 
 
+class RenameBookDialog(tk.Toplevel):
+    """The new name of *book*, in the Series and Volume fields the toolbar has (`book_fields.BookFields`), over the
+    Saved translations dialog: Rename (or Enter) gives it to *on_rename* when it is another name than *book* (the
+    window's rename then plans it, asks where the sheets say otherwise, and moves the files); Cancel, Esc and closing
+    it give nothing. A Volume field that holds no volume says why under the fields (`book_fields.refused_line`)."""
+
+    def __init__(self, master: tk.Misc, book: str, on_rename: Callable[[str], None]):
+        super().__init__(master)
+        self.book, self.on_rename = book, on_rename
+        self.title(_("Rename {book}").format(book=book))
+        self.transient(master)
+        self.resizable(False, False)
+        frm = ttk.Frame(self, padding=12)
+        frm.pack(fill="both", expand=True)
+        self.text_width = WARNING_CHARS * max(1, tkfont.nametofont("TkDefaultFont").measure("0"))
+        ttk.Label(frm, text=in_lines(_("The new name of {book}:").format(book=book), self.text_width),
+                  justify="left").pack(anchor="w", pady=(0, 6))
+        self.name_var = tk.StringVar(self, value=book)
+        self.hint_var = tk.StringVar(self, value="")
+        self.fields = BookFields(frm, self.name_var, series_chars=34,
+                                 on_refused=lambda text: self.hint_var.set(refused_line(text)))
+        self.fields.pack(fill="x")
+        ttk.Label(frm, textvariable=self.hint_var, foreground=ERROR_COLOUR, wraplength=self.text_width,
+                  justify="left").pack(anchor="w", pady=(4, 0))
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x", pady=(10, 0))
+        ttk.Button(btns, text=_("Cancel"), command=self.destroy).pack(side="right")
+        self.rename_btn = ttk.Button(btns, text=_("Rename"), command=self.apply, default="active")
+        self.rename_btn.pack(side="right", padx=(0, 6))
+        self.bind("<Return>", lambda _e: self.apply())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.fields.focus_series()
+        place_window(self, master)
+        try:
+            self.grab_set()
+        except tk.TclError:  # not on the screen (yet): no grab
+            pass
+
+    def apply(self) -> None:
+        """Rename: the fields as they are left (a refused volume keeps the dialog open), then *on_rename* with the
+        name they make, unless it is none or the book's own."""
+        if not self.winfo_exists() or not self.fields.commit():
+            return
+        new = " ".join(self.name_var.get().split())
+        self.destroy()
+        if new and new != self.book:
+            self.on_rename(new)
+
+
 class CachesDialog(tk.Toplevel):
-    """List and delete translation caches (text-only JSON files); export a cache to a file
-    encrypted with a passphrase, or import one, for the reader's own backup or other computer. A line above Export
-    and Import says what such a file is for and that it holds the translated text; each of them first shows a
-    warning (`WarningBox`) before it asks for a file: an export's file holds the book's translated text and is for
-    the reader alone, an import is only of a file the reader made; Cancel there does nothing else. The line below
-    them says what the last export or import did (the file's name and the pages; the list is filled again, the
-    book's cache selected), or, from the start, that both need the optional cryptography package when it is not
-    installed (both disabled then). The dialog takes the size of what it shows in the window's language: the
-    columns as wide as their headings and cells, the times in local time (`shown_time`), the explanations wrapped
-    to the dialog's width; a row's book as its Series and Volume (`bookname.split_name`, a name kept under an older
-    spelling too). Open folder shows where the files are. Delete takes the selected row's book in the row's
-    language alone, after a question that says so (Keep them has the focus), and moves its files to the Recycle Bin
-    (`recycle.to_recycle_bin`), where they can be restored; when the bin does not take them nothing is deleted and
-    the dialog says so."""
+    """The library of saved translations (text-only files, one per book and language): a row each, with its Series
+    and Volume (`bookname.split_name`, a name kept under an older spelling too), pages, bubbles, the file's size,
+    language and last change (in local time, `shown_time`), and under the list how many files, pages and bytes in all.
+    A click on a heading sorts the list by it (again: the other way round); at first it goes by series, volume and
+    language. Ctrl+click and Shift+click choose several rows, Ctrl+A all of them.
+
+    Delete moves the files of the rows chosen, each book in its row's language alone, to the Recycle Bin
+    (`recycle.to_recycle_bin`), after one question that says so (one book: which; several: how many and which; Keep
+    them has the focus); when the bin does not take a file nothing of it is deleted and the dialog says so. Rename...
+    gives the one book chosen a new name in its Series and Volume fields (`RenameBookDialog`) and hands it to the
+    window's rename (*rename*, by default the window's `_plan_rename`: the rename's review where the sheets say
+    otherwise, then its files moved), and the list follows once the window is done. Open folder shows where the files
+    are.
+
+    Export writes the rows chosen to one file encrypted with a passphrase, each book with its page information and the
+    series sheet it reads (`backup.export_books`; the stores are the window's, *annotations* and *sheets*, else the
+    caches alone); Import reads one back (`backup.open_export`, `backup.plan_import`), after a review
+    (`import_review.ImportReviewDialog`) when the file holds several books or meets corrections, page information or
+    sheet values of the reader's own, and imports what the reader chose (`backup.apply_import`). A line above Export and
+    Import says what such a file is for and that it holds the translated text; each of them first shows a warning
+    (`WarningBox`) before it asks for a file: an export's file holds the book's translated text and is for the reader
+    alone, an import is only of a file the reader made; Cancel there does nothing else. The line below them says what
+    the last export or import did (the file's name and the pages; the list is filled again, the books selected), or,
+    from the start, that both need the optional cryptography package when it is not installed (both disabled then).
+    The dialog takes the size of what it shows in the window's language: the columns as wide as their headings and
+    cells, the explanations wrapped to the dialog's width."""
 
     def __init__(self, master: tk.Misc, store: CacheStore,
                  on_changed: Callable[[str], None] | None = None, on_status: Callable[[str], None] | None = None,
-                 in_use: Callable[[str], bool] | None = None):
+                 in_use: Callable[[str], bool] | None = None, *, annotations: Any = None, sheets: Any = None,
+                 rename: Callable[[str, str, str, str, Any], None] | None = None):
         super().__init__(master)
         self.store = store
+        annotations = annotations if annotations is not None else getattr(master, "annotation_store", None)
+        sheets = sheets if sheets is not None else getattr(master, "glossary_store", None)
+        if annotations is not None and sheets is not None:
+            from ...rename import Stores
+
+            self.stores: Any = Stores(store, annotations, sheets)
+        else:
+            self.stores = store  # the caches alone (`backup` takes a CacheStore so)
+        self.rename_flow = rename if rename is not None else getattr(master, "_plan_rename", None)
         self.in_use = in_use or (lambda _book: False)  # a run reads this book: its next save would bring the file back
         self.on_changed = on_changed  # a book's cache was deleted or imported into
         self.on_status = on_status or (lambda _text: None)
         self._entries: dict[str, dict[str, Any]] = {}  # tree item -> the cache it lists
+        self._sort: tuple[str, bool] | None = None  # the heading the reader sorted by, and whether the other way round
         self.recycle = to_recycle_bin  # where Delete puts a cache's files (tests put them elsewhere)
         self._explanations: list[ttk.Label] = []
         self._backup_ready = self.crypto_available()  # export and import need the cryptography package
@@ -367,17 +490,24 @@ class CachesDialog(tk.Toplevel):
         frm.pack(fill="both", expand=True)
         self._frame = frm
         # the book's name as its Series (the tree's own text) and Volume (`bookname.split_name`)
-        self.tree = ttk.Treeview(frm, columns=("volume", "pages", "bubbles", "language", "updated"),
-                                 show="tree headings", height=7)
+        self.tree = ttk.Treeview(frm, columns=COLUMNS, show="tree headings", height=7, selectmode="extended")
         self.tree.pack(fill="both", expand=True, pady=(0, 2))
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._sync_buttons())
-        self.empty_var = tk.StringVar(self, value="")  # says so while nothing is kept: an empty list looks broken
+        for key in ("<Control-a>", "<Control-A>"):
+            self.tree.bind(key, self._select_all)
+        for column in ("#0", *COLUMNS):
+            self.tree.heading(column, command=lambda c=column: self._sort_by(c))
+        self.empty_var = tk.StringVar(self, value="")  # how much is kept, or that nothing is: an empty list looks broken
         ttk.Label(frm, textvariable=self.empty_var).pack(anchor="w")
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=(6, 0))
         button = ttk.Button(btns, text=_("Delete selected translations"), command=self._delete)
         button.pack(side="left")
         tip(_("Delete the chosen book's translations from this computer."), button)
+        self.rename_btn = ttk.Button(btns, text=_("Rename..."), command=self._rename, state="disabled")
+        self.rename_btn.pack(side="left", padx=(6, 0))
+        tip(_("Give the chosen book another name: its translations, page information and series sheet move along."),
+            self.rename_btn, disabled=_("Choose a book in the list first."))
         button = ttk.Button(btns, text=_("Open folder"), command=self._open_folder)
         button.pack(side="left", padx=(6, 0))
         tip(_("Open the folder that holds these files."), button)
@@ -430,68 +560,172 @@ class CachesDialog(tk.Toplevel):
         self.backup_var.set(text)
         self.backup_line.configure(foreground=ERROR_COLOUR if error else "")
 
-    def _fill(self, select: str | None = None, book: str | None = None) -> None:
-        """The list from the files as they are now; afterwards the cache file *select* is selected, or the cache of
-        *book* saved last (an import's)."""
+    # ------------------------------------------------------------------ the list
+    def _fill(self, select: str | Sequence[str] | None = None, book: str | None = None) -> None:
+        """The list from the files as they are now, sorted as the reader chose (`sort_key`); afterwards the cache
+        files *select* (one, or several) are selected, or the cache of *book* saved last (an import's)."""
         self.tree.delete(*self.tree.get_children())
         self._entries = {}
-        rows = []
+        found = []
         for b in self.store.list():
             parts = split_name(b["book"])
-            values = (parts.volume, b["pages"], b["bubbles"], b.get("language", ""), shown_time(b["updated"]))
-            item = self.tree.insert("", "end", text=parts.series or b["book"], values=values)
-            self._entries[item] = b
-            rows.append((parts.series or b["book"], *values))
+            try:
+                size = os.stat(b["file"]).st_size
+            except OSError:
+                size = 0
+            found.append({**b, "series": parts.series or b["book"], "volume": parts.volume, "size": size})
+        column, backwards = self._sort if self._sort is not None else (None, False)
+        found.sort(key=lambda entry: sort_key(column, entry), reverse=backwards)
+        rows = []
+        for entry in found:
+            values = (entry["volume"], entry["pages"], entry["bubbles"], shown_size(entry["size"]),
+                      entry.get("language", ""), shown_time(entry["updated"]))
+            item = self.tree.insert("", "end", text=entry["series"], values=values)
+            self._entries[item] = entry
+            rows.append((entry["series"], *values))
+        arrow = {self._sort[0]: ARROWS[self._sort[1]]} if self._sort is not None else {}
         width = fit_columns(self.tree, (
-            ("#0", _("Series"), ["A book title of some length"], 300), ("volume", _("Volume"), ["10.5"], 100),
-            ("pages", _("Pages"), ["9999"], 120), ("bubbles", _("Bubbles"), ["99999"], 140),
-            ("language", _("Language"), ["Portuguese (Brazil)"], 200),
-            ("updated", _("Updated"), ["2026-12-31 23:59"], 200)), rows)
-        self.empty_var.set("" if rows else _("Nothing is kept yet."))
+            ("#0", _("Series") + arrow.get("#0", ""), ["A book title of some length"], 300),
+            ("volume", _("Volume") + arrow.get("volume", ""), ["10.5"], 100),
+            ("pages", _("Pages") + arrow.get("pages", ""), ["9999"], 120),
+            ("bubbles", _("Bubbles") + arrow.get("bubbles", ""), ["99999"], 140),
+            ("size", _("Size") + arrow.get("size", ""), [shown_size(10 * 1024 * 1024)], 120),
+            ("language", _("Language") + arrow.get("language", ""), ["Portuguese (Brazil)"], 200),
+            ("updated", _("Updated") + arrow.get("updated", ""), ["2026-12-31 23:59"], 200)), rows)
+        if found:
+            self.empty_var.set(_("In all: {files} translation file(s), {pages} page(s), {size}.").format(
+                files=len(found), pages=sum(int(e["pages"]) for e in found),
+                size=shown_size(sum(e["size"] for e in found))))
+        else:
+            self.empty_var.set(_("Nothing is kept yet."))
         self._wrap_explanations(width)  # no wider than the lists until the dialog is on the screen
-        target = next((item for item, b in self._entries.items() if select is not None and b["file"] == str(select)), None)
-        if target is None and book is not None:
+        wanted = {str(select)} if isinstance(select, (str, Path)) else {str(s) for s in select or ()}
+        targets = [item for item, b in self._entries.items() if b["file"] in wanted]
+        if not targets and book is not None:
             saved = [(str(b.get("updated", "")), item) for item, b in self._entries.items() if b["book"] == book]
-            target = max(saved)[1] if saved else None
-        if target is not None:
-            self.tree.selection_set(target)
-            self.tree.see(target)
+            targets = [max(saved)[1]] if saved else []
+        if targets:
+            self.tree.selection_set(targets)
+            self.tree.see(targets[0])
         self._sync_buttons()
 
+    def _sort_by(self, column: str) -> None:
+        """A click on *column*'s heading: the list sorted by it, the other way round when it was already; the rows
+        chosen stay chosen."""
+        backwards = self._sort is not None and self._sort[0] == column and not self._sort[1]
+        self._sort = (column, backwards)
+        self._fill(select=[e["file"] for e in self._chosen()])
+
+    def _select_all(self, _event: Any = None) -> str:
+        """Ctrl+A in the list: every row chosen."""
+        self.tree.selection_set(self.tree.get_children())
+        return "break"
+
+    def _chosen(self) -> list[dict[str, Any]]:
+        """The caches selected, in the list's order."""
+        chosen = set(self.tree.selection())
+        return [entry for item, entry in self._entries.items() if item in chosen]
+
     def _selected(self) -> dict[str, Any] | None:
-        """The one cache selected (an export is one file per cache)."""
+        """The one cache selected (None for none or several)."""
         items = self.tree.selection()
         return self._entries.get(items[0]) if len(items) == 1 else None
 
     def _sync_buttons(self) -> None:
-        self.export_btn.configure(state="normal" if self._selected() is not None and self._backup_ready else "disabled")
+        self.export_btn.configure(state="normal" if self._chosen() and self._backup_ready else "disabled")
+        one = self._selected() is not None and self.rename_flow is not None
+        self.rename_btn.configure(state="normal" if one else "disabled")
 
+    # ------------------------------------------------------------------ delete, rename
     def _delete(self) -> None:
-        items = self.tree.selection()
-        if not items:
+        entries = self._chosen()
+        if not entries:
             self._say(_("Select one in the list first."))
             return
-        for item in items:
-            book = str(self._entries.get(item, {}).get("book", "") or self.tree.item(item, "text"))
-            language = str(self._entries.get(item, {}).get("language", "") or "English")
+        for entry in entries:
+            book = str(entry.get("book", ""))
             if self.in_use(book):  # the list and its selection stay
                 self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
                 return
-            if not ask(self, _(DELETE_QUESTION).format(book=book, language=language), _("Delete"), _("Keep them"),
-                       no_first=True):
-                return  # the list and its selection stay
+        if len(entries) == 1:
+            book, language = str(entries[0].get("book", "")), str(entries[0].get("language", "") or "English")
+            question = _(DELETE_QUESTION).format(book=book, language=language)
+        else:
+            question = _(DELETE_MANY_QUESTION).format(n=len(entries), names=names_line(entries))
+        if not ask(self, question, _("Delete"), _("Keep them"), no_first=True):
+            return  # the list and its selection stay
+        gone, failed = 0, []
+        for entry in entries:
+            book, language = str(entry.get("book", "")), str(entry.get("language", "") or "English")
             try:
-                gone = self.store.delete(book, language, recycle=self.recycle)
+                gone += bool(self.store.delete(book, language, recycle=self.recycle))
             except OSError:  # no Recycle Bin for the file, or the shell refused: nothing is deleted for good
-                self._fill()
-                self._warn(_(NOT_DELETED).format(book=book, language=language))
-                return
-            if gone:
-                self._say(_(IN_THE_BIN).format(book=book, language=language))
+                failed.append(entry)
+                continue
             if self.on_changed:
                 self.on_changed(book)
         self._fill()
+        if len(entries) == 1:
+            book, language = str(entries[0].get("book", "")), str(entries[0].get("language", "") or "English")
+            if failed:
+                self._warn(_(NOT_DELETED).format(book=book, language=language))
+            elif gone:
+                self._say(_(IN_THE_BIN).format(book=book, language=language))
+        elif failed:
+            self._warn(_(NOT_ALL_DELETED).format(n=len(failed), names=names_line(failed)))
+        elif gone:
+            self._say(_(IN_THE_BIN_MANY).format(n=gone))
 
+    def _rename(self) -> None:
+        """Rename...: the one book chosen gets the name the reader gives (`RenameBookDialog`), by the window's rename
+        - never while a run reads it, nor while the window waits for an answer to a question of its own."""
+        entry = self._selected()
+        if entry is None or self.rename_flow is None:
+            return
+        book = str(entry["book"])
+        if self.in_use(book):
+            self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
+            return
+        if getattr(self.master, "_start_dialog", None) is not None:
+            self._say(_("Answer the question in the TASlation window first."), error=True)
+            return
+        self._ask_name(book, lambda new: self._renaming(entry, new))
+
+    def _ask_name(self, book: str, then: Callable[[str], None]) -> None:
+        """The new name of *book*, asked for (`RenameBookDialog`); *then* takes it."""
+        RenameBookDialog(self, book, then)
+
+    def _renaming(self, entry: dict[str, Any], new: str) -> None:
+        old = str(entry["book"])
+        assert self.rename_flow is not None
+        try:
+            self.rename_flow(old, new, str(entry.get("model", "")), str(entry.get("language", "") or "English"), None)
+        except Exception:  # noqa: BLE001 - the window says nothing then: the dialog does
+            self._say(_("{book} keeps its name; the window's status line says why.").format(book=old), error=True)
+            return
+        self._watch_rename(old, new)
+
+    def _watch_rename(self, old: str, new: str) -> None:
+        """Once the window is done with the rename (no longer busy, its review answered), the list as the files are
+        and a line that says whether the book now has its new name."""
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        master = self.master
+        if getattr(master, "busy", False) or getattr(master, "_start_dialog", None) is not None:
+            self.after(RENAME_POLL_MS, lambda: self._watch_rename(old, new))
+            return
+        names = {b["book"] for b in self.store.list()}
+        if new in names and old not in names:
+            self._fill(book=new)
+            self._say(_("Renamed {book} to {name}.").format(book=old, name=new))
+        else:
+            self._fill(book=old)
+            self._say(_("{book} keeps its name; the window's status line says why.").format(book=old))
+
+    # ------------------------------------------------------------------ export, import
     def _before(self, title: str, text: str) -> bool:
         """The warning before an export or an import (`WarningBox`): whether the reader chose Continue."""
         box = WarningBox(self, title, text)
@@ -502,6 +736,12 @@ class CachesDialog(tk.Toplevel):
         dialog = PassphraseDialog(self, confirm)
         self.wait_window(dialog)
         return dialog.passphrase
+
+    def _review(self, opened: Any, plan: Any, file: str) -> ImportChoice | None:
+        """What to import of *opened*, asked (`ImportReviewDialog`); None when the reader cancels."""
+        dialog = ImportReviewDialog(self, opened, plan, file)
+        self.wait_window(dialog)
+        return dialog.choice
 
     def _busy(self, work: Callable[[], Any]) -> Any:
         """*work* under the busy cursor (deriving the key from the passphrase takes a moment)."""
@@ -525,10 +765,11 @@ class CachesDialog(tk.Toplevel):
         self._warn(_("Export and import are not installed. Double-click install.cmd in the TASlation folder."))
 
     def _export(self) -> None:
-        """The selected cache to a file encrypted with a passphrase, once the reader has read what the file is and
-        chosen Continue; the file name is the reader's (the suggested one names no book)."""
-        entry = self._selected()
-        if entry is None or not self._backup_ready:
+        """The caches chosen to one file encrypted with a passphrase, each with its page information and series sheet,
+        once the reader has read what the file is and chosen Continue; the file name is the reader's (the suggested
+        one names no book)."""
+        entries = self._chosen()
+        if not entries or not self._backup_ready:
             return
         if not self._before(_("Before exporting"), _("This file will contain the translated text of the book. Keep it for yourself: never give it to anyone, post it, or share it. Handing a translation to someone else infringes the author's rights even when the book is yours.")):
             return  # Cancel: no file is asked for, nothing changes
@@ -540,25 +781,51 @@ class CachesDialog(tk.Toplevel):
         passphrase = self._passphrase(confirm=True)
         if passphrase is None:
             return
+        books = [(str(e["book"]), str(e.get("language", "") or "English")) for e in entries]
         try:
-            pages = self._busy(lambda: backup.export_cache(self.store, entry["book"], path, passphrase, entry["language"]))
+            done = self._busy(lambda: backup.export_books(self.stores, books, path, passphrase))
         except backup.LibraryMissing:
             self._missing()
         except backup.TooLarge:
-            self._warn(_("This book's translations are larger than TASlation can export."))
+            self._warn(_("This book's translations are larger than TASlation can export.") if len(entries) == 1
+                       else _("These books are larger than TASlation can export in one file; export fewer at a time."))
         except backup.BackupError:  # (its own text is English: for the command line)
             self._warn(_("Could not export: choose another file name or folder."))
         except OSError as e:
             self._warn(_("Could not write the file: {error}").format(error=e))
         else:
-            self._fill(select=entry["file"])
-            self._say(_("Exported {pages} page(s) of {book} to {file}.").format(pages=pages, book=entry["book"],
-                                                                               file=Path(path).name))
-            self.on_status(_("Exported {book} to {path}").format(book=entry["book"], path=path))
+            self._fill(select=[e["file"] for e in entries])
+            if len(entries) == 1:
+                line = _("Exported {pages} page(s) of {book} to {file}.").format(pages=done.pages, book=entries[0]["book"],
+                                                                                 file=Path(path).name)
+                status = _("Exported {book} to {path}").format(book=entries[0]["book"], path=path)
+            else:
+                line = _("Exported {books} books, {pages} page(s), to {file}.").format(
+                    books=done.books, pages=done.pages, file=Path(path).name)
+                status = _("Exported {books} books, {pages} page(s), to {file}.").format(
+                    books=done.books, pages=done.pages, file=path)
+            more = []
+            if done.annotations or done.sheets:
+                more.append(_("With them: the page information of {marks} book(s) and {sheets} series sheet(s).").format(
+                    marks=done.annotations, sheets=done.sheets))
+            if done.left_out:
+                more.append(_("{n} file(s) that cannot be opened on this computer were left out.").format(n=done.left_out))
+            self._say(" ".join([line, *more]))
+            self.on_status(status)
+
+    def _import_failed(self, error: BaseException) -> None:
+        clash = _backup_error("NameClash")
+        if isinstance(error, backup.BackupError) or (clash is not None and isinstance(error, clash)):
+            self._warn(import_error_text(error))  # what went wrong, in the window's language
+        else:
+            self._warn(_("Could not import: {error}").format(error=error))
 
     def _import(self) -> None:
         """A file made by an export, once the reader has read that it must be one of their own and chosen Continue:
-        its pages replace the same pages of the book's cache here and join the others."""
+        what it holds is read and checked, and what an import would do counted (nothing written); the review asks
+        what to import when the file holds several books or meets corrections, page information or sheet values of
+        the reader's own (Cancel there: nothing is imported); then its pages replace the same pages of each book's
+        cache here and join the others, the reader's corrections kept unless they took the file as it is."""
         if not self._backup_ready:
             return
         if not self._before(_("Before importing"), _("Import only a file you made yourself on this or another of your computers. Importing someone else's translation is receiving a copy made without permission, and TASlation is built not to pass translations between people.")):
@@ -570,23 +837,84 @@ class CachesDialog(tk.Toplevel):
         passphrase = self._passphrase(confirm=False)
         if passphrase is None:
             return
-        clash = _backup_error("NameClash")
         try:
-            book, pages = self._busy(lambda: backup.import_cache(self.store, path, passphrase))
+            opened, plan = self._busy(lambda: self._opened(path, passphrase))
         except backup.LibraryMissing:
             self._missing()
             return
         except (backup.BackupError, OSError) as e:
-            if isinstance(e, backup.BackupError) or (clash is not None and isinstance(e, clash)):
-                self._warn(import_error_text(e))  # what went wrong, in the window's language
-            else:
-                self._warn(_("Could not import: {error}").format(error=e))
+            self._import_failed(e)
             return
-        self._fill(book=book)
+        choice = ImportChoice(list(range(len(opened.held))))
+        if len(opened.held) > 1 or plan.kept or plan.differing or plan.keyed():
+            choice = self._review(opened, plan, Path(path).name)
+            if choice is None or not choice.books:
+                return  # Cancel: nothing is imported
+        books = list(dict.fromkeys(opened.held[i].book for i in opened.chosen(choice.books)))
+        for book in books:
+            if self.in_use(book):
+                self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
+                return
+        try:
+            result = self._busy(lambda: backup.apply_import(
+                self.stores, opened, choice.books, keep_corrections=choice.keep_corrections,
+                take_annotations=choice.take_annotations, answers=choice.answers))
+        except backup.LibraryMissing:
+            self._missing()
+            return
+        except (backup.BackupError, OSError) as e:
+            self._import_failed(e)
+            return
+        self._fill(select=[str(b.target) for b in result.books], book=books[0] if books else None)
         if self.on_changed:
-            self.on_changed(book)
-        self._say(_("Imported {pages} page(s) of {book} from {file}.").format(pages=pages, book=book, file=Path(path).name))
-        self.on_status(_("Imported {pages} page(s) into {book}").format(pages=pages, book=book))
+            for book in books:
+                self.on_changed(book)
+        if result.annotations_added or result.annotations_taken or result.sheets_added or result.sheets_joined:
+            self._premises_changed()
+        if len(result.books) == 1:
+            book = result.books[0].held.book
+            line = _("Imported {pages} page(s) of {book} from {file}.").format(pages=result.pages, book=book,
+                                                                             file=Path(path).name)
+            status = _("Imported {pages} page(s) into {book}").format(pages=result.pages, book=book)
+        else:
+            line = _("Imported {books} books, {pages} page(s), from {file}.").format(
+                books=len(result.books), pages=result.pages, file=Path(path).name)
+            status = _("Imported {books} books, {pages} page(s), from {file}.").format(
+                books=len(result.books), pages=result.pages, file=path)
+        self._say(" ".join([line, *self._import_details(result)]))
+        self.on_status(status)
+
+    def _opened(self, path: str, passphrase: str) -> tuple[Any, Any]:
+        """The file at *path* opened and checked, and what importing all of it would do (nothing written)."""
+        opened = backup.open_export(path, passphrase)
+        return opened, backup.plan_import(self.stores, opened)
+
+    @staticmethod
+    def _import_details(result: Any) -> list[str]:
+        """What an import did beyond its pages, a sentence each, where there is something to say."""
+        said = []
+        if result.replaced or result.kept:
+            said.append(_("{added} page(s) added, {replaced} replaced, {kept} of your corrections kept.").format(
+                added=result.added, replaced=result.replaced, kept=result.kept))
+        if result.annotations_added or result.annotations_taken or result.annotations_kept:
+            said.append(_("Page information: {added} added, {taken} taken from the file, {kept} kept as yours.").format(
+                added=result.annotations_added, taken=result.annotations_taken, kept=result.annotations_kept))
+        if result.sheets_added or result.sheets_joined:
+            said.append(_("Series sheets: {added} added, {joined} joined with yours ({taken} value(s) taken from the file, {kept} kept as yours).").format(
+                added=result.sheets_added, joined=result.sheets_joined, taken=result.sheet_taken, kept=result.sheet_kept))
+        return said
+
+    def _premises_changed(self) -> None:
+        """Page information or a series sheet was written: the window's book takes them anew (its sheet may be one an
+        import joined, of another volume of its series), where the dialog is the window's."""
+        refresh = getattr(self.master, "_premises_changed", None)
+        book_var, lang_var = getattr(self.master, "book_var", None), getattr(self.master, "lang_var", None)
+        if refresh is None or book_var is None:
+            return
+        try:
+            refresh(book_var.get().strip(), (lang_var.get().strip() if lang_var is not None else "") or "English")
+        except Exception:  # noqa: BLE001 - the next page takes the book's stores anew
+            pass
 
     def _open_folder(self) -> None:
         self.store.cache_dir.mkdir(parents=True, exist_ok=True)
