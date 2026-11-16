@@ -51,7 +51,11 @@ wrong, and `summary` is a finished page's line (``pipeline.from_cache`` /
 ``pipeline.translated``). ``process(cancel=...)`` and ``scan(cancel=...)`` stop
 between regions while reading, before and during the request to the model and
 before rendering, and raise `Cancelled`; a page cancelled before its
-translation came back leaves nothing in the cache.
+translation came back leaves nothing in the cache. ``process`` also stops
+between the detectors, before the other readers read a region, while the rooms
+of the translations are measured and between the regions of the render; never
+between a translation that came back and its storing (a page unit is stored
+whole, or not at all).
 """
 
 from __future__ import annotations
@@ -1171,8 +1175,10 @@ class Pipeline:
         and the finished page last; a page from the cache gets only the finished page.
 
         *progress* gets the stages as Messages (see the module's docstring). Once *cancel* is set, `Cancelled` is
-        raised: between regions while reading, before and during the request to the model, before rendering; a
-        page cancelled before its translation came back leaves nothing in the cache. *on_slow*(seconds) is called
+        raised: between the detectors, between regions while reading (and before the other readers read one), while
+        the rooms are measured, before and during the request to the model, before and while rendering; a page
+        cancelled before its translation came back leaves nothing in the cache, and one whose translation came back
+        is stored whole before it stops. *on_slow*(seconds) is called
         (once per request) when the model has said nothing for a while, with a translator that can tell (it takes
         an ``on_slow`` argument). A short line translated before in the book or its series is given that translation
         (`linememo`, with the cache and ``reuse_lines``); *reuse* False ("Translate again") asks the model for every
@@ -1214,12 +1220,14 @@ class Pipeline:
                 return result
         check_cancel(cancel)
         report(Message("pipeline.stage_finding"))
-        _ON_SHOW.units, _ON_SHOW.rgb = units, rgb  # (`_detect`: a page on show, its units known)
+        # (`_detect`: a page on show, its units known, and what cancels it: looked at between the detectors)
+        _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel
         try:
             regions = self._annotate(rgb, self._detect(rgb), units)
         finally:
-            _ON_SHOW.units = _ON_SHOW.rgb = None
+            _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
         timer.lap("detect")
+        check_cancel(cancel)
 
         # every unit's regions in reading order and its cache entry first, so that the regions to read are known
         # (and can be shown) before the first of them is read
@@ -1247,6 +1255,7 @@ class Pipeline:
             else:
                 result.cache_misses += 1
             plans.append((unit, unit_regions, page))
+        check_cancel(cancel)
         if fill is not None:
             fill.announce([r for _unit, unit_regions, page in plans for r in unit_regions
                            if page is None or (completes(page) and r.status == "unmatched")])
@@ -1280,9 +1289,9 @@ class Pipeline:
         check_cancel(cancel)
         report(Message("pipeline.stage_rendering"))
         if fill is not None and not fill.regions and self._erases_on_art(out, all_regions):
-            self._early_look(rgb, all_regions, fill)  # a page from the cache: lettered at once, the art filled in after
+            self._early_look(rgb, all_regions, fill, cancel)  # a page from the cache: lettered at once, the art after
             timer.lap("early look")
-        self._render(out, all_regions)
+        self._render(out, all_regions, cancel=cancel)
         timer.lap("render")
 
         result.image = Image.fromarray(out)
@@ -1341,13 +1350,14 @@ class Pipeline:
         return any(i not in held and not self.erased_regions.has(k) and artwork.on_art(page, r)
                    for i, (k, r) in enumerate(zip(keys, todo)))
 
-    def _early_look(self, rgb: np.ndarray, regions: Sequence[TextRegion], fill: "PageFill") -> None:
+    def _early_look(self, rgb: np.ndarray, regions: Sequence[TextRegion], fill: "PageFill",
+                    cancel: threading.Event | None = None) -> None:
         """The page lettered with the paper fill where the inpainting model will fill in the art, sent as an early
         ``page`` (`PageFill`): a page from the cache shows at once, the finished page follows. Made on copies of
-        *regions*: nothing of them changes. A failure costs only the early look."""
+        *regions*: nothing of them changes. A failure costs only the early look; *cancel* set stops it (`Cancelled`)."""
         try:
             quick = rgb.copy()
-            self._render(quick, copy.deepcopy(list(regions)), quick=True)
+            self._render(quick, copy.deepcopy(list(regions)), quick=True, cancel=cancel)
             h, w = rgb.shape[:2]
             fill.emit("regions", {"boxes": [], "size": (w, h)})
             fill.emit("page", {"image": Image.fromarray(quick), "early": True})
@@ -1633,15 +1643,21 @@ class Pipeline:
         the classical detectors'. Those alone when the model cannot be used, or the erase it needs cannot. *units*:
         the page units of *rgb* (`fingerprint.analyze`, found again when not given). With *parallel* (a page on show:
         `process` says so for its capture on this thread, with its units) the classical detectors run beside the
-        layout model, in a worker thread of their own."""
+        layout model, in a worker thread of their own. A page on show stops between the detectors once its cancel
+        event is set (`Cancelled`): nothing is kept of a detection."""
+        cancel = None
         if getattr(_ON_SHOW, "rgb", None) is rgb:
             parallel = True
             units = units if units is not None else _ON_SHOW.units
+            cancel = getattr(_ON_SHOW, "cancel", None)
         s = self.settings
         layout, eraser = self.layout, self.art_eraser  # (the window may build others meanwhile)
+        # (a stand-in of one argument, as tests use, is called with that one)
+        classical_of = (functools.partial(self._detect_classical, cancel=cancel)
+                        if cancel is not None and accepts(self._detect_classical, "cancel") else self._detect_classical)
         if layout is None or (s.detect_model == "auto" and not (eraser is not None and eraser.ready())):
-            return self._detect_classical(rgb)
-        beside = _detect_pool().submit(self._detect_classical, rgb) if parallel else None
+            return classical_of(rgb)
+        beside = _detect_pool().submit(classical_of, rgb) if parallel else None
         try:
             # (no `gpu_gate` here: the layout model's 0.3 s a page on the GPU leaves a viewer's drawing alone, measured
             # in Chrome while the pages are turned, and waiting for it held every page's reading back until the reader
@@ -1649,8 +1665,9 @@ class Pipeline:
             found = layout.boxes(rgb, [u.box for u in (units if units is not None else fp.analyze(rgb, s.margins))])
         finally:
             classical = beside.result() if beside is not None else None  # (waited for whatever happened)
+        check_cancel(cancel)
         if classical is None:
-            classical = self._detect_classical(rgb)
+            classical = classical_of(rgb)
         if found is None:
             return classical
         model = model_regions(rgb, found)
@@ -1662,20 +1679,25 @@ class Pipeline:
                 r.after = self.shaper.rebuilt(rgb, r, ())
         return [*model, *classical]
 
-    def _detect_classical(self, rgb: np.ndarray) -> list[TextRegion]:
+    def _detect_classical(self, rgb: np.ndarray, cancel: threading.Event | None = None) -> list[TextRegion]:
+        """The classical detectors' regions of *rgb* (in the capture area); `Cancelled` between two of them once
+        *cancel* is set."""
         x0, y0, x1, y1 = self._capture(rgb)
         sub = rgb[y0:y1, x0:x1]
         gray = cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY)
         dark = self.detector.cfg.dark_threshold
         regions = drop_nested(focus_oversized(self.detector.detect(sub)), gray, dark)
         if self.settings.detect_dark_bubbles:
+            check_cancel(cancel)
             regions = merge_regions(regions, drop_nested(focus_oversized(self.detector.detect(sub, inverted=True)),
                                                          255 - gray, dark))
         if self.text_detector is not None:
             # text blocks are looked for outside the lettering of the bubbles (regions closed by an outline)
+            check_cancel(cancel)
             bubbles = [r for r in regions if r.kind in ("bubble", "dark-bubble")]
             regions = merge_regions(regions, self.text_detector.detect(sub, taken=bubbles))
             if self.settings.detect_dark_bubbles:
+                check_cancel(cancel)
                 regions = merge_regions(regions, self.text_detector.detect(sub, inverted=True, taken=bubbles))
         if x0 or y0:
             for r in regions:
@@ -2434,10 +2456,12 @@ class Pipeline:
             if (status == "ocr-noise" and self._short_line(r, reading.text, reading.score, pieces, unanimous=True)
                     and not self._on_lettering(r, among)):
                 # a short line charspot alone does not carry (one character, or less sure): the others are asked
+                check_cancel(cancel)
                 unanimous = self._unanimous(rgb, r, box, reading, view)
                 if unanimous:
                     status = self._verdict(r, reading, pieces, usual, unanimous=True)
             if status == "untranslated" or r.kind.startswith("manual"):  # the gate is charspot's: the others read the rest
+                check_cancel(cancel)  # (the other readers take most of a region's time)
                 reading = self._settle(rgb, r, box, reading, view)
                 status = self._verdict(r, reading, pieces, usual, unanimous)
             r.source_text = reading.text
@@ -2750,6 +2774,7 @@ class Pipeline:
         check_cancel(cancel)
         texts = [r.source_text for r in todo]
         for r in todo:
+            check_cancel(cancel)
             r.room = translation_room(r.mask, r.letter_box or r.text_box, r.source_text, self.settings, r.kind, r.x0,
                                       r.y0, self.suggested_font, direction_of(r))
         meta = facts_of(todo, [(r.unit, unit_box) for r in todo])  # with the page, a sentence going on
@@ -2800,7 +2825,7 @@ class Pipeline:
                     "direction": direction_of(r)}
                    for r, out in zip(todo, outputs)]
         outputs = self.tighten(entries)
-        flags = self.review(entries, outputs)
+        flags = self.review(entries, outputs, cancel=cancel)  # (stopped there, nothing of the page is kept)
         pairs: list[tuple[str, str]] = []
         for r, out, fl in zip(todo, outputs, flags):
             if out and self.real_translation(r.source_text, out):
@@ -2813,19 +2838,22 @@ class Pipeline:
         plan.learn_regions(todo)  # (kept for the lines to come; saved with the page)
         if pairs and self._context.maxlen:
             self._context.append(pairs)
-        if fill is not None:
+        if fill is not None:  # (also when cancelled by now: a draft's erase may cut a region's mask back, as stored)
             fill.settle(todo)
         if failure and any(r.status != "translated" for r in todo):
             return failure  # the request failed and asking again did not make up for it all
         return ""
 
-    def review(self, entries: list[dict[str, Any]], texts: Sequence[str]) -> list[list[str]]:
+    def review(self, entries: list[dict[str, Any]], texts: Sequence[str], *,
+               cancel: threading.Event | None = None) -> list[list[str]]:
         """The flags each translation gets for the reader (`taslation.review.REASONS`): set under the readable
-        size, missing a rendering from the sheet, far longer or shorter than the Japanese, the OCR unsure."""
+        size, missing a rendering from the sheet, far longer or shorter than the Japanese, the OCR unsure. Once
+        *cancel* is set, `Cancelled` before the next one is measured (nothing is kept of a review)."""
         s = self.settings
         sheet = self.check_sheet() if s.enforce_terms else None
         out: list[list[str]] = []
         for e, t in zip(entries, texts):
+            check_cancel(cancel)
             t = str(t or "")
             if not t:
                 out.append([])
@@ -3131,30 +3159,35 @@ class Pipeline:
         usual = float(np.median(self._book_sizes)) if self._book_sizes else 0.0
         return LARGE_LETTERING * max(usual, s.readable_font_size, s.min_font_size)
 
-    def cap_sizes(self, regions: Sequence[TextRegion], texts: Sequence[str]) -> None:
+    def cap_sizes(self, regions: Sequence[TextRegion], texts: Sequence[str],
+                  cancel: threading.Event | None = None) -> None:
         """Keep the sizes of a page alike: each of *regions* gets the largest size it may be set at (`page_caps`) from
         what all of them, with *texts*, fit at in automatic lettering, so that the reader's formatting of one changes
         that one alone (a size the reader set is never capped). Kept on the region, so that one lettered on its own
         later comes out as on its page. Display lettering on the art that takes a room of its own (`_art_room`) counts
-        as a shout: as large as it fits, and out of the sizes the page's speech is held to."""
+        as a shout: as large as it fits, and out of the sizes the page's speech is held to. *cancel* set: `Cancelled`
+        between two regions measured, before any cap is set."""
         for r in regions:
             r.size_cap = 0
         large = self._display_size()
-        sized = [(DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
-                  self._set_text(None, r, t, (255, 255, 255), None, scaled=False).size, r.glyph)
-                 for r, t in zip(regions, texts)]
+        sized = []
+        for r, t in zip(regions, texts):
+            check_cancel(cancel)
+            sized.append((DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
+                          self._set_text(None, r, t, (255, 255, 255), None, scaled=False).size, r.glyph))
         for r, cap in zip(regions, page_caps(sized, self.settings.readable_font_size)):
             r.size_cap = cap
 
     def _render(self, out: np.ndarray, regions: list[TextRegion], record: bool = True, recap: bool = True,
-                quick: bool = False) -> None:
+                quick: bool = False, cancel: threading.Event | None = None) -> None:
         """Erase every translated region of *regions* on the page *out* and letter its translation, in place (a region
         made "erase only", `ERASED`, is erased and nothing set); with
         *record*, each region keeps the size it was set at and what its lettering could not do as formatted, and with
         *recap* too the sizes of the page are kept alike anew (`cap_sizes`). A region's erase comes from the erased
         pages of a run (`erased_ahead`) or this session's erases (`erased_regions`) when one of them holds it (its
         `erase_key`), else it is done here and kept in `erased_regions`; *quick*: the paper fill in place of the
-        inpainting model (`_erase`; an early look, not kept)."""
+        inpainting model (`_erase`; an early look, not kept). Once *cancel* is set, `Cancelled` before the next
+        region's erase or lettering: *out* is then half done (the caller drops it), and each erase kept is whole."""
         s = self.settings
         backgrounds: dict[int, tuple[int, int, int]] = {}
         todo = [i for i, r in enumerate(regions) if erases(r)]
@@ -3163,6 +3196,7 @@ class Pipeline:
         place = {i: n for n, i in enumerate(todo)}
         for i, r in enumerate(regions):
             if i in place:
+                check_cancel(cancel)
                 n = place[i]
                 hit = ahead.get(n) if ahead else None
                 if hit is not None:  # erased ahead: the same erase, done already
@@ -3188,9 +3222,11 @@ class Pipeline:
         if not backgrounds:
             return
         if record and recap:
-            self.cap_sizes([regions[i] for i in backgrounds], [regions[i].translated_text for i in backgrounds])
+            self.cap_sizes([regions[i] for i in backgrounds], [regions[i].translated_text for i in backgrounds],
+                           cancel)
         pil = Image.fromarray(out)
         for i, bg in backgrounds.items():
+            check_cancel(cancel)
             r = regions[i]
             done = self._set_text(pil, r, r.translated_text, bg, r.style)
             if record:
