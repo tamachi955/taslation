@@ -105,6 +105,15 @@ rows' languages.
   followed by cards of facts. Both recordings hold CC BY-NC 4.0 material.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory (`--ahead`: erased ahead first, as a whole-book run leaves them).
+* `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
+  (`tools/standin_viewer/`: a local page the browser shows in an app window of its own, with a scratch profile; it
+  fetches nothing and turns its pages by its own script: soft first, spreads, black frames, a spinner, a band whose
+  cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
+  any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
+  answerer in its place), and the tool writes numbers (turn to page lettered, requests on unsettled frames, stale
+  pages, the confirmation it learnt, where the OCR ran) and pictures of TASlation's own window to the `--out` folder;
+  no key or click is sent, the state folder is a scratch one, and the profile, the state and the model it loaded are
+  gone at the end. Scenarios a-f by `--scenario`; OpenMantra pages from the datasets folder, or `--synthetic`.
 
 ## The README and the manual
 

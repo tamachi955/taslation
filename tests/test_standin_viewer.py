@@ -1,0 +1,177 @@
+"""The browser-type stand-in viewer (tools/standin_viewer) and its driver's plan (tools/standin_e2e.py), with no
+browser, no GPU and no Ollama: the script's format, the page with nothing to fetch from anywhere, its files written
+in the scratch folder alone, the window found only in the tree the tool started with its token, the guard on the
+window TASlation chose, and the band's code read back from a frame."""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+import standin_e2e  # noqa: E402
+import standin_viewer as sv  # noqa: E402
+
+
+# ---------------------------------------------------------------------------------------------------- the script
+def test_script_round_trips():
+    text = "g1,m1,w1200,n,w2500-3500,p,j12,f,f700,s1500,e"
+    steps = sv.parse_script(text)
+    assert sv.format_script(steps) == text
+    assert sv.parse_script(sv.format_script(steps)) == steps
+    assert steps[4] == sv.Step("w", 2500, 3500)
+    assert steps[5] == sv.Step("p") and steps[6] == sv.Step("j", 12)
+
+
+@pytest.mark.parametrize("bad", ["x1", "w", "g", "j", "w9-3", "n5-6", "w-3", "ww1"])
+def test_bad_steps_refused(bad):
+    with pytest.raises(ValueError):
+        sv.parse_script(bad)
+
+
+def test_the_page_knows_every_step_the_script_has():
+    html = sv.HTML.read_text(encoding="utf-8")
+    page_ops = re.search(r"\^\(\[([a-z]+)\]\)", html)
+    assert page_ops is not None and set(page_ops.group(1)) == set(sv.OPS)
+
+
+def test_the_plan_foresees_the_screens_and_holds_each_scenario():
+    names = standin_e2e.wanted("all")
+    assert names == ["c", "a", "b", "d", "e", "f", "f2"]
+    segments, steps = standin_e2e.build_plan(names, standin_e2e.pages_needed(names))
+    text = sv.format_script(steps)
+    for s in segments:
+        assert f"g{s.go},m{s.go}," in text
+    assert text.endswith(",e")
+    turns = {s.name: s.screens for s in segments}
+    assert turns["c"] == [(2, True), (4, True), (6, True)]
+    assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
+    assert turns["f2"] == [(53, False), (54, False)]  # single pages once the window is narrow
+    assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
+    with pytest.raises(SystemExit):
+        standin_e2e.wanted("a,z")
+
+
+# ---------------------------------------------------------------------------------------------------- the files
+def test_the_page_fetches_nothing_from_anywhere():
+    html = sv.HTML.read_text(encoding="utf-8")
+    assert "http://" not in html and "https://" not in html
+    assert not re.search(r"""(src|href)\s*=\s*["'](?!#)""", html), "no resource named in the markup"
+    assert "fetch(" not in html and "XMLHttpRequest" not in html and "WebSocket" not in html
+
+
+def test_page_list_and_control_only_in_the_scratch_folder(tmp_path):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    picture = tmp_path / "pictures" / "000.jpg"
+    picture.parent.mkdir()
+    picture.write_bytes(b"not read")
+    before = {p for p in tmp_path.rglob("*")}
+    listed = sv.write_page_list(scratch, [picture, (picture, "h")])
+    control = sv.write_control(scratch, 3, band=54)
+    made = {p for p in tmp_path.rglob("*")} - before
+    assert made == {listed, control} and listed.parent == scratch.resolve() and control.parent == scratch.resolve()
+    text = listed.read_text(encoding="utf-8")
+    assert text.startswith("standinPages(") and sv.file_url(picture) in text and '"flip": "h"' in text
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "band": 54});\n'
+    assert picture.read_bytes() == b"not read"  # (named, never copied)
+    with pytest.raises(ValueError):
+        sv._inside(scratch, "../elsewhere.js")
+    url = sv.page_url("t1234", sv.parse_script("g1,n,e"), scratch)
+    assert url.startswith(sv.file_url(sv.HTML) + "?") and url.endswith("#s=g1,n,e")
+    assert "http" not in url.split("#")[0].replace(sv.file_url(sv.HTML), "")
+
+
+def test_the_console_line_is_read_and_others_are_not():
+    line = '[1:2:1117/120000.1:INFO:CONSOLE:66] "STANDIN ev=draw t=1700000000123.4 step=3 page=4 spread=1 ' \
+           'state=soft why=next wait=2", source: file:///x/standin.html (66)'
+    said = sv.parse_line(line)
+    assert said == {"ev": "draw", "t": "1700000000123.4", "step": "3", "page": "4", "spread": "1", "state": "soft",
+                    "why": "next", "wait": "2"}
+    assert sv.parse_line("[1:2:INFO:CONSOLE:1] \"something else\"") is None
+    assert sv.parse_line('"STANDIN no event here"') is None
+
+
+def test_the_browser_command_keeps_its_own_profile_and_window():
+    cmd = sv.browser_command(Path("C:/b/chrome.exe"), "file:///p.html?token=t1", Path("C:/scratch/profile"),
+                             (0, 0, 1300, 900))
+    assert cmd[0].endswith("chrome.exe") and cmd[-1] == "--app=file:///p.html?token=t1"
+    assert any(a.startswith("--user-data-dir=") and a.endswith("profile") for a in cmd)
+    for flag in ("--no-first-run", "--disable-sync", "--disable-background-networking", "--window-size=1300,900"):
+        assert flag in cmd
+
+
+# ---------------------------------------------------------------------------------------------------- the window
+def test_the_window_is_found_in_the_tree_started_and_by_its_token():
+    windows = [(11, 500), (12, 600), (13, 601), (14, 700)]  # (window, process)
+    titles = {11: "Something t9f2c0 of the owner", 12: "Stand-in reader t9f2c0", 13: "Stand-in reader",
+              14: "Stand-in reader t9f2c0"}
+    asked: list[int] = []
+
+    def title(hwnd: int) -> str:
+        asked.append(hwnd)
+        return titles[hwnd]
+
+    tree = sv.process_tree(600, [(600, 1), (601, 600), (602, 601), (700, 2), (500, 3)])
+    assert tree == {600, 601, 602}
+    assert sv.find_window(tree, "t9f2c0", windows, title) == 12
+    assert set(asked) == {12, 13}, "no title of a window outside the tree is read"
+    asked.clear()
+    assert sv.find_window(tree, "t0000", windows, title) is None  # the token missing
+    assert sv.find_window({700}, "t9f2c0", [(14, 700), (15, 700)], lambda h: "Stand-in reader t9f2c0") is None
+    assert sv.find_window(tree, "t9f2", windows, title) is None  # a token is a word of its own
+    assert sv.find_window(tree, "", windows, title) is None
+    asked.clear()
+    assert sv.find_window({999}, "t9f2c0", windows, title) is None and not asked
+
+
+def test_the_guard_stops_on_any_other_window_and_stays_stopped():
+    guard = sv.SelectionGuard(12)
+    assert guard.check(None) == ""
+    assert guard.check(SimpleNamespace(hwnd=12)) == ""
+    why = guard.check(SimpleNamespace(hwnd=14))
+    assert why and "not the stand-in" in why
+    assert "Stand-in reader" not in why  # (no title is said)
+    assert guard.check(SimpleNamespace(hwnd=12)) == why  # stopped for good
+    assert sv.SelectionGuard(12).check(SimpleNamespace()) != ""  # a choice that names no window
+
+
+# ---------------------------------------------------------------------------------------------------- the frames
+def frame(page: int, spread: bool, soft: bool = False, spinner: bool = False, top: int = 31,
+          size: tuple[int, int] = (900, 700)) -> Image.Image:
+    """A frame as the browser draws the page: its title bar, the band with the code's cells, a light page."""
+    image = Image.new("RGB", size, (43, 43, 43))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, size[0], top - 1), fill=(32, 33, 36))
+    draw.rectangle((0, top, size[0], top + 53), fill=(58, 61, 65))
+    draw.rectangle((150, top + 80, size[0] - 150, size[1] - 40), fill=(240, 240, 240))
+    for k, bit in enumerate(sv.cells_of(page, spread, soft, spinner)):
+        x, y = sv.CODE_X + k * sv.CELL, top + sv.CODE_Y
+        draw.rectangle((x, y, x + sv.CELL - 1, y + sv.CELL - 1), fill=(255, 255, 255) if bit else (0, 0, 0))
+    return image
+
+
+@pytest.mark.parametrize("page,spread,soft,spinner", [(0, True, False, False), (46, True, True, False),
+                                                     (53, False, False, True), (511, False, True, True)])
+def test_the_band_code_reads_back(page, spread, soft, spinner):
+    shown = sv.decode(frame(page, spread, soft, spinner), 31)
+    assert shown.known and (shown.page, shown.spread, shown.soft, shown.spinner) == (page, spread, soft, spinner)
+    assert shown.state() == ("spinner" if spinner else "soft" if soft else "sharp")
+
+
+def test_a_black_frame_and_a_frame_without_code():
+    assert sv.decode(Image.new("RGB", (900, 700), (0, 0, 0)), 31).state() == "black"
+    plain = Image.new("RGB", (900, 700), (200, 200, 200))
+    assert sv.decode(plain, 31).state() == "unknown" and sv.decode(plain, 31).screen is None
+    broken = frame(8, True)
+    ImageDraw.Draw(broken).rectangle((sv.CODE_X + 6 * sv.CELL, 31 + sv.CODE_Y, sv.CODE_X + 7 * sv.CELL - 1,
+                                      31 + sv.CODE_Y + sv.CELL - 1), fill=(255, 255, 255))
+    assert sv.decode(broken, 31).known is False  # one cell wrong: the check says so
+    assert sv.decode(None, 31).state() == "unknown"

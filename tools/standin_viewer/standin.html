@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stand-in reader</title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2b2b; }
+canvas { position: fixed; left: 0; top: 0; display: block; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<script>
+"use strict";
+/* DEVELOPER TOOL, NOT PART OF THE APPLICATION: the browser-type stand-in viewer (tools/standin_viewer).
+
+A page of its own, run in a throwaway browser window, that draws sample pages the way a browser-based e-book reader
+does: a band at the top that is not the page, a dark ground round the page or the spread (right to left: the first
+page of a spread on the right), a small page counter; every turn drawn SOFT first (the page drawn into a canvas six
+times smaller and enlarged again, as the browser itself scales a canvas) and sharp a while later; BLACK for a while
+when the window gets the focus, a key pressed meanwhile lost; now and then a spinner over the page.
+
+Nothing is fetched from anywhere: no network, no external resource. The query names two files in a scratch folder,
+both loaded as scripts: the page list (`pages`, `standinPages({...})`: file URLs of the pictures, read where they
+are) and the control file (`control`, `standinControl({...})`, looked at every CONTROL_MS: what the driver releases).
+Without a page list it draws placeholder pages of its own.
+
+The hash holds the script (`#s=...`), steps separated by commas, run by the page itself:
+  gN wait until the control file's "go" is N or more   wN wait N ms     wA-B wait A..B ms (seeded)
+  n next screen    p previous screen    jN jump to page N (from 0)
+  f flash black (flash_ms)    fN flash black N ms    sN spinner over the page N ms
+  mN a mark (said in the log)    e the end
+Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
+left).
+
+What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch), which the driver reads
+from the browser's log; the title stays as it is, as a reader's tab title does. A strip of cells in the band carries
+the screen on show (its first page, spread or single, soft or sharp, spinner or not) for the driver to tell the
+frames TASlation captured apart; nothing else reads it. */
+
+const CONTROL_MS = 100;
+const CELL = 6, CODE_X = 12, CODE_Y = 12;  // the code's cells, CSS pixels from the content's top left
+const GROUND = "#2b2b2b", BAND = "#3a3d41", BAND_LINE = "#56595e", BAND_PART = "#4a4e53", COUNTER = "#9a9a9a";
+
+const query = new URLSearchParams(location.search);
+const hashed = new URLSearchParams(location.hash.slice(1));
+const num = (name, fallback) => { const v = Number(query.get(name)); return query.has(name) && isFinite(v) ? v : fallback; };
+const cfg = {
+  token: query.get("token") || "",
+  pages: query.get("pages") || "",
+  control: query.get("control") || "",
+  seed: num("seed", 1),
+  softMin: num("soft_min", 150), softMax: num("soft_max", 400),
+  factor: Math.max(2, num("factor", 6)),
+  flashMs: num("flash_ms", 800),
+  band: num("band", 54),
+  layout: query.get("layout") || "auto",  // "auto" (spreads while the window is wider than high), "spread", "single"
+  script: hashed.get("s") || "",
+};
+document.title = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
+
+// ------------------------------------------------------------------------------------------------ the log
+let step = -1;
+function now() { return performance.timeOrigin + performance.now(); }
+function say(ev, extra) {
+  console.log("STANDIN ev=" + ev + " t=" + now().toFixed(1) + " step=" + step + " page=" + index +
+              " spread=" + (spread ? 1 : 0) + (extra ? " " + extra : ""));
+}
+
+// ------------------------------------------------------------------------------------------------ seeded draws
+let seed = (cfg.seed >>> 0) || 1;
+function random() {  // mulberry32
+  seed = (seed + 0x6D2B79F5) >>> 0;
+  let t = seed;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+function between(a, b) { return Math.round(a + (b - a) * random()); }
+
+// ------------------------------------------------------------------------------------------------ the pages
+let entries = [];  // {url, flip} or {placeholder: n}
+const images = new Map();  // page -> Promise of a drawable
+
+function placeholder(n) {
+  const c = document.createElement("canvas");
+  c.width = 830; c.height = 1170;
+  const g = c.getContext("2d");
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, c.width, c.height);
+  let s = (n + 1) * 7919;
+  const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  g.fillStyle = "#222222";
+  for (let k = 0; k < 7; k++) g.fillRect(30 + r() * 600, 30 + r() * 950, 40 + r() * 160, 40 + r() * 160);
+  g.strokeStyle = "#000000"; g.lineWidth = 4;
+  for (let k = 0; k < 4; k++) { g.beginPath(); g.ellipse(120 + r() * 560, 140 + r() * 860, 70, 110, 0, 0, Math.PI * 2); g.stroke(); }
+  g.font = "bold 120px sans-serif"; g.fillStyle = "#cccccc"; g.fillText(String(n + 1), 340, 640);
+  return c;
+}
+
+function load(n) {
+  if (n < 0 || n >= entries.length) return null;
+  if (!images.has(n)) {
+    const e = entries[n];
+    images.set(n, e.url ? new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve({ img, flip: e.flip || "" });
+      img.onerror = () => resolve({ img: placeholder(n), flip: "" });
+      img.src = e.url;
+    }) : Promise.resolve({ img: placeholder(n), flip: "" }));
+  }
+  return images.get(n);
+}
+function keepNear(n) {  // the pictures near the one on show decoded ahead; the others let go
+  for (let k = n - 4; k <= n + 6; k++) load(k);
+  for (const k of [...images.keys()]) if (k < n - 8 || k > n + 10) images.delete(k);
+}
+
+// ------------------------------------------------------------------------------------------------ drawing
+const view = document.getElementById("view");
+const g = view.getContext("2d");
+let index = 0, spread = true, shown = "none", spinning = false, black = false;
+let base = null;  // the screen drawn sharp last (for the spinner's frames)
+let pendingSharp = null, drawToken = 0;
+const dpr = () => window.devicePixelRatio || 1;
+const wide = img => img.naturalWidth || img.width, high = img => img.naturalHeight || img.height;
+
+function sizeCanvas() {
+  const d = dpr(), w = Math.round(innerWidth * d), h = Math.round(innerHeight * d);
+  if (view.width !== w || view.height !== h) {
+    view.width = w; view.height = h;
+    view.style.width = innerWidth + "px"; view.style.height = innerHeight + "px";
+    return true;
+  }
+  return false;
+}
+function spreadNow() {
+  return cfg.layout === "spread" || (cfg.layout !== "single" && view.width > view.height * 1.05);
+}
+function first(n) { return spread ? Math.max(0, n - (n % 2)) : Math.max(0, n); }
+function screenPages() {
+  const out = [index];
+  if (spread && index + 1 < entries.length) out.push(index + 1);
+  return out;
+}
+
+function band() {
+  const d = dpr(), W = view.width, B = Math.round(cfg.band * d);
+  g.fillStyle = BAND; g.fillRect(0, 0, W, B);
+  g.fillStyle = BAND_LINE; g.fillRect(0, B - Math.max(1, Math.round(d)), W, Math.max(1, Math.round(d)));
+  g.fillStyle = BAND_PART;  // the reader's own controls: a few buttons on the right, a slider in the middle
+  for (let k = 0; k < 4; k++) g.fillRect(W - Math.round((44 + 40 * k) * d), Math.round(12 * d), Math.round(28 * d), Math.round(Math.min(28, cfg.band - 20) * d));
+  g.fillRect(Math.round(W * 0.3), Math.round((cfg.band / 2) * d), Math.round(W * 0.35), Math.max(1, Math.round(3 * d)));
+}
+
+function code(soft, spin) {  // the screen on show, as cells: 1010, 12 bits (page, spread, soft, spinner), 4 bits of check
+  const data = (index & 511) | ((spread ? 1 : 0) << 9) | ((soft ? 1 : 0) << 10) | ((spin ? 1 : 0) << 11);
+  const check = ((data & 15) + ((data >> 4) & 15) * 3 + ((data >> 8) & 15) * 5 + 7) & 15;
+  const bits = [1, 0, 1, 0];
+  for (let k = 0; k < 12; k++) bits.push((data >> k) & 1);
+  for (let k = 0; k < 4; k++) bits.push((check >> k) & 1);
+  const d = dpr(), c = Math.max(1, Math.round(CELL * d)), x0 = Math.round(CODE_X * d), y0 = Math.round(CODE_Y * d);
+  bits.forEach((b, k) => { g.fillStyle = b ? "#ffffff" : "#000000"; g.fillRect(x0 + k * c, y0, c, c); });
+}
+
+function rects(pics) {
+  const d = dpr(), W = view.width, H = view.height, B = Math.round(cfg.band * d), m = Math.round(14 * d);
+  const foot = Math.round(20 * d);
+  const tall = Math.max(...pics.map(p => high(p.img)));
+  const widths = pics.map(p => wide(p.img) * tall / high(p.img));
+  const total = widths.reduce((a, b) => a + b, 0);
+  const scale = Math.min((W - 2 * m) / total, (H - B - 2 * m - foot) / tall);
+  const h = Math.max(1, Math.round(tall * scale));
+  const ws = widths.map(w => Math.max(1, Math.round(w * scale)));
+  const all = ws.reduce((a, b) => a + b, 0);
+  let right = Math.round((W + all) / 2);
+  const top = B + m + Math.round((H - B - 2 * m - foot - h) / 2);
+  return ws.map(w => { const r = { x: right - w, y: top, w, h }; right -= w; return r; });  // the first on the right
+}
+
+function drawPicture(ctx, pic, r, soft) {
+  const { img, flip } = pic;
+  ctx.save();
+  ctx.translate(r.x + (flip.includes("h") ? r.w : 0), r.y + (flip.includes("v") ? r.h : 0));
+  ctx.scale(flip.includes("h") ? -1 : 1, flip.includes("v") ? -1 : 1);
+  ctx.imageSmoothingEnabled = true;
+  if (soft) {  // a picture of the page six times smaller (through a half-size step, then sampled), enlarged
+    const hw = Math.max(1, Math.round(wide(img) / 2)), hh = Math.max(1, Math.round(high(img) / 2));
+    const half = document.createElement("canvas"); half.width = hw; half.height = hh;
+    const hg = half.getContext("2d"); hg.imageSmoothingQuality = "high"; hg.drawImage(img, 0, 0, hw, hh);
+    const sw = Math.max(1, Math.round(wide(img) / cfg.factor)), sh = Math.max(1, Math.round(high(img) / cfg.factor));
+    const small = document.createElement("canvas"); small.width = sw; small.height = sh;
+    const sg = small.getContext("2d"); sg.imageSmoothingQuality = "low"; sg.drawImage(half, 0, 0, sw, sh);
+    ctx.imageSmoothingQuality = "low";
+    ctx.drawImage(small, 0, 0, sw, sh, 0, 0, r.w, r.h);
+  } else {
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, r.w, r.h);
+  }
+  ctx.restore();
+}
+
+function counter() {
+  const d = dpr(), W = view.width, H = view.height;
+  const pages = screenPages().map(p => p + 1);
+  g.fillStyle = COUNTER; g.font = Math.round(12 * d) + "px sans-serif"; g.textAlign = "right"; g.textBaseline = "bottom";
+  g.fillText(pages.join("-") + " / " + entries.length, W - Math.round(16 * d), H - Math.round(6 * d));
+}
+
+async function drawScreen(soft, why) {
+  const token = ++drawToken;
+  const began = now();
+  const pics = await Promise.all(screenPages().map(load));
+  if (token !== drawToken || black) return false;  // another drawing came meanwhile
+  sizeCanvas();
+  g.fillStyle = GROUND; g.fillRect(0, 0, view.width, view.height);
+  const rs = rects(pics);
+  pics.forEach((p, k) => drawPicture(g, p, rs[k], soft));
+  band(); counter(); code(soft, false);
+  shown = soft ? "soft" : "sharp";
+  if (!soft) {
+    base = document.createElement("canvas"); base.width = view.width; base.height = view.height;
+    base.getContext("2d").drawImage(view, 0, 0);
+  }
+  say("draw", "state=" + shown + " why=" + why + " wait=" + Math.round(now() - began));
+  return true;
+}
+
+function turnTo(n, why) {
+  if (black) { say("lost", "why=" + why); return; }  // a key in the black: gone
+  if (pendingSharp !== null) { clearTimeout(pendingSharp); pendingSharp = null; }
+  spinning = false;
+  index = first(Math.max(0, Math.min(entries.length - 1, n)));
+  keepNear(index);
+  drawScreen(true, why).then(done => {
+    if (!done) return;
+    const token = drawToken;
+    pendingSharp = setTimeout(() => {
+      pendingSharp = null;
+      if (token === drawToken) drawScreen(false, "sharp");
+    }, between(cfg.softMin, cfg.softMax));
+  });
+}
+function next() { turnTo(index + (spread ? 2 : 1), "next"); }
+function previous() { turnTo(index - (spread ? 2 : 1), "previous"); }
+
+let blackUntil = 0;
+function flash(ms) {  // the window drew black, as a browser does as it gets the foreground
+  if (pendingSharp !== null) { clearTimeout(pendingSharp); pendingSharp = null; }
+  drawToken++;
+  spinning = false;
+  const again = black;
+  blackUntil = Math.max(blackUntil, now() + ms);
+  black = true;
+  g.fillStyle = "#000000"; g.fillRect(0, 0, view.width, view.height);
+  shown = "black";
+  say("black", "on=1 ms=" + ms + (again ? " again=1" : ""));
+  if (again) return;  // (the black goes on: the one timer ends it)
+  const end = () => {
+    const left = blackUntil - now();
+    if (left > 1) { setTimeout(end, left); return; }
+    black = false;
+    say("black", "on=0");
+    drawScreen(false, "flash");
+  };
+  setTimeout(end, ms);
+}
+
+function spinner(ms) {  // a spinner over the page on show, for a while
+  if (black || base === null) return Promise.resolve();
+  spinning = true;
+  const token = ++drawToken;
+  const start = now();
+  say("spinner", "on=1 ms=" + ms);
+  return new Promise(resolve => {
+    function frame() {
+      if (!spinning || token !== drawToken) { resolve(); return; }
+      const t = now() - start;
+      if (t >= ms) {
+        spinning = false;
+        say("spinner", "on=0");
+        drawScreen(false, "spinner").then(() => resolve());
+        return;
+      }
+      const d = dpr();
+      g.drawImage(base, 0, 0);
+      const B = Math.round(cfg.band * d), x = view.width / 2, y = B + (view.height - B) / 2, r = 22 * d;
+      const a = (t / 1000) * Math.PI * 2;
+      g.lineCap = "round";
+      g.strokeStyle = "rgba(0,0,0,0.55)"; g.lineWidth = 9 * d;
+      g.beginPath(); g.arc(x, y, r, a, a + Math.PI * 1.5); g.stroke();
+      g.strokeStyle = "rgba(255,255,255,0.95)"; g.lineWidth = 5 * d;
+      g.beginPath(); g.arc(x, y, r, a, a + Math.PI * 1.5); g.stroke();
+      code(false, true);
+      shown = "spinner";
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// ------------------------------------------------------------------------------------------------ the control file
+const control = { go: 0 };
+let polls = 0;
+window.standinControl = function (c) {
+  if (!c || typeof c !== "object") return;
+  const bandBefore = cfg.band;
+  if (typeof c.go === "number" && c.go > control.go) { control.go = c.go; say("control", "go=" + c.go); }
+  if (typeof c.band === "number" && c.band >= 0 && c.band !== bandBefore) {
+    cfg.band = c.band;
+    say("control", "band=" + c.band);
+    if (!black && !spinning) drawScreen(shown === "soft", "band");
+  }
+};
+function poll() {
+  if (!cfg.control) return;
+  const s = document.createElement("script");
+  s.src = cfg.control + "?n=" + (polls++);
+  s.onload = s.onerror = () => s.remove();
+  document.head.appendChild(s);
+}
+
+// ------------------------------------------------------------------------------------------------ the script
+function parse(text) {
+  return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
+    const m = /^([gwnpjfsme])(\d+)?(?:-(\d+))?$/.exec(t);
+    if (!m) throw new Error("bad step " + t);
+    return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
+  });
+}
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function until(test) { while (!test()) await sleep(50); }
+async function run(steps) {
+  for (let k = 0; k < steps.length; k++) {
+    step = k;
+    const s = steps[k];
+    if (s.op === "g") { say("wait", "go=" + s.a); await until(() => control.go >= s.a); say("go", "go=" + s.a); }
+    else if (s.op === "w") await sleep(s.b === null ? s.a : between(s.a, s.b));
+    else if (s.op === "n") next();
+    else if (s.op === "p") previous();
+    else if (s.op === "j") turnTo(s.a || 0, "jump");
+    else if (s.op === "f") flash(s.a === null ? cfg.flashMs : s.a);
+    else if (s.op === "s") await spinner(s.a || 1000);
+    else if (s.op === "m") say("mark", "id=" + s.a);
+    else if (s.op === "e") break;
+  }
+  say("end");
+}
+
+// ------------------------------------------------------------------------------------------------ by hand
+addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft") { e.preventDefault(); black ? say("lost", "why=key") : next(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); black ? say("lost", "why=key") : previous(); }
+});
+addEventListener("focus", () => { say("focus"); flash(cfg.flashMs); });
+addEventListener("resize", () => {
+  if (!sizeCanvas()) return;
+  const was = spread;
+  spread = spreadNow();
+  if (was !== spread) index = first(index);
+  say("size", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr());
+  if (!black && !spinning) drawScreen(false, "resize");
+});
+
+// ------------------------------------------------------------------------------------------------ the start
+window.standinPages = function (list) {
+  if (list && Array.isArray(list.files)) entries = list.files.map(f => (typeof f === "string" ? { url: f } : f));
+};
+function begin() {
+  if (!entries.length) entries = Array.from({ length: 40 }, (_v, n) => ({ placeholder: n }));
+  sizeCanvas();
+  spread = spreadNow();
+  keepNear(0);
+  drawScreen(false, "start").then(() => {
+    say("ready", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +
+        " count=" + entries.length + " cell=" + CELL + " x=" + CODE_X + " y=" + CODE_Y);
+    setInterval(poll, CONTROL_MS);
+    poll();
+    let steps = [];
+    try { steps = parse(cfg.script); } catch (e) { say("bad_script"); }
+    run(steps);
+  });
+}
+if (cfg.pages) {
+  const s = document.createElement("script");
+  s.src = cfg.pages;
+  s.onload = begin;
+  s.onerror = begin;
+  document.head.appendChild(s);
+} else {
+  begin();
+}
+</script>
+</body>
+</html>
