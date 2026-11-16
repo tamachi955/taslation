@@ -113,8 +113,9 @@ class Readers:
     window's own object, read again at every decision), charspot and nar go to the GPU when ``ocr_runs_on`` and the
     room there say so - decided then, and again at the next read once the GPU memory was let go (`release_gpu`) or a
     setting the decision depends on changed (`place.watched`), never while the translation model loads or answers
-    (`place.busy`: the first read after it decides); `placement` says where they are and why. Without *settings* they
-    stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
+    (`place.busy`: the first read after it decides); a load of the translation model leaves them on the GPU where the
+    rule still finds room for them beside it (`keeps_through_load`). `placement` says where they are and why. Without
+    *settings* they stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
 
     # (as the class has them: readers made without `__init__`, a test's, read on the CPU and decide nothing)
     settings: Any = None
@@ -185,18 +186,50 @@ class Readers:
             LOG.info("the OCR readers run on the %s (%s)", decided.device.upper(), decided.why)
             return decided
 
-    def release_gpu(self) -> None:
+    def release_gpu(self, load: bool = False) -> None:
         """The readers' GPU memory given back now (before Ollama loads its model, Tools > Release the model now:
         `Pipeline.gpu_releases`); they read on the CPU, and decide again at the next read that comes while the model
         neither loads nor answers (`decide`) - also readers on the CPU, for the facts change with a load (a model of
-        the reader's own is known once it was seen loaded). Never raises."""
+        the reader's own is known once it was seen loaded). *load*: the release before Ollama loads the translation
+        model (`Pipeline.release_before_load`), which leaves them on the GPU where `keeps_through_load` says so: they
+        read there through the load, and the decision stands. Never raises."""
         with self._lock:
+            kept = self.keeps_through_load() if load else None
+            place.kept_through_load(kept is not None)
+            if kept is not None:
+                self.placement = kept
+                LOG.info("the OCR readers stay on the GPU through the translation model's load (%s MiB left at the "
+                         "peak)", kept.room)
+                return
             self._decided_for = None
             if self.placement.device != "gpu":
                 return
             for engine in self._movable():
                 engine.to("cpu")
             self.placement = place.Placement("cpu", place.RELEASED)
+
+    def keeps_through_load(self) -> place.Placement | None:
+        """Where charspot and nar, on the GPU now, stay through a load of the translation model (`release_gpu` with
+        *load*), None where they do not: only where the rule put them there (`place.ROOM`; the setting's "gpu" lets
+        them go, as before) for the settings in force, with no GPU failure this session and no load that came up partly
+        on the CPU beside them (`place.keeps_through_loads`), and where the rule asked again now still finds room for
+        them beside the whole model (`place.through_load` on `place.gather`: other programs may have grown since),
+        every fact of it measured. Never raises."""
+        settings = self.settings
+        if (settings is None or self._failed or self.placement.device != "gpu" or self.placement.why != place.ROOM
+                or place.watched(settings) != self._decided_for or not place.keeps_through_loads()
+                or any(engine.gpu_failed for engine in self._movable())):
+            return None
+        try:
+            again = place.through_load(place.gather(settings), self.gpu_mib())
+        except Exception as e:  # noqa: BLE001 - nothing to judge on: let go, as before
+            LOG.info("the room for the OCR readers through a load could not be measured (%s)", type(e).__name__)
+            return None
+        if again.device != "gpu":
+            LOG.info("the OCR readers go to the CPU for the translation model's load (%s, %s MiB left at the peak)",
+                     again.why, again.room)
+            return None
+        return again
 
     def holds_gpu(self) -> bool:
         """Whether charspot and nar read on the GPU now (what Release the model now gives back of them)."""

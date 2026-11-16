@@ -46,7 +46,7 @@ request, so reading the cache never loads it; it is not asked while the model an
 within `PS_RECHECK_S`, half its ``keep_alive`` when that is shorter, and a request that
 failed or a release makes the next request ask again); when it is not, the reader is told
 (`on_status`), the pipeline's GPU models let go (`before_load`, which is
-`Pipeline.release_gpu_models`) and `warm_up` loads it under its own timeout,
+`Pipeline.release_before_load`) and `warm_up` loads it under its own timeout,
 cancellable like a request. Every request carries ``keep_alive`` (the setting
 ``ollama_keep_alive``, in Ollama's own format: `keep_alive_value`): how long Ollama
 keeps the model after it, so the pages that go on needing it keep it, and it goes by
@@ -58,7 +58,10 @@ and never released (`never_unloads`).
 Every request to the model (`_chat`, PLaMo's `_generate`) runs within `taslation.ocr.place.translating`, a streamed
 one to its end: the OCR readers that are on the GPU read on the CPU meanwhile, for on a GPU the model computes on
 they wait (0.7 s a crop instead of 0.13). A load and a warm-up run within `place.loading`: where the readers read is
-decided after it (a crop on the GPU during a load reads as fast as on an idle GPU, so nothing moves for a load).
+decided after it (a crop on the GPU during a load reads as fast as on an idle GPU, so nothing moves for a load; the
+release before it keeps them on the GPU where the rule still finds room for them beside the whole model, and a model
+that comes up partly on the CPU all the same is told to `place.partly_loaded`, which lets them go before its second
+load).
 
 A load is checked afterwards: a model that came up partly on the CPU (`gpu_share`) is
 unloaded and loaded once more after the GPU models are let go; if that does not help
@@ -286,7 +289,7 @@ class OllamaTranslator:
         # brings Ollama back when a request finds it gone (`taslation.ollama_start.OllamaStarter.revive`): given the
         # request's cancel event, True when it answers again; None: a request that finds it gone fails, as doctor's do
         self.revive: Callable[[threading.Event | None], bool] | None = None
-        # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_gpu_models`)
+        # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_before_load`)
         self.before_load: Callable[[], Any] | None = None
         # told about a load as a Message: ``ollama.loading``, ``ollama.loaded``, ``ollama.partly_on_gpu``
         self.on_status: Callable[[Message], Any] | None = None
@@ -726,6 +729,7 @@ class OllamaTranslator:
             share = self.gpu_share(model)
             checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
             if checked and partly_on_gpu(share):
+                ocr_place.partly_loaded(share)  # (OCR readers kept on the GPU through the load go in the release below)
                 self.release(model, wait=True)
                 self._free_gpu()
                 seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)

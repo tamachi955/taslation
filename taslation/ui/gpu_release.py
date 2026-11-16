@@ -11,7 +11,9 @@ What goes:
 * the page models (`Pipeline.release_gpu_models`, the path a load of the translation model takes: the layout model and
   LaMa let go of their memory, each loaded again when a page needs it);
 * the OCR readers' copies on the GPU, where the rule put two of them there (``ocr_runs_on``: `Readers.release_gpu`,
-  one of the pipeline's ``gpu_releases``): they read on the processor, and the next page decides again where.
+  one of the pipeline's ``gpu_releases``): they read on the processor, and the next page decides again where. (The
+  release before a load of the translation model may keep them there, `Readers.keeps_through_load`; this one never
+  does.)
 
 What stays: the OCR readers on the processor (their own copies, as loaded: on the CPU they hold no GPU memory), and the
 CUDA context PyTorch made once a page model or a reader ran on the GPU (a few hundred MB: torch gives back the memory

@@ -1174,7 +1174,7 @@ class Pipeline:
             self.gpu_releases.append(ocr.release_gpu)
         self.translator = translator
         if hasattr(translator, "before_load"):
-            translator.before_load = self.release_gpu_models
+            translator.before_load = self.release_before_load
         self.cache = cache
         self._ocr_memo: dict[str, CharspotReading] = {}  # crop hash -> reading, memory only
         self._unanimous_memo: dict[str, bool] = {}  # crop hash and text -> all readers read it (`_unanimous`)
@@ -1318,15 +1318,35 @@ class Pipeline:
             if model is not self.layout and model is not self.art_eraser:
                 model.release()  # the settings changed meanwhile: this one is not used any more
 
-    def release_gpu_models(self) -> None:
+    def release_gpu_models(self, load: bool = False) -> None:
         """Every GPU model of `gpu_releases` lets go (each loads again when it is next needed). One that fails keeps
-        neither the others nor the page from going on."""
+        neither the others nor the page from going on. *load*: the release before Ollama loads the translation model
+        (`release_before_load`): the OCR readers' release comes last, once the page models have let go, and keeps them
+        on the GPU where the rule still finds room for them beside the whole model (`Readers.release_gpu` with
+        *load*)."""
         self._gpu_released += 1  # (a warm-up under way stops: `_warm`)
-        for release in list(self.gpu_releases):
+        releases = list(self.gpu_releases)
+        if load:
+            releases.sort(key=self._through_load)  # (stable: the readers' last)
+        for release in releases:
             try:
-                release()
+                if load and self._through_load(release):
+                    release(load=True)
+                else:
+                    release()
             except Exception:  # noqa: BLE001 - it stays in memory, no more than that
                 pass
+
+    def release_before_load(self) -> None:
+        """What lets go of the GPU before Ollama loads the translation model (the translator's ``before_load``):
+        `release_gpu_models` with *load*. Tools > Release the model now lets everything go (`release_gpu_models`)."""
+        self.release_gpu_models(load=True)
+
+    @staticmethod
+    def _through_load(release: Callable[..., Any]) -> bool:
+        """Whether *release*, one of `gpu_releases`, is the OCR readers' (`Readers.release_gpu`), which may keep them on
+        the GPU through a load."""
+        return callable(getattr(getattr(release, "__self__", None), "keeps_through_load", None))
 
     def set_translator(self, translator: Translator | None) -> None:
         """Translate with *translator* from now on (the window's, when the target language needs another model:
@@ -1337,7 +1357,7 @@ class Pipeline:
         self.release_translator()
         self.translator = translator
         if hasattr(translator, "before_load"):
-            translator.before_load = self.release_gpu_models
+            translator.before_load = self.release_before_load
 
     def release_translator(self) -> None:
         """The translator's model leaves memory now (`OllamaTranslator.release`), for a translator that has one. Never

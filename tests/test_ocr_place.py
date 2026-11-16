@@ -21,19 +21,22 @@ from taslation.config import ConfigError, Settings
 from taslation.devices import stage_devices
 from taslation.ocr import place, readers
 from taslation.ocr.place import (CHARSPOT_MIB, CONTEXT_MIB, KNOWN_TRANSLATORS, LAMA_MIB, MARGIN_MIB, MIN_TOTAL_MIB,
-                                 NAR_MIB, DeviceModels, GpuFacts, Placement, decide, judge, room_left)
+                                 NAR_MIB, DeviceModels, GpuFacts, Placement, decide, judge, room_left, through_load)
 
 OCR = CHARSPOT_MIB + NAR_MIB
 PLAMO = KNOWN_TRANSLATORS[("taslation-plamo3-translate-2b", 8192)]
 QWEN = KNOWN_TRANSLATORS[("qwen3.5:4b", 16384)]
 GPU = "NVIDIA Test GPU"
+REAL_GATHER = place.gather  # (taken before conftest's stand-in is put in its place for every test)
 
 
 @pytest.fixture(autouse=True)
 def nothing_learnt():
     place._learnt.clear()
+    place._kept, place._keeps = False, True
     yield
     place._learnt.clear()
+    place._kept, place._keeps = False, True
 
 
 def _settings(tmp_path: Path, **kw) -> Settings:
@@ -83,6 +86,49 @@ def test_what_is_taslation_s_own_is_not_counted_twice():
 def test_an_unknown_translator_or_card_keeps_them_on_the_cpu():
     assert judge(GpuFacts(total=12288, used=0, translator=None), OCR) == Placement("cpu", place.UNKNOWN)
     assert judge(None, OCR) == Placement("cpu", place.UNKNOWN)
+
+
+def test_just_before_a_load_the_readers_on_the_gpu_count_once():
+    """The facts the release before a load judges on (`through_load`): the model not loaded, the page models let go,
+    the readers on the GPU - in the card's used memory and in this process's own alike (its context and torch's 120
+    MiB for them now), so that they count once, as the rule's *ocr* at their peak. Ollama then finds the model's need
+    and the margin free."""
+    others, readers_now = 1325, 120
+    before = GpuFacts(total=6144, used=others, translator=PLAMO, lama=True)  # (the readers never on the GPU yet)
+    loading = GpuFacts(total=6144, used=others + CONTEXT_MIB + readers_now, own=CONTEXT_MIB + readers_now,
+                       translator=PLAMO, translator_now=0, lama=True)
+    peak = CONTEXT_MIB + PLAMO + LAMA_MIB + OCR
+    assert peak == 150 + 2000 + 850 + 500 == 3500
+    assert room_left(loading, OCR) == 6144 - others - peak == 1319 == room_left(before, OCR)
+    assert room_left(loading, OCR) != 6144 - (others + readers_now) - peak  # (twice: in the others' memory too)
+    assert room_left(loading, OCR) != 6144 - others - (peak - OCR)  # (none: their peak left out)
+    kept = through_load(loading, OCR)
+    assert kept == Placement("gpu", place.ROOM, 1319)
+    assert loading.total - loading.used == 4549 >= PLAMO + MARGIN_MIB  # what Ollama finds free at the load
+    # another model in Ollama, of another program's, counts as other programs' memory: no room, let go
+    crowded = GpuFacts(total=6144, used=loading.used + 1500, own=loading.own, translator=PLAMO, lama=True)
+    assert room_left(crowded, OCR) == 1319 - 1500 and through_load(crowded, OCR).device == "cpu"
+
+
+def test_a_check_before_a_load_needs_every_fact_measured():
+    assert through_load(None, OCR) == Placement("cpu", place.UNKNOWN)  # no card memory
+    assert through_load(GpuFacts(total=6144, used=1325, translator=None), OCR) == Placement("cpu", place.UNKNOWN)
+    unanswered = GpuFacts(total=6144, used=1325, translator=PLAMO, answered=False)
+    assert judge(unanswered, OCR).device == "gpu"  # (the ordinary decision takes Ollama down for a model not loaded)
+    assert through_load(unanswered, OCR) == Placement("cpu", place.UNKNOWN)
+
+
+def test_the_facts_say_whether_ollama_answered(tmp_path, monkeypatch):
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, 1325))
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    s = _settings(tmp_path, ollama_url="http://127.0.0.1:9")
+    netguard.install(allowed_ports={9}, audit_hook=False)
+    try:
+        facts = REAL_GATHER(s)
+    finally:
+        netguard.uninstall()
+    assert facts is not None and facts.translator == PLAMO and not facts.answered
+    assert place._translator_need(_settings(tmp_path, ollama_num_gpu="0")) == (0, 0, True)  # (nothing to ask)
 
 
 def test_a_translator_kept_off_the_gpu_needs_no_room_there(tmp_path):
@@ -163,6 +209,7 @@ def ollama():
 def test_the_translator_s_need_while_loaded_before_and_after(tmp_path, ollama):
     s = _settings(tmp_path, ollama_url=ollama.url)
     assert place.translator_need(s) == (PLAMO, 0)  # not loaded: as measured
+    assert place._translator_need(s) == (PLAMO, 0, True)  # (Ollama answered: none loaded)
     name = "taslation-plamo3-translate-2b"
     ollama.loaded.add(name)
     size = 3_000_000_000 // place.MiB  # (the fake's size)
@@ -530,6 +577,187 @@ def test_a_load_and_a_request_find_the_readers_on_the_cpu_and_the_read_after_the
     assert ocr.placement.why == place.RELEASED and ollama.loads == 1
     ocr.read_chars(None)
     assert len(fake_readers.asked) == 2 and ocr.charspot.reads[-1] == "net@cuda"
+
+
+# ------------------------------------------------------------------ through a load of the translation model
+ROOMY = GpuFacts(total=6144, used=1325 + CONTEXT_MIB + 120, own=CONTEXT_MIB + 120, translator=PLAMO, lama=True)
+
+
+@pytest.fixture
+def measured(monkeypatch):
+    """The facts of the moment (`place.gather`), as a test sets them (*facts*; an exception is raised), and the times
+    they were asked."""
+    state = SimpleNamespace(facts=ROOMY, asked=0)
+
+    def gather(settings):
+        state.asked += 1
+        if isinstance(state.facts, Exception):
+            raise state.facts
+        return state.facts
+
+    monkeypatch.setattr(place, "gather", gather)
+    return state
+
+
+def test_a_load_keeps_the_readers_the_rule_put_on_the_gpu_where_they_still_fit(tmp_path, fake_readers, measured,
+                                                                              given_back):
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    ocr.release_gpu(load=True)
+    assert measured.asked == 1  # asked again at the release
+    assert ocr.placement == Placement("gpu", place.ROOM, 1319) and ocr.holds_gpu()  # (the room of that moment)
+    assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and not given_back and place._kept
+    with place.loading():
+        assert ocr.read_chars(None).text == "x read with net@cuda"  # it reads there through the load
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 1 and measured.asked == 1  # the decision stands: nothing asked after the load
+
+
+@pytest.mark.parametrize("facts", [
+    GpuFacts(total=6144, used=4000, own=CONTEXT_MIB + 120, translator=PLAMO, lama=True),  # other programs grew
+    None,  # no NVML
+    GpuFacts(total=6144, used=1595, own=270, translator=PLAMO, lama=True, answered=False),  # /api/ps not answering
+    GpuFacts(total=6144, used=1595, own=270, translator=None, lama=True),  # the model's need not known
+    RuntimeError("NVML"),  # the measuring itself failed
+])
+def test_a_load_lets_the_readers_go_where_the_check_fails_or_cannot_be_made(tmp_path, fake_readers, measured,
+                                                                            given_back, facts):
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    measured.facts = facts
+    ocr.release_gpu(load=True)
+    assert measured.asked == 1 and ocr.placement.why == place.RELEASED and ocr.charspot.device == "cpu"
+    assert given_back and not place._kept
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 2  # decided again at the next read, as ever
+
+
+def test_a_load_lets_go_readers_the_setting_forced_there_failed_ones_and_changed_settings(tmp_path, fake_readers,
+                                                                                       measured):
+    fake_readers.answer = Placement("gpu", place.SET)
+    forced = readers.Readers(tmp_path, 0, settings=_settings(tmp_path, ocr_runs_on="gpu"))
+    forced.release_gpu(load=True)
+    assert forced.placement.why == place.RELEASED and forced.charspot.device == "cpu"
+    fake_readers.answer = Placement("gpu", place.ROOM, 1500)
+    failed = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    failed.charspot.broken = True
+    failed.read_chars(None)  # (out of memory on the GPU: the CPU for the session)
+    failed.release_gpu(load=True)
+    assert failed.placement.why == place.FAILED and failed.charspot.device == "cpu" and failed._nar.device == "cpu"
+    s = _settings(tmp_path)
+    changed = readers.Readers(tmp_path, 0, settings=s)
+    s.target_language = "Turkish"  # (another model loads: the placement was not decided for it)
+    changed.release_gpu(load=True)
+    assert changed.placement.why == place.RELEASED
+    assert measured.asked == 0  # none of them asked the room again
+
+
+def test_a_full_release_still_lets_the_readers_go(tmp_path, fake_readers, measured, given_back):
+    """Tools > Release the model now (`Pipeline.release_gpu_models`, no *load*), whatever the room."""
+    from taslation.pipeline import Pipeline
+
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    p = Pipeline(_settings(tmp_path), ocr=ocr)
+    p.release_gpu_models()
+    assert ocr.placement.why == place.RELEASED and ocr.charspot.device == "cpu" and given_back
+    assert measured.asked == 0
+
+
+def test_the_pipeline_s_release_before_a_load_asks_the_readers_last(tmp_path, fake_readers, measured):
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    tr = OllamaTranslator("http://127.0.0.1:9", "qwen3.5:4b", timeout=1.0)
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    p = Pipeline(_settings(tmp_path), ocr=ocr, translator=tr)
+    assert tr.before_load == p.release_before_load
+    order = []
+    p.gpu_releases.append(lambda: order.append(("page model", measured.asked)))  # (a page model's, built later)
+    p.release_before_load()
+    assert order == [("page model", 0)] and measured.asked == 1  # the page models let go before the room is asked
+    assert ocr.holds_gpu() and p._gpu_released == 1  # (a warm-up under way stops all the same)
+
+
+def test_a_load_through_the_translator_keeps_them_and_reads_on_the_gpu_meanwhile(tmp_path, fake_readers, measured,
+                                                                                ollama):
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="qwen3.5:4b")
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0)
+    Pipeline(s, ocr=ocr, translator=tr)
+    during = []
+
+    def answer(items, payload):
+        ocr.read_chars(None)
+        during.append((payload["messages"][-1]["content"] == "Hi", ocr.charspot.reads[-1]))
+
+    ollama.answer = answer
+    tr.translate_page(["はい"])
+    assert during == [(True, "net@cuda"), (False, "net@cpu")]  # the load on the GPU, the request on the CPU
+    assert ocr.placement == Placement("gpu", place.ROOM, 1319) and ollama.loads == 1
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 1 and ocr.charspot.reads[-1] == "net@cuda"
+
+
+def test_a_model_that_comes_up_partly_on_the_cpu_beside_them_sends_them_to_the_cpu_for_good(tmp_path, fake_readers,
+                                                                                          measured, ollama):
+    """Kept through a load whose model came up half on the GPU all the same: the translator loads it again after the
+    GPU models are let go (`OllamaTranslator._ensure_loaded`), and the readers go with them, there and at every load
+    after it this session, room or not. Between loads the rule still puts them on the GPU."""
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="qwen3.5:4b")
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0)
+    Pipeline(s, ocr=ocr, translator=tr)
+    during = []
+
+    def answer(items, payload):
+        if payload["messages"][-1]["content"] == "Hi":
+            ocr.read_chars(None)
+            during.append(ocr.charspot.reads[-1])
+
+    ollama.answer = answer
+    ollama.shares = [0.5]  # (the first load half on the GPU, the next whole)
+    tr.ensure_loaded()
+    assert during == ["net@cuda", "net@cpu"] and ollama.loads == 2 and ollama.share == 1.0
+    assert ocr.placement.why == place.RELEASED and not place.keeps_through_loads() and not place._kept
+    assert measured.asked == 1  # (the second release asked nothing)
+    ocr.read_chars(None)
+    assert ocr.holds_gpu() and len(fake_readers.asked) == 2  # (after the load the rule decides, as ever)
+    tr.release(wait=True)
+    tr.ensure_loaded()  # the next load: let go although the room is there
+    assert during[-1] == "net@cpu" and ollama.loads == 3 and ocr.placement.why == place.RELEASED
+    assert measured.asked == 1
+
+
+def test_a_model_partly_on_the_cpu_without_readers_kept_changes_nothing(tmp_path, fake_readers, measured, ollama):
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="qwen3.5:4b")
+    measured.facts = None  # (no NVML: let go before the load)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0)
+    Pipeline(s, ocr=ocr, translator=tr)
+    ollama.shares = [0.5]
+    tr.ensure_loaded()
+    assert ollama.loads == 2 and place.keeps_through_loads()  # (they took nothing from it)
+    assert not place.partly_loaded(0.5) and place.keeps_through_loads()
+
+
+def test_layers_set_by_hand_never_count_as_a_model_partly_on_the_cpu(tmp_path, fake_readers, measured, ollama):
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="qwen3.5:4b")
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0, num_gpu=10)
+    Pipeline(s, ocr=ocr, translator=tr)
+    ollama.shares = [0.5]  # (split on purpose)
+    tr.ensure_loaded()
+    assert ollama.loads == 1 and ocr.holds_gpu() and place.keeps_through_loads()
 
 
 def test_a_streamed_request_is_a_request_to_its_end(tmp_path, ollama):

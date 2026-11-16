@@ -22,10 +22,11 @@ What the rule measures (`GpuFacts`, `gather`):
   not known, and the readers stay on the CPU (`UNKNOWN`) until it has been.
 
 The decision is made when the readers load (`Readers`, the window's start), again once the GPU memory was let go
-(`Readers.release_gpu`: before Ollama loads its model, and Tools > Release the model now; decided again at the next
-read) and when a setting it depends on changed. A GPU that fails (out of memory, a CUDA error) moves the readers to
-the CPU for the rest of the session, and the crop at hand is read there (`DeviceModels.run`). The weights move without
-being read from disk again: the CPU's copy stays where it is loaded, the GPU's is made from it and dropped (`to`).
+(`Readers.release_gpu`: Tools > Release the model now, and before Ollama loads its model unless they stay through the
+load, below; decided again at the next read) and when a setting it depends on changed. A GPU that fails (out of
+memory, a CUDA error) moves the readers to the CPU for the rest of the session, and the crop at hand is read there
+(`DeviceModels.run`). The weights move without being read from disk again: the CPU's copy stays where it is loaded,
+the GPU's is made from it and dropped (`to`).
 While a request to the translation model is under way (`translating`, for the translator to wrap its requests in),
 the readers read on the CPU: the two processes share the GPU in time slices, and the OCR's many small steps wait.
 While Ollama loads the model (`loading`, the translator's load and warm-up) and while a request is under way
@@ -33,6 +34,22 @@ While Ollama loads the model (`loading`, the translator's load and warm-up) and 
 room would be guessed wrong, and a copy to the GPU would take memory Ollama is loading into; the next read after it
 decides. A load is no reason to read on the CPU: a crop read on the GPU while PLaMo loaded took 40 ms, as on an idle
 GPU (38), against 134 on the CPU, which also made the load itself take 5.9 s instead of 4.6 (measured 2026-11-16).
+
+So a load of the translation model keeps the readers on the GPU (`Readers.keeps_through_load`; the page models let go
+before it as ever) where the rule put them there (`ROOM`: the setting's "gpu" lets them go, as before), with no GPU
+failure this session, and where the rule asked again just then still finds room for them (`through_load`: `judge` on
+the facts of that moment, every one of them measured - the card's memory, /api/ps answering, the model's need known -
+for other programs may have grown since): the rule counts the model whole in video memory beside them and leaves
+`MARGIN_MIB` free, so Ollama finds room for all of it. They read on there through the load, and the decision stands.
+Just before a load the readers are in the card's used memory and in this process's own alike, so that they count once,
+as `peak_mib`'s *ocr*; the model is not loaded then (another model in Ollama counts as other programs' memory, as
+ever). A load that all the same ends with the model partly on the CPU (`partly_loaded`: ``size_vram`` below ``size``
+in the /api/ps the translator asks after it, the layers left to the server) found them in its way: they go to the CPU
+at the release before the translator's second load, and no load keeps them again this session
+(`keeps_through_loads`). Measured on the 6 GB card (2026-11-16, the app's own load, two rounds): PLaMo came up whole
+beside the readers kept in 10 loads of 10 (/api/ps 1823 of 1823 MiB); with a page read meanwhile a crop took 43-47 ms
+through the load against 146-226 on the CPU with them let go, and the load 5.0-5.3 s against 5.5-6.5 (once 7.1, the
+first load of a round); alone 4.8-5.1 s kept, 5.1 let go; the readings were those of the CPU.
 """
 
 from __future__ import annotations
@@ -91,7 +108,8 @@ class Placement:
 class GpuFacts:
     """What the rule decides on, in MiB: the card's *total* and *used* memory (all programs), *own* this process's now
     (0 without a CUDA context), *translator* what the translation model needs there at the peak (None: not known) and
-    *translator_now* what of it is there now, and whether *lama* and the *layout* model run on the GPU."""
+    *translator_now* what of it is there now, whether *lama* and the *layout* model run on the GPU, and whether Ollama
+    *answered* /api/ps (False: taken for a model not loaded)."""
 
     total: int
     used: int
@@ -100,6 +118,7 @@ class GpuFacts:
     translator_now: int = 0
     lama: bool = False
     layout: bool = False
+    answered: bool = True
 
 
 def peak_mib(facts: GpuFacts, ocr: int) -> int:
@@ -127,6 +146,14 @@ def judge(facts: GpuFacts | None, ocr: int) -> Placement:
         return Placement("cpu", UNKNOWN)
     room = room_left(facts, ocr)
     return Placement("gpu" if room >= MARGIN_MIB else "cpu", ROOM if room >= MARGIN_MIB else NO_ROOM, room)
+
+
+def through_load(facts: GpuFacts | None, ocr: int) -> Placement:
+    """The rule asked again just before Ollama loads the translation model (`Readers.keeps_through_load`): `judge` on
+    *facts*, but facts not all measured - Ollama not answering /api/ps among them - are a room not known."""
+    if facts is not None and not facts.answered:
+        return Placement("cpu", UNKNOWN)
+    return judge(facts, ocr)
 
 
 def decide(settings: Any, ocr: int, failed: str = "", cuda: bool | None = None,
@@ -161,9 +188,9 @@ def gather(settings: Any) -> GpuFacts | None:
     if memory is None:
         return None
     total, used = memory
-    need, now = translator_need(settings)
+    need, now, answered = _translator_need(settings)
     lama, layout = page_models_on_gpu(settings)
-    return GpuFacts(total, used, own_mib(), need, now, lama, layout)
+    return GpuFacts(total, used, own_mib(), need, now, lama, layout, answered)
 
 
 def card_memory() -> tuple[int, int] | None:
@@ -199,6 +226,12 @@ def translator_need(settings: Any) -> tuple[int | None, int]:
     """(what the translation model of *settings* needs on the GPU at the peak, what of it is there now), in MiB; None
     for a need not known. Ollama is asked /api/ps, which never loads a model; a server that does not answer is a model
     not loaded."""
+    need, now, _answered = _translator_need(settings)
+    return need, now
+
+
+def _translator_need(settings: Any) -> tuple[int | None, int, bool]:
+    """`translator_need`, and whether Ollama answered /api/ps (True where nothing was asked of it)."""
     from ..translate import TranslationError
     from ..translate.models import make_translator, wanted_name
     from ..translate.ollama import num_gpu_value
@@ -208,27 +241,28 @@ def translator_need(settings: Any) -> tuple[int | None, int]:
     except ValueError:
         layers = None
     if layers == 0:
-        return 0, 0  # (the processor only)
+        return 0, 0, True  # (the processor only)
     try:
         name = wanted_name(settings.ollama_model, settings.target_language)
         translator = make_translator(settings, name)
         key = (name, int(getattr(translator, "num_ctx", 0) or 0), layers)
     except (TranslationError, ValueError, AttributeError):
-        return None, 0
+        return None, 0, True
+    answered = True
     try:
         entry = translator._loaded(name)
     except (TranslationError, OSError, ValueError):
-        entry = None
+        entry, answered = None, False
     if entry and entry.get("size") and entry.get("size_vram") is not None:
         now = int(entry["size_vram"]) // MiB
         need = int(entry["size"]) // MiB if layers is None else now
         # once it is unloaded, the runner's own memory beside what /api/ps counts (in the used memory while it is
         # loaded, as other programs' there) is counted in
         _learnt[key] = round(need * RUNNER_SHARE)
-        return need, now
+        return need, now, True
     if key in _learnt:
-        return _learnt[key], 0
-    return (KNOWN_TRANSLATORS.get(key[:2]) if layers is None else None), 0
+        return _learnt[key], 0, answered
+    return (KNOWN_TRANSLATORS.get(key[:2]) if layers is None else None), 0, answered
 
 
 def page_models_on_gpu(settings: Any) -> tuple[bool, bool]:
@@ -327,6 +361,37 @@ def busy() -> bool:
     """Whether the translation model is being loaded or asked now (`loading`, `translating`): no time to decide where
     the readers run (the next read after it decides)."""
     return bool(_loading or _translating)
+
+
+_kept = False  # the last release before a load kept the readers on the GPU (`kept_through_load`)
+_keeps = True  # loads may keep them there this session (`keeps_through_loads`, `partly_loaded`)
+
+
+def keeps_through_loads() -> bool:
+    """Whether a load of the translation model may keep the readers on the GPU this session (`Readers.release_gpu`
+    with *load*): until one came up partly on the CPU beside them (`partly_loaded`)."""
+    return _keeps
+
+
+def kept_through_load(kept: bool) -> None:
+    """The release before a load of the translation model kept the readers on the GPU (*kept*), or let them go
+    (`Readers.release_gpu`)."""
+    global _kept
+    _kept = bool(kept)
+
+
+def partly_loaded(share: float) -> bool:
+    """A load of the translation model ended with only *share* of it on the GPU (`OllamaTranslator._ensure_loaded`,
+    where ``ollama_num_gpu`` leaves the layers to the server; it loads the model once more after the GPU models are
+    let go): readers kept on the GPU through it (`kept_through_load`) took room it needed, so no load keeps them there
+    again this session, and that release puts them on the CPU. Whether they had been kept."""
+    global _keeps
+    if not _kept:
+        return False
+    _keeps = False
+    LOG.info("the translation model came up %d %% on the GPU beside the OCR readers kept there through its load: they "
+             "go to the CPU before every load from now on", round(float(share) * 100))
+    return True
 
 
 def give_back() -> None:
