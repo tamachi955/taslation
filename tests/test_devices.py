@@ -1,7 +1,7 @@
 """In which order the models load, and how long Ollama's model stays (``keep_alive`` on every request, `warm_up`): nothing
-at the start unless the settings keep the model for good, which loads it before the OCR model - in the window
-(`_job_init`) and on the command line (``batch``, ``audit``). Fakes stand in for the OCR engine and Ollama. The load on
-demand itself: test_model_on_demand.py."""
+at the start unless the settings keep the model for good, which loads it before the OCR model on the command line
+(``batch``, ``audit``) and while the OCR model loads in a thread of its own in the window (`_job_init`). Fakes stand in
+for the OCR engine and Ollama. The load on demand itself: test_model_on_demand.py."""
 from __future__ import annotations
 
 import argparse
@@ -156,8 +156,15 @@ class Start:
 
 
 class StubEngine:
-    def __init__(self, order: list):
+    def __init__(self, order: list, loading: threading.Event | None = None):
         order.append("ocr")
+        if loading is not None:
+            loading.set()
+
+
+def worker(order: list) -> list:
+    """What the start did in the worker, in its order: the OCR model loads in a thread of its own."""
+    return [step for step in order if step != "ocr"]
 
 
 @pytest.fixture
@@ -167,21 +174,17 @@ def start(monkeypatch, tmp_path):
     import taslation.pipeline
 
     order: list = []
-    imported = threading.Event()
-
-    def import_libraries():
-        imported.set()
+    loading = threading.Event()
 
     def warm_up(self, model=None, keep_alive=None, timeout=None):
         order.append(("warm-up", model))
-        warm_up.overlapped = imported.wait(5.0)  # the import runs while Ollama loads its model
+        warm_up.overlapped = loading.wait(5.0)  # the OCR model loads while Ollama loads its model
         if getattr(warm_up, "fails", False):
             raise TranslationError(Message("ollama.timeout", seconds=300.0))
         return 3.4
 
-    monkeypatch.setattr(charspot, "import_libraries", import_libraries)
     monkeypatch.setattr(OllamaTranslator, "warm_up", warm_up)
-    monkeypatch.setattr(taslation.ocr, "Readers", lambda path, threads=0: StubEngine(order))
+    monkeypatch.setattr(taslation.ocr, "Readers", lambda path, threads=0: StubEngine(order, loading))
     monkeypatch.setattr(jobs, "ollama_compute", lambda log=None: "")  # (not this machine's Ollama log)
     monkeypatch.setattr(taslation.pipeline, "Pipeline",
                         lambda settings, ocr=None, translator=None: SimpleNamespace(ocr=ocr, translator=translator))
@@ -192,15 +195,15 @@ def start(monkeypatch, tmp_path):
 
     make.order = order
     make.warm_up = warm_up
-    make.imported = imported
+    make.loading = loading
     return make
 
 
-def test_the_start_checks_then_loads_ollama_s_model_then_the_ocr_model(start):
+def test_the_start_checks_then_loads_ollama_s_model_while_the_ocr_model_loads(start):
     w = start(([], ["qwen3.5:4b", "gemma3:4b"]))
     w._job_init()
-    assert start.order == ["health", ("warm-up", "qwen3.5:4b"), "ocr"]
-    assert start.warm_up.overlapped  # the OCR's libraries were imported while Ollama loaded its model
+    assert worker(start.order) == ["health", ("warm-up", "qwen3.5:4b")] and start.order.count("ocr") == 1
+    assert start.warm_up.overlapped  # the OCR model loaded while Ollama loaded its model
     events = w.events()
     kinds = [k for k, _d in events]
     assert kinds == ["health", "status", "status", "models", "ready", "compute", "status"]
@@ -219,7 +222,7 @@ def test_the_start_loads_nothing_of_ollama_unless_the_settings_keep_the_model(st
         start.order.clear()
         w = start(([], ["qwen3.5:4b"]), ollama_keep_alive=setting)
         w._job_init()
-        assert start.order == ["health", "ocr"]
+        assert worker(start.order) == ["health"] and start.order.count("ocr") == 1
         assert not any("Loading Ollama" in str(d.get("key", "")) or "text" in d for _k, d in w.events())
 
 
@@ -253,7 +256,7 @@ def test_the_loaded_line_in_the_window_s_language(start):
 def test_nothing_is_warmed_while_ollama_is_down(start):
     w = start(([Message("health.ollama_down", url="http://127.0.0.1:11434")], None))
     w._job_init()
-    assert start.order == ["health", "ocr"] and not start.imported.is_set()  # nothing to overlap: the engine imports
+    assert worker(start.order) == ["health"] and start.order.count("ocr") == 1
     events = w.events()
     assert not any(d.get("key", "").startswith("Getting the translator") for _k, d in events)
 
@@ -263,7 +266,7 @@ def test_the_model_the_window_falls_back_to_is_warmed(start):
     w = start(([Message("health.other_model", wanted="qwen3.5:4b", used="gemma3:4b")], ["gemma3:4b"]),
               ollama_model="qwen3.5:4b")
     w._job_init()
-    assert start.order == ["health", ("warm-up", "gemma3:4b"), "ocr"]
+    assert worker(start.order) == ["health", ("warm-up", "gemma3:4b")] and "ocr" in start.order
 
 
 def test_a_failed_warm_up_still_loads_the_ocr_model(start):
@@ -273,7 +276,7 @@ def test_a_failed_warm_up_still_loads_the_ocr_model(start):
         w._job_init()
     finally:
         start.warm_up.fails = False
-    assert start.order == ["health", ("warm-up", "qwen3.5:4b"), "ocr"]
+    assert worker(start.order) == ["health", ("warm-up", "qwen3.5:4b")] and "ocr" in start.order
     assert not any("text" in d for _k, d in w.events())  # nothing loaded to say
 
 
@@ -292,6 +295,107 @@ def test_a_missing_ocr_model_is_said_and_the_start_goes_on(start, monkeypatch):
     assert ("error" in [k for k, _d in events]) and [k for k, _d in events][-3:-1] == ["ready", "compute"]
     w._status_render = None
     assert events[-1][1]["text"]() == "Translator ready."
+
+
+class Reader:
+    """One reader of the OCR model: what it was given to read, and in which thread, is kept."""
+
+    def __init__(self, read: list, name: str, fails: bool = False):
+        self.seen, self.name, self.fails = read, name, fails
+
+    def read(self, image):
+        self.seen.append((self.name, image.size, threading.current_thread().name))
+        if self.fails:
+            raise RuntimeError("no first read")
+        return ""
+
+
+def test_the_ocr_model_loads_beside_the_setup_check_and_each_reader_reads_a_crop_before_the_pipeline(start, monkeypatch):
+    """The OCR model's load and the setup check wait here for each other: one after the other, the start would wait
+    in vain. A first read that fails is no error: the first page meets what is wrong, as ever."""
+    import taslation.ocr
+    import taslation.pipeline
+
+    loading, checked = threading.Event(), threading.Event()
+    read: list = []
+
+    def readers(path, threads=0):
+        start.order.append("ocr")
+        loading.set()
+        assert checked.wait(5.0)  # the setup is checked meanwhile
+        return SimpleNamespace(missing=[], charspot=Reader(read, "charspot"), _nar=Reader(read, "nar"),
+                               _cpt=Reader(read, "cpt", fails=True))
+
+    monkeypatch.setattr(taslation.ocr, "Readers", readers)
+    monkeypatch.setattr(taslation.pipeline, "Pipeline", lambda settings, ocr=None, translator=None:
+                        start.order.append(("pipeline", len(read))) or SimpleNamespace(ocr=ocr, translator=translator))
+    w = start(([], ["qwen3.5:4b"]), ollama_keep_alive="5m")
+    check = w._check_setup
+
+    def check_setup():
+        assert loading.wait(5.0)  # the OCR model loads meanwhile
+        checked.set()
+        return check()
+
+    w._check_setup = check_setup
+    w._job_init()
+    assert worker(start.order) == ["health", ("pipeline", 3)]  # the pipeline after the readers' first reads
+    assert read == [(name, (32, 32), "taslation-load-ocr") for name in ("charspot", "nar", "cpt")]
+    assert w.pipeline.ocr is not None and not getattr(w, "_ocr_failed", False)
+    events = w.events()
+    assert [k for k, _d in events][:5] == ["health", "status", "models", "ready", "compute"]
+    assert events[1][1]["key"].startswith("Getting the Japanese reader ready") and events[3][1] == {"ocr": True}
+
+
+def test_a_page_asked_for_as_the_window_opens_waits_for_the_ocr_model_loaded_once(start, monkeypatch):
+    import taslation.ocr
+
+    release, checked = threading.Event(), threading.Event()
+    made: list = []
+
+    def readers(path, threads=0):
+        made.append(threading.current_thread().name)
+        assert release.wait(5.0)
+        return SimpleNamespace(missing=["manga-ocr-nar-small"])
+
+    monkeypatch.setattr(taslation.ocr, "Readers", readers)
+    w = start(([], ["qwen3.5:4b"]), ollama_keep_alive="5m")
+    check = w._check_setup
+    w._check_setup = lambda: (checked.set(), check())[1]
+    w._jobs = queue.Queue()
+    pages: list = []
+    w._jobs.put(w._job_init)
+    w._jobs.put(lambda: pages.append(w.pipeline.ocr))  # a page asked for while the start runs
+    threading.Thread(target=jobs.JobsMixin._worker_loop, args=(w,), daemon=True).start()
+    assert checked.wait(5.0)
+    time.sleep(0.3)  # Ollama started, the setup checked: the start waits for the OCR model, and the page with it
+    assert pages == [] and "ready" not in [k for k, _d in w.events()]
+    release.set()
+    for _ in range(500):
+        if pages:
+            break
+        time.sleep(0.01)
+    assert len(pages) == 1 and pages[0].missing == ["manga-ocr-nar-small"]
+    assert made == ["taslation-load-ocr"]  # loaded once, in its own thread
+    assert "ready" in [k for k, _d in w.events()]
+
+
+def test_an_ocr_model_that_cannot_be_loaded_is_said_as_ever_and_the_window_starts_without_it(start, monkeypatch):
+    import taslation.ocr
+
+    def broken(path, threads=0):
+        start.order.append("ocr")
+        raise RuntimeError("weights damaged")
+
+    monkeypatch.setattr(taslation.ocr, "Readers", broken)
+    w = start(([], ["qwen3.5:4b"]), ollama_keep_alive="5m")
+    w._ocr_failed = False
+    w._job_init()
+    events = w.events()
+    assert [k for k, _d in events][:6] == ["health", "status", "error", "models", "ready", "compute"]
+    error = events[2][1]
+    assert error["cached_note"] is True and "RuntimeError: weights damaged" in str(error["message"])
+    assert events[4][1] == {"ocr": False} and w._ocr_failed and w.pipeline.ocr is None
 
 
 @pytest.fixture

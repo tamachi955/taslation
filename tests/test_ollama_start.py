@@ -23,7 +23,7 @@ import pytest
 from conftest import windows_only
 from test_batch import _fake_viewer
 from test_batch_messages import _reader
-from test_devices import start  # noqa: F401 - the fixture of the window's start
+from test_devices import start, worker  # noqa: F401 - the fixture of the window's start
 
 from helpers import read_book
 from taslation import cli, devices, health, ollama_start
@@ -583,7 +583,7 @@ def test_the_window_starts_ollama_before_the_setup_check_and_owns_it(machine, st
     events = w.events()
     assert events[0] == ("status", {"key": "Starting the translation program..."}) and events[1][0] == "health"
     assert _popups(events) == [] and len(machine.started) == 1
-    assert start.order[0] == "health"  # and from here on as if it had been running
+    assert worker(start.order)[0] == "health"  # and from here on as if it had been running
     assert ("warm-up", "qwen3.5:4b") in start.order
     assert owns_server() and _record(tmp_path)["users"] == [{"pid": ME, "started": 1}]
 

@@ -186,6 +186,51 @@ def pump_soon(window: Any) -> None:
     window._events_job = window.after(EVENTS_BUSY_MS, window._poll_events)
 
 
+def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]]:
+    """The OCR model of *settings* loaded in a thread of its own, and one crop read by each of its readers
+    (`first_reads`); what is returned waits for that, and gives the readers (None when they did not load) and what
+    their load raised. Loaded once, for the window's start (`JobsMixin._job_init`), which waits for it before the
+    pipeline is made - and so does every job after the start, a page asked for early among them."""
+    from ..ocr import Readers
+
+    done: list[tuple[Any, BaseException | None]] = []
+
+    def load() -> None:
+        try:
+            ocr = Readers(settings.models_dir, settings.ocr_threads)
+        except BaseException as e:  # noqa: BLE001 - the start says it as it always did
+            done.append((None, e))
+            return
+        first_reads(ocr)
+        done.append((ocr, None))
+
+    thread = threading.Thread(target=load, name="taslation-load-ocr", daemon=True)
+    thread.start()
+
+    def wait() -> tuple[Any, BaseException | None]:
+        thread.join()
+        return done[0] if done else (None, None)
+
+    return wait
+
+
+def first_reads(ocr: Any) -> None:
+    """One small crop (a stroke on white, made here) read by each of *ocr*'s readers, what they read thrown away: a
+    reader's first read takes longer than the next ones (torch readies itself then), and the first page's crops are
+    not it now. A read changes nothing of what the next ones read. What goes wrong is left for the first page to
+    meet."""
+    crop = Image.new("RGB", (32, 32), "white")
+    crop.paste((0, 0, 0), (12, 6, 20, 26))
+    for name in ("charspot", "_nar", "_cpt"):  # (the readers `ocr.Readers` asks: charspot, and the two beside it)
+        read = getattr(getattr(ocr, name, None), "read", None)
+        if read is None:
+            continue
+        try:
+            read(crop)
+        except Exception:  # noqa: BLE001 - the first page reads as ever
+            LOG.debug("a first read of %s failed", name.strip("_"))
+
+
 class JobsMixin:
     """The worker, its events and the requests. A part of `app.App` (no `__init__`: the state it uses is made by
     `App.__init__` and `_init_flow_state`; the other parts are reached through ``self``)."""
@@ -301,19 +346,20 @@ class JobsMixin:
             self._ollama.start()
 
     def _job_init(self) -> None:
-        """The start, in this order: Ollama started when it does not answer (what stands in the way said in a popup,
-        once), the setup check (the banner from the start on), then the OCR model. Ollama's model is left for the first
-        page that needs it (`OllamaTranslator.ensure_loaded`), unless ``ollama_keep_alive`` keeps it for good: it is
-        loaded then, when Ollama runs and has it, before the OCR model and while the OCR's libraries are imported, and
-        once ready the status line says what loaded where."""
-        from ..ocr import ModelNotInstalled, Readers
-        from ..ocr.charspot import import_libraries
+        """The start: the OCR model loads in a thread of its own (`load_readers`) while, in this order, Ollama is
+        started when it does not answer (what stands in the way said in a popup, once) and the setup is checked (the
+        banner from the start on); the start then waits for the OCR model, says what went wrong with it as ever, and
+        makes the pipeline. Ollama's model is left for the first page that needs it (`OllamaTranslator.ensure_loaded`),
+        unless ``ollama_keep_alive`` keeps it for good: it is loaded then, when Ollama runs and has it, while the OCR
+        model loads, and once ready the status line says what loaded where."""
+        from ..ocr import ModelNotInstalled
         from ..pipeline import Pipeline
         from ..translate import TranslationError
         from ..translate.models import choose, make_translator
         from ..translate.ollama import loaded_message, never_unloads
 
         s = self.settings
+        readers = load_readers(s)
         self._ollama = OllamaStarter(s.ollama_url,
                                      lambda: self._post("status", key="Starting the translation program..."),
                                      state_dir=s.state_dir, own=own_models(s))
@@ -332,22 +378,19 @@ class JobsMixin:
         model = chosen.name if models and health.has_model(models, chosen.name) else None
         if model and never_unloads(s.ollama_keep_alive):
             self._post("status", key="Getting the translator ready...")
-            importing = threading.Thread(target=import_libraries, name="taslation-import", daemon=True)
-            importing.start()
             try:
                 loaded.append(loaded_message(model, self.translator.warm_up(model)))
             except TranslationError:
                 pass  # the first page's request loads it, or says what is wrong
-            importing.join()
-        ocr = None
-        try:
-            self._post("status", key="Getting the Japanese reader ready (the first time takes a few seconds)...")
-            ocr = Readers(s.models_dir, s.ocr_threads)
-        except ModelNotInstalled as e:
-            self._post("error", message=message_of(e, "ocr.error"))
-        except Exception as e:  # noqa: BLE001 - said; the window starts all the same, as without the model
+        self._post("status", key="Getting the Japanese reader ready (the first time takes a few seconds)...")
+        ocr, error = readers()
+        if error is not None and not isinstance(error, Exception):
+            raise error  # (what is no error of the load's, as it always went)
+        if isinstance(error, ModelNotInstalled):
+            self._post("error", message=message_of(error, "ocr.error"))
+        elif error is not None:  # said; the window starts all the same, as without the model
             self._ocr_failed = True
-            self._post("error", message=message_of(f"{type(e).__name__}: {e}", "ocr.error"), cached_note=True)
+            self._post("error", message=message_of(f"{type(error).__name__}: {error}", "ocr.error"), cached_note=True)
         self.pipeline = Pipeline(s, ocr=ocr, translator=self.translator)
         self._warm_page_models()
         if s.cache_enabled:
