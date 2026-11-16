@@ -206,7 +206,8 @@ from .regions import PageResult
 from .terms import spelt_right
 from .translate import OllamaTranslator, TranslationError
 from .translate import base as _base
-from .translate.base import REASK_GROUP, accepts, ask_again_romanised, ask_for_missing, worth_asking_again
+from .translate.base import (REASK_GROUP, GrowingContext, accepts, ask_again_romanised, ask_for_missing,
+                             context_fits, grows_context, worth_asking_again)
 from .translate.continuation import facts_of
 from .translation_view import TranslationView
 
@@ -2023,8 +2024,8 @@ class BatchReader:
             return False
         return not self._stop.is_set() and worth_asking_again(error)
 
-    def _translate_units(self, units: list[ScannedUnit], recent: deque[tuple[str, str]], notes_text: str,
-                         upcoming: list[str], language: str, depth: int = 0) -> None:
+    def _translate_units(self, units: list[ScannedUnit], recent: "deque[tuple[str, str]] | GrowingContext",
+                         notes_text: str, upcoming: list[str], language: str, depth: int = 0) -> None:
         """Translate a run of page units.
 
         A failed request is retried in two halves, and so is a reply with not one usable line; a single page unit
@@ -2055,8 +2056,8 @@ class BatchReader:
         if not self._stop.is_set():
             self._units_final(units)
 
-    def _translate_run(self, units: list[ScannedUnit], recent: deque[tuple[str, str]], notes_text: str,
-                       upcoming: list[str], language: str, depth: int = 0) -> None:
+    def _translate_run(self, units: list[ScannedUnit], recent: "deque[tuple[str, str]] | GrowingContext",
+                       notes_text: str, upcoming: list[str], language: str, depth: int = 0) -> None:
         p = self.progress
         translator = self.pipeline.translator
         assert translator is not None
@@ -2079,9 +2080,13 @@ class BatchReader:
             self._translate_units(units[:half], recent, notes_text, upcoming, language, depth + 1)
             self._translate_units(units[half:], recent, notes_text, upcoming, language, depth + 1)
 
-        prior = list(recent)  # the pairs before this run: the context of its requests
+        # the pairs before this run: the context of its requests (for a translator that `grows_context`, those since
+        # the last cut, cut back first when they passed their bound: `GrowingContext.take`)
+        prior = (recent.take(context_fits(translator, notes_text)) if isinstance(recent, GrowingContext)
+                 else list(recent))
         call = cancel_args(translator.translate_page, self._stop, self._on_slow)
         sheet = self.pipeline.check_sheet()
+        grown = isinstance(recent, GrowingContext)
         answered: set[int] = set()  # the lines of this run the request under way has answered
 
         def on_item(k: int, text: str) -> None:
@@ -2151,7 +2156,10 @@ class BatchReader:
                 if r_out and self.pipeline.real_translation(r.source_text, r_out):
                     per_unit[ui][i] = r_out
                     per_unit_flags[ui][i] = list(fl)
-                    recent.append((r.source_text, r_out))
+                    if not grown or (k not in plan.served and k not in plan.copies):
+                        # (a line reused without a request is not in the request's history, so not in pairs that
+                        # only grow either: the next run's prompt extends this run's last one)
+                        recent.append((r.source_text, r_out))
 
         def commit(which: list[int]) -> list[int]:
             """The page units *which* stored with what they have, the lines kept for reuse first (`linememo`, saved
@@ -2672,7 +2680,10 @@ class BatchReader:
         s = self.settings
         language = s.target_language
         notes_text = self.pipeline.premises()  # the reader's series sheet
-        recent: deque[tuple[str, str]] = deque(maxlen=max(0, s.context_pairs))
+        # the pairs before each run: the last ``context_pairs``; for a translator that `grows_context` (PLaMo) pairs
+        # that only grow and are cut back rarely (`translate.base.GrowingContext`), none with ``context_pairs`` 0
+        recent: Any = (GrowingContext() if grows_context(self.pipeline.translator) and s.context_pairs > 0
+                       else deque(maxlen=max(0, s.context_pairs)))
         paged: set[int] = set()
         done = ci = 0
         while True:

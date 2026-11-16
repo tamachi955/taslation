@@ -124,7 +124,8 @@ from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat,
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
 from .translate import base as _base
-from .translate.base import accepts, ask_again_romanised, ask_for_missing, uses_room, worth_asking_again
+from .translate.base import (GrowingContext, accepts, ask_again_romanised, ask_for_missing, context_fits,
+                             grows_context, uses_room, worth_asking_again)
 from .translate.continuation import facts_of
 from .translate.renderings import BookNames, NamedPremises
 from .messages import Cancelled, Message, message_of
@@ -984,6 +985,9 @@ class Pipeline:
         self._book_sizes: deque[float] = deque(maxlen=400)  # usual-size samples of the pages so far (`_ocr_regions`)
         self._sizes_lock = threading.Lock()  # (`_add_sizes`: one writer at a time; readers take the deque as it is)
         self._context: deque[list[tuple[str, str]]] = deque(maxlen=max(0, settings.context_pages))
+        # the same pages' pairs for a translator that `grows_context` (PLaMo): they only grow, cut back rarely, so that
+        # the first request of a page extends the last prompt of the page before (`context_pairs`)
+        self._grown = GrowingContext()
         self.book_names = BookNames()  # the book's names and the renderings they keep (memory only, `premises`)
         self.last_seq: int | None = None
         # the lines its book reuses with its series' other volumes, when the window or the command line read them for
@@ -1339,9 +1343,17 @@ class Pipeline:
     def reset_context(self) -> None:
         """Another book, or its translations forgotten: the earlier pages' pairs and the names held go."""
         self._context.clear()
+        self._grown.clear()
         self.book_names.clear()
 
     def context_pairs(self) -> list[tuple[str, str]]:
+        """The earlier (Japanese, translation) pairs a page's request starts from: for a translator that
+        `grows_context` (PLaMo) the pairs of the pages before since the book began or the last cut
+        (`translate.base.GrowingContext`: grown to 60, then cut back to the newest 20, earlier when a request would not
+        fit after them), the lines the model was asked alone (`_translate_regions`); for the others the last 40 pairs
+        of the last ``context_pages`` pages. None with ``context_pages`` 0."""
+        if grows_context(self.translator):
+            return self._grown.take(context_fits(self.translator, self.premises()))
         pairs: list[tuple[str, str]] = []
         for page in self._context:
             pairs.extend(page)
@@ -3171,17 +3183,24 @@ class Pipeline:
         outputs = self.tighten(entries)
         flags = self.review(entries, outputs, cancel=cancel)  # (stopped there, nothing of the page is kept)
         pairs: list[tuple[str, str]] = []
-        for r, out, fl in zip(todo, outputs, flags):
+        asked: list[tuple[str, str]] = []  # (the lines the model was asked: what its request's history holds of them)
+        sent = set(plan.asked)
+        for i, (r, out, fl) in enumerate(zip(todo, outputs, flags)):
             if out and self.real_translation(r.source_text, out):
                 r.translated_text = out
                 r.status = "translated"
                 r.flags = list(fl)
                 pairs.append((r.source_text, out))
+                if i in sent:
+                    asked.append((r.source_text, out))
             else:
                 r.status = "untranslated"
         plan.learn_regions(todo)  # (kept for the lines to come; saved with the page)
         if pairs and self._context.maxlen:
             self._context.append(pairs)
+            # a line reused without a request (`linememo`) is not in the request's history: left out here too, so that
+            # the next page's prompt extends this page's last one
+            self._grown.extend(asked)
         if fill is not None:  # (also when cancelled by now: a draft's erase may cut a region's mask back, as stored)
             fill.settle(todo)
         if failure and any(r.status != "translated" for r in todo):

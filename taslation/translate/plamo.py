@@ -18,7 +18,10 @@ What the pipeline hands a translator maps to it like this:
   request, so that Ollama reuses the cached beginning of the prompt; a speaker the reader gave a line is added to it
   for that line;
 * the earlier bubbles (the ``context`` pairs, the book's own lines before these) and the lines of this request done so
-  far -> the earlier pairs, the oldest left out first when the prompt would not fit (`PROMPT_SHARE`);
+  far -> the earlier pairs, the oldest left out first when the prompt would not fit (`PROMPT_SHARE`). The pipeline and
+  the whole-book run give it pairs that only grow, cut back rarely (``grows_context``, `base.GrowingContext`, cut
+  earlier when a request would not fit after them: `context_fits`), so that a request's first prompt extends the
+  last prompt of the request before, which Ollama then does not compute again;
 * the sheet's renderings that a line names (`terms._sheet_hits`: the reader's terms and names, the forms a speaker
   uses, a name with its honorific: what the review flags check a translation against), the parts of the sheet's
   names (`terms.name_words`), and the book's names held so far (`renderings.BookNames`: a name's first rendering, as
@@ -72,7 +75,7 @@ import threading
 from typing import Any, Callable, Sequence
 
 from ..messages import Cancelled, Message
-from .base import HINT_SOMETIMES, TranslationError
+from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, TranslationError
 from .continuation import MAX_JOINED, joined, runs, split_back
 from .models import PLAMO, plamo_code
 from .ollama import KEEP_ALIVE, OllamaTranslator, _ignore
@@ -85,8 +88,14 @@ SOURCE_LANG = "ja"
 NUM_CTX = 8192  # Ollama's context for PLaMo: a line's prompt is ~1,200 tokens with 40 earlier pairs (1.9 GB in all)
 # the earlier pairs a request starts from, at most; the lines of the request done so far are added to them, never one
 # taken off the front: the prompts of a request then share their beginning, which Ollama computes once (cutting the
-# oldest pair at every line made each prompt new: prompt processing fell from 5,800 to 900 tokens a second)
-HISTORY_PAIRS = 60
+# oldest pair at every line made each prompt new: prompt processing fell from 5,800 to 900 tokens a second). The
+# pipeline and the whole-book run give it pairs that only grow from request to request and are cut back rarely
+# (`base.GrowingContext`, ``grows_context``), never more than this
+HISTORY_PAIRS = CONTEXT_GROWS_TO
+# tokens (reckoned high, `tokens_about`) a request keeps for its own lines after the earlier pairs it is given: a
+# whole-book run's 30 lines with their answers and a line's room for its answer (`GrowingContext.take` cuts the pairs
+# back when they would leave less: `context_fits`)
+REQUEST_ROOM = 2400
 # A line's prompt is kept within this share of the context, its answer's room taken off first; its length in tokens is
 # reckoned high (`tokens_about`): a reserved token one, any other character outside ASCII one (Japanese, Chinese,
 # Korean: fewer in fact), three ASCII characters one (English: four in fact). Counting characters instead took
@@ -115,6 +124,14 @@ def tokens_about(prompt: str) -> int:
 def clean(text: Any) -> str:
     """*text* without PLaMo's reserved tokens (a text that held one would break the prompt), trimmed."""
     return _RESERVED.sub("", str(text or "")).strip()
+
+
+def one_line(text: Any) -> str:
+    """A line's Japanese as a request gives it to the model, as the line itself and as an earlier pair alike (so that
+    the pair a line leaves in a request's history is the pair the next page's request starts from): its spaces and
+    line breaks made one space when it has a line break, else as it is."""
+    text = str(text)
+    return " ".join(text.split()) if "\n" in text else text
 
 
 def pfml_prompt(source: str, target: str, context: str = "", history: Sequence[tuple[str, str]] = (),
@@ -186,6 +203,9 @@ class PlamoTranslator(OllamaTranslator):
     name = "plamo"
     hint_support = HINT_SOMETIMES  # a region's hint is in its line's context, followed about half the time (above)
     uses_room = False  # a line goes with its context alone: nothing of a bubble's room (`translate_page`)
+    # the earlier pairs it is given only grow and are cut back rarely (`base.GrowingContext`): Ollama reuses a prompt's
+    # beginning only for a prompt that extends the one before it
+    grows_context = True
 
     def __init__(self, url: str = "http://127.0.0.1:11434", model: str = PLAMO.ollama_name, timeout: float = 900.0,
                  temperature: float = 0.2, num_ctx: int = NUM_CTX, target_language: str = "English",
@@ -274,6 +294,17 @@ class PlamoTranslator(OllamaTranslator):
             parts.append(after)
         return "\n\n".join(p for p in parts if p)
 
+    def context_fits(self, pairs: Sequence[tuple[str, str]], notes: str = "") -> bool:
+        """Whether a request may start from the earlier *pairs* with the premises *notes*: the prompt up to them, reckoned
+        high (`tokens_about`), leaves `REQUEST_ROOM` tokens of the share of the context a prompt keeps within
+        (`PROMPT_SHARE`). What `base.GrowingContext.take` asks before it gives the pairs to a request."""
+        try:
+            target = self.target_code
+        except TranslationError:
+            target = "en"
+        head = pfml_prompt("", target, self._context(notes), [(one_line(s), d) for s, d in pairs])
+        return tokens_about(head) + REQUEST_ROOM <= int(self.num_ctx * PROMPT_SHARE)
+
     def _fit(self, source: str, target: str, context: str, history: list[tuple[str, str]],
              glossary: list[tuple[str, str]], max_tokens: int) -> str:
         """The prompt for *source*, kept within the context (`PROMPT_SHARE`): the oldest earlier pairs left out first,
@@ -345,8 +376,8 @@ class PlamoTranslator(OllamaTranslator):
         if not texts:
             return []
         self.target_code  # noqa: B018 - a language PLaMo cannot write fails before any request
-        history = list(context)[-self.history_pairs:]
-        lines = [" ".join(str(t).split()) if "\n" in str(t) else str(t) for t in texts]
+        history = [(one_line(src), dst) for src, dst in list(context)[-self.history_pairs:]]
+        lines = [one_line(t) for t in texts]
         facts = [dict((meta[i] or {}) if meta and i < len(meta) else {}) for i in range(len(lines))]
         after = list(lines) + [str(t) for t in upcoming]  # what follows each line: the request's, then upcoming
         out: list[str] = [""] * len(lines)

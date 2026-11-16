@@ -166,13 +166,15 @@ class Settings:
     # something else; a number: that many layers on the GPU, the rest on the processor (`translate.ollama.num_gpu_value`)
     ollama_num_gpu: str = ""
     target_language: str = "English"
-    context_pages: int = 2  # live mode: previous pages passed to the model as context (memory only)
+    # live mode: previous pages passed to the model as context (memory only); PLaMo's earlier pairs instead grow from page
+    # to page and are cut back rarely (`translate.base.GrowingContext`: 60, then the newest 20); 0: none for either
+    context_pages: int = 2
 
     # --- whole-book batch: every page read as it is turned, then all of them translated with the whole book as context ---
     context_mode: bool = True  # False: page by page (each page translated as it is captured)
     chunk_bubbles: int = 30  # lines per request of the whole-book translation (3-5 pages; in runs of 100 the replies drift off their lines)
     lookahead_bubbles: int = 60  # upcoming bubbles shown to the chat translator for context only (PLaMo has no place for them)
-    context_pairs: int = 40  # previous (source, translation) pairs carried into the next request
+    context_pairs: int = 40  # previous (source, translation) pairs carried into the next request (PLaMo: as context_pages)
 
     # --- OCR ---
     models_dir: Path = field(default_factory=default_models_dir)

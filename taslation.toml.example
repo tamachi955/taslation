@@ -16,13 +16,14 @@ ollama_num_ctx = 16384        # the chat translator's context window (0 = server
 ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the first line to translate loads it, the end of a whole-book run or closing the window releases it. "-1": load it at the start and never unload
 ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Tools > Settings... > System). Tools > Release the model now gives the GPU memory back at once
 target_language = "English"
-context_pages = 2             # live mode: previous pages given to the model as context (memory only)
+context_pages = 2             # live mode: previous pages given to the model as context (memory only; PLaMo's earlier
+                              # lines grow to 60 and are cut back to the newest 20; 0: none)
 
 # --- whole-book batch: every page read as it is turned, then all of them translated in chunks with the whole book as context ---
 context_mode = true           # false: page by page (each page translated as it is captured)
 chunk_bubbles = 30            # lines per request of the whole-book translation (3-5 pages; in runs of 100 the replies drift off their lines)
 lookahead_bubbles = 60        # upcoming bubbles shown to the chat translator for context only (PLaMo has no place for them)
-context_pairs = 40            # previous (source, translation) pairs carried into the next request
+context_pairs = 40            # previous (source, translation) pairs carried into the next request (PLaMo: as above)
 
 # --- OCR ---
 # models_dir = "C:/path/to/models"   # where setup_models.py put the OCR model (default: ./models)

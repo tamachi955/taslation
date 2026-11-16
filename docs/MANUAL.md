@@ -815,6 +815,8 @@ PLaMo 3 Translate is a model made only for translation. TASlation builds its PFM
 (the form the model's card recommends for production use; the model's own chat template is not used: the template in the earlier revision's file could not be told
 the target language through Ollama, and ended up translating back into Japanese, and the one in the current file builds the same prompt as TASlation). Each line is one request,
 which carries the earlier lines and their translations, the series sheet as reference information (for a line with a speaker set, that speaker too), and, as a glossary, the series sheet's renderings that appear in that line.
+The earlier lines grow from page to page (from run to run in a whole-book run) and are cut back to the newest 20 only once they pass 60, so that each request's prompt begins with the one before it and Ollama does not compute that part again
+(when they moved on by a page at every page, the first request of each page took about 1,050 ms instead of 142).
 A region's hint for the model goes into the reference information of that line alone: in a test with invented lines it was followed in 38 of 78 answers (17 without it) and spoilt none,
 but never for the register or for who is addressed, and hints that should change nothing changed the wording of 5 of 30 answers (docs/OFFLINE_VERIFICATION.md); the region editor says so.
 The context is 8192 tokens, and it takes about 1.9 GB of GPU memory. On OpenMantra (Japanese to English, whole books, three runs each with fixed seeds),

@@ -76,6 +76,79 @@ def uses_room(translator: Any) -> bool:
     return bool(getattr(translator, "uses_room", True))
 
 
+# --- earlier pairs that only grow, cut back rarely ------------------------------------------------------------
+# A translator whose server reuses the beginning of a prompt only when the next prompt extends it byte for byte (PLaMo
+# on Ollama: a prompt that differs anywhere, even in its last earlier pair, is computed from its start again) is given
+# earlier pairs that only grow, from request to request and from page to page, and are cut back to the newest
+# `CONTEXT_CUT_TO` only once they pass `CONTEXT_GROWS_TO` (or no longer leave a request room: `GrowingContext.take`).
+# Sliding them by a page at every page made the first request of every page compute its whole prompt again (1,050 ms
+# against 142 ms for the later ones). Measured on OpenMantra (2026-11-16, PLaMo 3 Translate 2B on a 6 GB GPU): the
+# model's time 63.7 -> 49.0 s for 30 pages read one by one, 73.9 -> 57.7 s for the whole book; chrF 41.6 -> 41.2 and
+# 41.8 -> 42.0 (paired differences -0.19 +- 0.34 and -0.59 +- 0.41, a seed's own noise 0.45); no line left untranslated.
+CONTEXT_GROWS_TO = 60
+CONTEXT_CUT_TO = 20
+
+
+def grows_context(translator: Any) -> bool:
+    """Whether *translator* is given earlier pairs that only grow (`GrowingContext`): one that says so
+    (``grows_context``, `plamo.PlamoTranslator`). The chat translator, and one that does not say, gets the pairs of the
+    last pages or runs as before."""
+    return bool(getattr(translator, "grows_context", False))
+
+
+class GrowingContext:
+    """The earlier (Japanese, translation) pairs of a translator that `grows_context`: what is added stays, in its
+    order, so that a request's prompt extends the one before it; once they pass *grows_to* pairs, or the translator
+    finds that a request would have no room left after them (`take`'s *fits*), they are cut back to the newest
+    *cut_to* (fewer when even those do not fit). Memory only. Not shared between threads (the page's worker, or a
+    whole-book run's translation thread, has its own)."""
+
+    def __init__(self, grows_to: int = CONTEXT_GROWS_TO, cut_to: int = CONTEXT_CUT_TO):
+        self.grows_to = max(0, int(grows_to))
+        self.cut_to = max(0, min(int(cut_to), self.grows_to))
+        self._pairs: list[tuple[str, str]] = []
+        self.cuts = 0  # how many times they were cut back (for the tests and the evaluation)
+
+    maxlen = None  # (as a deque says it: no bound of its own)
+
+    def __len__(self) -> int:
+        return len(self._pairs)
+
+    def __iter__(self) -> Any:
+        return iter(list(self._pairs))
+
+    def append(self, pair: tuple[str, str]) -> None:
+        self._pairs.append((str(pair[0]), str(pair[1])))
+
+    def extend(self, pairs: Any) -> None:
+        for pair in pairs:
+            self.append(pair)
+
+    def clear(self) -> None:
+        self._pairs.clear()
+
+    def take(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> list[tuple[str, str]]:
+        """The pairs a request starts from (a copy), cut back first when they passed `grows_to` or *fits*(pairs) says
+        a request would not fit after them; a cut halves them on from `cut_to` while *fits* still says no."""
+        if not self._pairs:
+            return []
+        if len(self._pairs) > self.grows_to or (fits is not None and not fits(self._pairs)):
+            self._pairs = self._pairs[-self.cut_to:] if self.cut_to else []
+            self.cuts += 1
+            while self._pairs and fits is not None and not fits(self._pairs):
+                self._pairs = self._pairs[-(len(self._pairs) // 2):] if len(self._pairs) > 1 else []
+        return list(self._pairs)
+
+
+def context_fits(translator: Any, notes: str) -> Callable[[Sequence[tuple[str, str]]], bool] | None:
+    """What `GrowingContext.take` asks of *translator* with the premises *notes*: its ``context_fits`` (whether a
+    request may start from the pairs), None for a translator that has none."""
+    fits = getattr(translator, "context_fits", None)
+    if fits is None:
+        return None
+    return lambda pairs: bool(fits(pairs, notes))
+
+
 def accepts(fn: Any, name: str) -> bool:
     """Whether the callable *fn* takes a keyword argument *name* (or any keyword: ``**kwargs``)."""
     import inspect
