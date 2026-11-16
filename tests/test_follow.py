@@ -630,6 +630,123 @@ def test_a_page_turned_in_the_viewer_is_followed_at_its_first_frame(setup, monke
     assert len(v.captures) <= captures + 1 + 30 // 0.7  # no new frame: polled every auto_interval_ms, as before
 
 
+def test_a_frames_thumbnail_from_its_pixels_is_the_batchs_own():
+    """The live view takes a frame's pixels out of the picture once (`live.FrameFacts`) and makes its thumbnail from
+    them (`live.thumbnail_of`): the very values `batch.thumbnail` gives, which the whole-book run and the pages kept
+    compare with."""
+    pictures = [_page(1), _page(2, soft=3), _page(3, size=(333, 517)), Image.new("RGB", (7, 5), (3, 200, 9))]
+    for picture in pictures:
+        assert np.array_equal(live.thumbnail_of(picture, np.asarray(picture)), thumbnail(picture))
+        assert np.array_equal(live.thumbnail_of(picture, np.asarray(picture), 32), thumbnail(picture, 32))
+    for other in (_page(4).convert("RGBA"), _page(5).convert("L")):  # not RGB: the batch's own, as it is
+        assert np.array_equal(live.thumbnail_of(other, np.asarray(other)), thumbnail(other))
+
+
+def _follow_recorded(hidden_root, monkeypatch, tmp_path, worked_out_once: bool):
+    """A recorded sequence of the viewer's frames followed by events, the viewer in front and its frames counted:
+    page 1, the same picture captured again and again, page 2 sliding in (frames that keep changing), settling; a
+    page the cache holds whole, drawn soft first and sharp after; each capture a new picture, as the real capture
+    gives (the same bytes for a picture the viewer did not draw anew). What the window did, frame by frame: the
+    captures, the pages taken, what was on the page, what it said. With *worked_out_once* False every check works
+    its value out anew from the picture, as before `live.FrameFacts` (and nothing is shared with the page job)."""
+    from taslation import fingerprint as fp
+    from taslation.cache import CachedBubble, CachedPage, CacheStore
+
+    if not worked_out_once:
+        monkeypatch.setattr(live, "_facts", lambda window, image: live.FrameFacts(image))
+        monkeypatch.setattr(live, "_captured_facts", lambda window, hwnd, seq, image: live.FrameFacts(image))
+        monkeypatch.setattr(live, "thumbnail_of", lambda image, pixels=None, size=64: thumbnail(image, size))
+        monkeypatch.setattr(fp, "SHARED_KEEP", 0)
+    clock = Clock()
+    first = _page(1)
+    sliding = [Image.fromarray(np.roll(np.asarray(_page(2)), 40 * k, axis=1)) for k in (4, 3, 2, 1)]
+    soft, sharp = _page(8, soft=3), _page(8)
+    t0 = clock.now
+    frames = [(t0, first), *[(t0 + 5.0 + 0.05 * i, f) for i, f in enumerate(sliding)], (t0 + 5.2, _page(2)),
+              (t0 + 9.0, soft), (t0 + 9.3, sharp)]
+    labels: dict[int, str] = {}
+    names = {id(first): "1", id(soft): "8 soft", id(sharp): "8", id(frames[5][1]): "2"}
+    names.update({id(f): f"2 sliding {i}" for i, f in enumerate(sliding)})
+    kept: list[Image.Image] = []
+    trace: list[tuple] = []
+
+    def frame_now():
+        current = frames[0][1]
+        for since, frame in frames:
+            if clock.now >= since:
+                current = frame
+        return current
+
+    def capture_window(hwnd, client_only=True, allow_screen_fallback=True):
+        source = frame_now()
+        copy = source.copy()  # a new picture every time, as the real capture gives
+        kept.append(copy)
+        labels[id(copy)] = names[id(source)]
+        trace.append(("capture", round(clock.now - t0, 3), names[id(source)]))
+        return copy
+
+    def label(image):
+        return None if image is None else labels.get(id(image), names.get(id(image), "?"))
+
+    worked: dict[str, int] = {}  # how often each check was worked out
+
+    def counted(name, check):
+        def count(*args, **kwargs):
+            worked[name] = worked.get(name, 0) + 1
+            return check(*args, **kwargs)
+        return count
+
+    for name in ("is_blank", "is_black", "detail"):
+        monkeypatch.setattr(live, name, counted(name, getattr(live, name)))
+    monkeypatch.setattr(fp, "_analyze", counted("analyze", fp._analyze))
+    monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=clock.monotonic))
+    monkeypatch.setattr(live, "capture_window", capture_window)
+    monkeypatch.setattr(live, "frame_count", lambda hwnd: 1 + sum(1 for since, _f in frames[1:] if clock.now >= since))
+    monkeypatch.setattr(live, "window_exists", lambda hwnd: True)
+    monkeypatch.setattr(live, "client_rect_on_screen", lambda hwnd: (0, 0, 960, 720))
+    monkeypatch.setattr(live, "foreground_owner", lambda hwnd, viewer_hwnd: "viewer")
+    monkeypatch.setattr(live, "foreground_window", lambda: BROWSER)
+    monkeypatch.setattr(live, "last_input", lambda: 1)
+    monkeypatch.setattr(live, "window_at_pointer", lambda: 0)
+    w = Window(hidden_root, clock, owner="viewer")
+    w.settings.cache_enabled, w.settings.fingerprint_max_distance = True, 10
+    w.store = CacheStore(tmp_path / f"cache-{worked_out_once}")
+    w._name_needed = lambda: False
+    book = w.store.open("Book", "m", "English")
+    for unit in fp.analyze(np.asarray(sharp), (0, 0, 0, 0)):  # page 8 is in the cache, page 1 and 2 are not
+        book.add(CachedPage(unit.fingerprint, unit.width / unit.height, [CachedBubble((0.1, 0.1, 0.3, 0.3), "Hi")]))
+    book.save()
+    w.start()
+    shown = None
+    while clock.now < t0 + 12:
+        clock.run(0.05)
+        if w.busy:  # the page job: its frame read as `Pipeline.process` reads it (`units_of`), then done
+            read = np.asarray(w._job_frame.convert("RGB"))
+            trace.append(("job read", [u.fingerprint for u in fp.analyze(read, w.settings.margins)]))
+            w.job_done(PageResult(image=w._job_frame.copy(), original=w._job_frame.copy(), regions=[],
+                                  cache_hits=1))
+        if label(w._live) != shown:
+            shown = label(w._live)
+            trace.append(("shown", round(clock.now - t0, 3), shown))
+    trace += [("taken", round(t - t0, 3), label(p)) for t, p in w.new_pages]
+    trace += [("said", line) for line in w.statuses]
+    trace.append(("forgotten", len(w.pipeline.forgotten)))
+    return trace, worked
+
+
+def test_a_recorded_sequence_of_frames_leads_to_the_same_decisions_with_every_check_worked_out_once(
+        hidden_root, monkeypatch, tmp_path):
+    with monkeypatch.context() as patched:
+        before, worked_before = _follow_recorded(hidden_root, patched, tmp_path, worked_out_once=False)
+    now, worked = _follow_recorded(hidden_root, monkeypatch, tmp_path, worked_out_once=True)
+    assert now == before
+    assert all(worked[name] < worked_before[name] for name in worked_before), (worked, worked_before)
+    taken = [entry[2] for entry in now if entry[0] == "taken"]
+    assert taken == ["1", "2", "8"]  # (the sequence did what it says: page 8 taken at its first sharp frame, cached)
+    assert ("taken", 9.315, "8") in now and ("shown", 9.05, "8 soft") in now
+    assert sum(1 for entry in now if entry[0] == "capture" and entry[2] == "1") > 5  # page 1 captured again and again
+
+
 def test_a_page_that_settles_while_a_job_runs_is_taken_after_it(setup):
     v = setup.viewer
     w = setup.make()

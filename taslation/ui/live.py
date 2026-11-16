@@ -56,6 +56,7 @@ import tkinter as tk
 from dataclasses import dataclass, field
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -130,6 +131,123 @@ from .progress import status_word, unsure_art, usual_char
 from .strip import end_follow, run_page_on_show
 
 COVERED_PROBE_MS = 500  # a viewer asked to paint itself anew (`_learn_covered`): a frame within this says it drew
+FACTS_KEPT = 4  # the frames whose `FrameFacts` the window keeps, the latest first ...
+PIXELS_KEPT = 2  # ... with the pixels of so many of them (and of the frame captured last)
+
+
+class FrameFacts:
+    """What the live view works out of one frame (a capture of the viewer, a page read), each once: numpy's copy of
+    its pixels, whether it is blank or black, its thumbnail, its fine detail and its page units - the very values
+    `capture.is_blank`, `capture.is_black`, `batch.thumbnail`, `batch.detail` and `fingerprint.analyze` give for it,
+    so that a frame leads to the decisions it led to when every check worked them out anew (and took the pixels out
+    of the picture anew: 12 ms a time for a full-screen frame, measured). A frame captured again with the very same
+    bytes shares the facts of the capture before it (`_captured_facts`)."""
+
+    __slots__ = ("image", "_pixels", "memo", "hwnd", "seq")
+
+    def __init__(self, image: Image.Image) -> None:
+        self.image = image
+        self._pixels: np.ndarray | None = None
+        self.memo: dict[Any, Any] = {}
+        self.hwnd: int | None = None  # a capture: the window ...
+        self.seq: int | None = None  # ... and its frame count before the capture
+
+    @property
+    def pixels(self) -> np.ndarray:
+        """``np.asarray(image)`` (read-only)."""
+        if self._pixels is None:
+            self._pixels = np.asarray(self.image)
+        return self._pixels
+
+    def rgb(self) -> np.ndarray:
+        """``np.asarray(image.convert("RGB"))``: the pixels themselves for an RGB picture (a capture's)."""
+        return self.pixels if self.image.mode == "RGB" else np.asarray(self.image.convert("RGB"))
+
+    def get(self, key: Any, make: Any) -> Any:
+        """The fact *key*, made by *make* the first time (what *make* raises is raised, and nothing is kept)."""
+        memo = self.memo
+        if key not in memo:
+            memo[key] = make()
+        return memo[key]
+
+
+def _facts(window: Any, image: Image.Image) -> FrameFacts:
+    """The facts of *image* the window keeps (`FrameFacts`, by the picture's identity), made when it has none."""
+    kept = getattr(window, "_frame_facts", None)
+    if kept is None:
+        kept = window._frame_facts = []
+    for facts in kept:
+        if facts.image is image:
+            return facts
+    facts = FrameFacts(image)
+    kept.insert(0, facts)
+    del kept[FACTS_KEPT:]
+    last = getattr(window, "_capture_facts", None)
+    for older in kept[PIXELS_KEPT:]:
+        if older is not last:
+            older._pixels = None  # (17 MB a full-screen frame; made again when asked for)
+    return facts
+
+
+def _captured_facts(window: Any, hwnd: int, seq: int | None, image: Image.Image) -> FrameFacts:
+    """A frame `_capture` just took of the window *hwnd* (*seq*: its frame count before): when the capture before was
+    of that window, the count has not moved since (or is not known) and the bytes are the very same - a frame
+    captured again while the viewer drew none -, what was worked out of them holds for this one too, and nothing is
+    worked out again."""
+    facts = _facts(window, image)
+    last = getattr(window, "_capture_facts", None)
+    if (last is not None and last is not facts and last.memo is not facts.memo and last.hwnd == hwnd
+            and (seq is None or last.seq == seq) and last.image.size == image.size
+            and last.image.mode == image.mode and fp.same_pixels(last.pixels, facts.pixels)):
+        facts.memo = last.memo
+    facts.hwnd, facts.seq = hwnd, seq
+    window._capture_facts = facts
+    return facts
+
+
+def _blank(window: Any, image: Image.Image) -> bool:
+    """`capture.is_blank` of *image*."""
+    facts = _facts(window, image)
+    return facts.get("blank", lambda: is_blank(facts.pixels))  # (is_blank takes numpy's copy of the pixels)
+
+
+def _black(window: Any, image: Image.Image, margins: Any) -> bool:
+    """`capture.is_black` of *image* in the capture area *margins*."""
+    facts = _facts(window, image)
+    margins = tuple(margins)
+    return facts.get(("black", margins), lambda: is_black(facts.pixels, margins))
+
+
+def thumbnail_of(image: Image.Image, pixels: np.ndarray | None = None, size: int = 64) -> np.ndarray:
+    """`batch.thumbnail` of *image*: from its *pixels* (``np.asarray(image)``) when it is an RGB picture - the very
+    values, with the picture's pixels taken out of it once (tests/test_follow.py holds the two alike) -, else
+    `batch.thumbnail` itself."""
+    if (pixels is None or image.mode != "RGB" or pixels.dtype != np.uint8 or pixels.ndim != 3
+            or pixels.shape[2] != 3):
+        return thumbnail(image, size)
+    gray = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
+    return cv2.resize(gray, (size, size), interpolation=cv2.INTER_AREA).astype(np.float32)
+
+
+def _thumb(window: Any, image: Image.Image) -> np.ndarray:
+    """`batch.thumbnail` of *image*."""
+    facts = _facts(window, image)
+    return facts.get("thumb", lambda: thumbnail_of(image, facts.pixels if image.mode == "RGB" else None))
+
+
+def _detail(window: Any, image: Image.Image, box: Any) -> np.ndarray:
+    """`batch.detail` of *image* in *box*."""
+    facts = _facts(window, image)
+    box = tuple(box) if box is not None else None
+    return facts.get(("detail", box), lambda: detail(image, box))
+
+
+def _units(window: Any, image: Image.Image, margins: Any) -> list[Any]:
+    """`fingerprint.analyze` of *image* in the capture area *margins* (shared: never change what it gives). The
+    analysis is kept by `fingerprint.analyze` as well, so that the page job that reads this frame takes its units
+    from there (`Pipeline.units_of`)."""
+    facts = _facts(window, image)
+    return facts.get(("units", tuple(margins)), lambda: fp.analyze(facts.rgb(), margins))
 
 
 def follow_decision(mode: str, owner: str, *, following: bool, look_due: bool, poll_due: bool,
@@ -277,7 +395,7 @@ class BlackViewerMixin:
         (`recovery.BlackWatch`), a later one takes the spell a step on. Never while TASlation enlarges the window
         (`_resizing`): the frames then are of that change. A run has its own wait for a black viewer. No key goes for
         it."""
-        black = is_black(image, self.settings.margins)
+        black = _black(self, image, self.settings.margins)
         if in_a_run(self):
             return black
         watch = getattr(self, "_black_watch", None)
@@ -570,7 +688,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return thumb
         box = area.margins_to_box(margins, image.size)
         whole = box == (0, 0, image.width, image.height) or box[2] <= box[0] or box[3] <= box[1]
-        thumb = thumbnail(image if whole else image.crop(box))
+        thumb = _thumb(self, image) if whole else thumbnail(image.crop(box))
         self._thumbs = [(margins, image, thumb), *self._thumbs[:3]]
         return thumb
 
@@ -603,7 +721,7 @@ class LiveViewMixin(BlackViewerMixin):
     def _settle_live(self, result: PageResult) -> None:
         """A job's page has come: when the viewer still shows the frame it was read from, that capture is the live
         frame (the page then shows as it is, nothing laid over it)."""
-        thumb = self._job_thumb if self._job_thumb is not None else thumbnail(result.original)
+        thumb = self._job_thumb if self._job_thumb is not None else _thumb(self, result.original)
         if self._live_thumb is None or not frames_differ(self._live_thumb, thumb, LIVE_CHANGE):
             self._live, self._live_thumb = result.original, thumb
 
@@ -614,7 +732,7 @@ class LiveViewMixin(BlackViewerMixin):
         f = getattr(self, "_following", None)
         if f is not None:
             f.unseen = False
-        thumb = thumbnail(image) if thumb is None else thumb
+        thumb = _thumb(self, image) if thumb is None else thumb
         if (self._live is not None and self._live_thumb is not None and self._live.size == image.size
                 and not frames_differ(self._live_thumb, thumb, LIVE_CHANGE)):
             return
@@ -734,7 +852,7 @@ class LiveViewMixin(BlackViewerMixin):
             return True
         try:
             cache = self.store.peek(book, model, language or "English")
-            units = fp.analyze(np.asarray(image.convert("RGB")), self.settings.margins)
+            units = _units(self, image, self.settings.margins)
         except Exception:
             return False
         return bool(units) and any(
@@ -767,7 +885,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return False
             book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
             cache = self.store.peek(book, model, language or "English")
-            units = fp.analyze(np.asarray(image.convert("RGB")), s.margins)
+            units = _units(self, image, s.margins)
             if not units:
                 return False
             for u in units:
@@ -898,7 +1016,7 @@ class LiveViewMixin(BlackViewerMixin):
             if events:
                 self._following.polled = self._frame_count()  # (before the capture: a frame that comes during it is new)
             image = self._capture(win.hwnd)
-            thumb = thumbnail(image)
+            thumb = _thumb(self, image)
             if self._drew_nothing(thumb):  # one flat colour, or black: the viewer drew nothing
                 return
             self._show_live(image, thumb)
@@ -910,7 +1028,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return
             if events:
                 if self._auto_last is None or frames_differ(self._auto_last, thumb):  # a new page: followed at once
-                    frame_detail = detail(image, self._area_box(image))
+                    frame_detail = _detail(self, image, self._area_box(image))
                     if not self._take_at_once(win.hwnd, image, thumb, frame_detail):
                         self._begin_follow(win.hwnd, None, phase="settle", last=thumb, last_detail=frame_detail)
                 return
@@ -989,7 +1107,8 @@ class LiveViewMixin(BlackViewerMixin):
         if self.reading:
             try:
                 image = capture_window(hwnd, allow_screen_fallback=False)
-                if is_blank(image) and self._blank_behind(hwnd):
+                _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
+                if _blank(self, image) and self._blank_behind(hwnd):
                     raise CaptureError("the viewer gives no picture behind the reading window")
             except CaptureError:
                 self._set_viewer_hidden(True)
@@ -998,11 +1117,12 @@ class LiveViewMixin(BlackViewerMixin):
         else:
             covered = self._covers_viewer(hwnd)
             image = capture_window(hwnd, allow_screen_fallback=not covered)
-            if covered and is_blank(image) and self._blank_behind(hwnd):
+            _captured_facts(self, hwnd, seq, image)
+            if covered and _blank(self, image) and self._blank_behind(hwnd):
                 raise ViewerCovered("the viewer draws nothing behind TASlation")
             self._set_covered(False)
         black = self._see_black(hwnd, image)
-        if is_blank(image):
+        if _blank(self, image):
             if self._resizing():
                 return image
         else:
@@ -1349,7 +1469,7 @@ class LiveViewMixin(BlackViewerMixin):
             image = self._capture(hwnd)
         except CaptureError:
             return
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         now = time.monotonic()
         if frames_differ(reference, thumb):
             self._seen_turn(hwnd, raised, pressed)
@@ -1387,7 +1507,7 @@ class LiveViewMixin(BlackViewerMixin):
         once it has settled (*calm*: two frames 120 ms apart alike), is watched for turning once more - the posted
         key had arrived after all, and the viewer turned two pages (`_say_two_turns`)."""
         try:
-            thumb = thumbnail(self._capture(hwnd))
+            thumb = _thumb(self, self._capture(hwnd))
         except CaptureError:
             return
         if calm is not None and frames_differ(calm, thumb):
@@ -1406,7 +1526,7 @@ class LiveViewMixin(BlackViewerMixin):
         except CaptureError as e:
             self._capture_failed(e)
             return
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         self._auto_last = thumb
         self._show_live(image, thumb)
         self._start_translate(image, thumb=thumb)
@@ -1562,7 +1682,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._capture_failed(e)
             f.look_at = time.monotonic() + again  # again while it lasts (covered, hidden, minimised)
             return
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         if self._drew_nothing(thumb):  # the viewer drew nothing: again soon
             f.look_at = time.monotonic() + again
             return
@@ -1580,7 +1700,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._take(image, thumb)
         else:
             self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
-                               last_detail=detail(image, self._area_box(image)))
+                               last_detail=_detail(self, image, self._area_box(image)))
 
     def _look_over_job(self, win: Any) -> None:
         """A look while a page is translated with Auto on (`_look`): the viewer's frame compared with the page being
@@ -1596,7 +1716,7 @@ class LiveViewMixin(BlackViewerMixin):
             image = self._capture(win.hwnd)
         except CaptureError:
             return  # looked at again once the job is done
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         if self._drew_nothing(thumb):  # the viewer drew nothing
             return
         f = self._following
@@ -1642,7 +1762,7 @@ class LiveViewMixin(BlackViewerMixin):
         f = self._following
         f.retake = None
         if frame_detail is None:
-            frame_detail = detail(image, self._area_box(image))
+            frame_detail = _detail(self, image, self._area_box(image))
         f.taken = Taken(image, thumb, frame_detail, time.monotonic())
 
     def _check_sharper(self, image: Image.Image, thumb: np.ndarray) -> bool:
@@ -1652,7 +1772,7 @@ class LiveViewMixin(BlackViewerMixin):
         taken = f.taken
         if taken is None or time.monotonic() - taken.at > RETAKE_WITHIN_MS / 1000 or frames_differ(taken.thumb, thumb):
             return False
-        frame_detail = detail(image, self._area_box(image))
+        frame_detail = _detail(self, image, self._area_box(image))
         if not sharper(taken.detail, frame_detail):
             return False
         self._retake(image, thumb, frame_detail)
@@ -1986,7 +2106,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._capture_failed(e)
             f.look_at = now + self.settings.auto_interval_ms / 1000  # looked at again while it lasts
             return
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         blank = self._drew_nothing(thumb)  # nothing drawn (yet)
         if op.phase == "change":
             self._await_change(op, image, thumb, now, blank)
@@ -1998,7 +2118,7 @@ class LiveViewMixin(BlackViewerMixin):
             else:
                 f.look_at = now + self.settings.auto_interval_ms / 1000
             return
-        frame_detail = detail(image, self._area_box(image))
+        frame_detail = _detail(self, image, self._area_box(image))
         self._show_live(image, thumb)
         f.seen = thumb
         if op.phase == "settle":
@@ -2090,9 +2210,9 @@ class LiveViewMixin(BlackViewerMixin):
         except CaptureError:
             taken.complete = False
             return True
-        thumb = thumbnail(image)
+        thumb = _thumb(self, image)
         if frames_differ(taken.thumb, thumb):  # another page after all: followed until it settles
-            self._settle_on(op, thumb, detail(image, self._area_box(image)), now)
+            self._settle_on(op, thumb, _detail(self, image, self._area_box(image)), now)
             return True
         self._complete_taken(op, image, thumb, now)
         return True
@@ -2140,7 +2260,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return  # (the run reading the pages takes the page)
             self._auto_candidate = None
             f.seen = thumb
-            frame_detail = detail(image, self._area_box(image))
+            frame_detail = _detail(self, image, self._area_box(image))
             if op.pressed:
                 op.turned_at = now  # (does it turn once more, soon? "settle" watches)
             elif self._take_at_once(op.hwnd, image, thumb, frame_detail, operation=True, shown=False):

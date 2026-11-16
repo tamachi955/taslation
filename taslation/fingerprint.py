@@ -10,7 +10,9 @@ copy of the book: without the real page in the viewer there is nothing to show.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from typing import Any
 
 import cv2
 import numpy as np
@@ -332,6 +334,37 @@ def paper_box(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0)
     return (box[0] + x0, box[1] + y0, box[2] + x0, box[3] + y0)
 
 
+SHARED_KEEP = 2  # the latest analyses of captures whose pixels never change, kept for the next look at the same pixels
+_shared: list[tuple[np.ndarray, tuple[Any, ...], tuple[PageUnit, ...]]] = []  # (pixels, arguments, units): newest first
+_shared_lock = threading.Lock()
+
+
+def _fixed(rgb: np.ndarray) -> bool:
+    """Whether the pixels of *rgb* can never change: a read-only array over a bytes object, all the way down (what
+    numpy makes of a PIL image: the window's frames, the page a job reads)."""
+    base: Any = rgb
+    while isinstance(base, np.ndarray):
+        if base.flags.writeable:
+            return False
+        base = base.base
+    return isinstance(base, bytes)
+
+
+def same_pixels(a: np.ndarray, b: np.ndarray) -> bool:
+    """Whether *a* and *b* hold the very same pixels (a few rows compared first: two frames of a turning page differ
+    there already)."""
+    if a is b:
+        return True
+    if a.shape != b.shape or a.dtype != b.dtype:
+        return False
+    step = max(1, a.shape[0] // 32)
+    return bool(np.array_equal(a[::step], b[::step]) and np.array_equal(a, b))
+
+
+def _copies(units: Any) -> list[PageUnit]:
+    return [PageUnit(u.box, u.fingerprint, u.index) for u in units]
+
+
 def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), grow: bool = True,
             known: dict[Box, str] | None = None, rtl: bool = True) -> list[PageUnit]:
     """Locate the page(s) in a capture and fingerprint each one.
@@ -342,7 +375,31 @@ def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), 
     missed (`Pipeline._lookup_before`) look for those; what the pipeline keeps is fingerprinted with *grow*. *known*:
     the fingerprints of boxes of this very capture computed already (by box; the ones computed here are added), for a
     capture analyzed in several areas. *rtl*: the book's reading direction, which page of a spread comes first
-    (`split_spread`); the units' boxes and fingerprints do not depend on it."""
+    (`split_spread`); the units' boxes and fingerprints do not depend on it.
+
+    The analysis is computed once for the same pixels: the units of the latest SHARED_KEEP captures whose pixels
+    never change (`_fixed`) are kept, and a capture with the very same pixels, analyzed with the same arguments, gets
+    copies of them - the window's check of a frame on its thread (`ui.live`) and the page job that reads that frame
+    then (`Pipeline.units_of`) share one analysis. Nothing is kept for a capture analyzed with *known*."""
+    if known is not None or not isinstance(rgb, np.ndarray) or not all(type(m) is int for m in margins):
+        return _analyze(rgb, margins, grow, known, rtl)
+    args = (tuple(margins), bool(grow), bool(rtl))
+    with _shared_lock:
+        kept = list(_shared)
+    for pixels, kept_args, units in kept:
+        if kept_args == args and same_pixels(pixels, rgb):
+            return _copies(units)
+    found = _analyze(rgb, margins, grow, None, rtl)
+    if _fixed(rgb):
+        with _shared_lock:
+            _shared[:] = [(rgb, args, tuple(_copies(found)))] + [e for e in _shared if e[0] is not rgb or e[1] != args]
+            del _shared[SHARED_KEEP:]
+    return found
+
+
+def _analyze(rgb: np.ndarray, margins: tuple[int, int, int, int], grow: bool, known: dict[Box, str] | None,
+             rtl: bool) -> list[PageUnit]:
+    """`analyze`, computed."""
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
     x0, y0, x1, y1 = capture_area(gray.shape[1], gray.shape[0], margins)
     sub = gray[y0:y1, x0:x1]

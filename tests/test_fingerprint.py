@@ -243,3 +243,35 @@ def test_analyze_stays_fast_on_a_full_hd_capture_with_dark_pages(sample_page):
         fp.analyze(rgb)
         times.append(time.perf_counter() - start)
     assert min(times) < 0.030, times
+
+
+def test_the_same_pixels_are_analyzed_once_and_shared(sample_page, sample_page2, monkeypatch):
+    """A capture whose pixels never change (numpy's read-only copy of a picture) is analyzed once: the window's check
+    of a frame and the page job that reads the same frame (another copy of the same bytes) share the analysis, as
+    fresh copies of its units; other arguments, other pixels, a capture whose pixels can change and one analyzed
+    with *known* are worked out as ever."""
+    worked = []
+    real = fp._analyze
+    monkeypatch.setattr(fp, "_analyze", lambda *args: worked.append(args[1:]) or real(*args))
+    monkeypatch.setattr(fp, "_shared", [])
+    frame = np.asarray(sample_page)
+    units = fp.analyze(frame, (0, 0, 0, 0))
+    read = np.asarray(sample_page.convert("RGB"))  # the job's own copy of the frame
+    again = fp.analyze(read, (0, 0, 0, 0))
+    assert again == units and again[0] is not units[0] and len(worked) == 1
+    again[0].index = 9  # what a caller does to its units reaches no one else
+    assert fp.analyze(read, (0, 0, 0, 0)) == units and len(worked) == 1
+    writable = np.array(sample_page)
+    assert fp.analyze(writable, (0, 0, 0, 0)) == units and len(worked) == 1  # the same pixels: shared
+    writable[:, :, :] = 255  # ... and once they change, never the units of before
+    assert fp.analyze(writable, (0, 0, 0, 0)) == [] and len(worked) == 2
+    assert all(entry[0] is not writable for entry in fp._shared)  # pixels that can change are never kept
+    fp.analyze(read, (0, 20, 0, 0))
+    fp.analyze(read, (0, 0, 0, 0), rtl=False)
+    fp.analyze(read, (0, 0, 0, 0), grow=False)
+    assert len(worked) == 5  # other arguments: worked out
+    other = fp.analyze(np.asarray(sample_page2), (0, 0, 0, 0))
+    assert len(worked) == 6 and other[0].fingerprint != units[0].fingerprint
+    assert len(fp._shared) == fp.SHARED_KEEP
+    fp.analyze(np.asarray(sample_page2), (0, 0, 0, 0), known={})
+    assert len(worked) == 7
