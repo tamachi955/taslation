@@ -257,6 +257,7 @@ class OllamaTranslator:
         # told about a load as a Message: ``ollama.loading``, ``ollama.loaded``, ``ollama.partly_on_gpu``
         self.on_status: Callable[[Message], Any] | None = None
         self._used: set[str] = set()  # the models this translator had Ollama load or use (what `release` unloads)
+        self._loading = threading.Lock()  # one `ensure_loaded` at a time: another waits, then finds the model loaded
         self.last_stats: dict[str, Any] = {}
         # the known model (`models.TranslatorModel`) the target language chose for this translator (`make_translator`
         # with ``ollama_model = "auto"``), None for a model set by hand: a model Ollama lacks is then said as
@@ -572,10 +573,22 @@ class OllamaTranslator:
         """The model in memory before a request is sent (see the module's docstring). Nothing happens when it is
         loaded, when ``keep_alive`` would unload it right away, or when /api/ps does not answer: the request then goes
         out as it always did, and says what is wrong itself (and starts Ollama). A load that fails raises what the
-        request would have raised; Stop raises `Cancelled`."""
-        model = self.model
+        request would have raised; Stop raises `Cancelled`. One at a time: a call while another loads (the page's
+        model loaded ahead while the page is read, `pipeline.LoadAhead`) waits for it - Stop ends the wait - and then
+        finds the model loaded, so that the model is loaded once and the GPU models let go once."""
         if unloads_at_once(self.keep_alive):
             return
+        while not self._loading.acquire(timeout=POLL_S):
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+        try:
+            self._ensure_loaded(cancel, on_slow)
+        finally:
+            self._loading.release()
+
+    def _ensure_loaded(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None) -> None:
+        """`ensure_loaded`, its turn come."""
+        model = self.model
         try:
             if self._loaded(model) is not None:
                 return

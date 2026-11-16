@@ -611,7 +611,8 @@ class JobsMixin:
             if again is not None:
                 held = self.pipeline.pages_of(again)
                 self.pipeline.forget_page(again, keep_edited=not replace_edited)
-            hold = getattr(self.pipeline, "saves_held", None)  # (the cache saved once the page is shown, below)
+            # (the page on show: the cache saved once it is shown, below; the model loaded while it is read)
+            hold = getattr(self.pipeline, "page_on_show", None) or getattr(self.pipeline, "saves_held", None)
             try:
                 with hold() if hold is not None else nullcontext():
                     result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),

@@ -795,6 +795,46 @@ class PageDraft:
         return hit[1]
 
 
+class LoadAhead:
+    """The translator's model loaded on a thread of its own while a page on show in the window is read
+    (`Pipeline.page_on_show`): started once the reading finds the first line to translate, so that a load (seconds,
+    when Ollama does not hold the model) is done while the rest of the page is read, and the request finds the model
+    loaded (`OllamaTranslator.ensure_loaded`: one load at a time, the GPU models let go before it as ever). The page's
+    cancel ends it; `join` waits for it, so that the page lets go of the worker with no load of its own under way (Tools
+    > Release the model now waits for the page). Once it has loaded the model, the page models are warmed again
+    (`Pipeline.warm_page_models`): after the load, never during it, so that they never take the memory Ollama loads
+    into. A load that fails is left to the request, which says what is wrong as ever."""
+
+    def __init__(self, pipeline: "Pipeline", cancel: threading.Event):
+        self.pipeline, self.cancel = pipeline, cancel
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """The load begun (once; nothing for a translator without a model to load)."""
+        translator = self.pipeline.translator
+        if self.thread is not None or getattr(translator, "ensure_loaded", None) is None:
+            return
+        self.thread = threading.Thread(target=self._run, args=(translator,), name="taslation-load-ahead", daemon=True)
+        self.thread.start()
+
+    def _run(self, translator: Any) -> None:
+        pipeline = self.pipeline
+        released = pipeline._gpu_released
+        try:
+            translator.ensure_loaded(self.cancel)
+        except BaseException:  # noqa: BLE001 - Stop, or a load that failed: the request says it, as ever
+            return
+        if pipeline._gpu_released != released and not self.cancel.is_set():  # (it loaded the model)
+            try:
+                pipeline.warm_page_models()
+            except Exception:  # noqa: BLE001 - only a matter of speed: each loads when it is needed
+                pass
+
+    def join(self) -> None:
+        if self.thread is not None:
+            self.thread.join()
+
+
 class Pipeline:
     def __init__(
         self,
@@ -1046,6 +1086,19 @@ class Pipeline:
             return False
         self._save_errors.pop(name, None)
         return True
+
+    @contextmanager
+    def page_on_show(self) -> Iterator[None]:
+        """(the window's page job, on its worker) Within it, the page `process` reads is the one on show: its cache
+        saves wait for it to be shown (`saves_held`), and the translator's model loads while it is read, with the
+        page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (a whole-book run's)."""
+        before = getattr(_ON_SHOW, "window", False)
+        _ON_SHOW.window = True
+        try:
+            with self.saves_held():
+                yield
+        finally:
+            _ON_SHOW.window = before
 
     @contextmanager
     def saves_held(self) -> Iterator[None]:
@@ -1340,27 +1393,38 @@ class Pipeline:
 
         out = rgb.copy()
         all_regions: list[TextRegion] = []
-        for unit, unit_regions, page in plans:
-            if page is not None:
-                if completes(page):
-                    err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow,
-                                              reuse=reuse)
-                    if err:
-                        result.error = err
-            elif unit_regions:
-                self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
-                self._take_corrections(unit, unit_regions)
-                self._order_read(rgb, unit.box, unit_regions)
-                timer.lap("ocr")
-                if translate:
-                    err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
-                                                  reuse=reuse if use_cache else None)
-                    timer.lap("translate")
-                    if err:
-                        result.error = err
-                    if use_cache and self.cache is not None and self._cacheable(unit_regions):
-                        self._store_regions(unit, unit_regions)
-            all_regions.extend(unit_regions)
+        # a page on show in the window that is read to be translated: the model loads while it is read (`LoadAhead`)
+        reads = any((page is None and unit_regions) or (page is not None and completes(page))
+                    for _unit, unit_regions, page in plans)
+        ahead = (LoadAhead(self, cancel) if getattr(_ON_SHOW, "window", False) and cancel is not None and translate
+                 and reads and self.translator is not None else None)
+        held_ahead, _ON_SHOW.ahead = getattr(_ON_SHOW, "ahead", None), ahead
+        try:
+            for unit, unit_regions, page in plans:
+                if page is not None:
+                    if completes(page):
+                        err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow,
+                                                  reuse=reuse)
+                        if err:
+                            result.error = err
+                elif unit_regions:
+                    self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
+                    self._take_corrections(unit, unit_regions)
+                    self._order_read(rgb, unit.box, unit_regions)
+                    timer.lap("ocr")
+                    if translate:
+                        err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
+                                                      reuse=reuse if use_cache else None)
+                        timer.lap("translate")
+                        if err:
+                            result.error = err
+                        if use_cache and self.cache is not None and self._cacheable(unit_regions):
+                            self._store_regions(unit, unit_regions)
+                all_regions.extend(unit_regions)
+        finally:
+            _ON_SHOW.ahead = held_ahead
+            if ahead is not None:
+                ahead.join()  # (the page lets go of the worker with no load of its own under way)
 
         for i, r in enumerate(all_regions):
             r.order = i
@@ -2510,6 +2574,9 @@ class Pipeline:
             size = size_sample(self._read(rgb, r, r.text_box, self._ocr_view(rgb, r)))
             if size is not None:
                 samples.append(size)
+                ahead = getattr(_ON_SHOW, "ahead", None)
+                if ahead is not None:
+                    ahead.start()  # (a line read surely: the model loads while the rest is read, `LoadAhead`)
         usual = usual_size(samples, self._book_sizes)
         self._add_sizes(samples)
         return usual
@@ -2571,6 +2638,9 @@ class Pipeline:
                 if unanimous:
                     status = self._verdict(r, reading, pieces, usual, unanimous=True)
             if status == "untranslated" or r.kind.startswith("manual"):  # the gate is charspot's: the others read the rest
+                ahead = getattr(_ON_SHOW, "ahead", None)
+                if ahead is not None:
+                    ahead.start()  # (a line to translate: the model loads while the rest is read, `LoadAhead`)
                 check_cancel(cancel)  # (the other readers take most of a region's time)
                 reading = self._settle(rgb, r, box, reading, view)
                 status = self._verdict(r, reading, pieces, usual, unanimous)
