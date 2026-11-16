@@ -1045,7 +1045,8 @@ other work, setting `ocr_threads` to half the number of cores can make it faster
 With an NVIDIA GPU, `ocr_runs_on` (`"auto"` by default) puts manga-ocr-charspot-small and manga-ocr-nar-small on the GPU, but only when it has room for them at TASlation's peak:
 the translation model whole in video memory, LaMa and the layout model when they are used, PyTorch's own memory, and what other programs hold now, with 1 GB left over.
 A card of less than 5 GB is never used for them, and the larger translation model (Qwen3.5 4B) leaves no room on a 6 GB card. The third model reads only a few lines a page and stays on the CPU.
-TASlation decides when the OCR models load, again after the GPU memory was let go (before Ollama loads its model, and "Tools > Release the model now"), and when a setting it depends on changes.
+TASlation decides when the OCR models load, again after the GPU memory was let go ("Tools > Release the model now", and before Ollama loads its model when the room is no longer there), and when a setting it depends on changes.
+While Ollama loads its model, the two stay on the GPU as long as the room is still there at that moment; with `"gpu"` they go back to the CPU for the load, as before.
 It never decides while the translation model loads or answers, but at the first line read after that (at start, after the translation model's load when that is still under way).
 While the translation model answers (the next page of a spread is read meanwhile, for one), the two read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
 If the GPU fails (out of memory or another CUDA error), that line is read on the CPU, and the OCR stays on the CPU until the window closes. The readings are the same on both.
