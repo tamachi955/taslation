@@ -835,6 +835,103 @@ class LoadAhead:
             self.thread.join()
 
 
+class _HeldFill:
+    """A page's `PageFill` as a unit read beside sees it (`ReadBeside`): what its `read` would send is held, to be sent
+    in the unit's turn. The announced regions are only looked up."""
+
+    def __init__(self, fill: PageFill, held: list[tuple[Any, ...]]):
+        self.index = fill.index
+        self.emit = lambda kind, data: held.append(("emit", kind, data))
+
+    read = PageFill.read
+
+
+class ReadBeside:
+    """A spread's next page unit read on a thread of its own while the unit before it is translated (the window's page
+    job, `Pipeline.process`, within `Pipeline.page_on_show`; `SPREAD_READ`): the reading of it (`_ocr_regions`) is what
+    the worker would have done after the translation, for nothing it reads is changed by a translation - the page's
+    pixels, the settings, the readers and their memos - but the book's sizes, which it sees as they were when it began,
+    with its own samples added (`_HeldSizes`): those join the book's in its turn (`take`), so that the drafts of the unit
+    being translated letter at the sizes they had. What it would have told (the progress, the regions read) is held and
+    told in its turn, in its order; an error of it is raised there. The OCR has one user at a time: the worker reads no
+    region while it translates. The thread runs at a lower priority (the window, the drafts and the model's requests
+    first); torch keeps its threads, for their number could change a reading. The page's cancel ends it, and so does
+    `drop` (the unit before it stopped or failed)."""
+
+    def __init__(self, pipeline: "Pipeline", rgb: np.ndarray, index: int, unit: fp.PageUnit,
+                 regions: list[TextRegion], fill: PageFill | None, cancel: threading.Event):
+        self.pipeline, self.rgb, self.index, self.unit, self.regions = pipeline, rgb, index, unit, regions
+        self.held: list[tuple[Any, ...]] = []  # ("report", message) / ("emit", kind, data), in the order they came
+        self.fill = _HeldFill(fill, self.held) if fill is not None else None
+        self.sizes = _HeldSizes(pipeline._book_sizes)
+        self.cancel, self.stop = cancel, threading.Event()
+        self.error: BaseException | None = None
+        self.thread = threading.Thread(target=self._run, name="taslation-read-beside", daemon=True)
+
+    def start(self) -> "ReadBeside":
+        self.thread.start()
+        return self
+
+    def _run(self) -> None:
+        try:
+            from .batch import lower_priority  # (the batch imports the pipeline)
+
+            lower_priority()
+        except Exception:  # noqa: BLE001 - only a matter of speed
+            pass
+        _SIZES.held = self.sizes
+        try:
+            self.pipeline._ocr_regions(self.rgb, self.regions, lambda m: self.held.append(("report", m)), self.fill,
+                                       _Either(self.cancel, self.stop), unit_box=self.unit.box)  # type: ignore[arg-type]
+        except BaseException as e:  # noqa: BLE001 - raised in the unit's turn
+            self.error = e
+        finally:
+            _SIZES.held = None
+
+    def take(self, report: ProgressFn, fill: PageFill | None) -> None:
+        """(the worker, the unit's turn) The reading waited for; what it told told now, its samples added to the
+        book's sizes, and its error raised."""
+        self.thread.join()
+        for item in self.held:
+            if item[0] == "report":
+                report(item[1])
+            elif fill is not None:
+                fill.emit(item[1], item[2])
+        self.held.clear()
+        if self.sizes.samples:
+            self.pipeline._add_sizes(self.sizes.samples)
+        if self.error is not None:
+            raise self.error
+
+    def drop(self) -> None:
+        """The reading ended and left: nothing of it is told or kept."""
+        self.stop.set()
+        self.thread.join()
+
+
+class _HeldSizes:
+    """The book's sizes as a unit read beside sees them (`ReadBeside`): as they were, with its own samples added."""
+
+    def __init__(self, base: deque[float]):
+        self.view, self.samples = base, []  # type: ignore[var-annotated]
+
+    def add(self, samples: Sequence[float]) -> None:
+        view = deque(self.view, maxlen=self.view.maxlen)
+        view.extend(samples)
+        self.view = view
+        self.samples.extend(samples)
+
+
+class _Either:
+    """Set once either of two events is (`check_cancel` asks it)."""
+
+    def __init__(self, a: threading.Event, b: threading.Event):
+        self.a, self.b = a, b
+
+    def is_set(self) -> bool:
+        return self.a.is_set() or self.b.is_set()
+
+
 class Pipeline:
     def __init__(
         self,
@@ -1399,8 +1496,9 @@ class Pipeline:
         ahead = (LoadAhead(self, cancel) if getattr(_ON_SHOW, "window", False) and cancel is not None and translate
                  and reads and self.translator is not None else None)
         held_ahead, _ON_SHOW.ahead = getattr(_ON_SHOW, "ahead", None), ahead
+        beside: ReadBeside | None = None  # the next unit of a spread, read while this one is translated
         try:
-            for unit, unit_regions, page in plans:
+            for n, (unit, unit_regions, page) in enumerate(plans):
                 if page is not None:
                     if completes(page):
                         err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow,
@@ -1408,11 +1506,16 @@ class Pipeline:
                         if err:
                             result.error = err
                 elif unit_regions:
-                    self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
+                    if beside is not None and beside.index == n:
+                        taken, beside = beside, None
+                        taken.take(report, fill)  # (read beside: what it told told now, in its order)
+                    else:
+                        self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
                     self._take_corrections(unit, unit_regions)
                     self._order_read(rgb, unit.box, unit_regions)
                     timer.lap("ocr")
                     if translate:
+                        beside = self._read_beside(rgb, plans, n, fill, cancel)
                         err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
                                                       reuse=reuse if use_cache else None)
                         timer.lap("translate")
@@ -1422,6 +1525,8 @@ class Pipeline:
                             self._store_regions(unit, unit_regions)
                 all_regions.extend(unit_regions)
         finally:
+            if beside is not None:
+                beside.drop()  # (the unit before it stopped or failed: the reading ends, nothing of it told)
             _ON_SHOW.ahead = held_ahead
             if ahead is not None:
                 ahead.join()  # (the page lets go of the worker with no load of its own under way)
@@ -2525,6 +2630,20 @@ class Pipeline:
         self._erase_only(regions, fill)
         return repeated
 
+    def _read_beside(self, rgb: np.ndarray, plans: Sequence[tuple[fp.PageUnit, list[TextRegion], CachedPage | None]],
+                     n: int, fill: PageFill | None, cancel: threading.Event | None) -> ReadBeside | None:
+        """The unit after the *n*th of *plans* (read, about to be translated) read beside while it is translated
+        (`ReadBeside`): in the window's page job (`page_on_show`) with a cancel, `SPREAD_READ` and the OCR, when the
+        *n*th has a line to translate and the next is to be read afresh. None otherwise: it is read in its turn."""
+        if not (SPREAD_READ and getattr(_ON_SHOW, "window", False) and cancel is not None and self.ocr is not None
+                and n + 1 < len(plans)):
+            return None
+        unit, regions, page = plans[n + 1]
+        if page is not None or not regions or not any(r.status == "untranslated" and r.source_text
+                                                       for r in plans[n][1]):
+            return None
+        return ReadBeside(self, rgb, n + 1, unit, regions, fill, cancel).start()
+
     @staticmethod
     def _erase_only(regions: Sequence[TextRegion], fill: PageFill | None = None) -> None:
         """The regions the reader made "erase only" (their kind `ERASE_ONLY`, from the book's annotations) take the
@@ -2559,7 +2678,8 @@ class Pipeline:
         """The regions read as text of a page unit (*unit_box*) that holds only its titles (`title_unit`) become print;
         their size is held to the book's usual one so far (the page's own, on a title page, is the title's)."""
         read = [r for r in regions if r.status == "untranslated" and r.source_text and not r.kind.startswith("manual")]
-        book = float(np.median(self._book_sizes)) if self._book_sizes else usual
+        sizes = self._sizes_seen()
+        book = float(np.median(sizes)) if sizes else usual
         if title_unit(read, min(usual, book), unit_box[3] - unit_box[1]):
             for r in read:
                 r.status = "print"
@@ -2577,13 +2697,23 @@ class Pipeline:
                 ahead = getattr(_ON_SHOW, "ahead", None)
                 if ahead is not None:
                     ahead.start()  # (a line read surely: the model loads while the rest is read, `LoadAhead`)
-        usual = usual_size(samples, self._book_sizes)
+        usual = usual_size(samples, self._sizes_seen())
         self._add_sizes(samples)
         return usual
 
+    def _sizes_seen(self) -> deque[float]:
+        """The book's sizes as this thread sees them: `_book_sizes`, or a unit read beside's (`_HeldSizes`)."""
+        held = getattr(_SIZES, "held", None)
+        return held.view if held is not None else self._book_sizes
+
     def _add_sizes(self, samples: Sequence[float]) -> None:
         """*samples* kept with the book's sizes (`_book_sizes`): a new deque in place of the old one, never the old one
-        changed, so that whoever reads the sizes meanwhile (the drafts' thread, the window) reads a whole one."""
+        changed, so that whoever reads the sizes meanwhile (the drafts' thread, the window) reads a whole one. A unit
+        read beside keeps them to itself until its turn (`ReadBeside.take`)."""
+        held = getattr(_SIZES, "held", None)
+        if held is not None:
+            held.add(samples)
+            return
         with self._sizes_lock:
             sizes = deque(self._book_sizes, maxlen=self._book_sizes.maxlen)
             sizes.extend(samples)
@@ -3667,6 +3797,8 @@ def _measure_key(region: TextRegion, held: list[Any]) -> tuple[Any, ...]:
 
 DRAFTS_BESIDE = True  # the drafts of a page are lettered on a thread of their own while the model writes (`PageFill`)
 DRAFT_SIZES_KEPT = True  # the sizes the drafts of a page measure are kept for its next drafts (`Pipeline.cap_sizes`)
+SPREAD_READ = True  # a spread's next page unit is read while the one before it is translated (`ReadBeside`)
+_SIZES = threading.local()  # the book's sizes as a unit read beside sees them (`_HeldSizes`), on its thread
 _DRAFTS: list[ThreadPoolExecutor] = []
 
 
