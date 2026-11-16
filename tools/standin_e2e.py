@@ -418,7 +418,13 @@ class Notes:
         self.errors: Counter[str] = Counter()
         self.selected: list[int] = []
         self.noted_turns: list[dict[str, Any]] = []  # the turn times the window noted (`_note_turn`)
+        self.timings: dict[str, list[tuple[float, bool]]] = {}  # the Tk thread's time in the live view's calls
+        self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
         self.on_display: Callable[[dict[str, Any]], None] | None = None
+
+    def timed(self, name: str, ms: float, busy: bool) -> None:
+        with self.lock:
+            self.timings.setdefault(name, []).append((ms, busy))
 
     def shown(self, image: Any) -> sv.Shown:
         try:
@@ -539,7 +545,7 @@ class Notes:
         fill, result, live = getattr(app, "_fill", None), getattr(app, "last_result", None), getattr(app, "_live", None)
         if fill is not None and (image is fill.page or image is fill.final):
             kind, lettered, source = ("final" if image is fill.final else "filling"), fill.filled, fill.frame
-        elif fill is not None:
+        elif fill is not None and (image is fill.frame or image is getattr(fill, "base", None)):
             kind, lettered, source = "reading", 0, fill.frame
         elif result is not None and image is not live:
             kind, lettered, source = "translated", len(result.translated), result.original
@@ -616,6 +622,23 @@ class LogTap(logging.Handler):
 
 
 # ---------------------------------------------------------------------------------------------------- the hooks
+# the live view's calls on the Tk thread whose time is noted (those the window has: older code lacks some)
+TIMED = ("_beat", "_poll", "_look", "_look_over_job", "_watch_page", "_follow_step", "_poll_events")
+
+
+def timed_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callable[..., Any]:
+    def call(self: Any, *a: Any, **k: Any) -> Any:
+        busy = bool(getattr(self, "busy", False))
+        began = time.perf_counter()
+        try:
+            return original(self, *a, **k)
+        finally:
+            notes.timed(name, (time.perf_counter() - began) * 1000, busy)
+
+    call.__name__ = name
+    return call
+
+
 def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any]) -> dict[str, Any]:
     """The guard (`demo_video`'s, keys and clicks refused), and the hooks that take the notes; what was replaced."""
     import demo_video
@@ -681,7 +704,9 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return out
 
     def captured(self: Any, hwnd: int) -> Any:
+        began = time.perf_counter()
         image = capture(self, hwnd)
+        notes.timed("_capture", (time.perf_counter() - began) * 1000, bool(getattr(self, "busy", False)))
         notes.captured(image)
         return image
 
@@ -691,17 +716,35 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.selected.append(int(self.selected.hwnd))
         return out
 
-    note_turn = App._note_turn
+    note_turn, withdraw_turn = App._note_turn, getattr(App, "_withdraw_turn", None)  # (an older window has none)
 
     def turn_noted(self: Any, hwnd: int, seconds: float, amend: bool = False) -> Any:
+        # where the turn noted ended and began, in this clock: at the follow's last change (`Operation.last_at`), or
+        # for a turn amended at the look that saw its sharper frame (`_tail_turn`: `Look.at`), and *seconds* before
+        mono, wall = time.monotonic(), now_ms()
+        op = getattr(getattr(self, "_following", None), "op", None)
+        look = getattr(self, "_look_now", None)
+        last = getattr(look, "at", None) if amend else getattr(op, "last_at", None)
+        end = wall if last is None else wall - (mono - last) * 1000
         with notes.lock:
-            notes.noted_turns.append({"t": now_ms(), "ms": round(seconds * 1000), "amend": bool(amend),
-                                      "busy": bool(getattr(self, "busy", False))})
+            notes.noted_turns.append({"t": wall, "ms": round(seconds * 1000), "kind": "amend" if amend else "note",
+                                      "busy": bool(getattr(self, "busy", False)), "end_t": end,
+                                      "from_t": end - seconds * 1000})
         return note_turn(self, hwnd, seconds, amend)
+
+    def turn_withdrawn(self: Any, hwnd: int) -> Any:
+        with notes.lock:
+            notes.noted_turns.append({"t": now_ms(), "kind": "withdraw"})
+        return withdraw_turn(self, hwnd)
 
     App._start_translate, App._job_translate, App._handle_event = started, worked, handled
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
     App._note_turn = turn_noted
+    if withdraw_turn is not None:
+        App._withdraw_turn = turn_withdrawn
+    for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
+        if hasattr(App, name):
+            setattr(App, name, timed_call(notes, name, getattr(App, name)))
 
     def counted(cls: Any, name: str, note: Callable[[str], None]) -> None:
         original = cls.__dict__[name]
@@ -802,6 +845,8 @@ class Director:
         if self.over:
             return
         try:
+            with self.notes.lock:  # (this runs on the Tk thread: its CPU time so far, a page job running or not)
+                self.notes.tk_cpu.append((time.monotonic(), time.thread_time(), bool(getattr(self.app, "busy", False))))
             self.check()
             if not self.over:
                 self.pull()
@@ -1148,6 +1193,28 @@ def at(line: list[tuple[float, Any, str]], t: float) -> tuple[Any, str]:
     return found
 
 
+def screen_at(line: list[tuple[float, Any, str]], t: float) -> Any:
+    """The stand-in's screen at *t*; in a black frame, the screen under it."""
+    found = None
+    for when, screen, _state in line:
+        if when > t:
+            break
+        if screen is not None:
+            found = screen
+    return found
+
+
+def flash_near(line: list[tuple[float, Any, str]], t: float, within_ms: float = 1000) -> bool:
+    """Whether the stand-in showed black or a spinner at *t* or within *within_ms* before it."""
+    return at(line, t)[1] in ("black", "spinner") or any(
+        t - within_ms <= when <= t and state in ("black", "spinner") for when, _s, state in line)
+
+
+def spread_of(values: list[int]) -> dict[str, Any]:
+    return {"n": len(values), "median": median(values), "max": max(values, default=None),
+            "over_500": sum(1 for v in values if v > 500), "over_1000": sum(1 for v in values if v > 1000)}
+
+
 def turns_of(events: list[dict[str, Any]], offset: float, end: float) -> list[dict[str, Any]]:
     """The stand-in's turns: the screen, its soft and its sharp draw, the rest after it; the start's screen and a
     change of layout (the narrow window) as turns too."""
@@ -1178,11 +1245,46 @@ def ms(a: float | None, b: float | None) -> int | None:
     return None if a is None or b is None else round(a - b)
 
 
-def turn_rows(turns: list[dict[str, Any]], notes: Notes) -> list[dict[str, Any]]:
+def old_page_times(displays: list[dict[str, Any]], scr: tuple[int, bool], lo: float, end: float
+                   ) -> tuple[int | None, int | None]:
+    """When the stand-in began a turn at *lo* to *scr* and the window showed another page: how long the window
+    showed that page still, and how long with its lettering (None: the window showed no other page then; 0 for the
+    lettering: none was on it)."""
+    before = [d for d in displays if d["t"] <= lo]
+    first = before[-1] if before else None
+    if first is None or (first["page"], first["spread"]) == scr:
+        return None, None
+    old = (first["page"], first["spread"])
+    after = [d for d in displays if d["t"] > lo]
+    page_end = next((d["t"] for d in after if (d["page"], d["spread"]) != old), end)
+    if not lettered_shown(first):
+        return round(page_end - lo), 0
+    lettering_end = next((d["t"] for d in after if (d["page"], d["spread"]) != old or not lettered_shown(d)), end)
+    return round(page_end - lo), round(lettering_end - lo)
+
+
+def lettered_unsettled_ms(displays: list[dict[str, Any]], scr: tuple[int, bool], sharp: float | None,
+                          hi: float) -> int:
+    """How long, after the stand-in drew *scr* sharp and before it turned on, the window showed lettering read from
+    a frame of it that was not the sharp one (a page started on its soft frame, lettered on the blurry picture)."""
+    if sharp is None:
+        return 0
+    total = 0.0
+    for k, d in enumerate(displays):
+        until = displays[k + 1]["t"] if k + 1 < len(displays) else hi
+        a, b = max(d["t"], sharp), min(until, hi)
+        if b > a and (d["page"], d["spread"]) == scr and lettered_shown(d) and d["from"] not in ("sharp", None):
+            total += b - a
+    return round(total)
+
+
+def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dict[str, Any]]:
     rows = []
+    started = [j for j in notes.jobs if j["started"]]
     for k, turn in enumerate(turns):
         scr, lo, hi = turn["screen"], turn["soft_t"], turn["next_t"]
         sharp = turn["sharp_t"]
+        old_page_ms, old_lettering_ms = old_page_times(notes.displays, scr, lo, end)
         mine = [d for d in notes.displays if lo <= d["t"] < hi and (d["page"], d["spread"]) == scr]
         lettered = next((d["t"] for d in mine if lettered_shown(d)), None)
         finished = next((d["t"] for d in mine if d["kind"] == "final" or (d["kind"] == "translated" and d["lettered"])),
@@ -1212,6 +1314,9 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes) -> list[dict[str, Any]]
             "requests": sum(j["requests"] for j in jobs),
             "unsettled_requests": sum(j["unsettled_requests"] for j in jobs),
             "jobs_discarded": sum(1 for j in jobs if j.get("discarded")),
+            "job_at_turn": any(j["t"] <= lo < (j["done_t"] or end) for j in started),
+            "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
+            "lettered_unsettled_ms": lettered_unsettled_ms(notes.displays, scr, sharp, hi),
         })
     return rows
 
@@ -1495,7 +1600,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     offset = min(lat) if lat else 0.0
     line = timeline(events, offset)
     turns = turns_of(events, offset, ended)
-    rows = turn_rows(turns, notes)
+    rows = turn_rows(turns, notes, ended)
     spells = incidents(notes, line, ended)
 
     def segment_at_t(t: float) -> str:
@@ -1539,21 +1644,76 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                 for j in started]
     kept_soft = [j for j in job_list if j["frame"] != "sharp" and j["discarded"] is not True
                  and (j["gate_end"] == "confirmed" or not j["gate"]) and (j["stored"] or j["stored_at_cancel"])]
-    noted = []
+    noted: list[dict[str, Any]] = []
     for n in notes.noted_turns:  # each turn time the window noted, beside the stand-in's turn it followed
+        kind = n.get("kind", "amend" if n.get("amend") else "note")
+        if kind != "note" and noted:  # a note amended (`_tail_turn`) or withdrawn: the turn noted last
+            last = noted[-1]
+            if kind == "withdraw":
+                last["withdrawn"] = True
+                continue
+            turn = turns[last["turn"]] if last["turn"] is not None else None
+            last.update(final_ms=n["ms"], amends=last["amends"] + 1,
+                        end_after_sharp_ms=ms(n.get("end_t"), turn["sharp_t"] if turn else None))
+            continue
+        if kind != "note":
+            continue
         k = max((i for i, turn in enumerate(turns) if turn["soft_t"] <= n["t"]), default=None)
         turn = turns[k] if k is not None else None
         soft_t = turn["soft_t"] if turn is not None else None
-        noted.append({"t_s": rel(n["t"]), "noted_ms": n["ms"], "amend": n["amend"],
+        noted.append({"t_s": rel(n["t"]), "noted_ms": n["ms"], "final_ms": n["ms"], "amends": 0, "withdrawn": False,
                       "turn": k, "segment": turn["segment"] if turn else None,
                       "standin_soft_to_sharp_ms": rows[k]["soft_to_sharp_ms"] if k is not None else None,
+                      # the window's beginning of the turn after the stand-in's first draw of it (> 0: measured
+                      # short at its start), and its end after the stand-in's sharp draw (the frame's way to the
+                      # window and the window's look at it; < 0: measured short at its end)
+                      "start_late_ms": ms(n.get("from_t"), soft_t),
+                      "end_after_sharp_ms": ms(n.get("end_t"), turn["sharp_t"] if turn else None),
                       "job_running_at_turn": soft_t is not None and any(
                           j["t"] <= soft_t < (j["done_t"] or ended) for j in started)})
+    kept_notes = [n for n in noted if not n["withdrawn"] and n["standin_soft_to_sharp_ms"] is not None]
+    noted_summary = {
+        "notes": len(noted), "withdrawn": sum(1 for n in noted if n["withdrawn"]),
+        "amended": sum(1 for n in noted if n["amends"]),
+        # each turn kept, its time noted against the stand-in's own soft-to-sharp time (< 0: noted short)
+        "noted_minus_soft_ms": spread_of([n["final_ms"] - n["standin_soft_to_sharp_ms"] for n in kept_notes]),
+        "short": [{"t_s": n["t_s"], "noted": n["final_ms"], "soft": n["standin_soft_to_sharp_ms"]}
+                  for n in kept_notes if n["final_ms"] < n["standin_soft_to_sharp_ms"]],
+        "start_late_ms": spread_of([n["start_late_ms"] for n in kept_notes if n["start_late_ms"] is not None]),
+        "end_after_sharp_ms": spread_of([n["end_after_sharp_ms"] for n in kept_notes
+                                         if n["end_after_sharp_ms"] is not None]),
+        "longest_soft_ms": max((r["soft_to_sharp_ms"] or 0 for r in rows), default=0)}
+    cancels = []
+    for j in started:  # each page job cancelled: was its page still the stand-in's then (a black frame aside)?
+        if j["cancelled_t"] is None:
+            continue
+        screen = screen_at(line, j["cancelled_t"])
+        cancels.append({"id": j["id"], "t_s": rel(j["cancelled_t"]), "segment": segment_at_t(j["cancelled_t"]),
+                        "frame": j["state"], "gate_end": j["gate_end"],
+                        "page_on_show": screen == (j["page"], j["spread"]),
+                        "flash_or_spinner_within_1s": flash_near(line, j["cancelled_t"])})
+    false_cancels = [c for c in cancels if c["page_on_show"] and c["frame"] == "sharp"
+                     and c["gate_end"] in ("confirmed", None)]
+    old_lettering = {
+        "during_job": spread_of([r["old_lettering_ms"] for r in rows if r["job_at_turn"] and r["old_lettering_ms"]]),
+        "no_job": spread_of([r["old_lettering_ms"] for r in rows if not r["job_at_turn"] and r["old_lettering_ms"]]),
+        "by_segment": {s: spread_of([r["old_lettering_ms"] for r in rows if r["segment"] == s
+                                     and r["old_lettering_ms"]]) for s in dict.fromkeys(r["segment"] for r in rows)}}
     ready_at = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
     displays = [[rel(d["t"]), d["page"], int(bool(d["spread"])), d["state"], d["kind"], d["lettered"], d["from"],
                  int(bool(d["quick"]))] for d in notes.displays]
     return {
         "turns_noted": noted,
+        "turns_noted_summary": noted_summary,
+        "old_lettering_after_a_turn": old_lettering,
+        "cancels": {"all": len(cancels), "page_still_on_show": false_cancels,
+                    "list": cancels},
+        "lettered_unsettled_ms": {"total": sum(r["lettered_unsettled_ms"] for r in rows),
+                                  "turns": sum(1 for r in rows if r["lettered_unsettled_ms"])},
+        "empty_unsettled_results_shown": sum(1 for d in notes.displays if d["kind"] == "translated"
+                                             and not d["lettered"] and d["from"] not in ("sharp", None)),
+        "tk_thread": tk_share(notes.tk_cpu),
+        "timings": timing_table(notes.timings, notes.tk_cpu),
         "displays": {"columns": ["t_s", "page", "spread", "state", "kind", "lettered", "from", "quick"],
                      "rows": displays},
         "ready_s": rel(ready_at), "app_events": dict(Counter(e["kind"] for e in notes.app_events)),
@@ -1598,6 +1758,39 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "stand_in_events": dict(Counter(e["ev"] for e in events)),
         "rested_pages": rested_pages(rows),
     }
+
+
+def tk_share(samples: list[tuple[float, float, bool]]) -> dict[str, Any]:
+    """The Tk thread's CPU time against the wall clock, between the director's looks, a page job running or not."""
+    out: dict[str, Any] = {}
+    for key, busy in (("job_running", True), ("no_job", False)):
+        wall = cpu = 0.0
+        for (t0, c0, b0), (t1, c1, _b1) in zip(samples, samples[1:]):
+            if b0 == busy:
+                wall, cpu = wall + (t1 - t0), cpu + (c1 - c0)
+        out[key] = {"wall_s": round(wall, 1), "cpu_s": round(cpu, 2), "share": round(cpu / wall, 3) if wall else None}
+    return out
+
+
+def timing_table(timings: dict[str, list[tuple[float, bool]]], samples: list[tuple[float, float, bool]]
+                 ) -> dict[str, Any]:
+    """Per call timed (`TIMED`, and the capture): how often, and how long, a page job running or not."""
+    walls = {busy: sum(t1 - t0 for (t0, _c0, b0), (t1, _c1, _b1) in zip(samples, samples[1:]) if b0 == busy)
+             for busy in (True, False)}
+    out: dict[str, Any] = {}
+    for name, items in sorted(timings.items()):
+        row: dict[str, Any] = {}
+        for key, busy in (("job_running", True), ("no_job", False)):
+            values = sorted(ms_ for ms_, b in items if b == busy)
+            if not values:
+                continue
+            row[key] = {"n": len(values), "per_s": round(len(values) / walls[busy], 1) if walls[busy] else None,
+                        "median_ms": round(statistics.median(values), 2),
+                        "p90_ms": round(values[int(0.9 * (len(values) - 1))], 2),
+                        "max_ms": round(values[-1], 1), "total_s": round(sum(values) / 1000, 2),
+                        "share": round(sum(values) / 1000 / walls[busy], 3) if walls[busy] else None}
+        out[name] = row
+    return out
 
 
 def rested_pages(rows: list[dict[str, Any]]) -> int:
@@ -1678,6 +1871,19 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     print(f"requests {req['total']} (unsettled {req['unsettled']}, outside jobs {req['outside_page_jobs']}); "
           f"confirmation {conf.get('confirm_ms')} ms; cache pages {clean.get('cache_pages')} vs rested "
           f"{run_['rested_pages']}; shots {len(run_['shots'])}; report {path}")
+    old, cancels = run_["old_lettering_after_a_turn"], run_["cancels"]
+    print(f"old lettering after a turn, job running: {old['during_job']}; no job: {old['no_job']}; jobs cancelled "
+          f"{cancels['all']}, of them with their page still on show {len(cancels['page_still_on_show'])}; confirmed "
+          f"on a soft frame {run_['jobs']['confirmed_on_soft']}")
+    print("turns noted (ms noted, amended a / the stand-in's soft-to-sharp ms / start late ms; j: a job ran, "
+          "w: withdrawn): " + ", ".join(
+              f"{n['segment']}:{n['final_ms']}/{n['standin_soft_to_sharp_ms']}/{n['start_late_ms']}"
+              + ("a" if n["amends"] else "") + ("j" if n["job_running_at_turn"] else "")
+              + ("w" if n["withdrawn"] else "") for n in run_["turns_noted"]))
+    summary = run_["turns_noted_summary"]
+    print(f"turns noted {summary['notes']} (withdrawn {summary['withdrawn']}, amended {summary['amended']}); noted "
+          f"minus soft {summary['noted_minus_soft_ms']}; short {len(summary['short'])}; longest soft "
+          f"{summary['longest_soft_ms']} ms")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:
