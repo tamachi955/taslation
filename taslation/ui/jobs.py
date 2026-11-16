@@ -1864,9 +1864,9 @@ class JobsMixin:
             text = _("Stop the translation? {done} of {total} lines are translated and saved; they stay. The rest is kept only until you close TASlation: Read whole book... translates it then.").format(
                 done=group_digits(scan.checked), total=group_digits(max(scan.found, scan.checked)))
             choices = [("keep", _("Keep translating")), ("stop", _("Stop"))]
-        elif scan.finishing:
-            text = _("Stop the whole-book run? You pressed Finished reading: {pages} page(s) are read, and the translation comes next. If you stop now, nothing is translated, and what was read is kept only until you close TASlation.").format(pages=pages)
-            choices = [keep, ("stop", _("Stop without translating"))]
+        elif scan.finishing:  # (the translation may have begun beside the pages still read: what it did stays)
+            text = _("Stop the whole-book run? You pressed Finished reading: {pages} page(s) are read, and their translation has begun or comes next. If you stop now, the lines translated so far are stored and stay. The rest of what was read is kept only until you close TASlation: Read whole book... translates it then.").format(pages=pages)
+            choices = [keep, ("stop", _("Stop"))]
         elif self._run_pages() == 0 or self.batch is None:
             text, choices = _("Stop the whole-book run? No page is read yet."), [keep, ("stop", _("Stop"))]
         else:

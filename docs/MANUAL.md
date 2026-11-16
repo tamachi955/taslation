@@ -270,6 +270,7 @@ If you close the window, or on the command line, what was read is lost, and page
 If you "Stop" in the translation stage (you are asked first here too; the default is "Keep translating"), the translations already saved stay as they are, and only what the request under way would have brought is lost. If the window stays open,
 running it again translates the rest without reading. If you closed the window, or on the command line, the reading is needed again,
 but pages already translated are not translated again. Pages translated or corrected after the stop, by Auto or otherwise, are not overwritten by the rest of the translation. What was read is never written to disk.
+After "Finished reading", the translation may begin while the waiting pages are still read. "Stop" then works as in the translation stage (the question offers "Keep reading" and "Stop"): the lines translated so far are saved and stay.
 
 The model's reply is read as far as it can be read, even when it is broken. Only the lines with no usable translation are asked again, a few lines at a time with the lines around them as context, and, if still missing, one line at a time;
 a line that still gets no translation is left untranslated, and the translations of the other lines are saved in the cache. The lines left over are translated on their own when you read that page, or at the next run. A line of punctuation only is taken as its own translation.

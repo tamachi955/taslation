@@ -103,9 +103,11 @@ def test_esc_never_ends_a_run_by_itself(flow):
 
 
 def test_the_question_follows_the_phase_of_the_run(flow):
-    _reading(flow, 30, finishing=True)  # Finished reading pressed: the translation comes anyway
+    _reading(flow, 30, finishing=True)  # Finished reading pressed: the translation comes anyway, or has begun
     flow.stop_batch()
-    assert flow.questions[-1][1] == ["keep", "stop"] and "You pressed Finished reading" in flow.questions[-1][0]
+    text, answers, labels = flow.questions[-1]
+    assert answers == ["keep", "stop"] and labels == ["Keep reading", "Stop"] and "You pressed Finished reading" in text
+    assert "the lines translated so far are stored and stay" in text and "nothing is translated" not in text
     flow._scan.update(Message("batch.translated_chunk", chunk=2, chunks=9, bubbles=60, seconds=90.0), "translate",
                       30, 60, 270, 0.0, checked=60)
     flow.stop_batch()
