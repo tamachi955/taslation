@@ -55,8 +55,22 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
     assert turns["f2"] == [(53, False), (54, False)]  # single pages once the window is narrow
     assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
+    assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
     with pytest.raises(SystemExit):
         standin_e2e.wanted("a,z")
+
+
+def test_the_part_drawn_is_told_against_the_page_the_stand_in_drew():
+    # the narrow window: the page drawn 68 rows down the canvas, which begins under the browser's 31-row title bar
+    whole = standin_e2e.page_facts([0, 0, 844, 992], (118, 68, 727, 927), 54, 31)
+    assert whole["page"] == [118, 99, 727, 958] and whole["content_top"] == 85 and whole["page_whole"]
+    assert whole["title_bar_rows_drawn"] == 31 and whole["band_rows_drawn"] == 54
+    assert whole["ground_drawn"] == [118, 99, 117, 34]
+    alone = standin_e2e.page_facts([118, 99, 727, 958], (118, 68, 727, 927), 54, 31)
+    assert alone["title_bar_rows_drawn"] == alone["band_rows_drawn"] == 0 and alone["ground_drawn"] == [0, 0, 0, 0]
+    cut = standin_e2e.page_facts([118, 76, 700, 958], (118, 68, 727, 927), 54, 31)
+    assert cut["band_rows_drawn"] == 9 and not cut["page_whole"] and cut["ground_drawn"][2] == -27
+    assert standin_e2e.page_facts([0, 0, 1, 1], None, 0, 31) == {"page": None}
 
 
 # ---------------------------------------------------------------------------------------------------- the files

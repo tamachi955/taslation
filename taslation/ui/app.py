@@ -125,7 +125,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import shortcuts, theme
+from . import area, shortcuts, theme
 from .. import devices
 from .status import StatusMixin
 from .strip import StripMixin, close_warning, release_run_images
@@ -601,6 +601,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.canvas = ImageCanvas(self, bg="#202020")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.on_redraw = self._page_drawn  # the reading-order badges and the selection (`selection`)
+        # out of reading mode as in it, no more of a frame is drawn than the capture area in force, which every part
+        # of TASlation reads (a browser's title bar and a viewer's bands are in the capture of its client area)
+        self.canvas.read_area_of = lambda image: area.margins_to_box(self.settings.margins, image.size)
         # Single-screen use: the viewer may sit behind this window. Keys pressed on the
         # page turn its pages; clicks on the page are passed through to the same spot
         # (reader) or select, move, resize and edit the regions (translator).

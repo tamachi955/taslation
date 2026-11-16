@@ -33,10 +33,11 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
-What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch), which the driver reads
-from the browser's log; the title stays as it is, as a reader's tab title does. A strip of cells in the band carries
-the screen on show (its first page, spread or single, soft or sharp, spinner or not) for the driver to tell the
-frames TASlation captured apart; nothing else reads it. */
+What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch; a draw with the page's
+rectangle and the band's height in the canvas's pixels), which the driver reads from the browser's log; the title
+stays as it is, as a reader's tab title does. A strip of cells in the band carries the screen on show (its first
+page, spread or single, soft or sharp, spinner or not) for the driver to tell the frames TASlation captured apart;
+nothing else reads it. */
 
 const CONTROL_MS = 100;
 const CELL = 6, CODE_X = 12, CODE_Y = 12;  // the code's cells, CSS pixels from the content's top left
@@ -221,7 +222,11 @@ async function drawScreen(soft, why) {
     base = document.createElement("canvas"); base.width = view.width; base.height = view.height;
     base.getContext("2d").drawImage(view, 0, 0);
   }
-  say("draw", "state=" + shown + " why=" + why + " wait=" + Math.round(now() - began));
+  // where the page is (both pages of a spread) and how high the band is, in the canvas's pixels
+  const box = [Math.min(...rs.map(r => r.x)), Math.min(...rs.map(r => r.y)),
+               Math.max(...rs.map(r => r.x + r.w)), Math.max(...rs.map(r => r.y + r.h))];
+  say("draw", "state=" + shown + " why=" + why + " wait=" + Math.round(now() - began) + " box=" + box.join(",") +
+      " band=" + Math.round(cfg.band * dpr()));
   return true;
 }
 

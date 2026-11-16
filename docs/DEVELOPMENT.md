@@ -111,9 +111,13 @@ rows' languages.
   cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
   answerer in its place), and the tool writes numbers (turn to page lettered, requests on unsettled frames, stale
-  pages, the confirmation it learnt, where the OCR ran) and pictures of TASlation's own window to the `--out` folder;
-  no key or click is sent, the state folder is a scratch one, and the profile, the state and the model it loaded are
-  gone at the end. Scenarios a-f by `--scenario`; OpenMantra pages from the datasets folder, or `--synthetic`.
+  pages, the confirmation it learnt, where the OCR ran) and pictures of TASlation's own window to the `--out` folder,
+  each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
+  title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
+  outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
+  profile, the state and the model it loaded are gone at the end. Scenarios a-f by `--scenario` (f brings f2, the
+  narrow window, with it; f2 alone is that window without the dark theme); OpenMantra pages from the datasets folder,
+  or `--synthetic`.
 
 ## The README and the manual
 

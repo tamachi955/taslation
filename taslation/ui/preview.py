@@ -149,10 +149,15 @@ class ImageCanvas(tk.Canvas):
         self.outlines: list[tuple[tuple[int, int, int, int], str, bool]] = []  # (box in image pixels, colour, dashed)
         self.enlarge = False  # a picture smaller than the canvas is enlarged too (the reading window)
         self.crop: tuple[int, int, int, int] | None = None  # the part of the image shown (image pixels); None = all
-        # with no crop: a frame whose ground round the page is plain is drawn as the page alone (`area.page_bounds`),
-        # the boxes found joined while the frames keep their size, so that the page stays put from page to page
+        # with no crop: no more of a frame than the part the reading takes of it (`read_area_of`), and in that part a
+        # page on a plain ground drawn alone (`area.page_bounds`), the boxes found joined while the frames keep their
+        # size, so that the page stays put from page to page (`_trimmed`)
         self.trim = True
-        self._trims: list[tuple[Image.Image, tuple[int, int, int, int] | None]] = []  # (image, its page) lately
+        # the part of an image the reading takes (image pixels; None: all of it): the capture area in force, which
+        # leaves out a browser's own title bar and toolbars and a viewer's bands (they are in the capture of its
+        # client area); set by the window
+        self.read_area_of: Callable[[Image.Image], Box | None] | None = None
+        self._trims: list[tuple[Image.Image, Box, Box | None]] = []  # (image, the part read, the part drawn) lately
         self._trim_joined: tuple[tuple[int, int], tuple[int, int, int, int] | None] = ((0, 0), None)
         self.inset = 0  # canvas pixels kept clear around the picture
         self.message = ""  # shown in the middle instead of the picture
@@ -214,7 +219,8 @@ class ImageCanvas(tk.Canvas):
         return (int(self.offset[0] + x * self.scale), int(self.offset[1] + y * self.scale))
 
     def shown_box(self) -> tuple[int, int, int, int]:
-        """The part of the image on show, in image pixels: the crop, or all of it."""
+        """The part of the image on show, in image pixels: the crop; with none the part `_trimmed` gives (`trim`), or
+        all of it."""
         if self._image is None:
             return (0, 0, 0, 0)
         whole = (0, 0, self._image.width, self._image.height)
@@ -224,25 +230,45 @@ class ImageCanvas(tk.Canvas):
         box = area.clamp(self.crop, self._image.size)
         return box if box[2] > box[0] and box[3] > box[1] else whole
 
+    def _read_part(self, image: Image.Image) -> Box:
+        """The part of *image* the reading takes (`read_area_of`), within the image; all of it without one, and for a
+        part that leaves nothing."""
+        whole = (0, 0, image.width, image.height)
+        try:
+            box = self.read_area_of(image) if self.read_area_of is not None else None
+        except Exception:  # noqa: BLE001 - an area that cannot be had: the image as it is
+            box = None
+        if box is None:
+            return whole
+        box = area.clamp(box, image.size)
+        return box if box[2] > box[0] and box[3] > box[1] else whole
+
     def _trimmed(self, image: Image.Image) -> tuple[int, int, int, int] | None:
-        """The part of *image* drawn when nothing is cropped: the page on its plain ground (`area.page_bounds`),
-        joined with the pages of the frames of its size before it; None (all of it) when it shows no page on a plain
-        ground. Remembered for the last few images."""
-        for img, box in self._trims:
-            if img is image:
+        """The part of *image* drawn when nothing is cropped (None: all of it). Never more than the part the reading
+        takes (`_read_part`: a browser's title bar and a viewer's bands round the capture area are not the page), and
+        within it the page on the viewer's plain ground (`area.page_bounds` within that part, the ground's level the
+        whole frame's), joined with the pages of the frames of its size before it and kept within the part; the part
+        itself when it shows no page on a plain ground (the page fills it: the capture area is the page panel, the
+        paper's edge on its border). Remembered for the last few images and parts."""
+        part = self._read_part(image)
+        for img, read, box in self._trims:
+            if img is image and read == part:
                 return box
+        whole = part == (0, 0, image.width, image.height)
         try:
             pixels = self.pixels_of(image) if self.pixels_of is not None else None
-            found = area.page_bounds(image if pixels is None else pixels)
-        except Exception:  # noqa: BLE001 - a frame that cannot be looked at is drawn whole
+            found = area.page_bounds(image if pixels is None else pixels, None if whole else part)
+        except Exception:  # noqa: BLE001 - a frame that cannot be looked at is drawn as the part read
             found = None
         size, before = self._trim_joined
         if size != image.size:
             before = None
-        box = area.joined(before, found) if found is not None else None
-        if box is not None:
+        if found is None:
+            box = None if whole else part
+        else:
+            box = area.clipped(area.joined(before, found), part)
             self._trim_joined = (image.size, box)
-        self._trims = [(image, box), *self._trims[:3]]
+        self._trims = [(image, part, box), *self._trims[:3]]
         return box
 
     def inside(self, x: float, y: float) -> bool:

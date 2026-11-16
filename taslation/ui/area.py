@@ -380,14 +380,25 @@ TRIM_LEAST = 0.15  # ... and at least this share of its width and of its height 
 TRIM_WORK = 960  # the frame is looked at this many pixels across at most (a page panel is large)
 
 
-def page_bounds(image) -> Box | None:
+def page_bounds(image, within: Box | None = None) -> Box | None:
     """Where the page is on a frame whose ground round it is plain - dark (a full-screen viewer's black or grey) or
     light (white) -, in the frame's pixels and with a little of the ground left round it (`TRIM_PAD`): what the window
     draws of the frame so that the page itself shows large. On a dark ground the page is the paper (`fingerprint.
     page_box`: the large blobs, the bubbles in line with them, never the viewer's bars, buttons and page counter), on a
     light one what is not ground, small specks left out. A two-page spread is one box over both pages. None when the
     ground is not plain on two opposite sides of the frame (a desktop, a browser's toolbars), when no page is found, or when the page fills
-    the frame nearly whole (`TRIM_GAIN`): the frame is drawn as it is then."""
+    the frame nearly whole (`TRIM_GAIN`): the frame is drawn as it is then.
+
+    *within*: the part of the frame (its pixels) the page is looked for in, and the box returned lies in - the
+    capture area, which leaves a browser's own title bar and a reader's band out (`preview.ImageCanvas._trimmed`: on
+    the whole frame of a narrow browser window the paper grows past the band into the title bar, `fingerprint.
+    page_box`). The ground is the viewer's all the same, its level read on the border of the whole frame: a part that
+    the page fills (the page panel, whose border is the paper's white edge on a dark viewer) has no plain ground of
+    its own then, and None says that the part is the page; on a white viewer the paper's edge is its ground, as on the
+    whole frame. The sides, `TRIM_GAIN` and `TRIM_LEAST` are the part's; the ground left round the page is as wide as
+    on the whole frame."""
+    import math
+
     import cv2
     import numpy as np
 
@@ -406,8 +417,16 @@ def page_bounds(image) -> Box | None:
     f = max(1.0, max(width, height) / TRIM_WORK)
     small = gray if f == 1.0 else cv2.resize(gray, (max(8, int(width / f)), max(8, int(height / f))),
                                              interpolation=cv2.INTER_AREA)
+    ground = fp.background_level(small)  # (the whole frame's, with or without a part)
+    bound = (0, 0, width, height) if within is None else clamp(within, (width, height))
+    sx0 = sy0 = 0
+    if within is not None:  # the part in the working copy's pixels, each of them wholly inside it
+        sx0, sy0 = math.ceil(bound[0] / f), math.ceil(bound[1] / f)
+        sx1, sy1 = min(small.shape[1], math.floor(bound[2] / f)), min(small.shape[0], math.floor(bound[3] / f))
+        if sx1 - sx0 < 8 or sy1 - sy0 < 8:
+            return None
+        small = small[sy0:sy1, sx0:sx1]
     sh, sw = small.shape
-    ground = fp.background_level(small)
 
     def plain(side: np.ndarray) -> bool:
         return bool(np.mean(np.abs(side.astype(np.int16) - ground) <= GROUND_SPREAD) >= PLAIN_RING)
@@ -428,8 +447,10 @@ def page_bounds(image) -> Box | None:
     if x1 - x0 < TRIM_LEAST * sw or y1 - y0 < TRIM_LEAST * sh:
         return None
     pad = TRIM_PAD * max(width, height)
-    out = clamp((x0 * f - pad, y0 * f - pad, x1 * f + pad, y1 * f + pad), (width, height))
-    if (out[2] - out[0]) * (out[3] - out[1]) > TRIM_GAIN * width * height:
+    out = clamp(((sx0 + x0) * f - pad, (sy0 + y0) * f - pad, (sx0 + x1) * f + pad, (sy0 + y1) * f + pad),
+                (width, height))
+    out = clipped(out, bound)
+    if (out[2] - out[0]) * (out[3] - out[1]) > TRIM_GAIN * (bound[2] - bound[0]) * (bound[3] - bound[1]):
         return None
     return out
 
@@ -441,6 +462,14 @@ def joined(a: Box | None, b: Box | None) -> Box | None:
     if b is None:
         return a
     return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def clipped(box: Box | None, bound: Box) -> Box:
+    """What of *box* lies within *bound* (*bound* itself for None, or for a box that lies wholly outside it)."""
+    if box is None:
+        return bound
+    out = (max(box[0], bound[0]), max(box[1], bound[1]), min(box[2], bound[2]), min(box[3], bound[3]))
+    return out if out[2] > out[0] and out[3] > out[1] else bound
 
 
 LABEL_GAP = 3  # canvas pixels between a region's outline and its label

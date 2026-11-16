@@ -2,7 +2,7 @@
 stand-in viewer (`tools/standin_viewer`), with no real book and no real viewer - a developer's debugging aid, never
 part of a release.
 
-    python tools/standin_e2e.py --out SCRATCH [--scenario all | a,b,c,d,e,f] [--canned] [--browser auto|chrome|edge]
+    python tools/standin_e2e.py --out SCRATCH [--scenario all | a,b,c,d,e,f,f2] [--canned] [--browser auto|chrome|edge]
                                 [--seed 1] [--series 1] [--first 1] [--synthetic] [--front viewer|as-is]
 
 What runs, all on this computer:
@@ -48,6 +48,10 @@ every load of the model, and the System page's facts); errors (type names and co
 in the cache at the end against those the stand-in rested on. Into *--out*: report.json, and shots/ - pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
 moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
+With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
+there (`page_facts`: rows of the browser's title bar and of the band drawn, the ground drawn round the page) and what
+the reading makes of the frame (`reading_facts`: the page units in the area and on the whole frame, their fingerprints'
+distance), numbers only.
 
 At the end: the window closed through its own close, the canned server stopped, the browser's process tree (and
 nothing else) ended, its profile and the scratch state deleted, what the window loaded in Ollama checked gone."""
@@ -132,11 +136,12 @@ class Segment:
 
 
 def wanted(text: str) -> list[str]:
-    """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it)."""
+    """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it; "f2" alone is the narrow window
+    without the dark theme)."""
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
-    unknown = asked - set("abcdef")
+    unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
     return [n for n in ORDER if n in asked or (n == "f2" and "f" in asked)]
@@ -775,6 +780,8 @@ class Director:
         self.turns_in: Counter[str] = Counter()
         self.segment_of_go = {s.go: s.name for s in segments}
         self.current = ""
+        self.page_rect: tuple[int, int, int, int] | None = None  # the page the stand-in drew last (its canvas's pixels)
+        self.band_px = 0  # the height of its band then
         self.last_ocr = 0.0
         self.saver: queue.Queue[Any] = queue.Queue()
         self.saver_thread = threading.Thread(target=self._save, name="standin-shots", daemon=True)
@@ -838,6 +845,10 @@ class Director:
             e["t"], e["recv"] = float(said["t"]), self.epoch(mono)
             e["segment"] = self.current
             ev = e["ev"]
+            if ev == "draw":  # (where it drew the page: `page_facts`)
+                with contextlib.suppress(KeyError, ValueError):
+                    x0, y0, x1, y1 = (int(round(float(v))) for v in e["box"].split(","))
+                    self.page_rect, self.band_px = (x0, y0, x1, y1), int(e["band"])
             if ev == "wait":
                 self.waiting_go = int(e.get("go", 0))
             elif ev == "mark":
@@ -996,11 +1007,14 @@ class Director:
             return
         path = self.out / "shots" / f"{len(self.shots) + 1:02d}_{label}.png"
         last = self.notes.displays[-1] if self.notes.displays else {}
+        facts = area_facts(self.app)
         self.shots.append({"label": label, "path": str(path), "t": now_ms(), "size": list(image.size),
                            "window_shows": {k: last.get(k) for k in ("page", "spread", "state", "kind", "lettered",
                                                                     "from")},
                            "drawn_quickly": getattr(self.app.canvas, "_fit_key", 0) is None,
-                           "area": area_facts(self.app)})
+                           "area": facts,
+                           "page": page_facts(facts.get("drawn_box"), self.page_rect, self.band_px, self.notes.top),
+                           "reading": reading_facts(self.app)})
         self.saver.put((image, path))
 
     def _save(self) -> None:
@@ -1041,6 +1055,70 @@ def area_facts(app: Any) -> dict[str, Any]:
         out["viewer_size"] = [right - left, bottom - top]
     except Exception as e:  # noqa: BLE001 - said by its type
         out["viewer_size"] = type(e).__name__
+    return out
+
+
+def page_facts(drawn: Any, rect: tuple[int, int, int, int] | None, band: int, top: int) -> dict[str, Any]:
+    """The stand-in's page as it drew it last (*rect*: the pages of the screen in its canvas's pixels; *band*: its
+    band's height), in the capture's pixels - its canvas begins *top* rows down the client area, under the browser's
+    own title bar -, and the part the page view draws (*drawn*, `area_facts`) against it: the rows of the title bar
+    and of the band in it (0: none), the columns of the ground beside the page or the rows over and under it in it on
+    each side (left, top, right, bottom; negative: that much of the page left out), whether the page is whole in it."""
+    if rect is None:
+        return {"page": None}
+    page = [rect[0], top + rect[1], rect[2], top + rect[3]]
+    out: dict[str, Any] = {"page": page, "content_top": top + band}
+    if not (isinstance(drawn, list) and len(drawn) == 4):
+        return out
+    x0, y0, x1, y1 = (int(v) for v in drawn)
+    out["title_bar_rows_drawn"] = max(0, min(top, y1) - y0)
+    out["band_rows_drawn"] = max(0, min(top + band, y1) - max(top, y0))
+    out["ground_drawn"] = [page[0] - x0, page[1] - y0, x1 - page[2], y1 - page[3]]
+    out["page_whole"] = x0 <= page[0] and y0 <= page[1] and x1 >= page[2] and y1 >= page[3]
+    return out
+
+
+def reading_facts(app: Any) -> dict[str, Any]:
+    """What the reading makes of the viewer's latest frame, as numbers (no picture, no text): the page units' boxes
+    in the capture area in force (the pipeline's `units_of`), in the reader's own area alone (``hand``), in the page
+    panel the window finds on the whole frame with no area of the reader's (`find_page_area`, its box ``panel``) and
+    on the whole frame (no area), with each unit's fingerprint distance to the one of the same place in the area in
+    force (bits; 0: the same page identity); the paper `fingerprint.page_box` finds on the whole frame and the page
+    `ui.area.page_bounds` finds on it. Computed without the fingerprints' shared memo (`fingerprint._analyze`), so the
+    window's own is left as it is."""
+    import cv2
+    import numpy as np
+
+    from taslation import fingerprint as fp
+    from taslation.detect.page_area import find_page_area, page_area_margins
+    from taslation.ui import area
+
+    live = getattr(app, "_live", None)
+    if live is None:
+        return {"frame": None}
+    out: dict[str, Any] = {"frame": list(live.size)}
+    try:
+        rgb = np.asarray(live.convert("RGB"))
+        margins = tuple(int(m) for m in app.settings.margins)
+        units = fp._analyze(rgb, margins, True, None, True)
+        out["margins"] = list(margins)
+        out["units"] = [list(u.box) for u in units]
+        panel = find_page_area(live)
+        out["panel"] = list(panel) if panel is not None else None
+        others = {"hand": tuple(int(m) for m in app._hand_set()), "whole_frame": (0, 0, 0, 0)}
+        if panel is not None:
+            others["panel"] = tuple(int(m) for m in page_area_margins(panel, live.size))
+        for name, other in others.items():
+            found = fp._analyze(rgb, other, True, None, True)
+            out[f"units_{name}"] = [list(u.box) for u in found]
+            out[f"{name}_bits_off"] = [fp.hamming(a.fingerprint, b.fingerprint) for a, b in zip(units, found)]
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        box = fp.page_box(gray)
+        out["page_box_whole_frame"] = list(box) if box is not None else None
+        bounds = area.page_bounds(live)
+        out["page_bounds_whole_frame"] = list(bounds) if bounds is not None else None
+    except Exception as e:  # noqa: BLE001 - said by its type
+        out["error"] = type(e).__name__
     return out
 
 
@@ -1606,7 +1684,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
-    ap.add_argument("--scenario", default="all", help="all, or some of a,b,c,d,e,f")
+    ap.add_argument("--scenario", default="all", help="all, or some of a,b,c,d,e,f,f2 (f brings f2 with it)")
     ap.add_argument("--canned", action="store_true", help="the canned translator, not the Ollama on this computer")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
