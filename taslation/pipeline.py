@@ -1163,7 +1163,7 @@ class Pipeline:
     def process(self, image: Image.Image, *, use_cache: bool = True, translate: bool = True,
                 progress: ProgressFn | None = None, complete: bool = False,
                 events: EventFn | None = None, cancel: threading.Event | None = None,
-                on_slow: SlowFn | None = None, reuse: bool = True) -> PageResult:
+                on_slow: SlowFn | None = None, reuse: bool = True, timed: bool = True) -> PageResult:
         """Translate one capture. Every text region found goes to a page unit (`unit_for`), a region below or beside
         a unit that stops short of its page too; only what lies outside the capture area is left out. With
         *complete* (translator mode), a cached page is also completed: live text regions the cache has no bubble
@@ -1182,7 +1182,8 @@ class Pipeline:
         (once per request) when the model has said nothing for a while, with a translator that can tell (it takes
         an ``on_slow`` argument). A short line translated before in the book or its series is given that translation
         (`linememo`, with the cache and ``reuse_lines``); *reuse* False ("Translate again") asks the model for every
-        line, and keeps its answers for the lines to come."""
+        line, and keeps its answers for the lines to come. *timed* False: the page's stage times are not counted in
+        `stage_times` (a page lettered ahead of its next showing, `keep_shown`)."""
         s = self.settings
         timer = _Timer()
         report = progress or (lambda _msg: None)
@@ -1297,7 +1298,8 @@ class Pipeline:
         result.image = Image.fromarray(out)
         result.regions = all_regions
         result.timings = timer.timings
-        self.stage_times.add(timer.timings)
+        if timed:
+            self.stage_times.add(timer.timings)
         if shown_key is not None and not result.error:
             self.shown_pages.put(shown_key, rgb, out, all_regions, result.notes, self.last_seq)
         if fill is not None:
@@ -1334,6 +1336,29 @@ class Pipeline:
         sig = signature(parts, s, sheet, self.rtl, layout is not None and not getattr(layout, "failed", False),
                         (eraser.setting, eraser.failed) if eraser is not None else None, self._detector_given is None)
         return pixels_digest(rgb, self._capture(rgb)) + sig
+
+    def keep_shown(self, image: Image.Image, *, complete: bool = False,
+                   cancel: threading.Event | None = None) -> bool:
+        """A page just translated afresh and on show (*image*, the capture it was read from) lettered once more as its
+        next showing letters it - from the cache, as `process` with *complete* does it - and kept in `shown_pages`:
+        that showing (the viewer drew the page again, the reader came back to it) is laid over from memory at once,
+        the very page it would letter. Nothing is done when the page is not in the cache whole, is kept already, or
+        its next reading adds to its cache entry (`_shown_key` is none); its stage times are not counted. *cancel*
+        set (a new page, Stop) ends it where `process` stops, and nothing is kept; so does a failure. Whether the page
+        is kept now."""
+        if self.cache is None:
+            return False
+        try:
+            rgb = np.asarray(image.convert("RGB"))
+            units = self.units_of(rgb)
+            key = self._shown_key(rgb, units, True, complete) if units else None
+            if key is None or self.shown_pages.has(key):
+                return False
+            check_cancel(cancel)
+            self.process(image, complete=complete, cancel=cancel, timed=False)
+            return self.shown_pages.has(key)
+        except Exception:  # noqa: BLE001 - Cancelled, or a failure: the next showing letters the page as ever
+            return False
 
     def _erases_on_art(self, page: np.ndarray, regions: Sequence[TextRegion]) -> bool:
         """Whether rendering *regions* on *page* (untouched) takes the inpainting model for one of them: a region

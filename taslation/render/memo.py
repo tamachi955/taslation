@@ -134,6 +134,11 @@ class ShownPages:
             self.hits += 1
         return _copied(page.regions), page
 
+    def has(self, key: bytes) -> bool:
+        """Whether a page is kept under *key* (not counted, nor marked as shown)."""
+        with self._lock:
+            return key in self._pages
+
     def put(self, key: bytes, original: np.ndarray, lettered: np.ndarray, regions: Sequence[Any],
             notes: Sequence[str], seq: int | None) -> None:
         """Keep the page *lettered* from the capture *original* under *key*, with copies of its *regions*."""

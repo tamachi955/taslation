@@ -624,6 +624,11 @@ class JobsMixin:
             self._say_failed_save()
             self._look_for_colophon(image, result, book, model, language)
             keep_page_names(self, result, book, model, language)
+            keep_shown = getattr(self.pipeline, "keep_shown", None)
+            if keep_shown is not None and cancel is not None and result.cache_misses and not result.error:
+                # (a page read afresh, on show: lettered as its next showing letters it, from the cache, and kept in
+                # memory, so that showing is at once; a new page or Stop ends it, with the job's cancel)
+                keep_shown(image, complete=complete, cancel=cancel)
         finally:
             if held:
                 self.pipeline.restore_pages(held)
