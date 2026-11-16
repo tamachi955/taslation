@@ -770,7 +770,17 @@ class JobsMixin:
             self._busy_shown = True
             self.canvas.set_busy(self._busy_text)
         elif kind in ("regions", "read", "translated", "page"):
+            fill = self._fill
+            page = fill.page if fill is not None else None
             self._on_page_event(kind, data)
+            box, patch = data.get("box"), data.get("patch")
+            if (kind == "translated" and page is not None and self._fill is fill and fill.page is page
+                    and box is not None and patch is not None):
+                # the page lettered in place: the canvas resamples what changed alone (`_redisplay`)
+                x, y = int(box[0]), int(box[1])
+                held = getattr(self, "_fill_changed", None)
+                boxes = held[1] if held is not None and held[0] is page else []
+                self._fill_changed = (page, [*boxes, (x, y, x + patch.width, y + patch.height)])
         elif kind == "error":
             self._hide_busy()
             message = data.get("message")

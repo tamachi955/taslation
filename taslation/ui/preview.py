@@ -6,9 +6,10 @@ spaces, which leaves a Japanese or Chinese sentence in one piece and splits "TAS
 from __future__ import annotations
 
 import math
+import time
 import tkinter as tk
 import tkinter.font as tkfont
-from typing import Callable
+from typing import Any, Callable
 
 from PIL import Image, ImageTk
 
@@ -44,6 +45,11 @@ Patch = tuple[Box, Image.Image]
 # where its top left corner is on the canvas)
 Fit = tuple[Box, tuple[int, int], tuple[int, int], tuple[int, int]]
 LANCZOS_REACH = 3  # source pixels the resampling filter reaches on each side of a pixel, times the reduction
+# A frame of a picture that keeps changing (`ImageCanvas.moving`: the viewer's live frames) drawn within MOVING_MS of
+# the one before is resampled bilinearly (some 30 ms for a full-screen frame against 65), and the picture is drawn
+# again as ever - LANCZOS - once no frame has come for FINE_MS: the picture that stays is today's.
+MOVING_MS = 250
+FINE_MS = 200
 
 
 def patch_picture(image: Image.Image, patch: Patch, fit: Fit) -> tuple[tuple[int, int], Image.Image] | None:
@@ -52,14 +58,37 @@ def patch_picture(image: Image.Image, patch: Patch, fit: Fit) -> tuple[tuple[int
     scaled as the whole picture is scaled, so that its edges meet the picture around it (the resampling of the whole
     part, cut: the window resized with ``box`` takes in the pixels the filter reaches round it, `LANCZOS_REACH`, and
     stops where the part does). None when none of it is on show."""
-    (px0, py0, px1, py1), picture = patch
+    box, picture = patch
+    return _resampled(image, box, fit, lambda window, at: _lay(window, picture, at))
+
+
+def changed_picture(image: Image.Image, box: Box, fit: Fit) -> tuple[tuple[int, int], Image.Image] | None:
+    """The canvas pixels that change when *image*, drawn as *fit* says, changes in *box* (image pixels): the place
+    of their top left corner and their picture - the box with the canvas pixels round it whose filter reaches into
+    it, resampled as the whole picture is (`patch_picture`'s resampling, cut). None when none of it is on show."""
+    (bx0, by0, bx1, by1), (pw, ph), (sw, sh), _at = fit
+    if (sw, sh) != (pw, ph) and pw > 0 and ph > 0 and sw > 0 and sh > 0:
+        gx = math.ceil((LANCZOS_REACH + 1) * max(1.0, pw / sw)) + 1
+        gy = math.ceil((LANCZOS_REACH + 1) * max(1.0, ph / sh)) + 1
+        box = (box[0] - gx, box[1] - gy, box[2] + gx, box[3] + gy)
+    return _resampled(image, box, fit)
+
+
+def _resampled(image: Image.Image, box: Box, fit: Fit,
+               lay: Callable[[Image.Image, tuple[int, int]], None] | None = None,
+               ) -> tuple[tuple[int, int], Image.Image] | None:
+    """The canvas pixels over *box* (image pixels) of *image* drawn as *fit* says, resampled as the whole picture is:
+    the place of their top left corner and their picture; *lay* changes the window of the image they are resampled
+    from first (given it and the place of *box*'s top left corner in it). None when none of it is on show."""
+    px0, py0, px1, py1 = box
     (bx0, by0, bx1, by1), (pw, ph), (sw, sh), (x, y) = fit
     qx0, qy0, qx1, qy1 = max(px0, bx0), max(py0, by0), min(px1, bx1), min(py1, by1)
     if qx1 <= qx0 or qy1 <= qy0 or pw <= 0 or ph <= 0 or sw <= 0 or sh <= 0:
         return None
     if (sw, sh) == (pw, ph):  # drawn at its size: the pixels as they are
         window = image.crop((qx0, qy0, qx1, qy1))
-        _lay(window, picture, (px0 - qx0, py0 - qy0))
+        if lay is not None:
+            lay(window, (px0 - qx0, py0 - qy0))
         return (x + qx0 - bx0, y + qy0 - by0), window
     fx, fy = pw / sw, ph / sh  # the part's pixels for one of the canvas
     ci0, ci1 = max(0, math.floor((qx0 - bx0) / fx)), min(sw, math.ceil((qx1 - bx0) / fx))
@@ -71,7 +100,8 @@ def patch_picture(image: Image.Image, patch: Patch, fit: Fit) -> tuple[tuple[int
     wx0, wx1 = max(0, math.floor(sx0) - padx), min(pw, math.ceil(sx1) + padx)
     wy0, wy1 = max(0, math.floor(sy0) - pady), min(ph, math.ceil(sy1) + pady)
     window = image.crop((bx0 + wx0, by0 + wy0, bx0 + wx1, by0 + wy1))
-    _lay(window, picture, (px0 - bx0 - wx0, py0 - by0 - wy0))
+    if lay is not None:
+        lay(window, (px0 - bx0 - wx0, py0 - by0 - wy0))
     shown = window.resize((ci1 - ci0, cj1 - cj0), Image.LANCZOS, box=(sx0 - wx0, sy0 - wy0, sx1 - wx0, sy1 - wy0))
     return (x + ci0, y + cj0), shown
 
@@ -132,11 +162,34 @@ class ImageCanvas(tk.Canvas):
         self.band: Callable[[], str] | None = None  # the busy badge's line, asked for at every turn of the spinner
         self.badge = False  # the busy badge is on show
         self.on_redraw: Callable[[], None] | None = None  # draws more over the picture after every redraw
+        # ``np.asarray(image)`` of an image when its owner holds it already (else None): what `area.page_bounds` takes
+        # out of the image first
+        self.pixels_of: Callable[[Image.Image], Any] | None = None
+        # what the next `set_image` is told about its picture (each one forgets them again):
+        self.moving = False  # it is a frame of a picture that keeps changing (the viewer's live frames)
+        self.changed: list[Box] | None = None  # it is the picture on show, changed in place in these boxes alone
+        self._moved_at: float | None = None  # when a frame of a moving picture was drawn last (time.monotonic)
+        self._fine_job: str | None = None  # the picture drawn quickly: drawn again as ever then
+        self._fit_key: tuple | None = None  # what the picture drawn last was fitted from (None: drawn quickly)
         self.bind("<Configure>", self._on_configure)
 
     def set_image(self, image: Image.Image | None) -> None:
+        """*image* on the canvas, everything drawn again. Two cheaper draws, which leave the very picture the full
+        one leaves: the picture on show changed in place in the boxes `changed` names (a page filling in) - those
+        boxes alone are resampled, with the canvas pixels round them that the filter reaches, and the picture
+        stays (`_draw_changed`); and a frame of a moving picture (`moving`) that comes within MOVING_MS of the one
+        before - resampled bilinearly, and drawn again as ever once none has come for FINE_MS."""
+        changed, moving = self.changed, self.moving
+        self.changed, self.moving = None, False
+        if changed is not None and image is not None and image is self._image and self._draw_changed(changed):
+            return
         self._image = image
-        self._redraw()
+        quick = False
+        if moving and image is not None:
+            now = time.monotonic()
+            quick = self._moved_at is not None and now - self._moved_at < MOVING_MS / 1000
+            self._moved_at = now
+        self._redraw(quick)
 
     def set_patch(self, patch: Patch | None) -> None:
         """*patch* over the picture now (None: none), with nothing else drawn again: just above the picture, under
@@ -179,7 +232,8 @@ class ImageCanvas(tk.Canvas):
             if img is image:
                 return box
         try:
-            found = area.page_bounds(image)
+            pixels = self.pixels_of(image) if self.pixels_of is not None else None
+            found = area.page_bounds(image if pixels is None else pixels)
         except Exception:  # noqa: BLE001 - a frame that cannot be looked at is drawn whole
             found = None
         size, before = self._trim_joined
@@ -296,13 +350,13 @@ class ImageCanvas(tk.Canvas):
             self._spin_job = self.after(self.SPIN_MS, self._spin)
 
     def destroy(self) -> None:
-        for job in (self._job, self._note_job, self._spin_job):
+        for job in (self._job, self._note_job, self._spin_job, self._fine_job):
             if job is not None:
                 try:
                     self.after_cancel(job)
                 except tk.TclError:
                     pass
-        self._job = self._note_job = self._spin_job = None
+        self._job = self._note_job = self._spin_job = self._fine_job = None
         super().destroy()
 
     def _on_configure(self, _event: tk.Event) -> None:
@@ -317,17 +371,22 @@ class ImageCanvas(tk.Canvas):
             w, h = self.winfo_reqwidth(), self.winfo_reqheight()
         return w, h
 
-    def _redraw(self) -> None:
+    def _redraw(self, quick: bool = False) -> None:
+        """Everything drawn again; *quick*: the picture resampled bilinearly, and drawn again as ever after FINE_MS."""
         self._job = None
+        if self._fine_job is not None:
+            self.after_cancel(self._fine_job)
+            self._fine_job = None
         self.delete("all")
-        self._shown = self._fit = None
+        self._shown = self._fit = self._fit_key = None
         w, h = self.winfo_width(), self.winfo_height()
         if w >= 2 and h >= 2:
             if self.message:
                 self.create_text(w / 2, h / 2, text=self._lines(self.message, MESSAGE_FONT, max(200, w - 80)),
                                  fill="#e0e0e0", font=MESSAGE_FONT, justify="center")
             elif self._image is not None:
-                self._draw_picture(w, h)
+                if self._draw_picture(w, h, quick):
+                    self._fine_job = self.after(FINE_MS, self._refine)
             elif self.hint:
                 self.create_text(w / 2, h / 2, text=self._lines(self.hint, HINT_FONT, max(160, min(720, w - 80))),
                                  fill="#ffffff", font=HINT_FONT, justify="center", tags="hint")
@@ -335,18 +394,59 @@ class ImageCanvas(tk.Canvas):
         self._draw_busy()
         self._draw_note()
 
-    def _draw_picture(self, w: int, h: int) -> None:
+    def _refine(self) -> None:
+        """The picture drawn quickly a while ago, and no frame since: drawn again as ever."""
+        self._fine_job = None
+        self._redraw()
+
+    def _draw_picture(self, w: int, h: int, quick: bool = False) -> bool:
+        """The picture and everything over it; whether it was resampled bilinearly (*quick*: when it is resized)."""
         assert self._image is not None
         box = self.shown_box()
         part = self._image if box == (0, 0, self._image.width, self._image.height) else self._image.crop(box)
         size, (x, y) = area.fit(part.size, (w, h), self.inset, self.enlarge)
-        shown = part if size == part.size else part.resize(size, Image.LANCZOS)
+        quick = quick and size != part.size
+        shown = part if size == part.size else part.resize(size, Image.BILINEAR if quick else Image.LANCZOS)
         self.scale = shown.width / part.width
         self._photo = ImageTk.PhotoImage(shown)
         self.offset = (x - box[0] * self.scale, y - box[1] * self.scale)
         self._shown = (x, y, x + shown.width, y + shown.height)
         self.create_image(x, y, anchor="nw", image=self._photo, tags="picture")
         self._fit = (box, part.size, shown.size, (int(x), int(y)))
+        self._fit_key = None if quick else (box, (w, h), self.inset, self.enlarge)
+        self._draw_over_picture()
+        return quick
+
+    def _draw_changed(self, changed: list[Box]) -> bool:
+        """The picture on show changed in place in the boxes *changed* (image pixels): when it would be drawn as it
+        is drawn now (the same part, fitted the same way; not drawn quickly), the canvas pixels those boxes change
+        are resampled and put into the picture on show (`changed_picture`), and everything over it is drawn again;
+        else False (nothing done: it is drawn whole)."""
+        image, key = self._image, self._fit_key
+        if image is None or key is None or self._fit is None or self._photo is None or self.message:
+            return False
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 2 or h < 2 or key != (self.shown_box(), (w, h), self.inset, self.enlarge):
+            return False
+        x, y = self._fit[3]
+        for box in changed:
+            made = changed_picture(image, box, self._fit)
+            if made is None:
+                continue
+            (cx, cy), piece = made
+            photo = ImageTk.PhotoImage(piece, master=self)
+            self.tk.call(str(self._photo), "copy", str(photo), "-to", cx - x, cy - y, "-compositingrule", "set")
+        self.addtag_all("redrawn")
+        self.dtag("picture", "redrawn")
+        self.delete("redrawn")
+        self._draw_over_picture()
+        self._draw_banner()
+        self._draw_busy()
+        self._draw_note()
+        return True
+
+    def _draw_over_picture(self) -> None:
+        """What is drawn over the picture: the patch, the overlay with its labels, the outlines, and `on_redraw`'s."""
         self._draw_patch()
         boxes = []
         for (bx0, by0, bx1, by1), colour, label in self.overlay:

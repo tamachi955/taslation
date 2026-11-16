@@ -205,6 +205,15 @@ def _captured_facts(window: Any, hwnd: int, seq: int | None, image: Image.Image)
     return facts
 
 
+def known_pixels(window: Any, image: Image.Image) -> np.ndarray | None:
+    """``np.asarray(image)`` when the window holds it already (the frame's `FrameFacts`), else None: the canvas takes
+    its page's place out of them (`ImageCanvas.pixels_of`)."""
+    for facts in getattr(window, "_frame_facts", None) or ():
+        if facts.image is image:
+            return facts._pixels
+    return None
+
+
 def _blank(window: Any, image: Image.Image) -> bool:
     """`capture.is_blank` of *image*."""
     facts = _facts(window, image)
@@ -622,6 +631,15 @@ class LiveViewMixin(BlackViewerMixin):
         in_place.refresh(self)  # (a bubble showing its other side in its place: drawn with the page, or gone)
         image, overlay, outlines = self._picture()
         self.canvas.overlay, self.canvas.outlines = overlay, outlines
+        # what the canvas may draw cheaply, leaving the very picture of a full draw (`ImageCanvas.set_image`): a new
+        # frame of the viewer's, and the page filling in, lettered in place in the boxes noted since it was drawn
+        moved, self._live_moved = getattr(self, "_live_moved", False), False
+        lettered, self._fill_changed = getattr(self, "_fill_changed", None), None
+        fill = getattr(self, "_fill", None)
+        self.canvas.moving = bool(moved and image is not None and run_page_on_show(self) is None)
+        self.canvas.pixels_of = lambda picture: known_pixels(self, picture)
+        self.canvas.changed = (lettered[1] if lettered is not None and image is not None and lettered[0] is image
+                               and fill is not None and fill.page is image else None)
         if image is None:
             self.canvas.crop = None
             self.canvas.set_image(None)
@@ -738,6 +756,7 @@ class LiveViewMixin(BlackViewerMixin):
             return
         self._live, self._live_thumb = image, thumb
         if self._fill is None:
+            self._live_moved = True  # (a frame of the viewer's: drawn quickly while they keep coming, `_redisplay`)
             self._redisplay()
 
     def _quiet_live(self, image: Image.Image, thumb: np.ndarray) -> None:

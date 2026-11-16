@@ -9,13 +9,13 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, ImageTk
 
 from taslation import i18n
 from taslation.capture import WindowInfo
 from taslation.regions import PageResult
 from taslation.ui import app as app_mod
-from taslation.ui import live
+from taslation.ui import live, preview
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.live import BlackViewerMixin
 
@@ -284,6 +284,106 @@ def test_a_page_fills_in_on_the_frame_as_its_events_come(hidden_root, viewer):
     w._handle_event("translate_done", {})  # the job failed: the page as it was again, no band, no bar
     assert w._fill is None and w.shown() is final.image and not w.canvas.find_withtag("busy")
     assert not w.progress_bar.shown
+
+
+def _drawn(canvas):
+    """The picture on *canvas* as Tk holds it."""
+    return np.asarray(ImageTk.getimage(canvas._photo).convert("RGB"), dtype=int)
+
+
+def _drawn_whole(image, like):
+    """*image* drawn on a new canvas of *like*'s size: the picture a full draw makes of it."""
+    c = ImageCanvas(like.master)
+    c.winfo_width, c.winfo_height = like.winfo_width, like.winfo_height
+    c.set_image(image)
+    try:
+        return _drawn(c)
+    finally:
+        c.destroy()
+
+
+def test_a_page_filling_in_resamples_each_bubble_alone_and_the_finished_page_is_drawn_whole(hidden_root, viewer,
+                                                                                                sample_page):
+    """Each bubble lettered in place resamples its own canvas pixels alone (with those round it the filter reaches)
+    into the picture on show, which stays: within a grey level of a full draw. The finished page is a new picture,
+    drawn whole: the very pixels of a full draw."""
+    viewer.frame = sample_page.copy()
+    w = Window(hidden_root)
+    w.canvas.winfo_width, w.canvas.winfo_height = (lambda: 600), (lambda: 500)  # the page drawn at 0.29 of its size
+    w._tick()
+    frame = w._live
+    w._start_translate(frame, thumb=w._live_thumb)
+    boxes = [(100, 120, 400, 420), (700, 900, 1100, 1300), (180, 1400, 520, 1700)]
+    w._handle_event("regions", {"boxes": boxes, "size": frame.size})
+    w._flush_fill()
+    whole = []
+    draw = w.canvas._draw_picture
+    w.canvas._draw_picture = lambda *a: (whole.append(w.shown()), draw(*a))[1]
+    for i, box in enumerate(boxes):
+        before, picture = _drawn(w.canvas), w.canvas.find_withtag("picture")
+        patch = Image.new("RGB", (box[2] - box[0], box[3] - box[1]), (250, 250, 250))
+        patch.paste((200, 0, 0), (40, 40, 200, 120))
+        w._handle_event("translated", {"index": i, "text": "Hi!", "box": box, "patch": patch})
+        w._flush_fill()
+        assert w.shown() is w._fill.page and len(w.canvas.find_withtag("outline")) == len(boxes) - 1 - i
+        assert np.abs(_drawn(w.canvas) - before).max() > 100  # lettered on the canvas ...
+        assert np.abs(_drawn(w.canvas) - _drawn_whole(w._fill.page, w.canvas)).max() <= 1  # ... as a full draw has it
+        if i:  # (the first one makes the page lettered so far: a new picture, drawn whole)
+            assert w.canvas.find_withtag("picture") == picture  # the picture stays
+    assert len(whole) == 1 and whole[0] is w._fill.page
+    final = _translated(frame, box=boxes[0])
+    w._handle_event("page", {"image": final.image})
+    w._flush_fill()
+    assert len(whole) == 2 and whole[1] is final.image
+    assert (_drawn(w.canvas) == _drawn_whole(final.image, w.canvas)).all()  # the finished page: today's very pixels
+
+
+def test_frames_that_keep_coming_are_drawn_quickly_and_as_ever_once_they_stop(hidden_root, monkeypatch):
+    """A moving picture's frame within MOVING_MS of the one before is resampled bilinearly, and drawn again as ever
+    FINE_MS after the last one: the picture that stays is a full draw's. The first frame after a pause, any other
+    picture and a picture changed in place are drawn as ever (the one drawn quickly is drawn whole then)."""
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(preview, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    c = ImageCanvas(hidden_root)
+    c.winfo_width, c.winfo_height = (lambda: 300), (lambda: 400)
+    jobs: dict[str, tuple] = {}
+    made = iter(range(100))
+
+    def after(ms, then):
+        job = f"job{next(made)}"
+        jobs[job] = (ms, then)
+        return job
+
+    monkeypatch.setattr(c, "after", after)
+    monkeypatch.setattr(c, "after_cancel", lambda job: jobs.pop(job))
+    rng = np.random.default_rng(3)
+    frames = [Image.fromarray(rng.integers(0, 256, (900, 700, 3), dtype=np.uint8)) for _ in range(5)]
+
+    def shown(frame, moving=True, step=0.05):
+        clock.now += step
+        c.moving = moving
+        c.set_image(frame)
+        return _drawn(c)
+
+    assert (shown(frames[0]) == _drawn_whole(frames[0], c)).all() and not jobs  # the first one: as ever
+    quick = shown(frames[1])  # the next one within MOVING_MS: bilinear, drawn again later
+    assert (quick == np.asarray(frames[1].resize(c._fit[2], Image.BILINEAR), dtype=int)).all()
+    assert [ms for ms, _then in jobs.values()] == [preview.FINE_MS]
+    shown(frames[2])
+    assert len(jobs) == 1  # one redraw waits, for the latest frame
+    [(_ms, then)] = jobs.values()
+    jobs.clear()
+    then()  # none came for FINE_MS
+    assert (_drawn(c) == _drawn_whole(frames[2], c)).all() and not jobs
+    assert (shown(frames[3], step=preview.MOVING_MS / 1000 + 0.01) == _drawn_whole(frames[3], c)).all() and not jobs
+    shown(frames[4])
+    assert len(jobs) == 1
+    c.changed = [(0, 0, 10, 10)]  # a picture drawn quickly, changed in place: drawn whole, as ever
+    frames[4].paste((0, 0, 0), (0, 0, 10, 10))
+    assert (shown(frames[4], moving=False) == _drawn_whole(frames[4], c)).all() and not jobs
+    shown(frames[0])
+    assert len(jobs) == 1
+    assert (shown(frames[1], moving=False) == _drawn_whole(frames[1], c)).all() and not jobs  # another picture
 
 
 def test_the_status_bar_names_the_stage_in_the_windows_language(hidden_root, viewer):
