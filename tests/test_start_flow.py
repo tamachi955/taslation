@@ -1899,26 +1899,25 @@ def test_under_a_name_that_names_no_book_every_page_counts_as_uncached(flow, mon
     assert len(flow.dialogs) == 1 and flow.dialogs[0].generic
 
 
-def test_with_follow_by_events_a_page_is_watched_for_only_while_the_viewer_is_in_front(flow, monkeypatch):
+def test_with_follow_by_events_the_job_watch_looks_at_nothing_the_live_view_watches(flow, monkeypatch):
+    """With follow = "events" the page being translated is watched by the live view, at each new frame of the viewer
+    in front (`_look_over_job`: tests/test_job_watch.py); the job watch of every auto_interval_ms is follow = "poll"'s
+    alone."""
     clock = [100.0]
     monkeypatch.setattr(jobs.time, "monotonic", lambda: clock[0])
     captured = []
     flow._capture = lambda hwnd: captured.append(hwnd) or flow.frame
     flow._following = Following(mode="events", owner="own")
     flow._start_translate(_frame())
-    for owner in ("own", "other"):  # TASlation in front: its own operations are followed, and cancel the job
-        flow._following.owner = owner  # neither in front: nothing to look at
+    for owner in ("own", "other", "viewer"):
+        flow._following.owner = owner
         clock[0] += 5.0
         flow._watch_page()
     assert not captured and not flow._page_cancel.is_set()
-    flow._following.owner = "viewer"  # the viewer in front: the pages turned there are looked for, as before
-    clock[0] += 5.0
-    flow._watch_page()
-    assert captured == [VIEWER.hwnd]
     flow._following = Following(mode="poll")  # polling: as before
     clock[0] += 5.0
     flow._watch_page()
-    assert len(captured) == 2
+    assert captured == [VIEWER.hwnd]
 
 
 def test_f5_while_the_browser_shows_another_tab_says_the_live_views_line(flow):

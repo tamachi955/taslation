@@ -171,6 +171,9 @@ class Window(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin, t
     _redisplay = LiveViewMixin._redisplay
     _picture = LiveViewMixin._picture
     _result_on_show = LiveViewMixin._result_on_show
+    _fill_on_show = LiveViewMixin._fill_on_show
+    _shows_page = LiveViewMixin._shows_page
+    _sharper_than = LiveViewMixin._sharper_than
     _lettered = LiveViewMixin._lettered
     _lettering = LiveViewMixin._lettering
     _page_regions = LiveViewMixin._page_regions

@@ -21,7 +21,10 @@ from taslation import recovery
 from taslation.pipeline import PageGate
 from taslation.regions import PageResult
 from taslation.ui import jobs, live
-from taslation.ui.live import CONFIRM_FLOOR_MS, CONFIRM_MARGIN_MS, CONFIRM_WINDOW, confirm_ms
+from taslation.ui.constants import FRAME_STEP_MS
+from taslation.ui.live import CONFIRM_CEILING, CONFIRM_FLOOR_MS, CONFIRM_MARGIN_MS, CONFIRM_WINDOW, confirm_ms
+
+UNSEEN_S = CONFIRM_CEILING * 0.4  # a viewer not seen yet: its frames confirmed after twice settle_ms
 
 STEP_MS = 10  # the worker's stand-in looks at its job so often
 READ_S, ASK_S, CANCEL_S = 0.3, 0.5, 0.03  # a page read (detection and OCR), the model's answer, a cancel taking hold
@@ -238,21 +241,25 @@ def test_the_settle_wait_is_gone_from_the_time_to_the_first_request(hidden_root,
     assert shown[False] - shown[True] >= 0.38, shown  # ... from the first request and from the page lettered
 
 
-def test_a_new_viewer_waits_settle_ms_for_its_confirmation_and_learns_its_turns(follow):
-    w, worker = follow.make()  # no turn seen yet: 400 ms (`confirm_ms`)
-    assert w._turns_seen(VIEWER.hwnd) == [0]  # (page 1: settled when it was seen)
+def test_a_new_viewer_waits_the_longest_confirmation_and_learns_its_turns(follow):
+    w, worker = follow.make()  # no turn seen yet: twice settle_ms, 800 ms (`confirm_ms`)
+    assert w._turns_seen(VIEWER.hwnd) == []  # (page 1, the viewer's first frame: no turn was seen)
     turned = follow.show((0.0, "2", _page(2)))
     job = worker.one("2")
-    assert job.start - turned <= 0.016 and _after(job.gate.confirmed_at - turned, 0.4)
+    assert job.start - turned <= 0.016 and _after(job.gate.confirmed_at - turned, UNSEEN_S)
     assert job.asked == pytest.approx(job.gate.confirmed_at, abs=0.011)  # (the read was done by then)
     follow.show((0.0, "3", _page(3)))
-    assert w._turns_seen(VIEWER.hwnd) == [0, 0, 0] and confirm_ms([0, 0, 0], 400) == CONFIRM_FLOOR_MS
-    turned = follow.show((0.0, "4", _page(4)))
-    assert _after(worker.one("4").gate.confirmed_at - turned, 0.15)  # learnt: the floor
+    follow.show((0.0, "4", _page(4)))
+    seen = w._turns_seen(VIEWER.hwnd)
+    # each a turn in one frame: noted from the last look that still saw the page before (one heartbeat, FRAME_STEP_MS)
+    assert len(seen) == 3 and all(0 <= ms <= FRAME_STEP_MS for ms in seen), seen
+    assert confirm_ms(seen, 400) == CONFIRM_FLOOR_MS
+    turned = follow.show((0.0, "5", _page(5)))
+    assert _after(worker.one("5").gate.confirmed_at - turned, 0.15)  # learnt: the floor
 
 
 def test_a_page_read_before_its_frame_is_confirmed_is_shown_and_kept_only_then(follow):
-    w, worker = follow.make(asks=False)  # every line reused: no request; a new viewer, 400 ms
+    w, worker = follow.make(asks=False)  # every line reused: no request; a new viewer, 800 ms
     turned = follow.show((0.0, "2", _page(2)))
     job = worker.one("2")
     assert job.shown - turned <= READ_S + 0.03 and job.shown < job.gate.confirmed_at  # shown before ...
@@ -272,12 +279,14 @@ def test_a_soft_frame_then_the_sharp_one_drops_the_first_job_and_keeps_the_sharp
     assert first.ended - first.gate.dropped_at <= CANCEL_S + 0.011  # ... its job ended at once ...
     assert first.asked is None and first.stored is None and first.discarded  # ... nothing asked, nothing kept
     assert second.start - first.ended <= 0.016  # the sharp frame started as soon as the worker was free
-    assert _after(second.gate.confirmed_at - (turned + 0.25), 0.4)
+    assert _after(second.gate.confirmed_at - (turned + 0.25), UNSEEN_S)
     assert second.asked is not None and second.how == "done"
     assert worker.kept == ["1", "4"] and w.pipeline.forgotten == []  # (the soft job stored nothing to forget)
     assert w.last_result is second.result and w.last_result.original.tobytes() == sharp.tobytes()
     seen = w._turns_seen(VIEWER.hwnd)
-    assert len(seen) == seen_before + 1 and 240 <= seen[-1] <= 265  # one turn: first frame to the sharp one
+    # one turn, first frame to the sharp one: never short of the 250 ms, and what could not be seen of it in it - the
+    # look before the soft frame and the step that saw the sharp one, a frame step each
+    assert len(seen) == seen_before + 1 and 250 <= seen[-1] <= 250 + 2 * FRAME_STEP_MS, seen
 
 
 def test_frames_of_an_animation_ask_nothing_and_keep_nothing(follow):
@@ -289,7 +298,7 @@ def test_frames_of_an_animation_ask_nothing_and_keep_nothing(follow):
         if job.name.startswith("slide"):
             assert job.gate.confirmed_at is None and job.asked is None and job.stored is None, job
     assert worker.kept == ["1", "2"] and [j.name for j in worker.jobs if j.asked is not None] == ["1", "2"]
-    assert _after(worker.one("2").gate.confirmed_at - (turned + 0.2), 0.4)
+    assert _after(worker.one("2").gate.confirmed_at - (turned + 0.2), UNSEEN_S)
     assert w.pipeline.forgotten == []
 
 
@@ -310,16 +319,24 @@ def test_pages_flipped_faster_than_the_floor_ask_nothing_and_keep_nothing(follow
         assert [j.name for j in worker.jobs] == ["1", "p4"]  # nothing started before p4 settled
 
 
-def test_a_page_shown_past_the_floor_then_turned_has_its_job_cancelled_at_once(follow):
+def test_a_page_shown_past_the_floor_then_turned_has_its_job_cancelled_once_the_turn_is_confirmed(follow):
     _learnt(follow)  # 150 ms
     w, worker = follow.make()
-    turned = follow.show((0.0, "2", _page(2)), (0.2, "3", _page(3)))  # page 2 confirmed, then page 3 at 200 ms
-    two, three = worker.one("2"), worker.one("3")
+    three = _page(3)
+    turned = follow.show((0.0, "2", _page(2)), (0.2, "3", three), run=0.3 + 0.22)  # page 2 confirmed, then 3
+    two = worker.one("2")
     assert two.gate.confirmed_at is not None and two.asked is None  # confirmed, still reading when 3 came ...
-    assert two.how == "cancelled" and two.ended - (turned + 0.2) <= CANCEL_S + 0.03  # ... cancelled at once
-    assert three.start - two.ended <= 0.016 and three.how == "done" and worker.kept == ["1", "3"]
+    assert w._live is three and not two.cancel.is_set()  # ... page 3 on show at once, the job going on ...
+    follow.clock.run(3)
+    # ... until page 3 is confirmed in its turn (150 ms: `_look_over_job`'s rule), then cancelled
+    assert two.how == "cancelled" and 0.15 <= two.cancel_seen - (turned + 0.2) <= 0.15 + 3 * FRAME_STEP_MS / 1000
+    three_job = worker.one("3")
+    assert three_job.start - two.ended <= 0.016 and three_job.how == "done" and worker.kept == ["1", "3"]
+    assert two.ended - two.cancel_seen <= CANCEL_S + 0.011
     seen = w._turns_seen(VIEWER.hwnd)
-    assert 195 <= seen[-2] <= 215  # page 2's turn amended: another page came 200 ms after its first frame
+    # two turns, each in one frame: another page 200 ms after page 2's first frame is a turn of its own, not page 2's
+    # turn lengthened (ten pages flipped through were once noted as one turn of 3.8 s)
+    assert len(seen) == 3 + 2 and all(ms <= FRAME_STEP_MS for ms in seen[-2:]), seen
 
 
 # ------------------------------------------------------------------ a change after the confirmation
@@ -336,30 +353,33 @@ def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept_and_lengt
     assert second.gate is None and second.start - (turned + 0.35) <= 0.016  # read again from the sharp frame
     assert worker.kept == ["1", "4 soft", "4"] and w.last_result is second.result
     seen = w._turns_seen(VIEWER.hwnd)
-    assert 340 <= seen[-1] <= 365 and confirm_ms(seen, 400) == 400  # the turn took that long: the wait grows
+    # the turn took that long (and a frame step or two the window could not see): the wait grows past it
+    assert 350 <= seen[-1] <= 350 + 2 * FRAME_STEP_MS and confirm_ms(seen, 400) == seen[-1] + CONFIRM_MARGIN_MS, seen
     assert Profiles(follow.path).settle_seen_for(VIEWER) == seen  # (an amended turn is written at once)
 
 
 # ------------------------------------------------------------------ the confirmation time learnt
 def test_the_confirmation_time_is_the_longest_recent_turn_plus_a_margin_within_its_bounds():
-    assert confirm_ms([], 400) == 400 and confirm_ms([0, 0], 400) == 400  # too few turns: settle_ms
+    assert CONFIRM_CEILING == 2
+    assert confirm_ms([], 400) == 800 and confirm_ms([0, 0], 400) == 800  # too few turns: the ceiling
     assert confirm_ms([0, 0, 0], 400) == CONFIRM_FLOOR_MS  # at least the floor
     assert confirm_ms([90, 120, 100], 400) == 120 + CONFIRM_MARGIN_MS
-    assert confirm_ms([90, 900, 100], 400) == 400  # at most settle_ms
-    assert confirm_ms([0, 0, 0], 100) == 100  # (a settle_ms under the floor is the ceiling still)
+    assert confirm_ms([90, 420, 100], 400) == 500  # past settle_ms: a soft picture drawn longer than it ...
+    assert confirm_ms([90, 900, 100], 400) == 800  # ... and at most twice settle_ms
+    assert confirm_ms([0, 0, 0], 50) == 100  # (a ceiling under the floor is the ceiling still)
     outlier = [100] * 5 + [2000] + [100] * (CONFIRM_WINDOW - 1)
-    assert confirm_ms(outlier, 400) == 400  # an outlier holds while it is among the last CONFIRM_WINDOW ...
+    assert confirm_ms(outlier, 400) == 800  # an outlier holds while it is among the last CONFIRM_WINDOW ...
     assert confirm_ms(outlier + [100], 400) == 180  # ... and is forgotten after
 
 
 def test_the_turns_learnt_persist_per_viewer_and_bad_values_are_left_out(follow, tmp_path):
     w, _worker = follow.make()
-    for ms in (120, 90, 100):
+    for ms in (120, 90, 100, 110):
         w._note_turn(VIEWER.hwnd, ms / 1000)
-    assert w._turns_seen(VIEWER.hwnd) == [0, 120, 90, 100]
+    assert w._turns_seen(VIEWER.hwnd) == [120, 90, 100, 110]  # (page 1, the first frame: no turn)
     again = Profiles(follow.path)  # a new start: the store read anew
-    assert again.settle_seen_for(VIEWER) == [0, 120, 90]  # written when the time changed (the third turn) ...
-    assert confirm_ms([0, 120, 90], 400) == confirm_ms([0, 120, 90, 100], 400) == 200  # ... the same time: 120 + 80
+    assert again.settle_seen_for(VIEWER) == [120, 90, 100]  # written when the time changed (the third turn) ...
+    assert confirm_ms([120, 90, 100], 400) == confirm_ms([120, 90, 100, 110], 400) == 200  # ... the same: 120 + 80
     assert again.settle_seen_for(OTHER_VIEWER) == []  # per viewer
     fresh = Window(w.canvas.master, follow.clock, owner="viewer")
     fresh.settings.early_start, fresh.profiles = True, again
@@ -370,7 +390,7 @@ def test_the_turns_learnt_persist_per_viewer_and_bad_values_are_left_out(follow,
         fresh._note_turn(OTHER_VIEWER.hwnd, 0.3)
         written = Profiles(follow.path).settle_seen_for(OTHER_VIEWER)
         assert written == ([] if turns < 3 else [300] * 3 if turns < 11 else [300] * 11), turns
-    assert Profiles(follow.path).settle_seen_for(VIEWER) == [0, 120, 90]  # (the other viewer's stays)
+    assert Profiles(follow.path).settle_seen_for(VIEWER) == [120, 90, 100]  # (the other viewer's stays)
 
     bad = tmp_path / "bad.json"
     profiles = Profiles(bad)
@@ -387,7 +407,7 @@ def test_an_outlier_turn_is_forgotten_after_a_window_of_turns(follow):
     w._note_turn(VIEWER.hwnd, 2.0)  # a viewer that once took 2 s
     for _i in range(3):
         w._note_turn(VIEWER.hwnd, 0.05)
-    assert confirm_ms(w._turns_seen(VIEWER.hwnd), 400) == 400
+    assert confirm_ms(w._turns_seen(VIEWER.hwnd), 400) == 800
     for _i in range(CONFIRM_WINDOW):
         w._note_turn(VIEWER.hwnd, 0.05)
     assert confirm_ms(w._turns_seen(VIEWER.hwnd), 400) == CONFIRM_FLOOR_MS

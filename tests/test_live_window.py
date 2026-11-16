@@ -84,6 +84,9 @@ class Window(BlackViewerMixin):
     _page_regions = app_mod.App._page_regions
     _noted_regions = app_mod.App._noted_regions
     _result_on_show = app_mod.App._result_on_show
+    _fill_on_show = app_mod.App._fill_on_show
+    _shows_page = app_mod.App._shows_page
+    _sharper_than = app_mod.App._sharper_than
     _editing = app_mod.App._editing
     _same_page = app_mod.App._same_page
     _area_thumb = app_mod.App._area_thumb
@@ -98,6 +101,8 @@ class Window(BlackViewerMixin):
     _say_waiting = app_mod.App._say_waiting
     _normal_status = app_mod.App._normal_status
     _capture = app_mod.App._capture
+    _capture_frame = app_mod.App._capture_frame
+    _tail_turn = app_mod.App._tail_turn
     _covers_viewer = app_mod.App._covers_viewer
     _set_covered = app_mod.App._set_covered
     _capture_failed = app_mod.App._capture_failed

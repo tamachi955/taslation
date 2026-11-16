@@ -625,6 +625,8 @@ def _browser(size=(960, 600), page=(200, 130, 760, 560), bars=85):
 class Viewer(BlackViewerMixin):
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     _capture = app_mod.App._capture
+    _capture_frame = app_mod.App._capture_frame
+    _tail_turn = app_mod.App._tail_turn
     _resizing = app_mod.App._resizing
     _find_page = app_mod.App._find_page
     _found_margins = app_mod.App._found_margins

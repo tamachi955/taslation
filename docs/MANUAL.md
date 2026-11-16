@@ -34,10 +34,13 @@ or a scroll it looks once). Windows tells it which window is in front, so it doe
 With `follow = "poll"` in `taslation.toml`, it always looks every 0.7 seconds.
 A page that is not in the cache is also read from the first new picture, without waiting for the picture to settle.
 It asks the model for translations, and is kept in the cache, only once the picture has stayed the same for a moment: as long as this viewer
-takes to finish drawing a page, learnt from its last page turns and kept per viewer in `profiles.json` (at most 0.4 seconds, the `settle_ms` setting;
-0.4 seconds for a viewer not seen yet). If the picture changes before that (a page sliding in, a blurred picture replaced by the sharp one),
-what was read from it is dropped and the page is read again from the new picture. With `early_start = false` in `taslation.toml`,
-a page is read only once its picture has stayed the same for `settle_ms`, as in earlier versions.
+takes to finish drawing a page, learnt from its last page turns and kept per viewer in `profiles.json` (at most 0.8 seconds, twice the `settle_ms`
+setting; 0.8 seconds for a viewer not seen yet, until it has turned three pages). If the picture changes before that (a page sliding in,
+a blurred picture replaced by the sharp one), what was read from it is dropped and the page is read again from the new picture.
+With `early_start = false` in `taslation.toml`, a page is read only once its picture has stayed the same for `settle_ms`, as in earlier versions.
+A page turned while another is being translated shows at once as the viewer draws it, with nothing of the other page's translation over it;
+that translation is stopped only once the new picture has stayed the same for that moment (a black flash or a loading indicator stops nothing,
+and back on that page, its translation shows again).
 
 An untranslated page fills in while you look at it. The bubbles found are marked with frames (dashed; solid once read; gone once they turn out not to be text),
 and they are translated in the order the page's bubbles are read, each with the lines before it as context. Each bubble is lettered as soon as its translation is ready. At the end,

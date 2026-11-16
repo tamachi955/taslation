@@ -430,6 +430,9 @@ class Window:
     _on_page_event = JobsMixin._on_page_event
     _batch_page = JobsMixin._batch_page
     _picture = LiveViewMixin._picture
+    _fill_on_show = LiveViewMixin._fill_on_show
+    _shows_page = LiveViewMixin._shows_page
+    _sharper_than = LiveViewMixin._sharper_than
     _keep_pace = JobsMixin._keep_pace
 
     def __init__(self):

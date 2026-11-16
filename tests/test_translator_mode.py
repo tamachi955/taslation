@@ -525,6 +525,9 @@ class Pointer:
     _region_at = app_mod.App._region_at
     _page_regions = app_mod.App._page_regions
     _result_on_show = app_mod.App._result_on_show
+    _fill_on_show = app_mod.App._fill_on_show
+    _shows_page = app_mod.App._shows_page
+    _sharper_than = app_mod.App._sharper_than
 
     def __init__(self, root, regions):
         self.canvas = ImageCanvas(root)

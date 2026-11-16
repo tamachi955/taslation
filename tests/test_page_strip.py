@@ -192,6 +192,9 @@ class Window(StripMixin, tk.Frame):
     _on_release = A._on_release
     _picture = A._picture
     _result_on_show = A._result_on_show
+    _fill_on_show = A._fill_on_show
+    _shows_page = A._shows_page
+    _sharper_than = A._sharper_than
     _on_close = A._on_close
     _close_allowed = A._close_allowed
 

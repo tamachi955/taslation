@@ -63,6 +63,8 @@ class Window(BlackViewerMixin):
     _summary = staticmethod(app_mod.App._summary)
     _page_line = app_mod.App._page_line
     _capture = app_mod.App._capture
+    _capture_frame = app_mod.App._capture_frame
+    _tail_turn = app_mod.App._tail_turn
     _set_viewer_hidden = app_mod.App._set_viewer_hidden
     _redisplay = app_mod.App._redisplay
     _overlay_items = app_mod.App._overlay_items
@@ -72,6 +74,9 @@ class Window(BlackViewerMixin):
     _guard_line = app_mod.App._guard_line
     _show_progress = app_mod.App._show_progress
     _picture = app_mod.App._picture
+    _fill_on_show = app_mod.App._fill_on_show
+    _shows_page = app_mod.App._shows_page
+    _sharper_than = app_mod.App._sharper_than
     _same_page = app_mod.App._same_page
     _area_thumb = app_mod.App._area_thumb
     _lettered = app_mod.App._lettered

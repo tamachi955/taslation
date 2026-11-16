@@ -263,6 +263,9 @@ def window(hidden_root):
     class Window(StripMixin, tk.Frame):
         _picture = LiveViewMixin._picture
         _result_on_show = LiveViewMixin._result_on_show
+        _fill_on_show = LiveViewMixin._fill_on_show
+        _shows_page = LiveViewMixin._shows_page
+        _sharper_than = LiveViewMixin._sharper_than
 
         def __init__(self, master):
             tk.Frame.__init__(self, master)

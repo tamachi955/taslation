@@ -885,6 +885,15 @@ class JobsMixin:
                     pass
             self._events_job = self.after(EVENTS_BUSY_MS if self.busy else EVENTS_IDLE_MS, self._poll_events)
 
+    def _show_held(self, gate: Any) -> None:
+        """The frame of *gate* is confirmed (`LiveViewMixin._early_confirm`): the page its job finished before that,
+        held back ("result" while the gate was pending), is shown now as any page done."""
+        held = getattr(self, "_held_result", None)
+        if held is None or held.get("gate") is not gate:
+            return
+        self._held_result = None
+        self._handle_event("result", held)
+
     def _warn_unasked(self, text: str, said: bool = False) -> None:
         """A warning nobody asked for (the worker's: a page that failed, a model partly on the CPU, Ollama not
         started). While the reader reads - reading mode, or the window over the full-screen viewer - no box comes up
@@ -995,6 +1004,14 @@ class JobsMixin:
             if getattr(self, "_find", None) is not None:
                 self._refresh_find()
         elif kind == "result":
+            gate = data.get("gate")
+            if gate is not None and getattr(gate, "state", "confirmed") == "pending":
+                # a page started on its first frame, done before that frame was confirmed (a page with nothing for
+                # the model, or nothing found on a soft frame): shown once its frame is confirmed (`_show_held`), never
+                # once it is dropped - the viewer shows another picture by then, and a page "translated" for a moment
+                # with none of its lines was that picture's
+                self._held_result = data
+                return
             self._hide_busy()
             if data.get("edited") and data["result"] is not self.last_result:
                 self.say("Saved on the page the editor was opened on.")  # the page on show stays
@@ -1026,6 +1043,9 @@ class JobsMixin:
                 refresh()
         elif kind == "page_cancelled":  # Stop, or a new page: the page was not translated
             self._hide_busy()
+            held = getattr(self, "_held_result", None)
+            if held is not None and held.get("gate") is data.get("gate"):
+                self._held_result = None  # (its frame was never confirmed: never shown)
             job_news(self, data)
             if self._cancel_why != "page":
                 self.say("Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.")
@@ -1058,6 +1078,7 @@ class JobsMixin:
             self.busy = False
             self._page_cancel = None
             self._page_gate = None
+            self._held_result = None
             self._slow_before = None
             self._set_busy(False)
             self._sync_stop()
@@ -1231,8 +1252,10 @@ class JobsMixin:
     def _on_page_event(self, kind: str, data: dict[str, Any]) -> None:
         """The page filling in while it is translated (`pipeline.PageFill`): the regions found are outlined on the
         frame being read (dashed; solid once read; gone when they are no text), each one is lettered as its
-        translation comes in, and the finished page takes over; meanwhile the busy band is a badge in the corner.
-        The page is drawn again after the queue is empty (`_flush_fill`)."""
+        translation comes in, and the finished page takes over - once its frame is confirmed: a page started on its
+        first frame and finished before that (nothing for the model, or nothing found on a soft frame) stays filling
+        in, as its result waits (`_show_held`). Meanwhile the busy band is a badge in the corner. The page is drawn
+        again after the queue is empty (`_flush_fill`)."""
         fill = self._fill
         if kind == "regions":
             frame = self._job_frame
@@ -1259,6 +1282,9 @@ class JobsMixin:
             if code_of(self._progress) == SLOW and self._slow_before is not None:  # the model answers after all
                 self._progress, self._slow_before = self._slow_before, None
         elif kind == "page":
+            gate = getattr(self, "_page_gate", None)
+            if gate is not None and getattr(gate, "state", "confirmed") == "pending":
+                return  # (finished on a frame not confirmed yet: no finished page on show before its result)
             fill.final = data["image"]
         self._fill_dirty = True
 
@@ -2147,18 +2173,16 @@ class JobsMixin:
         return False
 
     def _watch_page(self, now: float | None = None) -> None:
-        """While a page is translated with Auto on: every auto_interval_ms a look at the viewer; a new page there
-        (its capture area unlike the page being translated, alike on two looks) cancels the translation, and Auto
-        takes the new page as soon as the job is gone (`_tick`, at once: it is its candidate already). With follow =
-        "events" it looks only while the viewer itself is in front (its own page turns): otherwise a page is turned
-        by TASlation's own operations, whose follow cancels the job itself (`_take`, `_cancel_page`), by the wheel
-        over the viewer while TASlation is in front, whose look does (`_look_over_job`), or not at all while neither
-        window is in front - a look then would capture for nothing. Whether a frame shows a new page is
-        `_turned_from_job`'s."""
+        """Follow = "poll", while a page is translated with Auto on: every auto_interval_ms a look at the viewer. Its
+        frame goes on the page (`_show_live`: the page filling in while the viewer shows its page, else the viewer's
+        frame as it is); a new page there (its capture area unlike the page being translated, alike on two looks)
+        cancels the translation, and Auto takes the new page as soon as the job is gone (`_tick`, at once: it is its
+        candidate already). Whether a frame shows a new page is `_turned_from_job`'s. With follow = "events" the live
+        view watches the page itself, at each new frame (`_look_over_job`), and this looks at nothing."""
         cancel = self._page_cancel
         if cancel is None or cancel.is_set() or self.batch is not None or not self.auto_var.get():
             return
-        if (self._follows_events() and self._following.owner != "viewer") or self._black_open():
+        if self._follows_events() or self._black_open():
             return
         now = time.monotonic() if now is None else now
         if now < self._watch_due:
@@ -2174,6 +2198,7 @@ class JobsMixin:
         thumb = thumbnail(image)
         if self._drew_nothing(thumb):  # the viewer drew nothing
             return
+        self._show_live(image, thumb)
         if self._turned_from_job(image, thumb):
             self._auto_candidate = thumb  # settled: Auto takes it once the job is gone
             self._cancel_why = "page"

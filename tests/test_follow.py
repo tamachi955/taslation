@@ -1027,14 +1027,14 @@ def test_a_page_turned_by_the_wheel_while_a_job_runs_does_not_wait_for_the_job(s
     assert len(v.captures) == before + 1 and not cancel.is_set()  # a new page on one look: it may still be turning
     setup.clock.run(0.6)
     assert len(v.captures) == before + 2 and cancel.is_set() and w._cancel_why == "page" and w._queued == ("auto", ())
-    for _step in range(5):  # more input while the cancelled job ends: nothing more is captured for it
-        v.input[0] += 100
+    for _step in range(5):  # more input while the cancelled job ends: the look once it stops shows the viewer's
+        v.input[0] += 100  # frame (`_look_over_job`), and nothing more is done
         setup.clock.run(0.1)
     setup.clock.run(2)
-    assert len(v.captures) == before + 2 and len(w.new_pages) == 1
+    assert len(v.captures) == before + 3 and len(w.new_pages) == 1 and w._live is page2
     w._handle_event("page_cancelled", {})  # what the worker says of a cancelled page: no result, then done
     w._handle_event("translate_done", {})
-    assert [p for _t, p in w.new_pages][1:] == [page2] and len(v.captures) == before + 3  # taken at once: settled
+    assert [p for _t, p in w.new_pages][1:] == [page2] and len(v.captures) == before + 4  # taken at once: settled
     assert w.busy and w._page_cancel is not cancel
     assert not any("Stopped" in line for line in w.statuses)  # a page given way is not "stopped"
 

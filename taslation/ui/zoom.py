@@ -99,6 +99,13 @@ SHOW_TRANSLATION = "Show the translation"  # the button of a panel pinned with t
 Box = tuple[int, int, int, int]
 
 
+def fill_on_show(window: Any) -> bool:
+    """Whether *window*'s page filling in is on show (`LiveViewMixin._fill_on_show`: not while the viewer shows
+    another page); a window without the live view shows it whenever there is one."""
+    on_show = getattr(window, "_fill_on_show", None)
+    return bool(on_show()) if on_show is not None else True
+
+
 def zoom_colours() -> dict[str, str]:
     """The popup's colours: its own dark ones, over the page in every theme; Windows' while high contrast is on."""
     return CONTRAST_ZOOM if theme.mode() == theme.CONTRAST_MODE else ZOOM_COLOURS
@@ -461,7 +468,7 @@ class BubbleZoomMixin:
         boxes: with the original on the page (`hover.reverse_on`), where nothing else says how far a bubble is, and the
         panel the way chosen; else None. A whole-book run's page on show is not one."""
         fill = getattr(self, "_fill", None)
-        if fill is None or not reverse_on(self) or not reveal_wanted(self, "panel"):
+        if fill is None or not reverse_on(self) or not reveal_wanted(self, "panel") or not fill_on_show(self):
             return None
         if run_page_on_show(self) is not None:
             return None
