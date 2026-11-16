@@ -27,6 +27,7 @@ context_pairs = 40            # previous (source, translation) pairs carried int
 # --- OCR ---
 # models_dir = "C:/path/to/models"   # where setup_models.py put the OCR model (default: ./models)
 ocr_threads = 0               # threads for the OCR model (0 = one per core); while other programs keep the CPU busy, half the cores can be faster
+ocr_runs_on = "auto"          # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
 
 # --- detection ---
 white_threshold = 225

@@ -10,6 +10,7 @@ from PIL import Image
 from taslation import bookname, health, names, ollama_start, protect, viewerparts
 from taslation.config import Settings
 from taslation.detect import layout
+from taslation.ocr import place
 from taslation.ocr.charspot import check_model_dir
 from taslation.ollama_start import OllamaStarter
 from taslation.render import artwork
@@ -191,6 +192,14 @@ def classical_unless_asked(request, monkeypatch):
         monkeypatch.setattr(artwork, "_cuda", False)
     else:
         monkeypatch.setattr(artwork, "_cuda", None)
+
+
+@pytest.fixture(autouse=True)
+def no_real_gpu_measured_for_the_ocr(monkeypatch):
+    """Where the OCR readers would run is never judged on this machine's GPU or its Ollama: the rule's facts
+    (`ocr.place.gather`: NVML, /api/ps) are none, so "auto" keeps them on the CPU wherever torch has CUDA; a test of the
+    rule gives its own facts."""
+    monkeypatch.setattr(place, "gather", lambda settings: None)
 
 
 @pytest.fixture(scope="session")

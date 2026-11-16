@@ -13,9 +13,10 @@ single character or was less sure of. `Readers.settle` is what is asked of them,
 closest to the other two stands (`medoid`). The chosen text goes with charspot's boxes and scores: they are what the
 page's character sizes and the gates are measured on.
 
-All three share the CPU and one thread setting (``ocr_threads``, torch's global); the GPU stays with Ollama. Crops come
-from memory; nothing here writes an image. The weights of all three are CC BY-NC-SA 4.0: never bundled, never fetched
-by the application (``setup_models.py``, after a person agreed in ``install.ps1``).
+All three share one thread setting on the CPU (``ocr_threads``, torch's global). charspot and nar read on the GPU where
+it has room beside the translator and the page models (`Readers.decide`, `taslation.ocr.place`), reading the same there;
+CPT always on the CPU. Crops come from memory; nothing here writes an image. The weights of all three are CC BY-NC-SA
+4.0: never bundled, never fetched by the application (``setup_models.py``, after a person agreed in ``install.ps1``).
 
 An install from before the three has charspot alone: `Readers` then works with it, `settle` changes nothing, and one
 line says so (``ocr.one_reader`` in the window's status line, a line of ``taslation doctor``).
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
@@ -33,6 +35,7 @@ from typing import Any
 from PIL import Image
 
 from ..config import OCR_CHARSPOT, OCR_SECOND_READERS
+from . import place
 from .charspot import CharspotEngine, CharspotReading, written
 
 LOG = logging.getLogger(__name__)
@@ -94,39 +97,136 @@ def missing_readers(models_dir: Path) -> list[str]:
     return [m.dirname for m in OCR_SECOND_READERS if m.missing(Path(models_dir))]
 
 
-class Readers:
-    """The OCR models in *models_dir* on the CPU. Raises `ModelNotInstalled` without charspot. Without either of the
-    others (`missing`) charspot reads alone, as an install from before them did."""
+def place_with(ocr: Any, settings: Any) -> Any:
+    """*ocr* (`Readers`, as loaded) deciding where it reads with *settings* from now on (`Readers.use`), returned as it
+    is; anything else (a test's stand-in) untouched."""
+    if isinstance(ocr, Readers):
+        ocr.use(settings)
+    return ocr
 
-    def __init__(self, models_dir: Path, threads: int = 0):
+
+class Readers:
+    """The OCR models in *models_dir*. Raises `ModelNotInstalled` without charspot. Without either of the others
+    (`missing`) charspot reads alone, as an install from before them did.
+
+    Where they run (`taslation.ocr.place`): given the *settings* in force (here, or later by `use` / `place_with`: the
+    window's own object, read again at every decision), charspot and nar go to the GPU when ``ocr_runs_on`` and the
+    room there say so - decided then, and again at the next read once the GPU memory was let go (`release_gpu`) or a
+    setting the decision depends on changed (`place.watched`); `placement` says where they are and why. Without
+    *settings* they stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
+
+    # (as the class has them: readers made without `__init__`, a test's, read on the CPU and decide nothing)
+    settings: Any = None
+    placement = place.Placement("cpu", place.NOT_ASKED)
+    _failed = ""
+
+    def __init__(self, models_dir: Path, threads: int = 0, settings: Any = None):
         models_dir = Path(models_dir)
         self.charspot = CharspotEngine(models_dir / OCR_CHARSPOT.dirname, threads)
         self.missing = missing_readers(models_dir)
         self._nar: Any = None
         self._cpt: Any = None
+        self.settings = settings
+        self.placement = place.Placement("cpu", place.NOT_ASKED)  # where charspot and nar read now, and why
+        self._failed = ""  # a GPU failure this session (its type name): the CPU from then on
+        self._decided_for: tuple[Any, ...] | None = None  # `place.watched` of the settings the placement was made for
+        self._lock = threading.RLock()  # one decision at a time
         if self.missing:
             LOG.info("reading with charspot alone: %s not installed (install.cmd adds them)", ", ".join(self.missing))
-            return
-        from .cpt import CptEngine
-        from .nar import NarEngine
+        else:
+            from .cpt import CptEngine
+            from .nar import NarEngine
 
-        nar_model, cpt_model = OCR_SECOND_READERS
-        self._nar = NarEngine(models_dir / nar_model.dirname)
-        self._cpt = CptEngine(models_dir / cpt_model.dirname)
+            nar_model, cpt_model = OCR_SECOND_READERS
+            self._nar = NarEngine(models_dir / nar_model.dirname)
+            self._cpt = CptEngine(models_dir / cpt_model.dirname)
+        for engine in self._movable():
+            engine.on_gpu_failure = self._gpu_failed
+        if settings is not None:
+            self.use(settings)
 
+    # ------------------------------------------------------------------ where they run
+    def _movable(self) -> list[Any]:
+        """The readers that go to the GPU: charspot, and nar where it is installed (a test's stand-in stays put)."""
+        return [e for e in (self.charspot, self._nar) if isinstance(e, place.DeviceModels)]
+
+    def use(self, settings: Any) -> place.Placement:
+        """Where charspot and nar read decided with *settings* from now on (the window's own object, read again at
+        every decision: `decide`), now; the placement."""
+        with self._lock:
+            self.settings = settings
+            self._decided_for = None
+        return self.decide()
+
+    def gpu_mib(self) -> int:
+        """What the readers that go to the GPU need there, in MiB (`place.CHARSPOT_MIB`, `place.NAR_MIB`)."""
+        return place.CHARSPOT_MIB + (place.NAR_MIB if self._nar is not None else 0)
+
+    def decide(self) -> place.Placement:
+        """Decide where charspot and nar read (`place.decide` with the settings in force) and put them there; the
+        placement. A copy to the GPU that fails leaves them on the CPU for the session."""
+        with self._lock:
+            settings = self.settings
+            if settings is None:
+                return self.placement
+            self._decided_for = place.watched(settings)
+            try:
+                decided = place.decide(settings, self.gpu_mib(), self._failed)
+            except Exception as e:  # noqa: BLE001 - nothing to judge on: the CPU, as before
+                LOG.info("where the OCR runs could not be decided (%s): on the CPU", type(e).__name__)
+                decided = place.Placement("cpu", place.UNKNOWN)
+            device = "cuda" if decided.device == "gpu" else "cpu"
+            for engine in self._movable():
+                if not engine.to(device):  # (a copy that failed: `_gpu_failed` put them all on the CPU, and why)
+                    return self.placement
+            self.placement = decided
+            LOG.info("the OCR readers run on the %s (%s)", decided.device.upper(), decided.why)
+            return decided
+
+    def release_gpu(self) -> None:
+        """The readers' GPU memory given back now (before Ollama loads its model, Tools > Release the model now:
+        `Pipeline.gpu_releases`); they read on the CPU, and decide again at the next read. Never raises."""
+        with self._lock:
+            if self.placement.device != "gpu":
+                return
+            for engine in self._movable():
+                engine.to("cpu")
+            self.placement = place.Placement("cpu", place.RELEASED)
+            self._decided_for = None
+
+    def _gpu_failed(self, reader: str, why: str) -> None:
+        """A reader failed on the GPU (`place.DeviceModels.run`): all of them on the CPU for the rest of the session."""
+        with self._lock:
+            self._failed = self._failed or why
+            for engine in self._movable():
+                engine.to("cpu")
+            self.placement = place.Placement("cpu", place.FAILED, error=self._failed)
+
+    def _check(self) -> None:
+        """Before a read: decide again when the placement is not for the settings in force (released, or a setting it
+        depends on changed)."""
+        settings = self.settings
+        if settings is not None and not self._failed and place.watched(settings) != self._decided_for:
+            self.decide()
+
+    # ------------------------------------------------------------------ reading
     def read_chars(self, image: Image.Image) -> CharspotReading:
+        self._check()
         return self.charspot.read_chars(image)
 
     def read(self, image: Image.Image) -> str:
+        self._check()
         return self.charspot.read(image)
 
     def read_with_confidence(self, image: Image.Image) -> tuple[str, float]:
+        self._check()
         return self.charspot.read_with_confidence(image)
 
     def settle(self, image: Image.Image, reading: CharspotReading) -> CharspotReading:
         """Charspot's *reading* of *image* with the text the readers `agree` on. Its boxes and scores stay."""
         if self._nar is None:
             return reading
+        self._check()
         text, parted = agree(reading.text, written(self._nar.read(image)), lambda: written(self._cpt.read(image)))
         return dataclasses.replace(reading, text=text, split=parted)
 
@@ -135,5 +235,6 @@ class Readers:
         without them."""
         if self._nar is None or not text:
             return False
+        self._check()
         want = normal(text)
         return normal(written(self._nar.read(image))) == want and normal(written(self._cpt.read(image))) == want

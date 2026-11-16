@@ -10,7 +10,9 @@ _loaded`), which says how much of a loaded model is in video memory and never lo
 
 * detection: the classical detectors on the CPU; with the layout model in use (`detect_model`, installed) the model
   runs on the GPU where torch has CUDA, else on the CPU;
-* OCR: the OCR readers on the CPU (they are loaded there: `ocr.charspot`);
+* OCR: where the readers are (`ocr.Readers.placement`: charspot and nar on the GPU where it has room for them, else
+  on the CPU, and why; CPT on the CPU); without loaded readers (``taslation doctor``), where the rule would put them now
+  (`ocr.place.decide`, which asks NVML and /api/ps, as above);
 * translation: Ollama's model on the GPU, the CPU or both, as /api/ps says while it is loaded;
 * erasing: the paper fill on the CPU; LaMa on the art where `art_erase` runs it on this computer and it is installed
   (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU too), on the GPU where torch has CUDA."""
@@ -160,9 +162,17 @@ class _NvmlMemory(ctypes.Structure):
 def nvml_memory_mib() -> int:
     """The first GPU's video memory in MiB as NVIDIA's driver library says it (as `nvml_name`; the number nvidia-smi
     prints as memory.total), 0 when there is none."""
+    found = nvml_usage_mib()
+    return found[0] if found is not None else 0
+
+
+def nvml_usage_mib() -> tuple[int, int] | None:
+    """(total, used) MiB of the first GPU as NVIDIA's driver library says it, every program's memory counted (on
+    Windows torch's ``mem_get_info`` sees its own process's alone); None without NVML or a GPU. No CUDA context is
+    made for it."""
     memory = _NvmlMemory()
     found = _nvml_first(lambda nvml, handle: nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)) == 0)
-    return int(memory.total // (1024 * 1024)) if found else 0
+    return (int(memory.total // (1024 * 1024)), int(memory.used // (1024 * 1024))) if found else None
 
 
 def _nvml_first(ask: Any) -> bool:
@@ -189,11 +199,12 @@ def _nvml_first(ask: Any) -> bool:
 
 # ------------------------------------------------------------------ the stages
 def stage_devices(settings: Any, translator: Any = None, cuda: bool | None = None,
-                  gpu: str | None = None) -> list[StageDevice]:
+                  gpu: str | None = None, ocr: Any = None) -> list[StageDevice]:
     """Where each of `STAGES` runs with *settings* (the settings in force), the translator *translator* (an
     `OllamaTranslator`, the window's; one is made for the settings when None or not Ollama's) asked for its model;
     *cuda* and *gpu* as `artwork.has_cuda` (`cuda_available`, asked once a session) and `gpu_name` say when None.
-    The erase on the art is where the pipeline has it, by the same rule (`artwork.available` with this *cuda*)."""
+    The erase on the art is where the pipeline has it, by the same rule (`artwork.available` with this *cuda*); the OCR
+    where *ocr* (the window's readers) is (`ocr_device`)."""
     from .detect import layout
     from .render import artwork
 
@@ -208,11 +219,49 @@ def stage_devices(settings: Any, translator: Any = None, cuda: bool | None = Non
     out = [StageDevice("detect", on_gpu if model else "cpu",
                        _("The layout model and the classical detectors") if model else _("The classical detectors"),
                        name if model else ""),
-           StageDevice("ocr", "cpu", _("The OCR readers"))]
+           ocr_device(settings, ocr, cuda, name)]
     out.append(_translator_device(settings, translator, name))
     out.append(StageDevice("erase", on_gpu if lama else "cpu", _("LaMa on the drawing, the paper fill in the bubbles")
                            if lama else _("The paper fill"), name if lama else ""))
     return out
+
+
+OCR_WHY = {  # what runs there, by why it is there (`ocr.place.Placement.why`)
+    "room": "Two of the OCR readers, as the GPU has room for them (the third on the CPU)",
+    "no_room": "The OCR readers: the GPU has no room for them beside the translator and the page models",
+    "unknown": "The OCR readers: the room on the GPU is not known",
+    "failed": "The OCR readers, on the CPU since the GPU failed ({error})",
+    "released": "The OCR readers: the GPU memory was let go, the next page decides again",
+}
+OCR_SET = {"gpu": "Two of the OCR readers, as set in ocr_runs_on (the third on the CPU)",
+           "cpu": "The OCR readers, as set in ocr_runs_on"}
+
+
+def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
+    """Where the OCR readers run: where *ocr* (the window's `Readers`) has them (its ``placement``); without readers
+    that decide, where the rule would put them now with *settings* (`ocr.place.decide`, *cuda* as known)."""
+    from .ocr import place
+
+    placement = getattr(ocr, "placement", None)
+    if not isinstance(placement, place.Placement):
+        if ocr is not None and getattr(ocr, "settings", None) is None:
+            placement = place.Placement("cpu", place.NOT_ASKED)  # (readers loaded without settings stay on the CPU)
+        else:
+            from .ocr.readers import missing_readers
+
+            need = place.CHARSPOT_MIB + (0 if missing_readers(settings.models_dir) else place.NAR_MIB)
+            try:
+                placement = place.decide(settings, need, cuda=cuda)
+            except Exception:  # noqa: BLE001 - nothing to judge on
+                placement = place.Placement("cpu", place.UNKNOWN)
+    if placement.why == place.SET:
+        what = _(OCR_SET["gpu" if placement.device == "gpu" else "cpu"])
+    elif placement.why in OCR_WHY:
+        what = _(OCR_WHY[placement.why]).format(error=placement.error or "?")
+    else:
+        what = _("The OCR readers")
+    on_gpu = placement.device == "gpu"
+    return StageDevice("ocr", "gpu" if on_gpu else "cpu", what, gpu if on_gpu else "")
 
 
 def _translator_device(settings: Any, translator: Any, gpu: str) -> StageDevice:

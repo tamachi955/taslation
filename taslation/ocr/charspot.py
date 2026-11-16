@@ -5,8 +5,9 @@
 # docs/licenses/Apache-2.0-manga-ocr-charspot-small.txt and at http://www.apache.org/licenses/LICENSE-2.0. Unless
 # required by applicable law or agreed to in writing, software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# Changed from the original: one crop at a time on the CPU in PyTorch (no ONNX Runtime, no masked batches, no GPU
-# backend), images taken from memory only, the results as the dataclasses below; the reader's gate is ours.
+# Changed from the original: one crop at a time in PyTorch, on the CPU or on the GPU where `taslation.ocr.place` finds
+# room (no ONNX Runtime, no masked batches), images taken from memory only, the results as the dataclasses below; the
+# reader's gate is ours.
 # The License covers code only: the WEIGHTS are CC BY-NC-SA 4.0 and are not part of this repository.
 """The OCR's first reader and its gate: manga-ocr-charspot-small, a character detector with a learned reading order.
 
@@ -21,18 +22,21 @@ The weights are CC BY-NC-SA 4.0: non-commercial use only, never bundled, and the
 ``setup_models.py`` does, after a person agreed to the licence in ``install.ps1``. Without them TASlation cannot read
 pages (``ocr.model_missing``, ``health.ocr_missing``).
 
-It runs on the CPU in PyTorch, one crop at a time: the GPU stays with Ollama. Not through ONNX Runtime, the upstream's
-CPU route: its official builds send telemetry from native code, where `taslation.netguard` cannot see it. The PyTorch
-path reads the same as upstream's ONNX model (docs/OFFLINE_VERIFICATION.md, "The OCR model"). Crops come from memory;
-nothing here writes an image.
+It runs in PyTorch, one crop at a time: on the CPU, or on the GPU where it has room beside the translator and the
+page models (`taslation.ocr.place`, the setting ``ocr_runs_on``), reading the same there. Not through ONNX Runtime,
+the upstream's CPU route: its official builds send telemetry from native code, where `taslation.netguard` cannot see
+it. The PyTorch path reads the same as upstream's ONNX model (docs/OFFLINE_VERIFICATION.md, "The OCR model"). Crops
+come from memory; nothing here writes an image.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import queue
 import re
 import statistics
+import threading
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -43,6 +47,7 @@ from PIL import Image
 
 from ..config import OCR_REQUIRED_FILES
 from ..messages import Message, as_message
+from .place import DeviceModels, device_copy
 
 # Hiragana, katakana, CJK ideographs (+ extension A), half-width katakana.
 JA_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]")
@@ -446,14 +451,25 @@ def _build(cfg: dict, n_out: int) -> tuple[Any, Any]:
             Tail(n_out, a["emb"], a["d"], a["layers"], a["theads"]))
 
 
-class CharspotEngine:
-    """The model on the CPU, loaded from *model_dir*. Reads one crop at a time (the crops of a page have different
-    shapes, and a page's worth takes a fraction of a second). Raises `ModelNotInstalled` when it is not there.
+class CharspotEngine(DeviceModels):
+    """The model loaded from *model_dir*, on the CPU and, once `to` asks for it, on the GPU too (`DeviceModels`: the
+    CPU's copy stays, a failure on the GPU reads on the CPU for good). Reads one crop at a time (the crops of a page
+    have different shapes, and a page's worth takes a fraction of a second). Raises `ModelNotInstalled` when it is not
+    there.
 
-    The dense network keeps its 4-D weights and its input channels-last (NHWC): its depthwise convolutions run faster
-    that way on the CPU, reading the same (the identity check of the gold set's crops)."""
+    On the CPU the dense network keeps its 4-D weights and its input channels-last (NHWC): its depthwise convolutions
+    run faster that way, reading the same (the identity check of the gold set's crops). The GPU's copy is in the usual
+    layout, and reads the same too.
+
+    On the GPU, the first crop of each input size (`preprocess`: a grid of 16-pixel cells, so a book has a few dozen)
+    costs about a second while cuDNN readies its kernels for it, then about 12 ms like the rest (30 such sizes among the
+    gold set's 933 crops): a crop of a size the GPU has not met yet is read on the CPU, and the GPU readies that size
+    meanwhile on a thread of its own (`_warm`), for the next crops of it."""
+
+    name = "charspot"
 
     def __init__(self, model_dir: Path, threads: int = 0):
+        super().__init__()
         self.model_dir = Path(model_dir)
         if check_model_dir(self.model_dir):
             raise ModelNotInstalled(Message("ocr.model_missing", path=str(self.model_dir)))
@@ -465,26 +481,85 @@ class CharspotEngine:
 
         cfg = json.loads((self.model_dir / "config.json").read_text(encoding="utf-8"))
         weights = load_file(str(self.model_dir / cfg["weights"]), device="cpu")
-        self._dense, self._tail = (m.eval() for m in _build(cfg, weights["tail.cls.weight"].shape[0]))
-        self._dense.load_state_dict({k[6:]: v for k, v in weights.items() if k.startswith("dense.")})
-        self._tail.load_state_dict({k[5:]: v for k, v in weights.items() if k.startswith("tail.")})
-        self._dense.to(memory_format=torch.channels_last)
+        dense, tail = (m.eval() for m in _build(cfg, weights["tail.cls.weight"].shape[0]))
+        dense.load_state_dict({k[6:]: v for k, v in weights.items() if k.startswith("dense.")})
+        tail.load_state_dict({k[5:]: v for k, v in weights.items() if k.startswith("tail.")})
+        dense.to(memory_format=torch.channels_last)
+        self._cpu_models = (dense, tail)
         self._out_str = load_vocab(self.model_dir / cfg["vocab"], cfg["n_cls"])
+        self._sizes: set[tuple[int, ...]] = set()  # the input sizes the GPU's copy has met (made ready for)
+        self._asked: set[tuple[int, ...]] = set()  # ... and those it was asked to ready
+        self._to_warm: queue.SimpleQueue[tuple[int, ...]] = queue.SimpleQueue()
+        self._warmer: threading.Thread | None = None
 
-    def read_chars(self, image: Image.Image) -> CharspotReading:
+    def _copy_to(self, device: str) -> tuple[Any, ...]:
         import torch
 
+        dense, tail = self._cpu_models
+        self._sizes, self._asked = set(), set()  # (a new copy meets the sizes anew: quickly where cuDNN still has them)
+        return device_copy(dense, device, torch.contiguous_format), device_copy(tail, device)
+
+    def read_chars(self, image: Image.Image) -> CharspotReading:
         pixels, (fx, fy) = preprocess(image.convert("RGB"))
+        size = tuple(pixels.shape)
+
+        def on(device: str, models: tuple[Any, ...]) -> CharspotReading:
+            if device != "cpu" and size not in self._sizes:
+                self._warm(size)
+                device, models = "cpu", self._cpu_models
+            return self._read(device, models, pixels, fx, fy)
+
+        return self.run(on)
+
+    def _warm(self, size: tuple[int, ...]) -> None:
+        """The GPU readies the input *size* on the warming thread (started the first time), once."""
+        with self._lock:
+            if size in self._asked:
+                return
+            self._asked.add(size)
+            if self._warmer is None:
+                self._warmer = threading.Thread(target=self._warming, name="taslation-ocr-warm", daemon=True)
+                self._warmer.start()
+        self._to_warm.put(size)
+
+    def _warming(self) -> None:
+        """The warming thread: each size asked for run once through the GPU's dense network (blank pixels; what it
+        gives is thrown away), then met. A failure there is the GPU's (`run`: the CPU from then on)."""
+        import torch
+
+        def ready(device: str, models: tuple[Any, ...], size: tuple[int, ...]) -> None:
+            if device == "cpu":
+                return
+            with torch.inference_mode():
+                models[0](torch.zeros((1, *size), device=device))
+                torch.cuda.synchronize()
+            self._sizes.add(size)
+
+        while True:
+            size = self._to_warm.get()
+            try:
+                self.run(lambda device, models: ready(device, models, size))
+            except Exception:  # noqa: BLE001 - that size is read on the CPU, no more than that
+                pass
+
+    def _read(self, device: str, models: tuple[Any, ...], pixels: np.ndarray, fx: float, fy: float) -> CharspotReading:
+        import torch
+
+        dense, tail = models
         with torch.inference_mode():
-            x = torch.from_numpy(pixels)[None].float().contiguous(memory_format=torch.channels_last)
-            heat, box, ruby, emb = self._dense(x)
-            found = detect(heat[0].numpy(), box[0].numpy(), ruby[0].numpy())
+            x = torch.from_numpy(pixels)[None]
+            if device == "cpu":
+                x = x.float().contiguous(memory_format=torch.channels_last)
+            else:
+                x = x.to(device).float()  # (the bytes go over; 0..255 as floats is exact on either side)
+            heat, box, ruby, emb = dense(x)
+            found = detect(heat[0].cpu().numpy(), box[0].cpu().numpy(), ruby[0].cpu().numpy())
             if found is None:
                 return CharspotReading()
             boxes, scores, geo = found
-            e = self._tail.pooled(emb, torch.from_numpy(boxes)[None])
-            sure, ids, pair, st, en = self._tail(e, torch.from_numpy(geo)[None])
-            order = chain(pair[0].numpy(), st[0].numpy(), en[0].numpy())
+            e = tail.pooled(emb, torch.from_numpy(boxes)[None].to(device))
+            sure, ids, pair, st, en = tail(e, torch.from_numpy(geo)[None].to(device))
+            order = chain(pair[0].cpu().numpy(), st[0].cpu().numpy(), en[0].cpu().numpy())
             sure, ids = sure[0].tolist(), ids[0].tolist()
         chars = tuple(CharspotChar(self._out_str[int(ids[k])],
                                    (float(boxes[k, 0] * fx), float(boxes[k, 1] * fy),

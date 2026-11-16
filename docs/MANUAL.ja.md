@@ -930,7 +930,7 @@ Enter で入れ（[Y/n]）、それ以外では Enter で入れません（[y/N]
 Esc とページ送りのキー、翻訳者モードのマウスの操作は灰色で表示するだけで、ここでは変えられません（ページ送りのキーは「ページ > ページ送りのキー...」）。全画面のビューアの上にいるときの F5、F11、Esc は元のキーのままです。
 
 「設定」の「システム」ページには、ページの処理の段階（文字の検出、文字の読み取り、翻訳、消去と写植）ごとに、どこで動くか（「GPU（GPU の名前）」か「CPU」）と、1ページにかかった秒数を表示します。
-検出は従来の検出が CPU で、レイアウトモデルを使うときはそのモデルが GPU で動きます。OCR は CPU で動きます。翻訳は Ollama が読み込んだモデルの場所で、
+検出は従来の検出が CPU で、レイアウトモデルを使うときはそのモデルが GPU で動きます。OCR は CPU で動きます。GPU に余裕があれば3つの読み手のうち2つが GPU で動き（`ocr_runs_on`、後述）、どちらでなぜかをその行に表示します。翻訳は Ollama が読み込んだモデルの場所で、
 一部だけがビデオメモリーに載っているときは「GPU と CPU（60 % が GPU）」のように表示します（モデルが読み込まれていなければ、その旨を表示します）。
 消去は紙の色の塗りつぶしが CPU で、インペイント（LaMa）を使うときは絵の上が GPU で動きます（「いつも使う（CPU でも）」で GPU がなければ CPU）。GPU として数えるのは CUDA が使える NVIDIA の GPU だけで、
 調べるためにモデルを読み込んだり Ollama を起動したりはしません。秒数は最近写植した20ページの平均で、ウィンドウを閉じるときに状態フォルダの `timings.json` に保存します（数値だけで、ページの内容は入りません）。
@@ -968,6 +968,7 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
+ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
@@ -1021,8 +1022,14 @@ hover_delay_ms = 450         # the wait before a bubble under the pointer shows 
 以前のインストールで manga-ocr-charspot-small しかない場合も、TASlation はそのモデルだけで動きます。ステータス行にその旨が1行出るだけで、
 エラーにはなりません。`install.cmd` を実行すると残りの2つが入ります。
 
-OCR はすべて CPU で動き、3つのモデルが `ocr_threads` の設定を共有します。GPU は Ollama のために空けておきます。CPU がほかの作業で
+OCR は CPU で動き、3つのモデルが `ocr_threads` の設定を共有します。CPU がほかの作業で
 忙しいときは、`ocr_threads` をコア数の半分にすると速くなることがあります。
+NVIDIA の GPU があれば、`ocr_runs_on`（既定 `"auto"`）が manga-ocr-charspot-small と manga-ocr-nar-small を GPU に置きます。ただし、TASlation がいちばん多く使うときにも余裕がある場合だけです。
+数えるのは、ビデオメモリーにまるごと載せた翻訳モデル、使うときの LaMa とレイアウトモデル、PyTorch 自身のメモリー、いまほかのプログラムが使っている分で、そのうえで 1 GB が残ることが条件です。
+5 GB 未満のグラフィックボードでは使わず、大きいほうの翻訳モデル（Qwen3.5 4B）では 6 GB のボードに余裕は残りません。3つ目のモデルは1ページに数行しか読まないので CPU のままです。
+決めるのは OCR モデルを読み込むとき、GPU のメモリーを返したあと（Ollama がモデルを読み込む前と「ツール > モデルを今すぐ解放」）、関係する設定が変わったときです。
+GPU が失敗したとき（メモリー不足やほかの CUDA のエラー）は、その行を CPU で読み、ウィンドウを閉じるまで OCR は CPU で動きます。読みはどちらでも同じです。
+`"cpu"` は OCR を CPU に置いたままにし、`"gpu"` は余裕を見ずに、GPU があれば2つを GPU に置きます。どこにあってなぜかは「システム」ページに表示します。
 
 Ollama のモデルは必要なときだけ GPU メモリに載せます。起動時には読み込まず、翻訳が必要な行が出たときに読み込みます
 （数秒かかり、状態表示に出ます）。翻訳がキャッシュにあるページでは読み込みません。読み込んだモデルは最後の要求から
@@ -1033,8 +1040,8 @@ Ollama のモデルは必要なときだけ GPU メモリに載せます。起�
 読み込んだモデルの一部しかグラフィックボードに載らなかったときは、もう一度読み込み直し、それでも載らなければその旨を知らせます。
 ゲームなどほかのプログラムのために GPU のメモリーをすぐ空けたいときは、「ツール > モデルを今すぐ解放」を使います。TASlation がこのセッションで読み込んだか使った翻訳モデルを、
 Ollama の API の通常の要求（そのモデルに `keep_alive` 0）で解放し、ページ用モデル（レイアウトモデルと LaMa）もメモリーを返します。`ollama_keep_alive = "-1"` のときも解放します。
-ほかのプログラムが同じ Ollama に読み込んだモデルには触れず、Ollama 自体を止めたり起動したりもしません。OCR は CPU で動くのでそのまま残り、
-ページ用モデルを一度 GPU で動かしたときに PyTorch が作った CUDA のコンテキスト（数百 MB）も、ウィンドウを閉じるまで残ります。
+ほかのプログラムが同じ Ollama に読み込んだモデルには触れず、Ollama 自体を止めたり起動したりもしません。GPU に置いた OCR モデルは CPU に戻り（どこで読むかは次のページでまた決めます）、
+ページ用モデルを一度 GPU で動かしたときに PyTorch が作った CUDA のコンテキスト（数百 MB）は、ウィンドウを閉じるまで残ります。
 何を解放したかはステータス行に出ます。翻訳中や、翻訳が始まるのを待っている間、一冊通しの処理の間は解放せず、その旨をステータス行に出します。
 次に翻訳が必要な行が出たときは、いつもどおりモデルを読み込み直します。
 Ollama は、TASlation が使うあいだだけ動きます。翻訳するときに Ollama が動いていなければ、TASlation は Ollama のサーバー（`ollama serve`）を

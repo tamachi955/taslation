@@ -6,8 +6,9 @@
 # by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS"
 # BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # Upstream's encoder is its re-implementation of the MonkeyOCRv2-S encoder (Apache-2.0, see the model's NOTICE.md).
-# Changed from the original: one crop at a time on the CPU in fp32, images taken from memory only; the GPU, ONNX and
-# CoreML backends and the int8 variant's quantisers are left out.
+# Changed from the original: one crop at a time in fp32, on the CPU or on the GPU where `taslation.ocr.place` finds
+# room, images taken from memory only; the ONNX and CoreML backends, fp16 and the int8 variant's quantisers are left
+# out.
 # The License covers code only: the WEIGHTS are CC BY-NC-SA 4.0 and are not part of this repository.
 """manga-ocr-nar-small: a line reader without a language model.
 
@@ -16,7 +17,11 @@ writes the line out character by character, so it cannot run away. `taslation.oc
 
 Parameter names match the weights' file. The released weights are an exact rescaling of the trained checkpoint; the
 matching norm epsilons come from its config.json ("reparam.norm_eps"). ``inject``, ``loop_emb`` and ``occ`` are
-training-time parameters. Imports torch: `taslation.ocr.readers` imports this file when it loads the models.
+training-time parameters. Every tensor made while reading is made on the device of the network's own (its weights),
+and the constants of `NarNet.prepare` are computed once, on the CPU, and copied as they are to the GPU
+(`taslation.ocr.place.device_copy`): the GPU reads with the CPU's numbers. In fp32 there too: autocast to fp16 was
+slower on the GPU measured (64 against 29 ms a crop). Imports torch: `taslation.ocr.readers` imports this file when it
+loads the models.
 """
 
 from __future__ import annotations
@@ -31,6 +36,8 @@ import torch.nn.functional as F
 from PIL import Image
 from safetensors.torch import load_file
 from torch import Tensor, nn
+
+from .place import DeviceModels, device_copy
 
 SLOTS = 65
 ENC_DIM, ENC_HEADS, ENC_FFN, ENC_LAYERS = 384, 6, 1536, 12
@@ -149,7 +156,7 @@ class _Rotary(nn.Module):
         self.register_buffer("inv_freq", inverse, persistent=False)
 
     def forward(self, n: int) -> Tensor:
-        return torch.outer(torch.arange(n, dtype=self.inv_freq.dtype), self.inv_freq)
+        return torch.outer(torch.arange(n, dtype=self.inv_freq.dtype, device=self.inv_freq.device), self.inv_freq)
 
 
 class _Vit(nn.Module):
@@ -184,7 +191,7 @@ class Memory(nn.Module):
     def fourier(rows: Tensor, cols: Tensor, h: Tensor, w: Tensor) -> Tensor:
         r = (rows.float() + 0.5) / h[:, None].float()
         c = (cols.float() + 0.5) / w[:, None].float()
-        f = torch.pi * 2.0 ** torch.arange(8).float()
+        f = torch.pi * 2.0 ** torch.arange(8, device=rows.device).float()
         return torch.cat([fn(t[..., None] * f) for t in (r, c) for fn in (torch.sin, torch.cos)], -1)
 
 
@@ -285,7 +292,7 @@ class NarNet(nn.Module):
         mems = base[None] + mem.gamma[:, None, None] * mem.wo(f)
         mems = torch.cat((mem.null.expand(mems.shape[0], B, -1, -1), mems), 2)
         kvs = [self.blocks[j].memory_kv(m) for j, m in enumerate(mems.unbind(0))]
-        km = torch.cat((torch.ones(B, 2, dtype=torch.bool), V), 1)[:, None, None, :]
+        km = torch.cat((torch.ones(B, 2, dtype=torch.bool, device=V.device), V), 1)[:, None, None, :]
         s = self.s_after_sa0.expand(B, -1, -1)
         S, Dm = s.shape[1], s.shape[2]
         for i in range(len(self.blocks)):
@@ -305,10 +312,14 @@ class NarNet(nn.Module):
         return F.linear(self.final_norms[0](s), self.tok.weight[:6818]) + self.bias
 
 
-class NarEngine:
-    """The model on the CPU, loaded from *model_dir* (the caller checked that its files are there)."""
+class NarEngine(DeviceModels):
+    """The model loaded from *model_dir* (the caller checked that its files are there), on the CPU and, once `to` asks
+    for it, on the GPU too (`DeviceModels`)."""
+
+    name = "nar"
 
     def __init__(self, model_dir: Path):
+        super().__init__()
         model_dir = Path(model_dir)
         cfg = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
         net = NarNet()
@@ -316,17 +327,24 @@ class NarEngine:
         modules = dict(net.named_modules())
         for name, eps in cfg["reparam"]["norm_eps"].items():
             modules[name].eps = eps
-        self._net = net.float().eval()
-        self._net.prepare()
+        net = net.float().eval()
+        net.prepare()
+        self._cpu_models = (net,)
         self._chars = json.loads((model_dir / VOCAB).read_text(encoding="utf-8"))["characters"]
+
+    def _copy_to(self, device: str) -> tuple[NarNet]:
+        return (device_copy(self._cpu_models[0], device),)
 
     def read(self, image: Image.Image) -> str:
         """The line in *image*, as the model spells it."""
         patches, valid, rows, cols, h, w = preprocess(image)
-        with torch.inference_mode():
-            logits = self._net(torch.from_numpy(patches)[None], torch.from_numpy(valid)[None],
-                               torch.from_numpy(rows)[None], torch.from_numpy(cols)[None],
-                               torch.tensor([h]), torch.tensor([w]))
-        ids = logits.argmax(-1)[0].tolist()
+
+        def logits_of(device: str, models: tuple[NarNet, ...]) -> list[int]:
+            with torch.inference_mode():
+                logits = models[0](*(torch.from_numpy(a)[None].to(device) for a in (patches, valid, rows, cols)),
+                                   torch.tensor([h], device=device), torch.tensor([w], device=device))
+                return logits.argmax(-1)[0].tolist()
+
+        ids = self.run(logits_of)
         end = len(self._chars)  # the id after the last character ends the text
         return "".join(self._chars[i] for i in ids[:ids.index(end) if end in ids else len(ids)])

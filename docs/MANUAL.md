@@ -936,7 +936,7 @@ and "Keys" in "Help > How to use..." ("Help > Keys...") show the changed keys to
 Esc, the page keys and translator mode's mouse actions are only shown in grey and cannot be changed here (the page keys are set in "Page > Page keys..."). Over a full-screen viewer, F5, F11 and Esc stay the original keys.
 
 The "System" page of "Settings" shows, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU") and how many seconds a page took.
-For detection, the classical detection runs on the CPU, and when the layout model is used, that model runs on the GPU. The OCR runs on the CPU. Translation runs where Ollama loaded the model,
+For detection, the classical detection runs on the CPU, and when the layout model is used, that model runs on the GPU. The OCR runs on the CPU, or two of its three readers on the GPU where it has room for them (`ocr_runs_on`, below), and the row says which and why. Translation runs where Ollama loaded the model,
 and when only part of it is in video memory, it shows something like "GPU and CPU (60 % on the GPU)" (if no model is loaded, it says so).
 For erasing, the fill with the paper's colour runs on the CPU, and when the inpainting (LaMa) is used, the part on the drawing runs on the GPU (on the CPU with "Always, also on the CPU" and no GPU). Only NVIDIA GPUs with CUDA are counted as GPUs,
 and it neither loads a model nor starts Ollama to find out. The seconds are the average of the last 20 pages lettered, saved in `timings.json` in the state folder when the window closes (numbers only; nothing of the pages' content).
@@ -974,6 +974,7 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
+ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
@@ -1027,8 +1028,14 @@ as agreement to its terms of use (`--accept-source-agreements --accept-package-a
 If an earlier installation has only manga-ocr-charspot-small, TASlation works with that model alone. The status line says so in one line,
 and it is not an error. Running `install.cmd` installs the other two.
 
-All the OCR runs on the CPU, and the three models share the `ocr_threads` setting. The GPU is left free for Ollama. When the CPU is busy with
+The OCR runs on the CPU, and the three models share the `ocr_threads` setting. When the CPU is busy with
 other work, setting `ocr_threads` to half the number of cores can make it faster.
+With an NVIDIA GPU, `ocr_runs_on` (`"auto"` by default) puts manga-ocr-charspot-small and manga-ocr-nar-small on the GPU, but only when it has room for them at TASlation's peak:
+the translation model whole in video memory, LaMa and the layout model when they are used, PyTorch's own memory, and what other programs hold now, with 1 GB left over.
+A card of less than 5 GB is never used for them, and the larger translation model (Qwen3.5 4B) leaves no room on a 6 GB card. The third model reads only a few lines a page and stays on the CPU.
+TASlation decides when the OCR models load, again after the GPU memory was let go (before Ollama loads its model, and "Tools > Release the model now"), and when a setting it depends on changes.
+If the GPU fails (out of memory or another CUDA error), that line is read on the CPU, and the OCR stays on the CPU until the window closes. The readings are the same on both.
+`"cpu"` keeps the OCR on the CPU; `"gpu"` puts the two on the GPU wherever there is one, without looking at the room. The "System" page says where they are and why.
 
 Ollama's model is put in GPU memory only when it is needed. It is not loaded at start, but when a line that needs translating comes up
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
@@ -1039,8 +1046,8 @@ With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OC
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
 To free the GPU memory at once for a game or another program, use "Tools > Release the model now". It releases the translation model TASlation loaded or used this session
 with a normal request of Ollama's API (`keep_alive` 0 for that model), and the page models (the layout model and LaMa) give their memory back too. It does so with `ollama_keep_alive = "-1"` as well.
-A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. The OCR stays, since it runs on the processor,
-and so does the CUDA context PyTorch made once a page model ran on the GPU (a few hundred MB), until the window closes.
+A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. OCR models on the GPU go back to the processor (the next page decides again where they read),
+and what stays is the CUDA context PyTorch made once a page model ran on the GPU (a few hundred MB), until the window closes.
 The status line says what was released. While a page is being translated, while a translation waits to start, and during a whole-book run it releases nothing and says so in the status line.
 The next line that needs translating loads the model again as usual.
 Ollama runs only while TASlation uses it. When it translates and Ollama is not running, TASlation starts Ollama's server (`ollama serve`)

@@ -177,6 +177,12 @@ class Settings:
     # --- OCR ---
     models_dir: Path = field(default_factory=default_models_dir)
     ocr_threads: int = 0  # threads the OCR model computes with (0 = torch's default, one per core); while other programs keep the CPU busy, half the cores can be faster
+    # where two of the three OCR readers (charspot, nar) run: "auto" (the default) on the GPU only when it has room for
+    # them beside the translation model whole in video memory, the page models in use and what other programs hold,
+    # with a margin (`ocr.place`, decided when they load and again after the GPU memory was let go), else on the CPU;
+    # "cpu" always on the CPU; "gpu" on the GPU wherever torch has CUDA. A GPU that fails moves them to the CPU for the
+    # session. (A new name: ``ocr_device``, a setting of the OCR before 2026-11-01, is still dropped quietly.)
+    ocr_runs_on: str = "auto"
 
     # --- detection ---
     white_threshold: int = 225
@@ -339,6 +345,8 @@ class Settings:
             raise ConfigError("art_erase must be 'auto', 'lama' or 'off'")
         if self.detect_model not in ("auto", "on", "off"):
             raise ConfigError("detect_model must be 'auto', 'on' or 'off'")
+        if self.ocr_runs_on not in ("auto", "cpu", "gpu"):
+            raise ConfigError("ocr_runs_on must be 'auto', 'cpu' or 'gpu'")
         from .translate.ollama import NUM_GPU_MOST, keep_alive_value, num_gpu_value
 
         try:

@@ -1,6 +1,6 @@
 """Where each stage of a page runs (`taslation.devices`): detection, OCR, the translator and the erase on "GPU (its
-name)" or "CPU" - the layout model and LaMa on the GPU only where torch has CUDA and they are in use, the OCR readers
-and the classical detectors on the CPU, Ollama's model where /api/ps says it is (all, none or a part in video memory,
+name)" or "CPU" - the layout model and LaMa on the GPU only where torch has CUDA and they are in use, the classical
+detectors on the CPU, the OCR readers where `ocr.place` puts them (tests/test_ocr_place.py), Ollama's model where /api/ps says it is (all, none or a part in video memory,
 never loaded to find out) - with the seconds a page from the last pages lettered (`StageTimes`, kept in the state
 folder when the window closes); Tools > Settings... > System shows it and `taslation doctor` prints it."""
 
@@ -164,7 +164,8 @@ def test_with_cuda_the_page_models_in_use_are_on_the_gpu(tmp_path, models):
     assert rows["detect"].where() == f"GPU ({GPU})"
     assert rows["erase"].where() == f"GPU ({GPU})"
     assert rows["translate"].where() == f"GPU ({GPU})" and rows["translate"].what == "Ollama: qwen3.5:4b"
-    assert rows["ocr"].where() == "CPU" and rows["ocr"].what == "The OCR readers"
+    # (the OCR readers: "auto" judges no facts in the tests, tests/conftest.py)
+    assert rows["ocr"].where() == "CPU" and rows["ocr"].what == "The OCR readers: the room on the GPU is not known"
 
 
 def test_models_not_in_use_or_not_installed_leave_it_to_the_cpu(tmp_path, models):
@@ -349,16 +350,17 @@ def test_the_system_page_looks_on_a_thread_once_shown(hidden_root, tmp_path):
 def test_the_settings_dialog_has_a_system_page_that_looks_when_chosen(hidden_root, tmp_path, monkeypatch):
     monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
     looked = []
-    monkeypatch.setattr(devices, "stage_devices", lambda settings, translator=None: looked.append(translator) or _rows())
+    monkeypatch.setattr(devices, "stage_devices",
+                        lambda settings, translator=None, ocr=None: looked.append((translator, ocr)) or _rows())
     settings = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
                         config_path=tmp_path / "taslation.toml")
-    window_translator = object()
-    d = dlg.SettingsDialog(hidden_root, settings, pipeline=lambda: SimpleNamespace(translator=window_translator,
-                                                                                   stage_times=StageTimes()))
+    window_translator, window_ocr = object(), object()
+    d = dlg.SettingsDialog(hidden_root, settings, pipeline=lambda: SimpleNamespace(
+        translator=window_translator, ocr=window_ocr, stage_times=StageTimes()))
     assert [d.pages.tab(t, "text") for t in d.pages.tabs()] == ["General", "Shortcuts", "System"]
     assert not d.system.looked
     d.pages.select(d.system)
     hidden_root.update()
     assert d.system.looked
     d.system._thread.join(5)
-    assert looked == [window_translator]  # the window's own translator is asked
+    assert looked == [(window_translator, window_ocr)]  # the window's own translator is asked, and its OCR readers

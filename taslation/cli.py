@@ -377,11 +377,13 @@ def _note(message: Any) -> None:
 
 
 def build_ocr(settings: Settings):
-    """The OCR engine, on the CPU; a model that is not installed ends the command with what to do."""
+    """The OCR engine, where ``ocr_runs_on`` and the room on the GPU put it (`ocr.place`); a model that is not
+    installed ends the command with what to do."""
     from .ocr import ModelNotInstalled, Readers
+    from .ocr.readers import place_with
 
     try:
-        return Readers(settings.models_dir, settings.ocr_threads)
+        return place_with(Readers(settings.models_dir, settings.ocr_threads), settings)
     except ModelNotInstalled as e:
         raise SystemExit(f"error: {e}") from e
 

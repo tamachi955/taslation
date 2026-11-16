@@ -54,8 +54,8 @@ def column_widths(width: int, seconds_heading: int) -> list[int]:
 
 class SystemPage(ttk.Frame):
     """Where the stages run for *settings*. *pipeline* gives the window's pipeline (None before it has one): its
-    translator is the one asked where its model is, and its `StageTimes` give the seconds a page (none yet: those kept
-    in the state folder). *look* is what finds the devices (`devices.stage_devices`; the tests give their own); the
+    translator is the one asked where its model is, its OCR readers say where they read (`devices.ocr_device`), and its
+    `StageTimes` give the seconds a page (none yet: those kept in the state folder). *look* is what finds the devices (`devices.stage_devices`; the tests give their own); the
     page is laid out in *width* pixels."""
 
     def __init__(self, master: tk.Misc, settings: Any, width: int, pipeline: Callable[[], Any] | None = None,
@@ -63,7 +63,8 @@ class SystemPage(ttk.Frame):
         super().__init__(master, padding=8)
         self.settings = settings
         self.pipeline = pipeline or (lambda: None)
-        self.look = look or (lambda: devices.stage_devices(settings, getattr(self.pipeline(), "translator", None)))
+        self.look = look or (lambda: devices.stage_devices(settings, getattr(self.pipeline(), "translator", None),
+                                                           ocr=getattr(self.pipeline(), "ocr", None)))
         self.width = width
         self.bold = tkfont.nametofont("TkDefaultFont").copy()  # the headings' face, kept while the page lives
         self.bold.configure(weight="bold")
