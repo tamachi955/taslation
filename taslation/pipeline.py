@@ -62,7 +62,7 @@ from __future__ import annotations
 
 import copy
 import functools
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from difflib import SequenceMatcher
 import hashlib
 import inspect
@@ -73,7 +73,7 @@ import time
 import unicodedata
 from collections import Counter, deque
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from typing import Any, Callable, Iterator, Sequence
 
 import cv2
@@ -124,7 +124,7 @@ from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat,
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
 from .translate import base as _base
-from .translate.base import accepts, ask_again_romanised, ask_for_missing, worth_asking_again
+from .translate.base import accepts, ask_again_romanised, ask_for_missing, uses_room, worth_asking_again
 from .translate.continuation import facts_of
 from .translate.renderings import BookNames, NamedPremises
 from .messages import Cancelled, Message, message_of
@@ -514,7 +514,13 @@ class PageFill:
 
     The indices count the announced regions. The patches come from a working copy of the page on which each region
     is erased and lettered in turn, so where two regions overlap a patch can differ for a moment from the finished
-    page; ``page`` is exact. Nothing here is written anywhere: the events carry pixels from memory to memory."""
+    page; ``page`` is exact. Nothing here is written anywhere: the events carry pixels from memory to memory.
+
+    A translation handed over while the model writes on is lettered on the drafts' thread (`DRAFTS_BESIDE`,
+    `_drafts_pool`), in the order they came, so that the model's next line is asked for at once; `wait` waits for
+    them, and `settle` and `finish` do so first: the regions are what the drafts left them (an erase may cut a mask
+    back) before anything else of the page looks at them. The sizes the drafts measure are kept for the page while
+    nothing a measure depends on changed (`Pipeline.cap_sizes`' *measured*)."""
 
     def __init__(self, pipeline: "Pipeline", rgb: np.ndarray, emit: EventFn):
         self.pipeline = pipeline
@@ -525,6 +531,8 @@ class PageFill:
         self.shown: dict[int, str] = {}  # index -> the text lettered on the working copy
         self.boxes: dict[int, Box] = {}  # index -> the part of the page its lettering changed
         self.work: np.ndarray | None = None
+        self._pending: list[Future[Any]] = []  # what was handed to the drafts' thread and not waited for
+        self._measured: dict[int, Any] = {}  # the sizes the drafts measured (`Pipeline.cap_sizes`' *measured*)
 
     def link(self, scanned: "ScannedRegion", region: TextRegion) -> None:
         """A scan's *scanned* region is the announced *region*: a translation of the one letters the other."""
@@ -547,8 +555,38 @@ class PageFill:
             self.emit("read", {"index": i, "status": region.status, "box": region.bbox})
 
     def draft(self, region: "TextRegion | ScannedRegion", text: str) -> None:
-        """A translation that came in while the model is still writing: lettered now, when it is a real one. A
-        failure here costs only the early look; it never reaches the translation."""
+        """A translation that came in while the model is still writing: lettered now, when it is a real one - on the
+        drafts' thread with `DRAFTS_BESIDE`, after those that came before it (`wait`). A failure here costs only the
+        early look; it never reaches the translation."""
+        if DRAFTS_BESIDE:
+            self._pending.append(_drafts_pool().submit(self._draft, region, text))
+        else:
+            self._draft(region, text)
+
+    def beside(self, task: Callable[[], None]) -> None:
+        """*task* done on the drafts' thread, after what was handed to it before; an error of it comes out of `wait`."""
+        self._pending.append(_drafts_pool().submit(task))
+
+    def wait(self, drop: bool = False) -> None:
+        """Every draft handed to the drafts' thread lettered and every task done; with *drop* (the page stops), those
+        not begun are dropped and nothing is raised; else the first error of a task is raised here."""
+        pending, self._pending = self._pending, []
+        if drop:
+            for job in pending:
+                job.cancel()
+        error: BaseException | None = None
+        for job in pending:
+            if job.cancelled():
+                continue
+            try:
+                job.result()
+            except BaseException as e:  # noqa: BLE001 - a draft raises nothing (`_draft`): a task's, said below
+                error = error or e
+        if error is not None and not drop:
+            raise error
+
+    def _draft(self, region: "TextRegion | ScannedRegion", text: str) -> None:
+        """`draft`, done."""
         try:
             i = self.index.get(id(region))
             text = balance_marks((text or "").strip())
@@ -570,7 +608,8 @@ class PageFill:
                            for r in regions])
 
     def settle_texts(self, finals: Sequence[tuple["TextRegion | ScannedRegion", str]]) -> None:
-        """`settle` with the final text of each region given ("": none)."""
+        """`settle` with the final text of each region given ("": none), once the drafts are done (`wait`)."""
+        self.wait()
         final = {self.index[id(r)]: text for r, text in finals if id(r) in self.index}
         changed = {i: t for i, t in final.items() if i in self.shown and self.shown[i] != t}
         new = {i: t for i, t in final.items() if t and i not in self.shown}
@@ -581,10 +620,12 @@ class PageFill:
             self._letter(i, new[i])
 
     def finish(self, image: Image.Image) -> None:
+        self.wait(drop=True)  # (none waits by now: every page that drafts waits for its drafts before it is stored)
         self.emit("page", {"image": image})
 
     def _cap_shown(self) -> None:
-        self.pipeline.cap_sizes([self.regions[i] for i in self.shown], list(self.shown.values()))
+        self.pipeline.cap_sizes([self.regions[i] for i in self.shown], list(self.shown.values()),
+                                measured=self._measured if DRAFT_SIZES_KEPT else None)
 
     def _letter(self, i: int, text: str) -> None:
         if self.work is None:
@@ -804,6 +845,7 @@ class Pipeline:
         self._ocr_memo: dict[str, CharspotReading] = {}  # crop hash -> reading, memory only
         self._unanimous_memo: dict[str, bool] = {}  # crop hash and text -> all readers read it (`_unanimous`)
         self._book_sizes: deque[float] = deque(maxlen=400)  # usual-size samples of the pages so far (`_ocr_regions`)
+        self._sizes_lock = threading.Lock()  # (`_add_sizes`: one writer at a time; readers take the deque as it is)
         self._context: deque[list[tuple[str, str]]] = deque(maxlen=max(0, settings.context_pages))
         self.book_names = BookNames()  # the book's names and the renderings they keep (memory only, `premises`)
         self.last_seq: int | None = None
@@ -974,7 +1016,8 @@ class Pipeline:
         self.flush_saves()  # (a save held back goes to the cache it was for)
         self.cache = cache
         self.last_seq = None
-        self._book_sizes.clear()
+        with self._sizes_lock:
+            self._book_sizes = deque(maxlen=self._book_sizes.maxlen)  # (a new one: see `_add_sizes`)
         self._save_errors.pop("cache", None)
 
     @property
@@ -2468,8 +2511,16 @@ class Pipeline:
             if size is not None:
                 samples.append(size)
         usual = usual_size(samples, self._book_sizes)
-        self._book_sizes.extend(samples)
+        self._add_sizes(samples)
         return usual
+
+    def _add_sizes(self, samples: Sequence[float]) -> None:
+        """*samples* kept with the book's sizes (`_book_sizes`): a new deque in place of the old one, never the old one
+        changed, so that whoever reads the sizes meanwhile (the drafts' thread, the window) reads a whole one."""
+        with self._sizes_lock:
+            sizes = deque(self._book_sizes, maxlen=self._book_sizes.maxlen)
+            sizes.extend(samples)
+            self._book_sizes = sizes
 
     def _read_regions(self, rgb: np.ndarray, regions: list[TextRegion], report: ProgressFn,
                       fill: PageFill | None = None, cancel: threading.Event | None = None, done: int = 0,
@@ -2832,10 +2883,23 @@ class Pipeline:
             return Message("pipeline.no_translator")
         check_cancel(cancel)
         texts = [r.source_text for r in todo]
-        for r in todo:
-            check_cancel(cancel)
-            r.room = translation_room(r.mask, r.letter_box or r.text_box, r.source_text, self.settings, r.kind, r.x0,
-                                      r.y0, self.suggested_font, direction_of(r))
+        # the room of each translation (`translation_room`), from the regions as they are now, before a draft's erase
+        # cuts a mask back: measured before the request for a translator that puts it in its request (`uses_room`),
+        # else while the model writes (on the drafts' thread, before the drafts) or once it has answered - the same
+        # rooms on the regions either way
+        later = not uses_room(self.translator)
+        sizing = [(r, (r.mask.copy() if later else r.mask, r.letter_box or r.text_box, r.source_text, self.settings,
+                       r.kind, r.x0, r.y0, self.suggested_font, direction_of(r))) for r in todo]
+        measured = [False]
+
+        def measure_rooms() -> None:
+            for r, args in sizing:
+                check_cancel(cancel)
+                r.room = translation_room(*args)
+            measured[0] = True
+
+        if not later:
+            measure_rooms()
         meta = facts_of(todo, [(r.unit, unit_box) for r in todo])  # with the page, a sentence going on
         report(Message("pipeline.stage_translating", bubbles=len(texts),
                        translator=str(getattr(self.translator, "name", "translator"))))
@@ -2849,32 +2913,53 @@ class Pipeline:
 
             extra["on_item"] = on_item
         plan = linememo.plan_for(self, texts, meta, todo, serve=bool(reuse), learn=reuse is not None)
-        failure: Message | str = ""
-        try:
-            outputs = plan.ask(self.translator.translate_page, self.context_pairs(), self.premises(),
-                               meta=meta if any(meta) else None, **extra)
-        except TranslationError as e:
-            failure = message_of(e)
-            if not worth_asking_again(failure) and not plan.served:
-                return failure
-            outputs = []  # every line is asked for again below, a few at a time
-        check_cancel(cancel)
-        outputs = plan.fill(outputs)  # (the lines reused in their places)
 
-        def usable(i: int, text: str) -> bool:
-            return bool(text) and self.real_translation(texts[i], text)
-
-        missing = [i for i in range(len(todo)) if not usable(i, outputs[i])]
-        if missing and (not failure or worth_asking_again(failure)):
-            again = ask_for_missing(self.translator, texts, outputs, usable, context=self.context_pairs(),
-                                    notes=self.premises(), meta=meta, call_args=call, cancel=cancel,
-                                    on_error=worth_asking_again, on_item=on_item)
-            outputs = again.texts
+        def ask() -> tuple[list[str], Message | str, bool]:
+            """The model asked (the lines reused filled in): its translations, what went wrong, and whether that
+            ends the page's translation here."""
+            failure: Message | str = ""
+            try:
+                outputs = plan.ask(self.translator.translate_page, self.context_pairs(), self.premises(),
+                                   meta=meta if any(meta) else None, **extra)
+            except TranslationError as e:
+                failure = message_of(e)
+                if not worth_asking_again(failure) and not plan.served:
+                    return [], failure, True
+                outputs = []  # every line is asked for again below, a few at a time
             check_cancel(cancel)
-        if _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: asked once more, with its neighbours
-            outputs = plan.served_back(ask_again_romanised(  # (a reused line was looked at when first answered)
-                self.translator, texts, plan.unserved(outputs), context=self.context_pairs(), notes=self.premises(),
-                meta=meta, call_args=call, cancel=cancel)[0])
+            outputs = plan.fill(outputs)  # (the lines reused in their places)
+
+            def usable(i: int, text: str) -> bool:
+                return bool(text) and self.real_translation(texts[i], text)
+
+            missing = [i for i in range(len(todo)) if not usable(i, outputs[i])]
+            if missing and (not failure or worth_asking_again(failure)):
+                again = ask_for_missing(self.translator, texts, outputs, usable, context=self.context_pairs(),
+                                        notes=self.premises(), meta=meta, call_args=call, cancel=cancel,
+                                        on_error=worth_asking_again, on_item=on_item)
+                outputs = again.texts
+                check_cancel(cancel)
+            if _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: asked once more, with its
+                # neighbours (a reused line was looked at when first answered)
+                outputs = plan.served_back(ask_again_romanised(
+                    self.translator, texts, plan.unserved(outputs), context=self.context_pairs(),
+                    notes=self.premises(), meta=meta, call_args=call, cancel=cancel)[0])
+            return outputs, failure, False
+
+        if later and fill is not None and DRAFTS_BESIDE:
+            fill.beside(measure_rooms)  # (while the model writes; before the drafts, which may cut a mask back)
+        try:
+            outputs, failure, stop = ask()
+        except BaseException:
+            if fill is not None:
+                fill.wait(drop=True)  # (nothing of the page is lettered after it stopped)
+            raise
+        if fill is not None:
+            fill.wait()  # the drafts lettered, and the rooms measured beside them: the regions as they are kept
+        if not measured[0]:
+            measure_rooms()
+        if stop:
+            return failure
         sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are; a reused
         # line was held to the sheet already (`linememo.held_to`), and the memo keeps the answers as spelt here
         outputs = [out if i in plan.served else spelt_right(sheet, texts[i], out, str(meta[i].get("speaker", "")))
@@ -3215,27 +3300,52 @@ class Pipeline:
         """The glyph size from which lettering on the page is display lettering (`_art_room`): `LARGE_LETTERING` times
         the book's usual character size so far (`_book_sizes`), and never under that many times the readable size."""
         s = self.settings
-        usual = float(np.median(self._book_sizes)) if self._book_sizes else 0.0
+        sizes = self._book_sizes  # (read once: `_add_sizes` puts a new one in its place)
+        usual = float(np.median(sizes)) if sizes else 0.0
         return LARGE_LETTERING * max(usual, s.readable_font_size, s.min_font_size)
 
     def cap_sizes(self, regions: Sequence[TextRegion], texts: Sequence[str],
-                  cancel: threading.Event | None = None) -> None:
+                  cancel: threading.Event | None = None, measured: dict[int, Any] | None = None) -> None:
         """Keep the sizes of a page alike: each of *regions* gets the largest size it may be set at (`page_caps`) from
         what all of them, with *texts*, fit at in automatic lettering, so that the reader's formatting of one changes
         that one alone (a size the reader set is never capped). Kept on the region, so that one lettered on its own
         later comes out as on its page. Display lettering on the art that takes a room of its own (`_art_room`) counts
         as a shout: as large as it fits, and out of the sizes the page's speech is held to. *cancel* set: `Cancelled`
-        between two regions measured, before any cap is set."""
+        between two regions measured, before any cap is set. *measured* (the drafts of a page, `PageFill`): what a
+        region was measured at is kept there, and taken again while nothing it is measured from changed - its text,
+        every field of the region (its mask the very array), the display size, the settings and the series sheet
+        (`_measure_key`) - so that a page's next draft measures only its new line."""
         for r in regions:
             r.size_cap = 0
         large = self._display_size()
+        held: list[Any] = []
+        around = self._measure_context(large, held) if measured is not None else None
         sized = []
         for r, t in zip(regions, texts):
             check_cancel(cancel)
-            sized.append((DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
-                          self._set_text(None, r, t, (255, 255, 255), None, scaled=False).size, r.glyph))
+            key = None
+            if measured is not None:
+                key = (t, around, _measure_key(r, held))
+                kept = measured.get(id(r))
+                if kept is not None and kept[0] == key:
+                    sized.append(kept[2])
+                    continue
+            one = (DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
+                   self._set_text(None, r, t, (255, 255, 255), None, scaled=False).size, r.glyph)
+            if measured is not None:
+                measured[id(r)] = (key, (r, held), one)  # (what the key names by identity is held with it)
+            sized.append(one)
         for r, cap in zip(regions, page_caps(sized, self.settings.readable_font_size)):
             r.size_cap = cap
+
+    def _measure_context(self, large: float, held: list[Any]) -> tuple[Any, ...]:
+        """What a region's measure in `cap_sizes` hangs on besides the region and its text, as a key: the display
+        size, the settings in force (their values), the series sheet and its lettering (the very ones: kept in
+        *held*, so that their ids stay theirs) and the font it suggests."""
+        sheet = self.glossary
+        style = getattr(sheet, "style", None)
+        held.extend((sheet, style))
+        return large, tuple(sorted(vars(self.settings).items())), id(sheet), id(style), self.suggested_font
 
     def _render(self, out: np.ndarray, regions: list[TextRegion], record: bool = True, recap: bool = True,
                 quick: bool = False, cancel: threading.Event | None = None) -> None:
@@ -3467,6 +3577,35 @@ def _detect_pool() -> ThreadPoolExecutor:
         if not _POOL:
             _POOL.append(ThreadPoolExecutor(max_workers=2, thread_name_prefix="taslation-detect"))
         return _POOL[0]
+
+
+def _measure_key(region: TextRegion, held: list[Any]) -> tuple[Any, ...]:
+    """Every field of *region* as a key (`Pipeline.cap_sizes`' *measured*): plain values as they are, boxes and lists
+    of them as tuples, anything else - its mask, a style, a shape taken after the reading - by identity, the object
+    kept in *held* so that its id stays its own: a mask an erase cut back is another array, and another key."""
+
+    def part(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, (tuple, list)):
+            return type(value).__name__, tuple(part(v) for v in value)
+        held.append(value)
+        return "id", id(value)
+
+    return tuple(part(getattr(region, f.name)) for f in fields(region))
+
+
+DRAFTS_BESIDE = True  # the drafts of a page are lettered on a thread of their own while the model writes (`PageFill`)
+DRAFT_SIZES_KEPT = True  # the sizes the drafts of a page measure are kept for its next drafts (`Pipeline.cap_sizes`)
+_DRAFTS: list[ThreadPoolExecutor] = []
+
+
+def _drafts_pool() -> ThreadPoolExecutor:
+    """The one thread the drafts of the page being read are lettered on, in the order they came (`PageFill.draft`)."""
+    with _POOL_LOCK:
+        if not _DRAFTS:
+            _DRAFTS.append(ThreadPoolExecutor(max_workers=1, thread_name_prefix="taslation-drafts"))
+        return _DRAFTS[0]
 
 
 def _units_before(rgb: np.ndarray, margins: tuple[int, int, int, int]) -> Callable[[], list[fp.PageUnit]]:

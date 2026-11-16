@@ -68,6 +68,14 @@ def hint_support(translator: Any) -> str:
     return str(getattr(translator, "hint_support", HINT_FOLLOWS) or HINT_FOLLOWS)
 
 
+def uses_room(translator: Any) -> bool:
+    """Whether *translator* puts a region's room (``room`` in ``meta``: the characters of translation its bubble has
+    space for) in its request: the chat translator does (`ollama.OllamaTranslator.uses_room`: the bubble's "room"),
+    PLaMo does not (`plamo.PlamoTranslator.uses_room`: a line and its context, nothing of its length). One that does
+    not say is taken to (a test's stand-in, the echo): the pipeline measures the rooms before its request then."""
+    return bool(getattr(translator, "uses_room", True))
+
+
 def accepts(fn: Any, name: str) -> bool:
     """Whether the callable *fn* takes a keyword argument *name* (or any keyword: ``**kwargs``)."""
     import inspect

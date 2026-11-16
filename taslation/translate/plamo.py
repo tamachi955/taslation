@@ -185,6 +185,7 @@ class PlamoTranslator(OllamaTranslator):
 
     name = "plamo"
     hint_support = HINT_SOMETIMES  # a region's hint is in its line's context, followed about half the time (above)
+    uses_room = False  # a line goes with its context alone: nothing of a bubble's room (`translate_page`)
 
     def __init__(self, url: str = "http://127.0.0.1:11434", model: str = PLAMO.ollama_name, timeout: float = 900.0,
                  temperature: float = 0.2, num_ctx: int = NUM_CTX, target_language: str = "English",

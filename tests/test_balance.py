@@ -405,6 +405,7 @@ def test_a_page_that_fills_in_ends_up_with_the_caps_of_the_finished_page(setting
     texts = [r.translated_text for r in regions]
     for r, text in zip(regions, texts):
         fill.draft(r, text)
+    fill.wait()  # (the drafts are lettered on a thread of their own)
     filled = [r.size_cap for r in regions]
     p._render(page.copy(), regions)
     assert [r.size_cap for r in regions] == filled and filled[3] > 0

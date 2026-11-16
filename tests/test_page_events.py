@@ -1,6 +1,8 @@
 """How a page fills in while it is translated: the pipeline's page events (regions, read, translated, page)."""
 from __future__ import annotations
 
+import time
+
 import numpy as np
 from helpers import EN_TEXTS, FakeOcr
 
@@ -69,9 +71,16 @@ def test_translations_are_lettered_while_the_model_is_still_writing(sample_page,
     log: list[tuple[str, int | None]] = []
 
     class Writing(DictTranslator):
+        """A model that takes its time over each line: long enough for the line before to be lettered (on the
+        drafts' thread) before it writes the next."""
+
         def translate_page(self, texts, context=(), notes="", upcoming=(), meta=None, on_item=None):
             out = [self.mapping.get(t, "") for t in texts]
             for i, text in enumerate(out):
+                if i:
+                    waited = time.monotonic() + 5.0
+                    while ("lettered", i - 1) not in log and time.monotonic() < waited:
+                        time.sleep(0.01)
                 log.append(("written", i))
                 on_item(i, text)
             log.append(("done", None))
@@ -128,6 +137,7 @@ def test_a_draft_that_does_not_last_gives_the_region_back(settings):
     fill.announce([r])
     fill.draft(r, "こんにちは")  # the Japanese copied back: never lettered
     fill.draft(r, "  Hello *there  ")  # stray emphasis dropped, as tighten would
+    fill.wait()  # (the drafts are lettered on a thread of their own)
     assert [d["text"] for d in events.of("translated")] == ["Hello there"]
     erased = np.asarray(events.of("translated")[0]["patch"])
     assert erased[40 - 20:60 - 20, 40 - 20:60 - 20].mean() > 128  # the original text is erased in it
@@ -137,6 +147,7 @@ def test_a_draft_that_does_not_last_gives_the_region_back(settings):
     x0, y0, x1, y1 = last["box"]
     assert last["text"] == "" and np.array_equal(np.asarray(last["patch"]), page[y0:y1, x0:x1])
     fill.draft(TextRegion(0, 0, 4, 4, np.full((4, 4), 255, np.uint8), (0, 0, 4, 4)), "Hi")  # not announced: nothing
+    fill.wait()
     assert len(events.of("translated")) == 2
 
 

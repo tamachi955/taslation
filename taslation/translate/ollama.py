@@ -209,6 +209,7 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.S)
 class OllamaTranslator:
     name = "ollama"
     hint_support = HINT_FOLLOWS  # a region's hint goes with its bubble as "note" (`build_messages`)
+    uses_room = True  # a bubble's room goes with it as "room" (`build_messages`): measured before the request
 
     def __init__(
         self,
