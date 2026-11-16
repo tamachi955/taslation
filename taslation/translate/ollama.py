@@ -1,8 +1,11 @@
 """Translation through a local Ollama server.
 
 The only network peer TASlation ever has. The client refuses any URL whose
-host is not a loopback address, builds its own ``urllib`` opener with proxies
-disabled, and the network guard independently blocks everything else.
+host is not a loopback address, talks to it over ``http.client`` straight to that
+address (no proxy is ever involved), with one connection kept per thread that talks
+to it (`OllamaTranslator._held`: a new one costs ~15 ms; one the server closed
+meanwhile is opened again and the request sent once more, nothing of it answered),
+and the network guard independently blocks everything else.
 
 Requests are page- or chunk-sized: all bubbles of the pages in question go to
 the model together, in reading order, with the reader's series sheet (names,
@@ -36,7 +39,9 @@ own (localised) error text, nor any text of the book.
 The model is in GPU memory only while it is needed. Nothing loads it at the start:
 the first request that wants it does (`OllamaTranslator.ensure_loaded`, from every
 request to the model): /api/ps says whether it is loaded (a page in the cache sends no
-request, so reading the cache never loads it); when it is not, the reader is told
+request, so reading the cache never loads it; it is not asked while the model answered
+within `PS_RECHECK_S`, half its ``keep_alive`` when that is shorter, and a request that
+failed or a release makes the next request ask again); when it is not, the reader is told
 (`on_status`), the pipeline's GPU models let go (`before_load`, which is
 `Pipeline.release_gpu_models`) and `warm_up` loads it under its own timeout,
 cancellable like a request. Every request carries ``keep_alive`` (the setting
@@ -94,6 +99,11 @@ KEEP_ALIVE = "5m"
 WARM_UP_TIMEOUT = 300.0  # seconds a warm-up may take at most: a model loaded from a slow disk
 WARM_UP_PROMPT = "Hi"  # what a warm-up asks (one token of answer)
 PS_TIMEOUT = 3.0  # seconds /api/ps may take: it only looks
+# A model that answered a request or loaded this many seconds ago at most (and less than half its keep_alive) counts
+# as loaded: `ensure_loaded` asks /api/ps only when it is older than that, or after a request failed (15 ms of the
+# ~27 a request took on the client's side, 2026-11-16)
+PS_RECHECK_S = 30.0
+TAIL_WAIT_S = 2.0  # how long the end of a streamed answer is waited for after its last object (it follows at once)
 RELEASE_TIMEOUT = 3.0  # seconds a request to unload may take: the end of a run or the window's close wait for it
 RELEASE_WAIT_S = 10.0  # how long `release(wait=True)` waits for the model to be gone (0.3 s as a rule)
 FULL_GPU_SHARE = 0.99  # the share of the model in GPU memory (`gpu_share`) from which it counts as being on the GPU
@@ -156,6 +166,21 @@ def unloads_at_once(value: Any) -> bool:
     the request."""
     kept = keep_alive_value(value)
     return not any(c in "123456789" for c in kept) if isinstance(kept, str) else kept == 0
+
+
+_UNIT_SECONDS = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
+_PART_RE = re.compile(r"(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h)")
+
+
+def keep_alive_seconds(value: Any) -> float:
+    """How long a ``keep_alive`` keeps the model after a request, in seconds: ``inf`` for one that keeps it for good,
+    0 for one that unloads it at once."""
+    kept = keep_alive_value(value)
+    if never_unloads(kept):
+        return float("inf")
+    if not isinstance(kept, str):
+        return float(kept)
+    return sum(float(n) * _UNIT_SECONDS[unit] for n, unit in _PART_RE.findall(kept))
 
 
 def same_model(name: Any, model: str) -> bool:
@@ -263,8 +288,12 @@ class OllamaTranslator:
         # with ``ollama_model = "auto"``), None for a model set by hand: a model Ollama lacks is then said as
         # ``translator.model_missing``, the language's model to install
         self.auto_model: Any = None
-        # No proxies, ever: a system proxy must never see the text of your books.
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # No proxies, ever: a system proxy must never see the text of your books. The requests go straight to the
+        # loopback address over http.client, one connection kept per thread that talks to the server (`_held`)
+        self._local = threading.local()
+        # (model, until): the model answered a request or loaded lately, so that `ensure_loaded` does not ask /api/ps
+        # before every request (`PS_RECHECK_S`)
+        self._fresh: tuple[str, float] = ("", 0.0)
 
     # --- plumbing -----------------------------------------------------------
     def _revived(self, error: TranslationError, cancel: threading.Event | None = None) -> bool:
@@ -284,21 +313,60 @@ class OllamaTranslator:
 
     def _request_once(self, path: str, payload: dict[str, Any] | None = None,
                       timeout: float | None = None) -> dict[str, Any]:
+        """Ollama's answer to one request, in one piece, on this thread's connection (`_held`): one the server closed
+        while it was kept (Ollama's own idle close, a restart) is opened anew and the request sent once more, nothing of
+        it having been answered."""
         data = None
         headers = {"Accept": "application/json"}
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(self.base + path, data=data, headers=headers, method="POST" if data else "GET")
-        try:
-            with self._opener.open(req, timeout=timeout or self.timeout) as resp:
-                body = resp.read()
-        except (OSError, http.client.HTTPException) as e:
-            raise self._failure(e, path, timeout or self.timeout) from e
+        limit = timeout or self.timeout
+        for _attempt in range(2):
+            conn, kept = self._held(limit)
+            try:
+                conn.response_class = http.client.HTTPResponse
+                conn.request("POST" if data else "GET", self._prefix + path, body=data, headers=headers)
+                resp = conn.getresponse()
+                status, body = resp.status, resp.read()
+                if resp.will_close:
+                    self._drop()
+            except (OSError, http.client.HTTPException) as e:
+                self._drop()
+                if kept and _stale(e):
+                    continue  # (kept, and closed by the server: the request never reached it)
+                raise self._failure(e, path, limit) from e
+            break
+        if status >= 300:
+            raise self._http_failure(status, body, path)
         try:
             return json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError as e:
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
             raise TranslationError(Message("ollama.bad_json", path=path)) from e
+
+    def _held(self, timeout: float) -> tuple[http.client.HTTPConnection, bool]:
+        """This thread's connection to Ollama, with *timeout* for each wait on it, and whether it was kept from an
+        earlier request (a new one connects with the request). Never shared between threads: the page's worker, a load
+        ahead, a whole-book run's translation and the window's own requests each have theirs (a new connection costs
+        ~15 ms, a kept one 0.2)."""
+        conn = getattr(self._local, "conn", None)
+        kept = conn is not None and conn.sock is not None
+        if conn is None:
+            conn = self._local.conn = self._connection()
+        conn.timeout = timeout
+        if conn.sock is not None:
+            conn.sock.settimeout(timeout)
+        return conn, kept
+
+    def _drop(self) -> None:
+        """This thread's connection closed and let go (after an error, a cancel, or a server that closes it)."""
+        conn = getattr(self._local, "conn", None)
+        self._local.conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - a connection that will not close is let go all the same
+                pass
 
     def _failure(self, e: BaseException, path: str, timeout: float) -> TranslationError:
         """What went wrong with a request, as the TranslationError to raise (never with the operating system's
@@ -371,48 +439,68 @@ class OllamaTranslator:
         pieces: list[str] = []
         last: dict[str, Any] | None = None
         timeout = timeout or self.timeout
-        watch = _Watch(cancel, on_slow, self.slow_after, timeout)
-        conn = self._connection()
-        resp: http.client.HTTPResponse | None = None
-        try:
-            conn.request("POST", self._prefix + path, body=data, headers=headers)
-            if conn.sock is not None:
-                conn.sock.settimeout(POLL_S)  # the answer is read in short waits (see _Watch)
-            conn.response_class = functools.partial(_Response, watch=watch)  # type: ignore[assignment]
-            resp = conn.getresponse()
-            if resp.status >= 300:
-                raise self._http_failure(resp.status, resp.read(65536), path)
-            for raw in resp:
+        for _attempt in range(2):
+            watch = _Watch(cancel, on_slow, self.slow_after, timeout)
+            conn, kept = self._held(timeout)
+            resp: http.client.HTTPResponse | None = None
+            whole = False  # the answer read to its end: the connection may be kept for the next request
+            began = False  # something of the answer came (the request reached the server)
+            try:
+                conn.response_class = http.client.HTTPResponse
+                conn.request("POST", self._prefix + path, body=data, headers=headers)
+                if conn.sock is not None:
+                    conn.sock.settimeout(POLL_S)  # the answer is read in short waits (see _Watch)
+                conn.response_class = functools.partial(_Response, watch=watch)  # type: ignore[assignment]
+                resp = conn.getresponse()
+                began = True
+                if resp.status >= 300:
+                    raise self._http_failure(resp.status, resp.read(65536), path)
+                for raw in resp:
+                    if cancel is not None and cancel.is_set():
+                        raise Cancelled()
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                        raise TranslationError(Message("ollama.bad_json", path=path)) from e
+                    if not isinstance(obj, dict):
+                        raise TranslationError(Message("ollama.bad_json", path=path))
+                    if obj.get("error"):
+                        raise TranslationError(Message("ollama.reported_error", path=path,
+                                                       detail=str(obj["error"])[:300]))
+                    # a chat's piece is in its message; /api/generate's (`PlamoTranslator`) in its "response"
+                    piece = str((obj.get("message") or {}).get("content") or obj.get("response") or "")
+                    if piece:
+                        pieces.append(piece)
+                        on_text(piece)
+                    if obj.get("done"):
+                        last = obj
+                        break
+                if last is not None:  # the end of the chunked answer read, so that the connection is clean for the
+                    watch.timeout = min(timeout, TAIL_WAIT_S)  # next request (not waited for long: closed then)
+                    try:
+                        resp.read()
+                        whole = not resp.will_close
+                    except (OSError, http.client.HTTPException, Cancelled):
+                        whole = False
+            except (OSError, http.client.HTTPException) as e:
                 if cancel is not None and cancel.is_set():
-                    raise Cancelled()
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                    raise TranslationError(Message("ollama.bad_json", path=path)) from e
-                if not isinstance(obj, dict):
-                    raise TranslationError(Message("ollama.bad_json", path=path))
-                if obj.get("error"):
-                    raise TranslationError(Message("ollama.reported_error", path=path,
-                                                   detail=str(obj["error"])[:300]))
-                # a chat's piece is in its message; /api/generate's (`PlamoTranslator`) in its "response"
-                piece = str((obj.get("message") or {}).get("content") or obj.get("response") or "")
-                if piece:
-                    pieces.append(piece)
-                    on_text(piece)
-                if obj.get("done"):
-                    last = obj
-                    break
-        except (OSError, http.client.HTTPException) as e:
-            if cancel is not None and cancel.is_set():
-                raise Cancelled() from e
-            raise self._failure(e, path, timeout) from e
-        finally:
-            if resp is not None:
-                resp.close()
-            conn.close()  # on a cancel: the connection goes, and Ollama stops writing
+                    raise Cancelled() from e
+                if kept and not began and _stale(e):
+                    self._drop()
+                    continue  # (kept, and closed by the server: the request never reached it)
+                raise self._failure(e, path, timeout) from e
+            finally:
+                if resp is not None:
+                    resp.close()
+                if whole and conn.sock is not None:
+                    conn.response_class = http.client.HTTPResponse
+                    conn.sock.settimeout(self.timeout)
+                else:
+                    self._drop()  # on a cancel: the connection goes, and Ollama stops writing
+            break
         if last is None:
             raise TranslationError(Message("ollama.broke_off", path=path))
         return {**last, "message": {**dict(last.get("message") or {}), "content": "".join(pieces)}}
@@ -479,14 +567,19 @@ class OllamaTranslator:
             return self._request("/api/chat", payload)
 
         try:
-            data = send()
-        except TranslationError as e:
-            if "think" in payload and refuses_think(e):
-                self._supports_think = False  # older server or a model without a thinking mode
-                payload.pop("think")
+            try:
                 data = send()
-            else:
-                raise
+            except TranslationError as e:
+                if "think" in payload and refuses_think(e):
+                    self._supports_think = False  # older server or a model without a thinking mode
+                    payload.pop("think")
+                    data = send()
+                else:
+                    raise
+        except TranslationError:
+            self._unsure()
+            raise
+        self._answered(self.model)
         self.last_stats = {k: data.get(k) for k in ("prompt_eval_count", "eval_count", "prompt_eval_duration", "eval_duration",
                                                     "total_duration", "done_reason")}
         return str(data.get("message", {}).get("content", ""))
@@ -531,6 +624,8 @@ class OllamaTranslator:
         self._used.add(payload["model"])
         start = time.monotonic()
         self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow)
+        if payload["keep_alive"] == self.keep_alive:
+            self._answered(payload["model"])
         return time.monotonic() - start  # (not last_stats: a warm-up must not stand in for a page's statistics)
 
     def _loaded(self, model: str) -> dict[str, Any] | None:
@@ -587,8 +682,11 @@ class OllamaTranslator:
             self._loading.release()
 
     def _ensure_loaded(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None) -> None:
-        """`ensure_loaded`, its turn come."""
+        """`ensure_loaded`, its turn come: nothing asked while the model answered lately (`_answered`)."""
         model = self.model
+        held, until = self._fresh
+        if held == model and time.monotonic() < until:
+            return
         try:
             if self._loaded(model) is not None:
                 return
@@ -608,6 +706,21 @@ class OllamaTranslator:
         if checked and partly_on_gpu(share):
             self._say(Message("ollama.partly_on_gpu", model=model, percent=round(float(share or 0) * 100)))
 
+    def _answered(self, model: str) -> None:
+        """*model* answered a request (or a warm-up) just now: it is loaded for its ``keep_alive`` from now, and
+        `ensure_loaded` takes it for loaded for `PS_RECHECK_S` (half the ``keep_alive`` when that is shorter) without
+        asking /api/ps."""
+        try:
+            fresh = min(PS_RECHECK_S, keep_alive_seconds(self.keep_alive) / 2)
+        except ValueError:
+            fresh = 0.0
+        self._fresh = (model, time.monotonic() + fresh) if fresh > 0 else ("", 0.0)
+
+    def _unsure(self, model: str | None = None) -> None:
+        """A request failed, or *model* (default: any) was unloaded: the next `ensure_loaded` asks /api/ps again."""
+        if model is None or self._fresh[0] == model:
+            self._fresh = ("", 0.0)
+
     def release(self, model: str | None = None, wait: bool = False) -> None:
         """Ollama unloads *model* now (default: the models this translator had it load or use; with none, nothing is
         sent, so that a session that read only cached pages leaves another program's model alone). With *wait*, until
@@ -622,6 +735,7 @@ class OllamaTranslator:
         """Ollama unloads *name* now (with *wait*, until /api/ps no longer has it, `RELEASE_WAIT_S` at most); whether
         the request to unload was answered. Never raises; starts nothing."""
         self._used.discard(name)
+        self._unsure(name)
         try:
             self._unload(name)
             end = time.monotonic() + RELEASE_WAIT_S
@@ -645,6 +759,7 @@ class OllamaTranslator:
                 held = e.message.code == "ollama.http_error"
             if not held:
                 self._used.discard(name)
+                self._unsure(name)
                 continue
             if self._release(name, wait=True):
                 released.append(name)
@@ -780,6 +895,13 @@ def partly_on_gpu(share: float | None) -> bool:
 
 def _ignore(_text: str) -> None:
     pass
+
+
+def _stale(e: BaseException) -> bool:
+    """Whether *e*, met on a connection kept from an earlier request before anything of the answer came, says that
+    the server had closed it meanwhile (its idle close, a restart): the request is sent once more on a new one."""
+    return isinstance(e, (http.client.RemoteDisconnected, http.client.CannotSendRequest, http.client.BadStatusLine,
+                          ConnectionResetError, ConnectionAbortedError, BrokenPipeError))
 
 
 def error_text(body: bytes) -> str:

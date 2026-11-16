@@ -108,10 +108,13 @@ def test_a_model_that_is_loaded_is_not_loaded_again_and_the_requests_keep_it(oll
     assert all(r["keep_alive"] == "5m" for r in ollama.requests)  # each one starts the idle time again
 
 
-def test_after_the_idle_time_the_next_line_loads_it_again(ollama):
+def test_after_the_idle_time_the_next_line_loads_it_again(ollama, monkeypatch):
     tr, said = _translator(ollama)
     tr.translate_page(["一"])
-    ollama.loaded.clear()  # Ollama's keep_alive has run out
+    ollama.loaded.clear()  # Ollama's keep_alive has run out ...
+    # ... minutes after the request: long past the time a model that answered counts as loaded (`PS_RECHECK_S`)
+    monkeypatch.setattr(ollama_module, "PS_RECHECK_S", 0.0)
+    tr._answered(tr.model)
     tr.translate_page(["二"])
     assert ollama.loads == 2
     assert _codes(said) == ["ollama.loading", "ollama.loaded"] * 2

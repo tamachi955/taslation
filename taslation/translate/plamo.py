@@ -261,12 +261,17 @@ class PlamoTranslator(OllamaTranslator):
         payload: dict[str, Any] = {"model": self.model, "prompt": prompt, "raw": True,
                                    "options": self._options(max_tokens, offset),
                                    "keep_alive": self.keep_alive}
-        if cancel is not None or on_slow is not None:
-            data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow)
-            raw = str((data.get("message") or {}).get("content") or "")
-        else:
-            data = self._request("/api/generate", {**payload, "stream": False})
-            raw = str(data.get("response") or "")
+        try:
+            if cancel is not None or on_slow is not None:
+                data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow)
+                raw = str((data.get("message") or {}).get("content") or "")
+            else:
+                data = self._request("/api/generate", {**payload, "stream": False})
+                raw = str(data.get("response") or "")
+        except TranslationError:
+            self._unsure()  # (the next request asks Ollama whether the model is loaded)
+            raise
+        self._answered(self.model)
         self.last_stats = {k: data.get(k) for k in ("prompt_eval_count", "eval_count", "prompt_eval_duration",
                                                     "eval_duration", "total_duration", "done_reason")}
         if self.stats_log is not None:
@@ -352,6 +357,8 @@ class PlamoTranslator(OllamaTranslator):
             self._request("/api/generate", {**payload, "stream": False}, limit)
         else:
             self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit)
+        if payload["keep_alive"] == self.keep_alive:
+            self._answered(payload["model"])
         return time.monotonic() - start
 
     def _unload(self, name: str) -> None:
