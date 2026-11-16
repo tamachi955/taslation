@@ -13,7 +13,10 @@ Two modes:
   capture and the OCR alone: no model request meanwhile); only text and geometry stay (`ScannedUnit`, in memory),
   nothing goes to disk, so nothing of a page can be read until the translation. *Translation*: once the reader says
   the book is done (`finish`), runs of pages (`chunk_bubbles`) are translated once with the series sheet and the whole
-  story as context (the translations before them, the Japanese that comes next), and each run is stored as it comes; a
+  story as context (the translations before them, the Japanese that comes next), and each run is stored as it comes -
+  beginning while the frames still waiting are read (`_translate_ahead`): each run as soon as it and the lines after
+  it are read for good, the very requests of a translation after the reading, nothing of it stored, counted or told
+  until the reading is over (`_end_deferring`), so that no reading finds a page of this run in the cache; a
   rendering the series sheet spells otherwise is put right without the model (`terms.spelt_right`), the review
   flags are set (`Pipeline.review`: no model request), a line left out or answered with the Japanese is asked for
   again, and a line never answered leaves its page `incomplete`. The model writes no notes of its own and reviews
@@ -66,10 +69,12 @@ Erased ahead (whole book): once a page is read, a thread of its own (`_erase_ahe
 settings have it) and keeps the erased page in memory in its frame's place (`PageImages.put_erased`), for the session
 only. The pipeline's render takes a region's erase from there when that very region is on show on that very page
 (`Pipeline.erase_key`: the region, the erase's settings, the pixels round it), and erases it itself otherwise
-(``Pipeline.erased_ahead``). The erase of the pages read is waited for before the translation
-(``batch.erasing_ahead`` {pages}), so that LaMa is done with the GPU before Ollama's model loads
-(`Pipeline.gpu_releases`). Translation still starts only when the reader has finished, with the whole book as
-context.
+(``Pipeline.erased_ahead``). The erase of the pages read is waited for before a translation that begins after the
+reading (``batch.erasing_ahead`` {pages}); a translation begun beside the backlog goes on while it is finished. Either
+way Ollama's model loads only once the run's GPU work has stopped - the reading of a page (the layout model), LaMa -,
+and none starts again until the model has answered (`_hold_loads`, `_gpu_work`), so that the GPU models are let go
+before it loads (`Pipeline.gpu_releases`) and it finds the GPU free. Translation still starts only when the reader has
+finished, with the whole book as context.
 
 Background load: the reading loop and the erase run at a lower thread priority (`lower_priority`, Windows'
 BELOW_NORMAL, on the thread itself), and torch computes with all cores but one or two (`torch_threads`), so that the
@@ -128,7 +133,9 @@ page the screen may switch off, nothing else. Only ``batch_max_pages`` ends the 
 Stop during the reading ends the run: nothing is translated, the pages read are not stored (the window asks first
 once more than a few pages are read, and offers to translate them instead: `finish(partial=True)`, which ends the
 reading as Finished reading does, with ``batch.read_so_far`` as its reason, so a later run reads on from the page on
-show). Stop during the translation keeps what is stored; a request under way is lost. What was read and not stored is
+show). Stop during the translation keeps what is stored; a request under way is lost. Stop while the backlog is read
+after the reader has finished keeps what the translation beside it translated, as Stop during the translation does
+(``batch.stopped_translating``). What was read and not stored is
 `BatchReader.left` (`Readings`, in memory only: Japanese text never goes to disk): a window hands it to its next run
 of the same book (*readings*), which goes on reading from the page on show, or, when the reader had finished the book,
 goes on translating. A run without it (the command line, a window closed) reads those pages again.
@@ -155,9 +162,9 @@ ends the translation at the first failed request instead of retrying it; a
 cache that cannot be written ends it after the page that found out
 (``batch.save_failed``).
 
-Ollama's model is not in memory while the pages are read: the reading pass sends no request, and the first request
-of the translation loads it (`OllamaTranslator.ensure_loaded`, which lets the pipeline's GPU models go first); the
-requests that follow keep it. Page by page, the first page that needs a translation loads it. However the run ends
+Ollama's model is not in memory while the reader turns pages: the reading pass sends no request then, and the first
+request of the translation loads it (`OllamaTranslator.ensure_loaded`, which lets the pipeline's GPU models go first,
+once the run's GPU work has stopped: `_hold_loads`); the requests that follow keep it. Page by page, the first page that needs a translation loads it. However the run ends
 (finished, Stop, a failure), its end releases it (`run`).
 """
 
@@ -170,6 +177,7 @@ import os
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -714,6 +722,31 @@ def chunk_units(units: list[ScannedUnit], max_bubbles: int) -> list[list[Scanned
     return chunks
 
 
+def next_chunk(units: Sequence[ScannedUnit], start: int, max_bubbles: int, lookahead: int,
+               complete: bool) -> tuple[list[ScannedUnit], list[str]] | None:
+    """The group of `chunk_units` (*units*, *max_bubbles*) that begins with unit *start* (where a group of it begins),
+    with the Japanese of the *lookahead* lines after it (a request's ``upcoming``), once *units* tell both for good:
+    *units* are the first units of all of them, in their order, and all of them when *complete*. None while they do
+    not tell (the group may take a unit still to come, fewer lines than *lookahead* come after it), or when no unit is
+    left from *start*. Groups taken one after the other this way are `chunk_units`'s, each with the very lines after
+    it that the whole list gives."""
+    chunk: list[ScannedUnit] = []
+    count, k = 0, start
+    while k < len(units):
+        n = len(units[k].japanese())
+        if chunk and count + n > max_bubbles:
+            break
+        chunk.append(units[k])
+        count += n
+        k += 1
+    if not chunk or (k == len(units) and not complete):
+        return None
+    upcoming = [r.source_text for u in units[k:] for r in u.japanese()][:lookahead] if lookahead else []
+    if len(upcoming) < lookahead and not complete:
+        return None
+    return chunk, upcoming
+
+
 def pid_alive(pid: int) -> bool:
     """Is a process with this id running? (The lock below belongs to a live batch only.)"""
     if pid <= 0:
@@ -854,8 +887,9 @@ class BatchReader:
         self._says = threading.RLock()  # the sampler and the reading loop both speak (`_emit`)
         self._line_said = 0.0  # when a line answered was last told (`_answered`)
         self.following = False  # the reading pass is on: the reader's keys go on to the viewer (`ui.live`)
-        # the translation pass is on: the run needs the viewer no more, and a window follows it as without a run,
-        # showing what the cache holds of the page it shows (`viewer_page`)
+        # the run needs the viewer no more - the reader has finished and the sampler is done (`_sample`: the backlog may
+        # still be read), or the translation pass is on -, and a window follows it as without a run, showing what the
+        # cache holds of the page it shows (`viewer_page`)
         self.viewer_free = False
         self._fps_of: dict[int, tuple[str, ...]] = {}  # seq -> the fingerprints of its page units (`_seq_for`)
         self._preflight = list(preflight) if preflight is not None else None  # the caller's pre-flight result
@@ -887,6 +921,35 @@ class BatchReader:
         # cache is not made for two threads; the view letters without the lock)
         self._view: TranslationView | None = None
         self._storing = threading.Lock()
+        # the view's "stored" and "ended" told before it opened (`_open_view`: it opens once the erase ahead is done)
+        self._view_lock = threading.Lock()
+        self._view_log: list[tuple[str, tuple[Any, ...]]] = []
+        self._view_opened = False
+        # The translation, on a thread of its own (`_start_translation`): from the moment the reader has finished and
+        # every frame still to read is on the backlog, beside the reading of the backlog (``translating ahead``), else
+        # once the reading is over. While frames are still read nothing it does is stored: what it would store, count
+        # and tell waits in `_journal`, in its order, until the reading is over (`_end_deferring`), so that no reading
+        # finds a page of this run in the cache and every page is stored as it is stored without the overlap.
+        self._translating: threading.Thread | None = None
+        self._translation_error: BaseException | None = None  # what the thread raised, raised again on the run's
+        self._ended_by: Message | None = None  # what ended the translation (Stop, a failure): `progress.reason` after
+        self._ahead_ok = False  # the reading pass may start the translation ahead (`_translate_ahead`)
+        self._taken_all = False  # the sampler and the packer have ended: no frame goes on the backlog any more
+        self._fed = threading.Condition()  # `_units`, `_seq_of`, `_unread`, `_book` as the translation sees them
+        self._unread: dict[int, int] = {}  # images' key -> seq of every frame on the backlog or being read
+        self._book: list[ScannedUnit] | None = None  # the units to translate, in the book's order, once all are known
+        self._journal_lock = threading.Lock()
+        self._deferring = False  # (under `_journal_lock`) frames are still read: what the translation stores waits
+        self._journal: list[Callable[[], None]] = []
+        self._journal_stores = 0  # page units stored in `_journal`
+        self._chunk_said: dict[str, tuple[int, int]] = {}  # the band's latest run messages while deferring, by kind
+        self._chunk_total = 0  # the translation's runs (``batch.translating_chunk`` {chunks}), once all are known
+        # GPU work of the run (a page's reading: the layout model; the erase ahead: LaMa) under way, by thread, and
+        # whether the translator's model loads (`_hold_loads`): no GPU work starts then, and the load waits for none
+        self._gpu_cond = threading.Condition()
+        self._gpu_busy: dict[int, int] = {}
+        self._loading = False
+        self._keep_gate = False  # the GPU gate stays after the reading (whole book: the erase ahead goes on)
         # the run's capture area when it follows the reader (the window's runs: see the module's docstring), widened
         # by the packer alone with each page it takes (`_meet`); None: one area for the run, the settings' (the CLI)
         self._area = page_area
@@ -956,7 +1019,14 @@ class BatchReader:
 
     def _gpu_wait(self) -> None:
         """GPU work waits while pages are being turned: until `gpu_quiet_s` without a new frame (``Pipeline.gpu_gate``
-        while the pages are read). Stop, and the end of the reading, end the wait."""
+        while the pages are read and the erase ahead goes on). Stop, and the end of the reading, end the wait. It also
+        waits while the translator's model loads (`_hold_loads`), this thread's GPU work counted as stopped meanwhile
+        (`_gpu_work`: LaMa asks the gate before each region, so the load waits for one region at most)."""
+        me = threading.get_ident()
+        with self._gpu_cond:
+            held = self._gpu_busy.pop(me, 0)
+            if held:
+                self._gpu_cond.notify_all()
         waited = False
         while not self._stop.is_set() and not self._sampler_off.is_set():
             quiet = time.monotonic() - self._last_change
@@ -966,6 +1036,70 @@ class BatchReader:
                 waited = True
                 self.gpu_waits += 1
             self._stop.wait(min(0.05, self.gpu_quiet_s - quiet))
+        with self._gpu_cond:
+            while self._loading and not self._stop.is_set():
+                self._gpu_cond.wait(0.05)
+            if held:
+                self._gpu_busy[me] = held
+
+    @contextmanager
+    def _gpu_work(self):
+        """GPU work of the run (a page's reading, a page's erase ahead): it starts once no model loads
+        (`_hold_loads`), and a load waits until it is over (or at the gate, `_gpu_wait`)."""
+        me = threading.get_ident()
+        with self._gpu_cond:
+            while self._loading and not self._stop.is_set():
+                self._gpu_cond.wait(0.05)
+            self._gpu_busy[me] = self._gpu_busy.get(me, 0) + 1
+        try:
+            yield
+        finally:
+            with self._gpu_cond:
+                left = self._gpu_busy.get(me, 0) - 1
+                if left > 0:
+                    self._gpu_busy[me] = left
+                else:
+                    self._gpu_busy.pop(me, None)
+                self._gpu_cond.notify_all()
+
+    def _hold_loads(self) -> tuple[Any, Any, Any] | None:
+        """For the whole-book run: the translator's model loads (``before_load``, before the GPU models go:
+        `Pipeline.release_gpu_models`) only once the run's other GPU work has stopped - the reading of a page (the
+        layout model) and the erase ahead (LaMa) -, and none starts again until the model answers (`_model_loaded`),
+        so that the model finds the GPU as free as when the translation began after the reading and the erase. Only
+        a load on the translation's own thread waits. Returns what `_let_loads` puts back."""
+        translator = self.pipeline.translator
+        if translator is None or not hasattr(translator, "before_load"):
+            return None
+        before = translator.before_load
+
+        def held() -> None:
+            if threading.current_thread() is self._translating:
+                me = threading.get_ident()
+                with self._gpu_cond:
+                    self._loading = True
+                    while any(n for t, n in self._gpu_busy.items() if t != me) and not self._stop.is_set():
+                        self._gpu_cond.wait(0.05)
+            if before is not None:
+                before()
+
+        translator.before_load = held
+        return translator, before, held
+
+    def _let_loads(self, held: tuple[Any, Any, Any] | None) -> None:
+        if held is None:
+            return
+        translator, before, mine = held
+        if getattr(translator, "before_load", None) is mine:
+            translator.before_load = before
+        self._model_loaded()
+
+    def _model_loaded(self) -> None:
+        """The translator's model has answered (or its request is over): the run's GPU work goes on."""
+        with self._gpu_cond:
+            if self._loading:
+                self._loading = False
+                self._gpu_cond.notify_all()
 
     # ------------------------------------------------------------------ capture helpers
     def _emit(self, message: str, result: PageResult | None = None) -> None:
@@ -1006,8 +1140,10 @@ class BatchReader:
         self._show("progress", text=message)
 
     def _on_slow(self, seconds: float) -> None:
-        """The model has said nothing for a while (it may still be loading)."""
-        self._emit(Message("ollama.slow", seconds=round(seconds)))
+        """The model has said nothing for a while (it may still be loading); not while the backlog is still read (the
+        band tells the reading then, `_deferring`)."""
+        if not self._deferring:
+            self._emit(Message("ollama.slow", seconds=round(seconds)))
 
     def _failed(self, error: Message) -> None:
         """A request failed (or its reply could not be used)."""
@@ -1245,6 +1381,11 @@ class BatchReader:
             packer.join(timeout=30.0)
             if not packer.is_alive():
                 self._merge_taken_missed()
+                self._taken_all = True
+                # the reader has finished: nothing of the run captures the viewer any more, the frames still to read
+                # are all on the backlog - the window follows the viewer from here on (`viewer_page`)
+                if self.context_mode and self._finish.is_set() and not self._stop.is_set() and self._fatal is None:
+                    self.viewer_free = True
 
     def _watch_viewer(self, watch: PageWatch) -> None:
         while not self._ended:
@@ -1491,6 +1632,8 @@ class BatchReader:
         self._on_show_key = self._last_key = key
         if fps:  # (before the loop can take it: its first event)
             self._page_stage(key, "read", "waiting", thumb=thumb_of(frame))
+        with self._fed:  # (still to read: the translation ahead takes no unit after it, `_book_so_far`)
+            self._unread[key] = key if fps else 0
         self._backlog.put(_Taken(key, key if fps else 0, fps))
         self._emit(Message("batch.page_waits", queued=self._backlog.qsize()))
         return True
@@ -1557,8 +1700,9 @@ class BatchReader:
 
     def _events_of(self, taken: _Taken) -> EventFn | None:
         """Where the pipeline's page events go: to the window while *taken* is the page on show; a page of the backlog
-        is read without them, the reader being on a later page."""
-        return self.show if taken.key == self._on_show_key else None
+        is read without them, the reader being on a later page, and so is every page once the window follows the
+        viewer again (`viewer_free`: the reader has finished, the backlog drains)."""
+        return self.show if taken.key == self._on_show_key and not self.viewer_free else None
 
     def _iterate_pages(self, handle: Callable[[Image.Image, _Taken], bool]) -> None:
         """The pages the reader turns, in that order, each new page once: *handle(frame, taken)* for each, the frames
@@ -1585,44 +1729,51 @@ class BatchReader:
                 taken = self._next_frame(sampler)
                 if taken is None:
                     break
-                frame = self.images.frame(taken.key)
-                if frame is None:  # (never: a frame to read is never let go)
-                    continue
-                self._read_in()  # (the area that holds this page: widened for it as it was taken)
-                fps = list(taken.fps)
-                seen = self._seen_before(fps)
-                if not seen and not self._still_the_book(frame):
-                    self._page_stage(taken.seq, "read", "skipped")
-                    self.images.drop_frame(taken.key)
-                    self._wait_for_reader(Message("batch.not_book"))
-                    continue
-                if getattr(p.waiting, "code", "") == "batch.not_book":
-                    self._carry_on()
-                if seen:
-                    self._page_stage(taken.seq, "read", "skipped")
-                    self.images.drop_frame(taken.key)
-                    continue
-                self._page_stage(taken.seq, "read", "working")
-                # the colophon names the book: the cheap test on every page, the OCR only on a page that passes it
-                if p.colophon is None and colophon_reads < colophon.MAX_READS and self.pipeline.ocr is not None \
-                        and colophon.precheck(frame, self.settings.margins):
-                    colophon_reads += 1
-                    p.colophon = colophon.find_colophon(frame, self.pipeline.ocr, self.settings.margins)
-                before = p.pages
-                if not handle(frame, taken):
-                    p.pages = before  # (a page that ended the run - its translation not kept - is no page more)
-                    break
-                frame = None  # (its packed image stays with `images` while the run needs it)
-                p.pages = before + 1  # (*handle* counts it as it says it: the band shows the page said as read)
-                p.seen.extend(fps)
+                try:
+                    frame = self.images.frame(taken.key)
+                    if frame is None:  # (never: a frame to read is never let go)
+                        continue
+                    self._read_in()  # (the area that holds this page: widened for it as it was taken)
+                    fps = list(taken.fps)
+                    seen = self._seen_before(fps)
+                    if not seen and not self._still_the_book(frame):
+                        self._page_stage(taken.seq, "read", "skipped")
+                        self.images.drop_frame(taken.key)
+                        self._wait_for_reader(Message("batch.not_book"))
+                        continue
+                    if getattr(p.waiting, "code", "") == "batch.not_book":
+                        self._carry_on()
+                    if seen:
+                        self._page_stage(taken.seq, "read", "skipped")
+                        self.images.drop_frame(taken.key)
+                        continue
+                    self._page_stage(taken.seq, "read", "working")
+                    # the colophon names the book: the cheap test on every page, the OCR only on a page that passes it
+                    if p.colophon is None and colophon_reads < colophon.MAX_READS and self.pipeline.ocr is not None \
+                            and colophon.precheck(frame, self.settings.margins):
+                        colophon_reads += 1
+                        p.colophon = colophon.find_colophon(frame, self.pipeline.ocr, self.settings.margins)
+                    before = p.pages
+                    if not handle(frame, taken):
+                        p.pages = before  # (a page that ended the run - its translation not kept - is no page more)
+                        break
+                    frame = None  # (its packed image stays with `images` while the run needs it)
+                    p.pages = before + 1  # (*handle* counts it as it says it: the band shows the page said as read)
+                    p.seen.extend(fps)
+                finally:
+                    self._read_off(taken.key)
         finally:
             self.following = False
             self._sampler_off.set()
             sampler.join(timeout=30.0)
             while not self._backlog.empty():  # (Stop, or the page limit: frames not read go at once)
                 self.images.drop_frame(self._backlog.get_nowait().key)
+            with self._fed:
+                self._unread.clear()
+                self._fed.notify_all()
             self._read_in()  # (the area the run ended with: the translation and the window letter its pages in it)
-            if gate and self.pipeline.gpu_gate == self._gpu_wait:
+            # (whole book: the gate stays while the erase ahead goes on, `_run_context`)
+            if gate and not self._keep_gate and self.pipeline.gpu_gate == self._gpu_wait:
                 self.pipeline.gpu_gate = None
             restore_torch_threads(threads)
             if priority is not None:
@@ -1635,6 +1786,12 @@ class BatchReader:
         if not p.reason:
             ended = Message("batch.read_so_far") if self._partial else Message("batch.finished_reading")
             p.reason = ended if p.seen else NO_PAGE
+
+    def _read_off(self, key: int) -> None:
+        """The frame *key* is read (or skipped): the translation ahead may take the units before it."""
+        with self._fed:
+            self._unread.pop(key, None)
+            self._fed.notify_all()
 
     def _torch_most(self) -> int:
         """Torch's threads while the batch reads: `torch_threads`, or the reader's ``ocr_threads`` when fewer."""
@@ -1673,7 +1830,8 @@ class BatchReader:
                 continue
             self._page_stage(seq, "erase", "working")
             try:
-                out, records = self.pipeline.erase_page(frame, regions, cancel=self._stop)
+                with self._gpu_work():  # (LaMa: no erase while the translator's model loads, `_hold_loads`)
+                    out, records = self.pipeline.erase_page(frame, regions, cancel=self._stop)
             except Cancelled:
                 return
             except Exception:  # noqa: BLE001 - the page erases on show, as without the erase ahead
@@ -1694,7 +1852,7 @@ class BatchReader:
         after the other (the OCR on the CPU, LaMa's own work round the GPU's): 30 pages turned in 20 s on OpenMantra,
         detect_model and art_erase "auto", read 40 s after the last turn instead of 63, all erased 61 s after it
         instead of 65 (tools: the e2e lab's turnlag). Nothing the reading pass shows needs an erased page: the
-        translation, which does, starts after the reading and the erase."""
+        translation's view, which does, opens once the erase is done (`_translation_pass`)."""
         while self._backlog.qsize() > 0 and not self._ended:
             self._stop.wait(0.05)
 
@@ -1709,14 +1867,15 @@ class BatchReader:
         thread.start()
         return thread
 
-    def _finish_erasing(self, thread: threading.Thread | None) -> None:
-        """The erase of the pages read done before the translation (LaMa off the GPU before Ollama's model loads), said when
-        there is some left (``batch.erasing_ahead``); at Stop at once."""
+    def _finish_erasing(self, thread: threading.Thread | None, say: bool = True) -> None:
+        """The erase of the pages read done, said when there is some left (``batch.erasing_ahead``; not while the
+        translation goes on beside it, *say* False: the band tells the translation); at Stop at once. The translation
+        may go on meanwhile: its model's load waits for LaMa, and LaMa for the load (`_hold_loads`)."""
         if thread is None:
             return
         left = self._erase_jobs.qsize()
         self._erase_jobs.put(None)
-        if left and not self._stop.is_set():
+        if left and say and not self._stop.is_set():
             self._emit(Message("batch.erasing_ahead", pages=left))
         while thread.is_alive() and not self._stop.is_set():
             thread.join(0.1)
@@ -1872,7 +2031,19 @@ class BatchReader:
         counted once, when it is stored. A page unit the model still gives nothing usable for is noted and translated
         when its page is read (``batch.note_unit_failed``). A failure every later request would repeat (`fatal`) ends
         the translation.
+
+        While frames are still read (`_deferring`), what it stores, counts and notes waits (`_store_unit`,
+        `_deferred`): it goes on as if every unit had been stored, its completeness as `Pipeline.commit_unit` would
+        return it (`_would_complete`). The lines kept for reuse (`linememo`) are kept at once, as without the overlap
+        (the next run's requests reuse them), under the run's lock: the reading of a page may read the cache meanwhile.
         """
+        try:
+            self._translate_run(units, recent, notes_text, upcoming, language, depth)
+        finally:
+            self._model_loaded()  # (a request is over: whatever it loaded is loaded)
+
+    def _translate_run(self, units: list[ScannedUnit], recent: deque[tuple[str, str]], notes_text: str,
+                       upcoming: list[str], language: str, depth: int = 0) -> None:
         p = self.progress
         translator = self.pipeline.translator
         assert translator is not None
@@ -1885,13 +2056,13 @@ class BatchReader:
         if not texts:
             return
         if depth > 6:
-            p.notes.append(Message("batch.note_gave_up", units=len(units)))
+            self._note(Message("batch.note_gave_up", units=len(units)))
             self._leave_for_reading(units)
             return
 
         def halves(note: Message) -> None:
             half = len(units) // 2
-            p.notes.append(note)
+            self._note(note)
             self._translate_units(units[:half], recent, notes_text, upcoming, language, depth + 1)
             self._translate_units(units[half:], recent, notes_text, upcoming, language, depth + 1)
 
@@ -1901,6 +2072,7 @@ class BatchReader:
         answered: set[int] = set()  # the lines of this run the request under way has answered
 
         def on_item(k: int, text: str) -> None:
+            self._model_loaded()  # (the model answers: it is loaded)
             self._answered(answered, k, len(texts))
             view = self._view
             if view is not None and 0 <= k < len(texts):  # (on show as it comes: `translation_view`)
@@ -1911,7 +2083,8 @@ class BatchReader:
         if self._view is not None:
             self._view.request(units)
         # a short line the book or its series translated before is not sent: it takes that translation (`linememo`)
-        plan = linememo.plan_for(self.pipeline, texts, meta, run, serve=not self.retranslate)
+        with self._storing:  # (the cache's lines: a page being read may look the cache up meanwhile)
+            plan = linememo.plan_for(self.pipeline, texts, meta, run, serve=not self.retranslate)
         try:
             outputs = plan.ask(translator.translate_page, prior, notes_text, upcoming,
                                meta=meta if any(meta) else None, **call, **told)
@@ -1928,7 +2101,7 @@ class BatchReader:
                 halves(Message("batch.note_retry_failed", bubbles=len(texts), error=error))
                 return
             if not worth_asking_again(error):
-                p.notes.append(Message("batch.note_unit_failed", unit=units[0].fingerprint[:8], error=error))
+                self._note(Message("batch.note_unit_failed", unit=units[0].fingerprint[:8], error=error))
                 self._leave_for_reading(units)
                 return
             outputs = []  # the page unit's lines are asked for again, a few at a time
@@ -1971,23 +2144,13 @@ class BatchReader:
             """The page units *which* stored with what they have, the lines kept for reuse first (`linememo`, saved
             with the units); the ones still incomplete."""
             left: list[int] = []
-            plan.learn({k: per_unit[ui][i] for k, (ui, i) in enumerate(slots)
-                        if ui in which and i in per_unit[ui] and i not in counted[ui]})
+            with self._storing:
+                plan.learn({k: per_unit[ui][i] for k, (ui, i) in enumerate(slots)
+                            if ui in which and i in per_unit[ui] and i not in counted[ui]})
             for ui in which:
-                unit = units[ui]
-                with self._storing:
-                    complete = self.pipeline.commit_unit(unit, per_unit[ui], per_unit_flags[ui])
-                if self._view is not None:
-                    self._view.stored(unit, per_unit[ui])
-                self._keep_said(unit, per_unit[ui])
                 fresh = len(per_unit[ui].keys() - counted[ui])  # stored now, not by the commit before this one
                 counted[ui].update(per_unit[ui])
-                p.translated += fresh
-                p.bubbles += fresh
-                p.checked += fresh
-                if per_unit[ui]:
-                    self._stored.add(id(unit))
-                if not complete:
+                if not self._store_unit(units[ui], per_unit[ui], per_unit_flags[ui], fresh):
                     left.append(ui)
             return left
 
@@ -2001,7 +2164,7 @@ class BatchReader:
             self._failed(Message("batch.reply_unusable"))
             halves(Message("batch.note_retry_unusable", bubbles=len(texts)))
             return
-        p.notes.append(Message("batch.note_incomplete", incomplete=len(incomplete), units=len(units)))
+        self._note(Message("batch.note_incomplete", incomplete=len(incomplete), units=len(units)))
         settled = [per_unit[ui].get(i, "") for ui, i in slots]
         answered.clear()
         try:
@@ -2019,12 +2182,76 @@ class BatchReader:
             settle(filled, again.texts, around[-limit:] if limit else [])
             incomplete = commit(incomplete)
         for ui in incomplete:
-            p.notes.append(Message("batch.note_unit_incomplete", unit=units[ui].fingerprint[:8]))
+            self._note(Message("batch.note_unit_incomplete", unit=units[ui].fingerprint[:8]))
+
+    # ------------------------------------------------------------------ what the translation stores
+    def _deferred(self, action: Callable[[], Any]) -> bool:
+        """*action* (a store, a note, a page's end) now, or once the reading is over while frames are still read
+        (`_deferring`), in its order with the others. Whether it waits."""
+        with self._journal_lock:
+            if self._deferring:
+                self._journal.append(action)
+                return True
+        action()
+        return False
+
+    def _note(self, note: Message) -> None:
+        self._deferred(lambda: self.progress.notes.append(note))
+
+    def _store_unit(self, unit: ScannedUnit, texts: dict[int, str], flags: dict[int, list[str]], fresh: int) -> bool:
+        """*unit* stored with *texts* (and their *flags*, `Pipeline.commit_unit`) and told to the view, its lines kept
+        for `_find_names`, the *fresh* lines (not stored by a commit before this one) counted; whether it is complete.
+        While frames are still read it waits (`_deferred`), and its completeness is what the store will return
+        (`_would_complete`)."""
+        texts, flags = dict(texts), {i: list(f) for i, f in flags.items()}
+        complete: list[bool] = []
+
+        def store() -> None:
+            with self._storing:
+                complete.append(self.pipeline.commit_unit(unit, texts, flags))
+            self._tell_view("stored", unit, texts)
+            self._keep_said(unit, texts)
+            p = self.progress
+            p.translated += fresh
+            p.bubbles += fresh
+            p.checked += fresh
+            if texts:
+                self._stored.add(id(unit))
+
+        with self._journal_lock:
+            if self._deferring:
+                self._journal.append(store)
+                self._journal_stores += 1
+                return self._would_complete(unit, texts)
+        store()
+        return complete[0]
+
+    def _would_complete(self, unit: ScannedUnit, texts: dict[int, str]) -> bool:
+        """What `Pipeline.commit_unit` returns for *unit* stored with *texts*: whether every line of it has a real
+        translation (and there is a cache to store it in)."""
+        if getattr(self.pipeline, "cache", None) is None:
+            return False
+        for i, r in enumerate(unit.japanese()):
+            text = (texts.get(i) or "").strip()
+            if not (text and self.pipeline.real_translation(r.source_text, text)):
+                return False
+        return True
+
+    def _tell_view(self, kind: str, *args: Any) -> None:
+        """``stored`` or ``ended`` for the view (`TranslationView`), or noted for it until it opens (`_open_view`)."""
+        with self._view_lock:
+            view = self._view
+            if view is None:
+                if not self._view_opened and self._view_wanted:
+                    self._view_log.append((kind, args))
+                return
+        getattr(view, kind)(*args)
 
     def _answered(self, answered: set[int], k: int, count: int) -> None:
         """The request under way has answered line *k* of the *count* it asks for (``on_item``): counted once in
-        `BatchProgress.answering` and told, at most every `LINE_SAID_S`, the message on show unchanged."""
-        if not 0 <= k < count or k in answered:
+        `BatchProgress.answering` and told, at most every `LINE_SAID_S`, the message on show unchanged (not while
+        frames are still read: the band tells the reading then)."""
+        if not 0 <= k < count or k in answered or self._deferring:
             return
         answered.add(k)
         self.progress.answering = len(answered)
@@ -2036,10 +2263,14 @@ class BatchReader:
     def _leave_for_reading(self, units: Sequence[ScannedUnit]) -> None:
         """Page units no request got through for: the entry of each (what it held and what is still its own) marked as
         lacking the rest, so that reading the page translates it (`CachedPage.incomplete`). A unit without an entry
-        gets none: the page is translated when it is read in any case."""
+        gets none: the page is translated when it is read in any case. While frames are still read, once the reading
+        is over (`_deferred`)."""
         for unit in units:
-            with self._storing:  # (the cache is not made for two threads: a window may be reading it, `viewer_page`)
-                self.pipeline.commit_unit(unit, {})
+            def leave(unit: ScannedUnit = unit) -> None:
+                with self._storing:  # (the cache is not made for two threads: a window may be reading it, `viewer_page`)
+                    self.pipeline.commit_unit(unit, {})
+
+            self._deferred(leave)
 
     def _run_pagewise(self, start: float) -> None:
         p = self.progress
@@ -2090,27 +2321,35 @@ class BatchReader:
         cache cannot say: half of a spread seen before, or a page read by the run an earlier one stopped in.)"""
         return any(fingerprint.hamming(unit.fingerprint, u.fingerprint) <= INDEXED_WITHIN for u in self._units)
 
-    def _reading_pass(self, start: float) -> None:
-        """Read every page the reader turns: the capture and the OCR, no model request (`Pipeline.scan`). The units with
-        something to translate go to `_units`, text and geometry only."""
+    def _reading_pass(self, start: float) -> threading.Thread | None:
+        """Read every page the reader turns: the capture and the OCR, no model request while the reader turns
+        (`Pipeline.scan`). The units with something to translate go to `_units`, text and geometry only. Once the
+        reader has finished, the translation may begin beside the frames still to read (`_translate_ahead`). Returns
+        the erase ahead, which goes on (`_finish_erasing`)."""
         p = self.progress
         pruned = timed = 0
+        self._ahead_ok = self.pipeline.translator is not None
 
         def handle(frame: Image.Image, taken: _Taken) -> bool:
             nonlocal pruned, timed
+            self._translate_ahead(start)
             page = p.pages + 1
             self._emit(Message("batch.scanning_page", page=page))
             began = time.monotonic()
             erasing = self._erasing and taken.seq > 0
-            scan = self.pipeline.scan(frame, skip_cached=True, fresh=self.retranslate, cancel=self._stop,
-                                      keep_edited=not self.replace_corrections,
-                                      events=self._events_of(taken),
-                                      progress=self._stage if self.show is not None else None,
-                                      **({"keep_regions": True} if erasing else {}))
+            # (the layout model: no reading while the translator's model loads; the cache, read here, is the
+            # translation's too)
+            with self._gpu_work(), self._storing:
+                scan = self.pipeline.scan(frame, skip_cached=True, fresh=self.retranslate, cancel=self._stop,
+                                          keep_edited=not self.replace_corrections,
+                                          events=self._events_of(taken),
+                                          progress=self._stage if self.show is not None else None,
+                                          **({"keep_regions": True} if erasing else {}))
             read = [u for u in scan.units if not u.cached and u.japanese() and not self._read_already(u)]
-            self._units.extend(read)
-            for u in read:
-                self._seq_of[id(u)] = taken.seq
+            with self._fed:
+                self._units.extend(read)
+                for u in read:
+                    self._seq_of[id(u)] = taken.seq
             nothing_new = bool(scan.units) and all(u.cached for u in scan.units)
             self._page_stage(taken.seq, "read", "skipped" if nothing_new else "done")
             regions = list(getattr(scan, "erasable", []) or []) if erasing else []
@@ -2140,8 +2379,7 @@ class BatchReader:
             else:
                 self._emit(Message("batch.read_page", page=page, lines=lines, pages=page, bubbles=p.found,
                                    cached=p.cache_hits, seconds=round(p.elapsed, 1), dropped=dropped))
-            self._saves_fail()
-            if self._fatal is not None:
+            if self._saves_fail():  # (a failure of the translation ahead ends the translation, not the reading)
                 p.reason = self._fatal  # the disk full: nothing could be kept
                 return False
             return True
@@ -2149,45 +2387,175 @@ class BatchReader:
         eraser = self._start_erasing()
         try:
             self._iterate_pages(handle)
-        finally:
+        except BaseException:
             self._finish_erasing(eraser)
+            raise
         self._read_through = getattr(p.reason, "code", "") == "batch.finished_reading"
         if pruned:
             p.notes.append(Message("batch.note_pruned", bubbles=pruned))
         if self._missed:
             p.notes.append(Message("batch.note_missed", pages=len(self._missed)))
+        return eraser
 
-    def _translation_pass(self, units: list[ScannedUnit], start: float) -> None:
-        """All the new lines in runs of pages, each run once, with the series sheet and the whole story as context,
-        stored as they come. While a window follows the run, its page on show is the page being translated
-        (`translation_view`) - until the reader turns to another page in the viewer, which the run needs no more
-        (`viewer_free`, `viewer_page`)."""
-        p = self.progress
+    def _translate_ahead(self, start: float) -> None:
+        """Before a frame is read: once the reader has finished and the sampler and the packer are done (every frame
+        still to read is on the backlog, `_taken_all`; its order, retaken pages and all, is known), the translation
+        begins beside the reading of the backlog, each run of lines as soon as it and the lines after it are read for
+        good (`_next_chunk`), nothing of it stored until the reading is over (`_deferring`). Not while the reader still
+        turns pages: the reading of the pages turned and the GPU are theirs then (`_gpu_wait`), Ollama's model is not
+        loaded, a page the reader turns back to may still come in between, and Stop stores nothing."""
+        if self._translating is not None or not self._ahead_ok or not self._taken_all:
+            return
+        if not self._finish.is_set() or self._stop.is_set() or self._fatal is not None:
+            return
         s = self.settings
-        language = s.target_language
-        notes_text = self.pipeline.premises()  # the reader's series sheet
+        units, complete = self._book_so_far()
+        if next_chunk(units, 0, max(1, s.chunk_bubbles), max(0, s.lookahead_bubbles), complete) is None:
+            return  # (nothing to ask yet: the run's first request is not known for good)
+        self._start_translation(start, ahead=True)
+
+    def _translation_pass(self, units: list[ScannedUnit], start: float, eraser: threading.Thread | None = None) -> None:
+        """All the new lines (*units*, in the book's order) in runs of pages, each run once, with the series sheet and
+        the whole story as context, stored as they come (`_translate_book`, on its own thread). Begun here, it begins
+        once the erase ahead (*eraser*) is done, as ever; begun beside the reading of the backlog (`_translate_ahead`),
+        what it did while frames were still read is stored now (`_end_deferring`) and the erase of the pages read is
+        finished beside it. While a window follows the run, its page on show is the page being translated
+        (`translation_view`: once the pages are erased, its pictures drawn on them) - until the reader turns to another
+        page in the viewer, which the run needs no more (`viewer_free`, `viewer_page`)."""
+        p = self.progress
         p.phase = "translate"
         self.viewer_free = True  # (the sampler has ended with the reading: nothing of the run captures the viewer)
         p.bubbles = 0  # from here on: the bubbles done
-        chunks = chunk_units(units, max(1, s.chunk_bubbles))
-        recent: deque[tuple[str, str]] = deque(maxlen=max(0, s.context_pairs))
-        left: dict[int, int] = {}  # seq -> its units not translated yet (``page_stage`` translate done once none is)
-        for u in units:
-            seq = self._seq_of.get(id(u), 0)
-            if seq:
-                left[seq] = left.get(seq, 0) + 1
-        self._view = self._start_view(units)
+        self._chunk_total = len(chunk_units(units, max(1, self.settings.chunk_bubbles)))
+        with self._fed:
+            self._book = list(units)
+            self._fed.notify_all()
+        if self._translating is None:
+            self._finish_erasing(eraser)  # (LaMa done before the model loads, `_run_context`)
+            self._open_view(units)
+            self._start_translation(start, ahead=False)
+        else:
+            self._end_deferring()
+            self._finish_erasing(eraser, say=False)
+            if not self._stop.is_set():
+                self._open_view(units)
         try:
-            self._translate_chunks(chunks, units, recent, notes_text, language, left, start)
+            self._join_translation()
         finally:
-            view, self._view = self._view, None
+            with self._view_lock:
+                view, self._view = self._view, None
             if view is not None:  # (stopped: at once; else the last page as stored first)
                 view.close(finish=not self.stopped)
+        if self._ended_by is not None:
+            p.reason = self._ended_by
+
+    def _start_translation(self, start: float, ahead: bool) -> None:
+        """The translation's thread (`_translate_book`); *ahead*: frames are still read, what it stores waits."""
+        with self._journal_lock:
+            self._deferring = ahead
+        self._translating = threading.Thread(target=self._translation_thread, args=(start,),
+                                             name="batch-translation", daemon=True)
+        self._translating.start()
+
+    def _translation_thread(self, start: float) -> None:
+        try:
+            self._translate_book(start)
+        except Cancelled:
+            self._ended_by = Message("batch.user_stop")
+        except BaseException as e:  # noqa: BLE001 - raised again on the run's thread (`_join_translation`)
+            self._translation_error = e
+        finally:
+            self._model_loaded()
+
+    def _join_translation(self) -> None:
+        """The translation's thread waited for (it ends at once at Stop); what it raised is raised here."""
+        thread = self._translating
+        if thread is None:
+            return
+        while thread.is_alive():
+            thread.join(0.1)
+        error, self._translation_error = self._translation_error, None
+        if error is not None:
+            raise error
+
+    def _end_deferring(self) -> int:
+        """The reading is over: what the translation did while frames were read is stored, counted, noted and told
+        now, in its order (`_journal`), and from here on as it comes; the band is told the last run done and the run
+        under way (``batch.translated_chunk``, ``batch.translating_chunk``). Returns the page units stored so."""
+        with self._journal_lock:
+            if not self._deferring:
+                return 0
+            journal, self._journal = self._journal, []
+            stores, self._journal_stores = self._journal_stores, 0
+            said, self._chunk_said = self._chunk_said, {}
+            if stores and self.progress.phase != "translate":  # (Stop while frames were still read: `_wind_up`)
+                self.progress.phase = "translate"
+                self.progress.bubbles = 0
+            for action in journal:
+                action()
+            self._deferring = False
+            if self._chunk_total:
+                done, now = said.get("translated"), said.get("translating")
+                if done is not None:
+                    self._say_chunk("translated", *done)
+                if now is not None and (done is None or now[0] > done[0]):
+                    self._say_chunk("translating", *now)
+        return stores
+
+    def _tell_chunk(self, kind: str, ci: int, bubbles: int) -> None:
+        """The band told that run *ci* (of *bubbles* lines) is "translating" or "translated" (`_say_chunk`); while
+        frames are still read, the latest of each kind waits for `_end_deferring` (the band tells the reading)."""
+        with self._journal_lock:
+            if self._deferring:
+                self._chunk_said[kind] = (ci, bubbles)
+                return
+        self._say_chunk(kind, ci, bubbles)
+
+    def _say_chunk(self, kind: str, ci: int, bubbles: int) -> None:
+        p = self.progress
+        if kind == "translating":
+            self._emit(Message("batch.translating_chunk", chunk=ci + 1, chunks=self._chunk_total, bubbles=bubbles))
+            self._stage(Message("pipeline.stage_translating", bubbles=bubbles,
+                                translator=str(getattr(self.pipeline.translator, "name", "translator"))))
+        else:
+            self._emit(Message("batch.translated_chunk", chunk=ci + 1, chunks=self._chunk_total, bubbles=p.bubbles,
+                               seconds=round(p.elapsed, 1)))
+
+    def _wind_up(self) -> None:
+        """However the run ends: the translation's thread ends too (at Stop at once; with the units known so far when
+        the run ends early), and what it did while frames were read is stored (`_end_deferring`): what was
+        translated is kept, as Stop during the translation keeps it."""
+        if self._translating is None:
+            return
+        with self._fed:
+            if self._book is None:
+                self._book = self._book_so_far()[0]
+            self._fed.notify_all()
+        try:
+            self._join_translation()
+        finally:
+            if self._end_deferring():
+                self._find_names()
+
+    def _open_view(self, units: Sequence[ScannedUnit]) -> None:
+        """The view (`_start_view`) opens, told first what was stored and ended before it did."""
+        view = self._start_view(units)
+        with self._view_lock:
+            if view is not None:
+                for kind, args in self._view_log:
+                    getattr(view, kind)(*args)
+            self._view_log = []
+            self._view_opened = True
+            self._view = view
+
+    @property
+    def _view_wanted(self) -> bool:
+        return self.show is not None and self._erasing and hasattr(self.pipeline, "page_picture")
 
     def _start_view(self, units: Sequence[ScannedUnit]) -> TranslationView | None:
         """The window's picture of the page being translated (`translation_view`), when a window follows the run and
         the run holds its page images (whole book: they are erased ahead); None otherwise (the command line)."""
-        if self.show is None or not self._erasing or not hasattr(self.pipeline, "page_picture"):
+        if not self._view_wanted:
             return None
         return TranslationView(self.pipeline, self.images, self.show, units,
                                lambda u: self._seq_of.get(id(u), 0),
@@ -2222,7 +2590,8 @@ class BatchReader:
         if not units:
             return ViewerPage("none")
         seq = self._seq_for([u.fingerprint for u in units])
-        if seq and self.stage_of(seq, "translate") in ("waiting", "working"):
+        if seq and (self.stage_of(seq, "translate") in ("waiting", "working")
+                    or self.stage_of(seq, "read") in ("waiting", "working")):  # (still to read: the backlog drains)
             return ViewerPage("waiting", seq=seq)
         cache = p.cache
         if cache is None:
@@ -2245,39 +2614,86 @@ class BatchReader:
             pass
         return ViewerPage("later", seq=seq)
 
-    def _translate_chunks(self, chunks: list[list[ScannedUnit]], units: list[ScannedUnit],
-                          recent: deque[tuple[str, str]], notes_text: str, language: str, left: dict[int, int],
-                          start: float) -> None:
-        """The runs of `_translation_pass` (*chunks* of *units*), each with one request and what follows it."""
+    def _book_so_far(self) -> tuple[list[ScannedUnit], bool]:
+        """The units to translate in the book's order as far as that order is final, and whether they are all of
+        them: once the reading is over, the units `_translation_pass` was given (`_book`). Before, the units read, in
+        the order read - sorted by their page's seq once a page that went by was taken when the reader turned back to
+        it (`_retaken`), and then only those before the first page still to read (a page retaken may still come in
+        between). Under `_fed`."""
+        with self._fed:
+            if self._book is not None:
+                return self._book, True
+            units = list(self._units)
+            if self._retaken:
+                units.sort(key=lambda u: self._seq_of.get(id(u), 0))
+                unread = [seq for seq in self._unread.values() if seq > 0]
+                if unread:
+                    low = min(unread)
+                    units = [u for u in units if self._seq_of.get(id(u), 0) < low]
+            return units, False
+
+    def _next_chunk(self, done: int) -> tuple[list[ScannedUnit], list[str], list[ScannedUnit]] | None:
+        """The run of lines that begins with unit *done* of the book (`next_chunk`), with the Japanese after it, and
+        the book's units known so far, once they are final (`_book_so_far`), waited for; None when no unit is left,
+        at Stop and after a failure every later request would repeat."""
+        s = self.settings
+        most, lookahead = max(1, s.chunk_bubbles), max(0, s.lookahead_bubbles)
+        with self._fed:
+            while not self._stop.is_set() and self._fatal is None:
+                units, complete = self._book_so_far()
+                got = next_chunk(units, done, most, lookahead, complete)
+                if got is not None:
+                    return got[0], got[1], units
+                if complete:
+                    return None
+                self._fed.wait(0.1)
+        return None
+
+    def _translate_book(self, start: float) -> None:
+        """The runs of the book's units (`chunk_units`), in its order, each with one request and what follows it, as
+        soon as it and the Japanese that comes after it (``lookahead_bubbles``, its context) are known for good
+        (`_next_chunk`): the very requests a translation after the reading makes. On the translation's thread."""
         p = self.progress
         s = self.settings
-        translator = self.pipeline.translator
-        position = {id(u): k for k, u in enumerate(units)}
-        lookahead = max(0, s.lookahead_bubbles)
-        for ci, chunk in enumerate(chunks):
+        language = s.target_language
+        notes_text = self.pipeline.premises()  # the reader's series sheet
+        recent: deque[tuple[str, str]] = deque(maxlen=max(0, s.context_pairs))
+        left: dict[int, int] = {}  # seq -> its units not translated yet (``page_stage`` translate done once none is)
+        paged: set[int] = set()
+        done = ci = 0
+        while True:
             if self._stop.is_set():
-                p.reason = Message("batch.user_stop")
+                self._ended_by = Message("batch.user_stop")
                 return
+            got = self._next_chunk(done)
+            if got is None:
+                if self._stop.is_set():
+                    self._ended_by = Message("batch.user_stop")
+                elif self._fatal is not None:
+                    self._ended_by = self._fatal
+                return
+            chunk, upcoming, units = got
+            done += len(chunk)
             for u in chunk:
-                self._page_stage(self._seq_of.get(id(u), 0), "translate", "working")
+                seq = self._seq_of.get(id(u), 0)
+                if seq and seq not in paged:  # (a page's units all read together, one after the other in the book)
+                    paged.add(seq)
+                    left[seq] = sum(1 for v in units if self._seq_of.get(id(v), 0) == seq)
+                self._page_stage(seq, "translate", "working")
             n_bubbles = sum(len(u.japanese()) for u in chunk)
-            self._emit(Message("batch.translating_chunk", chunk=ci + 1, chunks=len(chunks), bubbles=n_bubbles))
-            self._stage(Message("pipeline.stage_translating", bubbles=n_bubbles,
-                                translator=str(getattr(translator, "name", "translator"))))
-            after = units[position[id(chunk[-1])] + 1:]  # the Japanese that comes next: context only
-            upcoming = [r.source_text for u in after for r in u.japanese()][:lookahead] if lookahead else []
+            self._tell_chunk("translating", ci, n_bubbles)
             self._translate_units(chunk, recent, notes_text, upcoming, language)
             self._saves_fail()
             if self._stop.is_set():
-                p.reason = Message("batch.user_stop")
+                self._ended_by = Message("batch.user_stop")
                 return
-            self._translated_pages(chunk, left)
+            self._deferred(lambda chunk=chunk: self._translated_pages(chunk, left))
             p.elapsed = time.monotonic() - start
-            self._emit(Message("batch.translated_chunk", chunk=ci + 1, chunks=len(chunks), bubbles=p.bubbles,
-                               seconds=round(p.elapsed, 1)))
+            self._tell_chunk("translated", ci, n_bubbles)
+            ci += 1
             if self._fatal is not None:
-                p.reason = self._fatal  # Ollama gone, the model missing: the rest would fail the same way
-                break
+                self._ended_by = self._fatal  # Ollama gone, the model missing: the rest would fail the same way
+                return
 
     def _translated_pages(self, chunk: Sequence[ScannedUnit], left: dict[int, int]) -> None:
         """``page_stage`` translate for the pages whose last unit *chunk* held: "done" when this run stored every unit
@@ -2293,35 +2709,52 @@ class BatchReader:
             mine = [v for v in self._units if self._seq_of.get(id(v)) == seq]
             stored = all(id(v) in self._stored for v in mine)
             self._page_stage(seq, "translate", "done" if stored else "failed")
-            if self._view is not None:
-                self._view.ended(seq)
+            self._tell_view("ended", seq)
 
     def _run_context(self, start: float) -> None:
         p = self.progress
         p.phase = "read"
         self._take_readings()
+        self._keep_gate = True  # (the erase ahead goes on after the reading: `_gpu_wait` stays its gate)
+        held = self._hold_loads()
+        eraser: threading.Thread | None = None
+        try:
+            # --- pass 1: every page the reader turns read, no model request while the reader turns ---
+            if not self._read_through:
+                eraser = self._reading_pass(start)
+            if self._translating is None:  # the erase of the pages read done before the translation begins
+                self._finish_erasing(eraser)
+                eraser = None
+            keep_awake(display=False)  # no more captures: the screen may switch off, the PC must not sleep
+            if self._stop.is_set() or p.reason == NO_PAGE or self._saves_fail():
+                return  # nothing is stored but what was translated beside the backlog; `left` keeps the rest
+            # (a page that went by, read when the reader went back to it, in its place in the book: `_book_so_far`)
+            units = self._book_so_far()[0]
+            if not self._read_through_before:
+                self._emit(Message("batch.pages_read", pages=p.pages, bubbles=p.found))
+            if not units:
+                p.reason = Message("batch.nothing_new", reason=p.reason or Message("batch.scan_ended"))
+                return
+            if self.pipeline.translator is None:
+                p.reason = Message("pipeline.no_translator")
+                return
 
-        # --- pass 1: every page the reader turns read, no model request ---
-        if not self._read_through:
-            self._reading_pass(start)
-        keep_awake(display=False)  # no more captures: the screen may switch off, the PC must not sleep
-        if self._stop.is_set() or self._fatal is not None or p.reason == NO_PAGE:
-            return  # nothing is stored; `left` keeps what was read
-        units = list(self._units)
-        if self._retaken:  # a page that went by was read when the reader went back to it: in its place in the book
-            units.sort(key=lambda u: self._seq_of.get(id(u), 0))
-        if not self._read_through_before:
-            self._emit(Message("batch.pages_read", pages=p.pages, bubbles=p.found))
-        if not units:
-            p.reason = Message("batch.nothing_new", reason=p.reason or Message("batch.scan_ended"))
-            return
-        if self.pipeline.translator is None:
-            p.reason = Message("pipeline.no_translator")
-            return
-
-        # --- pass 2: all the lines, in runs of pages, with the series sheet and the whole story as context ---
-        self._translation_pass(units, start)
-        self._find_names()
+            # --- pass 2: all the lines, in runs of pages, with the series sheet and the whole story as context ---
+            self._translation_pass(units, start, eraser)
+            eraser = None
+            self._find_names()
+        except BaseException:
+            if self._translating is not None and self._translating.is_alive():
+                self._stop.set()  # (the translation's thread ends with the run)
+            raise
+        finally:
+            self._finish_erasing(eraser)
+            try:
+                self._wind_up()
+            finally:
+                self._let_loads(held)
+                if getattr(self.pipeline, "gpu_gate", None) == self._gpu_wait:
+                    self.pipeline.gpu_gate = None
 
     def _keep_said(self, unit: ScannedUnit, translations: dict[int, str]) -> None:
         """The lines of *unit* just stored (as `Pipeline.commit_unit` stores them: a real translation, stripped), for
