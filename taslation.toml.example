@@ -81,6 +81,7 @@ prev_page_key = "Right"       # the previous page
 black_wait_s = 30             # seconds a black viewer is waited for before you are told to reload it
 page_turn_wait_ms = 3000
 settle_ms = 400
+early_start = true            # a new page is read from its first frame; it asks the model and is kept once that frame stays (false: wait settle_ms first)
 batch_max_pages = 2000
 batch_memory_mb = 2048        # page images a whole-book run keeps in memory (packed, never on disk); at most a quarter of the RAM
 

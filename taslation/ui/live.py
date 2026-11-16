@@ -20,6 +20,16 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
 * while the viewer itself is in front, so that pages turned there are followed (`_poll`): at each new frame it draws
   (the capture's frame events: `capture.frame_count`, looked at every FRAME_STEP_MS), and every auto_interval_ms; a
   frame that changed is followed at once as an operation's is, until it settles;
+* with ``early_start`` (the default) a page the cache does not hold is started on its first changed frame too, and the
+  wait for it to settle becomes the frame's confirmation (`_early_start`): until the frame has stayed unchanged for
+  the viewer's confirmation time - no later frame further than SAME_PICTURE from it on the thumbnail, none sharper
+  (`batch.sharper`) - the job reads the page but asks nothing of the model and keeps nothing (`pipeline.PageGate`,
+  `Pipeline.page_on_show`); a later frame that differs ends it, everything it did is put back, and the page is started
+  again on the new frame. The confirmation time is learnt per viewer from its turns (`confirm_ms`: the longest of its
+  last CONFIRM_WINDOW turns, first changed frame to last change, plus CONFIRM_MARGIN_MS, between CONFIRM_FLOOR_MS and
+  settle_ms; settle_ms for a viewer not seen yet), kept in its profile (`pagekeys.Profiles.settle_seen_for`); a frame
+  of the page sharper, or another page, soon after the confirmation lengthens it (`_amend_turn`), and either cancels
+  the confirmed page's job at once (the sharper frame is read again as ever, `_retake`). Off: the fixed wait;
 * a page whose every unit is in the cache is taken on its first changed frame, without the wait for it to settle
   (`_take_at_once`: drawn from the cache, nothing read from the frame), and looked at every FOLLOW_STEP_MS for
   RECHECK_MS after: a viewer that draws a soft picture first has it replaced by the sharp one as soon as that comes
@@ -54,6 +64,7 @@ import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import cv2
@@ -103,7 +114,8 @@ from ..detect.page_area import (  # noqa: F401 - panel_inside, TIGHT_PX: as the 
 )
 from ..i18n import _
 from ..messages import Message
-from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
+from ..pagekeys import SETTLE_SEEN_KEPT, key_ways, opposite_key, pressed_for, same_key, viewer_key
+from ..pipeline import PageGate
 from ..regions import PageResult
 from . import area, hover, in_place
 from .constants import (
@@ -133,6 +145,37 @@ from .strip import end_follow, run_page_on_show
 COVERED_PROBE_MS = 500  # a viewer asked to paint itself anew (`_learn_covered`): a frame within this says it drew
 FACTS_KEPT = 4  # the frames whose `FrameFacts` the window keeps, the latest first ...
 PIXELS_KEPT = 2  # ... with the pixels of so many of them (and of the frame captured last)
+# A page started on its first frame (`_early_start`) is confirmed once its frame stayed as it is for the viewer's
+# confirmation time (`confirm_ms`), and only then asks the model: the shortest that time is learnt down to. Its job's
+# detection (60-290 ms) and OCR (some 1 s a page on the CPU, 0.3 s on the GPU) come before its first request anyway, so a
+# confirmation within 150-400 ms delays no request; under 150 ms (three frame gaps, FRAME_GAP_MS) a page could be
+# confirmed between two frames of a viewer's slide.
+CONFIRM_FLOOR_MS = 150
+CONFIRM_MARGIN_MS = 80  # added to the longest of the viewer's last turns ...
+CONFIRM_WINDOW = 12  # ... of so many (an outlier is forgotten after as many turns) ...
+CONFIRM_FIRST = 3  # ... once it has made so many (before that: settle_ms)
+CONFIRM_SAVE_EVERY = 8  # the turns seen go to the viewer's profile when its time changes, and every so many turns
+SAME_PICTURE = 0.5  # the thumbnails' mean difference under which two frames show the same picture (`_step`'s settle)
+
+
+def confirm_ms(seen: Any, ceiling: int) -> int:
+    """The confirmation time of a viewer whose last turns took *seen* ms each (from the frame that first changed to
+    the last change, oldest first): the longest of the last CONFIRM_WINDOW plus CONFIRM_MARGIN_MS, at least
+    CONFIRM_FLOOR_MS and at most *ceiling* (settle_ms); *ceiling* until CONFIRM_FIRST turns were seen."""
+    ceiling = max(1, int(ceiling))
+    recent = [int(v) for v in list(seen)[-CONFIRM_WINDOW:]]
+    if len(recent) < CONFIRM_FIRST:
+        return ceiling
+    return max(min(CONFIRM_FLOOR_MS, ceiling), min(ceiling, max(recent) + CONFIRM_MARGIN_MS))
+
+
+def _same_picture(a: Image.Image | None, b: Image.Image | None) -> bool:
+    """Whether *a* and *b* are the same capture, or hold the very same pixels."""
+    if a is None or b is None:
+        return False
+    if a is b:
+        return True
+    return a.size == b.size and np.array_equal(np.asarray(a.convert("RGB")), np.asarray(b.convert("RGB")))
 
 
 class FrameFacts:
@@ -328,6 +371,26 @@ class Operation:
     last_at: float = 0.0  # "settle" and "recheck" with frames counted: when the frame last changed ...
     settle_from: float = 0.0  # ... and since when it is followed to settle
     looked_at: float = 0.0  # "change" with frames counted: when the frame was last captured
+    redo: bool = False  # "settle": the page started early was dropped; started again once the worker is free
+    turn_from: float | None = None  # "recheck" after a settle with early_start: when the turn's first frame came ...
+    turn_to: float = 0.0  # ... and its last change (`_amend_turn`)
+    confirmed_early: bool = False  # "recheck": the page was started early and confirmed (`_early_confirm`)
+
+
+@dataclass
+class Early:
+    """A page job started on the first frame of a new page, before the frame settled (`_early_start`): the operation
+    followed, the job's gate (`pipeline.PageGate`), the frame it reads, and what the window held before it - what is
+    put back when the job is dropped (`_early_drop`)."""
+
+    op: Operation
+    gate: PageGate
+    image: Image.Image
+    thumb: np.ndarray
+    auto_last: np.ndarray | None
+    candidate: np.ndarray | None
+    taken: Taken | None
+    retake: Taken | None
 
 
 @dataclass
@@ -1049,7 +1112,8 @@ class LiveViewMixin(BlackViewerMixin):
                 if self._auto_last is None or frames_differ(self._auto_last, thumb):  # a new page: followed at once
                     frame_detail = _detail(self, image, self._area_box(image))
                     if not self._take_at_once(win.hwnd, image, thumb, frame_detail):
-                        self._begin_follow(win.hwnd, None, phase="settle", last=thumb, last_detail=frame_detail)
+                        self._begin_follow(win.hwnd, None, phase="settle", last=thumb, last_detail=frame_detail,
+                                           image=image)
                 return
             if self._auto_last is None or frames_differ(self._auto_last, thumb):
                 if self._auto_candidate is not None and not frames_differ(self._auto_candidate, thumb, 0.5):
@@ -1719,7 +1783,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._take(image, thumb)
         else:
             self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
-                               last_detail=_detail(self, image, self._area_box(image)))
+                               last_detail=_detail(self, image, self._area_box(image)), image=image)
 
     def _look_over_job(self, win: Any) -> None:
         """A look while a page is translated with Auto on (`_look`): the viewer's frame compared with the page being
@@ -1810,9 +1874,10 @@ class LiveViewMixin(BlackViewerMixin):
     def _take_retake(self, image: Image.Image, thumb: np.ndarray) -> None:
         """The sharper frame read as the page (`_retake`), once nothing runs: the job on the softer frame is cancelled
         where the window can cancel it (`_cancel_page`: nothing of it reaches the cache), else waited for (`_queue`).
-        When that job read the whole page anew - none of it came from the cache - what it stored is dropped first, so
-        that the bubbles are read again from the sharp picture (nothing older goes: a page that was in the cache,
-        even in part, keeps its translations and is only drawn again on the sharp picture)."""
+        The page units that job stored anew (as it said, done or stopped after its storing: `_page_stored`) are
+        dropped first, so that their bubbles are read again from the sharp picture (nothing older goes: a page unit
+        that was in the cache keeps its translations and is only drawn again on the sharp picture). A job that said
+        nothing of it (none but a stand-in's) is judged by its page: dropped when none of it came from the cache."""
         f = self._following
         if reads_beside(self):  # beside a run that translates: the sharper frame is asked of the run
             retake, f.retake = f.retake, None
@@ -1827,7 +1892,18 @@ class LiveViewMixin(BlackViewerMixin):
         retake, f.retake = f.retake, None
         result = self.last_result
         soft = retake.soft if retake is not None else None
-        if (soft is not None and result is not None and result.cache_misses and not result.cache_hits
+        stored = getattr(self, "_stored_by", None)  # (the page units the last page job stored anew, and its frame)
+        if soft is not None and stored is not None and _same_picture(stored[0], soft):
+            # the job on the soft frame said what it stored anew - done or cancelled after its storing, a spread in
+            # part from the cache: those units are dropped (the others were in the cache before it, and stay)
+            self._stored_by = None
+            if stored[1] and self.pipeline is not None:
+                units = [SimpleNamespace(fingerprint=fingerprint, aspect=aspect) for fingerprint, aspect in stored[1]]
+                try:
+                    self.pipeline.forget_page(SimpleNamespace(units=units))
+                except Exception:  # noqa: BLE001 - the cache stays as it was; the page is drawn again from it
+                    pass
+        elif (soft is not None and result is not None and result.cache_misses and not result.cache_hits
                 and self.pipeline is not None and result.original.size == soft.size
                 and np.array_equal(np.asarray(result.original), np.asarray(soft.convert("RGB")))):
             try:
@@ -1854,6 +1930,221 @@ class LiveViewMixin(BlackViewerMixin):
         if sync is not None:
             sync()
         return True
+
+    # ------------------------------------------------------------------ a page started on its first frame (events)
+    def _early_on(self) -> bool:
+        """Whether a page the cache does not hold is started on its first changed frame (``early_start``, with
+        follow = "events"); off, it is started once it has settled, after settle_ms, as before."""
+        return bool(getattr(self.settings, "early_start", False)) and self._follows_events()
+
+    def _confirm_s(self, op: Operation) -> float:
+        """How long *op*'s frame must stay as it is to be the page (seconds): for a page started early on it
+        (`_early_start`), the viewer's confirmation time (`confirm_ms`, learnt from its turns); else - early_start
+        off, a key pressed for real (its two turns are watched for), a page the cache holds, a page that could not be
+        started early - settle_ms, as ever."""
+        settle_ms = self.settings.settle_ms
+        if not self._early_on() or op.turned_at is not None or self._early_of(op) is None:
+            return settle_ms / 1000
+        return confirm_ms(self._turns_seen(op.hwnd), settle_ms) / 1000
+
+    def _turns_seen(self, hwnd: int) -> list[int]:
+        """The viewer *hwnd*'s last turns, in ms from the first changed frame to the last change (oldest first): this
+        session's, begun from what its profile kept (`pagekeys.Profiles.settle_seen_for`)."""
+        seen = self.__dict__.setdefault("_settle_seen", {})
+        if hwnd not in seen:
+            kept: list[int] = []
+            win, profiles = getattr(self, "selected", None), getattr(self, "profiles", None)
+            if win is not None and getattr(win, "hwnd", None) == hwnd and profiles is not None:
+                try:
+                    kept = list(profiles.settle_seen_for(win))
+                except Exception:  # noqa: BLE001 - a profile that cannot be read says nothing
+                    kept = []
+            seen[hwnd] = kept
+        return seen[hwnd]
+
+    def _note_turn(self, hwnd: int, seconds: float, amend: bool = False) -> None:
+        """A turn of the viewer *hwnd* took *seconds* from its first changed frame to its last change (*amend*: the
+        turn noted last took that long after all, `_amend_turn`). Kept for the session, and in the viewer's profile
+        when its confirmation time changes, every CONFIRM_SAVE_EVERY turns, and when a turn is amended."""
+        ms = max(0, min(60000, round(seconds * 1000)))
+        seen = self._turns_seen(hwnd)
+        ceiling = self.settings.settle_ms
+        before = confirm_ms(seen, ceiling)
+        if amend and seen:
+            seen[-1] = max(seen[-1], ms)
+        else:
+            seen.append(ms)
+        del seen[:-SETTLE_SEEN_KEPT]
+        unsaved = self.__dict__.setdefault("_turns_unsaved", {})
+        unsaved[hwnd] = unsaved.get(hwnd, 0) + 1
+        if not (amend or confirm_ms(seen, ceiling) != before or unsaved[hwnd] >= CONFIRM_SAVE_EVERY):
+            return
+        unsaved[hwnd] = 0
+        win, profiles = getattr(self, "selected", None), getattr(self, "profiles", None)
+        if win is not None and getattr(win, "hwnd", None) == hwnd and profiles is not None:
+            try:
+                profiles.set_settle_seen(win, seen)
+            except Exception:  # noqa: BLE001 - kept for the session alone
+                pass
+
+    def _amend_turn(self, op: Operation, now: float) -> None:
+        """"recheck": a frame of another page, or the page sharper, has come within settle_ms of the last change of the
+        turn *op* settled on: the fixed wait would not have taken that page yet, so the viewer was still drawing - the
+        turn took until now (`_note_turn`), and the next confirmation waits that long. Once per turn."""
+        start, op.turn_from = op.turn_from, None
+        if start is None or not self._early_on() or now - op.turn_to >= self.settings.settle_ms / 1000:
+            return
+        self._note_turn(op.hwnd, now - start, amend=True)
+
+    def _recheck_after(self, op: Operation, now: float) -> None:
+        """A page started early, confirmed as *op* settled (`_early_confirm`): looked at once more RECHECK_MS later -
+        with the viewer's frames counted, at each new frame until then, so that a sharper frame or another page that
+        comes after the (shorter) confirmation is seen as it comes (`_amend_turn`)."""
+        op.phase = "recheck"
+        if op.seq is not None:
+            op.fast_until = now + RECHECK_MS / 1000
+            self._next_step(op, FRAME_STEP_MS)
+        else:
+            self._next_step(op, RECHECK_MS)
+
+    def _starts_book(self, image: Image.Image) -> bool:
+        """Whether Auto's `_on_new_page` would do more with *image* than translate it: start the book (the start
+        dialog, the name asked for: `_begin_book`), or in reading mode count it among the pages kept nowhere - asked
+        without changing anything."""
+        scanned = getattr(self, "_book_scanned", False) and getattr(self, "_scanned_book", "") == \
+            self.book_var.get().strip()
+        whole = self.scan_mode() == "book"
+        if scanned or not (whole or self._name_needed()) or not self._page_uncached(image):
+            return False
+        return not (whole and not self._name_needed() and self._book_read())
+
+    def _early_allowed(self, op: Operation, image: Image.Image, thumb: np.ndarray) -> bool:
+        """Whether *op*'s frame *image* may be started at once, before it settles (`_early_start`): early_start on,
+        no key pressed for real (its two turns are watched for), none started early yet, the models ready, the worker
+        free, no whole-book run; Auto on and the frame a new page whose start asks nothing (no book start, no window
+        being enlarged), or Auto off and a page turned by TASlation's own operation; the viewer enlarged already; and
+        a page the cache does not hold whole (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
+        if not self._early_on() or op.turned_at is not None or getattr(self, "_early", None) is not None:
+            return False
+        if reads_beside(self) or not self.ready or self.busy or self.batch is not None or self._batching:
+            return False
+        if self._black_open() or getattr(self, "_enlarging", None) is not None:
+            return False
+        win = self.selected
+        if win is None or getattr(self, "_enlarge_asked", None) != win.hwnd:
+            return False  # (the first page of a viewer: its window may be enlarged first, `_enlarge_first`)
+        if self.auto_var.get():
+            if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
+                return False
+            if getattr(self, "_start_pending", None) is not None or self._starts_book(image):
+                return False
+        elif not op.operation:
+            return False
+        return not self._all_cached(image)
+
+    def _early_start(self, op: Operation, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray) -> bool:
+        """early_start: *op*'s frame started as the page at once (`_take`), before it settles, with a gate
+        (`pipeline.PageGate`): the job reads the page and may show it, but asks the model nothing and keeps nothing
+        until the frame is confirmed (`_early_confirm`); a frame that changes before that drops it (`_early_drop`).
+        Whether it was started so."""
+        if not self._early_allowed(op, image, thumb):
+            return False
+        f = self._following
+        gate = PageGate()
+        early = Early(op, gate, image, thumb, self._auto_last, self._auto_candidate, f.taken, f.retake)
+        self._early_gate = gate
+        try:
+            took = self._take(image, thumb, frame_detail, operation=op.operation)
+        finally:
+            self._early_gate = None
+        if took != "started" or getattr(self, "_page_gate", None) is not gate:
+            gate.drop()
+            if took == "started":  # (no job came of it - a black frame: taken as it settles, as ever)
+                self._early_revert(early)
+            return False
+        self._early = early
+        return True
+
+    def _early_of(self, op: Operation) -> Early | None:
+        """The page started early on *op*'s frame and not confirmed yet, if any."""
+        early = getattr(self, "_early", None)
+        return early if early is not None and early.op is op else None
+
+    def _early_revert(self, early: Early) -> None:
+        """What the window held before *early* was started, back (the page it took is not taken)."""
+        if self._auto_last is early.thumb:
+            self._auto_last, self._auto_candidate = early.auto_last, early.candidate
+        f = self._following
+        if f.taken is not None and f.taken.frame is early.image:
+            f.taken, f.retake = early.taken, early.retake
+
+    def _early_drop(self) -> None:
+        """The page started early, not confirmed, dropped: its gate (nothing of the job lasts:
+        `Pipeline.page_on_show`), its job cancelled as a new page cancels one, and the window as before it."""
+        early, self._early = getattr(self, "_early", None), None
+        if early is None:
+            return
+        early.gate.drop()
+        if getattr(self, "_page_gate", None) is early.gate:
+            cancel = getattr(self, "_page_cancel", None)
+            if cancel is not None and not cancel.is_set():
+                self._cancel_why = "page"
+                cancel.set()
+                sync = getattr(self, "_sync_stop", None)
+                if sync is not None:
+                    sync()
+        self._early_revert(early)
+
+    def _early_end(self, op: Operation) -> None:
+        """*op* is followed no further: a page started early on its frame and not confirmed is dropped."""
+        if self._early_of(op) is not None:
+            self._early_drop()
+
+    def _early_confirm(self, op: Operation, now: float) -> bool:
+        """*op*'s frame has settled: the page started early on it is confirmed - its job asks the model and keeps what
+        it stores - and looked at once more (`_recheck_after`). False when the job gave the page up first (Stop, a
+        failure, a new page another look saw: `_early_gone`): the page is then taken as ever."""
+        early, self._early = getattr(self, "_early", None), None
+        if early is None:
+            return False
+        if early.gate.confirm():
+            op.confirmed_early = True
+            self._recheck_after(op, now)
+            return True
+        self._early_gave_up(early)
+        return False
+
+    def _early_gave_up(self, early: Early) -> None:
+        """The job of *early* gave its page up before the frame was confirmed: after Stop the page stays taken (as Stop
+        leaves a page: F5 translates it); else the window goes back to before it, and the page is started again on
+        the frame there is (`Operation.redo`)."""
+        if getattr(self, "_cancel_why", "") == "stop":
+            return
+        self._early_revert(early)
+        f = getattr(self, "_following", None)
+        if f is not None and f.op is early.op and early.op.phase == "settle":
+            early.op.redo = True
+
+    def _early_gone(self, data: dict[str, Any]) -> None:
+        """(the worker's "page_cancelled", *discarded*) A page job whose frame was never confirmed is over and kept
+        nothing: when the window had not dropped it itself, as `_early_gave_up`; a page it showed goes from the page."""
+        early = getattr(self, "_early", None)
+        if early is not None and early.gate is data.get("gate"):
+            self._early = None
+            self._early_gave_up(early)
+        result = data.get("result")
+        if result is not None and result is self.last_result:
+            self.last_result = None  # (the viewer shows another picture by now: its frame goes on the page)
+            self._redisplay()
+
+    def _page_stored(self, data: dict[str, Any]) -> None:
+        """(the worker's "result" or "page_cancelled" of a page job) The page units the job stored anew, with the frame
+        it read: what a sharper picture of that frame drops (`_take_retake`)."""
+        if "stored" not in data:
+            return
+        frame = getattr(self, "_job_frame", None)
+        stored = [] if data.get("discarded") else list(data.get("stored") or ())
+        self._stored_by = (frame, stored) if frame is not None else None
 
     # ------------------------------------------------------------------ beside a whole-book run that translates
     def _watch_beside(self) -> None:
@@ -2018,12 +2309,12 @@ class LiveViewMixin(BlackViewerMixin):
     def _begin_follow(self, hwnd: int, reference: Any, key: str = "", retried: bool = False, *,
                       phase: str = "change", last: np.ndarray | None = None,
                       last_detail: np.ndarray | None = None, operation: bool = False, fast: bool = False,
-                      seq: int | None = None) -> None:
+                      seq: int | None = None, image: Image.Image | None = None) -> None:
         """Follow the viewer's frame (follow = "events"), in place of a follow before: from *phase* "change" (an
         operation of TASlation's: awaited to change from *reference*, at FOLLOW_STEP_MS; with *seq*, the viewer's
         frame count when *reference* was captured, at each new frame as it comes, `_counted_change`), "settle" (it has
-        changed: *last* is the frame seen; *operation*: after TASlation's own operation) or, *fast*, "recheck" (a page
-        just taken at once: `_take_at_once`)."""
+        changed: *last* is the frame seen, *image* its capture; *operation*: after TASlation's own operation) or,
+        *fast*, "recheck" (a page just taken at once: `_take_at_once`)."""
         f = self._follower()
         self._end_follow()
         if phase == "change":
@@ -2032,7 +2323,7 @@ class LiveViewMixin(BlackViewerMixin):
                        operation=phase == "change" or operation)
         f.op = op
         if phase == "settle":
-            self._settle_on(op, last, last_detail, op.started)
+            self._settle_on(op, last, last_detail, op.started, image)
             return
         if fast:
             op.fast_until = op.started + RECHECK_MS / 1000
@@ -2044,20 +2335,25 @@ class LiveViewMixin(BlackViewerMixin):
             return
         op.job = self.after(FOLLOW_STEP_MS if phase == "change" or fast else self.settings.settle_ms, self._follow_step)
 
-    def _settle_on(self, op: Operation, thumb: np.ndarray | None, frame_detail: np.ndarray | None, now: float) -> None:
-        """*op* followed from the frame *thumb* (seen at *now*) until it settles: two frames settle_ms apart alike -
-        with the viewer's frames counted (`capture.frame_count`), no new frame for settle_ms, looked at every
-        FRAME_STEP_MS, so that a frame that changes is seen as it comes (a page the cache holds is taken then:
-        `_take_at_once`); else a look every settle_ms. After a key pressed for real, every settle_ms (the two turns
-        are watched for)."""
+    def _settle_on(self, op: Operation, thumb: np.ndarray | None, frame_detail: np.ndarray | None, now: float,
+                   image: Image.Image | None = None) -> None:
+        """*op* followed from the frame *thumb* (seen at *now*; *image*: its capture) until it settles: two frames
+        settle_ms apart alike - with the viewer's frames counted (`capture.frame_count`), no new frame for settle_ms,
+        looked at every FRAME_STEP_MS, so that a frame that changes is seen as it comes (a page the cache holds is
+        taken then: `_take_at_once`); else a look every settle_ms. After a key pressed for real, every settle_ms (the
+        two turns are watched for). With early_start the page is started on this very frame (`_early_start`), and
+        the wait is the viewer's confirmation time (`_confirm_s`)."""
         op.phase, op.last, op.last_detail, op.settles = "settle", thumb, frame_detail, 0
         op.last_at = op.settle_from = now
         op.fast_until = None
+        op.redo, op.turn_from, op.confirmed_early = False, None, False
         op.seq = self._frame_count() if op.turned_at is None else None
-        self._next_step(op, FRAME_STEP_MS if op.seq is not None else self.settings.settle_ms)
+        if image is not None and thumb is not None and frame_detail is not None:
+            self._early_start(op, image, thumb, frame_detail)
+        self._next_step(op, FRAME_STEP_MS if op.seq is not None else round(self._confirm_s(op) * 1000))
 
     def _end_follow(self) -> None:
-        """The operation followed, if any, followed no further."""
+        """The operation followed, if any, followed no further (a page started early on its frame is dropped)."""
         f = getattr(self, "_following", None)
         op = f.op if f is not None else None
         if op is None:
@@ -2068,9 +2364,11 @@ class LiveViewMixin(BlackViewerMixin):
                 self.after_cancel(op.job)
             except tk.TclError:
                 pass
+        self._early_end(op)
 
     def _follow_step(self) -> None:
-        """One step of the operation followed (`_step`); it ends unless the step asked for the next one."""
+        """One step of the operation followed (`_step`); it ends unless the step asked for the next one (and a page
+        started early on its frame, still not confirmed, is dropped with it)."""
         f = self._following
         op = f.op
         if op is None:
@@ -2081,6 +2379,7 @@ class LiveViewMixin(BlackViewerMixin):
         finally:
             if f.op is op and op.job is None:
                 f.op = None
+                self._early_end(op)
 
     def _next_step(self, op: Operation, ms: int) -> None:
         op.job = self.after(ms, self._follow_step)
@@ -2115,7 +2414,9 @@ class LiveViewMixin(BlackViewerMixin):
                     if op.fast_until is not None and now < op.fast_until:
                         self._next_step(op, FRAME_STEP_MS)
                     return
-                if now - op.last_at < settle_s:  # ... yet; once settle_ms passed so, it has settled
+                if op.redo and not self.busy:
+                    pass  # (the page dropped is gone from the worker: started again on the frame there is, below)
+                elif now - op.last_at < self._confirm_s(op):  # ... yet; once the confirmation time passed, it settled
                     self._next_step(op, FRAME_STEP_MS)
                     return
             op.seq = count
@@ -2141,28 +2442,40 @@ class LiveViewMixin(BlackViewerMixin):
         self._show_live(image, thumb)
         f.seen = thumb
         if op.phase == "settle":
-            moving = frames_differ(op.last, thumb, 0.5) or sharper(op.last_detail, frame_detail)
+            moving = frames_differ(op.last, thumb, SAME_PICTURE) or sharper(op.last_detail, frame_detail)
             if op.turned_at is not None and not op.twice:  # after a key pressed for real: does it turn once more?
                 if op.calm is not None and frames_differ(op.calm, thumb):
                     op.twice = True  # it had settled, and turned again: the posted key had arrived after all
                 elif op.calm is None and not moving:
                     op.calm = thumb
             waiting = op.turned_at is not None and not op.twice and now - op.turned_at < TWO_TURNS_S
-            if moving and op.turned_at is None and self._take_at_once(op.hwnd, image, thumb, frame_detail,
-                                                                      op.operation):
-                return  # (a page the cache holds: taken now, then rechecked)
-            if op.seq is not None and op.turned_at is None:  # frames counted: settled after settle_ms without change
+            if moving and self._early_of(op) is not None:
+                self._early_drop()  # the frame changed under the page started on it: nothing of that job lasts ...
+                op.redo = True  # ... and the page starts again on this frame once the worker is free of it
+            if (moving or op.redo) and op.turned_at is None and not (op.redo and self.busy):
+                op.redo = False
+                if self._take_at_once(op.hwnd, image, thumb, frame_detail, op.operation):
+                    return  # (a page the cache holds: taken now, then rechecked)
+                self._early_start(op, image, thumb, frame_detail)  # (early_start: started on this frame)
+            if op.seq is not None and op.turned_at is None:  # frames counted: settled once unchanged for confirm_s
                 if moving and now - op.settle_from < SETTLE_TRIES * settle_s:
                     op.last, op.last_detail, op.last_at = thumb, frame_detail, now
                     self._next_step(op, FRAME_STEP_MS)
                     return
-                if not moving and now - op.last_at < settle_s:
+                if not moving and now - op.last_at < self._confirm_s(op):
                     self._next_step(op, FRAME_STEP_MS)
                     return
             elif (moving or waiting) and op.settles < SETTLE_TRIES:
                 op.last, op.last_detail, op.settles = thumb, frame_detail, op.settles + 1
-                self._next_step(op, self.settings.settle_ms)
+                if moving:
+                    op.last_at = now  # (when it last changed, for the turn's time: `_note_turn`)
+                self._next_step(op, round(self._confirm_s(op) * 1000))
                 return
+            if self._early_on() and op.turned_at is None:  # the turn's time, first changed frame to last change
+                self._note_turn(op.hwnd, op.last_at - op.settle_from)
+                op.turn_from, op.turn_to = op.settle_from, op.last_at
+            if self._early_of(op) is not None and self._early_confirm(op, now):
+                return  # (the page started on its first frame goes on: kept, and asks the model now)
             took = self._take(image, thumb, frame_detail, operation=op.operation)
             if op.twice:
                 self._say_two_turns(op.key)
@@ -2175,11 +2488,18 @@ class LiveViewMixin(BlackViewerMixin):
         if taken is None:
             return
         if frames_differ(taken.thumb, thumb):  # another page meanwhile: followed until it settles
+            self._amend_turn(op, now)
             if self._take_at_once(op.hwnd, image, thumb, frame_detail, op.operation):
                 return  # (a page the cache holds: taken now)
-            self._settle_on(op, thumb, frame_detail, now)
+            # a page started early and confirmed, which the viewer no longer shows: its job is cancelled now (what
+            # it stored stays, as after any cancel once confirmed), and this frame started once the job is gone
+            gone = op.confirmed_early and getattr(self, "_job_frame", None) is taken.frame and self._cancel_page()
+            self._settle_on(op, thumb, frame_detail, now, image)
+            if gone and self._early_of(op) is None:
+                op.redo = True
             return
         if sharper(taken.detail, frame_detail):
+            self._amend_turn(op, now)
             self._retake(image, thumb, frame_detail)
             return
         if taken.complete:  # the same page again: completed once the frame has settled
@@ -2231,7 +2551,7 @@ class LiveViewMixin(BlackViewerMixin):
             return True
         thumb = _thumb(self, image)
         if frames_differ(taken.thumb, thumb):  # another page after all: followed until it settles
-            self._settle_on(op, thumb, _detail(self, image, self._area_box(image)), now)
+            self._settle_on(op, thumb, _detail(self, image, self._area_box(image)), now, image)
             return True
         self._complete_taken(op, image, thumb, now)
         return True
@@ -2285,7 +2605,7 @@ class LiveViewMixin(BlackViewerMixin):
             elif self._take_at_once(op.hwnd, image, thumb, frame_detail, operation=True, shown=False):
                 return  # a page the cache holds: taken on its first frame, then rechecked
             self._show_live(image, thumb)  # the turned page shows at once
-            self._settle_on(op, thumb, frame_detail, now)
+            self._settle_on(op, thumb, frame_detail, now, image)
             return
         if blank or frames_differ(op.prev if op.prev is not None else op.reference, thumb, LIVE_CHANGE):
             op.stirred_at = now  # the viewer is at it: it took the key

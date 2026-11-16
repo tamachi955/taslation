@@ -175,6 +175,18 @@ def keep_page_names(window: Any, result: Any, book: str, model: str, language: s
                      lines=[line._replace(source="") for line in lines])
 
 
+def job_news(window: Any, data: dict[str, Any]) -> None:
+    """(a page job's "result" or "page_cancelled", on the Tk thread) What *window*'s live view keeps of it: the page
+    units it stored anew (`LiveViewMixin._page_stored`), and a page started early whose frame was never confirmed
+    (*discarded*: `LiveViewMixin._early_gone`)."""
+    stored = getattr(window, "_page_stored", None)
+    if stored is not None:
+        stored(data)
+    gone = getattr(window, "_early_gone", None)
+    if data.get("discarded") and gone is not None:
+        gone(data)
+
+
 def pump_soon(window: Any) -> None:
     """A job has started: *window*'s worker events are looked at EVENTS_BUSY_MS from now, not at the idle pace
     (`JobsMixin._poll_events`)."""
@@ -285,6 +297,10 @@ class JobsMixin:
         self._colophon_reads: dict[str, int] = {}  # book -> its pages read in full as a colophon this session (worker)
         self._page_cancel: threading.Event | None = None  # the page translation that runs (Stop cancels it)
         self._cancel_why = ""  # "stop" or "page": why it was cancelled
+        # the gate of a page started before its frame settled (`pipeline.PageGate`, `ui.live`'s early start): the one
+        # the next `_start_translate` takes, and the running job's
+        self._early_gate: Any = None
+        self._page_gate: Any = None
         self._watch_due = 0.0  # when Auto looks at the viewer again while a page is translated ...
         self._watch_candidate: np.ndarray | None = None  # ... and the new page it saw last time
         self._job_area: np.ndarray | None = None  # the capture area's thumbnail of the frame being translated
@@ -652,13 +668,22 @@ class JobsMixin:
         return True
 
     def _job_translate(self, image: Image.Image, book: str, model: str, language: str, complete: bool = False,
-                       cancel: threading.Event | None = None, again: Any = None, replace_edited: bool = False) -> None:
+                       cancel: threading.Event | None = None, again: Any = None, replace_edited: bool = False,
+                       gate: Any = None) -> None:
         """The page *image* read and translated, in the worker. *again* (a page's `PageResult`): "Translate again",
         every line asked of the model (none reused: `linememo`), its cached translations forgotten first and put back
         when this translates nothing new: Stop, a new page, Ollama down, a job that fails. They may be the reader's
         own, and no undo brings them back. The lines the person corrected (`CachedBubble.edited`) stay and are not
         asked for (`Pipeline.forget_page`'s *keep_edited*), unless *replace_edited*. A save that failed is said after
-        the page (`Pipeline.save_error`). The page is shown first and saved right after (`Pipeline.saves_held`)."""
+        the page (`Pipeline.save_error`). The page is shown first and saved right after (`Pipeline.saves_held`).
+
+        *gate* (`pipeline.PageGate`): the page was started on a frame the viewer may still be drawing (`ui.live`'s
+        early start). The model is asked nothing until the window confirms the frame, and the page, shown as soon as it
+        is done, is kept only then: what it stored is saved, its names checked, its colophon looked for and its next
+        showing lettered. A frame dropped instead (it changed, the follow ended), and a cancel before the
+        confirmation, put back everything the job did (`Pipeline.page_on_show`): "page_cancelled" says so
+        (*discarded*). The page units a job stored anew go to the window with its "result" or "page_cancelled"
+        (*stored*), for a sharper picture of the page to come (`_take_retake`)."""
         held: list[Any] = []
 
         def saved() -> None:  # the page's cache save, held back while it was read, made now (`Pipeline.flush_saves`)
@@ -666,24 +691,30 @@ class JobsMixin:
             if flush is not None:
                 flush()
 
+        work: Any = None
         try:
             self._use_model(model, language)
             if not self._ensure_cache(book, model, language):
+                if gate is not None:
+                    gate.close()  # (nothing read: the window takes the page as ever once its frame settles)
                 return  # the status line says which file could not be opened
             if again is not None:
                 held = self.pipeline.pages_of(again)
                 self.pipeline.forget_page(again, keep_edited=not replace_edited)
             # (the page on show: the cache saved once it is shown, below; the model loaded while it is read)
-            hold = getattr(self.pipeline, "page_on_show", None) or getattr(self.pipeline, "saves_held", None)
+            on_show = getattr(self.pipeline, "page_on_show", None)
+            hold = on_show or getattr(self.pipeline, "saves_held", None)
             try:
-                with hold() if hold is not None else nullcontext():
+                with (on_show(gate) if gate is not None and on_show is not None
+                      else hold() if hold is not None else nullcontext()) as work:
                     result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
                                                    complete=complete,
                                                    events=lambda kind, data: self._post(kind, **data), cancel=cancel,
                                                    on_slow=lambda seconds: self._post("slow", seconds=seconds),
                                                    **({"reuse": False} if again is not None else {}))  # (again: all)
             except Cancelled:  # Stop, or a new page: nothing of this page reached the cache
-                self._post("page_cancelled")
+                self._post("page_cancelled", gate=gate, discarded=getattr(work, "kept", True) is False,
+                           stored=list(getattr(work, "stored", None) or ()))
                 return
             if held and not [r for r in result.translated if not r.from_cache]:  # nothing translated anew (a corrected
                 # line that stayed is no new translation)
@@ -692,7 +723,11 @@ class JobsMixin:
                 result = self.pipeline.process(image, translate=False)  # the page as it is kept: nothing was replaced
                 result.error = error
             held = []
-            self._post("result", result=result)
+            self._post("result", result=result, gate=gate, stored=list(getattr(work, "stored", None) or ()))
+            if work is not None and getattr(work, "waits", False) and not work.settle(cancel):
+                # (shown, and never confirmed: nothing of it lasts)
+                self._post("page_cancelled", gate=gate, discarded=True, result=result, stored=[])
+                return
             saved()  # (shown first, then saved: before anything else of this job, or another job)
             self._say_failed_save()
             self._look_for_colophon(image, result, book, model, language)
@@ -958,6 +993,7 @@ class JobsMixin:
                 self.say("Saved on the page the editor was opened on.")  # the page on show stays
                 return
             self._fill = None
+            job_news(self, data)
             self._settle_live(data["result"])
             # (its regions are another page's)
             order_gone = getattr(self, "_ordering", None) is not None and data["result"] is not self.last_result
@@ -983,6 +1019,7 @@ class JobsMixin:
                 refresh()
         elif kind == "page_cancelled":  # Stop, or a new page: the page was not translated
             self._hide_busy()
+            job_news(self, data)
             if self._cancel_why != "page":
                 self.say("Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.")
         elif kind == "asked":
@@ -1013,6 +1050,7 @@ class JobsMixin:
         elif kind == "translate_done":
             self.busy = False
             self._page_cancel = None
+            self._page_gate = None
             self._slow_before = None
             self._set_busy(False)
             self._sync_stop()
@@ -2048,13 +2086,16 @@ class JobsMixin:
                          again: Any = None, replace_edited: bool = False) -> None:
         """The page *image* read and translated in the worker; Stop and Esc cancel it, and so does a new page Auto
         sees meanwhile (`_watch_page`). A black frame is no page: nothing is read from it. *again*, *replace_edited*:
-        `_job_translate`."""
+        `_job_translate`. A page the live view starts before its frame has settled hands its gate over in
+        ``_early_gate`` (`ui.live`'s early start: `pipeline.PageGate`), taken here; ``_page_gate`` is the job's."""
+        gate, self._early_gate = getattr(self, "_early_gate", None), None
         if is_black(image, self.settings.margins):
             self.say(VIEWER_BLACK if getattr(getattr(self, "_black_watch", None), "told", False)
                      else VIEWER_LOADING)
             return
         self._go_busy()
         self._job_frame, self._job_thumb, self._job_area = image, thumb, None  # the page fills in on this frame
+        self._page_gate = gate if again is None and not replace_edited else None
         self._page_cancel = cancel = threading.Event()
         self._cancel_why = ""
         self._watch_candidate = None
@@ -2067,6 +2108,10 @@ class JobsMixin:
         if replace_edited:
             self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again,
                                                        replace_edited=True))
+        elif self._page_gate is not None:
+            early = self._page_gate
+            self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again,
+                                                       gate=early))
         else:
             self._jobs.put(lambda: self._job_translate(image, book, model, language, complete, cancel, again))
         pump_soon(self)

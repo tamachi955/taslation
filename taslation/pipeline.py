@@ -796,6 +796,192 @@ class PageDraft:
         return hit[1]
 
 
+GATE_STEP_S = 0.01  # how often a page job waiting for its frame's confirmation looks at its cancel (`PageGate.wait`)
+GATE_LIMIT_S = 15.0  # a frame not confirmed nor dropped within this is taken as never confirmed (a guard: the window
+# decides every gate it opens long before; a page job never waits for nothing)
+_LOCKS = (type(threading.Lock()), type(threading.RLock()))
+
+
+class PageGate:
+    """Whether the frame a page job on show in the window reads is the page the viewer shows (`ui.live`: a job started
+    on the first frame of a new page, before that frame settled). Pending until the window confirms it (the frame
+    stayed unchanged for the viewer's confirmation time) or drops it (the frame changed, the follow ended); the first
+    of the two holds, and so does the worker closing a gate it gives up on (`close`: cancelled, failed, waited too
+    long): a confirm after that says False. Until it is confirmed, the page job asks nothing of the translator
+    (`Pipeline._translate_regions`, `LoadAhead`), and nothing it stores lasts (`Pipeline.page_on_show`, `PageWork`)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state = "pending"  # "pending", "confirmed", "dropped"
+        self._decided = threading.Event()
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @property
+    def confirmed(self) -> bool:
+        return self._state == "confirmed"
+
+    def _decide(self, state: str) -> bool:
+        with self._lock:
+            if self._state == "pending":
+                self._state = state
+                self._decided.set()
+            return self._state == state
+
+    def confirm(self) -> bool:
+        """(the window) The frame is confirmed: the job goes on to the translator and keeps what it stores. False when
+        the job gave the page up first (nothing of it was kept)."""
+        return self._decide("confirmed")
+
+    def drop(self) -> None:
+        """(the window) The frame changed, or is followed no further: nothing the job did lasts."""
+        self._decide("dropped")
+
+    def close(self) -> bool:
+        """(the worker) The job gives up waiting: whether the gate was confirmed before that."""
+        self._decide("dropped")
+        return self.confirmed
+
+    def wait(self, cancel: Any = None, limit: float = GATE_LIMIT_S, close: bool = True) -> bool:
+        """(the worker) Until the gate is decided: whether it was confirmed. Once *cancel* is set, or after *limit*
+        seconds, the gate is closed (`close`; with *close* False it is left as it is) and what it is is said."""
+        end = time.monotonic() + limit
+        while not self._decided.is_set():
+            if (cancel is not None and cancel.is_set()) or time.monotonic() >= end:
+                return self.close() if close else self.confirmed
+            self._decided.wait(GATE_STEP_S)
+        return self.confirmed
+
+
+def _held_state(obj: Any) -> dict[str, Any]:
+    """*obj*'s attributes, each container copied (its own lock taken while they are read, and left out)."""
+    lock = getattr(obj, "_lock", None)
+    with lock if isinstance(lock, _LOCKS) else nullcontext():
+        return {k: copy.copy(v) for k, v in vars(obj).items() if not isinstance(v, _LOCKS)}
+
+
+def _put_back(obj: Any, state: dict[str, Any]) -> None:
+    """*obj*'s attributes as `_held_state` took them."""
+    lock = getattr(obj, "_lock", None)
+    with lock if isinstance(lock, _LOCKS) else nullcontext():
+        for k, v in state.items():
+            setattr(obj, k, v)
+
+
+class Provisional:
+    """What a page job on a frame not confirmed yet (`PageGate`) may change that lasts, as it was before the job: the
+    book's cache (its pages, what waits to be saved, the header, the lines kept for reuse), where the book was read
+    last, the book's sizes, the earlier pages' pairs and the names held for the translator, the series' lines, the
+    session's line tally and stage times, and the pages kept lettered for showing again. `restore` puts it all back
+    (the frame changed: nothing of the job lasts); `commit` keeps it (confirmed). The memos keyed by the very pixels
+    (the OCR's readings, the erases) are left as they are: the same pixels read the same. While it is held, a save of
+    the cache waits and leaves the cache marked as it was (`Pipeline._save_store`), so that neither another save nor
+    the window's close writes any of it."""
+
+    def __init__(self, pipeline: "Pipeline"):
+        self.pipeline = pipeline
+        cache = self.cache = pipeline.cache
+        self.dirty = bool(cache.dirty) if cache is not None else False
+        self.stored = False  # a save of the cache waited while it was held
+        self.cache_state: dict[str, Any] | None = None
+        self.lines_state: tuple[list[Any], dict[Any, Any]] | None = None
+        if cache is not None:
+            with cache._save_lock:
+                self.cache_state = {k: copy.copy(v) for k, v in vars(cache).items()
+                                    if k not in ("_save_lock", "lines") and not isinstance(v, _LOCKS)}
+                self.cache_state["_index"] = None  # (indexed anew from the list put back)
+                lines = getattr(cache, "lines", None)
+                if lines is not None:
+                    rings = []
+                    for ring in lines.rings:
+                        held = copy.copy(ring)
+                        held.scopes = {name: dict(entries) for name, entries in ring.scopes.items()}
+                        rings.append(held)
+                    self.lines_state = (rings, dict(lines.touched))
+        self.last_seq = pipeline.last_seq
+        self.book_sizes = pipeline._book_sizes  # (replaced on each write, never changed in place: `_add_sizes`)
+        self.context = copy.copy(pipeline._context)
+        self.series_lines = pipeline.series_lines
+        self.save_due = pipeline._save_due
+        self.held = [(obj, _held_state(obj)) for obj in (pipeline.book_names, pipeline.line_tally, pipeline.stage_times,
+                                                         pipeline.shown_pages) if obj is not None]
+        pipeline._held_for = self
+
+    def restore(self) -> None:
+        """Everything as it was before the job (the cache when it is still the pipeline's)."""
+        p = self.pipeline
+        if p._held_for is self:
+            p._held_for = None
+        cache = self.cache
+        if cache is not None and p.cache is cache and self.cache_state is not None:
+            with cache._save_lock:
+                for k, v in self.cache_state.items():
+                    setattr(cache, k, v)
+                if self.lines_state is not None:
+                    cache.lines.rings, cache.lines.touched = self.lines_state
+        p.last_seq = self.last_seq
+        with p._sizes_lock:
+            p._book_sizes = self.book_sizes
+        p._context = self.context
+        p.series_lines = self.series_lines
+        for obj, state in self.held:
+            _put_back(obj, state)
+        p._save_due = self.save_due
+
+    def commit(self) -> None:
+        """What the job stored lasts: the cache marked as changed, and saved with the page (`Pipeline.flush_saves`)."""
+        p = self.pipeline
+        if p._held_for is self:
+            p._held_for = None
+        if self.stored and self.cache is not None:
+            self.cache.dirty = True
+
+
+class PageWork:
+    """A page job on show in the window (`Pipeline.page_on_show`): the page units it stored anew (``stored``: their
+    fingerprints and aspects, what the window forgets when the page comes again sharper) and, while its frame is not
+    confirmed (*gate*), what goes back should it never be (`Provisional`). ``kept``: None while that is not decided,
+    then whether what the job did lasts."""
+
+    def __init__(self, pipeline: "Pipeline", gate: PageGate | None):
+        self.gate = gate
+        self.stored: list[tuple[str, float]] = []
+        self.provisional = Provisional(pipeline) if gate is not None and not gate.confirmed else None
+        self.kept: bool | None = None if self.provisional is not None else True
+
+    @property
+    def waits(self) -> bool:
+        """Whether the job's work waits for its frame's confirmation."""
+        return self.provisional is not None
+
+    def _decided(self, keep: bool) -> bool:
+        held, self.provisional = self.provisional, None
+        if held is not None:
+            if keep:
+                held.commit()
+            else:
+                held.restore()
+                self.stored.clear()
+        self.kept = keep
+        return keep
+
+    def settle(self, cancel: Any = None) -> bool:
+        """(the worker, the page shown) The frame's confirmation waited for (`PageGate.wait`): True when it came - what
+        the job stored lasts, and `flush_saves` saves it -, False when it did not (cancelled, dropped, too long):
+        everything the job changed goes back."""
+        if self.provisional is None or self.gate is None:
+            return self._decided(True) if self.kept is None else bool(self.kept)
+        return self._decided(self.gate.wait(cancel))
+
+    def give_up(self) -> None:
+        """(the worker) The job raised (Stop, a new page, a failure): what it did goes back unless its frame was
+        confirmed first (then a page unit it stored is kept, and saved, as ever)."""
+        if self.provisional is not None and self.gate is not None:
+            self._decided(self.gate.close())
+
+
 class LoadAhead:
     """The translator's model loaded on a thread of its own while a page on show in the window is read
     (`Pipeline.page_on_show`): started once the reading finds the first line to translate, so that a load (seconds,
@@ -804,10 +990,13 @@ class LoadAhead:
     cancel ends it; `join` waits for it, so that the page lets go of the worker with no load of its own under way (Tools
     > Release the model now waits for the page). Once it has loaded the model, the page models are warmed again
     (`Pipeline.warm_page_models`): after the load, never during it, so that they never take the memory Ollama loads
-    into. A load that fails is left to the request, which says what is wrong as ever."""
+    into. A load that fails is left to the request, which says what is wrong as ever. A page whose frame is not
+    confirmed yet (*gate*, `PageGate`) loads nothing until it is: no request reaches the model server for a frame the
+    viewer may be drawing on its way to the page; a page done before that (every line reused) loads nothing."""
 
-    def __init__(self, pipeline: "Pipeline", cancel: threading.Event):
-        self.pipeline, self.cancel = pipeline, cancel
+    def __init__(self, pipeline: "Pipeline", cancel: threading.Event, gate: PageGate | None = None):
+        self.pipeline, self.cancel, self.gate = pipeline, cancel, gate
+        self.done = threading.Event()  # (`join`: the page is done; a load still waiting for the gate is not begun)
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -820,6 +1009,9 @@ class LoadAhead:
 
     def _run(self, translator: Any) -> None:
         pipeline = self.pipeline
+        if self.gate is not None and not self.gate.confirmed:
+            if not self.gate.wait(_Either(self.cancel, self.done), close=False) or self.cancel.is_set():
+                return  # (the job decides the gate: its own wait closes it)
         released = pipeline._gpu_released
         try:
             translator.ensure_loaded(self.cancel)
@@ -832,6 +1024,7 @@ class LoadAhead:
                 pass
 
     def join(self) -> None:
+        self.done.set()
         if self.thread is not None:
             self.thread.join()
 
@@ -947,6 +1140,7 @@ class Pipeline:
         self._save_errors: dict[str, str] = {}  # store ("cache", "annotations") -> why its last save failed
         self._saves_held = 0  # > 0: within `saves_held`, a save of the cache waits for `flush_saves`
         self._save_due: BookCache | None = None  # the cache whose save waits
+        self._held_for: Provisional | None = None  # a page job's frame not confirmed yet: what goes back if never
         self._overrides: dict[str, Any] = {}  # the book's own detection/OCR settings (from its annotations)
         self.annotations: BookAnnotations | None = None  # reader-made premises for the current book
         self.glossary_text: str = ""  # the series sheet (characters, glossary, style), rendered for the prompt
@@ -1176,7 +1370,14 @@ class Pipeline:
     def _save_store(self, name: str, store: Any) -> bool:
         """*store*.save(); a failure (a full disk, a locked file) is no reason to lose the page at hand, so it does
         not raise: it is kept in `save_error` for the window and the batch to say, until a save of *name* works.
-        Within `saves_held`, a save of the cache waits for `flush_saves` (True)."""
+        Within `saves_held`, a save of the cache waits for `flush_saves` (True); so does one while a page job's frame
+        is not confirmed (`Provisional`), the cache left marked as it was before the job."""
+        held = self._held_for
+        if name == "cache" and held is not None and store is held.cache:
+            held.stored = True
+            store.dirty = held.dirty  # (the window's close writes none of it: `ui.app.last_save`)
+            self._save_due = store
+            return True
         if name == "cache" and self._saves_held:
             self._save_due = store
             return True
@@ -1189,17 +1390,29 @@ class Pipeline:
         return True
 
     @contextmanager
-    def page_on_show(self) -> Iterator[None]:
+    def page_on_show(self, gate: PageGate | None = None) -> Iterator[PageWork]:
         """(the window's page job, on its worker) Within it, the page `process` reads is the one on show: its cache
         saves wait for it to be shown (`saves_held`), and the translator's model loads while it is read, with the
-        page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (a whole-book run's)."""
+        page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (a whole-book run's).
+
+        With *gate* pending (a frame not confirmed yet: `PageGate`), the job asks nothing of the translator until it
+        is confirmed (`_translate_regions`, `LoadAhead`), and what it changes that lasts is held (`Provisional`): the
+        job shows the page, then calls the `PageWork`'s ``settle`` - kept once the frame is confirmed, all of it put
+        back when it is not. A job that raises before that puts it all back (unless the frame was confirmed first),
+        before the save `saves_held` makes. What it yields says which page units the job stored anew."""
         before = getattr(_ON_SHOW, "window", False)
-        _ON_SHOW.window = True
+        held_work = getattr(_ON_SHOW, "work", None)
+        work = PageWork(self, gate)
+        _ON_SHOW.window, _ON_SHOW.work = True, work
         try:
             with self.saves_held():
-                yield
+                try:
+                    yield work
+                except BaseException:
+                    work.give_up()  # (before the save `saves_held` makes as the exception goes on)
+                    raise
         finally:
-            _ON_SHOW.window = before
+            _ON_SHOW.window, _ON_SHOW.work = before, held_work
 
     @contextmanager
     def saves_held(self) -> Iterator[None]:
@@ -1220,8 +1433,9 @@ class Pipeline:
 
     def flush_saves(self) -> bool:
         """The save of the cache `saves_held` held back, made now (`_save_store`: a failure is kept in `save_error`);
-        False when none waited, or the cache was saved since (nothing in it is unsaved)."""
-        if self._saves_held:
+        False when none waited, or the cache was saved since (nothing in it is unsaved); nothing is saved while a page
+        job's frame is not confirmed (`Provisional`)."""
+        if self._saves_held or self._held_for is not None:
             return False
         cache, self._save_due = self._save_due, None
         if cache is None or not cache.dirty:
@@ -1505,7 +1719,9 @@ class Pipeline:
         # a page on show in the window that is read to be translated: the model loads while it is read (`LoadAhead`)
         reads = any((page is None and unit_regions) or (page is not None and completes(page))
                     for _unit, unit_regions, page in plans)
-        ahead = (LoadAhead(self, cancel) if getattr(_ON_SHOW, "window", False) and cancel is not None and translate
+        work: PageWork | None = getattr(_ON_SHOW, "work", None)
+        ahead = (LoadAhead(self, cancel, work.gate if work is not None else None)
+                 if getattr(_ON_SHOW, "window", False) and cancel is not None and translate
                  and reads and self.translator is not None else None)
         held_ahead, _ON_SHOW.ahead = getattr(_ON_SHOW, "ahead", None), ahead
         beside: ReadBeside | None = None  # the next unit of a spread, read while this one is translated
@@ -2080,13 +2296,15 @@ class Pipeline:
         lacking = any(r.status in ("untranslated", "ocr-unavailable") for r in todo)
         if self.cache is None or (not new and lacking == page.incomplete):
             return err
+        bubbles = list(page.bubbles)  # (the cached page itself is never changed: its entry is replaced, `_save_page`,
+        # so that a page job whose frame is never confirmed leaves it as it was, `Provisional`)
         for r in new:
             poly = [unit.normalize((int(x) + r.x0, int(y) + r.y0, int(x) + r.x0, int(y) + r.y0))[:2]
                     for x, y in mask_polygon(r.mask)]
-            page.bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
-                                             note=r.reader_note, angle=r.angle))
+            bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
+                                        note=r.reader_note, angle=r.angle))
             r.from_cache = not page.incomplete  # (a marked page's are new to the reader, and to a run's count)
-        self._save_page(page.fingerprint, page.aspect, page.bubbles, lacking)
+        self._save_page(page.fingerprint, page.aspect, bubbles, lacking)
         return err
 
     # ------------------------------------------------------------------ translator mode
@@ -3158,6 +3376,12 @@ class Pipeline:
                     notes=self.premises(), meta=meta, call_args=call, cancel=cancel)[0])
             return outputs, failure, False
 
+        work: PageWork | None = getattr(_ON_SHOW, "work", None)
+        if work is not None and work.gate is not None and plan.asked and not work.gate.wait(cancel):
+            # (a page on show whose frame was never confirmed - it changed, the follow ended: `PageGate` - asks the
+            # model nothing; its job puts back what it did)
+            check_cancel(cancel)
+            raise Cancelled()
         if later and fill is not None and DRAFTS_BESIDE:
             fill.beside(measure_rooms)  # (while the model writes; before the drafts, which may cut a mask back)
         try:
@@ -3281,6 +3505,9 @@ class Pipeline:
                           incomplete=any(r.status == "untranslated" for r in regions))
         page = self.cache.add(page)
         self.last_seq = page.seq
+        work: PageWork | None = getattr(_ON_SHOW, "work", None)
+        if work is not None:
+            work.stored.append((unit.fingerprint, unit.aspect))  # (a page unit read anew and stored: `PageWork`)
         self._save_store("cache", self.cache)
 
     def _apply_cached(self, unit: fp.PageUnit, page: CachedPage, live: list[TextRegion],
