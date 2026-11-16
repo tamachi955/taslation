@@ -112,8 +112,9 @@ class Readers:
     Where they run (`taslation.ocr.place`): given the *settings* in force (here, or later by `use` / `place_with`: the
     window's own object, read again at every decision), charspot and nar go to the GPU when ``ocr_runs_on`` and the
     room there say so - decided then, and again at the next read once the GPU memory was let go (`release_gpu`) or a
-    setting the decision depends on changed (`place.watched`); `placement` says where they are and why. Without
-    *settings* they stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
+    setting the decision depends on changed (`place.watched`), never while the translation model loads or answers
+    (`place.busy`: the first read after it decides); `placement` says where they are and why. Without *settings* they
+    stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
 
     # (as the class has them: readers made without `__init__`, a test's, read on the CPU and decide nothing)
     settings: Any = None
@@ -164,10 +165,11 @@ class Readers:
 
     def decide(self) -> place.Placement:
         """Decide where charspot and nar read (`place.decide` with the settings in force) and put them there; the
-        placement. A copy to the GPU that fails leaves them on the CPU for the session."""
+        placement. A copy to the GPU that fails leaves them on the CPU for the session. While the translation model
+        loads or answers (`place.busy`) nothing is decided: they read where they are, and the next read decides."""
         with self._lock:
             settings = self.settings
-            if settings is None:
+            if settings is None or place.busy():
                 return self.placement
             self._decided_for = place.watched(settings)
             try:
@@ -185,14 +187,20 @@ class Readers:
 
     def release_gpu(self) -> None:
         """The readers' GPU memory given back now (before Ollama loads its model, Tools > Release the model now:
-        `Pipeline.gpu_releases`); they read on the CPU, and decide again at the next read. Never raises."""
+        `Pipeline.gpu_releases`); they read on the CPU, and decide again at the next read that comes while the model
+        neither loads nor answers (`decide`) - also readers on the CPU, for the facts change with a load (a model of
+        the reader's own is known once it was seen loaded). Never raises."""
         with self._lock:
+            self._decided_for = None
             if self.placement.device != "gpu":
                 return
             for engine in self._movable():
                 engine.to("cpu")
             self.placement = place.Placement("cpu", place.RELEASED)
-            self._decided_for = None
+
+    def holds_gpu(self) -> bool:
+        """Whether charspot and nar read on the GPU now (what Release the model now gives back of them)."""
+        return self.placement.device == "gpu"
 
     def _gpu_failed(self, reader: str, why: str) -> None:
         """A reader failed on the GPU (`place.DeviceModels.run`): all of them on the CPU for the rest of the session."""
@@ -204,9 +212,10 @@ class Readers:
 
     def _check(self) -> None:
         """Before a read: decide again when the placement is not for the settings in force (released, or a setting it
-        depends on changed)."""
+        depends on changed), unless the translation model loads or answers now (`place.busy`: a later read decides)."""
         settings = self.settings
-        if settings is not None and not self._failed and place.watched(settings) != self._decided_for:
+        if (settings is not None and not self._failed and place.watched(settings) != self._decided_for
+                and not place.busy()):
             self.decide()
 
     # ------------------------------------------------------------------ reading

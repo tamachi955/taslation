@@ -204,14 +204,17 @@ def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]
     """The OCR model of *settings* loaded in a thread of its own, and one crop read by each of its readers
     (`first_reads`); what is returned waits for that, and gives the readers (None when they did not load) and what
     their load raised. Loaded once, for the window's start (`JobsMixin._job_init`), which waits for it before the
-    pipeline is made - and so does every job after the start, a page asked for early among them."""
+    pipeline is made - and so does every job after the start, a page asked for early among them. Where they read is
+    the rule's (`place_with`, *settings* the window's own): decided once loaded, unless the translation model is being
+    loaded at the start meanwhile (`load_model_at_start`), which leaves it to the first read after that load."""
     from ..ocr import Readers
+    from ..ocr.readers import place_with
 
     done: list[tuple[Any, BaseException | None]] = []
 
     def load() -> None:
         try:
-            ocr = Readers(settings.models_dir, settings.ocr_threads)
+            ocr = place_with(Readers(settings.models_dir, settings.ocr_threads), settings)
         except BaseException as e:  # noqa: BLE001 - the start says it as it always did
             done.append((None, e))
             return
@@ -611,13 +614,14 @@ class JobsMixin:
         """The OCR model was missing at the start and is there now: it is loaded for the pipeline. An "ocr_loaded"
         event says how that went, whatever went wrong."""
         from ..ocr import ModelNotInstalled, Readers
+        from ..ocr.readers import place_with
 
         s = self.settings
         ocr = None
         error: Message | None = None
         try:
             self._post("status", key="Getting the Japanese reader ready (the first time takes a few seconds)...")
-            ocr = Readers(s.models_dir, s.ocr_threads)
+            ocr = place_with(Readers(s.models_dir, s.ocr_threads), s)
         except ModelNotInstalled as e:
             error = message_of(e, "ocr.error")
         except Exception as e:  # noqa: BLE001 - said in the status line; the window goes on without it
@@ -625,6 +629,9 @@ class JobsMixin:
             self._ocr_failed = True
         if ocr is not None and self.pipeline is not None:
             self.pipeline.ocr = ocr
+            releases = getattr(self.pipeline, "gpu_releases", None)  # (let go with the page models, as at the start)
+            if releases is not None and callable(getattr(ocr, "release_gpu", None)):
+                releases.append(ocr.release_gpu)
         self._post("ocr_loaded", ok=ocr is not None, error=error)
 
     def _ensure_cache(self, book: str, model: str, language: str) -> bool:

@@ -279,16 +279,47 @@ def test_what_the_status_line_says_for_each_case():
     assert gpu_release.released_line([], False) == (gpu_release.RELEASED_NOTHING, {})
     w = Window(FakeTranslator([]), SimpleNamespace(translator=None, layout=None, art_eraser=SimpleNamespace(_model=None),
                                                     release_gpu_models=lambda: None))
-    assert gpu_release.release_models(w) == ([], False)  # a page model that holds nothing: nothing to say of it
-    assert gpu_release.release_models(Window()) == ([], False)  # the window still starting: nothing at all
+    assert gpu_release.release_models(w) == ([], False, False)  # a page model that holds nothing: nothing to say of it
+    assert gpu_release.release_models(Window()) == ([], False, False)  # the window still starting: nothing at all
+
+
+def test_the_status_line_names_the_ocr_s_gpu_memory_when_it_held_some():
+    assert gpu_release.released_line([MODEL], True, True) == (gpu_release.RELEASED_ALL, {"model": MODEL})
+    assert gpu_release.released_line([MODEL], False, True) == (gpu_release.RELEASED_MODEL_OCR, {"model": MODEL})
+    assert gpu_release.released_line([], True, True) == (gpu_release.RELEASED_PAGES_OCR, {})
+    assert gpu_release.released_line([], False, True) == (gpu_release.RELEASED_OCR, {})
+    assert gpu_release.released_line([MODEL], True, False) == (gpu_release.RELEASED_BOTH, {"model": MODEL})
+    assert "processor" not in gpu_release.RELEASED_BOTH  # (readers on the CPU: nothing is said of them)
+    assert "OCR stays" not in gpu_release.RELEASE_TIP and "OCR readers that run on the GPU" in gpu_release.RELEASE_TIP
+
+
+def test_release_now_releases_the_ocr_on_the_gpu_and_says_so():
+    """The window's readers on the GPU (`Readers.holds_gpu`) let go with the page models (`Pipeline.release_gpu_models`,
+    whose list has their `release_gpu`), and the status line names them; on the CPU they are not named."""
+    readers = SimpleNamespace(on_gpu=True)
+    readers.holds_gpu = lambda: readers.on_gpu
+    readers.release_gpu = lambda: setattr(readers, "on_gpu", False)
+    pipeline = SimpleNamespace(translator=None, layout=None, art_eraser=None, ocr=readers,
+                               release_gpu_models=lambda: readers.release_gpu())
+    w = Window(FakeTranslator([MODEL]), pipeline)
+    assert gpu_release.release_now(w) is True
+    w.jobs.pop()()
+    assert readers.on_gpu is False
+    assert w.posted == [("status", {"key": gpu_release.RELEASED_MODEL_OCR, "values": {"model": MODEL}})]
+    assert gpu_release.release_models(Window(FakeTranslator([]), pipeline)) == ([], False, False)  # on the CPU now
 
 
 def test_the_strings_are_in_every_language():
-    for key in (gpu_release.RELEASE_ENTRY, gpu_release.RELEASE_TIP, gpu_release.RELEASE_REFUSED, gpu_release.RELEASING,
+    from taslation.locales.features import ocr_release
+
+    for key in (gpu_release.RELEASE_ENTRY, gpu_release.RELEASE_REFUSED, gpu_release.RELEASING,
                 gpu_release.RELEASED_BOTH, gpu_release.RELEASED_MODEL, gpu_release.RELEASED_PAGES,
                 gpu_release.RELEASED_NOTHING, system_page.NUM_GPU_LABEL, system_page.NUM_GPU_TEXT,
                 system_page.NUM_GPU_PROBLEM):
         assert sorted(texts.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+    for key in (gpu_release.RELEASE_TIP, gpu_release.RELEASED_ALL, gpu_release.RELEASED_MODEL_OCR,
+                gpu_release.RELEASED_PAGES_OCR, gpu_release.RELEASED_OCR):
+        assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
     set_language("ja")
     try:
         assert _(gpu_release.RELEASE_ENTRY) == "モデルを今すぐ解放"

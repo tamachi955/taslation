@@ -300,7 +300,7 @@ def test_release_the_model_now_waits_for_the_load_and_nothing_loads_after_it(win
     assert not done
     server.go.set()
     release.join(10.0)
-    assert done == [([MODEL], False)] and server.loaded == set()
+    assert done == [([MODEL], False, False)] and server.loaded == set()
     assert server.log.index("unload") > server.log.index("load")
     assert server.log.count("warm page models") == 0  # not warmed after the release
     time.sleep(0.3)

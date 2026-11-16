@@ -11,7 +11,10 @@ runs and, under it in grey, what runs there.
 Under it, the two settings of the translation model that the dialog holds: how many of its layers Ollama puts on the
 GPU (``ollama_num_gpu``: empty, the server decides; 0, the processor only; a number of layers), a box with a line on
 what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM`); and whether the window loads it
-at its start (``load_model_at_start``, a checkbox with its line: `load_at_start`, from the next start)."""
+at its start (``load_model_at_start``, a checkbox with its line: `load_at_start`, from the next start). Then where the
+OCR readers run (``ocr_runs_on``, `OCR_RUNS_ON_CHOICES`: the GPU when it has room, the processor, the GPU), a list
+with its line (`ocr_runs_on`, from the next page); where they are now and why is the OCR's row in the list above
+(`devices.ocr_device`)."""
 
 from __future__ import annotations
 
@@ -38,6 +41,12 @@ LOAD_AT_START_TEXT = ("The translation model loads while TASlation starts, so th
                       "a few seconds for it. Off: it loads when the first line to translate comes up. Either way it "
                       "leaves the GPU after a while without requests (ollama_keep_alive), or at once with Tools > "
                       "Release the model now. From the next start.")
+# where the OCR readers run (``ocr_runs_on``, `taslation.ocr.place`); the 16 languages: `locales/features/ocr_release.py`
+OCR_RUNS_ON_LABEL = "OCR runs on:"
+OCR_RUNS_ON_CHOICES = (("auto", "The GPU when it has room"), ("cpu", "The processor (CPU)"), ("gpu", "The GPU"))
+OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU while at least 1 GB of it stays free "
+                    "beside the translation model and the page models, else the processor; the readings are the same. "
+                    "The OCR row above says where they are now. From the next page.")
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -113,7 +122,25 @@ class SystemPage(ttk.Frame):
                          foreground=theme.colour("note"))
         line.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(LOAD_AT_START_TEXT), check)
+        name = ttk.Label(layers, text=_(OCR_RUNS_ON_LABEL))
+        name.grid(row=4, column=0, sticky="w", pady=(10, 0))
+        shown = [_(label) for _value, label in OCR_RUNS_ON_CHOICES]
+        now = str(getattr(settings, "ocr_runs_on", "auto") or "auto")
+        self.ocr_runs_on = tk.StringVar(self, value=next((_(label) for value, label in OCR_RUNS_ON_CHOICES
+                                                          if value == now), shown[0]))
+        box = ttk.Combobox(layers, textvariable=self.ocr_runs_on, values=shown, state="readonly",
+                           width=max(len(s) for s in shown) + 2)
+        box.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        line = ttk.Label(layers, text=in_lines(_(OCR_RUNS_ON_TEXT), width), justify="left",
+                         foreground=theme.colour("note"))
+        line.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(OCR_RUNS_ON_TEXT), name, box)
         self.looked = False
+
+    def ocr_runs_on_value(self) -> str:
+        """Where the OCR list says the readers run, as ``ocr_runs_on`` keeps it ("auto", "cpu", "gpu")."""
+        shown = self.ocr_runs_on.get()
+        return next((value for value, label in OCR_RUNS_ON_CHOICES if _(label) == shown), OCR_RUNS_ON_CHOICES[0][0])
 
     # ------------------------------------------------------------------ the layers on the GPU
     def num_gpu_value(self) -> str:

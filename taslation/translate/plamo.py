@@ -75,6 +75,7 @@ import threading
 from typing import Any, Callable, Sequence
 
 from ..messages import Cancelled, Message
+from ..ocr import place as ocr_place
 from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, TranslationError
 from .continuation import MAX_JOINED, joined, runs, split_back
 from .models import PLAMO, plamo_code
@@ -262,12 +263,13 @@ class PlamoTranslator(OllamaTranslator):
                                    "options": self._options(max_tokens, offset),
                                    "keep_alive": self.keep_alive}
         try:
-            if cancel is not None or on_slow is not None:
-                data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow)
-                raw = str((data.get("message") or {}).get("content") or "")
-            else:
-                data = self._request("/api/generate", {**payload, "stream": False})
-                raw = str(data.get("response") or "")
+            with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
+                if cancel is not None or on_slow is not None:
+                    data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow)
+                    raw = str((data.get("message") or {}).get("content") or "")
+                else:
+                    data = self._request("/api/generate", {**payload, "stream": False})
+                    raw = str(data.get("response") or "")
         except TranslationError:
             self._unsure()  # (the next request asks Ollama whether the model is loaded)
             raise
@@ -353,10 +355,11 @@ class PlamoTranslator(OllamaTranslator):
         self._used.add(payload["model"])
         limit = timeout or min(self.timeout, WARM_UP_TIMEOUT)
         start = time.monotonic()
-        if cancel is None and on_slow is None:
-            self._request("/api/generate", {**payload, "stream": False}, limit)
-        else:
-            self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit)
+        with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
+            if cancel is None and on_slow is None:
+                self._request("/api/generate", {**payload, "stream": False}, limit)
+            else:
+                self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start

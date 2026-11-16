@@ -28,6 +28,11 @@ the CPU for the rest of the session, and the crop at hand is read there (`Device
 being read from disk again: the CPU's copy stays where it is loaded, the GPU's is made from it and dropped (`to`).
 While a request to the translation model is under way (`translating`, for the translator to wrap its requests in),
 the readers read on the CPU: the two processes share the GPU in time slices, and the OCR's many small steps wait.
+While Ollama loads the model (`loading`, the translator's load and warm-up) and while a request is under way
+(`busy`), nothing is decided: during a load /api/ps and the card's used memory each count a part of the model, so the
+room would be guessed wrong, and a copy to the GPU would take memory Ollama is loading into; the next read after it
+decides. A load is no reason to read on the CPU: a crop read on the GPU while PLaMo loaded took 40 ms, as on an idle
+GPU (38), against 134 on the CPU, which also made the load itself take 5.9 s instead of 4.6 (measured 2026-11-16).
 """
 
 from __future__ import annotations
@@ -299,6 +304,29 @@ def translating() -> Iterator[None]:
     finally:
         with _translating_lock:
             _translating -= 1
+
+
+_loading = 0  # loads of the translation model under way (`loading`)
+
+
+@contextlib.contextmanager
+def loading() -> Iterator[None]:
+    """While Ollama loads the translation model (the translator's load, from the release of the GPU models before it to
+    its end, and a warm-up): where the readers run is not decided meanwhile (`busy`); they read where they are."""
+    global _loading
+    with _translating_lock:
+        _loading += 1
+    try:
+        yield
+    finally:
+        with _translating_lock:
+            _loading -= 1
+
+
+def busy() -> bool:
+    """Whether the translation model is being loaded or asked now (`loading`, `translating`): no time to decide where
+    the readers run (the next read after it decides)."""
+    return bool(_loading or _translating)
 
 
 def give_back() -> None:

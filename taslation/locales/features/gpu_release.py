@@ -1,5 +1,6 @@
 """The window's strings for giving the GPU back (`ui.gpu_release`, `ui.dialogs.system_page`): Tools > Release the
-model now, its tip, what the status line says of it, and the System page's box for the translation model's layers on
+model now, what the status line says of it (its tip, and the lines that name the OCR: `ocr_release.py`), and the
+System page's box for the translation model's layers on
 the GPU (``ollama_num_gpu``) with its line and what Save says of a value that does not fit. The translation model is
 worded as in the other lines on it (ja 「翻訳モデル」, de „Übersetzungsmodell“), the page models as in the Settings
 dialog (ja 「ページ用モデル」), the processor as the CPU where a language says so.
@@ -13,24 +14,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "nl": "Model nu vrijgeven", "pl": "Zwolnij model teraz", "ru": "Освободить модель сейчас",
         "tr": "Modeli şimdi serbest bırak", "id": "Lepaskan model sekarang", "vi": "Giải phóng mô hình ngay",
         "zh": "立即释放模型", "zh-tw": "立即釋放模型", "ko": "지금 모델 해제", "th": "ปล่อยโมเดลตอนนี้",
-    },
-    "Give back the GPU memory of TASlation's models now, for another program: the translation model and the page models. The OCR stays (it runs on the processor). The next translation loads the model again.": {
-        "ja": "TASlation のモデルが使っている GPU のメモリーを今すぐ返し、ほかのプログラムが使えるようにします（翻訳モデルとページ用モデル）。OCR はそのままです（CPU で動くため）。次に翻訳するときにモデルをまた読み込みます。",
-        "es": "Devuelve ahora la memoria de la GPU de los modelos de TASlation, para otro programa: el modelo de traducción y los modelos de página. El OCR se queda (funciona en el procesador). La próxima traducción vuelve a cargar el modelo.",
-        "pt": "Devolve agora a memória da GPU dos modelos do TASlation, para outro programa: o modelo de tradução e os modelos de página. O OCR fica (funciona no processador). A próxima tradução carrega o modelo de novo.",
-        "fr": "Rend maintenant la mémoire GPU des modèles de TASlation, pour un autre programme : le modèle de traduction et les modèles de page. L'OCR reste (il tourne sur le processeur). La prochaine traduction recharge le modèle.",
-        "de": "Gibt den GPU-Speicher der Modelle von TASlation jetzt frei, für ein anderes Programm: das Übersetzungsmodell und die Seitenmodelle. Die Texterkennung bleibt (sie läuft auf dem Prozessor). Die nächste Übersetzung lädt das Modell wieder.",
-        "it": "Restituisce ora la memoria della GPU dei modelli di TASlation, per un altro programma: il modello di traduzione e i modelli di pagina. L'OCR resta (funziona sul processore). La prossima traduzione ricarica il modello.",
-        "nl": "Geeft het GPU-geheugen van de modellen van TASlation nu vrij, voor een ander programma: het vertaalmodel en de paginamodellen. De OCR blijft (die draait op de processor). De volgende vertaling laadt het model opnieuw.",
-        "pl": "Oddaje teraz pamięć GPU modeli TASlation innemu programowi: model tłumaczenia i modele strony. OCR zostaje (działa na procesorze). Następne tłumaczenie wczyta model ponownie.",
-        "ru": "Сразу освобождает память GPU, занятую моделями TASlation, для другой программы: модель перевода и модели страницы. OCR остаётся (он работает на процессоре). Следующий перевод снова загрузит модель.",
-        "tr": "TASlation modellerinin GPU belleğini başka bir program için şimdi geri verir: çeviri modeli ve sayfa modelleri. OCR kalır (işlemcide çalışır). Sonraki çeviri modeli yeniden yükler.",
-        "id": "Kembalikan memori GPU model-model TASlation sekarang, untuk program lain: model terjemahan dan model halaman. OCR tetap (berjalan di prosesor). Terjemahan berikutnya memuat model lagi.",
-        "vi": "Trả lại ngay bộ nhớ GPU của các mô hình TASlation cho chương trình khác: mô hình dịch và các mô hình trang. OCR vẫn giữ (chạy trên bộ xử lý). Lần dịch sau sẽ nạp lại mô hình.",
-        "zh": "立即归还 TASlation 模型占用的 GPU 内存，供其他程序使用：翻译模型和页面模型。OCR 保留（它在处理器上运行）。下次翻译时会重新加载模型。",
-        "zh-tw": "立即歸還 TASlation 模型佔用的 GPU 記憶體，供其他程式使用：翻譯模型和頁面模型。OCR 保留（它在處理器上執行）。下次翻譯時會重新載入模型。",
-        "ko": "TASlation 모델이 쓰는 GPU 메모리를 지금 돌려주어 다른 프로그램이 쓸 수 있게 합니다: 번역 모델과 페이지 모델. OCR은 그대로입니다(프로세서에서 동작). 다음 번역 때 모델을 다시 불러옵니다.",
-        "th": "คืนหน่วยความจำ GPU ของโมเดลของ TASlation ทันที ให้โปรแกรมอื่นใช้: โมเดลแปลและโมเดลหน้า OCR ยังอยู่ (ทำงานบนโปรเซสเซอร์) การแปลครั้งถัดไปจะโหลดโมเดลอีกครั้ง",
     },
     "Not now: a translation or a whole-book run is going on. Release the model once it has ended.": {
         "ja": "今はできません。翻訳か本全体の処理が進行中です。終わってからモデルを解放してください。",

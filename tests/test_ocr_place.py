@@ -436,6 +436,169 @@ def test_the_window_s_first_reads_find_the_readers_where_they_are(tmp_path, fake
     assert ocr.charspot.reads == ["net@cuda"] and ocr._nar.reads == ["net@cuda"] and ocr._cpt.reads == ["net@cpu"]
 
 
+# ------------------------------------------------------------------ in the window: its readers, a load, a request
+def test_nothing_is_decided_while_the_model_loads_or_answers(tmp_path, fake_readers):
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    ocr.release_gpu()
+    for busy in (place.loading, place.translating):
+        with busy():
+            assert place.busy()
+            ocr.read_chars(None)
+            ocr.decide()
+            assert len(fake_readers.asked) == 1 and ocr.charspot.device == "cpu" and ocr.placement.why == place.RELEASED
+    assert not place.busy() and place._loading == place._translating == 0
+    ocr.read_chars(None)  # the first read after them decides
+    assert len(fake_readers.asked) == 2 and ocr.charspot.reads[-1] == "net@cuda"
+
+
+def test_a_release_of_readers_on_the_cpu_decides_again_too(tmp_path, fake_readers):
+    """(a model of the reader's own is not known before it was seen loaded: the read after its load finds it known)"""
+    fake_readers.answer = Placement("cpu", place.UNKNOWN)
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    ocr.release_gpu()
+    assert ocr.placement.why == place.UNKNOWN and not ocr.holds_gpu()  # nothing was given back
+    fake_readers.answer = Placement("gpu", place.ROOM, 1500)
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 2 and ocr.holds_gpu() and ocr.charspot.reads[-1] == "net@cuda"
+
+
+def test_the_window_s_readers_decide_with_its_settings_but_not_while_the_model_loads(tmp_path, fake_readers):
+    """`jobs.load_readers` (the start, beside ``load_model_at_start``'s load): decided once loaded with the window's
+    own settings; while the translation model loads meanwhile, the first read after that load decides."""
+    from taslation.ui.jobs import load_readers
+
+    s = _settings(tmp_path)
+    ocr, error = load_readers(s)()
+    assert error is None and ocr.settings is s and fake_readers.asked == [("auto", OCR, "")]
+    assert ocr.charspot.device == "cuda" and ocr.charspot.reads == ["net@cuda"]  # (its first read warmed it there)
+    with place.loading():
+        later, error = load_readers(s)()
+        later.read_chars(None)
+        assert error is None and len(fake_readers.asked) == 1 and later.placement.why == place.NOT_ASKED
+        assert later.charspot.reads == ["net@cpu", "net@cpu"]
+    later.read_chars(None)
+    assert len(fake_readers.asked) == 2 and later.charspot.reads[-1] == "net@cuda"
+
+
+def test_readers_installed_later_decide_too_and_go_with_the_page_models(tmp_path, fake_readers):
+    from taslation.ui.jobs import JobsMixin
+
+    s = _settings(tmp_path)
+    posted = []
+    w = SimpleNamespace(settings=s, pipeline=SimpleNamespace(ocr=None, gpu_releases=[]), _ocr_failed=False,
+                        _post=lambda kind, **data: posted.append(kind))
+    JobsMixin._job_load_ocr(w)
+    ocr = w.pipeline.ocr
+    assert posted[-1] == "ocr_loaded" and ocr.settings is s and fake_readers.asked == [("auto", OCR, "")]
+    assert w.pipeline.gpu_releases == [ocr.release_gpu]
+
+
+def test_the_pipeline_lets_the_readers_go_with_the_page_models(tmp_path, fake_readers, given_back):
+    from taslation.pipeline import Pipeline
+
+    s = _settings(tmp_path)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    p = Pipeline(s, ocr=ocr)
+    assert p.gpu_releases == [ocr.release_gpu]  # (no page model is installed here)
+    p.release_gpu_models()  # (before Ollama loads its model, and Release the model now)
+    assert ocr.placement.why == place.RELEASED and ocr.charspot.device == "cpu" and given_back
+
+
+def test_a_load_and_a_request_find_the_readers_on_the_cpu_and_the_read_after_them_decides(tmp_path, fake_readers,
+                                                                                         ollama):
+    """A page that needs the model: the readers let go before Ollama loads it (`before_load`); a read while it loads
+    and one while it answers (the spread's next page, read beside) read on the CPU and decide nothing; the first read
+    after them decides, and finds the GPU again."""
+    from taslation.pipeline import Pipeline
+    from taslation.translate import OllamaTranslator
+
+    s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="qwen3.5:4b")
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0)
+    Pipeline(s, ocr=ocr, translator=tr)
+    during = []
+
+    def answer(items, payload):  # (in the server's thread, while the client waits for its answer)
+        ocr.read_chars(None)
+        during.append((payload["messages"][-1]["content"] == "Hi", ocr.charspot.reads[-1], len(fake_readers.asked),
+                       bool(place._loading), place._translating))
+
+    ollama.answer = answer
+    assert ocr.charspot.device == "cuda"
+    tr.translate_page(["はい"])
+    assert during == [(True, "net@cpu", 1, True, 0), (False, "net@cpu", 1, False, 1)]  # the load, then the request
+    assert ocr.placement.why == place.RELEASED and ollama.loads == 1
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 2 and ocr.charspot.reads[-1] == "net@cuda"
+
+
+def test_a_streamed_request_is_a_request_to_its_end(tmp_path, ollama):
+    from taslation.translate import OllamaTranslator
+
+    ollama.between = 0.02
+    tr = OllamaTranslator(ollama.url, "qwen3.5:4b", timeout=10.0)
+    seen = []
+    tr.translate_page(["はい", "いいえ", "そう"], on_item=lambda i, text: seen.append(place._translating),
+                      cancel=threading.Event())
+    assert seen == [1, 1, 1] and place._translating == place._loading == 0
+
+
+def test_plamo_s_lines_are_requests_and_its_warm_up_a_load(monkeypatch):
+    from taslation.translate.plamo import PlamoTranslator
+
+    tr = PlamoTranslator("http://127.0.0.1:9", timeout=1.0)
+    seen = []
+
+    def request(path, payload=None, timeout=None):
+        seen.append((bool(payload.get("prompt")), place._loading, place._translating))
+        return {"response": "EN", "done": True}
+
+    def stream(path, payload, on_text, cancel=None, on_slow=None, timeout=None):
+        seen.append((bool(payload.get("prompt")), place._loading, place._translating))
+        return {"message": {"content": "EN"}, "done": True}
+
+    monkeypatch.setattr(tr, "_request", request)
+    monkeypatch.setattr(tr, "_stream", stream)
+    monkeypatch.setattr(tr, "ensure_loaded", lambda cancel=None, on_slow=None, quiet=False: None)
+    tr.warm_up()
+    tr._generate("a prompt", 16)
+    tr._generate("a prompt", 16, cancel=threading.Event())
+    assert seen == [(False, 1, 0), (True, 0, 1), (True, 0, 1)] and place._loading == place._translating == 0
+
+
+def test_a_saved_choice_decides_again_at_the_next_read(tmp_path, fake_readers):
+    from taslation.ui import app as app_mod
+
+    s = _settings(tmp_path)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    app_mod.App._settings_saved(SimpleNamespace(settings=s), {"ocr_runs_on": "cpu"})  # (Settings... > Save)
+    fake_readers.answer = Placement("cpu", place.SET)
+    ocr.read_chars(None)
+    assert fake_readers.asked[-1][0] == "cpu" and ocr.charspot.device == "cpu" and ocr._nar.device == "cpu"
+
+
+def test_the_system_page_shows_and_saves_where_the_ocr_runs(hidden_root, tmp_path, monkeypatch):
+    from taslation.i18n import set_language
+    from taslation.ui.dialogs import settings as dlg
+    from taslation.ui.dialogs import system_page
+
+    monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
+    in_force = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                        config_path=tmp_path / "taslation.toml")
+    got = []
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    assert [v for v, _label in system_page.OCR_RUNS_ON_CHOICES] == list(place.SETTING_VALUES)
+    assert d.system.ocr_runs_on.get() == "The GPU when it has room" and d.values()["ocr_runs_on"] == "auto"
+    d.system.ocr_runs_on.set("The processor (CPU)")
+    assert d.save() is True and got == [{"ocr_runs_on": "cpu"}]
+    assert Settings.from_toml(in_force.config_path).ocr_runs_on == "cpu"
+    d.destroy()
+    set_language("ja")
+    in_force.ocr_runs_on = "gpu"
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    assert d.system.ocr_runs_on.get() == "GPU" and d.values()["ocr_runs_on"] == "gpu"  # (shown in Japanese, kept as is)
+
+
 # ------------------------------------------------------------------ where it is said
 def _ocr_row(settings, ocr=None, cuda=True):
     return stage_devices(settings, SimpleNamespace(model="m", _loaded=lambda model: None), cuda=cuda, gpu=GPU,
@@ -542,8 +705,13 @@ def test_the_readers_read_the_same_on_either_device(device, real_readers, sample
 
 
 def test_the_new_lines_are_in_every_language():
-    from taslation.i18n import CATALOGS
+    from taslation.i18n import CATALOGS, FEATURE_LANGUAGES
+    from taslation.locales.features import ocr_release
+    from taslation.ui.dialogs import system_page
 
     for text in (*devices.OCR_WHY.values(), *devices.OCR_SET.values()):
         for code, catalog in CATALOGS.items():
             assert code == "en" or text in catalog, (code, text)
+    for key in (system_page.OCR_RUNS_ON_LABEL, system_page.OCR_RUNS_ON_TEXT,
+                *(label for _value, label in system_page.OCR_RUNS_ON_CHOICES)):
+        assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key

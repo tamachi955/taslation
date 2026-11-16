@@ -55,6 +55,11 @@ end of a whole-book run or a command, the window's close. ``"-1"`` (never unload
 the one setting that keeps the old way: loaded at the start, before the OCR model,
 and never released (`never_unloads`).
 
+Every request to the model (`_chat`, PLaMo's `_generate`) runs within `taslation.ocr.place.translating`, a streamed
+one to its end: the OCR readers that are on the GPU read on the CPU meanwhile, for on a GPU the model computes on
+they wait (0.7 s a crop instead of 0.13). A load and a warm-up run within `place.loading`: where the readers read is
+decided after it (a crop on the GPU during a load reads as fast as on an idle GPU, so nothing moves for a load).
+
 A load is checked afterwards: a model that came up partly on the CPU (`gpu_share`) is
 unloaded and loaded once more after the GPU models are let go; if that does not help
 the reader is told (``ollama.partly_on_gpu``). What else holds GPU memory did not
@@ -91,6 +96,7 @@ from urllib.parse import urlparse
 from ..health import is_default_model, pull_command
 from ..messages import Cancelled, Message
 from ..netguard import is_loopback_host
+from ..ocr import place as ocr_place
 from .base import HINT_FOLLOWS, TranslationError
 
 POLL_S = 0.1  # how often a streamed request looks at its cancel event while it waits for the answer
@@ -566,9 +572,10 @@ class OllamaTranslator:
             payload["think"] = False
 
         def send() -> dict[str, Any]:
-            if stream:
-                return self._stream("/api/chat", payload, on_text or _ignore, cancel, on_slow)
-            return self._request("/api/chat", payload)
+            with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
+                if stream:
+                    return self._stream("/api/chat", payload, on_text or _ignore, cancel, on_slow)
+                return self._request("/api/chat", payload)
 
         try:
             try:
@@ -627,7 +634,8 @@ class OllamaTranslator:
                                    "keep_alive": self.keep_alive if keep_alive is None else keep_alive_value(keep_alive)}
         self._used.add(payload["model"])
         start = time.monotonic()
-        self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow)
+        with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
+            self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start  # (not last_stats: a warm-up must not stand in for a page's statistics)
@@ -712,15 +720,16 @@ class OllamaTranslator:
             return False
         if not (quiet or told):
             self._say(Message("ollama.loading", model=model))
-        self._free_gpu()
-        seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
-        share = self.gpu_share(model)
-        checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
-        if checked and partly_on_gpu(share):
-            self.release(model, wait=True)
+        with ocr_place.loading():  # (from the release of the GPU models on: the OCR decides where it reads after it)
             self._free_gpu()
-            seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
+            seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
             share = self.gpu_share(model)
+            checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
+            if checked and partly_on_gpu(share):
+                self.release(model, wait=True)
+                self._free_gpu()
+                seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
+                share = self.gpu_share(model)
         if not quiet:
             self._say(loaded_message(model, seconds))
         if checked and partly_on_gpu(share):

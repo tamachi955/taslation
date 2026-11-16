@@ -1170,6 +1170,8 @@ class Pipeline:
         self._build_detectors()
         self.set_annotations(annotations)
         self.ocr = ocr
+        if callable(getattr(ocr, "release_gpu", None)):  # the OCR readers on the GPU go too (`Readers.release_gpu`)
+            self.gpu_releases.append(ocr.release_gpu)
         self.translator = translator
         if hasattr(translator, "before_load"):
             translator.before_load = self.release_gpu_models
