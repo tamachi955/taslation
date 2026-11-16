@@ -1064,8 +1064,13 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         return True
 
     def _on_close(self) -> None:
+        """The window closes. A page started on a frame not confirmed yet is given up before anything is saved
+        (`end_page_job`; what it changed goes back, `Pipeline.drop_unconfirmed`, after the steps between, which give
+        its worker the time to put it back itself): neither the stage times nor the cache written at the close hold
+        anything of it (`Pipeline.to_save`)."""
         if not self._close_allowed():  # pages of a run not finished: their pictures would be lost
             return
+        end_page_job(self)
         if self.batch is not None:
             self.batch.stop()
         self._release_model()
@@ -1073,17 +1078,44 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._restore_enlarged()
         self._lower_viewer()
         self._over_close()
-        devices.save_times(getattr(self, "pipeline", None), self.settings.state_dir)  # (Settings > System, doctor)
+        pipeline = getattr(self, "pipeline", None)
+        drop = getattr(pipeline, "drop_unconfirmed", None)
+        if drop is not None:
+            drop()
+        devices.save_times(pipeline, self.settings.state_dir)  # (Settings > System, doctor)
         try:
-            last_save(getattr(self, "pipeline", None), self)
+            last_save(pipeline, self)
         finally:
             self.destroy()
 
 
+def end_page_job(window: Any) -> None:
+    """The window closes (`App._on_close`, before anything is saved): every gate of a page started before its frame
+    settled is dropped (`pipeline.PageGate.drop`: the early start's, ``ui.live``'s ``_early``, and the page job's;
+    one the window confirmed first stays confirmed, and that page is kept), and the page job's cancel is set: the job
+    asks the model nothing more and gives its page up. The window's record of the early start goes with it, so that
+    nothing still running on this thread at the close confirms it."""
+    early = getattr(window, "_early", None)
+    if early is not None:
+        window._early = None
+    for gate in (getattr(early, "gate", None), getattr(window, "_early_gate", None),
+                 getattr(window, "_page_gate", None)):
+        if gate is not None:
+            gate.drop()
+    cancel = getattr(window, "_page_cancel", None)
+    if cancel is not None:
+        cancel.set()
+
+
 def last_save(pipeline: Any, window: tk.Misc | None = None) -> None:
     """The window closes: what an earlier save left in memory gets one more try; when that fails too, the reader is
-    told (in TASlation's own box over *window*, the window that closes), for it goes with the window."""
+    told (in TASlation's own box over *window*, the window that closes), for it goes with the window. Never what a
+    page job whose frame was not confirmed changed: while one may still change the cache, the cache is written as it
+    was before that job (`Pipeline.to_save`) - the pages an earlier save left unsaved are, its page is not."""
     cache = getattr(pipeline, "cache", None)
+    to_save = getattr(pipeline, "to_save", None)
+    if cache is not None and to_save is not None:
+        cache = to_save(cache)
     if cache is None or not cache.dirty:
         return
     try:

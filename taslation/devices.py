@@ -115,8 +115,12 @@ class StageTimes:
 
 
 def save_times(pipeline: Any, state_dir: Path | str) -> None:
-    """The window closes: the seconds of this session's pages kept for the next look (`StageTimes.save`)."""
+    """The window closes: the seconds of this session's pages kept for the next look (`StageTimes.save`), as they
+    were before a page job whose frame was not confirmed (`Pipeline.to_save`: none of its seconds)."""
     times = getattr(pipeline, "stage_times", None)
+    to_save = getattr(pipeline, "to_save", None)
+    if times is not None and to_save is not None:
+        times = to_save(times)
     if times is not None:
         try:
             times.save(state_dir)

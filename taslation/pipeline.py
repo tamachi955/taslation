@@ -799,6 +799,10 @@ class PageDraft:
 GATE_STEP_S = 0.01  # how often a page job waiting for its frame's confirmation looks at its cancel (`PageGate.wait`)
 GATE_LIMIT_S = 15.0  # a frame not confirmed nor dropped within this is taken as never confirmed (a guard: the window
 # decides every gate it opens long before; a page job never waits for nothing)
+# How long the window's close waits for a page job whose frame it dropped to put back what it did itself
+# (`Pipeline.drop_unconfirmed`): at its gate the job sees the drop within GATE_STEP_S, while it reads at its next check
+# (between two crops, two regions, two stages); a job held longer (a model's load) is put back from the close's thread
+CLOSE_WAIT_S = 1.0
 _LOCKS = (type(threading.Lock()), type(threading.RLock()))
 
 
@@ -863,11 +867,23 @@ def _held_state(obj: Any) -> dict[str, Any]:
 
 
 def _put_back(obj: Any, state: dict[str, Any]) -> None:
-    """*obj*'s attributes as `_held_state` took them."""
+    """*obj*'s attributes as `_held_state` took them: copies, so that *state* stays as it was whatever is done to
+    *obj* afterwards."""
     lock = getattr(obj, "_lock", None)
     with lock if isinstance(lock, _LOCKS) else nullcontext():
         for k, v in state.items():
-            setattr(obj, k, v)
+            setattr(obj, k, copy.copy(v))
+
+
+def _rings_copy(rings: Sequence[Any]) -> list[Any]:
+    """The rings of a book's kept lines (`linememo.Ring`), each with scopes of its own (a page job never changes an
+    entry: it puts a new one in its place, `LineMemo.put`)."""
+    out = []
+    for ring in rings:
+        held = copy.copy(ring)
+        held.scopes = {name: dict(entries) for name, entries in ring.scopes.items()}
+        out.append(held)
+    return out
 
 
 class Provisional:
@@ -878,10 +894,18 @@ class Provisional:
     (the frame changed: nothing of the job lasts); `commit` keeps it (confirmed). The memos keyed by the very pixels
     (the OCR's readings, the erases) are left as they are: the same pixels read the same. While it is held, a save of
     the cache waits and leaves the cache marked as it was (`Pipeline._save_store`), so that neither another save nor
-    the window's close writes any of it."""
+    the window's close writes any of it; the close writes the cache and the stage times as they were before the job
+    (`before`, `Pipeline.to_save`) until the job's worker has decided it (`settled`).
 
-    def __init__(self, pipeline: "Pipeline"):
+    What it took is never handed out: `restore` and `before` give copies of it, so that it stays as it was before the
+    job whatever is done to the live objects afterwards - by the worker still on the job after the window's close put
+    it back (`Pipeline.drop_unconfirmed`), or by the next job."""
+
+    def __init__(self, pipeline: "Pipeline", gate: PageGate | None = None):
         self.pipeline = pipeline
+        self.gate = gate  # (the job's: dropped by the window's close, `Pipeline.drop_unconfirmed`)
+        self.kept: bool | None = None  # None while it is held; then whether the job's changes last (`commit`)
+        self.over = threading.Event()  # the job's worker decided it (`settled`): the worker changes nothing more of it
         cache = self.cache = pipeline.cache
         self.dirty = bool(cache.dirty) if cache is not None else False
         self.stored = False  # a save of the cache waited while it was held
@@ -894,12 +918,7 @@ class Provisional:
                 self.cache_state["_index"] = None  # (indexed anew from the list put back)
                 lines = getattr(cache, "lines", None)
                 if lines is not None:
-                    rings = []
-                    for ring in lines.rings:
-                        held = copy.copy(ring)
-                        held.scopes = {name: dict(entries) for name, entries in ring.scopes.items()}
-                        rings.append(held)
-                    self.lines_state = (rings, dict(lines.touched))
+                    self.lines_state = (_rings_copy(lines.rings), dict(lines.touched))
         self.last_seq = pipeline.last_seq
         self.book_sizes = pipeline._book_sizes  # (replaced on each write, never changed in place: `_add_sizes`)
         self.context = copy.copy(pipeline._context)
@@ -907,24 +926,26 @@ class Provisional:
         self.save_due = pipeline._save_due
         self.held = [(obj, _held_state(obj)) for obj in (pipeline.book_names, pipeline.line_tally, pipeline.stage_times,
                                                          pipeline.shown_pages) if obj is not None]
-        pipeline._held_for = self
+        pipeline._held_for = pipeline._provisional = self
 
     def restore(self) -> None:
-        """Everything as it was before the job (the cache when it is still the pipeline's)."""
+        """Everything as it was before the job (the cache when it is still the pipeline's). Called again (the worker
+        after the window's close: `Pipeline.drop_unconfirmed`), the same state again."""
         p = self.pipeline
+        self.kept = False
         if p._held_for is self:
             p._held_for = None
         cache = self.cache
         if cache is not None and p.cache is cache and self.cache_state is not None:
             with cache._save_lock:
                 for k, v in self.cache_state.items():
-                    setattr(cache, k, v)
+                    setattr(cache, k, copy.copy(v))
                 if self.lines_state is not None:
-                    cache.lines.rings, cache.lines.touched = self.lines_state
+                    cache.lines.rings, cache.lines.touched = _rings_copy(self.lines_state[0]), dict(self.lines_state[1])
         p.last_seq = self.last_seq
         with p._sizes_lock:
             p._book_sizes = self.book_sizes
-        p._context = self.context
+        p._context = copy.copy(self.context)
         p.series_lines = self.series_lines
         for obj, state in self.held:
             _put_back(obj, state)
@@ -933,10 +954,44 @@ class Provisional:
     def commit(self) -> None:
         """What the job stored lasts: the cache marked as changed, and saved with the page (`Pipeline.flush_saves`)."""
         p = self.pipeline
+        self.kept = True
         if p._held_for is self:
             p._held_for = None
         if self.stored and self.cache is not None:
             self.cache.dirty = True
+
+    def settled(self) -> None:
+        """(the worker, once `PageWork` has kept or put back what the job did) Nothing more of the job changes what
+        this holds: the window's close waits for this (`Pipeline.drop_unconfirmed`), and writes the stores as they are
+        from then on (`Pipeline.to_save`)."""
+        p = self.pipeline
+        if p._provisional is self:
+            p._provisional = None
+        self.over.set()
+
+    def before(self, obj: Any) -> Any:
+        """A copy of *obj* - the book's cache, or one of the objects held (the stage times among them) - as it was
+        before the job, with containers of its own: nothing the job's worker does reaches it. The cache's copy saves
+        under the cache's own save lock (one save of its file at a time) and leaves the cache as it is. *obj* itself
+        when this holds nothing of it."""
+        cache = self.cache
+        if cache is not None and obj is cache and self.cache_state is not None:
+            twin = copy.copy(cache)  # (`BookCache.__setstate__`: a save lock of its own, the cache's taken below)
+            for k, v in self.cache_state.items():
+                setattr(twin, k, copy.copy(v))
+            twin._save_lock = cache._save_lock
+            if self.lines_state is not None:
+                lines = twin.lines = copy.copy(cache.lines)
+                lines.rings, lines.touched = _rings_copy(self.lines_state[0]), dict(self.lines_state[1])
+                lines.on_change = getattr(twin, "_lines_changed", None)  # (the copy's, not the cache's)
+            return twin
+        for held, state in self.held:
+            if held is obj:
+                twin = copy.copy(obj)
+                for k, v in state.items():
+                    setattr(twin, k, copy.copy(v))
+                return twin
+        return obj
 
 
 class PageWork:
@@ -948,7 +1003,7 @@ class PageWork:
     def __init__(self, pipeline: "Pipeline", gate: PageGate | None):
         self.gate = gate
         self.stored: list[tuple[str, float]] = []
-        self.provisional = Provisional(pipeline) if gate is not None and not gate.confirmed else None
+        self.provisional = Provisional(pipeline, gate) if gate is not None and not gate.confirmed else None
         self.kept: bool | None = None if self.provisional is not None else True
 
     @property
@@ -962,8 +1017,9 @@ class PageWork:
             if keep:
                 held.commit()
             else:
-                held.restore()
+                held.restore()  # (again, when the window's close put it back first: the same state)
                 self.stored.clear()
+            held.settled()
         self.kept = keep
         return keep
 
@@ -1141,6 +1197,7 @@ class Pipeline:
         self._saves_held = 0  # > 0: within `saves_held`, a save of the cache waits for `flush_saves`
         self._save_due: BookCache | None = None  # the cache whose save waits
         self._held_for: Provisional | None = None  # a page job's frame not confirmed yet: what goes back if never
+        self._provisional: Provisional | None = None  # ... until the job's worker decided it (`Provisional.settled`)
         self._overrides: dict[str, Any] = {}  # the book's own detection/OCR settings (from its annotations)
         self.annotations: BookAnnotations | None = None  # reader-made premises for the current book
         self.glossary_text: str = ""  # the series sheet (characters, glossary, style), rendered for the prompt
@@ -1393,8 +1450,9 @@ class Pipeline:
         """*store*.save(); a failure (a full disk, a locked file) is no reason to lose the page at hand, so it does
         not raise: it is kept in `save_error` for the window and the batch to say, until a save of *name* works.
         Within `saves_held`, a save of the cache waits for `flush_saves` (True); so does one while a page job's frame
-        is not confirmed (`Provisional`), the cache left marked as it was before the job."""
-        held = self._held_for
+        is not confirmed (`Provisional`), the cache left marked as it was before the job - and one while the window's
+        close has put such a job back and its worker is still on it (`_holding`)."""
+        held = self._holding()
         if name == "cache" and held is not None and store is held.cache:
             held.stored = True
             store.dirty = held.dirty  # (the window's close writes none of it: `ui.app.last_save`)
@@ -1456,13 +1514,59 @@ class Pipeline:
     def flush_saves(self) -> bool:
         """The save of the cache `saves_held` held back, made now (`_save_store`: a failure is kept in `save_error`);
         False when none waited, or the cache was saved since (nothing in it is unsaved); nothing is saved while a page
-        job's frame is not confirmed (`Provisional`)."""
-        if self._saves_held or self._held_for is not None:
+        job's frame is not confirmed (`Provisional`), nor while the window's close has put such a job back and its
+        worker is still on it (`_holding`)."""
+        if self._saves_held or self._holding() is not None:
             return False
         cache, self._save_due = self._save_due, None
         if cache is None or not cache.dirty:
             return False
         return self._save_store("cache", cache)
+
+    def _holding(self) -> Provisional | None:
+        """The page job whose changes no save writes now: one whose frame is not confirmed (`_held_for`), or one the
+        window's close put back while its worker is still on it (`drop_unconfirmed`: what the worker stores until it
+        decides the job itself is the job's too). None when there is neither."""
+        held = self._held_for
+        if held is None:
+            late = self._provisional
+            held = late if late is not None and late.kept is False else None
+        return held
+
+    def drop_unconfirmed(self, wait: float | None = None) -> bool:
+        """(the window, as it closes, before anything is saved: `ui.app.App._on_close`) A page job whose frame is not
+        confirmed (`Provisional`) leaves nothing: its gate is dropped - one the window confirmed first stays so, and
+        its page is kept, marked for the close's save as a page that needed no confirmation is - and what it changed
+        goes back. The job's worker puts it back itself once it sees the drop or its cancel (at its gate within
+        `GATE_STEP_S`, while it reads at its next check: `PageWork`); the close waits *wait* seconds at most for that
+        (`CLOSE_WAIT_S`), then puts it back from this thread. A worker held on the job longer (a model's load) may store
+        more of the page meanwhile, in memory alone: until it has decided the job, the close writes the cache and the
+        stage times as they were before the job (`to_save`), and the worker's own save comes after it has put the job
+        back itself (`PageWork.give_up`, `settle`; `flush_saves`). Whether a page was given up."""
+        held = self._provisional
+        if held is None:
+            return False
+        gate = held.gate
+        if gate is not None:
+            gate.drop()  # (nothing when the window confirmed it first, or the worker gave it up: the first holds)
+            if gate.confirmed:
+                if not held.over.is_set():
+                    held.commit()
+                return False
+        if not held.over.wait(max(0.0, CLOSE_WAIT_S if wait is None else wait)):
+            held.restore()
+        return True
+
+    def to_save(self, store: Any) -> Any:
+        """(the window, as it closes: `ui.app.last_save`, `devices.save_times`) What is written of *store* - the
+        book's cache, the stage times: *store* itself, or - while a page job whose frame was not confirmed may still
+        change it (`Provisional`: held, or put back by the close while its worker is still on the job) - a copy of it
+        as it was before that job (`Provisional.before`): what an earlier save left unsaved is written, nothing of the
+        job. A job kept (its frame confirmed) is written with *store* as ever."""
+        held = self._provisional
+        if held is None or held.kept:
+            return store
+        return held.before(store)
 
     @property
     def settings(self) -> Settings:
