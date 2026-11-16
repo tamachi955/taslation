@@ -94,6 +94,9 @@ What a window gets, through *show* (kind, data), besides ``batch_page`` {image} 
   holds already (and a frame that turned out not to be the book), and the later stages say what really becomes of it:
   erase "skipped" where there is nothing to erase or no erase ahead (page by page, the memory full), translate "skipped"
   where there is nothing to translate; translate "failed" for a page a unit of which the translation could not store.
+  Translate "done" comes as soon as no line of the page can change any more (`_units_final`): each of its units stored
+  complete (its lines spelt to the sheet, checked, tightened and saved; a line asked again later is never one of a
+  complete unit), or the request of an incomplete one over, its asking again included - not at the end of its run.
   Read "missed" (no thumbnail: a placeholder) for a page that went by before it could be taken; when the reader turns
   back to it, read "waiting" with its thumbnail follows under the same seq, and a page still missed at the end has its
   other stages "skipped". Read "merged" {into} (no other event of that seq follows): the page that went by was taken
@@ -944,6 +947,10 @@ class BatchReader:
         self._journal_stores = 0  # page units stored in `_journal`
         self._chunk_said: dict[str, tuple[int, int]] = {}  # the band's latest run messages while deferring, by kind
         self._chunk_total = 0  # the translation's runs (``batch.translating_chunk`` {chunks}), once all are known
+        # the pages begun by the translation, seq -> their units whose lines may still change (`_pages_final`), and the
+        # units (id) whose lines cannot (`_units_final`)
+        self._left: dict[int, int] = {}
+        self._final: set[int] = set()
         # GPU work of the run (a page's reading: the layout model; the erase ahead: LaMa) under way, by thread, and
         # whether the translator's model loads (`_hold_loads`): no GPU work starts then, and the load waits for none
         self._gpu_cond = threading.Condition()
@@ -2036,11 +2043,17 @@ class BatchReader:
         `_deferred`): it goes on as if every unit had been stored, its completeness as `Pipeline.commit_unit` would
         return it (`_would_complete`). The lines kept for reuse (`linememo`) are kept at once, as without the overlap
         (the next run's requests reuse them), under the run's lock: the reading of a page may read the cache meanwhile.
+
+        A unit stored complete can change no more (only the lines of incomplete ones are asked again), nor can any of
+        *units* once the call is over (Stop aside): either is told as soon as it is so (`_units_final`), so that its
+        page shows while the rest of the run is still asked for.
         """
         try:
             self._translate_run(units, recent, notes_text, upcoming, language, depth)
         finally:
             self._model_loaded()  # (a request is over: whatever it loaded is loaded)
+        if not self._stop.is_set():
+            self._units_final(units)
 
     def _translate_run(self, units: list[ScannedUnit], recent: deque[tuple[str, str]], notes_text: str,
                        upcoming: list[str], language: str, depth: int = 0) -> None:
@@ -2152,6 +2165,8 @@ class BatchReader:
                 counted[ui].update(per_unit[ui])
                 if not self._store_unit(units[ui], per_unit[ui], per_unit_flags[ui], fresh):
                     left.append(ui)
+                else:  # (complete: none of its lines is asked again)
+                    self._units_final([units[ui]])
             return left
 
         settle(list(range(len(texts))), outputs, prior)
@@ -2658,7 +2673,6 @@ class BatchReader:
         language = s.target_language
         notes_text = self.pipeline.premises()  # the reader's series sheet
         recent: deque[tuple[str, str]] = deque(maxlen=max(0, s.context_pairs))
-        left: dict[int, int] = {}  # seq -> its units not translated yet (``page_stage`` translate done once none is)
         paged: set[int] = set()
         done = ci = 0
         while True:
@@ -2677,8 +2691,8 @@ class BatchReader:
             for u in chunk:
                 seq = self._seq_of.get(id(u), 0)
                 if seq and seq not in paged:  # (a page's units all read together, one after the other in the book)
-                    paged.add(seq)
-                    left[seq] = sum(1 for v in units if self._seq_of.get(id(v), 0) == seq)
+                    paged.add(seq)  # (counted before any of them is final; the journal may count another page down)
+                    self._left[seq] = sum(1 for v in units if self._seq_of.get(id(v), 0) == seq)
                 self._page_stage(seq, "translate", "working")
             n_bubbles = sum(len(u.japanese()) for u in chunk)
             self._tell_chunk("translating", ci, n_bubbles)
@@ -2687,7 +2701,6 @@ class BatchReader:
             if self._stop.is_set():
                 self._ended_by = Message("batch.user_stop")
                 return
-            self._deferred(lambda chunk=chunk: self._translated_pages(chunk, left))
             p.elapsed = time.monotonic() - start
             self._tell_chunk("translated", ci, n_bubbles)
             ci += 1
@@ -2695,17 +2708,30 @@ class BatchReader:
                 self._ended_by = self._fatal  # Ollama gone, the model missing: the rest would fail the same way
                 return
 
-    def _translated_pages(self, chunk: Sequence[ScannedUnit], left: dict[int, int]) -> None:
-        """``page_stage`` translate for the pages whose last unit *chunk* held: "done" when this run stored every unit
-        of the page, else "failed" (a unit no reply got through for, or one left incomplete)."""
-        for u in chunk:
+    def _units_final(self, units: Sequence[ScannedUnit]) -> None:
+        """No line of *units* can change any more in this run (stored complete, or their request over, its asking
+        again included): told for their pages (`_pages_final`) after what they stored, in the journal's order while
+        frames are still read (`_deferred`). Each unit once. On the translation's thread."""
+        fresh = [u for u in units if id(u) not in self._final]
+        if not fresh:
+            return
+        self._final.update(id(u) for u in fresh)
+        self._deferred(lambda: self._pages_final(fresh))
+
+    def _pages_final(self, units: Sequence[ScannedUnit]) -> None:
+        """``page_stage`` translate for the pages whose last unit with lines that could still change was among
+        *units*, and ``ended`` for the view: "done" when this run stored every unit of the page, else "failed" (a unit
+        no reply got through for, or one left incomplete). From here on `viewer_page` shows the page: what it shows is
+        what stays stored."""
+        for u in units:
             seq = self._seq_of.get(id(u), 0)
-            if not seq or seq not in left:
+            count = self._left.get(seq)
+            if not seq or count is None:
                 continue
-            left[seq] -= 1
-            if left[seq] > 0:
+            if count > 1:
+                self._left[seq] = count - 1
                 continue
-            del left[seq]
+            del self._left[seq]
             mine = [v for v in self._units if self._seq_of.get(id(v)) == seq]
             stored = all(id(v) in self._stored for v in mine)
             self._page_stage(seq, "translate", "done" if stored else "failed")
