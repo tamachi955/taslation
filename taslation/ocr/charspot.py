@@ -33,10 +33,8 @@ from __future__ import annotations
 
 import json
 import math
-import queue
 import re
 import statistics
-import threading
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -451,6 +449,42 @@ def _build(cfg: dict, n_out: int) -> tuple[Any, Any]:
             Tail(n_out, a["emb"], a["d"], a["layers"], a["theads"]))
 
 
+def _depthwise_by_unfold(dense: Any) -> Any:
+    """*dense* (the GPU's copy) with its depthwise convolutions done by `unfold` and a product summed over the kernel,
+    not by cuDNN: there cuDNN readies its kernels anew for each input size, about a second each (30 sizes among the
+    gold set's 933 crops), and a book has a few dozen sizes. The same numbers within rounding (933 of 933 crops read the
+    same, no threshold crossed); 14 ms a crop against 12 with cuDNN's kernels ready. The other convolutions stay."""
+    import torch
+    import torch.nn.functional as F
+    from torch import nn
+
+    class Depthwise(nn.Module):
+        def __init__(self, conv: nn.Conv2d):
+            super().__init__()
+            self.weight, self.bias = conv.weight, conv.bias
+            self.kernel, self.stride, self.padding = conv.kernel_size, conv.stride, conv.padding
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            b, c, h, w = x.shape
+            ho = (h + 2 * self.padding[0] - self.kernel[0]) // self.stride[0] + 1
+            wo = (w + 2 * self.padding[1] - self.kernel[1]) // self.stride[1] + 1
+            cols = F.unfold(x, self.kernel, padding=self.padding, stride=self.stride).view(b, c, -1, ho * wo)
+            y = (cols * self.weight.view(c, -1, 1)).sum(2)
+            if self.bias is not None:
+                y = y + self.bias.view(1, c, 1)
+            return y.view(b, c, ho, wo)
+
+    def swap(module: nn.Module) -> None:
+        for name, child in module.named_children():
+            if isinstance(child, nn.Conv2d) and child.groups > 1 and child.groups == child.in_channels:
+                setattr(module, name, Depthwise(child))
+            else:
+                swap(child)
+
+    swap(dense)
+    return dense
+
+
 class CharspotEngine(DeviceModels):
     """The model loaded from *model_dir*, on the CPU and, once `to` asks for it, on the GPU too (`DeviceModels`: the
     CPU's copy stays, a failure on the GPU reads on the CPU for good). Reads one crop at a time (the crops of a page
@@ -461,10 +495,8 @@ class CharspotEngine(DeviceModels):
     run faster that way, reading the same (the identity check of the gold set's crops). The GPU's copy is in the usual
     layout, and reads the same too.
 
-    On the GPU, the first crop of each input size (`preprocess`: a grid of 16-pixel cells, so a book has a few dozen)
-    costs about a second while cuDNN readies its kernels for it, then about 12 ms like the rest (30 such sizes among the
-    gold set's 933 crops): a crop of a size the GPU has not met yet is read on the CPU, and the GPU readies that size
-    meanwhile on a thread of its own (`_warm`), for the next crops of it."""
+    On the GPU its depthwise convolutions are done without cuDNN (`_depthwise_by_unfold`), which would ready its
+    kernels anew for each input size, about a second each."""
 
     name = "charspot"
 
@@ -487,60 +519,16 @@ class CharspotEngine(DeviceModels):
         dense.to(memory_format=torch.channels_last)
         self._cpu_models = (dense, tail)
         self._out_str = load_vocab(self.model_dir / cfg["vocab"], cfg["n_cls"])
-        self._sizes: set[tuple[int, ...]] = set()  # the input sizes the GPU's copy has met (made ready for)
-        self._asked: set[tuple[int, ...]] = set()  # ... and those it was asked to ready
-        self._to_warm: queue.SimpleQueue[tuple[int, ...]] = queue.SimpleQueue()
-        self._warmer: threading.Thread | None = None
 
     def _copy_to(self, device: str) -> tuple[Any, ...]:
         import torch
 
         dense, tail = self._cpu_models
-        self._sizes, self._asked = set(), set()  # (a new copy meets the sizes anew: quickly where cuDNN still has them)
-        return device_copy(dense, device, torch.contiguous_format), device_copy(tail, device)
+        return _depthwise_by_unfold(device_copy(dense, device, torch.contiguous_format)), device_copy(tail, device)
 
     def read_chars(self, image: Image.Image) -> CharspotReading:
         pixels, (fx, fy) = preprocess(image.convert("RGB"))
-        size = tuple(pixels.shape)
-
-        def on(device: str, models: tuple[Any, ...]) -> CharspotReading:
-            if device != "cpu" and size not in self._sizes:
-                self._warm(size)
-                device, models = "cpu", self._cpu_models
-            return self._read(device, models, pixels, fx, fy)
-
-        return self.run(on)
-
-    def _warm(self, size: tuple[int, ...]) -> None:
-        """The GPU readies the input *size* on the warming thread (started the first time), once."""
-        with self._lock:
-            if size in self._asked:
-                return
-            self._asked.add(size)
-            if self._warmer is None:
-                self._warmer = threading.Thread(target=self._warming, name="taslation-ocr-warm", daemon=True)
-                self._warmer.start()
-        self._to_warm.put(size)
-
-    def _warming(self) -> None:
-        """The warming thread: each size asked for run once through the GPU's dense network (blank pixels; what it
-        gives is thrown away), then met. A failure there is the GPU's (`run`: the CPU from then on)."""
-        import torch
-
-        def ready(device: str, models: tuple[Any, ...], size: tuple[int, ...]) -> None:
-            if device == "cpu":
-                return
-            with torch.inference_mode():
-                models[0](torch.zeros((1, *size), device=device))
-                torch.cuda.synchronize()
-            self._sizes.add(size)
-
-        while True:
-            size = self._to_warm.get()
-            try:
-                self.run(lambda device, models: ready(device, models, size))
-            except Exception:  # noqa: BLE001 - that size is read on the CPU, no more than that
-                pass
+        return self.run(lambda device, models: self._read(device, models, pixels, fx, fy))
 
     def _read(self, device: str, models: tuple[Any, ...], pixels: np.ndarray, fx: float, fy: float) -> CharspotReading:
         import torch

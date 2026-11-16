@@ -522,14 +522,11 @@ def test_the_readers_read_the_same_on_either_device(device, real_readers, sample
     try:
         assert all(e.to(device) for e in engines)
         charspot = real_readers.charspot
-        if device != "cpu":  # (a size the GPU has not met is read on the CPU while the GPU readies it: ready them all)
-            for c in crops:
-                charspot.read_chars(c)
-            end = time.monotonic() + 120
-            while charspot._sizes != charspot._asked and time.monotonic() < end:
-                time.sleep(0.05)
-            assert charspot._asked and charspot._sizes == charspot._asked
+        took = time.perf_counter()
         got = [(charspot.read_chars(c), real_readers._nar.read(c)) for c in crops]
+        took = (time.perf_counter() - took) / len(crops)
+        if device != "cpu":  # (the depthwise convolutions without cuDNN: no second a new size of crop)
+            assert took < 0.5, took
     finally:
         for e in engines:
             e.to("cpu")
