@@ -72,9 +72,9 @@ import threading
 import time
 import unicodedata
 from collections import Counter, deque
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 import cv2
 import numpy as np
@@ -766,6 +766,8 @@ class Pipeline:
     ):
         self._base_settings = settings
         self._save_errors: dict[str, str] = {}  # store ("cache", "annotations") -> why its last save failed
+        self._saves_held = 0  # > 0: within `saves_held`, a save of the cache waits for `flush_saves`
+        self._save_due: BookCache | None = None  # the cache whose save waits
         self._overrides: dict[str, Any] = {}  # the book's own detection/OCR settings (from its annotations)
         self.annotations: BookAnnotations | None = None  # reader-made premises for the current book
         self.glossary_text: str = ""  # the series sheet (characters, glossary, style), rendered for the prompt
@@ -969,6 +971,7 @@ class Pipeline:
                 pass
 
     def set_cache(self, cache: BookCache | None) -> None:
+        self.flush_saves()  # (a save held back goes to the cache it was for)
         self.cache = cache
         self.last_seq = None
         self._book_sizes.clear()
@@ -988,7 +991,11 @@ class Pipeline:
 
     def _save_store(self, name: str, store: Any) -> bool:
         """*store*.save(); a failure (a full disk, a locked file) is no reason to lose the page at hand, so it does
-        not raise: it is kept in `save_error` for the window and the batch to say, until a save of *name* works."""
+        not raise: it is kept in `save_error` for the window and the batch to say, until a save of *name* works.
+        Within `saves_held`, a save of the cache waits for `flush_saves` (True)."""
+        if name == "cache" and self._saves_held:
+            self._save_due = store
+            return True
         try:
             store.save()
         except OSError as e:
@@ -996,6 +1003,33 @@ class Pipeline:
             return False
         self._save_errors.pop(name, None)
         return True
+
+    @contextmanager
+    def saves_held(self) -> Iterator[None]:
+        """(the worker) Within it, the saves of the cache that reading a page makes (a page unit stored: `_store_regions`,
+        `_save_page`) wait, and are one save, made by `flush_saves` - which the page job calls once the page is
+        shown, on this same thread, before any other job can read the cache; the window's close saves a cache left
+        unsaved (`ui.app.last_save`). When what runs within raises (Stop, a new page, a failure after a unit was
+        stored), the save is made at once, before the exception goes on: a page stored is saved whole as ever."""
+        self._saves_held += 1
+        try:
+            yield
+        except BaseException:
+            self._saves_held -= 1
+            if not self._saves_held:
+                self.flush_saves()
+            raise
+        self._saves_held -= 1
+
+    def flush_saves(self) -> bool:
+        """The save of the cache `saves_held` held back, made now (`_save_store`: a failure is kept in `save_error`);
+        False when none waited, or the cache was saved since (nothing in it is unsaved)."""
+        if self._saves_held:
+            return False
+        cache, self._save_due = self._save_due, None
+        if cache is None or not cache.dirty:
+            return False
+        return self._save_store("cache", cache)
 
     @property
     def settings(self) -> Settings:

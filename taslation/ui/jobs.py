@@ -50,6 +50,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
@@ -595,8 +596,14 @@ class JobsMixin:
         when this translates nothing new: Stop, a new page, Ollama down, a job that fails. They may be the reader's
         own, and no undo brings them back. The lines the person corrected (`CachedBubble.edited`) stay and are not
         asked for (`Pipeline.forget_page`'s *keep_edited*), unless *replace_edited*. A save that failed is said after
-        the page (`Pipeline.save_error`)."""
+        the page (`Pipeline.save_error`). The page is shown first and saved right after (`Pipeline.saves_held`)."""
         held: list[Any] = []
+
+        def saved() -> None:  # the page's cache save, held back while it was read, made now (`Pipeline.flush_saves`)
+            flush = getattr(self.pipeline, "flush_saves", None)
+            if flush is not None:
+                flush()
+
         try:
             self._use_model(model, language)
             if not self._ensure_cache(book, model, language):
@@ -604,12 +611,14 @@ class JobsMixin:
             if again is not None:
                 held = self.pipeline.pages_of(again)
                 self.pipeline.forget_page(again, keep_edited=not replace_edited)
+            hold = getattr(self.pipeline, "saves_held", None)  # (the cache saved once the page is shown, below)
             try:
-                result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
-                                               complete=complete, events=lambda kind, data: self._post(kind, **data),
-                                               cancel=cancel,
-                                               on_slow=lambda seconds: self._post("slow", seconds=seconds),
-                                               **({"reuse": False} if again is not None else {}))  # (again: all asked)
+                with hold() if hold is not None else nullcontext():
+                    result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
+                                                   complete=complete,
+                                                   events=lambda kind, data: self._post(kind, **data), cancel=cancel,
+                                                   on_slow=lambda seconds: self._post("slow", seconds=seconds),
+                                                   **({"reuse": False} if again is not None else {}))  # (again: all)
             except Cancelled:  # Stop, or a new page: nothing of this page reached the cache
                 self._post("page_cancelled")
                 return
@@ -621,6 +630,7 @@ class JobsMixin:
                 result.error = error
             held = []
             self._post("result", result=result)
+            saved()  # (shown first, then saved: before anything else of this job, or another job)
             self._say_failed_save()
             self._look_for_colophon(image, result, book, model, language)
             keep_page_names(self, result, book, model, language)
@@ -632,6 +642,7 @@ class JobsMixin:
         finally:
             if held:
                 self.pipeline.restore_pages(held)
+            saved()  # (a save held back is never left to another job)
             self._post("translate_done")
 
     def _say_failed_save(self) -> None:

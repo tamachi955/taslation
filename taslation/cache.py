@@ -407,6 +407,17 @@ class BookCache:
         self.details: dict[str, str] = {}  # the header's `DETAIL_FIELDS` that are known (the colophon's)
         self._details_set = False  # this process set them since its last save: they win over the file's
         self.lines = LineMemo(self._lines_changed)  # the book's short lines kept for reuse (`linememo`)
+        self._save_lock = threading.RLock()  # one save at a time (the worker's, the window's close)
+
+    def __getstate__(self) -> dict[str, Any]:
+        """(a copy: an import's) Its state without the save lock, which a copy has its own of."""
+        state = dict(self.__dict__)
+        state.pop("_save_lock", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self._save_lock = threading.RLock()
 
     def _lines_changed(self) -> None:
         self.dirty = True
@@ -536,18 +547,20 @@ class BookCache:
         meanwhile: damaged, by a newer TASlation, or protected for another Windows user or computer) is set aside
         first, never written over (`names.set_aside`); an OSError, and nothing written, when the file cannot be opened
         now or this system cannot protect it (`protect.Unavailable`). The file is written protected, sealed before
-        anything reaches the disk (`protect.protected`), all or nothing (`write_atomic`)."""
-        if merge:
-            self._take_in()
-        self.updated = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(self.to_json(), ensure_ascii=False, indent=1).encode("utf-8")
-        write_atomic(self.path, protect.protected(payload))
-        self.stamp = _stamp(self.path)
-        self.touched.clear()
-        self.removed.clear()
-        self.lines.saved()
-        self.dirty = self._details_set = False
+        anything reaches the disk (`protect.protected`), all or nothing (`write_atomic`). One save at a time: a save
+        from another thread (the window's close) waits for the one being made."""
+        with self._save_lock:
+            if merge:
+                self._take_in()
+            self.updated = time.strftime("%Y-%m-%dT%H:%M:%S")
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            payload = json.dumps(self.to_json(), ensure_ascii=False, indent=1).encode("utf-8")
+            write_atomic(self.path, protect.protected(payload))
+            self.stamp = _stamp(self.path)
+            self.touched.clear()
+            self.removed.clear()
+            self.lines.saved()
+            self.dirty = self._details_set = False
 
     def _take_in(self) -> None:
         """Before a merging save: take in what another process saved in the file since this copy was loaded, move
