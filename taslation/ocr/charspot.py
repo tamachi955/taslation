@@ -448,7 +448,10 @@ def _build(cfg: dict, n_out: int) -> tuple[Any, Any]:
 
 class CharspotEngine:
     """The model on the CPU, loaded from *model_dir*. Reads one crop at a time (the crops of a page have different
-    shapes, and a page's worth takes a fraction of a second). Raises `ModelNotInstalled` when it is not there."""
+    shapes, and a page's worth takes a fraction of a second). Raises `ModelNotInstalled` when it is not there.
+
+    The dense network keeps its 4-D weights and its input channels-last (NHWC): its depthwise convolutions run faster
+    that way on the CPU, reading the same (the identity check of the gold set's crops)."""
 
     def __init__(self, model_dir: Path, threads: int = 0):
         self.model_dir = Path(model_dir)
@@ -465,6 +468,7 @@ class CharspotEngine:
         self._dense, self._tail = (m.eval() for m in _build(cfg, weights["tail.cls.weight"].shape[0]))
         self._dense.load_state_dict({k[6:]: v for k, v in weights.items() if k.startswith("dense.")})
         self._tail.load_state_dict({k[5:]: v for k, v in weights.items() if k.startswith("tail.")})
+        self._dense.to(memory_format=torch.channels_last)
         self._out_str = load_vocab(self.model_dir / cfg["vocab"], cfg["n_cls"])
 
     def read_chars(self, image: Image.Image) -> CharspotReading:
@@ -472,7 +476,8 @@ class CharspotEngine:
 
         pixels, (fx, fy) = preprocess(image.convert("RGB"))
         with torch.inference_mode():
-            heat, box, ruby, emb = self._dense(torch.from_numpy(pixels)[None].float())
+            x = torch.from_numpy(pixels)[None].float().contiguous(memory_format=torch.channels_last)
+            heat, box, ruby, emb = self._dense(x)
             found = detect(heat[0].numpy(), box[0].numpy(), ruby[0].numpy())
             if found is None:
                 return CharspotReading()
