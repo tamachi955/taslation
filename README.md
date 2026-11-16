@@ -202,7 +202,7 @@ The sources for each country's laws and cases are in [docs/LEGAL_SOURCES.md](doc
 |---|---|---|
 | One screen showing one page (about 10 lines) | about 6 s (3 to 8) | about 23 s (12 to 30) |
 | One screen showing two pages (about 16 lines) | about 9 s (6 to 14) | about 30 s (19 to 45) |
-| The first page after starting | 4 to 5 s more (the translation model loads) | the same |
+| The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 6 s from the start); with Load the translation model at start off, 4 to 5 s more | the same |
 | Reading and translating a whole book (190 pages) | about 15 to 20 min | about 35 min to 1 h |
 
 The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. The whole-book times are estimates, calculated from 100 pages actually measured with the GPU and 16 pages without. The time you take to turn the pages is not included. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). Reading the pages (OCR) is done on the CPU, so a GPU does not make it faster (about 3 s for one two-page screen).
