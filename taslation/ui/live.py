@@ -723,7 +723,8 @@ class LiveViewMixin(BlackViewerMixin):
         self._start_translate(image, thumb=thumb, complete=complete)
 
     def _page_uncached(self, image: Image.Image) -> bool:
-        """Is any page unit of this capture missing from the book's cache? (A quick check on the Tk thread.) Under a
+        """Is any page unit of this capture missing from the book's cache? (A quick check on the Tk thread: the cache
+        as its file holds it, read again only once a save changed the file, `CacheStore.peek`.) Under a
         name that names no book (a viewer, a browser, nothing: `_name_needed`) every page is: nothing is kept under
         it, so the start asks for the name even when an old cache under the viewer's name holds the page."""
         book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
@@ -732,7 +733,7 @@ class LiveViewMixin(BlackViewerMixin):
         if self._name_needed():
             return True
         try:
-            cache = self.store.open(book, model, language or "English")
+            cache = self.store.peek(book, model, language or "English")
             units = fp.analyze(np.asarray(image.convert("RGB")), self.settings.margins)
         except Exception:
             return False
@@ -747,7 +748,7 @@ class LiveViewMixin(BlackViewerMixin):
             return False
         book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
         try:
-            return book_read(len(self.store.open(book, model, language or "English")))
+            return book_read(len(self.store.peek(book, model, language or "English")))
         except Exception:  # noqa: BLE001 - cannot be told: the start is offered as ever
             return False
 
@@ -765,7 +766,7 @@ class LiveViewMixin(BlackViewerMixin):
             if self._name_needed():
                 return False
             book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
-            cache = self.store.open(book, model, language or "English")
+            cache = self.store.peek(book, model, language or "English")
             units = fp.analyze(np.asarray(image.convert("RGB")), s.margins)
             if not units:
                 return False

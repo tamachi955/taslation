@@ -1009,6 +1009,33 @@ def test_in_translator_mode_a_cached_page_is_taken_at_its_first_frame_and_comple
     assert not flow._all_cached(page)
 
 
+def test_the_check_at_every_frame_reads_the_cache_file_only_once_a_save_changed_it(flow, monkeypatch):
+    """`_all_cached` and `_page_uncached` run on the Tk thread at the frames of a page turn: the book's cache file is
+    read and opened (Windows' data protection) only once it changed (`CacheStore.peek`), and what the worker saved
+    is seen at the next frame."""
+    from taslation import protect
+
+    flow.book_var.set("My Story 2")
+    flow._page_uncached = A._page_uncached.__get__(flow)  # the real one
+    page, other = Image.open(FIXTURES / "sample_page.png"), Image.open(FIXTURES / "sample_page2.png")
+    _cached_page(flow, page)
+    reads: list[int] = []
+    real = protect.readable
+    monkeypatch.setattr(protect, "readable", lambda data: reads.append(len(data)) or real(data))
+    assert flow._all_cached(page) and reads
+    reads.clear()
+    for _frame in range(10):
+        assert flow._all_cached(page) and not flow._all_cached(other)
+        assert not flow._page_uncached(page) and flow._page_uncached(other)
+    assert reads == []  # nothing read or opened at the frames: the file did not change
+    _cached_page(flow, other)  # the worker saved the other page
+    assert flow._all_cached(other) and not flow._page_uncached(other) and reads  # seen at the next frame
+    reads.clear()
+    assert flow._all_cached(other) and reads == []
+    _cached_page(flow, page, incomplete=True)
+    assert not flow._all_cached(page)
+
+
 def test_the_page_models_are_warmed_once_a_viewer_and_the_pipeline_are_there(flow):
     warmed = []
     flow.pipeline = SimpleNamespace(warm_page_models=lambda: warmed.append(1))

@@ -815,6 +815,9 @@ class CacheStore:
         self.cache_dir = Path(cache_dir)
         self._read: dict[str, tuple[Stamp, _Read | None]] = {}  # `identities`: what each file held, by its stamp
         self._read_lock = threading.Lock()  # the window reads them on its thread, its worker at the start
+        # `peek`: the cache opened last per (book, model, language), with the stamps of the book's two files then
+        self._peeked: dict[tuple[str, str, str], tuple[tuple[Stamp, Stamp], BookCache]] = {}
+        self._peek_lock = threading.Lock()
 
     def _identity_of(self, path: Path) -> _Read | None:
         """`_read_identity` of the file at *path*, read again only once the file has changed (`_stamp`)."""
@@ -936,6 +939,25 @@ class CacheStore:
             set_aside(path, e.reason)
             return BookCache(path, book, model, language)
         cache.model = cache.model or model
+        return cache
+
+    def peek(self, book: str, model: str, language: str = "English") -> BookCache:
+        """The cache of *book* in *language* as `open` gives it, for a look that changes nothing (the window's quick
+        checks on its own thread, at every frame): opened again only once one of the book's two files (`cache_names`,
+        the ones `path_for` chooses from) is another version than when it was opened last (`_stamp`: a save writes a
+        new file in place of the old one, `write_atomic`, so a save by the worker is seen at the next look and a file
+        half written never is); until then the copy opened last, with no file read or opened (`protect`). What
+        `open` raises is raised, and nothing is kept then. The copy is shared: never change it, never save it."""
+        plain, hashed = cache_names(book, language)
+        stamps = (_stamp(self.cache_dir / plain), _stamp(self.cache_dir / hashed))  # (before the file is read)
+        key = (book, model, language)
+        with self._peek_lock:
+            held = self._peeked.get(key)
+        if held is not None and held[0] == stamps:
+            return held[1]
+        cache = self.open(book, model, language)
+        with self._peek_lock:
+            self._peeked = {**{k: v for k, v in self._peeked.items() if k[0] == book}, key: (stamps, cache)}
         return cache
 
     def _is_cache_file(self, path: Path, cache: BookCache) -> bool:

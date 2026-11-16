@@ -91,6 +91,42 @@ def test_store_list_delete_and_corrupt_file(tmp_path):
     assert not store.delete("Some Book")
 
 
+def test_a_peek_reads_the_file_again_only_once_a_save_changed_it(tmp_path, monkeypatch):
+    """`CacheStore.peek`, the window's look at a book's cache at every frame: the file is read (and opened, Windows'
+    data protection) once, then again only once a save wrote another version of it; what the worker's own copy saved
+    is seen at the next look; a file gone gives an empty cache, and a file of another book raises as `open` does,
+    as `open` has it (the book's other file name)."""
+    from taslation import protect
+
+    reads: list[int] = []
+    real = protect.readable
+    monkeypatch.setattr(protect, "readable", lambda data: reads.append(len(data)) or real(data))
+    store = CacheStore(tmp_path)
+    worker = store.open("Book", "m")  # the worker's own copy
+    worker.add(_page(FP_A))
+    worker.save()
+    reads.clear()
+    first = store.peek("Book", "m")
+    assert first.lookup(FP_A, 0.71, 10) is not None and reads
+    reads.clear()
+    for _frame in range(20):
+        assert store.peek("Book", "m") is first
+    assert reads == []  # nothing read while the file stayed as it was
+    worker.add(_page(FP_B))
+    worker.save()  # a save by the worker: the next look sees it
+    seen = store.peek("Book", "m")
+    assert seen is not first and seen.lookup(FP_B, 0.71, 10) is not None and reads
+    assert store.peek("Book", "m", "German") is not seen and len(store.peek("Book", "m", "German")) == 0
+    worker.path.unlink()
+    assert len(store.peek("Book", "m")) == 0
+    other = store.open("Other", "m")
+    other.add(_page(FP_B))
+    other.save()
+    other.path.rename(worker.path)  # the file now holds another book's cache: never read as this book's
+    elsewhere = store.peek("Book", "m")
+    assert len(elsewhere) == 0 and elsewhere.path != worker.path and elsewhere.path == store.open("Book", "m").path
+
+
 def _learned(*parts: str) -> None:
     """*parts* are viewers' parts, as choosing their windows teaches (tests/test_viewer_parts.py). The viewers named in
     these tests are invented."""
