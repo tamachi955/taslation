@@ -191,6 +191,7 @@ def start(monkeypatch, tmp_path):
 
     def make(setup, **settings) -> Start:
         settings.setdefault("ollama_keep_alive", "-1")  # the settings that load the model at the start
+        settings.setdefault("load_model_at_start", False)  # (the start as before it: tests/test_model_at_start.py)
         return Start(Settings(state_dir=tmp_path / "state", **settings), setup, order)
 
     make.order = order

@@ -157,14 +157,18 @@ class Settings:
     ollama_temperature: float = 0.2
     ollama_num_ctx: int = 16384  # the chat translator's context window (0 = server default); a batch request needs ~10K; PLaMo has its own (8192)
     # How long Ollama keeps the model loaded after a request, in Ollama's own format: a duration ("30m", "2h") or
-    # seconds ("0": unloads after every request). Every request carries it; the first line to translate loads the
-    # model, and the end of a whole-book run or the window closed releases it; "-1": loaded at the start, before the
-    # OCR model, and never released (`translate.ollama.never_unloads`).
+    # seconds ("0": unloads after every request). Every request carries it; the window's start (`load_model_at_start`)
+    # or else the first line to translate loads the model, and the end of a whole-book run or the window closed
+    # releases it; "-1": loaded at the start, before the OCR model, and never released (`translate.ollama.never_unloads`).
     ollama_keep_alive: str = "5m"
     # How many of the model's layers Ollama puts on the GPU (its ``num_gpu`` option, for both translators): empty, the
     # default, sends nothing and the server decides, as before; "0": the processor only, the GPU left free for
     # something else; a number: that many layers on the GPU, the rest on the processor (`translate.ollama.num_gpu_value`)
     ollama_num_gpu: str = ""
+    # The window loads the translation model at its start, while the OCR model loads (`ui.jobs.loads_at_start`), so
+    # that the first page to translate does not wait for it; it then goes as ollama_keep_alive says, as after a page.
+    # Nothing with ollama_keep_alive "0"; the commands never. False: the first line to translate loads it, as before.
+    load_model_at_start: bool = True
     target_language: str = "English"
     # live mode: previous pages passed to the model as context (memory only); PLaMo's earlier pairs instead grow from page
     # to page and are cut back rarely (`translate.base.GrowingContext`: 60, then the newest 20); 0: none for either

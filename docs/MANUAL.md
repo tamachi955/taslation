@@ -975,6 +975,7 @@ detect_model = "off"         # (opt-in for now: "auto") the layout model first, 
 ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: "2h", "90s", seconds; "-1" never
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
+load_model_at_start = true   # the window loads the translation model at start, beside the OCR models; false: the first line to translate does
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
@@ -1040,9 +1041,12 @@ TASlation decides when the OCR models load, again after the GPU memory was let g
 If the GPU fails (out of memory or another CUDA error), that line is read on the CPU, and the OCR stays on the CPU until the window closes. The readings are the same on both.
 `"cpu"` keeps the OCR on the CPU; `"gpu"` puts the two on the GPU wherever there is one, without looking at the room. The "System" page says where they are and why.
 
-Ollama's model is put in GPU memory only when it is needed. It is not loaded at start, but when a line that needs translating comes up
+Ollama's model is put in GPU memory only while it is needed. The window loads it at start, while the OCR models load (`load_model_at_start = true`, the default;
+"Load the translation model at start" on the System page of "Tools > Settings..."), so the first page to translate does not wait for it. Nothing is shown for this load,
+and when Ollama is not running or the model is not installed it does nothing (the first page that needs the model says what is wrong, as before).
+With the setting off, and for the `taslation` commands, the model is loaded when a line that needs translating comes up
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
-`ollama_keep_alive` ("5m" by default) after the last request, then is released automatically. While you read on through untranslated pages, each request
+`ollama_keep_alive` ("5m" by default) after the last request (or after the load at start), then is released automatically; with `ollama_keep_alive = "0"` nothing is loaded at start. While you read on through untranslated pages, each request
 extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while pages are being read,
 but when the reading is over and it moves on to the notes and the translation. At the end of a run (a stop or a failure included) and when the window closes, it is released at once.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
@@ -1052,7 +1056,7 @@ with a normal request of Ollama's API (`keep_alive` 0 for that model), and the p
 A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. OCR models on the GPU go back to the processor (the next page decides again where they read),
 and what stays is the CUDA context PyTorch made once a page model ran on the GPU (a few hundred MB), until the window closes.
 The status line says what was released. While a page is being translated, while a translation waits to start, and during a whole-book run it releases nothing and says so in the status line.
-The next line that needs translating loads the model again as usual.
+If the model is still loading at start, it waits for that load and then releases it. The next line that needs translating loads the model again as usual.
 Ollama runs only while TASlation uses it. When it translates and Ollama is not running, TASlation starts Ollama's server (`ollama serve`)
 in a window that is never shown (never Ollama's app), and writes down that it did in `ollama-started.json` in the state folder
 (the process's number, its program, when it started and the TASlation processes that use it; no text of a book). When you close the window, or when a `taslation` command that translated ends,

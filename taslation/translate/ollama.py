@@ -36,8 +36,11 @@ chose (``auto_model``), ``translator.model_missing``, or, for a model of the rea
 ``ollama.timeout``, ...); its English text never carries the operating system's
 own (localised) error text, nor any text of the book.
 
-The model is in GPU memory only while it is needed. Nothing loads it at the start:
-the first request that wants it does (`OllamaTranslator.ensure_loaded`, from every
+The model is in GPU memory only while it is needed. The window loads it at its start,
+while the OCR model loads (``load_model_at_start``, on by default: `ensure_loaded` with
+*quiet*, on a thread of its own, after Ollama was started as ever), so that the first
+page does not wait for it; the commands and a window with the setting off leave it to
+the first request that wants it (`OllamaTranslator.ensure_loaded`, from every
 request to the model): /api/ps says whether it is loaded (a page in the cache sends no
 request, so reading the cache never loads it; it is not asked while the model answered
 within `PS_RECHECK_S`, half its ``keep_alive`` when that is shorter, and a request that
@@ -283,6 +286,7 @@ class OllamaTranslator:
         self.on_status: Callable[[Message], Any] | None = None
         self._used: set[str] = set()  # the models this translator had Ollama load or use (what `release` unloads)
         self._loading = threading.Lock()  # one `ensure_loaded` at a time: another waits, then finds the model loaded
+        self._quietly = False  # the `ensure_loaded` under way tells nothing (the window's load at the start)
         self.last_stats: dict[str, Any] = {}
         # the known model (`models.TranslatorModel`) the target language chose for this translator (`make_translator`
         # with ``ollama_model = "auto"``), None for a model set by hand: a model Ollama lacks is then said as
@@ -664,35 +668,50 @@ class OllamaTranslator:
                 pass
 
     def ensure_loaded(self, cancel: threading.Event | None = None,
-                      on_slow: Callable[[float], None] | None = None) -> None:
+                      on_slow: Callable[[float], None] | None = None, quiet: bool = False) -> None:
         """The model in memory before a request is sent (see the module's docstring). Nothing happens when it is
         loaded, when ``keep_alive`` would unload it right away, or when /api/ps does not answer: the request then goes
         out as it always did, and says what is wrong itself (and starts Ollama). A load that fails raises what the
         request would have raised; Stop raises `Cancelled`. One at a time: a call while another loads (the page's
         model loaded ahead while the page is read, `pipeline.LoadAhead`) waits for it - Stop ends the wait - and then
-        finds the model loaded, so that the model is loaded once and the GPU models let go once."""
+        finds the model loaded, so that the model is loaded once and the GPU models let go once.
+
+        *quiet* (the window's load at the start, ``load_model_at_start``): the load is not told (``ollama.loading``,
+        ``ollama.loaded``), only a model partly on the CPU is; a call that comes to wait for it tells the load as its
+        own, from when it began to wait to when the model is there."""
         if unloads_at_once(self.keep_alive):
             return
+        began, told = time.monotonic(), False
         while not self._loading.acquire(timeout=POLL_S):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
+            if not told and self._quietly and not quiet:  # (what it waits for says nothing: it says it)
+                told = True
+                self._say(Message("ollama.loading", model=self.model))
         try:
-            self._ensure_loaded(cancel, on_slow)
+            self._quietly = quiet
+            loaded = self._ensure_loaded(cancel, on_slow, quiet=quiet, told=told)
         finally:
+            self._quietly = False
             self._loading.release()
+        if told and not loaded:
+            self._say(loaded_message(self.model, time.monotonic() - began))
 
-    def _ensure_loaded(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None) -> None:
-        """`ensure_loaded`, its turn come: nothing asked while the model answered lately (`_answered`)."""
+    def _ensure_loaded(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None,
+                       quiet: bool = False, told: bool = False) -> bool:
+        """`ensure_loaded`, its turn come: nothing asked while the model answered lately (`_answered`). Whether it
+        loaded the model (and said so, unless *quiet*; *told*: the load was told already)."""
         model = self.model
         held, until = self._fresh
         if held == model and time.monotonic() < until:
-            return
+            return False
         try:
             if self._loaded(model) is not None:
-                return
+                return False
         except TranslationError:
-            return
-        self._say(Message("ollama.loading", model=model))
+            return False
+        if not (quiet or told):
+            self._say(Message("ollama.loading", model=model))
         self._free_gpu()
         seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
         share = self.gpu_share(model)
@@ -702,9 +721,11 @@ class OllamaTranslator:
             self._free_gpu()
             seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
             share = self.gpu_share(model)
-        self._say(loaded_message(model, seconds))
+        if not quiet:
+            self._say(loaded_message(model, seconds))
         if checked and partly_on_gpu(share):
             self._say(Message("ollama.partly_on_gpu", model=model, percent=round(float(share or 0) * 100)))
+        return True
 
     def _answered(self, model: str) -> None:
         """*model* answered a request (or a warm-up) just now: it is loaded for its ``keep_alive`` from now, and

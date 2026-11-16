@@ -969,6 +969,7 @@ detect_model = "off"         # (opt-in for now: "auto") the layout model first, 
 ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: "2h", "90s", seconds; "-1" never
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
+load_model_at_start = true   # the window loads the translation model at start, beside the OCR models; false: the first line to translate does
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
@@ -1034,9 +1035,12 @@ NVIDIA の GPU があれば、`ocr_runs_on`（既定 `"auto"`）が manga-ocr-ch
 GPU が失敗したとき（メモリー不足やほかの CUDA のエラー）は、その行を CPU で読み、ウィンドウを閉じるまで OCR は CPU で動きます。読みはどちらでも同じです。
 `"cpu"` は OCR を CPU に置いたままにし、`"gpu"` は余裕を見ずに、GPU があれば2つを GPU に置きます。どこにあってなぜかは「システム」ページに表示します。
 
-Ollama のモデルは必要なときだけ GPU メモリに載せます。起動時には読み込まず、翻訳が必要な行が出たときに読み込みます
-（数秒かかり、状態表示に出ます）。翻訳がキャッシュにあるページでは読み込みません。読み込んだモデルは最後の要求から
-`ollama_keep_alive`（既定 "5m"）の間残り、そのあと自動で解放されます。未翻訳のページを読み進めている間は要求のたびに
+Ollama のモデルは必要なあいだだけ GPU メモリに載せます。ウィンドウは起動時に、OCR モデルの読み込みと並行してモデルを読み込むので（`load_model_at_start = true`、既定。
+「ツール > 設定...」の「システム」ページの「起動時に翻訳モデルを読み込む」）、最初に翻訳するページはその読み込みを待ちません。この読み込みは何も表示せず、
+Ollama が動いていないときやモデルが入っていないときは何もしません（モデルが必要な最初のページが、これまでどおり何が問題かを伝えます）。
+この設定がオフのときと `taslation` コマンドでは、翻訳が必要な行が出たときに読み込みます
+（数秒かかり、状態表示に出ます）。翻訳がキャッシュにあるページでは読み込みません。読み込んだモデルは最後の要求（または起動時の読み込み）から
+`ollama_keep_alive`（既定 "5m"）の間残り、そのあと自動で解放されます。`ollama_keep_alive = "0"` のときは起動時に読み込みません。未翻訳のページを読み進めている間は要求のたびに
 延長されるので、ページごとに読み込み直すことはありません。一冊通しの処理では、ページを読んでいる間はモデルを読み込まず、
 読み終えてメモと翻訳に移るときに読み込みます。処理の終わり（停止や失敗を含む）とウィンドウを閉じたときには、すぐに解放します。
 `ollama_keep_alive = "-1"` にすると以前と同じく、起動時に OCR モデルより先に読み込み、解放しません。
@@ -1046,7 +1050,7 @@ Ollama の API の通常の要求（そのモデルに `keep_alive` 0）で解�
 ほかのプログラムが同じ Ollama に読み込んだモデルには触れず、Ollama 自体を止めたり起動したりもしません。GPU に置いた OCR モデルは CPU に戻り（どこで読むかは次のページでまた決めます）、
 ページ用モデルを一度 GPU で動かしたときに PyTorch が作った CUDA のコンテキスト（数百 MB）は、ウィンドウを閉じるまで残ります。
 何を解放したかはステータス行に出ます。翻訳中や、翻訳が始まるのを待っている間、一冊通しの処理の間は解放せず、その旨をステータス行に出します。
-次に翻訳が必要な行が出たときは、いつもどおりモデルを読み込み直します。
+起動時の読み込みがまだ終わっていなければ、それを待ってから解放します。次に翻訳が必要な行が出たときは、いつもどおりモデルを読み込み直します。
 Ollama は、TASlation が使うあいだだけ動きます。翻訳するときに Ollama が動いていなければ、TASlation は Ollama のサーバー（`ollama serve`）を
 表示しないウィンドウで起動し（Ollama のアプリは起動しません）、起動したことを状態フォルダーの `ollama-started.json` に書き残します
 （プロセスの番号、プログラム、起動した時刻、使っている TASlation だけで、本の文字は入りません）。ウィンドウを閉じたとき、または翻訳した `taslation` のコマンドが終わったときに、

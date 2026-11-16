@@ -14,7 +14,8 @@ What goes:
 What stays: the OCR readers (they run on the processor and hold no GPU memory), and the CUDA context PyTorch made once
 a page model ran on the GPU (a few hundred MB: torch gives back the memory it cached, not its context, which goes with
 the window). The next line to translate loads the model again as ever (`OllamaTranslator.ensure_loaded`, said in the
-status line).
+status line). The model's load at the window's start (``load_model_at_start``), when it is still under way, is waited
+for and released with the rest, and the page models are not warmed after it.
 
 Refused with a plain line while the model is in use: a page or a request being translated (``busy``), one waiting for
 the models (``_queued``), a whole-book run (`constants.in_a_run`). Otherwise it is a job of the window's worker, after
@@ -62,7 +63,14 @@ def holds_memory(model: Any) -> bool:
 def release_models(window: Any) -> tuple[list[str], bool]:
     """(worker) The window's translation models unloaded (`OllamaTranslator.release_now`) and the page models let go
     (`Pipeline.release_gpu_models`): the names of the translation models that were loaded, and whether a page model
-    held memory. Never raises."""
+    held memory. Never raises. The window's load of the model at its start, when under way, is waited for first
+    (`JobsMixin.wait_load_at_start`), so that what it loads goes too and nothing loads after the release."""
+    wait = getattr(window, "wait_load_at_start", None)
+    if wait is not None:
+        try:
+            wait()
+        except Exception:  # noqa: BLE001 - what it loaded goes after keep_alive, as after a page
+            pass
     names: list[str] = []
     for translator in translators(window):
         try:

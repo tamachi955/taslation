@@ -9,8 +9,9 @@ Around them:
   in a popup, once (the "ollama_failed" event); the window stays usable, and the banner says what stands. An Ollama
   the window started is stopped once the window has closed (`run_app`), unless another TASlation or another program
   still uses it;
-* Ollama's model in memory only while pages need it (`taslation.translate.ollama`): the first page that needs it loads
-  it, which the status line and the badge say (`_model_status`); the window's close releases it (`_release_model`);
+* Ollama's model in memory only while pages need it (`taslation.translate.ollama`): loaded at the start, while the OCR
+  model loads (``load_model_at_start``: `_load_at_start`, which says nothing), or else by the first page that needs it,
+  which the status line and the badge say (`_model_status`); the window's close releases it (`_release_model`);
 * the setup checks: `health.check` at the start and, while a problem stands, every `HEALTH_RECHECK_MS` in a thread
   of their own (never on the Tk thread); the setup banner shows what they find and loses a line by itself once it is
   fixed (`_set_health`);
@@ -215,6 +216,19 @@ def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]
     return wait
 
 
+def loads_at_start(settings: Any) -> bool:
+    """Whether the window loads the translation model at its start (``load_model_at_start``, `JobsMixin._load_at_start`):
+    the setting on, and an ``ollama_keep_alive`` that neither unloads it after every request (nothing loaded ahead
+    would stay) nor keeps it for good (that one is loaded at the start already, before the OCR model, as ever)."""
+    from ..translate.ollama import never_unloads, unloads_at_once
+
+    keep = getattr(settings, "ollama_keep_alive", "5m")
+    try:
+        return bool(getattr(settings, "load_model_at_start", False)) and not (unloads_at_once(keep) or never_unloads(keep))
+    except ValueError:  # (a keep_alive the settings refuse: the first page says what is wrong)
+        return False
+
+
 def first_reads(ocr: Any) -> None:
     """One small crop (a stroke on white, made here) read by each of *ocr*'s readers, what they read thrown away: a
     reader's first read takes longer than the next ones (torch readies itself then), and the first page's crops are
@@ -242,6 +256,10 @@ class JobsMixin:
         self._ollama: OllamaStarter | None = None  # starts Ollama when it does not answer (made by `_job_init`)
         self._before_loading: Any = None  # what the page was doing when Ollama's model began to load
         self._partial_said = False  # the popup about a model partly on the CPU was shown (once a session)
+        self._start_load: threading.Thread | None = None  # the model's load at the start (`_load_at_start`) ...
+        self._start_load_over = threading.Event()  # ... is over, however it ended (the page models may be warmed)
+        self._start_load_cancel = threading.Event()  # ends that load (the window closes)
+        self._start_load_released = False  # Release the model now came meanwhile: the page models are not warmed
         self._health: list[Any] = []  # the setup's problems and notices on show (health.check's Messages)
         self._health_after: str | None = None  # the next look at them while one stands
         self._health_checking = False  # a check runs (in a thread of its own)
@@ -350,9 +368,11 @@ class JobsMixin:
         """The start: the OCR model loads in a thread of its own (`load_readers`) while, in this order, Ollama is
         started when it does not answer (what stands in the way said in a popup, once) and the setup is checked (the
         banner from the start on); the start then waits for the OCR model, says what went wrong with it as ever, and
-        makes the pipeline. Ollama's model is left for the first page that needs it (`OllamaTranslator.ensure_loaded`),
-        unless ``ollama_keep_alive`` keeps it for good: it is loaded then, when Ollama runs and has it, while the OCR
-        model loads, and once ready the status line says what loaded where."""
+        makes the pipeline. Ollama's model, when Ollama runs and has it, is loaded on a thread of its own while the OCR
+        model loads (``load_model_at_start``, on by default: `_load_at_start`), and the window is ready without waiting
+        for it; with the setting off it is left for the first page that needs it (`OllamaTranslator.ensure_loaded`).
+        An ``ollama_keep_alive`` that keeps it for good loads it here, while the OCR model loads, and once ready the
+        status line says what loaded where; one that unloads it after every request loads nothing ahead."""
         from ..ocr import ModelNotInstalled
         from ..pipeline import Pipeline
         from ..translate import TranslationError
@@ -383,6 +403,8 @@ class JobsMixin:
                 loaded.append(loaded_message(model, self.translator.warm_up(model)))
             except TranslationError:
                 pass  # the first page's request loads it, or says what is wrong
+        elif model and loads_at_start(s):
+            self._load_at_start()
         self._post("status", key="Getting the Japanese reader ready (the first time takes a few seconds)...")
         ocr, error = readers()
         if error is not None and not isinstance(error, Exception):
@@ -465,12 +487,49 @@ class JobsMixin:
         if taken:
             self._warn_unasked(rendered(Message("store.set_aside", path=", ".join(str(t.copy) for t in taken))))
 
+    def _load_at_start(self) -> None:
+        """(worker, at the start) The translation model loaded on a thread of its own while the OCR model loads
+        (`loads_at_start`), Ollama started and found to have it; nothing of it is said but a model partly on the CPU
+        (`OllamaTranslator.ensure_loaded` *quiet*), and it goes as ``ollama_keep_alive`` says, as after a page. It is
+        the one load of the model: a page that needs the model meanwhile waits for it and says that it loads
+        (`ensure_loaded`, one at a time). The page models are warmed once it is over (`_warm_page_models` waits for
+        it), never during it, so that they never take the memory Ollama loads into. A load that fails says nothing:
+        the first page that needs the model says what is wrong, as ever. The window's close ends it
+        (`_release_model`); Release the model now waits for it, then releases what it loaded (`wait_load_at_start`)."""
+        translator, cancel, over = self.translator, self._start_load_cancel, self._start_load_over
+
+        def run() -> None:
+            try:
+                translator.ensure_loaded(cancel, quiet=True)
+            except BaseException:  # noqa: BLE001 - the window closed, or a load that failed: a page says it
+                pass
+            over.set()
+            if not cancel.is_set() and not self._start_load_released:
+                self._warm_page_models()
+
+        self._start_load = threading.Thread(target=run, name="taslation-load-model", daemon=True)
+        self._start_load.start()
+
+    def wait_load_at_start(self) -> None:
+        """(worker) Release the model now (`gpu_release.release_models`): the load at the start, when it is under
+        way, is waited for (`ollama.WARM_UP_TIMEOUT` at most), so that what it loads is released with the rest, and
+        the page models are not warmed after it; nothing loads again until a page needs the model."""
+        from ..translate.ollama import WARM_UP_TIMEOUT
+
+        self._start_load_released = True
+        thread = self._start_load
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(WARM_UP_TIMEOUT)
+
     def _warm_page_models(self) -> None:
         """The page models (layout, erase) made ready ahead of the first page, once the pipeline is there and a
         viewer is chosen (`Pipeline.warm_page_models`: cheap, safe to repeat, returns at once; any thread). Again
-        after a change of what they are (a book's settings)."""
+        after a change of what they are (a book's settings). Not while the model loads at the start: that load warms
+        them once it is over (`_load_at_start`)."""
         pipeline = getattr(self, "pipeline", None)
         if pipeline is None or getattr(self, "selected", None) is None:
+            return
+        if getattr(self, "_start_load", None) is not None and not self._start_load_over.is_set():
             return
         try:
             pipeline.warm_page_models()
@@ -524,6 +583,9 @@ class JobsMixin:
         model named in the settings during the session is not another program's."""
         if self._page_cancel is not None:
             self._page_cancel.set()
+        cancel = getattr(self, "_start_load_cancel", None)
+        if cancel is not None:
+            cancel.set()  # (a load at the start under way ends; what it loaded is released below)
         count_as_own(getattr(getattr(self, "translator", None), "model", ""),
                      *own_models(getattr(self, "settings", None)))
         if self.pipeline is not None:

@@ -8,9 +8,10 @@ The list is a grid of labels broken to their column's width (`caches.in_lines`),
 name, a model's or a longer language's words then take another line instead of being cut off. Each stage has where it
 runs and, under it in grey, what runs there.
 
-Under it, the one setting of where things run that the dialog holds: how many of the translation model's layers
-Ollama puts on the GPU (``ollama_num_gpu``: empty, the server decides; 0, the processor only; a number of layers), a
-box with a line on what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM`)."""
+Under it, the two settings of the translation model that the dialog holds: how many of its layers Ollama puts on the
+GPU (``ollama_num_gpu``: empty, the server decides; 0, the processor only; a number of layers), a box with a line on
+what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM`); and whether the window loads it
+at its start (``load_model_at_start``, a checkbox with its line: `load_at_start`, from the next start)."""
 
 from __future__ import annotations
 
@@ -32,6 +33,11 @@ NUM_GPU_LABEL = "Translation model's layers on the GPU:"
 NUM_GPU_TEXT = ("Empty: Ollama decides (the fastest). 0: the processor only, which leaves the GPU free and translates "
                 "several times slower. A number: that many of the model's layers on the GPU, the rest on the processor.")
 NUM_GPU_PROBLEM = "The layers on the GPU: leave the box empty, or a whole number from 0 to {most}."
+LOAD_AT_START_LABEL = "Load the translation model at start"
+LOAD_AT_START_TEXT = ("The translation model loads while TASlation starts, so the first page to translate does not wait "
+                      "a few seconds for it. Off: it loads when the first line to translate comes up. Either way it "
+                      "leaves the GPU after a while without requests (ollama_keep_alive), or at once with Tools > "
+                      "Release the model now. From the next start.")
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -100,6 +106,13 @@ class SystemPage(ttk.Frame):
         line = ttk.Label(layers, text=in_lines(_(NUM_GPU_TEXT), width), justify="left", foreground=theme.colour("note"))
         line.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(NUM_GPU_TEXT), name, box)
+        self.load_at_start = tk.BooleanVar(self, value=bool(getattr(settings, "load_model_at_start", True)))
+        check = ttk.Checkbutton(layers, text=_(LOAD_AT_START_LABEL), variable=self.load_at_start)
+        check.grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        line = ttk.Label(layers, text=in_lines(_(LOAD_AT_START_TEXT), width), justify="left",
+                         foreground=theme.colour("note"))
+        line.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(LOAD_AT_START_TEXT), check)
         self.looked = False
 
     # ------------------------------------------------------------------ the layers on the GPU
