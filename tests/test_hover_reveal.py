@@ -169,6 +169,7 @@ class Window(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin, t
     use: the live view's picture and redraw, the region editor's way of reading a region's Japanese."""
 
     _redisplay = LiveViewMixin._redisplay
+    _status_follows_page = LiveViewMixin._status_follows_page
     _picture = LiveViewMixin._picture
     _result_on_show = LiveViewMixin._result_on_show
     _fill_on_show = LiveViewMixin._fill_on_show

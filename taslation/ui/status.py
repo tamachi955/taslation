@@ -19,7 +19,7 @@ from ..render.shaping import letter_by_letter
 from . import taskbar, trouble
 from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, band_fraction, band_text,
                      blocking, busy_title, is_notice)
-from .constants import READER_AFTER_RUN, READING_NOTE_MS, READY
+from .constants import READER_AFTER_RUN, READING_NOTE_MS, READY, in_a_run
 from .constants import APP_TITLE
 from .progress import busy_line, rendered
 
@@ -69,7 +69,7 @@ class StatusMixin:
             text = lambda: rendered(message)  # noqa: E731 - said again after a language switch
         render = text if callable(text) else None
         line = render() if render is not None else str(text)
-        self._status_render, self._status_key = render, None
+        self._status_render, self._status_key, self._status_page = render, None, None
         self.status_var.set(line)
         if self.reading:  # no status bar there: the line shows at the bottom of the page for a while
             self.canvas.set_note(line, READING_NOTE_MS)
@@ -83,6 +83,21 @@ class StatusMixin:
             return
         self.status(lambda: _(key).format(**{k: _shown(v) for k, v in values.items()}) if values else _(key))
         self._status_key = key
+
+    def _page_status(self, text: str | Message | Callable[[], str], page: Any) -> None:
+        """`status` for a line about one page (a page's summary, a page job stopped): *page* is the frame of that
+        page, and the line goes as soon as the viewer's frame is of another page (`_status_follows_page`)."""
+        self.status(text)
+        self._status_page = page
+
+    def _job_line(self, render: Callable[[], str]) -> None:
+        """The status line of the page job at work (its progress, a request that is slow; no note on the reading
+        window's page): about the page the job reads (`_job_frame`), so it goes while the viewer shows another page
+        (`_status_follows_page`); a whole-book run's is about the run, whatever the viewer shows."""
+        self.status_var.set(render())
+        self._status_render, self._status_key = render, None
+        self._status_page = None if in_a_run(self) else self._job_frame
+        self._status_follows_page()
 
     def _font_note(self) -> str:
         """After the page summary: the series sheet suggests a lettering font this computer lacks."""
@@ -113,7 +128,7 @@ class StatusMixin:
         """The status line of the normal window: the page on show, else the viewer, else ready."""
         result = self.last_result
         if result is not None and self._result_on_show():
-            self.status(lambda: self._page_line(result) + self._font_note())
+            self._page_status(lambda: self._page_line(result) + self._font_note(), result.original)
         elif self.selected is not None:
             self.say("Viewer: {title}", title=self.selected.title)
         else:

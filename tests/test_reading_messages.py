@@ -124,6 +124,7 @@ class Reading(tk.Toplevel):
     status = app_mod.App.status
     say = app_mod.App.say
     _normal_status = app_mod.App._normal_status
+    _page_status = app_mod.App._page_status
     _restore_geometry = app_mod.App._restore_geometry
     _current_geometry = app_mod.App._current_geometry
     _window_monitor = app_mod.App._window_monitor

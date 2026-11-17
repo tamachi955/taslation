@@ -357,6 +357,7 @@ class Reading(tk.Toplevel):
     status = app_mod.App.status
     say = app_mod.App.say
     _normal_status = app_mod.App._normal_status
+    _page_status = app_mod.App._page_status
     _restore_geometry = app_mod.App._restore_geometry
     _current_geometry = app_mod.App._current_geometry
     _window_monitor = app_mod.App._window_monitor
@@ -847,6 +848,7 @@ def test_the_area_dialog_shows_the_page_panel_found_inside_the_area_dashed(hidde
 # ------------------------------------------------------------------ the canvas
 class Empty:
     _redisplay = app_mod.App._redisplay
+    _status_follows_page = app_mod.App._status_follows_page
 
     def __init__(self, root):
         self.canvas = _sized(ImageCanvas(root))

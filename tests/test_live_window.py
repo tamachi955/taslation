@@ -79,6 +79,7 @@ class Window(BlackViewerMixin):
     _summary = staticmethod(app_mod.App._summary)
     _page_line = app_mod.App._page_line
     _redisplay = app_mod.App._redisplay
+    _status_follows_page = app_mod.App._status_follows_page
     _picture = app_mod.App._picture
     _overlay_items = app_mod.App._overlay_items
     _page_regions = app_mod.App._page_regions
@@ -100,6 +101,8 @@ class Window(BlackViewerMixin):
     _viewer_shows_book = app_mod.App._viewer_shows_book
     _say_waiting = app_mod.App._say_waiting
     _normal_status = app_mod.App._normal_status
+    _page_status = app_mod.App._page_status
+    _job_line = app_mod.App._job_line
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
     _covers_viewer = app_mod.App._covers_viewer
@@ -402,6 +405,78 @@ def test_the_status_bar_names_the_stage_in_the_windows_language(hidden_root, vie
         assert w.status_var.get() == "Something new..."
     finally:
         i18n.set_language("en")
+
+
+class Said(Window):
+    """The window with its own status line (`status`), the reading window's note on the page included."""
+
+    status = app_mod.App.status
+
+
+def test_a_line_about_a_page_goes_as_soon_as_the_viewer_shows_another(hidden_root, viewer):
+    w = Said(hidden_root)
+    w._tick()
+    result = _translated(w._live)
+    w._handle_event("result", {"result": result})
+    summary = w.status_var.get()
+    assert summary and w._status_page is result.original
+    viewer.frame = _frame(toolbar=True)  # the same page, the viewer's toolbar over it: the line stays
+    w._tick()
+    assert w.status_var.get() == summary
+    viewer.frame = _frame(ink=(120, 80, 170, 130))  # turned: the line of what is on show, at once
+    w._tick()
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome" and w._status_page is None
+    w._handle_event("result", {"result": _translated(viewer.frame)})
+    viewer.frame = _frame(size=(260, 150))  # the viewer's window given another size: the page's line goes too
+    w._tick()
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"
+
+    w._tick()
+    frame = w._live
+    w._start_translate(frame, thumb=w._live_thumb)  # a page job at work: its line is about its page ...
+    w._handle_event("progress", {"text": "Reading text 3/7..."})
+    reading = w.status_var.get()
+    assert reading != "Viewer: Yomizuq - Google Chrome" and w._status_page is frame
+    w._show_live(_frame(ink=(10, 10, 50, 50), size=(260, 150)))  # ... and goes when the viewer is turned
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"  # (the job's look at the viewer's frame)
+    w._handle_event("progress", {"text": "Translating 1 bubble(s) with qwen3.5:4b..."})  # (the job before its cancel)
+    w._handle_event("slow", {"seconds": 30})
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"
+    w._cancel_why = "stop"
+    w._handle_event("page_cancelled", {})  # stopped while the viewer shows another page: nothing said of that one
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"
+    w._handle_event("translate_done", {})
+
+    viewer.frame = w._live
+    w._start_translate(w._live, thumb=w._live_thumb)
+    w._handle_event("page_cancelled", {})  # stopped on its page: said, and gone with the page
+    assert w.status_var.get().startswith("Stopped:")
+    w._handle_event("translate_done", {})
+    viewer.frame = _frame(ink=(60, 60, 90, 90), size=(260, 150))
+    w._tick()
+    assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"
+
+
+def test_in_the_reading_window_the_note_of_a_page_goes_with_its_page(hidden_root, viewer):
+    w = Said(hidden_root)
+    w._tick()
+    w.reading = True
+    w._handle_event("result", {"result": _translated(w._live)})
+    assert w.canvas.note == w.status_var.get() != ""  # the line on the page for a while
+    viewer.frame = _frame(ink=(120, 80, 170, 130))
+    w._tick()
+    assert w.canvas.note == "" and w.status_var.get() == "Viewer: Yomizuq - Google Chrome"  # no note of its own
+
+
+def test_a_whole_book_runs_line_is_about_the_run_whatever_the_viewer_shows(hidden_root, viewer):
+    w = Said(hidden_root)
+    w._tick()
+    w._start_translate(w._live, thumb=w._live_thumb)
+    w._batching = True
+    w._handle_event("progress", {"text": "Reading text 3/7..."})
+    line = w.status_var.get()
+    w._show_live(_frame(ink=(120, 80, 170, 130)))
+    assert w.status_var.get() == line and w._status_page is None
 
 
 def test_a_viewer_hidden_behind_taslation_keeps_the_last_good_frame(hidden_root, viewer):

@@ -702,6 +702,7 @@ class LiveViewMixin(BlackViewerMixin):
     # ------------------------------------------------------------------ the picture on the page
     def _redisplay(self) -> None:
         reading = self.reading
+        self._status_follows_page()  # (a line about the page before goes with it)
         self.canvas.enlarge = reading
         self.canvas.message = _("This viewer cannot be read behind the reading window; press Esc") if (
             reading and self._viewer_hidden) else ""
@@ -762,6 +763,20 @@ class LiveViewMixin(BlackViewerMixin):
                 return (live if live is not None else result.original), self._overlay_items(), []
             return self._lettered(result, live), self._overlay_items(), []
         return live, [], []
+
+    def _status_follows_page(self) -> None:
+        """The status line speaks of the page on show: a line about one page (`_page_status`, a page job's line,
+        `_job_line`) goes as soon as the viewer's latest frame (`_live`) is of another page (`_shows_page`: a soft
+        picture and its sharp one, the pointer over it, are the same page) - a turn, the viewer's window given another
+        size -, and the line of what is on show takes its place (`_normal_status`), with no note of its own on the
+        reading window's page, where the old line's note goes too. Asked whenever the page is drawn (`_redisplay`)."""
+        page = getattr(self, "_status_page", None)
+        if page is None or self._live is None or self._shows_page(self._live, page):
+            return
+        old, self._status_page = self.status_var.get(), None
+        self._normal_status()
+        if self.reading and self.canvas.note in (old, self.status_var.get()):
+            self.canvas.set_note("")
 
     def _result_on_show(self) -> bool:
         """Whether the page shows the last result (not a page filling in, nor the viewer showing another page)."""
@@ -2386,9 +2401,10 @@ class LiveViewMixin(BlackViewerMixin):
         b.note = line
         if line:
             self.canvas.set_note(line)
-            self.status(lambda: beside_line(state))
+            self._page_status(lambda: beside_line(state), self._live)
         elif state == "translated":
             self.say("This page is translated; the whole-book run goes on with the rest of the book.")
+            self._status_page = self._live  # (about the page on show: `_page_status`)
 
     def _beside_stage(self, data: dict[str, Any]) -> None:
         """A page of the run has its translation (``page_stage`` translate done or failed): when the viewer shows that

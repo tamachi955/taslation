@@ -185,6 +185,9 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _post = A._post
     say = A.say
     status = A.status
+    _page_status = A._page_status
+    _job_line = A._job_line
+    _status_follows_page = A._status_follows_page
     _summary = staticmethod(A._summary)
     _page_line = A._page_line
     _build_strips = A._build_strips

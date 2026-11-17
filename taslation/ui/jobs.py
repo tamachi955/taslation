@@ -924,8 +924,7 @@ class JobsMixin:
             self._progress = progress = data["text"]
             self._slow_before = None
             reading = getattr(self._scan, "phase", "") == "read"
-            self.status_var.set(progress_line(progress, reading))
-            self._status_render, self._status_key = (lambda: progress_line(progress, reading)), None
+            self._job_line(lambda: progress_line(progress, reading))
             if self._fill is not None and asks_model(progress):
                 self._fill.mark = self._fill.filled  # the badge counts this request's bubbles
             self._busy_shown = self._busy_shown or reads_page(self._progress)
@@ -939,8 +938,7 @@ class JobsMixin:
             if code_of(self._progress) != SLOW:
                 self._slow_before = self._progress
             self._progress = slow = Message(SLOW, seconds=round(float(data.get("seconds", 0))))
-            self.status_var.set(progress_line(slow))
-            self._status_render, self._status_key = (lambda: progress_line(slow)), None
+            self._job_line(lambda: progress_line(slow))
             self._busy_shown = True
             self.canvas.set_busy(self._busy_text)
         elif kind in ("regions", "read", "translated", "page"):
@@ -1032,7 +1030,8 @@ class JobsMixin:
             self._redisplay()
             self._show_notes()
             result = self.last_result
-            self.status(lambda: self._page_line(result) + self._font_note())
+            self._page_status(lambda: self._page_line(result) + self._font_note(), result.original)
+            self._status_follows_page()  # (a page read from a frame the viewer has turned from meanwhile)
             if order_gone:
                 self.say("Reading order cancelled: another page came.")
             if self._review is not None and self._review.winfo_exists():
@@ -1050,13 +1049,16 @@ class JobsMixin:
             job_news(self, data)
             if self._cancel_why != "page":
                 self.say("Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.")
+                self._status_page = self._job_frame  # (about that page: `_page_status`)
+                self._status_follows_page()
         elif kind == "asked":
             editor = self._editor
             if editor is not None and editor.winfo_exists():
                 editor.show_answers(data["mode"], data["texts"])
             if data["texts"] and self.last_result is not None:
                 result = self.last_result
-                self.status(lambda: self._page_line(result))
+                self._page_status(lambda: self._page_line(result), result.original)
+                self._status_follows_page()
             else:
                 self.say("The model gave no other translation.")
         elif kind == "propose":

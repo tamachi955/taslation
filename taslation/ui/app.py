@@ -298,6 +298,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._area_hinted = False
         self._status_render: Callable[[], str] | None = None  # the status line in the window's language, again
         self._status_key: str | None = None  # ... and its key, when it was said with `say`
+        self._status_page: Image.Image | None = None  # ... and the frame of the page it speaks of (`_page_status`)
         self._manual_area = False  # the reader set the chosen viewer's area: the page is looked for inside it only
         self._hand_area: tuple[int, int, int, int] | None = None  # ... that area, as the reader set it (margins)
         self._page_areas: dict[str, tuple[tuple[int, int], tuple[int, int, int, int] | None]] = {}  # viewer -> (size, page box)

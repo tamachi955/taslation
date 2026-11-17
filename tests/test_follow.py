@@ -266,6 +266,8 @@ class Window(BlackViewerMixin):
     _summary = staticmethod(app_mod.App._summary)
     _page_line = app_mod.App._page_line
     _normal_status = app_mod.App._normal_status
+    _page_status = app_mod.App._page_status
+    _job_line = app_mod.App._job_line
     _queue = app_mod.App._queue
     _run_queued = app_mod.App._run_queued
     _start_translate = app_mod.App._start_translate

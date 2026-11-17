@@ -66,6 +66,9 @@ class Window(BlackViewerMixin):
     _capture_frame = app_mod.App._capture_frame
     _set_viewer_hidden = app_mod.App._set_viewer_hidden
     _redisplay = app_mod.App._redisplay
+    _status_follows_page = app_mod.App._status_follows_page
+    _page_status = app_mod.App._page_status
+    _job_line = app_mod.App._job_line
     _overlay_items = app_mod.App._overlay_items
     _page_regions = app_mod.App._page_regions
     _guard_numbers = app_mod.App._guard_numbers
