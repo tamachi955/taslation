@@ -951,40 +951,64 @@ def real_processes(monkeypatch):
     for name, function in REAL.items():
         monkeypatch.setattr(ollama_start, name, function)
     monkeypatch.setattr(subprocess, "Popen", REAL_POPEN)
-    started: list[subprocess.Popen] = []
+    started: list[tuple[subprocess.Popen, int]] = []
 
     def stand_in(code: str) -> tuple[int, int]:
         proc = REAL_POPEN([BASE_PYTHON, "-I", "-S", "-c", code], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
-        started.append(proc)
         deadline = time.monotonic() + 10
         info = ollama_start.process_info(proc.pid)
         while info is None and time.monotonic() < deadline:
             time.sleep(0.05)
             info = ollama_start.process_info(proc.pid)
+        started.append((proc, info.started))
         return proc.pid, info.started
 
     yield stand_in
-    for proc in started:
+    for proc, began in started:  # (what a failed test left; *proc* holds the stand-in's number: none is another's)
         with contextlib.suppress(OSError):
             proc.kill()
+        for child, child_started in REAL["descendants"](proc.pid, began):
+            REAL["terminate"](child, child_started)
 
 
 BASE_PYTHON = getattr(sys, "_base_executable", "") or sys.executable  # (no virtual environment's process between)
-PARENT = ("import subprocess, sys, time\n"
+# Ollama's server as a stand-in: *handler* set first, then one child started (its model's process), then a wait in short
+# sleeps (a handler runs within one). Windows gives the stand-in's hidden console a host of its own (conhost.exe), a
+# child of the stand-in too, which shows first.
+PARENT = ("import signal, subprocess, sys, time\n"
+          "{handler}"
           "child = subprocess.Popen([sys.executable, '-I', '-S', '-c', 'import time; time.sleep(60)'])\n"
-          "{ignore}time.sleep(60)\n")
+          "while True:\n"
+          "    time.sleep(0.05)\n")
+IGNORE = "signal.signal(signal.SIGBREAK, signal.SIG_IGN)\n"  # a server that ignores the request to stop
+
+
+def _pythons(tree: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The stand-in's own children in *tree* (Pythons, as it is), not its console's host."""
+    python = os.path.normcase(os.path.abspath(BASE_PYTHON))
+    return [(pid, started) for pid, started in tree if (info := ollama_start.process_info(pid)) is not None
+            and os.path.normcase(os.path.abspath(info.exe)) == python]
 
 
 def _wait_for_child(pid: int, started: int) -> list[tuple[int, int]]:
+    """What stand-in *pid* started, once its child is among it: the host of its console shows first, and a stand-in
+    asked to stop before its child has started would end with none (its handler is set by then)."""
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         found = ollama_start.descendants(pid, started)
-        if found:
+        if _pythons(found):
             return found
         time.sleep(0.05)
     return []
+
+
+def _left(pid: int, started: int, tree: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """What of stand-in *pid* still runs: itself, what *tree* listed, and what a look finds now (its number is held by
+    the fixture's Popen: what has it as its parent's is the stand-in's)."""
+    found = dict.fromkeys(tree + ollama_start.descendants(pid, started))
+    return [(p, s) for p, s in [(pid, started), *found] if ollama_start.same_process(p, s)]
 
 
 @windows_only
@@ -1001,30 +1025,26 @@ def test_this_process_is_known_by_its_program_and_start_time(real_processes):
 
 @windows_only
 def test_a_server_asked_to_stop_ends_with_its_children(real_processes):
-    pid, started = real_processes(PARENT.format(ignore=""))
-    children = _wait_for_child(pid, started)
-    assert len(children) == 1
+    pid, started = real_processes(PARENT.format(handler=""))
+    tree = _wait_for_child(pid, started)
+    assert len(_pythons(tree)) == 1  # its child (beside its console's host)
     began = time.monotonic()
     assert ollama_start.stop_server(pid, started)
     took = time.monotonic() - began
-    assert ollama_start.process_info(pid) is None
-    assert all(not ollama_start.same_process(c, s) for c, s in children)
+    assert _left(pid, started, tree) == []  # the moment it returns
     assert took < 3.0, took
 
 
 @windows_only
 def test_a_server_that_ignores_the_request_is_ended_within_the_bound(real_processes, monkeypatch):
     monkeypatch.setattr(ollama_start, "STOP_WAIT_S", 0.5)
-    ignore = "import signal; signal.signal(signal.SIGBREAK, signal.SIG_IGN)\n"
-    pid, started = real_processes(PARENT.format(ignore=ignore))
-    children = _wait_for_child(pid, started)
-    assert len(children) == 1
-    time.sleep(0.3)  # (the handler is set)
+    pid, started = real_processes(PARENT.format(handler=IGNORE))
+    tree = _wait_for_child(pid, started)
+    assert len(_pythons(tree)) == 1
     began = time.monotonic()
     assert ollama_start.stop_server(pid, started)
     took = time.monotonic() - began
-    assert ollama_start.process_info(pid) is None
-    assert all(not ollama_start.same_process(c, s) for c, s in children)
+    assert _left(pid, started, tree) == []
     assert 0.4 < took < 0.5 + ollama_start.HELPER_TIMEOUT_S + ollama_start.KILL_WAIT_S, took
 
 
