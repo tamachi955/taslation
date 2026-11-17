@@ -1791,7 +1791,9 @@ class Pipeline:
                 events: EventFn | None = None, cancel: threading.Event | None = None,
                 on_slow: SlowFn | None = None, reuse: bool = True, timed: bool = True) -> PageResult:
         """Translate one capture. Every text region found goes to a page unit (`unit_for`), a region below or beside
-        a unit that stops short of its page too; only what lies outside the capture area is left out. With
+        a unit that stops short of its page too; only what lies outside the capture area is left out. A unit the
+        cache does not hold as it is found now is looked for as the capture reads at another window size first
+        (`_resolve`): a page translated at one size is drawn from the cache at another. With
         *complete* (translator mode), a cached page is also completed: live text regions the cache has no bubble
         for are read, translated and added to it; so is a cached page marked `CachedPage.incomplete`, in any mode and
         at each reading until the translation that is missing comes. What was translated is kept whatever else failed,
@@ -1819,6 +1821,8 @@ class Pipeline:
         fill = PageFill(self, rgb, events) if events is not None else None
 
         units = self.units_of(rgb)  # (a spread: the page read first first)
+        if use_cache and self.cache is not None:
+            units = self._resolve(rgb, units)  # (a page cached as it was read at another window size: read so again)
         result.fingerprints = [u.fingerprint for u in units]
         result.units = list(units)
         timer.lap("fingerprint")
@@ -2221,6 +2225,39 @@ class Pipeline:
                 taken.add(best)
                 held.append(cb)
         return held
+
+    def _resolve(self, rgb: np.ndarray, units: list[fp.PageUnit]) -> list[fp.PageUnit]:
+        """*units* (the capture's, as `units_of` finds them), each one the cache does not hold replaced by its
+        counterpart in another reading of the capture (`fingerprint.readings`, the first that the cache holds within
+        ``fingerprint_max_distance``, as strict as any lookup): the page as it was read at another window size, whose
+        content box came out otherwise there. The counterpart keeps the unit's place (its index) and brings its own
+        box - the one the cached page's bubbles are placed by - and fingerprint, which finds the cached entry from then
+        on (the lookups, a reader's corrections, `result.units`); nothing is stored or re-keyed. A unit a reading
+        does not have (no box of it overlapping the unit's by `RESOLVE_IOU`), and the units of an empty cache, stay as
+        they are; the readings stop once every unit is found. Pages another process saved meanwhile are picked up
+        first (`BookCache.refresh`)."""
+        assert self.cache is not None
+        s = self.settings
+
+        def held(unit: fp.PageUnit) -> bool:
+            assert self.cache is not None
+            found = self.cache.lookup(unit.fingerprint, unit.aspect, s.fingerprint_max_distance, self.last_seq)
+            return found is not None
+
+        missed = [u for u in units if not held(u)]
+        if missed and self.cache.refresh():
+            missed = [u for u in missed if not held(u)]
+        if not missed or not len(self.cache):
+            return units
+        found: dict[int, fp.PageUnit] = {}
+        for reading in fp.readings(rgb, s.margins, self.rtl):
+            for unit in missed:
+                other = None if unit.index in found else _counterpart(unit, reading)
+                if other is not None and other.fingerprint != unit.fingerprint and held(other):
+                    found[unit.index] = fp.PageUnit(other.box, other.fingerprint, unit.index)
+            if len(found) == len(missed):
+                break
+        return [found.get(u.index, u) for u in units]
 
     def _lookup(self, unit: fp.PageUnit,
                 before: Callable[[], list[fp.PageUnit]] | None = None) -> tuple[CachedPage, int] | None:
@@ -4233,6 +4270,16 @@ def _units_before(rgb: np.ndarray, margins: tuple[int, int, int, int]) -> Callab
     """The units of the capture *rgb* as analyze found them before 2026-10-31 (``grow=False``), made the first time
     they are asked for (a unit's lookup that missed: `Pipeline._lookup`) and kept for the capture's other units."""
     return functools.cache(lambda: fp.analyze(rgb, margins, grow=False))
+
+
+RESOLVE_IOU = 0.6  # a unit's counterpart in another reading of its capture overlaps it this much (`_counterpart`)
+
+
+def _counterpart(unit: fp.PageUnit, reading: Sequence[fp.PageUnit]) -> fp.PageUnit | None:
+    """The unit of *reading* (another reading of the capture of *unit*: `fingerprint.readings`) that is the same page
+    as *unit*: the one overlapping it most, by RESOLVE_IOU of their union at least; None when none does."""
+    best = max(reading, key=lambda u: box_iou(u.box, unit.box), default=None)
+    return best if best is not None and box_iou(best.box, unit.box) >= RESOLVE_IOU else None
 
 
 def _inside_unit(old: Box, unit: Box) -> bool:

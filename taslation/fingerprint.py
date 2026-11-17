@@ -11,6 +11,7 @@ copy of the book: without the real page in the viewer there is nothing to show.
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -205,8 +206,44 @@ def _kept_apart(integral: np.ndarray, box: Box, blob: Box, vertical: bool, gap: 
     return bool((empty[need:] - empty[:-need] == need).any())
 
 
+@dataclass(frozen=True)
+class Nudge:
+    """One pixel of ink more (*by* 1) or less (-1) that the rows or columns at one edge of a content box need to count
+    as ink, as the page drawn at another scale may need it (`readings`): *where* is "box" (the capture's content box),
+    "right" or "left" (a spread's page, `split_spread`) or "gutter" (the gutter's columns); *side* is the edge, 0 to 3
+    for left, top, right and bottom (-1 for the gutter)."""
+
+    where: str
+    side: int
+    by: int
+
+    def at(self, where: str) -> tuple[int, int, int, int]:
+        """The pixels each edge of the content box *where* needs besides the threshold (left, top, right, bottom)."""
+        out = [0, 0, 0, 0]
+        if where == self.where and self.side >= 0:
+            out[self.side] = self.by
+        return out[0], out[1], out[2], out[3]
+
+
+NO_SLACK = (0, 0, 0, 0)
+
+
+def _ink_box(rows: np.ndarray, cols: np.ndarray, rneed: float, cneed: float,
+             slack: tuple[int, ...]) -> Box | None:
+    """The extent of the ink on a paper whose rows and columns hold *rows* and *cols* dark pixels: from the first to
+    the last column (row) with *cneed* (*rneed*) of them, each edge needing its *slack* (left, top, right, bottom)
+    besides. None when no column or row has that many (or the edges cross)."""
+    left, right = np.flatnonzero(cols >= cneed + slack[0]), np.flatnonzero(cols >= cneed + slack[2])
+    top, bottom = np.flatnonzero(rows >= rneed + slack[1]), np.flatnonzero(rows >= rneed + slack[3])
+    if not (left.size and right.size and top.size and bottom.size):
+        return None
+    box = (int(left[0]), int(top[0]), int(right[-1]) + 1, int(bottom[-1]) + 1)
+    return box if box[0] < box[2] and box[1] < box[3] else None
+
+
 def content_box(gray: np.ndarray, bright_threshold: int = 200, ink_threshold: int = 120,
-                grow: bool = True) -> Box | None:
+                grow: bool = True, slack: tuple[int, ...] = NO_SLACK,
+                moved: list[tuple[int, int]] | None = None) -> Box | None:
     """Bounding box of the page content inside a capture.
 
     First the paper is located: on a dark viewer background it is the union of
@@ -215,6 +252,9 @@ def content_box(gray: np.ndarray, bright_threshold: int = 200, ink_threshold: in
     buttons); on a bright background it is where bright rows and columns are.
     Then the ink inside the paper gives the extent of the artwork. Coverage
     thresholds keep stray pixels from moving the box. *grow*: `page_box`'s.
+    *slack*: the dark pixels each edge's rows or columns need besides the
+    threshold (`Nudge`); *moved* gets the (edge, pixel) whose one pixel more or
+    less would move that edge (`readings`).
     """
     h, w = gray.shape
     if h < 8 or w < 8:
@@ -231,33 +271,26 @@ def content_box(gray: np.ndarray, bright_threshold: int = 200, ink_threshold: in
     paper = gray[py0:py1, px0:px1]
     ph, pw = paper.shape
     ink = paper < ink_threshold
-    irows = _span(_counts(ink, 1) >= max(2, 0.003 * pw))
-    icols = _span(_counts(ink, 0) >= max(2, 0.003 * ph))
-    if irows is None or icols is None:
+    rcounts, ccounts = _counts(ink, 1), _counts(ink, 0)
+    rneed, cneed = max(2, 0.003 * pw), max(2, 0.003 * ph)
+    box = _ink_box(rcounts, ccounts, rneed, cneed, slack)
+    if box is None:
         return None  # blank page: nothing to read, nothing to fingerprint
-    return (px0 + icols[0], py0 + irows[0], px0 + icols[1], py0 + irows[1])
+    if moved is not None:
+        for side in range(4):
+            for by in (1, -1):
+                nudged = list(slack)
+                nudged[side] += by
+                other = _ink_box(rcounts, ccounts, rneed, cneed, nudged)
+                if other is not None and other[side] != box[side]:
+                    moved.append((side, by))
+    return (px0 + box[0], py0 + box[1], px0 + box[2], py0 + box[3])
 
 
-def split_spread(gray: np.ndarray, box: Box, grow: bool = True, rtl: bool = True) -> list[Box]:
-    """Split a two-page spread at the gutter between the pages. The page read first comes first: the right page,
-    the left one without *rtl* (a book read left to right). Only the order follows *rtl*: the boxes, and so the
-    fingerprints, are the same either way.
-
-    A gutter is a run of columns near the middle that carries no ink (white gap)
-    or is perfectly uniform (viewer background). A false split on a single page
-    is harmless: both the batch pass and the reading pass apply the same rule,
-    so fingerprints still line up. *grow*: `page_box`'s, for each page's box.
-    """
-    x0, y0, x1, y1 = box
-    crop = gray[y0:y1, x0:x1]
-    h, w = crop.shape
-    if w < 64 or h < 64:
-        return [box]
-    lo, hi = int(w * 0.35), int(w * 0.65)
-    band = crop[:, lo:hi]
-    ink_free = _counts(band < 120, 0) <= max(1, 0.002 * h)
-    uniform = band.std(axis=0) < 4.0
-    candidate = ink_free | uniform
+def _gutter(candidate: np.ndarray, lo: int, w: int, h: int) -> tuple[int, int] | None:
+    """Where a spread of *w* x *h* splits (its columns), from the columns of its middle band from column *lo* on that
+    may be the gutter (*candidate*): the longest run of them, at least `split_spread`'s gap wide, else the middle of a
+    landscape unit; None for a single page."""
     best: tuple[int, int] | None = None
     start = None
     for i, flag in enumerate(list(candidate) + [False]):
@@ -271,19 +304,58 @@ def split_spread(gray: np.ndarray, box: Box, grow: bool = True, rtl: bool = True
     min_gap = max(3, int(0.006 * w))
     if best is None or (best[1] - best[0]) < min_gap:
         if w / h < 1.25:
-            return [box]
+            return None
         # A landscape unit without a visible gutter is a spread whose pages touch:
         # split it in the middle.
-        gx0 = gx1 = w // 2
-    else:
-        gx0, gx1 = lo + best[0], lo + best[1]
+        return w // 2, w // 2
+    return lo + best[0], lo + best[1]
+
+
+def split_spread(gray: np.ndarray, box: Box, grow: bool = True, rtl: bool = True, nudge: Nudge | None = None,
+                 moved: list[Nudge] | None = None) -> list[Box]:
+    """Split a two-page spread at the gutter between the pages. The page read first comes first: the right page,
+    the left one without *rtl* (a book read left to right). Only the order follows *rtl*: the boxes, and so the
+    fingerprints, are the same either way.
+
+    A gutter is a run of columns near the middle that carries no ink (white gap)
+    or is perfectly uniform (viewer background). A false split on a single page
+    is harmless: both the batch pass and the reading pass apply the same rule,
+    so fingerprints still line up. *grow*: `page_box`'s, for each page's box.
+    *nudge*: the gutter's columns, or an edge of a page's box, read with a pixel
+    of ink more or less (`Nudge`); *moved* gets the nudges that would move the
+    gutter or an edge of a page's box (`readings`).
+    """
+    x0, y0, x1, y1 = box
+    crop = gray[y0:y1, x0:x1]
+    h, w = crop.shape
+    if w < 64 or h < 64:
+        return [box]
+    lo, hi = int(w * 0.35), int(w * 0.65)
+    band = crop[:, lo:hi]
+    counts = _counts(band < 120, 0)
+    free = max(1, 0.002 * h) + (nudge.by if nudge is not None and nudge.where == "gutter" else 0)
+    uniform = band.std(axis=0) < 4.0
+    gutter = _gutter((counts <= free) | uniform, lo, w, h)
+    if moved is not None:
+        moved.extend(Nudge("gutter", -1, by) for by in (1, -1)
+                     if _gutter((counts <= free + by) | uniform, lo, w, h) != gutter)
+    if gutter is None:
+        return [box]
+    gx0, gx1 = gutter
     left_part = crop[:, :gx0]
     right_part = crop[:, gx1:]
     if (np.count_nonzero(left_part < 120) < 0.002 * left_part.size
             or np.count_nonzero(right_part < 120) < 0.002 * right_part.size):
         return [box]
-    right_box = content_box(right_part, grow=grow) or (0, 0, right_part.shape[1], right_part.shape[0])
-    left_box = content_box(left_part, grow=grow) or (0, 0, left_part.shape[1], left_part.shape[0])
+    edges: dict[str, list[tuple[int, int]]] = {"right": [], "left": []}
+    right_box = content_box(right_part, grow=grow, slack=nudge.at("right") if nudge is not None else NO_SLACK,
+                            moved=edges["right"] if moved is not None else None) \
+        or (0, 0, right_part.shape[1], right_part.shape[0])
+    left_box = content_box(left_part, grow=grow, slack=nudge.at("left") if nudge is not None else NO_SLACK,
+                           moved=edges["left"] if moved is not None else None) \
+        or (0, 0, left_part.shape[1], left_part.shape[0])
+    if moved is not None:
+        moved.extend(Nudge(where, side, by) for where, found in edges.items() for side, by in found)
     right = (x0 + gx1 + right_box[0], y0 + right_box[1], x0 + gx1 + right_box[2], y0 + right_box[3])
     left = (x0 + left_box[0], y0 + left_box[1], x0 + left_box[2], y0 + left_box[3])
     return [right, left] if rtl else [left, right]
@@ -398,17 +470,21 @@ def analyze(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0), 
 
 
 def _analyze(rgb: np.ndarray, margins: tuple[int, int, int, int], grow: bool, known: dict[Box, str] | None,
-             rtl: bool) -> list[PageUnit]:
-    """`analyze`, computed."""
+             rtl: bool, nudge: Nudge | None = None, moved: list[Nudge] | None = None) -> list[PageUnit]:
+    """`analyze`, computed: with *nudge*, one edge read with a pixel of ink more or less; *moved* gets the nudges
+    that would move an edge (`readings`)."""
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
     x0, y0, x1, y1 = capture_area(gray.shape[1], gray.shape[0], margins)
     sub = gray[y0:y1, x0:x1]
-    box = content_box(sub, grow=grow)
+    edges: list[tuple[int, int]] | None = [] if moved is not None else None
+    box = content_box(sub, grow=grow, slack=nudge.at("box") if nudge is not None else NO_SLACK, moved=edges)
     if box is None:
         return []
+    if moved is not None and edges:
+        moved.extend(Nudge("box", side, by) for side, by in edges)
     box = (box[0] + x0, box[1] + y0, box[2] + x0, box[3] + y0)
     units: list[PageUnit] = []
-    for idx, b in enumerate(split_spread(gray, box, grow=grow, rtl=rtl)):
+    for idx, b in enumerate(split_spread(gray, box, grow=grow, rtl=rtl, nudge=nudge, moved=moved)):
         bx0, by0, bx1, by1 = b
         if bx1 - bx0 < 16 or by1 - by0 < 16:
             continue
@@ -419,3 +495,105 @@ def _analyze(rgb: np.ndarray, margins: tuple[int, int, int, int], grow: bool, kn
                 known[b] = fingerprint
         units.append(PageUnit(box=b, fingerprint=fingerprint, index=idx))
     return units
+
+
+# The pixels of the viewer's ground around the paper that `readings` reads a capture with, besides none: a sliver on
+# its left and right, which a page whose edges are black art takes for paper, and enough on every side for
+# `background_level`'s ring to see the ground.
+SLIVER = 2
+GROUND = 8
+CUTS = (0.012, 0.024, 0.036, 0.048)  # the shares of its width `readings` cuts a page alone by, at either side
+
+
+def _trimmed(gray: np.ndarray, box: Box, index: int) -> PageUnit | None:
+    """The page unit *index* of the part *box* of a capture, trimmed to its ink as `split_spread` trims a spread's
+    page (the part as it is when it holds none); None when it is under 16 pixels either way."""
+    x0, y0, x1, y1 = box
+    if x1 - x0 < 16 or y1 - y0 < 16:
+        return None
+    b = content_box(gray[y0:y1, x0:x1]) or (0, 0, x1 - x0, y1 - y0)
+    b = (x0 + b[0], y0 + b[1], x0 + b[2], y0 + b[3])
+    if b[2] - b[0] < 16 or b[3] - b[1] < 16:
+        return None
+    return PageUnit(box=b, fingerprint=compute_fingerprint(gray[b[1]:b[3], b[0]:b[2]]), index=index)
+
+
+def _halves(gray: np.ndarray, margins: tuple[int, int, int, int], paper: Box, rtl: bool) -> list[PageUnit]:
+    """The spread in the capture area *margins* split where its two pages meet, the middle of its *paper*, rather
+    than at the middle of its content box, each part trimmed to its ink: its pages much as each is read alone. Empty
+    when that middle does not split the content box."""
+    x0, y0, x1, y1 = capture_area(gray.shape[1], gray.shape[0], margins)
+    box = content_box(gray[y0:y1, x0:x1])
+    if box is None:
+        return []
+    bx0, by0, bx1, by1 = box[0] + x0, box[1] + y0, box[2] + x0, box[3] + y0
+    mid = (paper[0] + paper[2]) // 2
+    if not bx0 < mid < bx1:
+        return []
+    parts = [(mid, by0, bx1, by1), (bx0, by0, mid, by1)]  # the right page first
+    units = []
+    for idx, part in enumerate(parts if rtl else parts[::-1]):
+        unit = _trimmed(gray, part, idx)
+        if unit is None:
+            return []
+        units.append(unit)
+    return units
+
+
+def readings(rgb: np.ndarray, margins: tuple[int, int, int, int] = (0, 0, 0, 0),
+             rtl: bool = True) -> Iterator[list[PageUnit]]:
+    """The page units of the capture *rgb* as `analyze` finds them where the same page is drawn at another window
+    size, each reading computed only once it is asked for: a page the cache holds as it was read at another size is
+    found by one of them (`Pipeline._resolve`). Three things that decide a page's content box are not the same at
+    every size, so neither is its fingerprint:
+
+    - the capture area *margins* is joined from the page panels of all the pages seen at the size (`ui.live`'s
+      `_find_page`): one wider by a few pixels than this page's paper takes in a sliver of the viewer's dark ground,
+      and on a page whose edges are black art the sliver is read as paper and ink (`background_level` takes the art
+      for the background) - the content box runs out to the capture area's sides, and a spread is split elsewhere.
+      At another size the area may fit the paper, or run well past it - and a page whose edges are black art fit
+      exactly loses that art to the background too. So the capture is read in the area fit to its paper
+      (`paper_box`: in the capture area where it has ground beside the paper, else across the capture's width),
+      with SLIVER pixels of ground beside the
+      paper on its left and right (pages and spreads are centred; their widths differ), and with GROUND pixels of
+      ground all round;
+    - a line one or two pixels thick (a panel's frame across a page's margin, a page's border) that decides where
+      the ink ends, or whether a gutter runs, is drawn a pixel thicker or thinner at another scale: each edge whose
+      rows or columns one pixel more or less of ink would move - of the content box, of each page of a spread, the
+      gutter - is read so, one at a time (`Nudge`);
+    - a window too narrow for a spread shows its pages one at a time, and a spread whose pages touch is split at the
+      middle of its content box (`split_spread`), which lies off the middle of its paper - where the pages meet - when
+      one page's ink keeps farther from its outer edge than the other's: each page of the spread is cut there by a
+      few hundredths of its width, and the page alone is not. So a spread is also read split at its paper's middle
+      (`_halves`), and a page alone cut at either side by each of the CUTS of its width (that finds the page the
+      split cut short; the other page took in a strip of its neighbour, which the page alone does not have).
+
+    None of the readings is kept by `analyze`'s shared analyses."""
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY) if rgb.ndim == 3 else rgb
+    h, w = gray.shape
+    x0, _y0, x1, _y1 = capture_area(w, h, margins)
+    paper = paper_box(gray, margins)
+    if paper is None or paper[0] <= x0 or paper[2] >= x1:  # no ground seen beside it: the capture's width tells
+        paper = paper_box(gray, (0, margins[1], 0, margins[3]))
+    if paper is not None:
+        px0, py0, px1, py1 = paper
+        for side, top in ((0, 0), (SLIVER, 0), (GROUND, GROUND)):
+            area = (max(0, px0 - side), max(0, py0 - top), max(0, w - px1 - side), max(0, h - py1 - top))
+            if area != tuple(margins):
+                yield _analyze(gray, area, True, None, rtl)
+    moved: list[Nudge] = []
+    units = _analyze(gray, margins, True, None, rtl, moved=moved)
+    for nudge in moved:
+        yield _analyze(gray, margins, True, None, rtl, nudge)
+    if len(units) == 2 and paper is not None:
+        halves = _halves(gray, margins, paper, rtl)
+        if halves:
+            yield halves
+    elif len(units) == 1:
+        x0, y0, x1, y1 = units[0].box
+        for share in CUTS:
+            cut = int(round(share * (x1 - x0)))
+            for box in ((x0 + cut, y0, x1, y1), (x0, y0, x1 - cut, y1)):
+                unit = _trimmed(gray, box, units[0].index)
+                if unit is not None:
+                    yield [unit]

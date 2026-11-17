@@ -613,6 +613,8 @@ Check the facts first. A series sheet written from the model's own guesses was n
 
 A page fingerprint is a 320-bit perceptual hash of the page's content area (a 16x16 gradient hash and an 8x8 brightness hash of the shrunken page),
 not a hash of a file. The same page captured at another size or zoom gives nearly the same bits, and a difference of up to 36 bits counts as "the same page".
+At another window size the content area itself can come out otherwise (a page whose edges are black art, read with a sliver of the viewer's background beside it; a line a pixel thick at the page's edge; a page shown alone in a window too narrow for its spread).
+So a page the cache does not hold as it is read now is also looked for as it is read at other sizes, within the same 36 bits: a page translated at one window size is shown from the cache at another without asking the model again.
 The page cannot be rebuilt from its fingerprint. Similar pages (blank pages, an advertisement that recurs) are told apart by their aspect ratio and their place in the order.
 
 ### Reading in a browser: give the book's tab its own window

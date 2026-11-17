@@ -74,6 +74,7 @@ class Job:
 
     def __init__(self, p: Pipeline, image, gate: PageGate | None, cancel: threading.Event | None = None, **kwargs):
         self.p, self.image, self.gate = p, image, gate
+        self.read_before = p.ocr.calls  # (the regions a page before read: none of them is this job's)
         self.cancel = cancel or threading.Event()
         self.result = self.error = self.kept = self.work = None
         self.processed = threading.Event()
@@ -97,13 +98,15 @@ class Job:
 
 
 def _read_and_waiting(p: Pipeline, job: Job, seconds=20.0) -> None:
-    """Until *job* has read its page and waits at the gate (the OCR read every line, nothing more comes)."""
+    """Until *job* has read its page and waits at the gate (the OCR read every line, nothing more comes): once its
+    own reading has begun, whatever the page takes before the OCR (its fingerprints looked for in the cache, as it
+    reads at other window sizes too, and its text regions found)."""
     end = time.monotonic() + seconds
     calls = -1
     while time.monotonic() < end:
         if job.processed.is_set():
             return
-        if p.ocr.calls and p.ocr.calls == calls:
+        if p.ocr.calls > job.read_before and p.ocr.calls == calls:
             return
         calls = p.ocr.calls
         time.sleep(0.25)
