@@ -482,6 +482,24 @@ def place_own(hwnd: int, rect: tuple[int, int, int, int], top: bool = False) -> 
         user32.SetWindowPos(hwnd, 0, x, y, w, h, flags)
 
 
+def placed_view(browser: Any, ready: dict[str, str], since: int, seconds: float = 3.0, quiet: float = 0.5
+                ) -> dict[str, str]:
+    """The stand-in's view once its window is in place: *ready* with the size it said last after *since* (a browser
+    drawing at another scale takes the size it starts at in its own scaled pixels, so its window starts at another
+    size than the place it is given), once no other size has come for *quiet* seconds (*seconds* at most)."""
+    view, seen, calm = dict(ready), since, time.monotonic()
+    end = calm + seconds
+    while time.monotonic() < end and time.monotonic() - calm < quiet:
+        said = browser.said(seen)
+        seen += len(said)
+        for _t, event in said:
+            if event.get("ev") == "size":
+                view.update({k: v for k, v in event.items() if k != "ev"})
+                calm = time.monotonic()
+        time.sleep(0.05)
+    return view
+
+
 # ---------------------------------------------------------------------------------------------------- the notes
 class Notes:
     """What the hooks see, as numbers and codes (`standin_viewer.Shown` of every picture): the page jobs, the
@@ -2051,7 +2069,9 @@ def run(args: argparse.Namespace) -> int:
     try:
         hwnd = browser.wait_window()
         ready = browser.wait_event("ready", 30)
+        since = len(browser.said())
         place_own(hwnd, standin_rect, top=True)
+        ready = placed_view(browser, ready, since)
         report["run"] = run_app(args, report, browser, hwnd, ready, segments, out, standin_dir, url, app_rect,
                                 narrow_rect, mode)
     except Exception as e:  # noqa: BLE001 - said (its type and where, no value), then everything is closed

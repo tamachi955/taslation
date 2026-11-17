@@ -297,3 +297,16 @@ def test_a_black_frame_and_a_frame_without_code():
                                       31 + sv.CODE_Y + sv.CELL - 1), fill=(255, 255, 255))
     assert sv.decode(broken, 31).known is False  # one cell wrong: the check says so
     assert sv.decode(None, 31).state() == "unknown"
+
+
+def test_the_view_is_the_one_the_stand_in_says_once_its_window_is_in_place():
+    """A browser at another scale starts its window at the size given in its own pixels: the view the tool reads the
+    capture by is the size the page said last once the window is in place, else the one it was ready with."""
+    ready = {"ev": "ready", "w": "2856", "h": "1446", "vw": "1904", "vh": "964", "dpr": "1.5", "count": "70"}
+    events = [(0.0, ready), (0.1, {"ev": "draw", "state": "sharp"})]
+    browser = SimpleNamespace(said=lambda since=0: events[since:])
+    assert standin_e2e.placed_view(browser, ready, len(events), seconds=0.3, quiet=0.1) == ready  # (no change)
+    events.append((0.2, {"ev": "size", "w": "2847", "h": "1485", "vw": "1898", "vh": "990", "dpr": "1.5"}))
+    view = standin_e2e.placed_view(browser, ready, 2, seconds=0.5, quiet=0.1)
+    assert view["vh"] == "990" and view["w"] == "2847" and view["count"] == "70" and view["ev"] == "ready"
+

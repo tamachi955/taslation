@@ -117,7 +117,7 @@ rows' languages.
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
-  profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 7
+  profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 6
   minutes): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and spinners; e,
   turning back to cached pages; r, reading mode, entered and left by F11's own handler; o, over the book (the stand-in
   made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Reading mode
