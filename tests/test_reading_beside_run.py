@@ -237,6 +237,35 @@ def test_while_the_run_translates_a_page_turned_in_the_viewer_shows_from_the_cac
     assert sent(v) == ["Left"]
 
 
+def test_the_busy_badge_tells_of_the_runs_page_and_goes_once_the_reader_turns_beside_the_run(setup):
+    """The badge on the page area is the run's progress: on the run's page being translated, gone as soon as the reader
+    turns to a page of their own beside the run (the band says the run's progress), back only while the viewer shows
+    the very page being translated."""
+    v = setup.viewer
+    page1 = v.frames[0][1]
+    w, run = _beside_window(setup, owner="viewer", auto=False)
+    w._on_translation_page = lambda data: setattr(w, "_run_view", RunPage(data["seq"], data["frame"], data["image"]))
+    setup.clock.run(5)  # (the strip's part of it: tests/test_page_strip.py)
+    w._run_view = RunPage(4, page1, lettered(page1))
+    run.following, run.viewer_free = False, True
+    setup.clock.run(1)
+    w._handle_event("progress", {"text": "Translating 1 bubble(s) with qwen3.5:4b..."})
+    assert w.canvas.badge  # on the run's page being translated
+    page3 = _page(3)
+    run.answers[id(page3)] = ViewerPage("waiting", seq=3)
+    v.frames.append((setup.clock.now + 0.2, page3))  # the reader turns to a page the run has not come to
+    setup.clock.run(3)
+    pump(w)
+    assert w._picture()[0] is page3 and w.canvas.note == live.beside_line("waiting")
+    assert not w.canvas.badge  # no word of the run's work on a page it does not work on
+    w._handle_event("progress", {"text": "Translating 2 bubble(s) with qwen3.5:4b..."})
+    assert not w.canvas.badge and w._busy_shown  # (the run's progress goes on, off the page)
+    w._handle_event("translation_page", {"seq": 7, "image": lettered(page1), "frame": page1})  # another page of it
+    assert not w.canvas.badge and w._picture()[0] is page3
+    w._handle_event("translation_page", {"seq": 3, "image": lettered(page3), "frame": page3})  # the run comes to it
+    assert w.canvas.badge  # its progress, on the very page the viewer shows
+
+
 def test_the_run_over_the_window_reads_as_ever(setup):
     v = setup.viewer
     w, run = _beside_window(setup, owner="viewer")

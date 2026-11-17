@@ -76,6 +76,8 @@ class Window(BlackViewerMixin):
     _set_busy = app_mod.App._set_busy
     _show_progress = app_mod.App._show_progress
     _busy_text = app_mod.App._busy_text
+    _badge_due = app_mod.App._badge_due
+    _show_badge = app_mod.App._show_badge
     _hide_busy = app_mod.App._hide_busy
     _summary = staticmethod(app_mod.App._summary)
     _page_line = app_mod.App._page_line

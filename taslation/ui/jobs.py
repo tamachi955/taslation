@@ -929,7 +929,7 @@ class JobsMixin:
                 self._fill.mark = self._fill.filled  # the badge counts this request's bubbles
             self._busy_shown = self._busy_shown or reads_page(self._progress)
             if self._busy_shown:
-                self.canvas.set_busy(self._busy_text)
+                self._show_badge()
         elif kind == "model_status":  # Ollama's model is being loaded
             self._model_status(data["message"])
         elif kind == "slow":  # the model has said nothing for a while: the badge says so, and that Stop cancels
@@ -1146,6 +1146,8 @@ class JobsMixin:
             held = getattr(self, "_beside_translation_page", None)  # ... until the reader reads beside the run
             if held is None or not held(data):
                 self._on_translation_page(data)
+                if self._busy_shown:  # (the badge with it, on the very page the viewer shows beside the run)
+                    self._show_badge()
         elif kind == "beside_page":  # the run's answer for the page the viewer shows while it translates
             shown = getattr(self, "_beside_shown", None)
             if shown is not None:

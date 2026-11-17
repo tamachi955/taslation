@@ -560,7 +560,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._set_busy(self.busy)
         self._sync_stop()
         if self._busy_shown:
-            self.canvas.set_busy(self._busy_text)
+            self._show_badge()
         if self._covered:  # the new canvas says it again
             self._covered = False
             self._set_covered(True)

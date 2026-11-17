@@ -208,6 +208,8 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _show_busy_signs = A._show_busy_signs
     _show_progress = A._show_progress
     _busy_text = A._busy_text
+    _badge_due = A._badge_due
+    _show_badge = A._show_badge
     _hide_busy = A._hide_busy
 
     def __init__(self, root, tmp_path):

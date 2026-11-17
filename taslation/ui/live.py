@@ -69,7 +69,8 @@ worker runs the run, and no request may compete with it - but to the run (`Batch
 window's own, `_ask_beside`): a page the cache holds is shown lettered from it with no model at all, laid over the
 viewer's frame while it shows that page, and any other says it is not translated yet (`beside_line`). The run's page
 being translated keeps the page area until the reader turns to another page (`Beside.reading`); then the viewer's
-page has it - the run's progress only while the viewer shows the very page being translated - until the run ends.
+page has it - the run's progress, and its busy badge, only while the viewer shows the very page being translated
+(`_badge_due`) - until the run ends.
 
 Windows tells who is in front and what happens to the viewer's window (`capture.WindowEvents`, whose notes the
 heartbeat takes in: `_beat`), and `follow_decision` decides what each heartbeat does."""
@@ -2373,7 +2374,8 @@ class LiveViewMixin(BlackViewerMixin):
             b.reading = True
         b.seq, b.state = None, ""
         self._beside_unsay(b)
-        end_follow(self, redisplay=False)  # (the run's page being translated, when it was on show)
+        end_follow(self, redisplay=False)  # (the run's page being translated, when it was on show ...)
+        self._show_badge()  # (... and the badge of its progress: `_badge_due`)
         self._redisplay()
         self._ask_beside(image)
         return True

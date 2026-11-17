@@ -22,6 +22,7 @@ from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner,
 from .constants import READER_AFTER_RUN, READING_NOTE_MS, READY, in_a_run
 from .constants import APP_TITLE
 from .progress import busy_line, rendered
+from .strip import run_page_on_show
 
 BUSY_SIGNS_S = 0.3  # a job shows the busy title and bar after this long (a page from the cache is done before)
 
@@ -349,6 +350,19 @@ class StatusMixin:
         return busy_line(self._progress, time.monotonic() - self._busy_since,
                          fill.filled - fill.mark if fill is not None else 0,
                          reading=getattr(getattr(self, "_scan", None), "phase", "") == "read")
+
+    def _badge_due(self) -> bool:
+        """Whether the busy badge belongs on the page area: it tells of the page being worked on, so beside a
+        whole-book run that translates, once the reader has turned to a page of their own (`live.Beside.reading`), only
+        while the page area shows the run's page being translated (`strip.run_page_on_show`: the very page the viewer
+        shows). The run's progress is the band's then."""
+        beside = getattr(self, "_beside", None)
+        return beside is None or not beside.reading or run_page_on_show(self) is not None
+
+    def _show_badge(self) -> None:
+        """The busy badge on the page area while the busy band is on (`_busy_shown`) and it belongs there
+        (`_badge_due`)."""
+        self.canvas.set_busy(self._busy_text if self._busy_shown and self._badge_due() else None)
 
     def _hide_busy(self) -> None:
         self._busy_shown = False
