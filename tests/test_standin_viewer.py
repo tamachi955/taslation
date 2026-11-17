@@ -22,12 +22,13 @@ import standin_viewer as sv  # noqa: E402
 
 # ---------------------------------------------------------------------------------------------------- the script
 def test_script_round_trips():
-    text = "g1,m1,w1200,n,w2500-3500,p,j12,f,f700,s1500,e"
+    text = "g1,m1,w1200,n,w2500-3500,p,j12,f,f700,s1500,t700,b2,t,b,e"
     steps = sv.parse_script(text)
     assert sv.format_script(steps) == text
     assert sv.parse_script(sv.format_script(steps)) == steps
     assert steps[4] == sv.Step("w", 2500, 3500)
     assert steps[5] == sv.Step("p") and steps[6] == sv.Step("j", 12)
+    assert steps[10:14] == [sv.Step("t", 700), sv.Step("b", 2), sv.Step("t"), sv.Step("b")]
 
 
 @pytest.mark.parametrize("bad", ["x1", "w", "g", "j", "w9-3", "n5-6", "w-3", "ww1"])
@@ -44,8 +45,9 @@ def test_the_page_knows_every_step_the_script_has():
 
 def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     names = standin_e2e.wanted("all")
-    assert names == ["c", "a", "b", "d", "e", "f", "f2"]
-    segments, steps = standin_e2e.build_plan(names, standin_e2e.pages_needed(names))
+    assert names == ["c", "a", "b", "d", "e", "r", "o", "z", "w", "w2", "x", "f", "f2"]
+    count = standin_e2e.pages_needed(names)
+    segments, steps = standin_e2e.build_plan(names, count + 6, cancel_first=count, soft_ms=700)
     text = sv.format_script(steps)
     for s in segments:
         assert f"g{s.go},m{s.go}," in text
@@ -53,11 +55,53 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     turns = {s.name: s.screens for s in segments}
     assert turns["c"] == [(2, True), (4, True), (6, True)]
     assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
-    assert turns["f2"] == [(53, False), (54, False)]  # single pages once the window is narrow
+    assert turns["w2"][:2] == [(70, True), (68, True)]  # back to pages of the run, which read 64 to 72
+    # x: the screens of little text added after the others, soft long and half as sharp, then back where it was
+    assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (76, True)]
+    assert f"t700,b2,j{count},w5000," in text and ",t,b,j76,w4000," in text
+    assert turns["f2"] == [(81, False), (82, False)]  # single pages once the window is narrow
     assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
+    assert standin_e2e.wanted("w2") == standin_e2e.wanted("w") == ["w", "w2"]  # a run and the reading beside it
     with pytest.raises(SystemExit):
-        standin_e2e.wanted("a,z")
+        standin_e2e.wanted("a,q")
+
+
+def test_the_pages_of_little_text_come_from_the_annotation_counts_alone(tmp_path):
+    import json
+
+    dataset = tmp_path / "dataset"
+    pages = []
+    for series, counts in (("s1", [1, 5, 2]), ("s2", [0, 2, 1, 3, 1])):
+        folder = dataset / "images" / series / "ja"
+        folder.mkdir(parents=True)
+        for k, n in enumerate(counts):
+            (folder / f"{k:03d}.jpg").write_bytes(b"not read")
+            pages.append({"image_paths": {"ja": f"images/{series}/ja/{k:03d}.jpg"}, "text": [{}] * n})
+    (dataset / "annotation.json").write_text(json.dumps([{"book_title": "not read", "pages": pages}]),
+                                             encoding="utf-8")
+    taken = [dataset / "images" / "s2" / "ja" / "001.jpg"]
+    found = standin_e2e.little_text_pages(taken, 3, dataset)
+    # the last series first, in reading order; neither a page taken, nor one without text or with more than two lines
+    assert [p.relative_to(dataset).as_posix() for p in found] == [
+        "images/s2/ja/002.jpg", "images/s2/ja/004.jpg", "images/s1/ja/000.jpg"]
+    assert len(standin_e2e.little_text_pages([], 9, dataset)) == 5  # all there are
+    assert standin_e2e.little_text_pages([], 2, tmp_path / "none") == []
+
+
+def test_the_hot_keys_reach_no_system_and_a_press_is_taken_only_for_a_key_held():
+    notes = standin_e2e.Notes(31, 1.0)
+    keys = standin_e2e.HotKeys(notes)
+    assert keys.register("F5", 0x74) and keys.register("F11", 0x7A) and keys.registered == {"F5", "F11"}
+    keys.press("F11")
+    keys.press("Escape")  # (not held: the viewer's key)
+    assert keys.take() == ["F11"] and keys.take() == []
+    keys.unregister("F11")
+    keys.clear()
+    assert keys.registered == frozenset()
+    held = [h["held"] for h in notes.hotkeys if "held" in h]
+    assert held == [["F5"], ["F11", "F5"], ["F5"], []]
+    assert [(h["pressed"], h["taken"]) for h in notes.hotkeys if "pressed" in h] == [("F11", True), ("Escape", False)]
 
 
 def test_the_part_drawn_is_told_against_the_page_the_stand_in_drew():
@@ -180,6 +224,10 @@ def test_the_browser_command_keeps_its_own_profile_and_window():
     assert any(a.startswith("--user-data-dir=") and a.endswith("profile") for a in cmd)
     for flag in ("--no-first-run", "--disable-sync", "--disable-background-networking", "--window-size=1300,900"):
         assert flag in cmd
+    assert not any(a.startswith("--force-device-scale-factor") for a in cmd)
+    scaled = sv.browser_command(Path("C:/b/chrome.exe"), "file:///p.html", Path("C:/scratch/profile"),
+                                (0, 0, 1300, 900), 1.5)
+    assert "--force-device-scale-factor=1.5" in scaled and scaled[-1] == "--app=file:///p.html"
 
 
 # ---------------------------------------------------------------------------------------------------- the window

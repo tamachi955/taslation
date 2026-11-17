@@ -29,6 +29,8 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
   gN wait until the control file's "go" is N or more   wN wait N ms     wA-B wait A..B ms (seeded)
   n next screen    p previous screen    jN jump to page N (from 0)
   f flash black (flash_ms)    fN flash black N ms    sN spinner over the page N ms
+  tN the turns after drawn soft for N ms    t the soft time of the query again
+  bN the turns after drawn soft N times smaller    b the factor of the query again
   mN a mark (said in the log)    e the end
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
@@ -58,6 +60,7 @@ const cfg = {
   layout: query.get("layout") || "auto",  // "auto" (spreads while the window is wider than high), "spread", "single"
   script: hashed.get("s") || "",
 };
+const softQuery = [cfg.softMin, cfg.softMax], factorQuery = cfg.factor;  // (a script's "t" and "b" put them back)
 document.title = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
 
 // ------------------------------------------------------------------------------------------------ the log
@@ -327,7 +330,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfsme])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbme])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -345,6 +348,11 @@ async function run(steps) {
     else if (s.op === "j") turnTo(s.a || 0, "jump");
     else if (s.op === "f") flash(s.a === null ? cfg.flashMs : s.a);
     else if (s.op === "s") await spinner(s.a || 1000);
+    else if (s.op === "t") {
+      [cfg.softMin, cfg.softMax] = s.a === null ? softQuery : [s.a, s.a];
+      say("soft", "ms=" + cfg.softMin + "-" + cfg.softMax);
+    }
+    else if (s.op === "b") { cfg.factor = s.a === null ? factorQuery : Math.max(2, s.a); say("soft", "factor=" + cfg.factor); }
     else if (s.op === "m") say("mark", "id=" + s.a);
     else if (s.op === "e") break;
   }

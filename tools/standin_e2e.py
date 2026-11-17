@@ -2,8 +2,9 @@
 stand-in viewer (`tools/standin_viewer`), with no real book and no real viewer - a developer's debugging aid, never
 part of a release.
 
-    python tools/standin_e2e.py --out SCRATCH [--scenario all | a,b,c,d,e,f,f2] [--canned] [--browser auto|chrome|edge]
-                                [--seed 1] [--series 1] [--first 1] [--synthetic] [--front viewer|as-is]
+    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,o,z,w,x,f,f2] [--canned] [--scale 1.0]
+                                [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
+                                [--front viewer|as-is] [--cancel-soft-ms 700]
 
 What runs, all on this computer:
 
@@ -18,7 +19,8 @@ What runs, all on this computer:
 * TASlation's window in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: page by page, Auto
   on, the Reader role, early start and the load of the model at the start as the defaults have them), on a scratch
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
-  English; the reader's capture area 0,85,0,0 as on the owner's browser reader), with the real OCR models
+  English; the reader's capture area 0,85,0,0 as on the owner's browser reader, its top scaled with *--scale*),
+  with the real OCR models
   (TASLATION_MODELS_DIR) and the default translator through the Ollama on this computer (requests only: it is
   never started, stopped or set up here; what the window loaded it lets go of at its close, and the end checks
   /api/ps). *--canned* (or an Ollama that does not answer or lacks the model) answers from a small server of this
@@ -28,13 +30,32 @@ What runs, all on this computer:
   clicks refused outright): every function that captures, moves, raises or enlarges a window acts on the
   stand-in or this process's own windows, else the run stops; the window chosen is checked at every step
   (`standin_viewer.SelectionGuard`) and anything but the stand-in stops the run at once, nothing pressed.
-  The foreground is never changed: the window follows a viewer in front, which is the reader's case, and with
-  *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was).
+  This tool never changes the foreground: the window follows a viewer in front, which is the reader's case, and with
+  *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was) -
+  over the book (scenario o) it is told so whenever its own window is not in front, and it gives the stand-in the
+  foreground from its own window as that mode does. Its global hot keys are never registered with Windows: the
+  window holds them in this tool's `HotKeys`, which notes their names, and a hot key "pressed" is this tool's call
+  handed to the window as Windows hands one over (only for a key the window holds); no key reaches the system;
+* *--scale* other than 1: the stand-in's browser draws as on a display of that scale (``--force-device-scale-factor``,
+  its own window and the page's devicePixelRatio), TASlation's text size (`Settings.ui_scale`) is set to it and the
+  reader's capture area scaled with it; no setting of the system's is changed.
 
 The scenarios, in this order (each released once the window has come to rest after the one before):
   c  turns while the model still loads at the start         a  slow reading: 9 turns 6-8 s apart
   b  fast flipping: 10 turns 0.3-0.5 s apart, then a rest   d  black flashes and spinners between turns
-  e  turning back to pages translated (cache hits)          f  the dark theme, then a narrow window (single pages)
+  e  turning back to pages translated (cache hits)
+  r  reading mode, entered and left by F11's own handler (`toggle_reading`): slow turns, a quick one, back
+  o  over the book: the stand-in made to fill its monitor, View > Over the full-screen viewer on, the status bar's
+     Move TASlation there, the Reading mode button; turns as in r; reading mode left by the F11 hot key, the mode
+     turned off, both windows put back
+  z  TASlation's text size at 150 % of the run's (Settings), turns, back
+  w  a whole-book run (as the dialog's Start starts it) on a short stretch: the run reads the screens the stand-in
+     turns to, then Finished reading (the band's); w2 then turns back to pages of the run and on past them, the
+     window beside the run (w brings w2, w2 brings w)
+  x  a request cancelled in flight at the translator: screens of little text (the dataset's pages with one or two
+     lines, by its annotation's counts) drawn soft for --cancel-soft-ms at half resolution, so that the window reads
+     the soft frame and asks on it before the sharp one comes; then back (needs the dataset)
+  f  the dark theme, then a narrow window (single pages)
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -50,7 +71,10 @@ it); the jobs kept from a frame that was not the sharp one (must be none); the j
 flashes and spinners: none); overlays left on a page the stand-in had left; that no profile in the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
-stand-in rested on. Into *--out*: report.json, and shots/ - pictures of
+stand-in rested on; the window's modes as they changed (reading, over the book, a run, beside it, the text size) and
+the hot keys it held; the whole-book run's decisions on the frames and the frames it read (each must be a sharp one),
+how it ended and its requests; the requests of scenario x sent for nothing and what their cancel cost. Into *--out*:
+report.json, and shots/ - pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
 moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
 With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
@@ -106,6 +130,7 @@ REST_MS = 2000  # a screen on show sharp so long is one the reader rested on
 STALE_MS = 1000  # a page lettered on show this long after the stand-in left it is an overlay left behind
 LAG_MS = 1000  # ... any page of the window's this long: the window did not follow
 LONG_CAPTURE_MS = 100  # a capture that took longer is noted with when it was
+MODE_WAIT_S = 20.0  # a mode of a scenario not on so long after it was entered: the scenario is released all the same
 STANDIN_SIZE = (1300, 900)
 NARROW_SIZE = (860, 1000)
 APP_SIZE = (1180, 940)
@@ -124,14 +149,30 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "d": ("black flashes, spinners", ["n", "w6000", "f800", "w5000", "s1500", "w5000", "n", "w300", "f700",
                                       "w6000", "s2500", "n", "w6000"]),
     "e": ("turning back", ["p", "w3000", "p", "w3000", "p", "w3000", "n", "w3000", "n", "w4000"]),
+    "r": ("reading mode", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000", "p", "w3000"]),
+    "o": ("over the book", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000"]),
+    "z": ("text size", ["n", "w6000", "p", "w3000", "n", "w4000"]),
+    "w": ("whole-book run", ["w1500", "n", "w2500-3000", "n", "w2500-3000", "n", "w2500-3000", "n", "w3000"]),
+    "w2": ("beside the run", ["p", "w3000", "p", "w3000", "n", "w3000", "n", "w3000", "n", "w3000", "n", "w4000"]),
+    "x": ("cancelled in flight", []),  # (its steps: `cancel_steps`, on the screens of little text added for it)
     "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
 }
-ORDER = ["c", "a", "b", "d", "e", "f", "f2"]
+ORDER = ["c", "a", "b", "d", "e", "r", "o", "z", "w", "w2", "x", "f", "f2"]
+PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"))  # a scenario that brings another with it
 # the turns whose soft frame and sharp frame drawn quickly are pictured (turns that come to a window at rest), and
-# those pictured at rest
-SOFT_SHOTS = {"a": (1,), "e": (3,), "f2": (1,)}
-REST_SHOTS = {"a": (1, 5)}
+# (scenario, turn) -> (seconds after the turn began, name): the other pictures of a turn
+SOFT_SHOTS = {"a": (1,), "e": (3,), "r": (1,), "o": (1,), "x": (1,), "f2": (1,)}
+SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5): (5.2, "a_turn5_rest"),
+         ("b", 10): (6.0, "b_after_flipping"), ("d", 3): (5.0, "d_rest"), ("e", 1): (1.5, "e_back_cached"),
+         ("r", 1): (5.2, "r_rest"), ("r", 4): (5.0, "r_after_flipping"), ("r", 5): (1.5, "r_back_cached"),
+         ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
+         ("w", 2): (2.0, "w_reading"), ("w2", 1): (2.0, "w2_page_of_the_run"), ("w2", 5): (2.0, "w2_page_not_read"),
+         ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 2): (5.0, "f_narrow_rest")}
+TEXT_SIZE = 1.5  # scenario z: TASlation's text size, times the run's
+CANCEL_SCREENS = 3  # scenario x: the screens of little text (spreads of pages with 1 to CANCEL_LINES lines of text)
+CANCEL_LINES = 2
+CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the window can read)
 
 
 @dataclass
@@ -143,32 +184,46 @@ class Segment:
 
 
 def wanted(text: str) -> list[str]:
-    """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it; "f2" alone is the narrow window
-    without the dark theme)."""
+    """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it, "f2" alone is the narrow window
+    without the dark theme; "w" and "w2" come together: `PAIRS`)."""
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
-    return [n for n in ORDER if n in asked or (n == "f2" and "f" in asked)]
+    asked |= {other for one, other in PAIRS if one in asked}
+    return [n for n in ORDER if n in asked]
 
 
-def build_plan(names: list[str], count: int) -> tuple[list[Segment], list[sv.Step]]:
+def cancel_steps(first: int, back: int, soft_ms: int) -> list[str]:
+    """Scenario x's steps: the turns drawn soft for *soft_ms* at 1/CANCEL_FACTOR of the resolution, to the screens of
+    little text from page *first* on (CANCEL_SCREENS spreads), then the stand-in's own soft time and blur again and
+    back to page *back*, the screen before."""
+    steps = [f"t{soft_ms}", f"b{CANCEL_FACTOR}"]
+    for k in range(CANCEL_SCREENS):
+        steps += [f"j{first + 2 * k}", "w5000"]
+    return [*steps, "t", "b", f"j{back}", "w4000"]
+
+
+def build_plan(names: list[str], count: int, cancel_first: int | None = None,
+               soft_ms: int = 700) -> tuple[list[Segment], list[sv.Step]]:
     """The segments of the stand-in's script (each held at ``gN`` until the driver releases it, ``mN`` to mark it)
-    and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window)."""
+    and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window).
+    Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`)."""
     segments: list[Segment] = []
     index, spread = 0, True
     text: list[str] = []
     for go, name in enumerate(names, 1):
-        steps = SCENARIOS[name][1]
+        steps = cancel_steps(cancel_first or 0, index, soft_ms) if name == "x" else SCENARIOS[name][1]
         segment = Segment(name, go, steps)
         if name == "f2":
             spread = False
         for step in steps:
-            if step in ("n", "p"):
+            if step in ("n", "p") or step.startswith("j"):
                 width = 2 if spread else 1
-                index = max(0, min(count - 1, index + (width if step == "n" else -width)))
+                index = int(step[1:]) if step.startswith("j") else index + (width if step == "n" else -width)
+                index = max(0, min(count - 1, index))
                 index = index - index % 2 if spread else index
                 segment.screens.append((index, spread))
         segments.append(segment)
@@ -198,6 +253,35 @@ def dataset_pages(series: int, first: int, count: int) -> list[Path] | None:
         if len(out) >= count:
             return out[:count]
     return out or None
+
+
+def text_counts(dataset: Path = DATASET) -> dict[Path, int]:
+    """How many lines of text each page of the dataset holds, by its annotation (a count: no line is read out, no
+    title kept); empty without it."""
+    try:
+        books = json.loads((dataset / "annotation.json").read_text(encoding="utf-8"))
+        return {(dataset / page["image_paths"]["ja"]).resolve(): len(page.get("text") or [])
+                for book in books for page in book.get("pages", [])}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def little_text_pages(taken: list[Path], count: int, dataset: Path = DATASET) -> list[Path]:
+    """*count* pages of the dataset with 1 to CANCEL_LINES lines of text and none of *taken*, from its last series
+    back (in reading order within a series); fewer when there are not so many."""
+    counts = text_counts(dataset)
+    images = dataset / "images"
+    if not counts or not images.is_dir():
+        return []
+    used = {Path(p).resolve() for p in taken}
+    out: list[Path] = []
+    for folder in sorted((p / "ja" for p in images.iterdir() if (p / "ja").is_dir()), reverse=True):
+        for path in sorted(folder.glob("*.jpg")):
+            if path.resolve() not in used and 1 <= counts.get(path.resolve(), 0) <= CANCEL_LINES:
+                out.append(path)
+                if len(out) == count:
+                    return out
+    return out
 
 
 def synthetic_pages(count: int) -> list[tuple[Path, str]]:
@@ -431,6 +515,11 @@ class Notes:
         self.status_lines: list[dict[str, Any]] = []  # the status line's kind and the page it speaks of, from when
         self.long_captures: list[tuple[float, float]] = []  # (when, ms): the captures that took over LONG_CAPTURE_MS
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
+        self.modes: list[dict[str, Any]] = []  # reading, over the book, a run, beside it, text size, as changed
+        self.hotkeys: list[dict[str, Any]] = []  # the hot keys the window held, as they changed, and the presses
+        self.run_frames: list[dict[str, Any]] = []  # a whole-book run's decisions on the viewer's frames, and ...
+        self.run_reads: list[dict[str, Any]] = []  # ... the frames it got from its store to read
+        self.run_ends: list[dict[str, Any]] = []
         self.on_display: Callable[[dict[str, Any]], None] | None = None
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
@@ -619,6 +708,42 @@ class Notes:
             if last is None or any(last[k] != rec[k] for k in ("size", "margins", "own", "read", "busy")):
                 self.margins.append(rec)
 
+    def mode(self, app: Any) -> None:
+        """The window's modes, noted as they change: reading mode, over the book, a whole-book run on, the window
+        beside it (`live.reads_beside`), TASlation's text size."""
+        from taslation.ui.constants import in_a_run
+        from taslation.ui.live import reads_beside
+
+        rec = {"t": now_ms(), "reading": bool(getattr(app, "reading", False)),
+               "over": bool(getattr(app, "_over_on", False)), "run": in_a_run(app), "beside": reads_beside(app),
+               "text_size": float(app.settings.ui_scale)}
+        with self.lock:
+            last = self.modes[-1] if self.modes else None
+            if last is None or any(last[k] != rec[k] for k in rec if k != "t"):
+                self.modes.append(rec)
+
+    def held(self, names: frozenset[str]) -> None:
+        with self.lock:
+            self.hotkeys.append({"t": now_ms(), "held": sorted(names)})
+
+    def pressed(self, name: str, taken: bool) -> None:
+        with self.lock:
+            self.hotkeys.append({"t": now_ms(), "pressed": name, "taken": taken})
+
+    def run_frame(self, kind: Any, image: Any) -> None:
+        with self.lock:
+            self.run_frames.append({"t": now_ms(), "kind": str(kind), **self.code(self.shown(image))})
+
+    def run_read(self, key: Any, image: Any) -> None:
+        with self.lock:
+            self.run_reads.append({"t": now_ms(), "key": key, **self.code(self.shown(image))})
+
+    def run_end(self, progress: Any) -> None:
+        ended = getattr(progress, "summary", None) or getattr(progress, "reason", None)
+        with self.lock:
+            self.run_ends.append({"t": now_ms(), "code": str(getattr(ended, "code", type(ended).__name__)),
+                                  "pages": getattr(progress, "pages", None)})
+
     def captured(self, image: Any) -> None:
         shown = self.shown(image)
         rec = {"t": now_ms(), **self.code(shown), "size": list(getattr(image, "size", (0, 0)))}
@@ -643,6 +768,50 @@ class Notes:
             last = self.ocr[-1] if self.ocr else None
             if last is None or any(last[k] != rec[k] for k in ("device", "why", "engines", "loading")):
                 self.ocr.append(rec)
+
+
+class HotKeys:
+    """TASlation's global hot keys as this tool lets the window have them (in `capture.overlay.HotKeys`' place): none
+    is registered with Windows - the keys stay the system's and their owner's -, the names the window holds are noted
+    as they change, and a press is this tool's (`press`), handed to the window by `take` as Windows hands over a
+    WM_HOTKEY: only for a key the window holds then (another is the viewer's, and noted as not taken)."""
+
+    def __init__(self, notes: Notes):
+        self.notes = notes
+        self.names: set[str] = set()
+        self.presses: list[str] = []
+
+    @property
+    def registered(self) -> frozenset[str]:
+        return frozenset(self.names)
+
+    def register(self, name: str, vk: int, mods: int = 0) -> bool:
+        if name not in self.names:
+            self.names.add(name)
+            self.notes.held(self.registered)
+        return True
+
+    def unregister(self, name: str) -> None:
+        if name in self.names:
+            self.names.discard(name)
+            self.notes.held(self.registered)
+
+    def clear(self) -> None:
+        for name in list(self.names):
+            self.unregister(name)
+
+    def close(self) -> None:
+        self.clear()
+
+    def press(self, name: str) -> None:
+        self.presses.append(name)
+
+    def take(self) -> list[str]:
+        taken = [name for name in self.presses if name in self.names]
+        for name in self.presses:
+            self.notes.pressed(name, name in self.names)
+        self.presses.clear()
+        return taken
 
 
 # status lines said with `say` that speak of a page: of the page the job read, of the viewer's page on show
@@ -727,18 +896,22 @@ def timed_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callabl
     return call
 
 
-def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any]) -> dict[str, Any]:
-    """The guard (`demo_video`'s, keys and clicks refused), and the hooks that take the notes; what was replaced."""
+def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
+            hotkeys: HotKeys) -> dict[str, Any]:
+    """The guard (`demo_video`'s, keys and clicks refused; the global hot keys this tool's *hotkeys*), and the hooks
+    that take the notes; what was replaced."""
     import demo_video
 
     import taslation.capture.overlay as overlay
     import taslation.capture.wgc as wgc
     import taslation.capture.windows as windows
+    from taslation import batch as batch_mod
+    from taslation import pageimages
     from taslation.ocr import place
     from taslation.translate import ollama as ollama_mod
     from taslation.translate import plamo as plamo_mod
     from taslation.ui import app as app_mod
-    from taslation.ui import live
+    from taslation.ui import live, overbook
 
     table = {name: (("never" if allow == "viewer" else allow), target)
              for name, (allow, target) in demo_video.GUARDED.items()}  # (TASlation sends no key, no click here)
@@ -757,12 +930,12 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         guard.refuse("a capture session")
 
     wgc.latest = compositor
-    refuse_keys = classmethod(lambda cls, *a, **k: guard.refuse("global hot keys"))
-    overlay.HotKeys.start = refuse_keys  # type: ignore[assignment]
+    overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
 
     App = app_mod.App
     start_translate, job_translate = App._start_translate, App._job_translate
     handle_event, redisplay, capture, chosen = App._handle_event, App._redisplay, App._capture, App._on_window_selected
+    batch_done = App._batch_done
 
     def started(self: Any, image: Any, *a: Any, **k: Any) -> Any:
         job = notes.new_job(image)
@@ -808,8 +981,26 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.selected.append(int(self.selected.hwnd))
         return out
 
+    def run_done(self: Any, progress: Any) -> Any:
+        notes.run_end(progress)
+        return batch_done(self, progress)
+
     App._start_translate, App._job_translate, App._handle_event = started, worked, handled
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
+    App._batch_done = run_done
+    decided, stored = batch_mod.BatchReader._decided, pageimages.PageImages.frame
+
+    def run_decided(self: Any, decisions: Any) -> Any:  # a whole-book run's decisions on the viewer's frames
+        for kind, image in decisions:
+            notes.run_frame(kind, image)
+        return decided(self, decisions)
+
+    def run_stored(self: Any, key: Any) -> Any:  # ... and each frame it gets from its store, to read or letter
+        image = stored(self, key)
+        notes.run_read(key, image)
+        return image
+
+    batch_mod.BatchReader._decided, pageimages.PageImages.frame = run_decided, run_stored
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -903,6 +1094,12 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return "viewer" if args.front == "viewer" else got
 
     live.foreground_owner = owner
+
+    def over_owner(hwnd: int, viewer: int, *a: Any, **k: Any) -> str:  # over the book: its own window as it is
+        got = real_owner(hwnd, viewer, *a, **k)
+        return "viewer" if args.front == "viewer" and got != "own" else got
+
+    overbook.foreground_owner = over_owner
     hook = threading.excepthook
 
     def thread_error(info: Any) -> None:
@@ -920,10 +1117,13 @@ class Director:
 
     def __init__(self, app: Any, browser: sv.StandinBrowser, guard: Any, selection: sv.SelectionGuard,
                  notes: Notes, segments: list[Segment], args: argparse.Namespace, out: Path, standin_dir: Path,
-                 narrow_rect: tuple[int, int, int, int]):
+                 narrow_rect: tuple[int, int, int, int], app_rect: tuple[int, int, int, int], hotkeys: HotKeys):
         self.app, self.browser, self.guard, self.selection = app, browser, guard, selection
         self.notes, self.segments, self.args, self.out, self.standin_dir = notes, segments, args, out, standin_dir
-        self.narrow_rect = narrow_rect
+        self.narrow_rect, self.app_rect, self.hotkeys = narrow_rect, app_rect, hotkeys
+        self.entered: dict[str, dict[str, Any]] = {}  # per scenario of a mode: what was done to enter it, and when
+        self.standin_before: tuple[int, int, int, int] | None = None  # the stand-in's rect before scenario o
+        self.run_ends_seen = 0
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
         self.events: list[dict[str, Any]] = []
         self.seen = 0
@@ -976,6 +1176,7 @@ class Director:
                     self.last_ocr = time.monotonic()
                     self.notes.placement(self.app)
                 self.notes.area(self.app)
+                self.notes.mode(self.app)
                 self.step()
                 self.due_shots()
         except Exception as e:  # noqa: BLE001 - said by its type, and the run ends
@@ -1034,20 +1235,11 @@ class Director:
             self.events.append(e)
 
     def turned(self, e: dict[str, Any]) -> None:
-        """A turn began on the stand-in: the pictures due for it."""
-        seg, k, at = self.current, self.turns_in[self.current], time.monotonic()
-        if k in REST_SHOTS.get(seg, ()):
-            self.due.append((at + 5.2, f"{seg}_turn{k}_rest"))
-        elif seg == "c" and k == 2:
-            self.due.append((at + 1.0, "c_loading"))
-        elif seg == "b" and k == 10:
-            self.due.append((at + 6.0, "b_after_flipping"))
-        elif seg == "d" and k == 3:
-            self.due.append((at + 5.0, "d_rest"))
-        elif seg == "e" and k == 1:
-            self.due.append((at + 1.5, "e_back_cached"))
-        elif seg in ("f", "f2") and k == 2:
-            self.due.append((at + 5.0, "f_dark_rest" if seg == "f" else "f_narrow_rest"))
+        """A turn began on the stand-in: the pictures due for it (`SHOTS`)."""
+        seg, k = self.current, self.turns_in[self.current]
+        if (seg, k) in SHOTS:
+            delay, label = SHOTS[(seg, k)]
+            self.due.append((time.monotonic() + delay, label))
 
     # the scenarios
     def idle(self) -> bool:
@@ -1062,8 +1254,13 @@ class Director:
         self.idle_since = (self.idle_since or now) if self.idle() else None
         rested = self.idle_since is not None and now - self.idle_since >= IDLE_S
         waited = now - self.phase_at
+        if len(self.notes.run_ends) > self.run_ends_seen:  # a whole-book run ended: the window a while after
+            self.run_ends_seen = len(self.notes.run_ends)
+            self.due.append((time.monotonic() + 4.0, f"run{self.run_ends_seen}_ended"))
         if self.index >= len(self.segments):
             if self.phase != "end":
+                if self.index:
+                    self.after(self.segments[-1])
                 self.phase, self.phase_at = "end", now
                 return
             if (self.ended and rested) or waited > self.args.timeout:
@@ -1073,19 +1270,38 @@ class Director:
             return
         seg = self.segments[self.index]
         if self.phase == "prepare":
+            if self.index:
+                self.after(self.segments[self.index - 1])
             self.before(seg)
             self.phase, self.phase_at = "settle", now
             return
         if self.phase == "settle":
             ready_go = self.waiting_go >= seg.go
+            if seg.name in ("r", "o", "z", "w") and seg.name not in self.entered and ready_go and rested:
+                self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
+                return
+            app = self.app
+            mode = self.entered.get(seg.name)
             if seg.name == "c":
-                go = ready_go and getattr(self.app, "selected", None) is not None
+                go = ready_go and getattr(app, "selected", None) is not None
             elif seg.name == "f2":
                 go = ready_go and rested and self.resized()
+            elif seg.name in ("r", "o", "z"):
+                go = ready_go and rested and mode is not None and now - mode["at"] >= 1.0 and (
+                    seg.name == "z" or bool(app.reading) and (seg.name == "r" or bool(app._over_on)))
+            elif seg.name == "w":  # the run reads the pages the stand-in turns to
+                batch = getattr(app, "batch", None)
+                go = (ready_go and mode is not None and batch is not None and bool(getattr(batch, "following", False))
+                      and now - mode["at"] >= 1.0)
+            elif seg.name == "w2":  # Finished reading: the run translates, and the window follows the viewer beside it
+                from taslation.ui.live import reads_beside
+
+                go = ready_go and reads_beside(app)
             else:
                 go = ready_go and rested and (self.index > 0 or self.first_page_done())
-            timed_out = ready_go and waited > self.args.timeout
-            if timed_out and not self.app.ready:
+            timed_out = ready_go and (waited > self.args.timeout or (
+                seg.name in ("r", "o", "z") and mode is not None and now - mode["at"] > MODE_WAIT_S))
+            if timed_out and not app.ready:
                 self.stop("the window was not ready within --timeout")
                 return
             if go or timed_out:
@@ -1114,6 +1330,91 @@ class Director:
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
                 place_own(hwnd, self.narrow_rect)
+        elif seg.name == "w2":
+            self.app.finish_reading()  # the band's Finished reading: the stand-in has come to the stretch's end
+            self.entered["w2"] = {"at": time.monotonic(), "finished_reading": True}
+
+    def enter(self, name: str) -> None:
+        """The mode of scenario *name* entered, as a reader does: r - F11 (`toggle_reading`, the key's own handler);
+        o - over the book (`over_begin`); z - TASlation's text size TEXT_SIZE times the run's (Settings); w - a
+        whole-book run started as the dialog's Start starts it."""
+        app = self.app
+        self.entered[name] = {"at": time.monotonic()}
+        if name == "r":
+            app.toggle_reading()
+        elif name == "o":
+            self.over_begin()
+        elif name == "z":
+            app._settings_saved({"ui_scale": round(self.args.scale * TEXT_SIZE, 2)})
+        elif name == "w":
+            app._start_batch(app.selected, app.settings.batch_max_pages, app.settings.context_mode)
+
+    def after(self, seg: Segment) -> None:
+        """The stand-in has gone through scenario *seg*: its mode left (r: F11's handler; o: `over_end`; z: the run's
+        text size again)."""
+        app = self.app
+        if seg.name == "r" and app.reading:
+            app.toggle_reading()
+        elif seg.name == "o":
+            self.over_end()
+        elif seg.name == "z":
+            app._settings_saved({"ui_scale": self.args.scale})
+
+    def over_begin(self) -> None:
+        """Scenario o: the stand-in's window made to fill its monitor (a viewer's full screen, as `is_fullscreen` tells
+        it), View > Over the full-screen viewer turned on; then, as a reader would, the status bar's Move TASlation
+        there (offered while TASlation is on another monitor) and the Reading mode button (F11 over the book is the
+        viewer's own key). What was offered and done is noted."""
+        from taslation.capture import monitor_rect, window_rect
+
+        app, hwnd, facts = self.app, self.browser.hwnd, self.entered["o"]
+        if not hwnd or not self.guard.is_viewer(hwnd):
+            return
+        self.standin_before = window_rect(hwnd)
+        monitor = monitor_rect(hwnd)
+        if monitor is None:
+            facts["failed"] = "no monitor"
+            return
+        left, top, right, bottom = monitor
+        place_own(hwnd, (left, top, right - left, bottom - top))
+        app.over_var.set(True)
+        app.toggle_over()
+
+        def move() -> None:
+            button = getattr(app, "move_btn", None)
+            facts["move_offered"] = bool(button is not None and button.winfo_manager())
+            app.move_to_book()  # the status bar's button
+            app.after(1000, read)
+
+        def read() -> None:
+            facts["over_before_reading"] = bool(app._over_on)
+            app.enter_reading()  # the Reading mode button
+
+        app.after(800, move)
+
+    def over_end(self) -> None:
+        """Scenario o over: reading mode left by the F11 hot key (this tool's press, `HotKeys`), then the mode turned
+        off, TASlation's window back in its place and the stand-in's back to its size (F11's handler where the press
+        was not taken: noted)."""
+        app, facts = self.app, self.entered.get("o")
+        if facts is None:
+            return
+        self.hotkeys.press("F11")
+
+        def off() -> None:
+            facts["left_by_hot_key"] = not app.reading
+            if app.reading:
+                app.toggle_reading()
+            app.over_var.set(False)
+            app.toggle_over()
+            x, y, w, h = self.app_rect
+            app.geometry(f"{w}x{h}+{x}+{y}")
+            hwnd = self.browser.hwnd
+            if self.standin_before is not None and hwnd and self.guard.is_viewer(hwnd):
+                left, top, right, bottom = self.standin_before
+                place_own(hwnd, (left, top, right - left, bottom - top))
+
+        app.after(800, off)
 
     def resized(self) -> bool:
         return any(e["ev"] == "size" for e in self.events[getattr(self, "resize_from", len(self.events)):])
@@ -1691,13 +1992,23 @@ def run(args: argparse.Namespace) -> int:
 
     names = wanted(args.scenario)
     count = pages_needed(names)
-    report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front}
+    report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale}
     pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
     report["pages"] = "dataset" if pictures else "synthetic"
     if not pictures:
         pictures = synthetic_pages(count)
+    cancel_first = None
+    if "x" in names:  # the screens of little text, after the others (a spread's first page at an even place)
+        extra = little_text_pages(pictures, 2 * CANCEL_SCREENS) if report["pages"] == "dataset" else []
+        if len(extra) == 2 * CANCEL_SCREENS:
+            pictures = pictures[:len(pictures) - len(pictures) % 2]
+            cancel_first = len(pictures)
+            pictures = [*pictures, *extra]
+        else:
+            names.remove("x")
+            report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
-    segments, steps = build_plan(names, count)
+    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms)
     sv.write_page_list(standin_dir, pictures)
     sv.write_control(standin_dir, 0)
     report["page_count"] = count
@@ -1735,7 +2046,7 @@ def run(args: argparse.Namespace) -> int:
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
     page = sv.page_url(token, steps, standin_dir, seed=args.seed)
-    browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token)
+    browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale)
     closed: dict[str, Any] = {}
     try:
         hwnd = browser.wait_window()
@@ -1781,7 +2092,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     _x, _y, _w, client_h = client_rect_on_screen(hwnd)
     dpr = float(ready.get("dpr", 1) or 1)
     top = client_h - round(float(ready["vh"]) * dpr)
-    sv.write_control(standin_dir, 0, band=round((AREA[1] - top) / dpr))
+    area = (AREA[0], round(AREA[1] * args.scale), AREA[2], AREA[3])  # (the reader's area, set at their scale)
+    report["area"] = list(area)
+    sv.write_control(standin_dir, 0, band=round((area[1] - top) / dpr))
     selection = sv.SelectionGuard(hwnd)
     pid = next(p for w, p in sv.top_windows() if w == hwnd)
 
@@ -1791,15 +2104,16 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         return WindowInfo(hwnd, sv.window_text(hwnd), window_class(hwnd), pid, window_rect(hwnd), program_name(pid))
 
     notes = Notes(top, dpr)
-    patched = install(notes, args, guard, viewer_info)
+    hotkeys = HotKeys(notes)
+    patched = install(notes, args, guard, viewer_info, hotkeys)
     state = demo_video.scratch_state()
     info = viewer_info()
     remember_role(state, BOOK, "reader")
     profiles = Profiles(state / "profiles.json")
-    profiles.set_margins(info, AREA)
-    profiles.set_margins(info, AREA, large=True)
+    profiles.set_margins(info, area)
+    profiles.set_margins(info, area, large=True)
     settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
-                        flash_when_done=False, sound_when_done=False, always_on_top=False,
+                        flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url)
     settings.validate()
     errorlog.setup(settings)
@@ -1833,7 +2147,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     x, y, w, h = app_rect
     app.geometry(f"{w}x{h}+{x}+{y}")
     app.after(600, lambda: app.geometry(f"{w}x{h}+{x}+{y}"))
-    director = Director(app, browser, guard, selection, notes, segments, args, out, standin_dir, narrow_rect)
+    director = Director(app, browser, guard, selection, notes, segments, args, out, standin_dir, narrow_rect,
+                        app_rect, hotkeys)
     director.start()
     began = now_ms()
     try:
@@ -1904,6 +2219,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     kept_soft = [j for j in job_list if j["frame"] != "sharp" and j["discarded"] is not True
                  and (j["gate_end"] == "confirmed" or not j["gate"]) and (j["stored"] or j["stored_at_cancel"])]
     cancels = []
+    sizes = [e["t"] + offset for e in events if e["ev"] == "size"]
     for j in started:  # each page job cancelled: was its page still the stand-in's then (a black frame aside)?
         if j["cancelled_t"] is None:
             continue
@@ -1911,9 +2227,11 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         cancels.append({"id": j["id"], "t_s": rel(j["cancelled_t"]), "segment": segment_at_t(j["cancelled_t"]),
                         "frame": j["state"], "gate_end": j["gate_end"],
                         "page_on_show": screen == (j["page"], j["spread"]),
-                        "flash_or_spinner_within_1s": flash_near(line, j["cancelled_t"])})
+                        "flash_or_spinner_within_1s": flash_near(line, j["cancelled_t"]),
+                        "resize_within_1s": any(j["cancelled_t"] - 1000 <= s <= j["cancelled_t"] for s in sizes)})
+    # (a job on a frame of the size before gives way to the new size's frame of the same page: no false cancel)
     false_cancels = [c for c in cancels if c["page_on_show"] and c["frame"] == "sharp"
-                     and c["gate_end"] in ("confirmed", None)]
+                     and c["gate_end"] in ("confirmed", None) and not c["resize_within_1s"]]
     old_lettering = {
         "during_job": spread_of([r["old_lettering_ms"] for r in rows if r["job_at_turn"] and r["old_lettering_ms"]]),
         "no_job": spread_of([r["old_lettering_ms"] for r in rows if not r["job_at_turn"] and r["old_lettering_ms"]]),
@@ -1959,6 +2277,35 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     resizes = resize_rows(events, offset, notes, turns, rows)
     for item in resizes:
         item["from_s"] = rel(item.pop("from_t"))
+    modes = {"columns": ["t_s", "reading", "over", "run", "beside", "text_size"],
+             "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), int(m["run"]), int(m["beside"]),
+                       m["text_size"]] for m in notes.modes],
+             "entered": {name: {k: v for k, v in facts.items() if k != "at"}
+                         for name, facts in director.entered.items()},
+             "hot_keys": [{**{k: v for k, v in h.items() if k != "t"}, "t_s": rel(h["t"])} for h in notes.hotkeys]}
+    run_requests = [r for r in requests if r["job"] is None]
+    whole_book = {
+        "decisions": dict(Counter(f"{f['kind']}:{f['state']}" for f in notes.run_frames)),
+        "frames_got": dict(Counter(f["state"] for f in notes.run_reads)),
+        "frames_got_not_sharp": sorted({str(f["key"]) for f in notes.run_reads if f["state"] != "sharp"}),
+        "pages_got": len({f["key"] for f in notes.run_reads}),
+        "ends": [{"code": e["code"], "pages": e["pages"], "t_s": rel(e["t"])} for e in notes.run_ends],
+        "requests": len(run_requests), "requests_by_outcome": dict(Counter(str(r["outcome"]) for r in run_requests)),
+        "status_kinds_beside": dict(Counter(s["kind"] for s in notes.status_lines
+                                            if segment_at_t(s["t"]) == "w2"))}
+    cancel_rows = [r for r in rows if r["segment"] == "x"]
+    in_flight = [w for w in wasted if segment_at_t(w["t"]) == "x"]
+    cancel = {"soft_ms": director.args.cancel_soft_ms, "factor": CANCEL_FACTOR,
+              "jobs_on_soft": sum(1 for j in started if segment_at_t(j["t"]) == "x" and j["state"] == "soft"),
+              "requests_on_soft": sum(1 for r in requests if segment_at_t(r["t"]) == "x" and r["frame"] == "soft"),
+              "cancelled_in_flight": len([w for w in in_flight if w["ran_on_after_cancel_ms"] is not None]),
+              "ran_ms": dist([w["ran_ms"] for w in in_flight]),
+              "ran_on_after_cancel_ms": dist([w["ran_on_after_cancel_ms"] for w in in_flight]),
+              "next_real_after_ms": dist([w["next_real_after_ms"] for w in in_flight]),
+              "next_real_server_wait_ms": dist([w["next_real_server_wait_ms"] for w in in_flight]),
+              "turns": [{k: r[k] for k in ("page", "soft_to_sharp_ms", "first_request_ms", "finished_ms", "jobs",
+                                           "jobs_on", "requests", "wasted_requests", "at_rest", "at_rest_from")}
+                        for r in cancel_rows]}
     request_list = {"columns": ["t_s", "job", "frame", "gate", "outcome", "ran_ms", "server_ms", "server_wait_ms",
                                 "wasted"],
                     "rows": [[rel(r["t"]), r["job"], r["frame"], r["gate"], r["outcome"], ms(r["end_t"], r["t"]),
@@ -1968,6 +2315,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "latency_rested": latency,
         "status_line_of_the_page_before": status_summary,
         "resizes": resizes,
+        "modes": modes,
+        "whole_book_run": whole_book,
+        "cancel_in_flight": cancel,
         "wasted_requests": wasted_summary,
         "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
                                       "requests": sum(j["requests"] for j in cancelled_after_kept)},
@@ -2158,13 +2508,31 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"{item['first_capture_ms']} ms, read by its own area {item['read_by_own_area_ms']} ms, its own area in "
               f"force {item['own_area_in_force_ms']} ms, long captures {item['long_captures_ms']}, job running "
               f"{item['job_running']}, old lettering {item['old_lettering_ms']} ms")
+    modes = run_["modes"]
+    print(f"modes entered {modes['entered']}; hot keys pressed "
+          f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")
+    whole = run_["whole_book_run"]
+    if whole["decisions"] or whole["ends"]:
+        print(f"whole-book run: decisions {whole['decisions']}; frames got {whole['frames_got']}, not sharp "
+              f"{whole['frames_got_not_sharp']}; ended {whole['ends']}; requests {whole['requests']}")
+    cancel = run_["cancel_in_flight"]
+    if cancel["turns"]:
+        print(f"cancelled in flight (soft {cancel['soft_ms']} ms): jobs on soft {cancel['jobs_on_soft']}, requests "
+              f"on soft {cancel['requests_on_soft']}, cancelled while running {cancel['cancelled_in_flight']}; ran on "
+              f"after the cancel {cancel['ran_on_after_cancel_ms']}; next real request after "
+              f"{cancel['next_real_after_ms']}, its server wait {cancel['next_real_server_wait_ms']}")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
-    ap.add_argument("--scenario", default="all", help="all, or some of a,b,c,d,e,f,f2 (f brings f2 with it)")
+    ap.add_argument("--scenario", default="all",
+                    help="all, or some of c,a,b,d,e,r,o,z,w,x,f,f2 (f brings f2 with it, w brings w2)")
+    ap.add_argument("--scale", type=float, default=1.0,
+                    help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
+    ap.add_argument("--cancel-soft-ms", type=int, default=700,
+                    help="scenario x: how long the screens of little text stay soft")
     ap.add_argument("--canned", action="store_true", help="the canned translator, not the Ollama on this computer")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
@@ -2183,7 +2551,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     if sys.platform != "win32":
         raise SystemExit("the stand-in needs Windows (window capture)")
-    return run(parse(argv))
+    args = parse(argv)
+    if not 1.0 <= args.scale <= 3.0:
+        raise SystemExit("--scale is 1 to 3")
+    return run(args)
 
 
 if __name__ == "__main__":

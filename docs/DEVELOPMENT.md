@@ -117,9 +117,21 @@ rows' languages.
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
-  profile, the state and the model it loaded are gone at the end. Scenarios a-f by `--scenario` (f brings f2, the
-  narrow window, with it; f2 alone is that window without the dark theme); OpenMantra pages from the datasets folder,
-  or `--synthetic`.
+  profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 7
+  minutes): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and spinners; e,
+  turning back to cached pages; r, reading mode, entered and left by F11's own handler; o, over the book (the stand-in
+  made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Reading mode
+  button, reading mode left by the F11 hot key); z, TASlation's text size at 150 %; w, a whole-book run on a short
+  stretch, started as the dialog's Start starts it, then Finished reading, with w2, the window beside the run as the
+  stand-in turns back to the run's pages and on past them (w and w2 come together); x, a request cancelled in flight
+  at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
+  at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
+  dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
+  dark theme). Its global hot keys are never registered with Windows: the tool holds them, notes which the window
+  held, and hands it a press as Windows would. Over the book the window gives the stand-in the foreground from its
+  own window, as the mode does; the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
+  of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
+  changes. OpenMantra pages from the datasets folder, or `--synthetic`.
 
 ## The README and the manual
 
