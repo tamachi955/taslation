@@ -42,8 +42,13 @@ another program's model loaded, the server is left running and no longer owned (
 models). The stop is Ollama's own (what its tray app does to the server it runs: `ask_to_stop`, a CTRL_BREAK to the
 server's process group through its console; Ollama then ends the model's process itself), for at most `STOP_WAIT_S`;
 a server that does not end then is terminated with its descendants (llama.cpp's ``llama-server``), as Ollama's own
-uninstaller ends them, for at most `KILL_WAIT_S` more. One still running after that is left, and the record kept for
-the next end. Nothing here ever waits without a bound.
+uninstaller ends them, for at most `KILL_WAIT_S` more. Either way, once the server has ended, what it started that
+still runs, and theirs, is terminated and waited for within that bound, and looked for again until none is left: a
+process may outlive the server by a moment (the console host Windows gives the server's hidden console), and one
+started after the first look, or one the request did not reach, is in no earlier list. The server is held open
+meanwhile (`pinned`), so that no other process gets its number and passes for the parent of what it starts. One still
+running after that (the server, or a process it started) is left, and the record kept for the next end. Nothing here
+ever waits without a bound.
 
 Messages of `OllamaStarter.start` (None when Ollama answers):
 
@@ -242,6 +247,18 @@ def _open(pid: int, access: int) -> Any:
     return _kernel32().OpenProcess(access | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid) or None
 
 
+def _start_time(handle: Any) -> int | None:
+    """When the process *handle* opens started (`ProcessInfo.started`), whether it has ended or not; None when Windows
+    does not say."""
+    import ctypes
+    from ctypes import wintypes
+
+    times = [wintypes.FILETIME() for _ in range(4)]
+    if not _kernel32().GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+        return None
+    return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+
+
 def _info_of(handle: Any) -> ProcessInfo | None:
     import ctypes
     from ctypes import wintypes
@@ -249,14 +266,14 @@ def _info_of(handle: Any) -> ProcessInfo | None:
     k = _kernel32()
     if k.WaitForSingleObject(handle, 0) != _WAIT_TIMEOUT:
         return None  # it has ended (its handle is signalled)
-    times = [wintypes.FILETIME() for _ in range(4)]
-    if not k.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+    started = _start_time(handle)
+    if started is None:
         return None
     size = wintypes.DWORD(32768)
     name = ctypes.create_unicode_buffer(size.value)
     if not k.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
         return None
-    return ProcessInfo(name.value, (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime)
+    return ProcessInfo(name.value, started)
 
 
 def process_info(pid: int) -> ProcessInfo | None:
@@ -350,6 +367,20 @@ def terminate(pid: int, started: int) -> bool:
         _kernel32().CloseHandle(handle)
 
 
+@contextlib.contextmanager
+def pinned(pid: int, started: int) -> Iterator[bool]:
+    """Process *pid* held open for a block: while it is, Windows gives its number to no other process, even once it has
+    ended, so that the processes a look finds with that number as their parent's are its own (`descendants`). Whether
+    the process held is the one that started at *started* (False: no process has that number, or another one has it
+    now, and nothing of the one that started then can be told apart any more)."""
+    handle = _open(pid, _SYNCHRONIZE)
+    try:
+        yield handle is not None and _start_time(handle) == started
+    finally:
+        if handle is not None:
+            _kernel32().CloseHandle(handle)
+
+
 # What Ollama's tray app does to stop the server it started (app/server, server_windows.go): attach to the server's
 # console, take no Ctrl+C itself, and send a Ctrl+Break to the server's process group (Go hands it to Ollama as an
 # interrupt: Ollama's graceful shutdown). A process can attach to another's console only when it has none of its own,
@@ -387,17 +418,45 @@ def ask_to_stop(pid: int) -> bool:
 
 
 def stop_server(pid: int, started: int) -> bool:
-    """The server *pid* (the process that started at *started*) stopped as the module's docstring says: asked, then
-    terminated with its descendants; whether it is gone. At most `HELPER_TIMEOUT_S` + `STOP_WAIT_S` + `KILL_WAIT_S`."""
-    children = descendants(pid, started)
-    if ask_to_stop(pid) and wait_exit(pid, started, STOP_WAIT_S):
-        for child, child_started in children:  # (Ollama ends them itself; one left behind goes too)
+    """The server *pid* (the process that started at *started*) stopped as the module's docstring says: asked, else
+    terminated with its descendants, and what it started ended with it (`_end_left`); whether it and all of those are
+    gone. At most `HELPER_TIMEOUT_S` + `STOP_WAIT_S` + `KILL_WAIT_S`."""
+    with pinned(pid, started) as the_server:
+        if not the_server:
+            return True  # it has ended (and its number may be another process's: nothing is touched)
+        children = descendants(pid, started)
+        if ask_to_stop(pid) and wait_exit(pid, started, STOP_WAIT_S):
+            # (Ollama ends them itself; one left behind goes too, and one ending is waited for)
+            return _end_left(pid, started, children, time.monotonic() + KILL_WAIT_S)
+        for child, child_started in dict.fromkeys(descendants(pid, started) + children):
             terminate(child, child_started)
-        return True
-    for child, child_started in dict.fromkeys(descendants(pid, started) + children):
-        terminate(child, child_started)
-    terminate(pid, started)
-    return wait_exit(pid, started, KILL_WAIT_S)
+        terminate(pid, started)
+        deadline = time.monotonic() + KILL_WAIT_S
+        gone = wait_exit(pid, started, KILL_WAIT_S)
+        return _end_left(pid, started, children, deadline) and gone
+
+
+def _end_left(pid: int, started: int, listed: list[tuple[int, int]], deadline: float) -> bool:
+    """What the server *pid* (the process that started at *started*, held by `pinned`, ended or told to end) started,
+    and theirs, ended: those of *listed* (found while it ran: one whose parent has ended since is no longer found from
+    it) and those a look finds now, each terminated and waited for until *deadline*, then looked for again, as one may
+    have started another meanwhile (once more after *deadline*, without a wait). Whether none is left; the log says how
+    many are."""
+    known, last = list(listed), False
+    while True:
+        known = list(dict.fromkeys(known + descendants(pid, started)))
+        left = [(child, child_started) for child, child_started in known if same_process(child, child_started)]
+        if not left:
+            return True
+        if last:
+            LOG.warning("%d process(es) of the Ollama TASlation started did not end", len(left))
+            return False
+        for child, child_started in left:
+            terminate(child, child_started)
+        ended = all(not same_process(child, child_started)
+                    or wait_exit(child, child_started, max(0.0, deadline - time.monotonic()))
+                    for child, child_started in left)
+        last = not ended or time.monotonic() >= deadline
 
 
 def this_process() -> dict[str, int]:

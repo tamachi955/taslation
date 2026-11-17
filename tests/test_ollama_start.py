@@ -43,7 +43,8 @@ ROOT = Path(__file__).resolve().parent.parent
 URL = "http://127.0.0.1:11434"
 REAL_START = OllamaStarter.start  # conftest stands in for it during a test ...
 REAL = {name: getattr(ollama_start, name) for name in (  # ... and for these
-    "launch", "process_info", "descendants", "wait_exit", "terminate", "ask_to_stop", "stop_server", "small_gpu")}
+    "launch", "process_info", "descendants", "wait_exit", "terminate", "pinned", "ask_to_stop", "stop_server",
+    "small_gpu")}
 REAL_POPEN = subprocess.Popen
 ME = os.getpid()
 GONE = Message("ollama.unreachable", url=URL)
@@ -129,6 +130,11 @@ class Machine:
             self._end(pid)
         return True
 
+    @contextlib.contextmanager
+    def pinned(self, pid, started):
+        info = self.procs.get(pid)
+        yield info is not None and info.started == started
+
     def ps(self, url, timeout=1.0):
         self.ps_timeouts.append(timeout)
         return self.loaded
@@ -149,6 +155,7 @@ def machine(nothing_starts_ollama, monkeypatch, tmp_path):
     monkeypatch.setattr(ollama_start, "ask_to_stop", m.ask)
     monkeypatch.setattr(ollama_start, "wait_exit", m.wait)
     monkeypatch.setattr(ollama_start, "terminate", m.terminate)
+    monkeypatch.setattr(ollama_start, "pinned", m.pinned)
     monkeypatch.setattr(ollama_start, "small_gpu", lambda: False)
     monkeypatch.setattr(ollama_start.shutil, "which", lambda name: None)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
@@ -983,6 +990,12 @@ PARENT = ("import signal, subprocess, sys, time\n"
           "while True:\n"
           "    time.sleep(0.05)\n")
 IGNORE = "signal.signal(signal.SIGBREAK, signal.SIG_IGN)\n"  # a server that ignores the request to stop
+# a server that starts one more process when it is asked to stop (one that no earlier look lists and that the request
+# never reaches), then ends
+LAST_ONE = ("def leave(*_):\n"
+            "    subprocess.Popen([sys.executable, '-I', '-S', '-c', 'import time; time.sleep(60)'])\n"
+            "    sys.exit(0)\n"
+            "signal.signal(signal.SIGBREAK, leave)\n")
 
 
 def _pythons(tree: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -1049,9 +1062,32 @@ def test_a_server_that_ignores_the_request_is_ended_within_the_bound(real_proces
 
 
 @windows_only
+def test_a_process_the_server_starts_as_it_is_asked_to_stop_is_ended_too(real_processes, monkeypatch):
+    ended: list[int] = []
+
+    def terminate(pid, started):
+        ended.append(pid)
+        return REAL["terminate"](pid, started)
+
+    monkeypatch.setattr(ollama_start, "terminate", terminate)
+    pid, started = real_processes(PARENT.format(handler=LAST_ONE))
+    tree = _wait_for_child(pid, started)
+    assert len(_pythons(tree)) == 1
+    began = time.monotonic()
+    assert ollama_start.stop_server(pid, started)
+    took = time.monotonic() - began
+    assert _left(pid, started, tree) == []
+    assert set(ended) - {p for p, _s in tree}  # the last one: found after the server had ended, and ended
+    assert took < 3.0, took
+
+
+@windows_only
 def test_a_process_that_is_not_the_recorded_one_is_never_touched(real_processes):
     pid, started = real_processes("import time; time.sleep(60)")
     assert not ollama_start.terminate(pid, started + 1) and ollama_start.wait_exit(pid, started + 1, 5.0)
+    with ollama_start.pinned(pid, started + 1) as the_server:
+        assert not the_server
+    assert ollama_start.stop_server(pid, started + 1)  # (ended, as far as the stop knows: nothing asked or ended)
     assert ollama_start.same_process(pid, started)
     assert ollama_start.terminate(pid, started) and ollama_start.wait_exit(pid, started, 5.0)
 
