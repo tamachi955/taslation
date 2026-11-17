@@ -78,18 +78,22 @@ def _job(id_, t, state="sharp", discarded=None, result_t=None, page=4):
             "result_t": result_t}
 
 
-def _request(t, job, end, server=None, http=None):
+def _request(t, job, end, server=None, http=None, work=None):
     return {"t": t, "job": job, "frame": "x", "gate": "pending", "outcome": "ok" if server else "Cancelled",
-            "end_t": end, "http_t": http, "http_end_t": end if http is not None else None, "server_ms": server}
+            "end_t": end, "http_t": http, "http_end_t": end if http is not None else None, "server_ms": server,
+            "work_ms": work}
 
 
 def test_requests_sent_for_nothing_are_told_with_what_they_cost():
     jobs = [_job(1, 1000, "soft", True), _job(2, 1300, "sharp", True), _job(3, 1500, "sharp", False, 2600)]
-    requests = [_request(1100, 1, 1250), _request(1400, 2, 1480), _request(1600, 3, 1900, server=250.0, http=1610)]
+    requests = [_request(1100, 1, 1250), _request(1400, 2, 1480),
+                _request(1600, 3, 1900, server=250.0, http=1610, work=50.0)]
     wasted = standin_e2e.wasted_requests(requests, jobs, [1200, 1450], 5000)
     assert [(w["job"], w["why"], w["ran_ms"], w["ran_on_after_cancel_ms"]) for w in wasted] == [
         (1, "soft", 150, 50), (2, "dropped", 80, 30)]
-    assert wasted[0]["next_real_after_ms"] == 350 and wasted[0]["next_real_server_wait_ms"] == 40
+    # the wait is the exchange less the model's work, not less Ollama's total, which takes in a wait behind another
+    assert wasted[0]["next_real_after_ms"] == 350 and wasted[0]["next_real_server_wait_ms"] == 240
+    assert standin_e2e.server_wait(_request(1600, 3, 1900, server=250.0, http=1610)) is None
     # the page's job is the last one on its screen whose result came and was kept
     assert standin_e2e.finishing_job(jobs, (4, True), 900, 3000)["id"] == 3
     assert standin_e2e.finishing_job(jobs, (6, True), 900, 3000) is None

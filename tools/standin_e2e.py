@@ -771,8 +771,10 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     stream_once = ollama_mod.OllamaTranslator._stream_once
 
     def streamed(self: Any, path: str, payload: dict[str, Any], *a: Any, **k: Any) -> Any:
-        # the HTTP exchange of a request noted (`requested`): when it went out, when it ended, and the server's own
-        # time for it (Ollama's total_duration, the model's load in it), so that a wait at the server shows
+        # the HTTP exchange of a request noted (`requested`): when it went out, when it ended, the server's time for
+        # it (Ollama's total_duration, the model's load in it) and the model's own work in it (the load, the prompt,
+        # the answer), so that a wait at the server shows: Ollama counts a request queued behind another in its
+        # total_duration (a short request sent beside a long one: total 3164 ms, work 57 ms)
         rec = getattr(notes.local, "request", None)
         if rec is None or not (payload.get("prompt") or payload.get("messages")):
             return stream_once(self, path, payload, *a, **k)
@@ -784,6 +786,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         with contextlib.suppress(TypeError, ValueError):
             rec["server_ms"] = round(float(data.get("total_duration") or 0) / 1e6, 1)
             rec["load_ms"] = round(float(data.get("load_duration") or 0) / 1e6, 1)
+            rec["work_ms"] = round(sum(float(data.get(key) or 0) for key in
+                                       ("load_duration", "prompt_eval_duration", "eval_duration")) / 1e6, 1)
         return data
 
     ollama_mod.OllamaTranslator._stream_once = streamed
@@ -1335,7 +1339,7 @@ def wasted_requests(requests: list[dict[str, Any]], jobs: list[dict[str, Any]], 
     """Each request sent for nothing (`wasted_why`), as numbers: how long it ran and how it ended, when the live view
     cancelled its job (the first cancel within it) and how long the request ran on after that, and the next request
     that was not sent for nothing - how long after this one's end it went out and how long it waited at the server
-    (the request's time less Ollama's own: a server still busy with this one would make it wait)."""
+    (`server_wait`: a server still busy with this one would make it wait)."""
     by_id = {j["id"]: j for j in jobs}
     real = [r for r in requests if r["job"] is not None and wasted_why(by_id.get(r["job"])) is None]
     out = []
@@ -1356,11 +1360,12 @@ def wasted_requests(requests: list[dict[str, Any]], jobs: list[dict[str, Any]], 
 
 
 def server_wait(r: dict[str, Any]) -> int | None:
-    """How long a request waited beyond the server's own time for it (its HTTP exchange less Ollama's
-    total_duration): the wait for the server, and the way to it and back."""
-    if r.get("http_t") is None or r.get("http_end_t") is None or not r.get("server_ms"):
+    """How long a request waited beyond the model's work for it (its HTTP exchange less Ollama's load, prompt and
+    answer durations; not less its total_duration, which takes in a wait behind another request): the wait for the
+    server, the server's own handling, and the way to it and back."""
+    if r.get("http_t") is None or r.get("http_end_t") is None or not r.get("work_ms"):
         return None
-    return round(r["http_end_t"] - r["http_t"] - r["server_ms"])
+    return round(r["http_end_t"] - r["http_t"] - r["work_ms"])
 
 
 def dist(values: list[Any]) -> dict[str, Any]:
