@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 
 from taslation import i18n
 from taslation.capture import WindowInfo
+from taslation.detect import page_area
 from taslation.regions import PageResult
 from taslation.ui import app as app_mod
 from taslation.ui import live, preview
@@ -116,6 +117,8 @@ class Window(BlackViewerMixin):
     _find_page = app_mod.App._find_page
     _found_margins = app_mod.App._found_margins
     _apply_found_margins = app_mod.App._apply_found_margins
+    _margins_of = app_mod.App._margins_of
+    _area_box = app_mod.App._area_box
     _hand_set = app_mod.App._hand_set
     _inner_margins = app_mod.App._inner_margins
     _area_hint_due = app_mod.App._area_hint_due
@@ -477,6 +480,29 @@ def test_a_whole_book_runs_line_is_about_the_run_whatever_the_viewer_shows(hidde
     line = w.status_var.get()
     w._show_live(_frame(ink=(120, 80, 170, 130)))
     assert w.status_var.get() == line and w._status_page is None
+
+
+def test_a_frame_of_a_new_size_is_read_by_its_own_area_while_the_job_keeps_the_old_one(hidden_root, viewer):
+    """The viewer's window resized while a page job runs: the frames of the new size are read by that size's own
+    capture area at once; the margins in force stay the job's until it is gone."""
+    w = Window(hidden_root)
+    w._manual_area = False
+    key = live.viewer_key(VIEWER)
+    w._tick()
+    old = w._live
+    w._page_areas[key] = (old.size, (20, 10, 180, 140))
+    w._apply_found_margins()
+    margins = tuple(w.settings.margins)
+    w._start_translate(old, thumb=w._live_thumb)
+    wide = _frame(size=(300, 150))
+    w._page_areas[key] = (wide.size, (50, 0, 250, 150))  # (what `_find_page` found in the frame of the new size)
+    own = page_area.area_margins((50, 0, 250, 150), wide.size)
+    w._apply_found_margins()  # (not while the job runs)
+    assert tuple(w.settings.margins) == margins and own != margins
+    assert w._margins_of(old) == margins and w._margins_of(wide) == own
+    assert w._area_box(wide) == (50, 0, 250, 150)
+    w._handle_event("translate_done", {})
+    assert tuple(w.settings.margins) == own == w._margins_of(wide)
 
 
 def test_a_viewer_hidden_behind_taslation_keeps_the_last_good_frame(hidden_root, viewer):

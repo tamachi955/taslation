@@ -169,6 +169,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _loaded_line = A._loaded_line
     _tell_protection = A._tell_protection
     _area_of = A._area_of
+    _margins_of = A._margins_of
     _turned_from_job = A._turned_from_job
     _watch_page = A._watch_page
     _follows_events = A._follows_events

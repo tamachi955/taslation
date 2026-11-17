@@ -569,7 +569,7 @@ def test_a_size_given_meanwhile_ends_the_spell(settings, stage):
 def test_nothing_is_pressed_while_the_reader_is_in_another_program(settings, stage):
     window = Window(settings)
     window._following = SimpleNamespace(mode="events", owner="other", events=MagicMock(take=lambda: []), look_at=None,
-                                        op=None, last_poll=0.0, unseen=False, last_input=0)
+                                        moved=None, op=None, last_poll=0.0, unseen=False, last_input=0)
     window._capture(HWND)
     beats(window, stage, 40)
     window._following.owner = "own"

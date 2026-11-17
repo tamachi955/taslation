@@ -42,16 +42,20 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   (`_retake`), and the job on the soft frame, cancelled or done, adds nothing to the cache; in translator mode the
   page is completed from what it reads once its frame has settled (`_completion`);
 * once when TASlation or the viewer comes back to the front, once the viewer's window or TASlation's own stops moving
-  (maximised over the viewer, TASlation may make it stop drawing), when the viewer's title changes - a browser's is
-  its active tab's -, and, while TASlation is in front, once input over the viewer's window stops (Windows scrolls a
-  window under the pointer that is not in front: `_note_input`) (`_look`);
+  (maximised over the viewer, TASlation may make it stop drawing), at once as well when the viewer's window is given
+  another size (`_take_notes`: the capture's first frame of the new size may be all that comes, `wgc.restart`), when
+  the viewer's title changes - a browser's is its active tab's -, and, while TASlation is in front, once input over
+  the viewer's window stops (Windows scrolls a window under the pointer that is not in front: `_note_input`)
+  (`_look`);
 * while a page job runs, as while none runs (at each new frame of the viewer in front, at a look): a frame of another
   page goes on the page at once as the viewer draws it - the page being translated, lettered so far, is on show only
   while the viewer shows that page (`_fill_on_show`) -, and is followed until it settles; once it has stayed as it is
   for LEFT_PAGE_MS (the viewer has left the job's page; whether the new picture is final is its own job's gate's
   matter) it cancels the job, is followed on, and is started early on the frame there is - a gate of its own - as soon
   as the worker is free of the job (`_waits_for_worker`); a frame back on the job's page before that letters it again,
-  the job never cancelled; a black flash or a spinner over the page changes nothing (`_look_over_job`);
+  the job never cancelled; a black flash or a spinner over the page changes nothing (`_look_over_job`). A frame of
+  another size (the viewer's window resized) is another page so, read by its own size's capture area from the first
+  (`_margins_of`): the job's area stays in force for the job alone until it is gone;
 * never while neither is in front - except for a viewer just chosen (at the start, from the list, by the watch): it
   is looked at at once whoever is in front, and every auto_interval_ms until a frame of it is on the page
   (`Following.unseen`, `_follow_viewer`), and for a viewer whose window TASlation just gave a new size: the fresh frame
@@ -417,6 +421,8 @@ class Following:
     events: Any = None  # the hooks (capture.WindowEvents)
     owner: str = "own"  # who is in front: "own" (a window of TASlation's), "viewer", "other"
     look_at: float | None = None  # a look at the viewer is due from then on
+    moved: float | None = None  # the viewer's window noted moving last then, and not looked at once it stopped yet
+    size: tuple[int, int] | None = None  # the size of the viewer's window at the last note that it moved (or watched)
     last_poll: float = 0.0
     polled: int | None = None  # the viewer's frame count at the last poll (`capture.frame_count`)
     last_input: int = 0  # when the session's last input came (Windows' ticks), as seen at the last heartbeat
@@ -483,7 +489,7 @@ class BlackViewerMixin:
         (`recovery.BlackWatch`), a later one takes the spell a step on. Never while TASlation enlarges the window
         (`_resizing`): the frames then are of that change. A run has its own wait for a black viewer. No key goes for
         it."""
-        black = _black(self, image, self.settings.margins)
+        black = _black(self, image, self._margins_of(image))
         if in_a_run(self):
             return black
         watch = getattr(self, "_black_watch", None)
@@ -557,10 +563,13 @@ class LiveViewMixin(BlackViewerMixin):
     `App.__init__`; the other parts are reached through ``self``)."""
 
     # ------------------------------------------------------------------ the page in the viewer's window
-    def _found_margins(self) -> tuple[int, int, int, int]:
-        """The margins of the page panel found so far in the chosen viewer's frames ((0, 0, 0, 0): none yet)."""
+    def _found_margins(self, size: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
+        """The margins of the page panel found so far in the chosen viewer's frames ((0, 0, 0, 0): none yet), in
+        frames of *size* only when given."""
         known = self._page_areas.get(viewer_key(self.selected)) if self.selected is not None else None
-        return area_margins(known[1], known[0]) if known is not None else (0, 0, 0, 0)
+        if known is None or (size is not None and known[0] != size):
+            return (0, 0, 0, 0)
+        return area_margins(known[1], known[0])
 
     def _find_page(self, image: Image.Image) -> None:
         """The page panel in the chosen viewer's frame (`find_page_area`). While the reader has set no area for the
@@ -613,16 +622,17 @@ class LiveViewMixin(BlackViewerMixin):
         margins = hand if hand is not None else self.settings.margins
         return tuple(int(m) for m in margins)  # type: ignore[return-value]
 
-    def _inner_margins(self) -> tuple[int, int, int, int]:
+    def _inner_margins(self, size: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
         """The capture area within the reader's own: the page panel found inside it so far, as far as it lies within
-        the area (`_find_page`); the area itself while none is found for this viewer, capture size and area."""
+        the area (`_find_page`); the area itself while none is found for this viewer, capture size (*size*, when
+        given) and area."""
         hand = self._hand_set()
         known = getattr(self, "_inner_areas", {}).get(viewer_key(self.selected)) \
             if self.selected is not None else None
-        if known is None or known[1] != hand or known[2] is None:
+        if known is None or known[1] != hand or known[2] is None or (size is not None and known[0] != size):
             return hand
-        size, _hand, box = known
-        return area_margins(box, size, hand)
+        found_size, _hand, box = known
+        return area_margins(box, found_size, hand)
 
     def _apply_found_margins(self, starting: bool = False) -> None:
         """The page found so far becomes the capture area - within the reader's own area when there is one
@@ -724,7 +734,7 @@ class LiveViewMixin(BlackViewerMixin):
             self.canvas.crop = None
             self.canvas.set_image(None)
             return
-        self.canvas.crop = area.margins_to_box(self.settings.margins, image.size) if reading else None  # the page alone
+        self.canvas.crop = area.margins_to_box(self._margins_of(image), image.size) if reading else None  # the page alone
         self.canvas.set_image(image)
 
     def _picture(self) -> tuple[Image.Image | None, list[Any], list[Any]]:
@@ -824,8 +834,8 @@ class LiveViewMixin(BlackViewerMixin):
         return not frames_differ(self._area_thumb(result.original), self._area_thumb(live))
 
     def _area_thumb(self, image: Image.Image) -> np.ndarray:
-        """The thumbnail of *image*'s capture area (remembered for the last few frames)."""
-        margins = tuple(self.settings.margins)
+        """The thumbnail of *image*'s capture area (`_margins_of`; remembered for the last few frames)."""
+        margins = self._margins_of(image)
         for key, img, thumb in self._thumbs:
             if img is image and key == margins:
                 return thumb
@@ -1001,7 +1011,7 @@ class LiveViewMixin(BlackViewerMixin):
             return True
         try:
             cache = self.store.peek(book, model, language or "English")
-            units = _units(self, image, self.settings.margins)
+            units = _units(self, image, self._margins_of(image))
         except Exception:
             return False
         return bool(units) and any(
@@ -1034,7 +1044,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return False
             book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
             cache = self.store.peek(book, model, language or "English")
-            units = _units(self, image, s.margins)
+            units = _units(self, image, self._margins_of(image))
             if not units:
                 return False
             for u in units:
@@ -1725,6 +1735,7 @@ class LiveViewMixin(BlackViewerMixin):
         f.mode, f.events = "events", events
         f.owner = foreground_owner(events.front, events.viewer)
         f.look_at = 0.0  # the viewer as it is now, whoever is in front (`Following.unseen`)
+        f.size = self._window_size(events.viewer) if events.viewer else None  # (its notes that it moved tell from it)
         self._watch_own_window()
         return f
 
@@ -1755,6 +1766,7 @@ class LiveViewMixin(BlackViewerMixin):
             return
         f.owner = foreground_owner(foreground_window(), f.events.viewer)
         f.look_at, f.unseen = 0.0, True
+        f.moved, f.size = None, self._window_size(f.events.viewer) if f.events.viewer else None
 
     def _look_soon(self) -> None:
         """Follow = "events": the viewer looked at at the next heartbeat (the capture area changed: Auto reads the
@@ -1772,8 +1784,13 @@ class LiveViewMixin(BlackViewerMixin):
     def _take_notes(self, f: Following) -> None:
         """Windows' notes since the last heartbeat: who is in front now - a window of TASlation's or the viewer coming
         back to the front is looked at once (and the viewer in front polled) -, the viewer's window renamed (a tab
-        switch: is the book in front? looked at once), moved or resized (looked at once it stops), closed."""
+        switch: is the book in front? looked at once), moved or resized (looked at once it stops: settle_ms after the
+        last note, `Following.moved`; and at once as well at the first note of a spell that gives it another size,
+        since the capture's first frame of the new size may be all that comes - `wgc.restart` - and a page job on a
+        frame of the old size gives way to it as to a turned page, `_look_over_job`: a drag that goes on is not looked
+        at), closed."""
         now = time.monotonic()
+        settle = self.settings.settle_ms / 1000
         for kind, hwnd in f.events.take():
             if kind == "front":
                 owner = foreground_owner(hwnd, f.events.viewer)
@@ -1784,12 +1801,18 @@ class LiveViewMixin(BlackViewerMixin):
             elif kind == "renamed":
                 f.look_at = now
             elif kind == "moved":
-                f.look_at = now + self.settings.settle_ms / 1000
+                size = self._window_size(hwnd)
+                if f.moved is None and size != f.size:
+                    f.look_at = now
+                f.moved, f.size = now, size
             elif kind == "closed":
-                f.look_at = None
+                f.look_at, f.moved = None, None
                 self._viewer_gone()
                 if self.selected is not None:  # still there for a moment, or a run is on: looked at again
-                    f.look_at = now + self.settings.settle_ms / 1000
+                    f.look_at = now + settle
+        if f.moved is not None and now >= f.moved + settle:
+            f.moved = None
+            f.look_at = now if f.look_at is None else min(f.look_at, now)
         if getattr(self, "_over_on", False):
             self._front_as_it_is(f, now)
 
@@ -1819,8 +1842,20 @@ class LiveViewMixin(BlackViewerMixin):
             f.look_at = now + self.settings.settle_ms / 1000
 
     def _area_box(self, image: Image.Image) -> tuple[int, int, int, int]:
-        """The capture area of *image* (the margins every part of TASlation reads)."""
-        return area.margins_to_box(self.settings.margins, image.size)
+        """The capture area of *image* (the margins every part of TASlation reads: `_margins_of`)."""
+        return area.margins_to_box(self._margins_of(image), image.size)
+
+    def _margins_of(self, image: Image.Image) -> tuple[int, int, int, int]:
+        """The capture area (margins) the window reads the viewer's frame *image* by: the margins in force, but for a
+        frame of another size than the one a page job reads while that job runs - the viewer's window was given
+        another size: the margins in force stay the job's until it is done (`_apply_found_margins`; it is cancelled
+        once the frame of the new size has stayed, as for a turned page), and the new size's frames are read by that
+        size's own area at once (`_inner_margins`, `_found_margins`: `_find_page` looks at every frame captured), not
+        by an area of the old size's. A whole-book run keeps its own area (`page_area.JoinedArea`)."""
+        job = getattr(self, "_job_frame", None)
+        if job is None or job.size == image.size or not self.busy or in_a_run(self):
+            return tuple(self.settings.margins)  # type: ignore[return-value]
+        return self._inner_margins(image.size) if self._manual_area else self._found_margins(image.size)
 
     def _look(self) -> None:
         """Follow = "events": the viewer looked at once - it came back to the front, stopped moving or was renamed,

@@ -2153,8 +2153,8 @@ class JobsMixin:
         pump_soon(self)
 
     def _area_of(self, image: Image.Image) -> np.ndarray:
-        """The thumbnail of *image*'s capture area (the margins)."""
-        box = area.margins_to_box(tuple(self.settings.margins), image.size)
+        """The thumbnail of *image*'s capture area (the margins it is read by: `_margins_of`)."""
+        box = area.margins_to_box(self._margins_of(image), image.size)
         whole = box == (0, 0, image.width, image.height) or box[2] <= box[0] or box[3] <= box[1]
         return thumbnail(image if whole else image.crop(box))
 

@@ -170,6 +170,7 @@ class Window(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin, t
 
     _redisplay = LiveViewMixin._redisplay
     _status_follows_page = LiveViewMixin._status_follows_page
+    _margins_of = LiveViewMixin._margins_of
     _picture = LiveViewMixin._picture
     _result_on_show = LiveViewMixin._result_on_show
     _fill_on_show = LiveViewMixin._fill_on_show

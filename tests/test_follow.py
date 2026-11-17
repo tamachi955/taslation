@@ -518,6 +518,36 @@ def test_the_viewer_moved_is_looked_at_once_it_stops_and_renamed_at_once(setup):
     assert len(v.captures) <= 5  # the page taken, settled and looked at again; nothing after
 
 
+def test_the_viewer_given_another_size_is_looked_at_at_once_and_again_once_it_stops(setup, monkeypatch):
+    """A window given another size may draw no frame of it by itself (the capture's first frame of the new size can be
+    all that comes): it is looked at at the first note, and once it stops; a drag in between is not looked at."""
+    v = setup.viewer
+    rect = [(0, 0, 960, 760)]
+    monkeypatch.setattr(live, "window_rect", lambda hwnd: rect[0])
+    w = setup.make(auto=False)
+    w._following.size = (960, 760)  # (as the window watching it found it: `_follower`)
+    w.start()
+    setup.clock.run(2)
+    w.events.notes.append(("moved", VIEWER.hwnd))  # moved, its size as it was: once it stops only
+    setup.clock.run(0.15)
+    assert len(v.captures) == 1
+    setup.clock.run(0.6)
+    assert len(v.captures) == 2
+    rect[0] = (0, 0, 860, 1000)  # given another size in one step
+    w.events.notes += [("moved", VIEWER.hwnd), ("moved", VIEWER.hwnd)]
+    setup.clock.run(0.15)
+    assert len(v.captures) == 3  # at once
+    setup.clock.run(1)
+    assert len(v.captures) == 4  # and once it stopped (settle_ms after the last note)
+    for step in range(10):  # dragged to other sizes for a second
+        rect[0] = (0, 0, 870 + 10 * step, 1000)
+        w.events.notes.append(("moved", VIEWER.hwnd))
+        setup.clock.run(0.1)
+    assert len(v.captures) == 5  # at its first note alone
+    setup.clock.run(0.6)
+    assert len(v.captures) == 6
+
+
 def _turn(setup, w, *frames):
     """Press Left in the window: the viewer shows *frames* (delay, frame) after the key."""
     now = setup.clock.now

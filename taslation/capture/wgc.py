@@ -7,7 +7,10 @@ windows, which `PrintWindow` could not do for a Chromium page even in front. Mea
   is the window as it is now, however old it is;
 * frames hold the window's own title bar and borders: they are the size of the DWM extended frame bounds (`crop_box`
   takes the client area out of them);
-* a window that is resized gives its first frame of the new size a moment later (`newer`);
+* a window that is resized may give no frame of its new size until it draws again: the package makes its frames anew
+  at the new size and drops the one that showed it, and a browser drawing a still page gave none for 1.1-1.25 s; a new
+  session's first frame is the window as it is, 48-61 ms after its start (a browser, measured), so a frame of another
+  size than the window's starts the session over (`restart`), once for every size;
 * the package takes a window by handle, so windows that share a title do not matter, and a title that changes page by
   page does not touch a session.
 
@@ -84,9 +87,10 @@ def crop_box(size: tuple[int, int], bounds: Box, client: tuple[int, int, int, in
 
 
 class _Session:
-    """The capture of one window, kept by a daemon thread (see the module's notes)."""
+    """The capture of one window, kept by a daemon thread (see the module's notes); its frames are counted on from
+    *seq* (a session started over goes on from the count of the one before)."""
 
-    def __init__(self, hwnd: int, api: Any):
+    def __init__(self, hwnd: int, api: Any, seq: int = 0):
         self.hwnd = hwnd
         self.started = time.monotonic()
         self.ended_at: float | None = None
@@ -94,8 +98,7 @@ class _Session:
         self._api = api
         self._changed = threading.Condition()
         self._frame: Frame | None = None
-        self._seq = 0
-        self._gave_up = 0  # the frame after which `newer` waited in vain (not waited for again)
+        self._seq = seq
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name=f"wgc-{hwnd:x}", daemon=True)
         self._thread.start()
@@ -165,20 +168,9 @@ class _Session:
                 self._changed.wait_for(lambda: self._frame is not None or self.ended, left)
             return self._frame
 
-    def newer(self, seq: int, timeout: float) -> Frame | None:
-        """The newest frame once there is one after frame *seq*, waited for up to *timeout* seconds, once for every
-        frame: a window whose frames never fit is not waited for at every look."""
-        with self._changed:
-            if self._seq <= seq and seq != self._gave_up and timeout > 0:
-                self._changed.wait_for(lambda: self._seq > seq or self.ended, timeout)
-            if self._seq > seq:
-                return self._frame
-            self._gave_up = seq
-            return None
-
     def wait_past(self, seq: int, timeout: float) -> int:
-        """The session's frame count once it is past *seq*, or as it is after *timeout* seconds (every time: unlike
-        `newer`, a caller that waits for the next frame of a window that does not change waits each time)."""
+        """The session's frame count once it is past *seq*, or as it is after *timeout* seconds (every time: a caller
+        that waits for the next frame of a window that does not change waits each time)."""
         with self._changed:
             if self._seq <= seq and timeout > 0:
                 self._changed.wait_for(lambda: self._seq > seq or self.ended, timeout)
@@ -192,6 +184,7 @@ class _Session:
 
 _lock = threading.Lock()
 _session: _Session | None = None
+_restarted: tuple[int, tuple[int, int]] | None = None  # the window and its size the session was last started over for
 _api: Any = None
 _why = ""  # why the package cannot be used
 
@@ -245,12 +238,20 @@ def latest(hwnd: int, timeout: float = START_WAIT_S) -> Frame | None:
     return session.latest(timeout) if session is not None else None
 
 
-def newer(hwnd: int, seq: int, timeout: float) -> Frame | None:
-    """The newest frame of the window *hwnd* once it is newer than frame *seq*, within *timeout* seconds (a resized
-    window's first frame of its new size); None when none came."""
+def restart(hwnd: int, size: tuple[int, int]) -> bool:
+    """The running session of the window *hwnd* started over, its frame count going on from there (a count never goes
+    back): the window's frame there is not of its size *size* (width, height of its bounds), and a new session's first
+    frame is the window as it is (see the module's notes; `latest` waits for it). Once for every size: a window whose
+    frames never fit is not started over at every look. Whether it was."""
+    global _session, _restarted
     with _lock:
         session = _session
-    return session.newer(seq, timeout) if session is not None and session.hwnd == hwnd else None
+        if session is None or session.hwnd != hwnd or session.ended or _restarted == (hwnd, size):
+            return False
+        session.close()
+        _session = _Session(hwnd, session._api, session.seq)
+        _restarted = (hwnd, size)
+        return True
 
 
 def count(hwnd: int) -> int | None:

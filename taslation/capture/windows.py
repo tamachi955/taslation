@@ -746,18 +746,22 @@ def _frame_bounds(hwnd: int) -> Rect:
 
 
 def _compositor_frame(hwnd: int, client_only: bool) -> Image.Image | None:
-    """The window's latest frame from Windows.Graphics.Capture (`wgc`), cut to the client area; a window that was
-    resized is waited for up to RESIZE_WAIT_S, until a frame of its size has come. None: no frame to be had."""
+    """The window's latest frame from Windows.Graphics.Capture (`wgc`), cut to the client area. A frame of another size
+    than the window's (it was resized, and the session may give no frame of the new size until the window draws
+    again) starts the session over, whose first frame is the window as it is (`wgc.restart`, once for every size).
+    None: no frame to be had."""
     if user32.IsIconic(hwnd):
         return None
     frame = wgc.latest(hwnd)
-    deadline = time.monotonic() + RESIZE_WAIT_S
-    while frame is not None:
-        box = wgc.crop_box(frame.size, _frame_bounds(hwnd), _client_box(hwnd) if client_only else None)
-        if box is not None:
-            return frame.image(box)
-        frame = wgc.newer(hwnd, frame.seq, deadline - time.monotonic())
-    return None
+    if frame is None:
+        return None
+    bounds = _frame_bounds(hwnd)
+    box = wgc.crop_box(frame.size, bounds, _client_box(hwnd) if client_only else None)
+    if box is None and wgc.restart(hwnd, (bounds[2] - bounds[0], bounds[3] - bounds[1])):
+        frame = wgc.latest(hwnd)
+        if frame is not None:
+            box = wgc.crop_box(frame.size, _frame_bounds(hwnd), _client_box(hwnd) if client_only else None)
+    return frame.image(box) if frame is not None and box is not None else None
 
 
 def _dib_to_array(mem_dc: int, bmp: int, width: int, height: int) -> np.ndarray:
@@ -890,7 +894,6 @@ MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_ABSOLUTE
 INPUT_CHILD_CLASSES = ("Chrome_RenderWidgetHostHWND",)
 CAPTION_CHILD_CLASS = "InputNonClientPointerSource"  # WinUI's child over the title bar it draws (`caption_rows`)
 KEY_CHILD_CLASS = "InputSiteWindowClass"  # WinUI's child that takes the keyboard (`key_target`)
-RESIZE_WAIT_S = 0.6  # how long a resized window's first frame of the new size is waited for
 
 
 def input_target(hwnd: int) -> int:

@@ -81,6 +81,7 @@ class Window(BlackViewerMixin):
     _sharper_than = app_mod.App._sharper_than
     _same_page = app_mod.App._same_page
     _area_thumb = app_mod.App._area_thumb
+    _margins_of = app_mod.App._margins_of
     _lettered = app_mod.App._lettered
     _lettering = app_mod.App._lettering
     _settle_live = app_mod.App._settle_live

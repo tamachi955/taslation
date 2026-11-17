@@ -630,6 +630,7 @@ class Viewer(BlackViewerMixin):
     _resizing = app_mod.App._resizing
     _find_page = app_mod.App._find_page
     _found_margins = app_mod.App._found_margins
+    _margins_of = app_mod.App._margins_of
     _apply_found_margins = app_mod.App._apply_found_margins
     _hand_set = app_mod.App._hand_set
     _inner_margins = app_mod.App._inner_margins
@@ -848,6 +849,7 @@ def test_the_area_dialog_shows_the_page_panel_found_inside_the_area_dashed(hidde
 # ------------------------------------------------------------------ the canvas
 class Empty:
     _redisplay = app_mod.App._redisplay
+    _margins_of = app_mod.App._margins_of
     _status_follows_page = app_mod.App._status_follows_page
 
     def __init__(self, root):

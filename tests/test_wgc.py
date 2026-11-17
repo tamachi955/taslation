@@ -11,7 +11,6 @@ from contextlib import contextmanager
 import builtins
 import os
 import sys
-import threading
 import time
 from types import SimpleNamespace
 
@@ -261,27 +260,41 @@ def test_the_image_has_the_box_and_the_right_colours():
     assert image.size == (3, 2) and image.mode == "RGB" and image.getpixel((0, 0)) == (30, 20, 10)
 
 
-def test_a_resize_is_waited_for(api, monkeypatch):
-    capture = api(stand_in(frames=((4, 3),)))
+@pytest.fixture
+def window(monkeypatch):
+    """A window whose bounds (and client area) the test sets; `restart`'s record of the size starts empty."""
+    state = SimpleNamespace(bounds=(0, 0, 8, 6))
     monkeypatch.setattr(windows, "user32", SimpleNamespace(IsWindow=lambda h: True, IsIconic=lambda h: False))
-    monkeypatch.setattr(windows, "_frame_bounds", lambda h: (0, 0, 8, 6))
-    monkeypatch.setattr(windows, "_client_box", lambda h: (0, 0, 8, 6))
-    threading.Timer(0.05, lambda: capture.made[0].send((8, 6))).start()
+    monkeypatch.setattr(windows, "_frame_bounds", lambda h: state.bounds)
+    monkeypatch.setattr(windows, "_client_box", lambda h: (0, 0, state.bounds[2], state.bounds[3]))
+    monkeypatch.setattr(wgc, "_restarted", None)
+    return state
+
+
+def test_a_resized_window_starts_the_session_over_and_its_count_goes_on(api, window):
+    """The package drops a resized window's first frame of the new size, and a window that draws nothing more gives
+    none: a new session's first frame is the window as it is."""
+    sizes = [(8, 6)]  # what a session's start sends: the window as it is
+    capture = api(stand_in(frames=sizes))
     assert windows._compositor_frame(1, True).size == (8, 6)
+    capture.made[0].send((8, 6))
+    assert wgc.count(1) == 2
+    window.bounds, sizes[:] = (0, 0, 12, 9), [(12, 9)]  # resized: the session's frame is of the old size still
+    started = time.monotonic()
+    assert windows._compositor_frame(1, True).size == (12, 9) and time.monotonic() - started < 0.5
+    assert len(capture.made) == 2 and wgc.count(1) == 3  # (a count never goes back: the window's looks go by it)
+    wait_until(lambda: capture.made[0].stops == 1)
+    assert windows._compositor_frame(1, True).size == (12, 9) and len(capture.made) == 2  # (no other start)
 
 
-def test_a_frame_that_never_fits_is_waited_for_once_then_printwindow(api, monkeypatch):
-    api(stand_in())
-    monkeypatch.setattr(windows, "user32", SimpleNamespace(IsWindow=lambda h: True, IsIconic=lambda h: False))
-    monkeypatch.setattr(windows, "_frame_bounds", lambda h: (0, 0, 8, 6))
-    monkeypatch.setattr(windows, "_client_box", lambda h: (0, 0, 8, 6))
-    monkeypatch.setattr(windows, "RESIZE_WAIT_S", 0.05)
+def test_a_frame_that_never_fits_starts_the_session_over_once_then_printwindow(api, window):
+    capture = api(stand_in())  # frames of (4, 3), whatever the window's size
     started = time.monotonic()
-    assert windows._compositor_frame(1, True) is None
-    assert time.monotonic() - started >= 0.04
-    started = time.monotonic()
-    assert windows._compositor_frame(1, True) is None
-    assert time.monotonic() - started < 0.04
+    assert windows._compositor_frame(1, True) is None and len(capture.made) == 2
+    assert windows._compositor_frame(1, True) is None and len(capture.made) == 2  # once for this size
+    assert time.monotonic() - started < 0.5  # (no wait for a frame that does not come)
+    window.bounds = (0, 0, 10, 7)  # another size: started over once more
+    assert windows._compositor_frame(1, True) is None and len(capture.made) == 3
 
 
 def test_a_minimised_window_is_left_to_the_old_route(api, monkeypatch):

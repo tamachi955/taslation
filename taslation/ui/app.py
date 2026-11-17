@@ -603,8 +603,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.canvas.pack(fill="both", expand=True)
         self.canvas.on_redraw = self._page_drawn  # the reading-order badges and the selection (`selection`)
         # out of reading mode as in it, no more of a frame is drawn than the capture area in force, which every part
-        # of TASlation reads (a browser's title bar and a viewer's bands are in the capture of its client area)
-        self.canvas.read_area_of = lambda image: area.margins_to_box(self.settings.margins, image.size)
+        # of TASlation reads (a browser's title bar and a viewer's bands are in the capture of its client area; a frame
+        # of a new size while a page job runs, that size's own: `_margins_of`)
+        self.canvas.read_area_of = lambda image: area.margins_to_box(self._margins_of(image), image.size)
         # Single-screen use: the viewer may sit behind this window. Keys pressed on the
         # page turn its pages; clicks on the page are passed through to the same spot
         # (reader) or select, move, resize and edit the regions (translator).
