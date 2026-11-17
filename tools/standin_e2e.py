@@ -168,7 +168,9 @@ SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5)
          ("r", 1): (5.2, "r_rest"), ("r", 4): (5.0, "r_after_flipping"), ("r", 5): (1.5, "r_back_cached"),
          ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
          ("w", 2): (2.0, "w_reading"), ("w2", 1): (2.0, "w2_page_of_the_run"), ("w2", 5): (2.0, "w2_page_not_read"),
-         ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 2): (5.0, "f_narrow_rest")}
+         ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
+         ("f2", 2): (5.0, "f_narrow_rest")}
+RESIZE_SHOT_S = 3.0  # the picture of the window this long after the stand-in drew its page at a new size
 TEXT_SIZE = 1.5  # scenario z: TASlation's text size, times the run's
 CANCEL_SCREENS = 3  # scenario x: the screens of little text (spreads of pages with 1 to CANCEL_LINES lines of text)
 CANCEL_LINES = 2
@@ -538,6 +540,7 @@ class Notes:
         self.run_frames: list[dict[str, Any]] = []  # a whole-book run's decisions on the viewer's frames, and ...
         self.run_reads: list[dict[str, Any]] = []  # ... the frames it got from its store to read
         self.run_ends: list[dict[str, Any]] = []
+        self.lookups: list[dict[str, Any]] = []  # each page unit a page job looked for in the cache, and what it found
         self.on_display: Callable[[dict[str, Any]], None] | None = None
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
@@ -560,7 +563,8 @@ class Notes:
 
     # the page jobs
     def new_job(self, image: Any) -> dict[str, Any]:
-        job = {"id": len(self.jobs) + 1, "t": now_ms(), **self.code(self.shown(image)), "started": False,
+        job = {"id": len(self.jobs) + 1, "t": now_ms(), **self.code(self.shown(image)),
+               "size": list(image.size) if image is not None else None, "started": False,
                "gate": False, "requests": 0, "translated": 0, "first_translated_t": None,
                "result_t": None, "result_translated": None, "result_from": None, "cancelled_t": None,
                "discarded": None, "done_t": None, "gate_end": None}
@@ -748,6 +752,25 @@ class Notes:
         with self.lock:
             self.hotkeys.append({"t": now_ms(), "pressed": name, "taken": taken})
 
+    def lookup(self, pipeline: Any, unit: Any, hit: Any, read: tuple[Any, Any] | None) -> None:
+        """A page unit a page job looked for in the cache (`Pipeline._lookup`), in numbers: the frame's size and the
+        capture area it was fingerprinted by (`Pipeline.units_of`), the unit's box and aspect, the distance of the page
+        found (None: a miss), and the nearest page the cache holds whatever its aspect, with its aspect."""
+        from taslation.fingerprint import hamming
+
+        size, margins = read if read is not None else (None, None)
+        nearest, aspect = None, None
+        for page in list(getattr(pipeline.cache, "pages", None) or ()):
+            d = hamming(unit.fingerprint, page.fingerprint)
+            if nearest is None or d < nearest:
+                nearest, aspect = d, round(float(page.aspect or 0), 3)
+        rec = {"t": now_ms(), "size": list(size) if size else None, "margins": list(margins) if margins else None,
+               "box": [int(v) for v in unit.box], "aspect": round(float(unit.aspect), 3),
+               "hit": hit[1] if hit is not None else None, "nearest": nearest, "nearest_aspect": aspect}
+        with self.lock:
+            rec["job"] = self.current["id"] if self.current else None
+            self.lookups.append(rec)
+
     def run_frame(self, kind: Any, image: Any) -> None:
         with self.lock:
             self.run_frames.append({"t": now_ms(), "kind": str(kind), **self.code(self.shown(image))})
@@ -925,6 +948,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     import taslation.capture.windows as windows
     from taslation import batch as batch_mod
     from taslation import pageimages
+    from taslation import pipeline as pipeline_mod
     from taslation.ocr import place
     from taslation.translate import ollama as ollama_mod
     from taslation.translate import plamo as plamo_mod
@@ -1019,6 +1043,22 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return image
 
     batch_mod.BatchReader._decided, pageimages.PageImages.frame = run_decided, run_stored
+    units_of, lookup = pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup
+
+    def fingerprinted(self: Any, rgb: Any) -> Any:  # the page units, by the capture area in force as they are found
+        units = units_of(self, rgb)
+        notes.local.read = ((int(rgb.shape[1]), int(rgb.shape[0])), tuple(int(m) for m in self.settings.margins))
+        return units
+
+    def looked_up(self: Any, unit: Any, *a: Any, **k: Any) -> Any:  # ... and what the cache gave each of them
+        hit = lookup(self, unit, *a, **k)
+        try:
+            notes.lookup(self, unit, hit, getattr(notes.local, "read", None))
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            notes.error("lookup hook", type(e).__name__)
+        return hit
+
+    pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup = fingerprinted, looked_up
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -1142,6 +1182,7 @@ class Director:
         self.entered: dict[str, dict[str, Any]] = {}  # per scenario of a mode: what was done to enter it, and when
         self.standin_before: tuple[int, int, int, int] | None = None  # the stand-in's rect before scenario o
         self.run_ends_seen = 0
+        self.resized_at, self.resizes_seen = float("-inf"), 0  # the stand-in's last draw at a new size, pictured after
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
         self.events: list[dict[str, Any]] = []
         self.seen = 0
@@ -1246,6 +1287,11 @@ class Director:
             elif ev == "draw" and e.get("why") in ("next", "previous", "jump"):
                 self.turns_in[self.current] += 1
                 self.turned(e)
+            elif ev == "draw" and e.get("why") == "resize" and time.monotonic() - self.resized_at > RESIZE_SHOT_S:
+                # the page at its new size, as the window draws it once it has read it (from the cache, if it holds it)
+                self.resized_at, self.resizes_seen = time.monotonic(), self.resizes_seen + 1
+                self.due.append((self.resized_at + RESIZE_SHOT_S,
+                                 f"{self.current or 'start'}_resized{self.resizes_seen}"))
             elif ev == "black" and e.get("on") == "1" and self.current == "d":
                 self.due.append((time.monotonic() + 0.3, f"d_flash{self.turns_in['d']}"))
             elif ev == "spinner" and e.get("on") == "1" and self.current == "d":
@@ -1763,6 +1809,51 @@ def resize_rows(events: list[dict[str, Any]], offset: float, notes: Notes, turns
     return out
 
 
+def across_sizes(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The page jobs on a sharp frame of a page the cache held as it was stored at another frame size only (by page
+    jobs done before this one began that stored all of their screen, at sizes other than this frame's; a page the
+    cache gave a job stays stored where it was), each page of the screen so: right after a change of the window's size
+    (the screen on show as the size changed, no other shown at the new size before it) or on a turn back to the page
+    later, as often as it comes. Per job, the units the cache gave and did not and
+    the requests sent - for nothing: the page was held. A single page held as a page of a spread (the narrow window),
+    or the other way round, is told apart ("layout")."""
+    held: list[tuple[float, int, bool, tuple[int, int]]] = []  # (done, page, in a spread, frame size)
+    rows: list[dict[str, Any]] = []
+    size_before, since = None, []  # the size of the sharp frames before, and the screens shown at it since it came
+    for j in sorted(jobs, key=lambda j: j["t_s"]):
+        size = tuple(j["size"]) if j.get("size") else None
+        pages = [j["page"], j["page"] + 1] if j["spread"] else [j["page"]]
+        if j["frame"] == "sharp" and size is not None and j["page"] is not None:
+            screen = (j["page"], bool(j["spread"]))
+            if size != size_before:
+                since = []
+            earlier = [[(spread, s) for done, p, spread, s in held if p == page and done <= j["t_s"]] for page in pages]
+            if all(earlier) and all(s != size for found in earlier for _spread, s in found):
+                layouts = {spread for found in earlier for spread, _s in found}
+                rows.append({"id": j["id"], "t_s": j["t_s"], "page": j["page"], "spread": j["spread"],
+                             "size": list(size),
+                             "held_at": [list(s) for s in sorted({s for found in earlier for _x, s in found})],
+                             "layout": "same" if layouts == {bool(j["spread"])} else "spread/single",
+                             "why": "size change" if all(s == screen for s in since) else "turn back",
+                             "unit_hits": j.get("cache_hits"), "unit_misses": j.get("cache_misses"),
+                             "requests": j["requests"]})
+            since.append(screen)
+            size_before = size
+        units = 2 if j["spread"] else 1
+        if size is not None and j["page"] is not None and j.get("done_s") is not None and \
+                (j.get("stored") or j.get("stored_at_cancel") or 0) >= units:
+            held.extend((j["done_s"], page, bool(j["spread"]), size) for page in pages)
+
+    def total(items: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"jobs": len(items), "unit_hits": sum(r["unit_hits"] or 0 for r in items),
+                "unit_misses": sum(r["unit_misses"] or 0 for r in items), "requests": sum(r["requests"] for r in items)}
+
+    return {**total(rows),
+            "by_layout": {k: total([r for r in rows if r["layout"] == k]) for k in ("same", "spread/single")},
+            "by_why": {k: total([r for r in rows if r["why"] == k]) for k in ("size change", "turn back")},
+            "list": rows}
+
+
 def wasted_why(job: dict[str, Any] | None) -> str | None:
     """Why the requests of the page job *job* were sent for nothing (None: they were not): its frame was not the sharp
     one ("soft": soft, a spinner, black or a frame without the stand-in's code), or what it did was dropped
@@ -2228,7 +2319,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     for load in loads:
         load["from_s"] = rel(load.pop("from_t"))
     job_list = [{"id": j["id"], "t_s": rel(j["t"]), "page": j["page"], "spread": j["spread"], "frame": j["state"],
-                 "gate": j["gate"], "gate_end": j["gate_end"], "requests": j["requests"],
+                 "size": j["size"], "gate": j["gate"], "gate_end": j["gate_end"], "requests": j["requests"],
                  "lettered_events": j["translated"],
                  "first_lettered_s": rel(j["first_translated_t"]), "result_s": rel(j["result_t"]),
                  "result_translated": j["result_translated"], "result_from": j["result_from"],
@@ -2335,6 +2426,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "latency_rested": latency,
         "status_line_of_the_page_before": status_summary,
         "resizes": resizes,
+        "cache_across_sizes": across_sizes(job_list),
         "modes": modes,
         "whole_book_run": whole_book,
         "cancel_in_flight": cancel,
@@ -2355,6 +2447,11 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                      "rows": displays},
         "ready_s": rel(ready_at), "app_events": dict(Counter(e["kind"] for e in notes.app_events)),
         "job_list": job_list,
+        "lookup_list": {"columns": ["t_s", "job", "size", "margins", "box", "aspect", "hit", "nearest",
+                                    "nearest_aspect"],
+                        "rows": [[rel(r["t"]), r["job"], r["size"], r["margins"], r["box"], r["aspect"], r["hit"],
+                                  r["nearest"], r["nearest_aspect"]] for r in notes.lookups]},
+        "area_list": [{**{k: v for k, v in m.items() if k != "t"}, "t_s": rel(m["t"])} for m in notes.margins],
         "failed": director.failed, "seconds": round((ended - began) / 1000, 1),
         "clock": {"standin_to_window_ms": round(offset, 1),
                   "log_latency_ms_median": round(statistics.median(lat) - offset, 1) if lat else None},
@@ -2528,6 +2625,10 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"{item['first_capture_ms']} ms, read by its own area {item['read_by_own_area_ms']} ms, its own area in "
               f"force {item['own_area_in_force_ms']} ms, long captures {item['long_captures_ms']}, job running "
               f"{item['job_running']}, old lettering {item['old_lettering_ms']} ms")
+    across = run_["cache_across_sizes"]
+    print(f"pages held at another size only: {across['jobs']} jobs, units from the cache {across['unit_hits']}, not "
+          f"{across['unit_misses']}, requests {across['requests']}; by why {across['by_why']}; by layout "
+          f"{across['by_layout']}")
     modes = run_["modes"]
     print(f"modes entered {modes['entered']}; hot keys pressed "
           f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")

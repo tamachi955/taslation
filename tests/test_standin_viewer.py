@@ -145,6 +145,34 @@ def test_requests_sent_for_nothing_are_told_with_what_they_cost():
     assert standin_e2e.dist([]) == {"n": 0}
 
 
+def _sized(id_, t, page, spread, size, frame="sharp", stored=0, hits=0, misses=0, requests=0, done=None):
+    return {"id": id_, "t_s": t, "page": page, "spread": spread, "frame": frame, "size": size, "requests": requests,
+            "cache_hits": hits, "cache_misses": misses, "stored": stored, "stored_at_cancel": None, "done_s": done}
+
+
+def test_a_page_held_at_another_size_only_is_told_with_what_the_cache_gave_and_what_was_asked():
+    tall, taller, narrow = [1904, 1024], [1904, 1072], [844, 992]
+    jobs = [_sized(1, 0, 4, True, tall, stored=2, done=5),
+            _sized(2, 6, 4, True, taller, hits=None, misses=None),  # just after the size changed: given way ...
+            _sized(3, 7, 4, True, taller, misses=2, requests=3, stored=2, done=10),  # ... to this one on the same page
+            _sized(4, 11, 6, True, taller, stored=1, done=12),  # (one of its two pages stored: not held whole)
+            _sized(5, 20, 4, True, taller, hits=2, done=21),  # held at this size since job 3
+            _sized(6, 25, 4, False, narrow, hits=1, done=26),  # the narrow window: a page of a spread held
+            _sized(7, 30, 5, False, narrow, frame="soft"),
+            _sized(8, 31, 5, False, narrow, hits=1, done=32),  # a turn at that size to the spread's other page
+            _sized(9, 40, 6, False, narrow, misses=1, requests=1, done=41),  # never held whole: not told
+            _sized(10, 45, 4, False, narrow, hits=1, done=46)]  # given by the cache before, still stored elsewhere only
+    across = standin_e2e.across_sizes(jobs)
+    assert [(r["id"], r["why"], r["layout"], r["held_at"]) for r in across["list"]] == [
+        (2, "size change", "same", [tall]), (3, "size change", "same", [tall]),
+        (6, "size change", "spread/single", [tall, taller]), (8, "turn back", "spread/single", [tall, taller]),
+        (10, "turn back", "spread/single", [tall, taller])]
+    assert {k: across[k] for k in ("jobs", "unit_hits", "unit_misses", "requests")} == {
+        "jobs": 5, "unit_hits": 3, "unit_misses": 2, "requests": 3}
+    assert across["by_why"]["size change"]["requests"] == 3 and across["by_layout"]["spread/single"]["jobs"] == 3
+    assert standin_e2e.across_sizes([])["jobs"] == 0
+
+
 def progress_line(progress, reading=False):  # (as the window's progress line is named where it says it)
     return str(progress)
 

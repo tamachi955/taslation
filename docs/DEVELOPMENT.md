@@ -112,8 +112,12 @@ rows' languages.
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
   answerer in its place), and the tool writes numbers (the sharp frame to the first request, the first lettered
   bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; jobs kept
-  from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran) and pictures of
-  TASlation's own window to the `--out` folder,
+  from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; the pages the
+  cache held as they were stored at another window size only, met right after a change of size or on a turn back, with
+  the page units the cache gave and did not and the requests sent for them, a page alone and a page of a spread told
+  apart; each page unit looked for in the cache, with the frame's size, the capture area and the distance of the page
+  found and of the nearest one, and the capture areas in force) and pictures of TASlation's own window to the `--out`
+  folder (one of them 3 s after each change of the stand-in's size, its page at the new size),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
