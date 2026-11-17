@@ -541,6 +541,7 @@ class Notes:
         self.run_reads: list[dict[str, Any]] = []  # ... the frames it got from its store to read
         self.run_ends: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []  # each page unit a page job looked for in the cache, and what it found
+        self.resolves: list[dict[str, Any]] = []  # ... and each look for the page as read at other sizes
         self.on_display: Callable[[dict[str, Any]], None] | None = None
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
@@ -771,6 +772,13 @@ class Notes:
             rec["job"] = self.current["id"] if self.current else None
             self.lookups.append(rec)
 
+    def resolved(self, ms: float, readings: int | None, replaced: int) -> None:
+        """A page job's look for the page units the cache did not hold as found (`Pipeline._resolve`): its time, the
+        readings it went through (None: it needed none) and the units one of them found."""
+        with self.lock:
+            self.resolves.append({"t": now_ms(), "job": self.current["id"] if self.current else None,
+                                  "ms": round(ms, 1), "readings": readings, "replaced": replaced})
+
     def run_frame(self, kind: Any, image: Any) -> None:
         with self.lock:
             self.run_frames.append({"t": now_ms(), "kind": str(kind), **self.code(self.shown(image))})
@@ -947,6 +955,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     import taslation.capture.wgc as wgc
     import taslation.capture.windows as windows
     from taslation import batch as batch_mod
+    from taslation import fingerprint
     from taslation import pageimages
     from taslation import pipeline as pipeline_mod
     from taslation.ocr import place
@@ -1059,6 +1068,23 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return hit
 
     pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup = fingerprinted, looked_up
+    resolve, readings = pipeline_mod.Pipeline._resolve, fingerprint.readings
+
+    def counted_readings(*a: Any, **k: Any) -> Any:  # the readings a look for the page went through
+        for units in readings(*a, **k):
+            notes.local.readings += 1
+            yield units
+
+    def resolved(self: Any, rgb: Any, units: Any) -> Any:  # ... and how long it took, what it found
+        notes.local.readings = 0
+        t = time.perf_counter()
+        out = resolve(self, rgb, units)
+        ms = (time.perf_counter() - t) * 1000
+        ran = notes.local.readings
+        notes.resolved(ms, ran if ran else None, sum(1 for a, b in zip(units, out) if a is not b))
+        return out
+
+    pipeline_mod.Pipeline._resolve, fingerprint.readings = resolved, counted_readings
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -1900,6 +1926,17 @@ def wasted_requests(requests: list[dict[str, Any]], jobs: list[dict[str, Any]], 
     return out
 
 
+def readings_on_a_miss(resolves: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The page jobs' looks for page units the cache did not hold as found (`Notes.resolved`): how many there were,
+    how many went through readings and found a unit so, the time those took and the readings they went through
+    (all of them for a page the cache holds at no size), each with its time in the run (*rel*)."""
+    ran = [r for r in resolves if r["readings"] is not None]
+    return {"looks": len(resolves), "with_readings": len(ran), "found": sum(1 for r in ran if r["replaced"]),
+            "ms": dist([r["ms"] for r in ran]), "readings": dist([r["readings"] for r in ran]),
+            "ms_when_found": dist([r["ms"] for r in ran if r["replaced"]]),
+            "list": [{**{k: v for k, v in r.items() if k != "t"}, "t_s": rel(r["t"])} for r in ran]}
+
+
 def server_wait(r: dict[str, Any]) -> int | None:
     """How long a request waited beyond the model's work for it (its HTTP exchange less Ollama's load, prompt and
     answer durations; not less its total_duration, which takes in a wait behind another request): the wait for the
@@ -2427,6 +2464,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "status_line_of_the_page_before": status_summary,
         "resizes": resizes,
         "cache_across_sizes": across_sizes(job_list),
+        "readings_on_a_miss": readings_on_a_miss(notes.resolves, rel),
         "modes": modes,
         "whole_book_run": whole_book,
         "cancel_in_flight": cancel,
@@ -2629,6 +2667,10 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     print(f"pages held at another size only: {across['jobs']} jobs, units from the cache {across['unit_hits']}, not "
           f"{across['unit_misses']}, requests {across['requests']}; by why {across['by_why']}; by layout "
           f"{across['by_layout']}")
+    looks = run_["readings_on_a_miss"]
+    print(f"readings of a page the cache did not hold as found: {looks['with_readings']} of {looks['looks']} looks, "
+          f"found {looks['found']}; ms {looks['ms']} (when found {looks['ms_when_found']}); readings "
+          f"{looks['readings']}")
     modes = run_["modes"]
     print(f"modes entered {modes['entered']}; hot keys pressed "
           f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")

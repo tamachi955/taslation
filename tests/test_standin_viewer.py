@@ -173,6 +173,16 @@ def test_a_page_held_at_another_size_only_is_told_with_what_the_cache_gave_and_w
     assert standin_e2e.across_sizes([])["jobs"] == 0
 
 
+def test_the_looks_for_a_page_as_read_at_other_sizes_are_told_with_their_time():
+    looks = [{"t": 100, "job": 1, "ms": 0.2, "readings": None, "replaced": 0},  # (held as found: no reading)
+             {"t": 200, "job": 2, "ms": 41.0, "readings": 12, "replaced": 0},  # (held at no size)
+             {"t": 300, "job": 3, "ms": 9.5, "readings": 2, "replaced": 2}]
+    told = standin_e2e.readings_on_a_miss(looks, lambda t: t / 1000)
+    assert (told["looks"], told["with_readings"], told["found"]) == (3, 2, 1)
+    assert told["ms"]["max"] == 41.0 and told["ms_when_found"]["n"] == 1 and told["readings"]["min"] == 2
+    assert [r["job"] for r in told["list"]] == [2, 3] and told["list"][1]["t_s"] == 0.3
+
+
 def progress_line(progress, reading=False):  # (as the window's progress line is named where it says it)
     return str(progress)
 
