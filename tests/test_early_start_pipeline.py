@@ -1,10 +1,12 @@
 """A page job on a frame the window has not confirmed yet (`pipeline.PageGate`, `Pipeline.page_on_show`: the live
-view's early start, tests/test_early_start.py): it reads the page but asks the model nothing, and loads no model, until
-the frame is confirmed; what it changes that lasts - the cache and its file, the lines kept for reuse, the book's sizes,
-where the book was read last, the pairs held for the translator, the line tally, the stage times, the pages kept
-lettered - is held, kept once the frame is confirmed and put back whole when it is dropped or the job is cancelled
-first. The memos keyed by the very pixels (the OCR's readings) stay. The window's page job (`_job_translate`) shows the
-page first, then waits for the frame; what it stored anew goes to the window with the page."""
+view's early start, tests/test_early_start.py): it reads the page, and asks the model - and loads its model - as soon
+as the window has found the frame on show after the job asked (`PageGate.on_show`, `seen`), with no wait for the
+confirmation; what it changes that lasts - the cache and its file, the lines kept for reuse, the book's sizes, where
+the book was read last, the pairs held for the translator, the lines the translator counts as asked for, the line
+tally, the stage times, the pages kept lettered - is held, kept once the frame is confirmed and put back whole when it
+is dropped or the job is cancelled first, a request in flight among it. The memos keyed by the very pixels (the OCR's
+readings) stay. The window's page job (`_job_translate`) shows the page first, then waits for the frame; what it stored
+anew goes to the window with the page."""
 from __future__ import annotations
 
 import threading
@@ -108,13 +110,25 @@ def _read_and_waiting(p: Pipeline, job: Job, seconds=20.0) -> None:
     raise AssertionError("the job never came to the gate")
 
 
-def test_the_model_is_asked_nothing_until_the_frame_is_confirmed_and_the_page_is_kept_then(sample_page, settings):
+def _asked(p: Pipeline, seconds=20.0) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end and not p.translator.calls:
+        time.sleep(0.01)
+    return bool(p.translator.calls)
+
+
+def test_the_model_is_asked_once_the_window_sees_the_frame_and_the_page_is_kept_once_it_is_confirmed(sample_page,
+                                                                                                     settings):
     p = _pipeline(settings, "Confirmed")
     gate = PageGate()
+    gate.seen(time.monotonic())  # (a look before the job asked says nothing of the frame now)
     job = Job(p, sample_page, gate)
     _read_and_waiting(p, job)
-    assert p.ocr.calls and p.translator.calls == [] and job.thread.is_alive()  # read, and waiting
-    assert len(p.cache) == 0 and not p.cache.path.exists()
+    assert p.ocr.calls and p.translator.calls == [] and job.thread.is_alive()  # read, and waiting at the gate
+    gate.seen(time.monotonic())  # the window's next look: the frame is on show still
+    assert _asked(p) and job.thread.is_alive()  # asked at once, not confirmed: the page waits for its frame ...
+    time.sleep(0.2)
+    assert len(p.cache) == 1 and not p.cache.dirty and not p.cache.path.exists()  # ... stored, and held
     assert gate.confirm()  # the window: the frame stayed
     job.join()
     assert job.error is None and job.kept is True and len(p.translator.calls) == 1
@@ -159,6 +173,52 @@ def test_a_frame_dropped_while_its_page_waits_puts_back_everything_the_job_did(s
     expected = fresh.process(sample_page)
     assert [(r.bbox, r.translated_text) for r in again.regions] == [(r.bbox, r.translated_text)
                                                                     for r in expected.regions]
+
+
+class Slow(DictTranslator):
+    """A translator whose request runs until it is cancelled (`translate_page`'s *cancel*), counting each line it was
+    asked for as `PlamoTranslator` does (`draws`)."""
+
+    def __init__(self, mapping):
+        super().__init__(mapping)
+        self.asked: dict[str, int] = {}
+        self.running = threading.Event()
+
+    def translate_page(self, texts, *args, cancel=None, **kwargs):
+        for text in texts:
+            self.asked[text] = self.asked.get(text, 0) + 1
+        self.running.set()
+        while cancel is not None and not cancel.wait(0.01):
+            pass
+        return super().translate_page(texts, *args, cancel=cancel, **kwargs)
+
+    def draws(self):
+        return dict(self.asked)
+
+    def set_draws(self, draws):
+        self.asked = dict(draws)
+
+
+def test_a_frame_that_changes_while_its_request_runs_cancels_it_and_puts_back_everything(sample_page, sample_page2,
+                                                                                         settings, monkeypatch):
+    monkeypatch.setattr(pipeline_mod, "size_sample", lambda reading: 21.0)
+    p = _pipeline(settings, "Changed in flight")
+    p.process(sample_page2)  # a page before
+    p.translator = translator = Slow(EN_TEXTS)
+    translator.asked = {"before": 1}
+    before, stamp = _state(p), p.cache.path.stat().st_mtime_ns
+    gate, cancel = PageGate(), threading.Event()
+    job = Job(p, sample_page, gate, cancel)
+    _read_and_waiting(p, job)
+    gate.seen(time.monotonic())
+    assert translator.running.wait(20.0)  # the request on its way
+    assert len(translator.asked) > 1
+    gate.drop()  # the frame changed: the window drops it and cancels the job, its request with it
+    cancel.set()
+    job.join()
+    assert isinstance(job.error, Cancelled) and job.work.kept is False and job.work.stored == []
+    assert _state(p) == before and p.cache.path.stat().st_mtime_ns == stamp
+    assert translator.asked == {"before": 1}  # (a line asked for on the frame that changed is drawn anew later)
 
 
 def test_a_cancel_while_the_page_waits_for_its_frame_keeps_nothing(sample_page, settings):
@@ -211,7 +271,7 @@ def test_a_cancel_after_the_confirmation_keeps_the_page_stored_as_ever(sample_pa
     assert len(_on_disk(settings, "Confirmed then stopped")) == 1  # stored whole, and saved, as ever
 
 
-def test_the_model_loads_ahead_only_once_the_frame_is_confirmed(settings):
+def test_the_model_loads_ahead_once_the_window_sees_the_frame(settings):
     loads: list[float] = []
     p = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS))
     p.translator.ensure_loaded = lambda cancel=None: loads.append(time.monotonic())
@@ -219,11 +279,21 @@ def test_the_model_loads_ahead_only_once_the_frame_is_confirmed(settings):
     ahead = LoadAhead(p, cancel, gate)
     ahead.start()
     time.sleep(0.3)
-    assert loads == []  # waits for the frame
-    confirmed = time.monotonic()
-    gate.confirm()
+    assert loads == []  # waits for a look at the frame
+    seen = time.monotonic()
+    gate.seen(seen)
+    ahead.thread.join(5.0)
+    assert len(loads) == 1 and loads[0] >= seen and gate.state == "pending"  # loaded, nothing confirmed
     ahead.join()
-    assert len(loads) == 1 and loads[0] >= confirmed
+
+    loads.clear()
+    dropped = PageGate()
+    ahead = LoadAhead(p, cancel, dropped)
+    ahead.start()
+    dropped.drop()  # the frame changed before a look found it
+    ahead.thread.join(5.0)
+    assert loads == [] and not ahead.thread.is_alive()
+    ahead.join()
 
     loads.clear()
     pending = PageGate()
@@ -274,9 +344,10 @@ def test_the_page_job_shows_its_page_then_waits_for_the_frame(sample_page, setti
     while time.monotonic() < end and "result" not in w.kinds():
         time.sleep(0.02)
         if p.ocr.calls and not p.translator.calls and not w.kinds():
-            gate.confirm() if confirmed else None  # (the frame stays: the model is asked; else it never is)
             if not confirmed:
                 break
+            gate.seen(time.monotonic())  # (the frame on show: the model is asked; else it never is)
+            gate.confirm()
     if confirmed:
         thread.join(20)
         assert w.kinds() == ["result", "translate_done"]

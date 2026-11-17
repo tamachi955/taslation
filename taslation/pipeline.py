@@ -796,9 +796,9 @@ class PageDraft:
         return hit[1]
 
 
-GATE_STEP_S = 0.01  # how often a page job waiting for its frame's confirmation looks at its cancel (`PageGate.wait`)
-GATE_LIMIT_S = 15.0  # a frame not confirmed nor dropped within this is taken as never confirmed (a guard: the window
-# decides every gate it opens long before; a page job never waits for nothing)
+GATE_STEP_S = 0.01  # how often a page job waiting at its gate looks at its cancel (`PageGate.wait`, `on_show`)
+GATE_LIMIT_S = 15.0  # a frame neither seen on show, kept nor dropped within this is taken as never kept (a guard: the
+# window looks at the frame of every gate it opens within tens of ms; a page job never waits for nothing)
 # How long the window's close waits for a page job whose frame it dropped to put back what it did itself
 # (`Pipeline.drop_unconfirmed`): at its gate the job sees the drop within GATE_STEP_S, while it reads at its next check
 # (between two crops, two regions, two stages); a job held longer (a model's load) is put back from the close's thread
@@ -808,16 +808,20 @@ _LOCKS = (type(threading.Lock()), type(threading.RLock()))
 
 class PageGate:
     """Whether the frame a page job on show in the window reads is the page the viewer shows (`ui.live`: a job started
-    on the first frame of a new page, before that frame settled). Pending until the window confirms it (the frame
-    stayed unchanged for the viewer's confirmation time) or drops it (the frame changed, the follow ended); the first
-    of the two holds, and so does the worker closing a gate it gives up on (`close`: cancelled, failed, waited too
-    long): a confirm after that says False. Until it is confirmed, the page job asks nothing of the translator
-    (`Pipeline._translate_regions`, `LoadAhead`), and nothing it stores lasts (`Pipeline.page_on_show`, `PageWork`)."""
+    on the first frame of a new page, before that frame settled). Pending until the window keeps it (`confirm`: the
+    frame stayed as it is for a fixed time) or drops it (the frame changed, the follow ended); the first of the two
+    holds, and so does the worker closing a gate it gives up on (`close`: cancelled, failed, waited too long): a
+    confirm after that says False. Nothing the job stores lasts until it is kept (`Pipeline.page_on_show`,
+    `PageWork`). Its requests do not wait for that: before the first one (`Pipeline._translate_regions`) and before
+    the translator's model is loaded for it (`LoadAhead`), the job asks whether its frame is on show still
+    (`on_show`), and the window answers at its next look at the viewer that finds it so (`seen`: a capture of the same
+    picture, or the viewer's frame count unchanged since that frame was captured) - tens of ms, the time to the next
+    frame step. A frame that changes meanwhile, or while the request runs, is dropped, and its job cancelled."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._cond = threading.Condition()
         self._state = "pending"  # "pending", "confirmed", "dropped"
-        self._decided = threading.Event()
+        self._seen = float("-inf")  # the last moment the window knew the frame on show (`seen`)
 
     @property
     def state(self) -> str:
@@ -828,15 +832,15 @@ class PageGate:
         return self._state == "confirmed"
 
     def _decide(self, state: str) -> bool:
-        with self._lock:
+        with self._cond:
             if self._state == "pending":
                 self._state = state
-                self._decided.set()
+                self._cond.notify_all()
             return self._state == state
 
     def confirm(self) -> bool:
-        """(the window) The frame is confirmed: the job goes on to the translator and keeps what it stores. False when
-        the job gave the page up first (nothing of it was kept)."""
+        """(the window) The frame stayed as it is: the job keeps what it stores. False when the job gave the page up
+        first (nothing of it was kept)."""
         return self._decide("confirmed")
 
     def drop(self) -> None:
@@ -848,15 +852,48 @@ class PageGate:
         self._decide("dropped")
         return self.confirmed
 
+    def seen(self, at: float) -> None:
+        """(the window) The frame the job reads was on show at *at* (`time.monotonic`): a look at the viewer then
+        found the same picture, or no new frame since that picture was captured."""
+        with self._cond:
+            if at > self._seen:
+                self._seen = at
+                self._cond.notify_all()
+
+    def seen_since(self, at: float) -> bool:
+        """Whether the frame is known on show at *at* or later (`seen`), or kept; never once it is dropped."""
+        return self._state == "confirmed" or (self._state == "pending" and self._seen >= at)
+
+    def on_show(self, cancel: Any = None, limit: float = GATE_LIMIT_S, close: bool = True) -> bool:
+        """(the worker, before it asks the translator anything) Whether the frame the job read is the viewer's still:
+        True once a look the window took after this call found it on show (`seen`), or once it is kept; False once
+        it is dropped. Once *cancel* is set, or after *limit* seconds, the gate is closed (with *close* False it is
+        left as it is) and False said."""
+        asked = time.monotonic()
+        end = asked + limit
+        with self._cond:
+            while self._state == "pending" and self._seen < asked:
+                if (cancel is not None and cancel.is_set()) or time.monotonic() >= end:
+                    break
+                self._cond.wait(GATE_STEP_S)
+            if self.seen_since(asked):
+                return True
+        if close:
+            self.close()
+        return False
+
     def wait(self, cancel: Any = None, limit: float = GATE_LIMIT_S, close: bool = True) -> bool:
-        """(the worker) Until the gate is decided: whether it was confirmed. Once *cancel* is set, or after *limit*
+        """(the worker) Until the gate is decided: whether it was kept. Once *cancel* is set, or after *limit*
         seconds, the gate is closed (`close`; with *close* False it is left as it is) and what it is is said."""
         end = time.monotonic() + limit
-        while not self._decided.is_set():
-            if (cancel is not None and cancel.is_set()) or time.monotonic() >= end:
-                return self.close() if close else self.confirmed
-            self._decided.wait(GATE_STEP_S)
-        return self.confirmed
+        with self._cond:
+            while self._state == "pending":
+                if (cancel is not None and cancel.is_set()) or time.monotonic() >= end:
+                    break
+                self._cond.wait(GATE_STEP_S)
+            if self._state != "pending":
+                return self.confirmed
+        return self.close() if close else self.confirmed
 
 
 def _held_state(obj: Any) -> dict[str, Any]:
@@ -887,11 +924,13 @@ def _rings_copy(rings: Sequence[Any]) -> list[Any]:
 
 
 class Provisional:
-    """What a page job on a frame not confirmed yet (`PageGate`) may change that lasts, as it was before the job: the
+    """What a page job on a frame not kept yet (`PageGate`) may change that lasts, as it was before the job: the
     book's cache (its pages, what waits to be saved, the header, the lines kept for reuse), where the book was read
-    last, the book's sizes, the earlier pages' pairs and the names held for the translator, the series' lines, the
+    last, the book's sizes, the earlier pages' pairs and the names held for the translator, the lines the translator
+    counts as asked for before (a line asked for again is drawn anew: `PlamoTranslator.draws`), the series' lines, the
     session's line tally and stage times, and the pages kept lettered for showing again. `restore` puts it all back
-    (the frame changed: nothing of the job lasts); `commit` keeps it (confirmed). The memos keyed by the very pixels
+    (the frame changed: nothing of the job lasts, and a line its request asked for is drawn on the sharp frame as if it
+    never had been); `commit` keeps it (the frame kept). The memos keyed by the very pixels
     (the OCR's readings, the erases) are left as they are: the same pixels read the same. While it is held, a save of
     the cache waits and leaves the cache marked as it was (`Pipeline._save_store`), so that neither another save nor
     the window's close writes any of it; the close writes the cache and the stage times as they were before the job
@@ -926,6 +965,9 @@ class Provisional:
         self.save_due = pipeline._save_due
         self.held = [(obj, _held_state(obj)) for obj in (pipeline.book_names, pipeline.line_tally, pipeline.stage_times,
                                                          pipeline.shown_pages) if obj is not None]
+        self.translator = pipeline.translator
+        draws = getattr(self.translator, "draws", None)
+        self.draws = draws() if draws is not None else None
         pipeline._held_for = pipeline._provisional = self
 
     def restore(self) -> None:
@@ -950,6 +992,8 @@ class Provisional:
         for obj, state in self.held:
             _put_back(obj, state)
         p._save_due = self.save_due
+        if self.draws is not None and p.translator is self.translator:
+            self.translator.set_draws(self.draws)
 
     def commit(self) -> None:
         """What the job stored lasts: the cache marked as changed, and saved with the page (`Pipeline.flush_saves`)."""
@@ -997,8 +1041,8 @@ class Provisional:
 class PageWork:
     """A page job on show in the window (`Pipeline.page_on_show`): the page units it stored anew (``stored``: their
     fingerprints and aspects, what the window forgets when the page comes again sharper) and, while its frame is not
-    confirmed (*gate*), what goes back should it never be (`Provisional`). ``kept``: None while that is not decided,
-    then whether what the job did lasts."""
+    kept (*gate*), what goes back should it never be (`Provisional`). ``kept``: None while that is not decided, then
+    whether what the job did lasts."""
 
     def __init__(self, pipeline: "Pipeline", gate: PageGate | None):
         self.gate = gate
@@ -1008,7 +1052,7 @@ class PageWork:
 
     @property
     def waits(self) -> bool:
-        """Whether the job's work waits for its frame's confirmation."""
+        """Whether what the job did waits for its frame to be kept."""
         return self.provisional is not None
 
     def _decided(self, keep: bool) -> bool:
@@ -1024,16 +1068,17 @@ class PageWork:
         return keep
 
     def settle(self, cancel: Any = None) -> bool:
-        """(the worker, the page shown) The frame's confirmation waited for (`PageGate.wait`): True when it came - what
-        the job stored lasts, and `flush_saves` saves it -, False when it did not (cancelled, dropped, too long):
-        everything the job changed goes back."""
+        """(the worker, the page shown) The frame waited for until it is kept (`PageGate.wait`): True when it is -
+        what the job stored lasts, and `flush_saves` saves it -, False when it is not (cancelled, dropped, too long):
+        everything the job changed goes back. A page done before its frame stayed as it is for the window's fixed
+        time (every line reused, a short page) waits here for it."""
         if self.provisional is None or self.gate is None:
             return self._decided(True) if self.kept is None else bool(self.kept)
         return self._decided(self.gate.wait(cancel))
 
     def give_up(self) -> None:
-        """(the worker) The job raised (Stop, a new page, a failure): what it did goes back unless its frame was
-        confirmed first (then a page unit it stored is kept, and saved, as ever)."""
+        """(the worker) The job raised (Stop, a new page, a failure): what it did goes back unless its frame was kept
+        first (then a page unit it stored is kept, and saved, as ever)."""
         if self.provisional is not None and self.gate is not None:
             self._decided(self.gate.close())
 
@@ -1046,13 +1091,14 @@ class LoadAhead:
     cancel ends it; `join` waits for it, so that the page lets go of the worker with no load of its own under way (Tools
     > Release the model now waits for the page). Once it has loaded the model, the page models are warmed again
     (`Pipeline.warm_page_models`): after the load, never during it, so that they never take the memory Ollama loads
-    into. A load that fails is left to the request, which says what is wrong as ever. A page whose frame is not
-    confirmed yet (*gate*, `PageGate`) loads nothing until it is: no request reaches the model server for a frame the
-    viewer may be drawing on its way to the page; a page done before that (every line reused) loads nothing."""
+    into. A load that fails is left to the request, which says what is wrong as ever. A page whose frame is not kept
+    yet (*gate*, `PageGate`) loads nothing before the window has seen that frame on show after the load asked
+    (`PageGate.on_show`), as its request does; a page done before that (every line reused) loads nothing, and a frame
+    that changes meanwhile cancels the load with the page."""
 
     def __init__(self, pipeline: "Pipeline", cancel: threading.Event, gate: PageGate | None = None):
         self.pipeline, self.cancel, self.gate = pipeline, cancel, gate
-        self.done = threading.Event()  # (`join`: the page is done; a load still waiting for the gate is not begun)
+        self.done = threading.Event()  # (`join`: the page is done; a load still waiting at the gate is not begun)
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -1066,7 +1112,7 @@ class LoadAhead:
     def _run(self, translator: Any) -> None:
         pipeline = self.pipeline
         if self.gate is not None and not self.gate.confirmed:
-            if not self.gate.wait(_Either(self.cancel, self.done), close=False) or self.cancel.is_set():
+            if not self.gate.on_show(_Either(self.cancel, self.done), close=False) or self.cancel.is_set():
                 return  # (the job decides the gate: its own wait closes it)
         released = pipeline._gpu_released
         try:
@@ -1475,11 +1521,12 @@ class Pipeline:
         saves wait for it to be shown (`saves_held`), and the translator's model loads while it is read, with the
         page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (a whole-book run's).
 
-        With *gate* pending (a frame not confirmed yet: `PageGate`), the job asks nothing of the translator until it
-        is confirmed (`_translate_regions`, `LoadAhead`), and what it changes that lasts is held (`Provisional`): the
-        job shows the page, then calls the `PageWork`'s ``settle`` - kept once the frame is confirmed, all of it put
-        back when it is not. A job that raises before that puts it all back (unless the frame was confirmed first),
-        before the save `saves_held` makes. What it yields says which page units the job stored anew."""
+        With *gate* pending (a frame not confirmed yet: `PageGate`), the job asks nothing of the translator before the
+        window has found its frame on show after it asked (`PageGate.on_show`: `_translate_regions`, `LoadAhead`), and
+        what it changes that lasts is held (`Provisional`): the job shows the page, then calls the `PageWork`'s
+        ``settle`` - kept once the frame is confirmed, all of it put back when it is not. A job that raises before that
+        puts it all back (unless the frame was confirmed first), before the save `saves_held` makes. What it yields
+        says which page units the job stored anew."""
         before = getattr(_ON_SHOW, "window", False)
         held_work = getattr(_ON_SHOW, "work", None)
         work = PageWork(self, gate)
@@ -3503,9 +3550,9 @@ class Pipeline:
             return outputs, failure, False
 
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
-        if work is not None and work.gate is not None and plan.asked and not work.gate.wait(cancel):
-            # (a page on show whose frame was never confirmed - it changed, the follow ended: `PageGate` - asks the
-            # model nothing; its job puts back what it did)
+        if work is not None and work.gate is not None and plan.asked and not work.gate.on_show(cancel):
+            # (a page on show whose frame is not the viewer's any more - it changed, the follow ended: `PageGate` -
+            # asks the model nothing; its job puts back what it did)
             check_cancel(cancel)
             raise Cancelled()
         if later and fill is not None and DRAFTS_BESIDE:

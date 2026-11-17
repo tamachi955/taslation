@@ -241,6 +241,17 @@ class PlamoTranslator(OllamaTranslator):
             self._asked[source] = n + 1
             return n
 
+    def draws(self) -> dict[str, int]:
+        """A copy of what `_draw` counts (each line's requests so far): a page job whose frame may yet change holds it
+        (`pipeline.Provisional`), and puts it back when the frame does (`set_draws`)."""
+        with self._asked_lock:
+            return dict(self._asked)
+
+    def set_draws(self, draws: dict[str, int]) -> None:
+        """What `_draw` counts, as `draws` gave it."""
+        with self._asked_lock:
+            self._asked = dict(draws)
+
     def _options(self, max_tokens: int, offset: int = 0) -> dict[str, Any]:
         options: dict[str, Any] = {"temperature": self.temperature,
                                    "stop": list(STOPS), "num_predict": int(max_tokens)}

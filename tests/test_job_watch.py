@@ -1,22 +1,23 @@
 """A page turned in the viewer while a page job runs (follow = "events", the viewer in front: the live view's
 `_look_over_job`): one look at another page puts the viewer's frame on the page as it is - the old page's lettering
-goes at once - while the job goes on; the job is cancelled only once the new page is confirmed (unchanged for the
-viewer's confirmation time, `live.confirm_ms`), and a frame back on the job's page before that letters it again, the
-job never cancelled. A black flash and frames of the same page drawn again (a spinner) change nothing. A page job
-done before its frame was confirmed is shown only once it is (`JobsMixin._show_held`). The window, the viewer, the
-clock and the worker are tests/test_early_start.py's; this worker also fills the page in as the pipeline does (its
-regions found once it is read, one lettered while the model answers)."""
+goes at once - while the job goes on; the job is cancelled only once the new page has stayed as it is for
+`live.LEFT_PAGE_MS`, and the new page is then started early - a gate of its own - as soon as the worker is free; a
+frame back on the job's page before that letters it again, the job never cancelled. A black flash and frames of the
+same page drawn again (a spinner) change nothing. A page job done before its frame was confirmed is shown only once it
+is (`JobsMixin._show_held`). The window, the viewer, the clock and the worker are tests/test_early_start.py's; this
+worker also fills the page in as the pipeline does (its regions found once it is read, one lettered while the model
+answers)."""
 from __future__ import annotations
 
 import pytest
 from PIL import Image, ImageDraw
 import test_early_start as early
-from test_early_start import READ_S, Worker, _learnt, follow  # noqa: F401 - the fixture
-from test_follow import VIEWER, _page
+from test_early_start import KEEP_S, READ_S, Worker, _after, follow  # noqa: F401 - the fixture
+from test_follow import _page
 
 from taslation.config import Settings
 from taslation.ui.constants import FRAME_STEP_MS
-from taslation.ui.live import CONFIRM_CEILING
+from taslation.ui.live import LEFT_PAGE_MS
 
 BOX = (100, 100, 300, 220)  # the page's one region
 
@@ -68,9 +69,8 @@ class FinishingWorker(CachedWorker):
 
 @pytest.fixture
 def watch(follow, monkeypatch):
-    """`follow`, its viewer's confirmation learnt (150 ms), the model answering for 3 s: page 2's job, started at its
-    first frame, is read by 0.3 s, lettered at 1.8 s and done at 3.3 s - the viewer turns meanwhile."""
-    _learnt(follow)
+    """`follow`, the model answering for 3 s: page 2's job, started at its first frame, is read by 0.3 s, confirmed at
+    0.8 s, lettered at 1.8 s and done at 3.3 s - the viewer turns meanwhile."""
 
     def make():
         w, worker = follow.make()  # (page 1 done as ever)
@@ -108,60 +108,54 @@ def test_one_look_at_another_page_hides_the_old_lettering_but_does_not_cancel(wa
     watch.show((0.0, "2", two), (2.0, "3", three), (2.1, "2 again", again), run=0.3 + 1.99)
     job = worker.one("2")
     assert _lettered_page(w)  # page 2 being translated, lettered so far
-    watch.clock.run(0.02)  # page 3 came: one look
+    watch.clock.run(0.03)  # page 3 came: one look (within a frame step)
     assert _shown(w) is three and w._live is three  # the viewer's frame as it is, nothing of page 2 on it
     assert not job.cancel.is_set()  # the job goes on
-    watch.clock.run(0.12)  # back on page 2 before page 3 was confirmed (150 ms)
+    watch.clock.run(0.12)  # back on page 2 before page 3 had stayed LEFT_PAGE_MS (150 ms)
     assert _lettered_page(w) and not job.cancel.is_set()  # lettered again
     watch.clock.run(4)
     assert job.how == "done" and worker.kept == ["2"] and [j.name for j in worker.jobs] == ["2"]
     assert w.last_result is job.result
 
 
-def test_a_new_page_confirmed_cancels_the_job_and_is_taken(watch):
+def test_a_new_page_that_stays_cancels_the_job_and_is_started_with_a_gate_of_its_own(watch):
     w, worker = watch.make_watched()
-    seen_before = len(w._turns_seen(VIEWER.hwnd))
     three = _page(3)
     turned = watch.show((0.0, "2", _page(2)), (2.0, "3", three), run=0.3 + 2.0 + 0.02)
     job = worker.one("2")
     assert _shown(w) is three and not job.cancel.is_set()  # shown at once ...
     watch.clock.run(5)
-    # ... cancelled once page 3 stayed for the confirmation time (150 ms, and the step that saw it)
-    assert job.how == "cancelled" and 0.15 <= job.cancel_seen - (turned + 2.0) <= 0.15 + 3 * FRAME_STEP_MS / 1000
+    # ... cancelled once page 3 stayed LEFT_PAGE_MS (and the step that saw it)
+    lag = job.cancel_seen - (turned + 2.0)
+    assert job.how == "cancelled" and LEFT_PAGE_MS / 1000 <= lag <= LEFT_PAGE_MS / 1000 + 3 * FRAME_STEP_MS / 1000, lag
     new = worker.one("3")
     assert new.start - job.ended <= 0.016 and new.how == "done" and worker.kept == ["3"]
-    assert new.gate is None  # (confirmed already: it asks the model as soon as it has read the page)
-    seen = w._turns_seen(VIEWER.hwnd)
-    # page 2's turn, and page 3's during the job, each in one frame: measured
-    assert len(seen) == seen_before + 2 and all(0 <= ms <= FRAME_STEP_MS for ms in seen[-2:]), seen
+    # started early as soon as the worker was free: what it stored kept once page 3 stayed twice settle_ms
+    assert new.gate is not None and _after(new.gate.confirmed_at - (turned + 2.0), KEEP_S)
+    assert new.asked < new.gate.confirmed_at  # (its request did not wait for that)
 
 
-def test_a_page_that_sharpens_while_the_cancelled_job_goes_is_on_show_and_its_turn_measured(watch, monkeypatch):
+def test_a_page_that_sharpens_while_the_cancelled_job_goes_is_on_show_and_read_sharp(watch, monkeypatch):
     monkeypatch.setattr(early, "CANCEL_S", 0.5)  # a job slow to stop (a request on its way)
     w, worker = watch.make_watched()
     soft, sharp = _page(3, soft=3), _page(3)
-    seen_before = len(w._turns_seen(VIEWER.hwnd))
-    watch.show((0.0, "2", _page(2)), (2.0, "3 soft", soft), (2.45, "3", sharp), run=0.3 + 2.0 + 0.47)
+    turned = watch.show((0.0, "2", _page(2)), (2.0, "3 soft", soft), (2.45, "3", sharp), run=0.3 + 2.0 + 0.47)
     job = worker.one("2")
-    assert job.cancel.is_set() and job.ended is None  # cancelled once the soft frame was confirmed, still going ...
+    assert job.cancel.is_set() and job.ended is None  # cancelled once the soft frame had stayed, still going ...
     assert w._live is sharp and _shown(w) is sharp  # ... while the sharp picture is on show as it came
     watch.clock.run(4)
     assert [j.name for j in worker.jobs] == ["2", "3"] and worker.kept == ["3"]  # read from the sharp frame alone
-    seen = w._turns_seen(VIEWER.hwnd)
-    # page 3's turn, soft to sharp (`_tail_turn`): never short of the 450 ms, and what could not be seen of it in it
-    assert len(seen) == seen_before + 2 and 450 <= seen[-1] <= 450 + 2 * FRAME_STEP_MS, seen
+    assert _after(worker.one("3").gate.confirmed_at - (turned + 2.45), KEEP_S)
 
 
-def test_a_sharper_frame_not_seen_as_it_came_withdraws_its_turn(watch, monkeypatch):
+def test_a_page_that_sharpens_while_nothing_looks_is_read_sharp(watch, monkeypatch):
     monkeypatch.setattr(early, "CANCEL_S", 0.5)
     w, worker = watch.make_watched()
-    seen_before = len(w._turns_seen(VIEWER.hwnd))
     watch.show((0.0, "2", _page(2)), (2.0, "3 soft", _page(3, soft=3)), run=0.3 + 2.0 + 0.2)
-    assert worker.one("2").cancel.is_set() and len(w._turns_seen(VIEWER.hwnd)) == seen_before + 2  # noted ...
-    w._following.owner = "own"  # TASlation in front: nothing looks at the viewer's frames until the job is gone ...
-    watch.show((-0.05, "3", _page(3)), run=4)  # ... and the page sharpens meanwhile
-    assert [j.name for j in worker.jobs] == ["2", "3"]
-    assert len(w._turns_seen(VIEWER.hwnd)) == seen_before + 1  # ... page 3's turn, its end unknown, is no measurement
+    assert worker.one("2").cancel.is_set()
+    w._following.owner = "own"  # TASlation in front ...
+    watch.show((-0.05, "3", _page(3)), run=4)  # ... and the page sharpens while the job goes
+    assert [j.name for j in worker.jobs] == ["2", "3"] and worker.kept == ["3"]
 
 
 def test_a_black_flash_over_the_page_being_translated_changes_nothing(watch):
@@ -189,21 +183,21 @@ def test_a_spinner_over_the_page_being_translated_changes_nothing(watch):
 
 
 def test_a_page_done_before_its_frame_is_confirmed_shows_only_once_it_is(follow):
-    # every line reused: the page is done at READ_S, before the confirmation (a viewer not seen yet: twice settle_ms)
+    # every line reused: the page is done at READ_S, before the confirmation (twice settle_ms)
     w, worker = follow.make(asks=False)
     follow.show((0.0, "2", _page(2)), run=0.3 + READ_S + 0.02)
     job = worker.one("2")
     assert job.shown is not None and job.gate.state == "pending"
     assert w.last_result is not job.result and w._held_result is not None  # done, not shown: no "translated" yet
     statuses = len(w.statuses)
-    follow.clock.run(CONFIRM_CEILING * 0.4 - READ_S + 0.03)
+    follow.clock.run(KEEP_S - READ_S + 0.03)
     assert job.gate.confirmed_at is not None and w.last_result is job.result and w._held_result is None
     assert len(w.statuses) > statuses
 
 
 def test_lettering_laid_on_a_soft_frame_goes_from_the_page_as_the_sharp_frame_comes(follow, monkeypatch):
     monkeypatch.setattr(early, "CANCEL_S", 0.2)  # the job on the soft frame slow to go
-    w, worker = follow.make()  # a viewer not seen yet: the soft frame is never confirmed
+    w, worker = follow.make()  # the soft frame is never confirmed
     w._jobs = worker = CachedWorker(w, follow.clock, worker.name, True)
     soft, sharp = _page(4, soft=3), _page(4)
     follow.show((0.0, "4 soft", soft), (READ_S + 0.05, "4", sharp), run=0.3 + READ_S + 0.02)
@@ -221,7 +215,7 @@ def test_a_page_finished_before_its_frame_is_confirmed_stays_filling_in_until_th
     job = worker.one("2")
     assert job.gate.state == "pending" and job.shown is not None  # finished: its picture and its result came ...
     assert _lettered_page(w) and w._fill.final is None and w.last_result is not job.result  # ... neither on show
-    follow.clock.run(CONFIRM_CEILING * 0.4 - READ_S + 0.03)
+    follow.clock.run(KEEP_S - READ_S + 0.03)
     assert job.gate.confirmed_at is not None and w.last_result is job.result and w._fill is None
 
 

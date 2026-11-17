@@ -42,14 +42,15 @@ captured, the frame each page job reads and the picture its page area is given a
 the window shows is matched to what the stand-in showed exactly, not by likeness. Per turn: from the stand-in's draw
 of the sharp frame to the first request of the page job that finished the page, to the first lettered bubble and to
 the finished page (spreads of the turns that came to rest, per scenario), whether the page at rest is the stand-in's
-and translated, from which frame; the page jobs and the translator's requests per page, and requests for frames not
-settled (a gate not confirmed, a soft, black or spinner frame: must be 0); the requests sent for nothing (a job on
-a frame that was not the sharp one, or one dropped as its frame changed: how long each ran, how long after its job's
+and translated, from which frame; the page jobs and the translator's requests per page, and the gate each request
+went out under (a page started early asks before its frame is confirmed); the requests sent for nothing (a job on a
+frame that was not the sharp one, or one dropped as its frame changed: how long each ran, how long after its job's
 cancel, and when the next request went out and how long that waited at the server, against Ollama's own time for
-it); overlays left on a page the stand-in had left; the
-confirmation time learnt (its profile in the scratch state); where the OCR read (the readers' placement, through
-every load of the model, and the System page's facts); errors (type names and counts, also from the log); the pages
-in the cache at the end against those the stand-in rested on. Into *--out*: report.json, and shots/ - pictures of
+it); the jobs kept from a frame that was not the sharp one (must be none); the jobs cancelled, per scenario (d, the
+flashes and spinners: none); overlays left on a page the stand-in had left; that no profile in the scratch state keeps
+turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
+facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
+stand-in rested on. Into *--out*: report.json, and shots/ - pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
 moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
 With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
@@ -423,7 +424,6 @@ class Notes:
         self.selected: list[int] = []
         self.cancels: list[float] = []  # when a running page job's cancel was set by the live view (a turn, a drop)
         self.local = threading.local()  # (the request a translator thread is in: `request`, `http_begin`, `http_end`)
-        self.noted_turns: list[dict[str, Any]] = []  # the turn times the window noted (`_note_turn`)
         self.timings: dict[str, list[tuple[float, bool]]] = {}  # the Tk thread's time in the live view's calls
         self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
         self.on_display: Callable[[dict[str, Any]], None] | None = None
@@ -449,7 +449,7 @@ class Notes:
     # the page jobs
     def new_job(self, image: Any) -> dict[str, Any]:
         job = {"id": len(self.jobs) + 1, "t": now_ms(), **self.code(self.shown(image)), "started": False,
-               "gate": False, "requests": 0, "unsettled_requests": 0, "translated": 0, "first_translated_t": None,
+               "gate": False, "requests": 0, "translated": 0, "first_translated_t": None,
                "result_t": None, "result_translated": None, "result_from": None, "cancelled_t": None,
                "discarded": None, "done_t": None, "gate_end": None}
         with self.lock:
@@ -518,14 +518,12 @@ class Notes:
             job = self.current
             gate = job.get("_gate") if job else None
             state = getattr(gate, "state", "none") if gate is not None else "none"
-            unsettled = state in ("pending", "dropped") or (job is not None and job["state"] != "sharp")
             rec = {"t": t, "kind": kind, "job": job["id"] if job else None, "gate": state,
-                   "frame": job["state"] if job else None, "unsettled": bool(job and unsettled), "end_t": None,
+                   "frame": job["state"] if job else None, "end_t": None,
                    "outcome": None, "http_t": None, "http_end_t": None, "server_ms": None, "load_ms": None}
             self.requests.append(rec)
             if job is not None:
                 job["requests"] += 1
-                job["unsettled_requests"] += int(unsettled)
         return rec
 
     def request_over(self, rec: dict[str, Any], outcome: str) -> None:
@@ -735,32 +733,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.selected.append(int(self.selected.hwnd))
         return out
 
-    note_turn, withdraw_turn = App._note_turn, getattr(App, "_withdraw_turn", None)  # (an older window has none)
-
-    def turn_noted(self: Any, hwnd: int, seconds: float, amend: bool = False) -> Any:
-        # where the turn noted ended and began, in this clock: at the follow's last change (`Operation.last_at`), or
-        # for a turn amended at the look that saw its sharper frame (`_tail_turn`: `Look.at`), and *seconds* before
-        mono, wall = time.monotonic(), now_ms()
-        op = getattr(getattr(self, "_following", None), "op", None)
-        look = getattr(self, "_look_now", None)
-        last = getattr(look, "at", None) if amend else getattr(op, "last_at", None)
-        end = wall if last is None else wall - (mono - last) * 1000
-        with notes.lock:
-            notes.noted_turns.append({"t": wall, "ms": round(seconds * 1000), "kind": "amend" if amend else "note",
-                                      "busy": bool(getattr(self, "busy", False)), "end_t": end,
-                                      "from_t": end - seconds * 1000})
-        return note_turn(self, hwnd, seconds, amend)
-
-    def turn_withdrawn(self: Any, hwnd: int) -> Any:
-        with notes.lock:
-            notes.noted_turns.append({"t": now_ms(), "kind": "withdraw"})
-        return withdraw_turn(self, hwnd)
-
     App._start_translate, App._job_translate, App._handle_event = started, worked, handled
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
-    App._note_turn = turn_noted
-    if withdraw_turn is not None:
-        App._withdraw_turn = turn_withdrawn
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -883,7 +857,6 @@ class Director:
         self.over = False
         self.failed = ""
         self.released: dict[str, dict[str, Any]] = {}
-        self.confirm_at: dict[str, Any] = {}
         self.facts: dict[str, Any] = {}
         self.theme: dict[str, str] = {}
         self.shots: list[dict[str, Any]] = []
@@ -1036,7 +1009,6 @@ class Director:
                 self.stop("the window was not ready within --timeout")
                 return
             if go or timed_out:
-                self.confirm_at[seg.name] = self.confirmation()
                 self.released[seg.name] = {"waited_s": round(waited, 1), "timed_out": bool(timed_out and not go),
                                            "t": now_ms()}
                 sv.write_control(self.standin_dir, seg.go)
@@ -1066,23 +1038,12 @@ class Director:
     def resized(self) -> bool:
         return any(e["ev"] == "size" for e in self.events[getattr(self, "resize_from", len(self.events)):])
 
-    def confirmation(self) -> dict[str, Any]:
-        from taslation.ui.live import confirm_ms
-
-        hwnd = self.browser.hwnd
-        try:
-            seen = list(self.app._turns_seen(hwnd))
-        except Exception:  # noqa: BLE001 - none yet
-            seen = []
-        return {"turns_seen_ms": seen, "confirm_ms": confirm_ms(seen, self.app.settings.settle_ms)}
-
     def finish(self) -> None:
-        """The last scenario over and the window at rest: the last picture, the System page's facts, the
-        confirmation time; the loop ends."""
+        """The last scenario over and the window at rest: the last picture, the System page's facts; the loop
+        ends."""
         from taslation import devices
 
         self.shot("end")
-        self.confirm_at["end"] = self.confirmation()
         try:
             ocr = getattr(getattr(self.app, "pipeline", None), "ocr", None)
             stages = devices.stage_devices(self.app.settings, self.app.translator, ocr=ocr)
@@ -1462,7 +1423,6 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "at_rest_lettered": rest.get("lettered") if rest else None,
             "jobs": len(jobs), "jobs_on": dict(Counter(j["state"] for j in jobs)),
             "requests": sum(j["requests"] for j in jobs),
-            "unsettled_requests": sum(j["unsettled_requests"] for j in jobs),
             "jobs_discarded": sum(1 for j in jobs if j.get("discarded")),
             "job_at_turn": any(j["t"] <= lo < (j["done_t"] or end) for j in started),
             "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
@@ -1538,7 +1498,6 @@ def segment_table(rows: list[dict[str, Any]], spells: dict[str, list[dict[str, A
                                      if r["at_rest"] == "translated" and r["at_rest_from"] != "sharp"),
             "jobs": sum(r["jobs"] for r in mine),
             "requests": sum(r["requests"] for r in mine),
-            "unsettled_requests": sum(r["unsettled_requests"] for r in mine),
             "wasted_requests": sum(r["wasted_requests"] for r in mine),
             "stale": len([s for s in spells["stale_overlays"] if segment_at(s["from_t"]) == name]),
             "not_following": len([s for s in spells["not_following"] if segment_at(s["from_t"]) == name]),
@@ -1789,7 +1748,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         load["from_s"] = rel(load.pop("from_t"))
     job_list = [{"id": j["id"], "t_s": rel(j["t"]), "page": j["page"], "spread": j["spread"], "frame": j["state"],
                  "gate": j["gate"], "gate_end": j["gate_end"], "requests": j["requests"],
-                 "unsettled_requests": j["unsettled_requests"], "lettered_events": j["translated"],
+                 "lettered_events": j["translated"],
                  "first_lettered_s": rel(j["first_translated_t"]), "result_s": rel(j["result_t"]),
                  "result_translated": j["result_translated"], "result_from": j["result_from"],
                  "cache_hits": j.get("cache_hits"), "cache_misses": j.get("cache_misses"),
@@ -1798,45 +1757,6 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                 for j in started]
     kept_soft = [j for j in job_list if j["frame"] != "sharp" and j["discarded"] is not True
                  and (j["gate_end"] == "confirmed" or not j["gate"]) and (j["stored"] or j["stored_at_cancel"])]
-    noted: list[dict[str, Any]] = []
-    for n in notes.noted_turns:  # each turn time the window noted, beside the stand-in's turn it followed
-        kind = n.get("kind", "amend" if n.get("amend") else "note")
-        if kind != "note" and noted:  # a note amended (`_tail_turn`) or withdrawn: the turn noted last
-            last = noted[-1]
-            if kind == "withdraw":
-                last["withdrawn"] = True
-                continue
-            turn = turns[last["turn"]] if last["turn"] is not None else None
-            last.update(final_ms=n["ms"], amends=last["amends"] + 1,
-                        end_after_sharp_ms=ms(n.get("end_t"), turn["sharp_t"] if turn else None))
-            continue
-        if kind != "note":
-            continue
-        k = max((i for i, turn in enumerate(turns) if turn["soft_t"] <= n["t"]), default=None)
-        turn = turns[k] if k is not None else None
-        soft_t = turn["soft_t"] if turn is not None else None
-        noted.append({"t_s": rel(n["t"]), "noted_ms": n["ms"], "final_ms": n["ms"], "amends": 0, "withdrawn": False,
-                      "turn": k, "segment": turn["segment"] if turn else None,
-                      "standin_soft_to_sharp_ms": rows[k]["soft_to_sharp_ms"] if k is not None else None,
-                      # the window's beginning of the turn after the stand-in's first draw of it (> 0: measured
-                      # short at its start), and its end after the stand-in's sharp draw (the frame's way to the
-                      # window and the window's look at it; < 0: measured short at its end)
-                      "start_late_ms": ms(n.get("from_t"), soft_t),
-                      "end_after_sharp_ms": ms(n.get("end_t"), turn["sharp_t"] if turn else None),
-                      "job_running_at_turn": soft_t is not None and any(
-                          j["t"] <= soft_t < (j["done_t"] or ended) for j in started)})
-    kept_notes = [n for n in noted if not n["withdrawn"] and n["standin_soft_to_sharp_ms"] is not None]
-    noted_summary = {
-        "notes": len(noted), "withdrawn": sum(1 for n in noted if n["withdrawn"]),
-        "amended": sum(1 for n in noted if n["amends"]),
-        # each turn kept, its time noted against the stand-in's own soft-to-sharp time (< 0: noted short)
-        "noted_minus_soft_ms": spread_of([n["final_ms"] - n["standin_soft_to_sharp_ms"] for n in kept_notes]),
-        "short": [{"t_s": n["t_s"], "noted": n["final_ms"], "soft": n["standin_soft_to_sharp_ms"]}
-                  for n in kept_notes if n["final_ms"] < n["standin_soft_to_sharp_ms"]],
-        "start_late_ms": spread_of([n["start_late_ms"] for n in kept_notes if n["start_late_ms"] is not None]),
-        "end_after_sharp_ms": spread_of([n["end_after_sharp_ms"] for n in kept_notes
-                                         if n["end_after_sharp_ms"] is not None]),
-        "longest_soft_ms": max((r["soft_to_sharp_ms"] or 0 for r in rows), default=0)}
     cancels = []
     for j in started:  # each page job cancelled: was its page still the stand-in's then (a black frame aside)?
         if j["cancelled_t"] is None:
@@ -1891,11 +1811,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
                                       "requests": sum(j["requests"] for j in cancelled_after_kept)},
         "request_list": request_list,
-        "turns_noted": noted,
-        "turns_noted_summary": noted_summary,
         "old_lettering_after_a_turn": old_lettering,
-        "cancels": {"all": len(cancels), "page_still_on_show": false_cancels,
-                    "list": cancels},
+        "cancels": {"all": len(cancels), "by_segment": dict(Counter(str(c["segment"]) for c in cancels)),
+                    "page_still_on_show": false_cancels, "list": cancels},
         "lettered_unsettled_ms": {"total": sum(r["lettered_unsettled_ms"] for r in rows),
                                   "turns": sum(1 for r in rows if r["lettered_unsettled_ms"])},
         "empty_unsettled_results_shown": sum(1 for d in notes.displays if d["kind"] == "translated"
@@ -1925,7 +1843,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                                                       and j["result_t"] and j["result_translated"])},
         "requests": {"total": len(requests), "by_kind": dict(Counter(r["kind"] for r in requests)),
                      "outside_page_jobs": sum(1 for r in requests if r["job"] is None),
-                     "unsettled": sum(1 for r in requests if r["unsettled"]),
+                     "gate_pending": sum(1 for r in requests if r["gate"] == "pending"),
                      "by_gate": dict(Counter(r["gate"] for r in requests)),
                      "by_frame": dict(Counter(str(r["frame"]) for r in requests)),
                      "warm_ups": len(notes.warmups),
@@ -1933,7 +1851,6 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "captures": dict(notes.capture_counts),
         "capture_sizes": [[rel(c["t"]), *c["size"]] for k, c in enumerate(notes.captures)
                           if k == 0 or c["size"] != notes.captures[k - 1]["size"]],
-        "confirmation": director.confirm_at,
         "ocr": {"placements": [{**o, "t": rel(o["t"])} for o in notes.ocr],
                 "log": [{**o, "t": rel(o["t"])} for o in notes.ocr_log], "loads": loads,
                 "system_page": director.facts},
@@ -1993,9 +1910,9 @@ def rested_pages(rows: list[dict[str, Any]]) -> int:
 
 def cleanup(report: dict[str, Any], closed: dict[str, Any], state: Path, standin_dir: Path, mode: str, url: str,
             ps_before: list[str] | None) -> dict[str, Any]:
-    """What the state holds at the end (the confirmation time kept, the pages in the cache, the log's errors), read
-    before it goes; the scratch folders deleted; what the window loaded in Ollama checked gone (and let go of if
-    not)."""
+    """What the state holds at the end (any turn times a profile keeps - none -, the pages in the cache, the log's
+    errors), read before it goes; the scratch folders deleted; what the window loaded in Ollama checked gone (and let
+    go of if not)."""
     out: dict[str, Any] = {"browser": closed}
     try:
         from taslation.cache import CacheStore
@@ -2046,14 +1963,14 @@ def print_table(report: dict[str, Any], path: Path) -> None:
         print(f"report {path}")
         return
     head = ("segment", "turns", "rested", "request med/max ms", "lettered med/max ms", "finished med/max ms",
-            "translated at rest", "from soft", "jobs", "requests", "unsettled", "wasted", "stale", "lag")
+            "translated at rest", "from soft", "jobs", "requests", "wasted", "stale", "lag")
     print(" | ".join(head))
     for s in run_["segments"]:
         print(" | ".join(str(v) for v in (
             s["segment"], s["turns"], s["rested"], f"{s['first_request_ms_median']}/{s['first_request_ms_max']}",
             f"{s['first_lettered_ms_median']}/{s['first_lettered_ms_max']}",
             f"{s['finished_ms_median']}/{s['finished_ms_max']}", f"{s['translated_at_rest']}/{s['rested']}",
-            s["at_rest_from_soft"], s["jobs"], s["requests"], s["unsettled_requests"], s["wasted_requests"],
+            s["at_rest_from_soft"], s["jobs"], s["requests"], s["wasted_requests"],
             s["stale"], s["not_following"])))
     for key, value in run_["latency_rested"]["all"].items():
         print(f"rested turns, {key}: {value}")
@@ -2061,24 +1978,17 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     print(f"wasted requests {wasted['count']} {wasted['by_why']} {wasted['by_outcome']}; ran {wasted['ran_ms']}; "
           f"ran on after the cancel {wasted['ran_on_after_cancel_ms']}; next real request's server wait "
           f"{wasted['next_real_server_wait_ms']} (all real: {wasted['real_server_wait_ms']})")
-    req, conf = run_["requests"], run_["confirmation"].get("end", {})
+    req = run_["requests"]
     clean = report["cleanup"]
-    print(f"requests {req['total']} (unsettled {req['unsettled']}, outside jobs {req['outside_page_jobs']}); "
-          f"confirmation {conf.get('confirm_ms')} ms; cache pages {clean.get('cache_pages')} vs rested "
-          f"{run_['rested_pages']}; shots {len(run_['shots'])}; report {path}")
+    print(f"requests {req['total']} (on a gate pending {req['gate_pending']}, outside jobs "
+          f"{req['outside_page_jobs']}); turn times kept in a profile {len(clean.get('settle_seen_kept') or [])}; "
+          f"cache pages {clean.get('cache_pages')} vs rested {run_['rested_pages']}; shots {len(run_['shots'])}; "
+          f"report {path}")
     old, cancels = run_["old_lettering_after_a_turn"], run_["cancels"]
     print(f"old lettering after a turn, job running: {old['during_job']}; no job: {old['no_job']}; jobs cancelled "
-          f"{cancels['all']}, of them with their page still on show {len(cancels['page_still_on_show'])}; confirmed "
-          f"on a soft frame {run_['jobs']['confirmed_on_soft']}")
-    print("turns noted (ms noted, amended a / the stand-in's soft-to-sharp ms / start late ms; j: a job ran, "
-          "w: withdrawn): " + ", ".join(
-              f"{n['segment']}:{n['final_ms']}/{n['standin_soft_to_sharp_ms']}/{n['start_late_ms']}"
-              + ("a" if n["amends"] else "") + ("j" if n["job_running_at_turn"] else "")
-              + ("w" if n["withdrawn"] else "") for n in run_["turns_noted"]))
-    summary = run_["turns_noted_summary"]
-    print(f"turns noted {summary['notes']} (withdrawn {summary['withdrawn']}, amended {summary['amended']}); noted "
-          f"minus soft {summary['noted_minus_soft_ms']}; short {len(summary['short'])}; longest soft "
-          f"{summary['longest_soft_ms']} ms")
+          f"{cancels['all']} {cancels['by_segment']}, of them with their page still on show "
+          f"{len(cancels['page_still_on_show'])}; confirmed on a soft frame {run_['jobs']['confirmed_on_soft']}; kept "
+          f"from frames not the sharp one {run_['jobs']['kept_from_unsettled_frames']}")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:

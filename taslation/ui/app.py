@@ -1096,8 +1096,8 @@ def end_page_job(window: Any) -> None:
     """The window closes (`App._on_close`, before anything is saved): every gate of a page started before its frame
     settled is dropped (`pipeline.PageGate.drop`: the early start's, ``ui.live``'s ``_early``, and the page job's;
     one the window confirmed first stays confirmed, and that page is kept), and the page job's cancel is set: the job
-    asks the model nothing more and gives its page up. The window's record of the early start goes with it, so that
-    nothing still running on this thread at the close confirms it."""
+    asks the model nothing more - a request in flight is cancelled - and gives its page up. The window's record of
+    the early start goes with it, so that nothing still running on this thread at the close confirms it."""
     early = getattr(window, "_early", None)
     if early is not None:
         window._early = None

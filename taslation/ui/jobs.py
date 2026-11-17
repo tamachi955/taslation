@@ -685,9 +685,10 @@ class JobsMixin:
         the page (`Pipeline.save_error`). The page is shown first and saved right after (`Pipeline.saves_held`).
 
         *gate* (`pipeline.PageGate`): the page was started on a frame the viewer may still be drawing (`ui.live`'s
-        early start). The model is asked nothing until the window confirms the frame, and the page, shown as soon as it
-        is done, is kept only then: what it stored is saved, its names checked, its colophon looked for and its next
-        showing lettered. A frame dropped instead (it changed, the follow ended), and a cancel before the
+        early start). The model is asked nothing before the window has found the frame on show after the job asked
+        (`PageGate.on_show`), and the page, shown as soon as it is done and its frame confirmed, is kept only then:
+        what it stored is saved, its names checked, its colophon looked for and its next showing lettered. A frame
+        dropped instead (it changed - its request in flight cancelled -, the follow ended), and a cancel before the
         confirmation, put back everything the job did (`Pipeline.page_on_show`): "page_cancelled" says so
         (*discarded*). The page units a job stored anew go to the window with its "result" or "page_cancelled"
         (*stored*), for a sharper picture of the page to come (`_take_retake`)."""

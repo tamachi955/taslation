@@ -1,10 +1,12 @@
-"""The window's close while a page job waits for its frame's confirmation (`pipeline.PageGate`, the live view's early
-start: tests/test_early_start_pipeline.py). Nothing of that job reaches the disk - neither the cache file nor the stage
-times kept at the close - and what it changed in memory goes back: every gate is dropped and the job's cancel set
-before anything is saved (`ui.app.end_page_job`), what the job changed is put back (`Pipeline.drop_unconfirmed`), and
-the close writes the stores as they were before the job while its worker may still change them (`Pipeline.to_save`).
-The pages an earlier save left unsaved are still written; a page whose frame was confirmed before the close is kept
-and saved as ever; a worker held on the job past the close's wait changes nothing that lasts."""
+"""The window's close while a page job's frame is not confirmed yet (`pipeline.PageGate`, the live view's early start:
+tests/test_early_start_pipeline.py) - the job waiting for a look at its frame, its request running, or its page done
+and waiting for the confirmation. Nothing of that job reaches the disk - neither the cache file nor the stage times
+kept at the close - and what it changed in memory goes back: every gate is dropped and the job's cancel set before
+anything is saved (`ui.app.end_page_job`; a request in flight is cancelled), what the job changed is put back
+(`Pipeline.drop_unconfirmed`), and the close writes the stores as they were before the job while its worker may still
+change them (`Pipeline.to_save`). The pages an earlier save left unsaved are still written; a page whose frame was
+confirmed before the close is kept and saved as ever; a worker held on the job past the close's wait changes nothing
+that lasts."""
 from __future__ import annotations
 
 import json
@@ -14,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 from helpers import EN_TEXTS, FakeOcr
+from test_early_start_pipeline import Slow
 
 from taslation import cache as cachemod
 from taslation import devices
@@ -37,17 +40,23 @@ def scratch_state(settings, monkeypatch):
 
 @pytest.fixture
 def gate_waits(monkeypatch) -> threading.Event:
-    """Set once the page job waits at its gate (`PageGate.wait` with *close*: the job's own wait, before the model
-    is asked or after the page was shown; not the model's load ahead)."""
+    """Set once the page job waits at its gate with *close* - the job's own waits, not the model's load ahead: before
+    the model is asked, for a look at its frame (`PageGate.on_show`), or after the page was shown (`PageGate.wait`)."""
     waiting = threading.Event()
-    real = PageGate.wait
+    real_wait, real_on_show = PageGate.wait, PageGate.on_show
 
     def wait(self, cancel=None, limit=pipeline_mod.GATE_LIMIT_S, close=True):
         if close:
             waiting.set()
-        return real(self, cancel, limit, close)
+        return real_wait(self, cancel, limit, close)
+
+    def on_show(self, cancel=None, limit=pipeline_mod.GATE_LIMIT_S, close=True):
+        if close:
+            waiting.set()
+        return real_on_show(self, cancel, limit, close)
 
     monkeypatch.setattr(PageGate, "wait", wait)
+    monkeypatch.setattr(PageGate, "on_show", on_show)
     return waiting
 
 
@@ -182,15 +191,15 @@ class Window:
         self.closed = True
 
 
-def test_closing_while_the_model_waits_for_the_frame_writes_nothing_of_the_page(sample_page, sample_page2, settings,
-                                                                              gate_waits):
+def test_closing_while_the_job_waits_for_a_look_at_its_frame_writes_nothing_of_the_page(sample_page, sample_page2,
+                                                                                       settings, gate_waits):
     p = _pipeline(settings, "Closed waiting")
     p.process(sample_page2)  # a page before: saved, its seconds counted
     before, stamp, file = _state(p), p.cache.path.stat().st_mtime_ns, _file(p)
     w = Window(p, settings)
     gate = PageGate()
     cancel = w.start(sample_page, gate)
-    assert gate_waits.wait(20.0)  # read, and waiting for the frame before the model is asked
+    assert gate_waits.wait(20.0)  # read, and waiting for a look at its frame before the model is asked
     w._on_close()
     assert w.closed and gate.state == "dropped" and cancel.is_set() and w._early is None
     assert _file(p) == file and p.cache.path.stat().st_mtime_ns == stamp  # the file as it was
@@ -200,6 +209,28 @@ def test_closing_while_the_model_waits_for_the_frame_writes_nothing_of_the_page(
     assert _state(p) == before and len(p.translator.calls) == 1  # the page before's request alone
     assert _file(p) == file and len(_on_disk(settings, "Closed waiting")) == 1
     assert not gate.confirm()  # a confirmation that comes after the close keeps nothing
+
+
+def test_closing_while_the_request_runs_cancels_it_and_writes_nothing_of_the_page(sample_page, sample_page2, settings):
+    p = _pipeline(settings, "Closed asking")
+    p.process(sample_page2)  # a page before: saved, its seconds counted
+    p.translator = translator = Slow(EN_TEXTS)  # (its request runs until it is cancelled)
+    before, stamp, file = _state(p), p.cache.path.stat().st_mtime_ns, _file(p)
+    w = Window(p, settings)
+    gate = PageGate()
+    cancel = w.start(sample_page, gate)
+    end = time.monotonic() + 20
+    while not translator.running.is_set():  # the window's looks: the frame is on show still
+        assert time.monotonic() < end, "the model was never asked"
+        gate.seen(time.monotonic())
+        time.sleep(0.01)
+    w._on_close()  # while the request runs
+    assert w.closed and gate.state == "dropped" and cancel.is_set() and w._early is None
+    assert _file(p) == file and p.cache.path.stat().st_mtime_ns == stamp  # the file as it was
+    assert _times_kept(settings) == 1  # the page before's seconds alone
+    w.join()  # (the request ended with the cancel)
+    assert w.kinds() == ["page_cancelled", "translate_done"] and dict(w.posted)["page_cancelled"]["discarded"]
+    assert _state(p) == before and _file(p) == file and len(_on_disk(settings, "Closed asking")) == 1
 
 
 def test_closing_while_a_page_done_waits_for_its_frame_writes_nothing_of_it(sample_page, settings, held_settle):

@@ -1,12 +1,15 @@
 """A new page the cache does not hold, started on its first changed frame (``early_start``, follow = "events": the live
-view's `_early_start`): its job reads the page at once, but asks the model nothing and keeps nothing until the frame is
-confirmed - unchanged for the viewer's confirmation time (`live.confirm_ms`, learnt from its turns, kept in its
-profile); a frame that changes first drops the job, nothing of it lasts, and the page starts again on the new frame.
-Pages the cache holds, blank and black frames and focus redraws go as without it. The viewer's frames are counted, its
-window in front; the worker is a stand-in on the fake clock that reads a page in READ_S and asks the model for ASK_S
-(tests/test_early_start_pipeline.py: the real pipeline's part)."""
+view's `_early_start`): its job reads the page at once and asks the model as soon as it has read it and a look after it
+asked has found its frame on show still (`PageGate.on_show`, the window's `_frame_seen`) - no wait for a confirmation -;
+what it stores lasts once the frame has stayed as it is for twice settle_ms (`live.KEEP_SETTLES`, the same for every
+viewer and every turn: nothing learnt, nothing in the profile). A frame that changes first drops the job - its request
+cancelled when it runs -, nothing of it lasts, and the page starts again on the new frame. Pages the cache holds, blank
+and black frames and focus redraws go as without it. The viewer's frames are counted, its window in front (one test
+without the counts); the worker is a stand-in on the fake clock that reads a page in READ_S and asks the model for
+ASK_S (tests/test_early_start_pipeline.py: the real pipeline's part)."""
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,40 +17,41 @@ import pytest
 from PIL import Image
 from test_follow import BROWSER, VIEWER, Clock, Window, _page
 
-from taslation.capture import WindowInfo
 from taslation.config import Settings
-from taslation.pagekeys import SETTLE_SEEN, Profiles
+from taslation.pagekeys import Profiles
 from taslation import recovery
 from taslation.pipeline import PageGate
 from taslation.regions import PageResult
 from taslation.ui import jobs, live
-from taslation.ui.constants import FRAME_STEP_MS
-from taslation.ui.live import CONFIRM_CEILING, CONFIRM_FLOOR_MS, CONFIRM_MARGIN_MS, CONFIRM_WINDOW, confirm_ms
+from taslation.ui.constants import FOLLOW_STEP_MS, FRAME_STEP_MS
+from taslation.ui.live import KEEP_SETTLES, LEFT_PAGE_MS
 
-UNSEEN_S = CONFIRM_CEILING * 0.4  # a viewer not seen yet: its frames confirmed after twice settle_ms
+KEEP_S = KEEP_SETTLES * 0.4  # what a page started early stores lasts once its frame stayed this long (settle_ms 400)
 
 STEP_MS = 10  # the worker's stand-in looks at its job so often
 READ_S, ASK_S, CANCEL_S = 0.3, 0.5, 0.03  # a page read (detection and OCR), the model's answer, a cancel taking hold
-OTHER_VIEWER = WindowInfo(hwnd=9, title="Pagewell Reader", class_name="PagewellWindow", pid=9, rect=(0, 0, 960, 720))
 
 
 class Worker:
     """The window's worker as it runs a page job (`_job_translate`), on the fake clock: it reads the page for READ_S;
-    then, its gate confirmed (a job with no gate goes on at once), asks the model for ASK_S, stores the page and shows
-    it. With *asks* False (every line reused) the page is stored and shown as soon as it is read, and kept once the
-    gate is confirmed. A cancel - or a gate dropped - ends a job CANCEL_S later: what it did lasts only when its gate
-    was confirmed first. ``jobs``: what each job did, when; ``kept``: the pages whose store lasted, in order."""
+    then - a job with a gate not confirmed yet once a look of the window's after it asked has found its frame on show
+    (`PageGate.on_show`: ``gate_at`` when it asked), a job with no gate or a confirmed one at once - asks the model for
+    *ask_s*, stores the page and shows it; what it stored is kept once its gate is confirmed. With *asks* False (every
+    line reused) the page is stored and shown as soon as it is read, and kept once the gate is confirmed. A cancel - or
+    a gate dropped - ends a job CANCEL_S later, its request with it: what it did lasts only when its gate was confirmed
+    first. ``jobs``: what each job did, when; ``kept``: the pages whose store lasted, in order."""
 
-    def __init__(self, w, clock, name, asks=True):
+    def __init__(self, w, clock, name, asks=True, ask_s=None):
         self.w, self.clock, self.name, self.asks = w, clock, name, asks
+        self.ask_s = ask_s
         self.jobs: list[SimpleNamespace] = []
         self.kept: list[str] = []
 
     def put(self, _job):
         w = self.w
         job = SimpleNamespace(frame=w._job_frame, name=self.name(w._job_frame), gate=w._page_gate,
-                              cancel=w._page_cancel, start=self.clock.now, cancel_seen=None, asked=None, shown=None,
-                              stored=None, ended=None, how=None, discarded=None, result=None)
+                              cancel=w._page_cancel, start=self.clock.now, cancel_seen=None, gate_at=None, asked=None,
+                              shown=None, stored=None, ended=None, how=None, discarded=None, result=None)
         self.jobs.append(job)
         self._again(job)
 
@@ -83,11 +87,14 @@ class Worker:
         if now - job.start + 1e-9 < READ_S or job.shown is not None:
             return self._again(job)  # reading; or shown, and waiting for its frame
         if self.asks:
-            if not confirmed:
-                return self._again(job)  # read; it waits at the gate (`Pipeline._translate_regions`)
             if job.asked is None:
+                if gate is not None and not confirmed:
+                    if job.gate_at is None:
+                        job.gate_at = now  # read: is its frame on show still? (`Pipeline._translate_regions`)
+                    if not gate.seen_since(job.gate_at):
+                        return self._again(job)  # waits for the window's next look
                 job.asked = now
-            if now - job.asked + 1e-9 < ASK_S:
+            if now - job.asked + 1e-9 < (ASK_S if self.ask_s is None else self.ask_s):
                 return self._again(job)
         job.shown = now
         job.result = PageResult(image=job.frame.copy(), original=job.frame.copy(), regions=[], cache_misses=1)
@@ -113,8 +120,9 @@ def follow(hidden_root, monkeypatch, tmp_path):
     return _environment(hidden_root, monkeypatch, tmp_path / "profiles.json")
 
 
-def _environment(hidden_root, monkeypatch, path):
-    """(`follow`) A clock, a viewer and their window of their own, the viewer's profile kept in *path*."""
+def _environment(hidden_root, monkeypatch, path, counted=True):
+    """(`follow`) A clock, a viewer and their window of their own, the viewer's profile kept in *path*; *counted*
+    False: the viewer's frames not counted (`capture.frame_count` None)."""
     clock = Clock()
     first = _page(1)
     viewer = SimpleNamespace(frames=[(0.0, first)], captures=[])
@@ -152,15 +160,17 @@ def _environment(hidden_root, monkeypatch, path):
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=clock.monotonic))  # (the job watch's looks too)
     monkeypatch.setattr(live, "capture_window", capture_window)
     _viewer_in_front(monkeypatch, clock, lambda: viewer.frames)
+    if not counted:
+        monkeypatch.setattr(live, "frame_count", lambda hwnd: None)
 
-    def make(early=True, asks=True, profiles=None, selected=VIEWER):
+    def make(early=True, asks=True, profiles=None, selected=VIEWER, ask_s=None):
         w = Window(hidden_root, clock, owner="viewer")
         w.settings.early_start = early
         w.selected = selected
         w._starts_book = lambda image: False  # (the book is started: tests/test_start_flow.py)
         w._enlarge_asked = selected.hwnd  # (the window enlarged for this viewer already: tests/test_enlarge.py)
         w.profiles = profiles if profiles is not None else Profiles(path)
-        w._jobs = worker = Worker(w, clock, lambda image: names.get(id(image), "?"), asks)
+        w._jobs = worker = Worker(w, clock, lambda image: names.get(id(image), "?"), asks, ask_s)
         w.start()
         clock.run(3)  # page 1 taken and done
         assert worker.kept == ["1"]
@@ -201,15 +211,9 @@ def _after(seconds, wait):
     return wait - 0.001 <= seconds <= wait + 0.035
 
 
-def _learnt(follow, ms_each=0, turns=3):
-    """The viewer's profile with *turns* turns of *ms_each* ms (its confirmation time learnt)."""
-    Profiles(follow.path).set_settle_seen(VIEWER, [ms_each] * turns)
-
-
 # ------------------------------------------------------------------ the time to the first request
 @pytest.mark.parametrize("early", [False, True])
-def test_a_sharp_page_starts_on_its_first_frame_and_asks_once_confirmed(follow, early):
-    _learnt(follow)  # this viewer turns in one frame: confirmed after the floor
+def test_a_sharp_page_starts_on_its_first_frame_and_asks_as_soon_as_it_is_read(follow, early):
     w, worker = follow.make(early=early)
     page = _page(2)
     turned = follow.show((0.0, "2", page))
@@ -221,9 +225,11 @@ def test_a_sharp_page_starts_on_its_first_frame_and_asks_once_confirmed(follow, 
         return
     assert job.start - turned <= 0.016  # at its first frame (seen within FRAME_STEP_MS)
     gate = job.gate
-    assert _after(gate.confirmed_at - turned, CONFIRM_FLOOR_MS / 1000)  # the learnt time
-    assert job.asked >= gate.confirmed_at and job.asked - turned <= READ_S + 0.03  # the read alone before the request
-    assert job.stored > gate.confirmed_at
+    assert job.gate_at - job.start == pytest.approx(READ_S, abs=0.011)  # read: is the frame on show still? ...
+    assert job.asked - job.gate_at <= FRAME_STEP_MS / 1000 + 0.011  # ... the window's next look said so
+    assert job.asked < gate.confirmed_at  # no wait for the confirmation, ...
+    assert _after(gate.confirmed_at - turned, KEEP_S)  # ... which comes once the frame stayed twice settle_ms
+    assert job.stored >= gate.confirmed_at  # what it stored kept only then
     assert w.last_result is job.result
 
 
@@ -232,34 +238,44 @@ def test_the_settle_wait_is_gone_from_the_time_to_the_first_request(hidden_root,
     for early in (False, True):
         with monkeypatch.context() as patched:
             env = _environment(hidden_root, patched, tmp_path / f"profiles-{early}.json")
-            _learnt(env)
             _w, worker = env.make(early=early)
             turned = env.show((0.0, "2", _page(2)))
             job = worker.one("2")
             asked[early], shown[early] = job.asked - turned, job.shown - turned
-    assert asked[False] - asked[True] >= 0.38, asked  # the 400 ms settle_ms, all but a frame step ...
-    assert shown[False] - shown[True] >= 0.38, shown  # ... from the first request and from the page lettered
+    # the 400 ms settle_ms, all but a frame step to the first frame and one to the look that let the request go
+    assert asked[False] - asked[True] >= 0.36, asked
+    assert shown[False] - shown[True] >= 0.36, shown  # ... from the first request and from the page lettered
 
 
-def test_a_new_viewer_waits_the_longest_confirmation_and_learns_its_turns(follow):
-    w, worker = follow.make()  # no turn seen yet: twice settle_ms, 800 ms (`confirm_ms`)
-    assert w._turns_seen(VIEWER.hwnd) == []  # (page 1, the viewer's first frame: no turn was seen)
-    turned = follow.show((0.0, "2", _page(2)))
+def test_what_a_page_started_early_stores_lasts_after_the_same_fixed_time_on_every_turn(follow):
+    w, worker = follow.make()
+    for k in range(4):
+        turned = follow.show((0.0, f"p{k}", _page(2 + k)))
+        job = worker.one(f"p{k}")
+        assert _after(job.gate.confirmed_at - turned, KEEP_S) and job.how == "done", k  # nothing learnt
+    assert worker.kept == ["1", "p0", "p1", "p2", "p3"]
+    data = json.loads(follow.path.read_text(encoding="utf-8")) if follow.path.exists() else {}
+    assert not any("settle_seen" in v for v in data.values() if isinstance(v, dict))  # nothing in the profile
+
+
+def test_without_frame_counts_the_frame_is_looked_at_every_step_while_its_job_is_unconfirmed(hidden_root, monkeypatch,
+                                                                                           tmp_path):
+    env = _environment(hidden_root, monkeypatch, tmp_path / "profiles.json", counted=False)
+    w, worker = env.make()
+    turned = env.show((0.0, "2", _page(2)), run=0.0)
+    env.clock.run(3.0)
     job = worker.one("2")
-    assert job.start - turned <= 0.016 and _after(job.gate.confirmed_at - turned, UNSEEN_S)
-    assert job.asked == pytest.approx(job.gate.confirmed_at, abs=0.011)  # (the read was done by then)
-    follow.show((0.0, "3", _page(3)))
-    follow.show((0.0, "4", _page(4)))
-    seen = w._turns_seen(VIEWER.hwnd)
-    # each a turn in one frame: noted from the last look that still saw the page before (one heartbeat, FRAME_STEP_MS)
-    assert len(seen) == 3 and all(0 <= ms <= FRAME_STEP_MS for ms in seen), seen
-    assert confirm_ms(seen, 400) == CONFIRM_FLOOR_MS
-    turned = follow.show((0.0, "5", _page(5)))
-    assert _after(worker.one("5").gate.confirmed_at - turned, 0.15)  # learnt: the floor
+    assert job.how == "done" and worker.kept == ["1", "2"] and job.gate is not None
+    looks = [t for t in env.viewer.captures if job.start <= t <= job.gate.confirmed_at]
+    gaps = np.diff(looks)
+    assert len(looks) >= 8 and gaps.max() <= FOLLOW_STEP_MS / 1000 + 1e-6, gaps  # every FOLLOW_STEP_MS, not settle_ms
+    assert job.asked - job.gate_at <= FOLLOW_STEP_MS / 1000 + 0.011  # the request waits for the next look alone
+    assert KEEP_S <= job.gate.confirmed_at - job.start <= KEEP_S + FOLLOW_STEP_MS / 1000 + 0.011
+    assert job.start - turned <= w.settings.auto_interval_ms / 1000 + 0.016  # (seen at the next poll)
 
 
 def test_a_page_read_before_its_frame_is_confirmed_is_shown_and_kept_only_then(follow):
-    w, worker = follow.make(asks=False)  # every line reused: no request; a new viewer, 800 ms
+    w, worker = follow.make(asks=False)  # every line reused: no request
     turned = follow.show((0.0, "2", _page(2)))
     job = worker.one("2")
     assert job.shown - turned <= READ_S + 0.03 and job.shown < job.gate.confirmed_at  # shown before ...
@@ -267,11 +283,20 @@ def test_a_page_read_before_its_frame_is_confirmed_is_shown_and_kept_only_then(f
     assert worker.kept == ["1", "2"] and w.last_result is job.result
 
 
+def test_a_page_done_before_its_fixed_time_keeps_nothing_when_its_frame_changes(follow):
+    w, worker = follow.make(asks=False)
+    turned = follow.show((0.0, "2", _page(2)), (0.5, "3", _page(3)))
+    two, three = worker.one("2"), worker.one("3")
+    assert two.shown is not None and two.shown < turned + 0.5  # done before page 3 came ...
+    assert two.gate.state == "dropped" and two.gate.confirmed_at is None  # ... never confirmed ...
+    assert two.discarded and two.stored is None and two.how == "cancelled"  # ... and kept nothing
+    assert three.how == "done" and worker.kept == ["1", "3"] and w.last_result is three.result
+
+
 # ------------------------------------------------------------------ frames that change before the confirmation
-def test_a_soft_frame_then_the_sharp_one_drops_the_first_job_and_keeps_the_sharp_page(follow):
+def test_a_soft_frame_then_the_sharp_one_before_the_request_drops_the_first_job_and_keeps_the_sharp_page(follow):
     w, worker = follow.make()
     soft, sharp = _page(4, soft=3), _page(4)
-    seen_before = len(w._turns_seen(VIEWER.hwnd))
     turned = follow.show((0.0, "4 soft", soft), (0.25, "4", sharp))
     first, second = worker.one("4 soft"), worker.one("4")
     assert first.start - turned <= 0.016 and first.gate.state == "dropped" and first.gate.confirmed_at is None
@@ -279,14 +304,36 @@ def test_a_soft_frame_then_the_sharp_one_drops_the_first_job_and_keeps_the_sharp
     assert first.ended - first.gate.dropped_at <= CANCEL_S + 0.011  # ... its job ended at once ...
     assert first.asked is None and first.stored is None and first.discarded  # ... nothing asked, nothing kept
     assert second.start - first.ended <= 0.016  # the sharp frame started as soon as the worker was free
-    assert _after(second.gate.confirmed_at - (turned + 0.25), UNSEEN_S)
+    assert _after(second.gate.confirmed_at - (turned + 0.25), KEEP_S)
     assert second.asked is not None and second.how == "done"
     assert worker.kept == ["1", "4"] and w.pipeline.forgotten == []  # (the soft job stored nothing to forget)
     assert w.last_result is second.result and w.last_result.original.tobytes() == sharp.tobytes()
-    seen = w._turns_seen(VIEWER.hwnd)
-    # one turn, first frame to the sharp one: never short of the 250 ms, and what could not be seen of it in it - the
-    # look before the soft frame and the step that saw the sharp one, a frame step each
-    assert len(seen) == seen_before + 1 and 250 <= seen[-1] <= 250 + 2 * FRAME_STEP_MS, seen
+
+
+def test_a_sharp_frame_that_comes_while_the_soft_frames_request_runs_cancels_it_and_keeps_the_sharp_page(follow):
+    w, worker = follow.make()
+    soft, sharp = _page(4, soft=3), _page(4)
+    turned = follow.show((0.0, "4 soft", soft), (0.42, "4", sharp))
+    first, second = worker.one("4 soft"), worker.one("4")
+    assert first.asked is not None and first.asked < turned + 0.42  # its request went out on the soft frame ...
+    assert first.gate.dropped_at - (turned + 0.42) <= 0.016  # ... and the sharp frame's first look dropped it:
+    assert first.cancel_seen - first.gate.dropped_at <= STEP_MS / 1000 + 1e-6  # the request cancelled at once ...
+    assert first.how == "cancelled" and first.shown is None and first.stored is None and first.discarded  # nothing
+    assert second.start - first.ended <= 0.016 and second.how == "done" and worker.kept == ["1", "4"]
+    assert _after(second.gate.confirmed_at - (turned + 0.42), KEEP_S)
+    assert w.last_result is second.result and w.last_result.original.tobytes() == sharp.tobytes()
+
+
+def test_soft_pictures_drawn_longer_than_settle_ms_are_never_kept(follow):
+    """The browser-type stand-in viewer draws its soft picture up to 400-420 ms on the screen: settle_ms itself
+    confirmed some of those soft frames; twice settle_ms confirms none. Their requests go out and are cancelled."""
+    w, worker = follow.make()
+    for k in range(4):
+        follow.show((0.0, f"p{k} soft", _page(70 + k, soft=3)), (0.42, f"p{k}", _page(70 + k)))
+    soft = [j for j in worker.jobs if j.name.endswith("soft")]
+    assert len(soft) == 4 and all(j.gate.confirmed_at is None and j.stored is None and j.discarded for j in soft)
+    assert all(j.asked is not None and j.how == "cancelled" for j in soft)  # (asked, and cancelled)
+    assert worker.kept == ["1", "p0", "p1", "p2", "p3"]
 
 
 def test_frames_of_an_animation_ask_nothing_and_keep_nothing(follow):
@@ -298,13 +345,12 @@ def test_frames_of_an_animation_ask_nothing_and_keep_nothing(follow):
         if job.name.startswith("slide"):
             assert job.gate.confirmed_at is None and job.asked is None and job.stored is None, job
     assert worker.kept == ["1", "2"] and [j.name for j in worker.jobs if j.asked is not None] == ["1", "2"]
-    assert _after(worker.one("2").gate.confirmed_at - (turned + 0.2), UNSEEN_S)
+    assert _after(worker.one("2").gate.confirmed_at - (turned + 0.2), KEEP_S)
     assert w.pipeline.forgotten == []
 
 
 @pytest.mark.parametrize("early", [False, True])
-def test_pages_flipped_faster_than_the_floor_ask_nothing_and_keep_nothing(follow, early):
-    _learnt(follow)  # the shortest confirmation: 150 ms
+def test_pages_flipped_faster_than_a_page_is_read_ask_nothing_and_keep_nothing(follow, early):
     w, worker = follow.make(early=early)
     pages = [(0.1 * i, f"p{i}", _page(20 + i)) for i in range(5)]  # each shown 100 ms, the last one stays
     turned = follow.show(*pages)
@@ -312,106 +358,125 @@ def test_pages_flipped_faster_than_the_floor_ask_nothing_and_keep_nothing(follow
     assert asked == ["1", "p4"] and worker.kept == ["1", "p4"]
     last = worker.one("p4")
     if early:
-        assert _after(last.gate.confirmed_at - (turned + 0.4), 0.15)
+        assert _after(last.gate.confirmed_at - (turned + 0.4), KEEP_S)
         assert all(j.gate.state == "dropped" for j in worker.jobs if j.name.startswith("p") and j.name != "p4")
         assert all(j.ended is not None for j in worker.jobs)  # (every job ended: none left waiting)
     else:
         assert [j.name for j in worker.jobs] == ["1", "p4"]  # nothing started before p4 settled
 
 
-def test_a_page_shown_past_the_floor_then_turned_has_its_job_cancelled_once_the_turn_is_confirmed(follow):
-    _learnt(follow)  # 150 ms
+def test_pages_flipped_through_each_soft_first_keep_the_last_page_alone(follow):
     w, worker = follow.make()
-    three = _page(3)
-    turned = follow.show((0.0, "2", _page(2)), (0.2, "3", three), run=0.3 + 0.22)  # page 2 confirmed, then 3
-    two = worker.one("2")
-    assert two.gate.confirmed_at is not None and two.asked is None  # confirmed, still reading when 3 came ...
-    assert w._live is three and not two.cancel.is_set()  # ... page 3 on show at once, the job going on ...
-    follow.clock.run(3)
-    # ... until page 3 is confirmed in its turn (150 ms: `_look_over_job`'s rule), then cancelled
-    assert two.how == "cancelled" and 0.15 <= two.cancel_seen - (turned + 0.2) <= 0.15 + 3 * FRAME_STEP_MS / 1000
-    three_job = worker.one("3")
-    assert three_job.start - two.ended <= 0.016 and three_job.how == "done" and worker.kept == ["1", "3"]
-    assert two.ended - two.cancel_seen <= CANCEL_S + 0.011
-    seen = w._turns_seen(VIEWER.hwnd)
-    # two turns, each in one frame: another page 200 ms after page 2's first frame is a turn of its own, not page 2's
-    # turn lengthened (ten pages flipped through were once noted as one turn of 3.8 s)
-    assert len(seen) == 3 + 2 and all(ms <= FRAME_STEP_MS for ms in seen[-2:]), seen
+    frames = []
+    for k in range(5):  # five pages flipped 120 ms apart, each soft first and sharp 60 ms later; the last one stays
+        frames += [(0.12 * k, f"p{k} soft", _page(40 + k, soft=3)), (0.12 * k + 0.06, f"p{k}", _page(40 + k))]
+    follow.show(*frames)
+    assert worker.kept == ["1", "p4"]
+
+
+def test_a_flash_within_a_turn_keeps_the_sharp_page(follow):
+    w, worker = follow.make()
+    w.settings.black_wait_s = Settings().black_wait_s
+    soft, sharp = _page(2, soft=3), _page(2)
+    black = Image.new("RGB", soft.size, "black")
+    follow.show((0.0, "2 soft", soft), (0.1, "black", black), (0.8, "2", sharp))  # a focus flash of 700 ms
+    assert worker.kept == ["1", "2"]
+
+
+def test_a_frame_of_another_size_is_taken_as_ever(follow):
+    """The viewer's window narrowed, its page laid out anew."""
+    w, worker = follow.make()
+    follow.show((0.0, "2 narrow", _page(2).resize((480, 720))))
+    assert worker.kept == ["1", "2 narrow"]
+
+
+def test_the_time_spent_on_a_frame_is_not_added_to_the_wait(follow):
+    """The fixed time is counted from the look that saw the frame (`Look.at`), not from after the window had worked
+    it out (its thumbnail drawn, its page units read for the cache: 30-170 ms on the stand-in)."""
+    w, worker = follow.make()
+    clock = follow.clock
+    cached = w._all_cached
+
+    def slow(image):  # reading the frame's page units takes 120 ms of the Tk thread
+        clock.now += 0.12
+        return cached(image)
+
+    w._all_cached = slow
+    turned = follow.show((0.0, "3 soft", _page(3, soft=3)), (0.3, "3", _page(3)))
+    assert KEEP_S - 0.001 <= worker.one("3").gate.confirmed_at - (turned + 0.3) <= KEEP_S + 0.12, (
+        worker.one("3").gate.confirmed_at - (turned + 0.3))
+
+
+def test_a_page_seen_again_while_the_models_load_waits_for_them(follow):
+    w, worker = follow.make()
+    w.ready = False  # the models load: a page that settles waits for them, and is followed again at each poll
+    follow.show((0.0, "2", _page(2)), run=3.0)
+    assert [j.name for j in worker.jobs] == ["1"] and w._queued is not None
+
+
+def test_a_turn_not_seen_as_it_came_is_taken_as_ever(follow):
+    w, worker = follow.make()
+    w._following.owner = "other"  # neither window in front: the window does not look ...
+    follow.show((0.0, "2 soft", _page(2, soft=3)), (0.25, "2", _page(2)), run=1.0)  # ... while the page turns
+    assert [j.name for j in worker.jobs] == ["1"]
+    w._following.owner, w._following.look_at = "viewer", follow.clock.now  # the viewer in front again: one look
+    follow.clock.run(2.0)
+    assert worker.one("2").how == "done"
 
 
 # ------------------------------------------------------------------ a change after the confirmation
-def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept_and_lengthens_the_wait(follow):
-    _learnt(follow)  # 150 ms: the soft frame is confirmed before the sharp one comes
+def test_a_page_turned_while_its_confirmed_job_runs_cancels_it_once_the_new_frame_stayed_briefly(follow):
+    w, worker = follow.make(ask_s=1.5)  # the model answers for 1.5 s: page 2's job runs past its confirmation
+    three = _page(3)
+    turned = follow.show((0.0, "2", _page(2)), (1.0, "3", three), run=0.3 + 1.02)
+    two = worker.one("2")
+    assert two.gate.confirmed_at is not None and two.asked is not None and two.shown is None  # confirmed, asking ...
+    assert w._live is three and not two.cancel.is_set()  # ... page 3 on show at once, the job going on ...
+    follow.clock.run(3)
+    # ... until page 3 has stayed LEFT_PAGE_MS (`_look_over_job`'s rule), then cancelled
+    lag = two.cancel_seen - (turned + 1.0)
+    assert two.how == "cancelled" and LEFT_PAGE_MS / 1000 <= lag <= LEFT_PAGE_MS / 1000 + 3 * FRAME_STEP_MS / 1000, lag
+    assert two.ended - two.cancel_seen <= CANCEL_S + 0.011
+    three_job = worker.one("3")
+    assert three_job.start - two.ended <= 0.016 and three_job.how == "done" and worker.kept == ["1", "3"]
+    # page 3 started early - a gate of its own -, kept once its frame stayed twice settle_ms from the look that saw it
+    assert three_job.gate is not None and _after(three_job.gate.confirmed_at - (turned + 1.0), KEEP_S)
+
+
+def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept(follow):
     w, worker = follow.make(asks=False)
     soft, sharp = _page(4, soft=3), _page(4)
-    turned = follow.show((0.0, "4 soft", soft), (0.35, "4", sharp))
+    turned = follow.show((0.0, "4 soft", soft), (0.95, "4", sharp))  # the soft frame confirmed before the sharp came
     first, second = worker.one("4 soft"), worker.one("4")
-    assert _after(first.gate.confirmed_at - turned, 0.15)
-    assert first.stored is not None and first.stored < turned + 0.35  # kept before the sharp frame came
+    assert _after(first.gate.confirmed_at - turned, KEEP_S)
+    assert first.stored is not None and first.stored < turned + 0.95  # kept before the sharp frame came
     forgotten = w.pipeline.forgotten[-1]
     assert [(u.fingerprint, u.aspect) for u in forgotten.units] == [("4 soft", 1.0)]  # what it stored is dropped
-    assert second.gate is None and second.start - (turned + 0.35) <= 0.016  # read again from the sharp frame
+    assert second.gate is None and second.start - (turned + 0.95) <= 0.016  # read again from the sharp frame
     assert worker.kept == ["1", "4 soft", "4"] and w.last_result is second.result
-    seen = w._turns_seen(VIEWER.hwnd)
-    # the turn took that long (and a frame step or two the window could not see): the wait grows past it
-    assert 350 <= seen[-1] <= 350 + 2 * FRAME_STEP_MS and confirm_ms(seen, 400) == seen[-1] + CONFIRM_MARGIN_MS, seen
-    assert Profiles(follow.path).settle_seen_for(VIEWER) == seen  # (an amended turn is written at once)
 
 
-# ------------------------------------------------------------------ the confirmation time learnt
-def test_the_confirmation_time_is_the_longest_recent_turn_plus_a_margin_within_its_bounds():
-    assert CONFIRM_CEILING == 2
-    assert confirm_ms([], 400) == 800 and confirm_ms([0, 0], 400) == 800  # too few turns: the ceiling
-    assert confirm_ms([0, 0, 0], 400) == CONFIRM_FLOOR_MS  # at least the floor
-    assert confirm_ms([90, 120, 100], 400) == 120 + CONFIRM_MARGIN_MS
-    assert confirm_ms([90, 420, 100], 400) == 500  # past settle_ms: a soft picture drawn longer than it ...
-    assert confirm_ms([90, 900, 100], 400) == 800  # ... and at most twice settle_ms
-    assert confirm_ms([0, 0, 0], 50) == 100  # (a ceiling under the floor is the ceiling still)
-    outlier = [100] * 5 + [2000] + [100] * (CONFIRM_WINDOW - 1)
-    assert confirm_ms(outlier, 400) == 800  # an outlier holds while it is among the last CONFIRM_WINDOW ...
-    assert confirm_ms(outlier + [100], 400) == 180  # ... and is forgotten after
-
-
-def test_the_turns_learnt_persist_per_viewer_and_bad_values_are_left_out(follow, tmp_path):
-    w, _worker = follow.make()
-    for ms in (120, 90, 100, 110):
-        w._note_turn(VIEWER.hwnd, ms / 1000)
-    assert w._turns_seen(VIEWER.hwnd) == [120, 90, 100, 110]  # (page 1, the first frame: no turn)
-    again = Profiles(follow.path)  # a new start: the store read anew
-    assert again.settle_seen_for(VIEWER) == [120, 90, 100]  # written when the time changed (the third turn) ...
-    assert confirm_ms([120, 90, 100], 400) == confirm_ms([120, 90, 100, 110], 400) == 200  # ... the same: 120 + 80
-    assert again.settle_seen_for(OTHER_VIEWER) == []  # per viewer
-    fresh = Window(w.canvas.master, follow.clock, owner="viewer")
-    fresh.settings.early_start, fresh.profiles = True, again
-    assert confirm_ms(fresh._turns_seen(VIEWER.hwnd), 400) == 200
-    fresh.selected = OTHER_VIEWER
-    assert fresh._turns_seen(OTHER_VIEWER.hwnd) == []
-    for turns in range(1, 12):  # written when the time changes, and every CONFIRM_SAVE_EVERY turns after
-        fresh._note_turn(OTHER_VIEWER.hwnd, 0.3)
-        written = Profiles(follow.path).settle_seen_for(OTHER_VIEWER)
-        assert written == ([] if turns < 3 else [300] * 3 if turns < 11 else [300] * 11), turns
-    assert Profiles(follow.path).settle_seen_for(VIEWER) == [120, 90, 100]  # (the other viewer's stays)
-
-    bad = tmp_path / "bad.json"
-    profiles = Profiles(bad)
-    profiles.set_settle_seen(VIEWER, [100])
-    data = profiles.data
-    key = next(k for k, v in data.items() if isinstance(v, dict) and SETTLE_SEEN in v)
-    data[key][SETTLE_SEEN] = [100, "x", -5, True, 70000, 2.5, None, 200]
-    bad.write_text(__import__("json").dumps(data), encoding="utf-8")
-    assert Profiles(bad).settle_seen_for(VIEWER) == [100, 2, 200]
-
-
-def test_an_outlier_turn_is_forgotten_after_a_window_of_turns(follow):
-    w, _worker = follow.make()
-    w._note_turn(VIEWER.hwnd, 2.0)  # a viewer that once took 2 s
-    for _i in range(3):
-        w._note_turn(VIEWER.hwnd, 0.05)
-    assert confirm_ms(w._turns_seen(VIEWER.hwnd), 400) == 800
-    for _i in range(CONFIRM_WINDOW):
-        w._note_turn(VIEWER.hwnd, 0.05)
-    assert confirm_ms(w._turns_seen(VIEWER.hwnd), 400) == CONFIRM_FLOOR_MS
-    assert len(Profiles(follow.path).settle_seen_for(VIEWER)) <= 16
+# ------------------------------------------------------------------ the profile
+def test_an_old_profile_with_turn_times_loads_and_they_are_never_written(follow, tmp_path):
+    """Older versions kept the viewer's page turns timed in its profile ("settle_seen"): such a profile loads - its
+    area and keys as ever -, the times are ignored, and nothing writes them."""
+    path = follow.path
+    Profiles(path).set_key_way(VIEWER, "posted")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    key = next(k for k, v in data.items() if isinstance(v, dict) and v.get("key_way") == "posted")
+    data[key]["settle_seen"] = [120, 90, 100]
+    data[key]["margins"] = [0, 85, 0, 0]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    profiles = Profiles(path)
+    assert profiles.key_way_for(VIEWER) == "posted"
+    w, worker = follow.make(profiles=profiles)
+    for k in range(3):
+        turned = follow.show((0.0, f"p{k}", _page(2 + k)))
+        assert _after(worker.one(f"p{k}").gate.confirmed_at - turned, KEEP_S)  # the fixed time, whatever it says
+    profiles.set_covered(VIEWER, True)  # (a write of the profile's own: the old entry stays as it was found)
+    after = json.loads(path.read_text(encoding="utf-8"))[key]
+    assert after["settle_seen"] == [120, 90, 100] and after["margins"] == [0, 85, 0, 0]
+    assert after["while_covered"] == "draws"
 
 
 # ------------------------------------------------------------------ what goes as without it

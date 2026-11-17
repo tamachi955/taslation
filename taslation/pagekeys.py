@@ -23,8 +23,9 @@ presets::
 
 "margins" is the area set on the window at the size the reader gave it, "margins_large" the one set on the window
 TASlation enlarged (`capture.enlarge_window`): the frames differ, so neither says anything about the other. What older
-versions kept here as "fullscreen_reading", and a "first" or "fullscreen" among the keys (the viewer's full-screen
-key, which TASlation no longer presses), is ignored.
+versions kept here as "fullscreen_reading", a "first" or "fullscreen" among the keys (the viewer's full-screen key,
+which TASlation no longer presses), and "settle_seen" (the viewer's page turns timed, which the window no longer
+learns from), is ignored.
 
 What TASlation has seen of a viewer that is no browser, so that a later session need not find it out again at the
 first key: "while_covered" - "draws" when frames of it came while other windows hid it wholly, "stops" when they came
@@ -50,7 +51,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping
 
 from .atomic import write_atomic
 
@@ -71,11 +72,6 @@ RESERVED = (DEFAULT_KEYS, KEY_PRESETS)  # top-level entries of profiles.json tha
 COVERED = "while_covered"  # a viewer's profile: "draws" or "stops" while other windows hide it wholly
 KEY_WAY = "key_way"  # a viewer's profile: "real" or "posted", how it took a key passed on
 KEY_WAYS = ("real", "posted")
-# a viewer's profile: its last page turns, each the ms from the frame that first changed to the last change (oldest
-# first), what the window's confirmation time of a page started early is learnt from (`ui.live.confirm_ms`)
-SETTLE_SEEN = "settle_seen"
-SETTLE_SEEN_KEPT = 16
-SETTLE_SEEN_MAX_MS = 60000
 OPPOSITE_KEYS = {"left": "Right", "right": "Left", "pagedown": "PageUp", "pageup": "PageDown", "next": "Prior",
                  "prior": "Next", "down": "Up", "up": "Down"}  # a page-turn key -> the key that turns the other way
 
@@ -499,28 +495,6 @@ class Profiles:
 
         self._change(change)
 
-    def settle_seen_for(self, title: Any) -> list[int]:
-        """The viewer's last page turns as sessions before saw them ("settle_seen": each the ms from the frame that
-        first changed to the last change, oldest first, at most SETTLE_SEEN_KEPT); [] for none. A value that is no
-        such number is left out."""
-        seen = _entry_of(self, title).get(SETTLE_SEEN)
-        if not isinstance(seen, list):
-            return []
-        return [int(v) for v in seen if isinstance(v, (int, float)) and not isinstance(v, bool)
-                and 0 <= v <= SETTLE_SEEN_MAX_MS][-SETTLE_SEEN_KEPT:]
-
-    def set_settle_seen(self, title: Any, seen: Sequence[int]) -> None:
-        """The viewer's last page turns (`settle_seen_for`), the last SETTLE_SEEN_KEPT of *seen* kept. Written only when
-        they change; the viewer's areas, keys and the rest stay."""
-        values = [max(0, min(SETTLE_SEEN_MAX_MS, int(v))) for v in seen][-SETTLE_SEEN_KEPT:]
-        if self.settle_seen_for(title) == values:
-            return
-
-        def change(data: dict[str, Any]) -> None:
-            self._entry(data, profile_key(data, title))[SETTLE_SEEN] = values
-
-        self._change(change)
-
     def keys_for(self, title: Any, settings: Any) -> PageKeys:
         return page_keys_for(self, settings, title)
 
@@ -540,7 +514,7 @@ class Profiles:
 __all__ = [
     "BUILTIN_PRESETS", "COVERED", "DEFAULT_KEYS", "FILE_TITLE", "KEY_CODES", "KEY_NAMES", "KEY_PRESETS", "KEY_WAY",
     "KEY_WAYS", "KeyWays", "MEANINGS",
-    "OPPOSITE_KEYS", "RESERVED", "SETTING_OF", "SETTLE_SEEN", "SETTLE_SEEN_KEPT", "PageKeys", "Profiles", "ViewerTitle",
+    "OPPOSITE_KEYS", "RESERVED", "SETTING_OF", "PageKeys", "Profiles", "ViewerTitle",
     "class_key",
     "default_keys", "margin_key", "names_a_file", "normal_key", "opposite_key", "own_keys", "page_keys_for",
     "passed_on", "pressed_for", "profile_key", "profile_names", "same_key", "valid_key", "viewer_key", "viewer_title",

@@ -253,9 +253,10 @@ class Settings:
     black_wait_s: float = 30.0  # a viewer black this long may just be loading; then the person is told to reload it
     page_turn_wait_ms: int = 3000  # how long to wait for the viewer to show the next page
     settle_ms: int = 400  # frame must stay unchanged this long before it is processed
-    # with follow = "events": a page not in the cache is read from its first new frame, and asks the model and is kept
-    # only once that frame has stayed unchanged for the viewer's own confirmation time (learnt from its page turns, at
-    # most twice settle_ms); false: read once the frame has stayed unchanged for settle_ms, as before
+    # with follow = "events": a page not in the cache is read from its first new frame and asks the model as soon as a
+    # look finds that frame on show still; a frame that changes meanwhile starts it over, and what it stores is kept
+    # once the frame has stayed unchanged for twice settle_ms; false: read once the frame has stayed unchanged for
+    # settle_ms, as before
     early_start: bool = True
     batch_max_pages: int = 2000
     # MB of page images a whole-book run keeps in memory, packed without loss and never on disk: the pages waiting to be

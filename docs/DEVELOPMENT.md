@@ -110,8 +110,10 @@ rows' languages.
   fetches nothing and turns its pages by its own script: soft first, spreads, black frames, a spinner, a band whose
   cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
-  answerer in its place), and the tool writes numbers (turn to page lettered, requests on unsettled frames, stale
-  pages, the confirmation it learnt, where the OCR ran) and pictures of TASlation's own window to the `--out` folder,
+  answerer in its place), and the tool writes numbers (the sharp frame to the first request, the first lettered
+  bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; jobs kept
+  from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran) and pictures of
+  TASlation's own window to the `--out` folder,
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the

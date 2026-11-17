@@ -102,7 +102,6 @@ class Window(BlackViewerMixin):
     _normal_status = app_mod.App._normal_status
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
-    _tail_turn = app_mod.App._tail_turn
     _covers_viewer = app_mod.App._covers_viewer
     _set_covered = app_mod.App._set_covered
     _capture_failed = app_mod.App._capture_failed
