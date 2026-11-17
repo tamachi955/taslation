@@ -101,6 +101,38 @@ def test_requests_sent_for_nothing_are_told_with_what_they_cost():
     assert standin_e2e.dist([]) == {"n": 0}
 
 
+def progress_line(progress, reading=False):  # (as the window's progress line is named where it says it)
+    return str(progress)
+
+
+def test_a_status_line_is_told_by_its_kind_and_the_page_it_speaks_of_never_by_its_text():
+    from taslation.messages import Message
+    from taslation.regions import PageResult
+
+    result = PageResult(image=Image.new("RGB", (4, 4)), original=Image.new("RGB", (4, 4)), regions=[])
+    window = SimpleNamespace(_page_line=lambda r: "3 line(s)", _font_note=lambda: "")
+    summary = lambda: window._page_line(result) + window._font_note()  # noqa: E731 - as the window says it
+    progress, reading = Message("ollama.loading"), False
+    assert standin_e2e.status_kind(summary, None) == ("page_summary", "result", result)
+    assert standin_e2e.status_kind(lambda: progress_line(progress, reading), None)[:2] == ("progress", "job")
+    key = "Stopped: this page was not translated, and nothing of it was kept. F5 translates it again."
+    assert standin_e2e.status_kind(lambda: key, key)[:2] == ("say:Stopped_this_page_was", "job")
+    assert standin_e2e.status_kind(lambda: "Viewer: x", "Viewer: {title}")[:2] == ("say:Viewer_title", None)
+    message = Message("ollama.loading")
+    assert standin_e2e.status_kind(lambda: str(message), None)[:2] == ("message:ollama.loading", None)
+    assert standin_e2e.status_kind(None, None)[:2] == ("other", None)
+
+
+def test_how_long_a_status_line_of_the_page_before_stays_after_a_turn():
+    lines = [{"t": 0, "kind": "page_summary", "page": [2, True]}, {"t": 1150, "kind": "progress", "page": [2, True]},
+             {"t": 1300, "kind": "say:Viewer_title", "page": None}, {"t": 1500, "kind": "progress", "page": [4, True]},
+             {"t": 2600, "kind": "progress", "page": [2, True]}, {"t": 2700, "kind": "page_summary", "page": [4, True]}]
+    # the turn to 4 at 1000: the summary of 2, then 2's progress, until a line of no page at 1300; 2's line again later
+    assert standin_e2e.status_of_another_page(lines, (4, True), 1000, 3000) == (300, "page_summary", 400)
+    assert standin_e2e.status_of_another_page(lines, (2, True), 100, 1000) == (0, None, 0)
+    assert standin_e2e.status_of_another_page([], (2, True), 100, 1000) == (0, None, 0)
+
+
 # ---------------------------------------------------------------------------------------------------- the files
 def test_the_page_fetches_nothing_from_anywhere():
     html = sv.HTML.read_text(encoding="utf-8")

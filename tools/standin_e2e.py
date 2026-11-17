@@ -71,6 +71,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import shutil
 import statistics
@@ -104,6 +105,7 @@ IDLE_S = 2.0  # the window at rest so long before the next scenario is released
 REST_MS = 2000  # a screen on show sharp so long is one the reader rested on
 STALE_MS = 1000  # a page lettered on show this long after the stand-in left it is an overlay left behind
 LAG_MS = 1000  # ... any page of the window's this long: the window did not follow
+LONG_CAPTURE_MS = 100  # a capture that took longer is noted with when it was
 STANDIN_SIZE = (1300, 900)
 NARROW_SIZE = (860, 1000)
 APP_SIZE = (1180, 940)
@@ -426,6 +428,9 @@ class Notes:
         self.local = threading.local()  # (the request a translator thread is in: `request`, `http_begin`, `http_end`)
         self.timings: dict[str, list[tuple[float, bool]]] = {}  # the Tk thread's time in the live view's calls
         self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
+        self.status_lines: list[dict[str, Any]] = []  # the status line's kind and the page it speaks of, from when
+        self.long_captures: list[tuple[float, float]] = []  # (when, ms): the captures that took over LONG_CAPTURE_MS
+        self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
         self.on_display: Callable[[dict[str, Any]], None] | None = None
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
@@ -581,6 +586,39 @@ class Notes:
         if not same and self.on_display is not None:
             self.on_display(rec)
 
+    def status_line(self, app: Any, t: float) -> None:
+        """The status line set at *t*, as `status_kind` tells it (its kind, never its text), with the page it speaks of
+        as the stand-in's code (None: a line of no page, or a picture without the code)."""
+        kind, about, result = status_kind(getattr(app, "_status_render", None), getattr(app, "_status_key", None))
+        picture = {"result": getattr(result, "original", None), "job": getattr(app, "_job_frame", None),
+                   "viewer": getattr(app, "_live", None)}.get(about or "")
+        shown = self.shown(picture) if picture is not None else sv.Shown()
+        rec = {"t": t, "kind": kind, "about": about, "page": list(shown.screen) if shown.screen else None}
+        with self.lock:
+            last = self.status_lines[-1] if self.status_lines else None
+            if last is None or any(last[k] != rec[k] for k in ("kind", "about", "page")):
+                self.status_lines.append(rec)
+
+    def area(self, app: Any) -> None:
+        """The capture area in force, the one the window reads the frame on show by (`_margins_of` where the window has
+        it, else the area in force) and the frame's own (what the window applies once no job runs), with the frame's
+        size: noted as they change."""
+        live = getattr(app, "_live", None)
+        try:
+            margins = [int(m) for m in app.settings.margins]
+            own = [int(m) for m in (app._inner_margins() if app._manual_area else app._found_margins())]
+            read = ([int(m) for m in app._margins_of(live)] if live is not None and hasattr(app, "_margins_of")
+                    else margins)
+        except Exception as e:  # noqa: BLE001 - said by its type
+            self.error("area sample", type(e).__name__)
+            return
+        rec = {"t": now_ms(), "size": list(live.size) if live is not None else None, "margins": margins, "own": own,
+               "read": read, "busy": bool(getattr(app, "busy", False))}
+        with self.lock:
+            last = self.margins[-1] if self.margins else None
+            if last is None or any(last[k] != rec[k] for k in ("size", "margins", "own", "read", "busy")):
+                self.margins.append(rec)
+
     def captured(self, image: Any) -> None:
         shown = self.shown(image)
         rec = {"t": now_ms(), **self.code(shown), "size": list(getattr(image, "size", (0, 0)))}
@@ -605,6 +643,39 @@ class Notes:
             last = self.ocr[-1] if self.ocr else None
             if last is None or any(last[k] != rec[k] for k in ("device", "why", "engines", "loading")):
                 self.ocr.append(rec)
+
+
+# status lines said with `say` that speak of a page: of the page the job read, of the viewer's page on show
+JOB_KEYS = ("Stopped: this page was not translated",)
+VIEWER_KEYS = ("This page is translated; the whole-book run",)
+
+
+def status_kind(render: Any, key: str | None) -> tuple[str, str | None, Any]:
+    """What a status line is, from the window's record of it (*render*, the callable that says it again in the
+    window's language, and *key*, its template when it was said with `say`): its kind - "page_summary" (a page's
+    summary), "progress" (a page job at work), "beside" (beside a whole-book run), "say:" and the template's first
+    words, "message:" and a Message's code, "other" -, never its text; which page it speaks of ("result": the page in
+    its words, "job": the page the running job reads, "viewer": the viewer's frame on show, None: no page); and the
+    page's result for "result"."""
+    cells = []
+    for cell in getattr(render, "__closure__", None) or ():
+        with contextlib.suppress(ValueError):
+            cells.append(cell.cell_contents)
+    names = getattr(getattr(render, "__code__", None), "co_names", ())
+    result = next((c for c in cells if type(c).__name__ == "PageResult"), None)
+    if result is not None:
+        return "page_summary", "result", result
+    if "progress_line" in names:
+        return "progress", "job", None
+    if "beside_line" in names:
+        return "beside", "viewer", None
+    if key:
+        about = "job" if key.startswith(JOB_KEYS) else "viewer" if key.startswith(VIEWER_KEYS) else None
+        return "say:" + "_".join(re.findall(r"[A-Za-z]+", key)[:4]), about, None
+    message = next((c for c in cells if type(c).__name__ == "Message"), None)
+    if message is not None:
+        return "message:" + str(getattr(message, "code", "?")), None, None
+    return "other", None, None
 
 
 class LogTap(logging.Handler):
@@ -723,7 +794,11 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     def captured(self: Any, hwnd: int) -> Any:
         began = time.perf_counter()
         image = capture(self, hwnd)
-        notes.timed("_capture", (time.perf_counter() - began) * 1000, bool(getattr(self, "busy", False)))
+        took = (time.perf_counter() - began) * 1000
+        notes.timed("_capture", took, bool(getattr(self, "busy", False)))
+        if took > LONG_CAPTURE_MS:
+            with notes.lock:
+                notes.long_captures.append((now_ms(), took))
         notes.captured(image)
         return image
 
@@ -900,6 +975,7 @@ class Director:
                 if time.monotonic() - self.last_ocr >= OCR_EVERY_S:
                     self.last_ocr = time.monotonic()
                     self.notes.placement(self.app)
+                self.notes.area(self.app)
                 self.step()
                 self.due_shots()
         except Exception as e:  # noqa: BLE001 - said by its type, and the run ends
@@ -1313,6 +1389,61 @@ def lettered_unsettled_ms(displays: list[dict[str, Any]], scr: tuple[int, bool],
     return round(total)
 
 
+def status_of_another_page(lines: list[dict[str, Any]], scr: tuple[int, bool], lo: float, hi: float
+                           ) -> tuple[int, str | None, int]:
+    """How the status line spoke of another page than *scr* in a turn from *lo* to *hi* (the stand-in's first draw of
+    *scr* to its next turn; *lines*: `Notes.status_lines`): how long the line on at *lo*, of a page before, stayed (0:
+    it spoke of no page, or of *scr*; a line of no page or of *scr* ends it) and its kind, and how long lines of
+    another page were on in all."""
+    def other(s: dict[str, Any]) -> bool:
+        return s["page"] is not None and tuple(s["page"]) != tuple(scr)
+
+    before = [s for s in lines if s["t"] <= lo]
+    first = before[-1] if before else None
+    stayed, kind = 0, None
+    if first is not None and other(first):
+        kind = first["kind"]
+        stayed = round(min(next((s["t"] for s in lines if s["t"] > lo and not other(s)), hi), hi) - lo)
+    total = 0.0
+    for k, s in enumerate(lines):
+        a, b = max(s["t"], lo), min(lines[k + 1]["t"] if k + 1 < len(lines) else hi, hi)
+        if b > a and other(s):
+            total += b - a
+    return stayed, kind, round(total)
+
+
+def resize_rows(events: list[dict[str, Any]], offset: float, notes: Notes, turns: list[dict[str, Any]],
+                rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per change of the stand-in's window size after the window's first capture (its "size" line), from its draw of
+    the new layout, numbers: to the window's first capture of another size, to the first moment the window read that
+    frame by its own capture area, and by its own area in force too (`Notes.area`); the captures that took over
+    LONG_CAPTURE_MS within 3 s; whether a page job ran, and how long the old layout's lettering stayed (the turn's
+    `old_lettering_ms`)."""
+    out = []
+    for k, e in enumerate(events):
+        if e["ev"] != "size":
+            continue
+        t = e["t"] + offset
+        draw = next((d["t"] + offset for d in events[k:] if d["ev"] == "draw" and d.get("why") == "resize"), t)
+        before = [c for c in notes.captures if c["t"] <= t]
+        if not before:
+            continue  # (the stand-in's own size at the start: nothing of another size was captured yet)
+        old = before[-1]["size"]
+        new = next((c for c in notes.captures if c["t"] > t and c["size"] != old), None)
+        size = new["size"] if new is not None else None
+        read = next((m["t"] for m in notes.margins if m["t"] > t and m["size"] == size and m["read"] == m["own"]), None)
+        own = next((m["t"] for m in notes.margins if m["t"] > t and m["size"] == size and m["margins"] == m["own"]),
+                   None)
+        turn = next((r for r, w in zip(rows, turns) if w["why"] == "resize" and abs(w["soft_t"] - draw) < 50), None)
+        out.append({"from_t": round(draw), "size_before": old, "size_after": size,
+                    "first_capture_ms": ms(new["t"], draw) if new is not None else None,
+                    "read_by_own_area_ms": ms(read, draw), "own_area_in_force_ms": ms(own, draw),
+                    "long_captures_ms": [round(m) for when, m in notes.long_captures if t <= when <= t + 3000],
+                    "job_running": turn["job_at_turn"] if turn else None,
+                    "old_lettering_ms": turn["old_lettering_ms"] if turn else None})
+    return out
+
+
 def wasted_why(job: dict[str, Any] | None) -> str | None:
     """Why the requests of the page job *job* were sent for nothing (None: they were not): its frame was not the sharp
     one ("soft": soft, a spinner, black or a frame without the stand-in's code), or what it did was dropped
@@ -1414,6 +1545,7 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
         first_request = min((r["t"] for r in notes.requests if last is not None and r["job"] == last["id"]),
                             default=None)
         mine_requests = [r for r in notes.requests if any(r["job"] == j["id"] for j in jobs)]
+        status_stayed, status_kind_, status_other = status_of_another_page(notes.status_lines, scr, lo, hi)
         rows.append({
             "n": k, "segment": turn["segment"], "page": scr[0], "spread": scr[1], "why": turn["why"],
             "soft_to_sharp_ms": ms(sharp, lo), "rest_ms": ms(hi, sharp), "captured_sharp_ms": ms(seen_sharp, sharp),
@@ -1432,6 +1564,8 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "job_at_turn": any(j["t"] <= lo < (j["done_t"] or end) for j in started),
             "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
             "lettered_unsettled_ms": lettered_unsettled_ms(notes.displays, scr, sharp, hi),
+            "status_old_page_ms": status_stayed, "status_old_page_kind": status_kind_,
+            "status_other_page_ms": status_other,
         })
     return rows
 
@@ -1513,8 +1647,6 @@ def segment_table(rows: list[dict[str, Any]], spells: dict[str, list[dict[str, A
 def log_facts(state: Path) -> dict[str, Any]:
     """The app's log in the scratch state: how many tracebacks, warnings and errors, and the exception type names
     in it (nothing else of a line)."""
-    import re
-
     counts: Counter[str] = Counter()
     types: Counter[str] = Counter()
     for path in sorted(state.glob("log.txt*")):
@@ -1682,6 +1814,15 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         return queue_put(item, *a, **k)
 
     app._events.put = tagged  # type: ignore[method-assign]
+    status_set = app.status_var.set
+
+    def status_said(value: Any) -> Any:  # the status line set: told once the window's record of it is complete
+        out = status_set(value)
+        t = now_ms()
+        app.after_idle(lambda: notes.status_line(app, t))
+        return out
+
+    app.status_var.set = status_said  # type: ignore[method-assign]
     callback = app.report_callback_exception
 
     def tk_error(kind: Any, value: Any, tb: Any) -> None:
@@ -1805,6 +1946,19 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                  for w in wasted]}
     cancelled_after_kept = [j for j in started if j["cancelled_t"] is not None and j.get("discarded") is False
                             and j["state"] == "sharp"]
+    stale_status = [r for r in rows if r["status_old_page_ms"]]
+    status_summary = {
+        "turns": len(rows), "turns_with_a_line_of_the_page_before": len(stale_status),
+        "stayed_ms": dist([r["status_old_page_ms"] for r in stale_status]),
+        "by_kind": {kind: dist([r["status_old_page_ms"] for r in stale_status if r["status_old_page_kind"] == kind])
+                    for kind in sorted({str(r["status_old_page_kind"]) for r in stale_status})},
+        "by_segment": {s: dist([r["status_old_page_ms"] for r in stale_status if r["segment"] == s])
+                       for s in dict.fromkeys(r["segment"] for r in stale_status)},
+        "lines_of_another_page_ms": dist([r["status_other_page_ms"] for r in rows if r["status_other_page_ms"]]),
+        "kinds_seen": dict(Counter(s["kind"] for s in notes.status_lines))}
+    resizes = resize_rows(events, offset, notes, turns, rows)
+    for item in resizes:
+        item["from_s"] = rel(item.pop("from_t"))
     request_list = {"columns": ["t_s", "job", "frame", "gate", "outcome", "ran_ms", "server_ms", "server_wait_ms",
                                 "wasted"],
                     "rows": [[rel(r["t"]), r["job"], r["frame"], r["gate"], r["outcome"], ms(r["end_t"], r["t"]),
@@ -1812,6 +1966,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                               if r["job"] is not None else None] for r in requests]}
     return {
         "latency_rested": latency,
+        "status_line_of_the_page_before": status_summary,
+        "resizes": resizes,
         "wasted_requests": wasted_summary,
         "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
                                       "requests": sum(j["requests"] for j in cancelled_after_kept)},
@@ -1994,6 +2150,14 @@ def print_table(report: dict[str, Any], path: Path) -> None:
           f"{cancels['all']} {cancels['by_segment']}, of them with their page still on show "
           f"{len(cancels['page_still_on_show'])}; confirmed on a soft frame {run_['jobs']['confirmed_on_soft']}; kept "
           f"from frames not the sharp one {run_['jobs']['kept_from_unsettled_frames']}")
+    status = run_["status_line_of_the_page_before"]
+    print(f"status line of the page before after a turn: {status['turns_with_a_line_of_the_page_before']} of "
+          f"{status['turns']} turns, stayed {status['stayed_ms']}, by kind {status['by_kind']}")
+    for item in run_["resizes"]:
+        print(f"resize at {item['from_s']} s {item['size_before']} -> {item['size_after']}: first capture "
+              f"{item['first_capture_ms']} ms, read by its own area {item['read_by_own_area_ms']} ms, its own area in "
+              f"force {item['own_area_in_force_ms']} ms, long captures {item['long_captures_ms']}, job running "
+              f"{item['job_running']}, old lettering {item['old_lettering_ms']} ms")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:
