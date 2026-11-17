@@ -73,6 +73,30 @@ def test_the_part_drawn_is_told_against_the_page_the_stand_in_drew():
     assert standin_e2e.page_facts([0, 0, 1, 1], None, 0, 31) == {"page": None}
 
 
+def _job(id_, t, state="sharp", discarded=None, result_t=None, page=4):
+    return {"id": id_, "t": t, "state": state, "page": page, "spread": True, "started": True, "discarded": discarded,
+            "result_t": result_t}
+
+
+def _request(t, job, end, server=None, http=None):
+    return {"t": t, "job": job, "frame": "x", "gate": "pending", "outcome": "ok" if server else "Cancelled",
+            "end_t": end, "http_t": http, "http_end_t": end if http is not None else None, "server_ms": server}
+
+
+def test_requests_sent_for_nothing_are_told_with_what_they_cost():
+    jobs = [_job(1, 1000, "soft", True), _job(2, 1300, "sharp", True), _job(3, 1500, "sharp", False, 2600)]
+    requests = [_request(1100, 1, 1250), _request(1400, 2, 1480), _request(1600, 3, 1900, server=250.0, http=1610)]
+    wasted = standin_e2e.wasted_requests(requests, jobs, [1200, 1450], 5000)
+    assert [(w["job"], w["why"], w["ran_ms"], w["ran_on_after_cancel_ms"]) for w in wasted] == [
+        (1, "soft", 150, 50), (2, "dropped", 80, 30)]
+    assert wasted[0]["next_real_after_ms"] == 350 and wasted[0]["next_real_server_wait_ms"] == 40
+    # the page's job is the last one on its screen whose result came and was kept
+    assert standin_e2e.finishing_job(jobs, (4, True), 900, 3000)["id"] == 3
+    assert standin_e2e.finishing_job(jobs, (6, True), 900, 3000) is None
+    assert standin_e2e.dist([None, 5, 1, 3]) == {"n": 3, "min": 1, "p25": 3, "median": 3, "p75": 5, "max": 5}
+    assert standin_e2e.dist([]) == {"n": 0}
+
+
 # ---------------------------------------------------------------------------------------------------- the files
 def test_the_page_fetches_nothing_from_anywhere():
     html = sv.HTML.read_text(encoding="utf-8")

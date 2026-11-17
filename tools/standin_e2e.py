@@ -39,10 +39,14 @@ The scenarios, in this order (each released once the window has come to rest aft
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
 captured, the frame each page job reads and the picture its page area is given are decoded from it, so that what
-the window shows is matched to what the stand-in showed exactly, not by likeness. Per turn: from sharp to the first
-lettered bubble and to the finished page, whether the page at rest is the stand-in's and translated, from which
-frame; the page jobs and the translator's requests per page, and requests for frames not settled (a gate not
-confirmed, a soft, black or spinner frame: must be 0); overlays left on a page the stand-in had left; the
+the window shows is matched to what the stand-in showed exactly, not by likeness. Per turn: from the stand-in's draw
+of the sharp frame to the first request of the page job that finished the page, to the first lettered bubble and to
+the finished page (spreads of the turns that came to rest, per scenario), whether the page at rest is the stand-in's
+and translated, from which frame; the page jobs and the translator's requests per page, and requests for frames not
+settled (a gate not confirmed, a soft, black or spinner frame: must be 0); the requests sent for nothing (a job on
+a frame that was not the sharp one, or one dropped as its frame changed: how long each ran, how long after its job's
+cancel, and when the next request went out and how long that waited at the server, against Ollama's own time for
+it); overlays left on a page the stand-in had left; the
 confirmation time learnt (its profile in the scratch state); where the OCR read (the readers' placement, through
 every load of the model, and the System page's facts); errors (type names and counts, also from the log); the pages
 in the cache at the end against those the stand-in rested on. Into *--out*: report.json, and shots/ - pictures of
@@ -417,6 +421,8 @@ class Notes:
         self.owners: Counter[str] = Counter()
         self.errors: Counter[str] = Counter()
         self.selected: list[int] = []
+        self.cancels: list[float] = []  # when a running page job's cancel was set by the live view (a turn, a drop)
+        self.local = threading.local()  # (the request a translator thread is in: `request`, `http_begin`, `http_end`)
         self.noted_turns: list[dict[str, Any]] = []  # the turn times the window noted (`_note_turn`)
         self.timings: dict[str, list[tuple[float, bool]]] = {}  # the Tk thread's time in the live view's calls
         self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
@@ -504,18 +510,31 @@ class Notes:
                 job["done_t"] = t
 
     # the translator
-    def request(self, kind: str) -> None:
+    def request(self, kind: str) -> dict[str, Any]:
+        """A request to the translator begins (a line, or lines joined): noted with its job and its gate's state;
+        `request_over` notes its end."""
         t = now_ms()
         with self.lock:
             job = self.current
             gate = job.get("_gate") if job else None
             state = getattr(gate, "state", "none") if gate is not None else "none"
             unsettled = state in ("pending", "dropped") or (job is not None and job["state"] != "sharp")
-            self.requests.append({"t": t, "kind": kind, "job": job["id"] if job else None, "gate": state,
-                                  "frame": job["state"] if job else None, "unsettled": bool(job and unsettled)})
+            rec = {"t": t, "kind": kind, "job": job["id"] if job else None, "gate": state,
+                   "frame": job["state"] if job else None, "unsettled": bool(job and unsettled), "end_t": None,
+                   "outcome": None, "http_t": None, "http_end_t": None, "server_ms": None, "load_ms": None}
+            self.requests.append(rec)
             if job is not None:
                 job["requests"] += 1
                 job["unsettled_requests"] += int(unsettled)
+        return rec
+
+    def request_over(self, rec: dict[str, Any], outcome: str) -> None:
+        with self.lock:
+            rec["end_t"], rec["outcome"] = now_ms(), outcome
+
+    def cancelled(self, t: float) -> None:
+        with self.lock:
+            self.cancels.append(t)
 
     def warmup(self, kind: str) -> None:
         with self.lock:
@@ -755,8 +774,59 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
         setattr(cls, name, call)
 
-    counted(plamo_mod.PlamoTranslator, "_generate", notes.request)
-    counted(ollama_mod.OllamaTranslator, "_chat", notes.request)
+    def requested(cls: Any, name: str) -> None:  # a request to the translator: its begin, its end and how it ended
+        original = cls.__dict__[name]
+
+        def call(self: Any, *a: Any, **k: Any) -> Any:
+            rec = notes.request(f"{cls.__name__}.{name}")
+            held, notes.local.request = getattr(notes.local, "request", None), rec
+            outcome = "ok"
+            try:
+                return original(self, *a, **k)
+            except BaseException as e:
+                outcome = type(e).__name__
+                raise
+            finally:
+                notes.local.request = held
+                notes.request_over(rec, outcome)
+
+        setattr(cls, name, call)
+
+    requested(plamo_mod.PlamoTranslator, "_generate")
+    requested(ollama_mod.OllamaTranslator, "_chat")
+    stream_once = ollama_mod.OllamaTranslator._stream_once
+
+    def streamed(self: Any, path: str, payload: dict[str, Any], *a: Any, **k: Any) -> Any:
+        # the HTTP exchange of a request noted (`requested`): when it went out, when it ended, and the server's own
+        # time for it (Ollama's total_duration, the model's load in it), so that a wait at the server shows
+        rec = getattr(notes.local, "request", None)
+        if rec is None or not (payload.get("prompt") or payload.get("messages")):
+            return stream_once(self, path, payload, *a, **k)
+        rec["http_t"] = now_ms()
+        try:
+            data = stream_once(self, path, payload, *a, **k)
+        finally:
+            rec["http_end_t"] = now_ms()
+        with contextlib.suppress(TypeError, ValueError):
+            rec["server_ms"] = round(float(data.get("total_duration") or 0) / 1e6, 1)
+            rec["load_ms"] = round(float(data.get("load_duration") or 0) / 1e6, 1)
+        return data
+
+    ollama_mod.OllamaTranslator._stream_once = streamed
+    for name in ("_cancel_page", "_early_drop"):  # a running page job cancelled by the live view: when
+        if not hasattr(App, name):
+            continue
+
+        def cancelling(self: Any, *a: Any, _original: Callable[..., Any] = getattr(App, name), **k: Any) -> Any:
+            cancel = getattr(self, "_page_cancel", None)
+            was = cancel is None or cancel.is_set()
+            try:
+                return _original(self, *a, **k)
+            finally:
+                if not was and cancel.is_set() and bool(getattr(self, "busy", False)):
+                    notes.cancelled(now_ms())
+
+        setattr(App, name, cancelling)
     counted(plamo_mod.PlamoTranslator, "warm_up", notes.warmup)
     counted(ollama_mod.OllamaTranslator, "warm_up", notes.warmup)
     loading = place.loading
@@ -1278,7 +1348,78 @@ def lettered_unsettled_ms(displays: list[dict[str, Any]], scr: tuple[int, bool],
     return round(total)
 
 
+def wasted_why(job: dict[str, Any] | None) -> str | None:
+    """Why the requests of the page job *job* were sent for nothing (None: they were not): its frame was not the sharp
+    one ("soft": soft, a spinner, black or a frame without the stand-in's code), or what it did was dropped
+    ("dropped": its frame changed before it was kept, and everything it did went back)."""
+    if job is None:
+        return None
+    if job["state"] != "sharp":
+        return "soft"
+    if job.get("discarded"):
+        return "dropped"
+    return None
+
+
+def finishing_job(jobs: list[dict[str, Any]], scr: tuple[int, bool], lo: float, hi: float) -> dict[str, Any] | None:
+    """The page job that finished the turn's page: of the jobs started on its screen while the stand-in showed it,
+    the last whose result came and was not dropped."""
+    mine = [j for j in jobs if j["started"] and lo <= j["t"] < hi and (j["page"], j["spread"]) == scr
+            and j["result_t"] is not None and j.get("discarded") is not True]
+    return mine[-1] if mine else None
+
+
+def wasted_requests(requests: list[dict[str, Any]], jobs: list[dict[str, Any]], cancels: list[float],
+                    end: float) -> list[dict[str, Any]]:
+    """Each request sent for nothing (`wasted_why`), as numbers: how long it ran and how it ended, when the live view
+    cancelled its job (the first cancel within it) and how long the request ran on after that, and the next request
+    that was not sent for nothing - how long after this one's end it went out and how long it waited at the server
+    (the request's time less Ollama's own: a server still busy with this one would make it wait)."""
+    by_id = {j["id"]: j for j in jobs}
+    real = [r for r in requests if r["job"] is not None and wasted_why(by_id.get(r["job"])) is None]
+    out = []
+    for r in requests:
+        job = by_id.get(r["job"]) if r["job"] is not None else None
+        why = wasted_why(job)
+        if why is None:
+            continue
+        stop = r["end_t"] if r["end_t"] is not None else end
+        cancel = next((c for c in sorted(cancels) if r["t"] <= c <= stop), None)
+        nxt = next((q for q in real if q["t"] >= r["t"]), None)
+        out.append({"t": r["t"], "job": r["job"], "why": why, "frame": r["frame"], "gate": r["gate"],
+                    "outcome": r["outcome"], "ran_ms": ms(stop, r["t"]),
+                    "ran_on_after_cancel_ms": ms(stop, cancel),
+                    "next_real_after_ms": ms(nxt["t"], stop) if nxt is not None else None,
+                    "next_real_server_wait_ms": server_wait(nxt) if nxt is not None else None})
+    return out
+
+
+def server_wait(r: dict[str, Any]) -> int | None:
+    """How long a request waited beyond the server's own time for it (its HTTP exchange less Ollama's
+    total_duration): the wait for the server, and the way to it and back."""
+    if r.get("http_t") is None or r.get("http_end_t") is None or not r.get("server_ms"):
+        return None
+    return round(r["http_end_t"] - r["http_t"] - r["server_ms"])
+
+
+def dist(values: list[Any]) -> dict[str, Any]:
+    """A spread of values (None left out): how many, the smallest, the quartiles, the median, the largest."""
+    kept = sorted(v for v in values if v is not None)
+    if not kept:
+        return {"n": 0}
+
+    def q(p: float) -> int:
+        return round(kept[min(len(kept) - 1, int(p * (len(kept) - 1) + 0.5))])
+
+    return {"n": len(kept), "min": round(kept[0]), "p25": q(0.25), "median": round(statistics.median(kept)),
+            "p75": q(0.75), "max": round(kept[-1])}
+
+
 def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dict[str, Any]]:
+    """Per turn of the stand-in, numbers: the times are from the stand-in's draw of the turn's sharp frame (its own
+    clock, put on the window's by the least latency of its console lines: `summarise`) to the window's first
+    request for the job that finished the page (`finishing_job`), its first picture of the page with lettering on
+    it, and its finished page."""
     rows = []
     started = [j for j in notes.jobs if j["started"]]
     for k, turn in enumerate(turns):
@@ -1303,10 +1444,19 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
         jobs = [j for j in notes.jobs if j["started"] and lo <= j["t"] < hi and (j["page"], j["spread"]) == scr]
         seen_sharp = next((c["t"] for c in notes.captures if c["t"] >= lo and (c["page"], c["spread"]) == scr
                            and c["state"] == "sharp"), None)
+        last = finishing_job(notes.jobs, scr, lo, hi)
+        first_request = min((r["t"] for r in notes.requests if last is not None and r["job"] == last["id"]),
+                            default=None)
+        mine_requests = [r for r in notes.requests if any(r["job"] == j["id"] for j in jobs)]
         rows.append({
             "n": k, "segment": turn["segment"], "page": scr[0], "spread": scr[1], "why": turn["why"],
             "soft_to_sharp_ms": ms(sharp, lo), "rest_ms": ms(hi, sharp), "captured_sharp_ms": ms(seen_sharp, sharp),
-            "shown_ms": ms(shown, sharp), "first_lettered_ms": ms(lettered, sharp), "finished_ms": ms(finished, sharp),
+            "shown_ms": ms(shown, sharp), "first_request_ms": ms(first_request, sharp),
+            "first_lettered_ms": ms(lettered, sharp), "finished_ms": ms(finished, sharp),
+            "finishing_job": last["id"] if last is not None else None,
+            "finishing_job_on": last["state"] if last is not None else None,
+            "wasted_requests": sum(1 for r in mine_requests
+                                   if wasted_why(next(j for j in jobs if j["id"] == r["job"])) is not None),
             "empty_result_shown_ms": ms(empty, sharp),
             "at_rest": at_rest, "at_rest_from": rest.get("from") if rest else None,
             "at_rest_lettered": rest.get("lettered") if rest else None,
@@ -1375,6 +1525,9 @@ def segment_table(rows: list[dict[str, Any]], spells: dict[str, list[dict[str, A
         rested = [r for r in mine if (r["rest_ms"] or 0) >= REST_MS]
         out.append({
             "segment": name, "turns": len(mine), "rested": len(rested),
+            "first_request_ms_median": median([r["first_request_ms"] for r in rested]),
+            "first_request_ms_max": max([r["first_request_ms"] for r in rested if r["first_request_ms"] is not None],
+                                        default=None),
             "first_lettered_ms_median": median([r["first_lettered_ms"] for r in rested]),
             "first_lettered_ms_max": max([r["first_lettered_ms"] for r in rested if r["first_lettered_ms"] is not None],
                                          default=None),
@@ -1386,6 +1539,7 @@ def segment_table(rows: list[dict[str, Any]], spells: dict[str, list[dict[str, A
             "jobs": sum(r["jobs"] for r in mine),
             "requests": sum(r["requests"] for r in mine),
             "unsettled_requests": sum(r["unsettled_requests"] for r in mine),
+            "wasted_requests": sum(r["wasted_requests"] for r in mine),
             "stale": len([s for s in spells["stale_overlays"] if segment_at(s["from_t"]) == name]),
             "not_following": len([s for s in spells["not_following"] if segment_at(s["from_t"]) == name]),
         })
@@ -1702,7 +1856,41 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     ready_at = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
     displays = [[rel(d["t"]), d["page"], int(bool(d["spread"])), d["state"], d["kind"], d["lettered"], d["from"],
                  int(bool(d["quick"]))] for d in notes.displays]
+    rested_rows = [r for r in rows if (r["rest_ms"] or 0) >= REST_MS]
+    latency = {"all": {key: dist([r[key] for r in rested_rows])
+                       for key in ("first_request_ms", "first_lettered_ms", "finished_ms")}}
+    for seg in dict.fromkeys(r["segment"] for r in rested_rows):
+        latency[seg] = {key: dist([r[key] for r in rested_rows if r["segment"] == seg])
+                        for key in ("first_request_ms", "first_lettered_ms", "finished_ms")}
+    wasted = wasted_requests(requests, jobs, notes.cancels, ended)
+    by_id = {j["id"]: j for j in jobs}
+    real = [r for r in requests if r["job"] is not None and wasted_why(by_id.get(r["job"])) is None]
+    wasted_summary = {
+        "count": len(wasted), "by_why": dict(Counter(w["why"] for w in wasted)),
+        "by_outcome": dict(Counter(str(w["outcome"]) for w in wasted)),
+        "by_segment": dict(Counter(segment_at_t(w["t"]) for w in wasted)),
+        "ran_ms": dist([w["ran_ms"] for w in wasted]),
+        "ran_on_after_cancel_ms": dist([w["ran_on_after_cancel_ms"] for w in wasted]),
+        "next_real_after_ms": dist([w["next_real_after_ms"] for w in wasted]),
+        "next_real_server_wait_ms": dist([w["next_real_server_wait_ms"] for w in wasted]),
+        # beside it: the server wait of every request that was not sent for nothing
+        "real_server_wait_ms": dist([server_wait(r) for r in real]),
+        "real_ran_ms": dist([ms(r["end_t"], r["t"]) for r in real]),
+        "list": [{**{k: v for k, v in w.items() if k != "t"}, "t_s": rel(w["t"]), "segment": segment_at_t(w["t"])}
+                 for w in wasted]}
+    cancelled_after_kept = [j for j in started if j["cancelled_t"] is not None and j.get("discarded") is False
+                            and j["state"] == "sharp"]
+    request_list = {"columns": ["t_s", "job", "frame", "gate", "outcome", "ran_ms", "server_ms", "server_wait_ms",
+                                "wasted"],
+                    "rows": [[rel(r["t"]), r["job"], r["frame"], r["gate"], r["outcome"], ms(r["end_t"], r["t"]),
+                              r["server_ms"], server_wait(r), wasted_why(by_id.get(r["job"]))
+                              if r["job"] is not None else None] for r in requests]}
     return {
+        "latency_rested": latency,
+        "wasted_requests": wasted_summary,
+        "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
+                                      "requests": sum(j["requests"] for j in cancelled_after_kept)},
+        "request_list": request_list,
         "turns_noted": noted,
         "turns_noted_summary": noted_summary,
         "old_lettering_after_a_turn": old_lettering,
@@ -1857,15 +2045,22 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if "segments" not in run_:
         print(f"report {path}")
         return
-    head = ("segment", "turns", "rested", "lettered med/max ms", "finished med/max ms", "translated at rest",
-            "from soft", "jobs", "requests", "unsettled", "stale", "lag")
+    head = ("segment", "turns", "rested", "request med/max ms", "lettered med/max ms", "finished med/max ms",
+            "translated at rest", "from soft", "jobs", "requests", "unsettled", "wasted", "stale", "lag")
     print(" | ".join(head))
     for s in run_["segments"]:
         print(" | ".join(str(v) for v in (
-            s["segment"], s["turns"], s["rested"], f"{s['first_lettered_ms_median']}/{s['first_lettered_ms_max']}",
+            s["segment"], s["turns"], s["rested"], f"{s['first_request_ms_median']}/{s['first_request_ms_max']}",
+            f"{s['first_lettered_ms_median']}/{s['first_lettered_ms_max']}",
             f"{s['finished_ms_median']}/{s['finished_ms_max']}", f"{s['translated_at_rest']}/{s['rested']}",
-            s["at_rest_from_soft"], s["jobs"], s["requests"], s["unsettled_requests"], s["stale"],
-            s["not_following"])))
+            s["at_rest_from_soft"], s["jobs"], s["requests"], s["unsettled_requests"], s["wasted_requests"],
+            s["stale"], s["not_following"])))
+    for key, value in run_["latency_rested"]["all"].items():
+        print(f"rested turns, {key}: {value}")
+    wasted = run_["wasted_requests"]
+    print(f"wasted requests {wasted['count']} {wasted['by_why']} {wasted['by_outcome']}; ran {wasted['ran_ms']}; "
+          f"ran on after the cancel {wasted['ran_on_after_cancel_ms']}; next real request's server wait "
+          f"{wasted['next_real_server_wait_ms']} (all real: {wasted['real_server_wait_ms']})")
     req, conf = run_["requests"], run_["confirmation"].get("end", {})
     clean = report["cleanup"]
     print(f"requests {req['total']} (unsettled {req['unsettled']}, outside jobs {req['outside_page_jobs']}); "
