@@ -64,7 +64,8 @@ Other
 
 * The window can be dark, following Windows' app mode.
 * Text typed through an input method (Japanese, Chinese, Korean) shows in the box while it is being composed.
-* Help → "About TASlation" shows the version of the program files that run.
+* Help → "About TASlation" shows the version of the program files that run. It no longer lists the offline lines; "Copy details"
+  carries the offline guard's state.
 * The translation model is pinned to its publisher's revision of November 9, 2026.
 
 ## 0.1.0 - 2026-11-15
