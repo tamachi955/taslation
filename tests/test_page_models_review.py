@@ -97,6 +97,93 @@ def test_the_layout_model_on_a_full_gpu_goes_on_on_the_cpu_after_letting_go(tmp_
     assert loads == ["cuda", "cpu"] and model._device == "cpu"
 
 
+@pytest.mark.parametrize("error", [torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB"),
+                                   RuntimeError("CUDA error: out of memory"),
+                                   RuntimeError("CUDA error: CUBLAS_STATUS_ALLOC_FAILED when calling `cublasCreate`")])
+def test_the_layout_model_out_of_memory_finds_the_page_s_boxes_on_the_cpu_and_the_gpu_again_once_let_go(
+        tmp_path, monkeypatch, error):
+    """The GPU runs out of memory (Ollama's load, another program): this page's boxes are found on the CPU, and the
+    next pages too until the model is let go (before the translation model's next load, Tools > Release the model
+    now); the next page then loads it on the GPU again, where the memory came back."""
+    model = LayoutModel(tmp_path)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    full = [True]
+    loads, runs = [], []
+
+    def load(device=""):
+        loads.append(device)
+        model._device = device
+        model._net = object()
+
+    def forward(rgb):
+        runs.append(model._device)
+        if model._device == "cuda" and full[0]:
+            raise error
+        return [(1.0, 2.0, 30.0, 40.0, 0.9, TEXT)]
+
+    monkeypatch.setattr(model, "_load", load)
+    monkeypatch.setattr(model, "_forward", forward)
+    page = np.zeros((200, 200, 3), np.uint8)
+    assert model.boxes(page, [(0, 0, 200, 200)]) == [(1.0, 2.0, 30.0, 40.0, 0.9, TEXT)]  # the page found all the same
+    assert model.boxes(page, [(0, 0, 200, 200)]) and loads == ["cuda", "cpu"] and runs == ["cuda", "cpu", "cpu"]
+    full[0] = False  # the memory came back
+    model.release()
+    assert model._net is None and model.uses_gpu()
+    assert model.boxes(page, [(0, 0, 200, 200)]) and loads == ["cuda", "cpu", "cuda"] and runs[-1] == "cuda"
+    assert not model.failed
+
+
+def test_a_cuda_error_of_the_layout_model_leaves_classical_detection_for_the_session(tmp_path, monkeypatch):
+    model = LayoutModel(tmp_path)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(model, "_load", lambda device="": (setattr(model, "_device", device), setattr(model, "_net", 1)))
+
+    def forward(rgb):
+        raise RuntimeError("CUDA error: an illegal memory access was encountered")
+
+    monkeypatch.setattr(model, "_forward", forward)
+    assert model.boxes(np.zeros((200, 200, 3), np.uint8), [(0, 0, 200, 200)]) is None and model.failed
+    model.release()
+    assert model.boxes(np.zeros((200, 200, 3), np.uint8), [(0, 0, 200, 200)]) is None  # (no try again)
+
+
+def test_lama_out_of_memory_letters_the_page_on_the_cpu_and_the_gpu_again_once_let_go(tmp_path, monkeypatch):
+    """LaMa's window does not fit on the GPU: that region is filled on the CPU, and the next ones until the model is
+    let go; the next erase then loads it on the GPU again. The page is lettered all along, never with the paper fill
+    for the drawing."""
+    fallback = []
+    eraser = ArtEraser(tmp_path, "lama", lambda *a: (fallback.append(1), (0, 0, 0))[1])
+    monkeypatch.setattr(ArtEraser, "_device", staticmethod(lambda: "cuda"))
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(artwork, "give_back_idle", lambda: False)
+    full = [True]
+    loads = []
+
+    class Gpu(Model):
+        def run(self, image, mask):
+            self.runs += 1
+            if full[0]:
+                raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 588.00 MiB")
+            return super().run(image, mask)
+
+    def load(device):
+        loads.append(device)
+        eraser._model = Gpu("cuda") if device == "cuda" else Model("cpu")
+
+    monkeypatch.setattr(eraser, "_load", load)
+    for _ in range(2):
+        eraser.erase(lettered(), region(100, 100, 200, 300))
+    assert loads == ["cuda", "cpu"] and eraser.counts["art"] == 2 and not eraser.failed and not fallback
+    full[0] = False  # the memory came back
+    eraser.release()
+    assert eraser._model is None and eraser.uses_gpu()
+    eraser.erase(lettered(), region(100, 100, 200, 300))
+    assert loads == ["cuda", "cpu", "cuda"] and eraser._model.device == "cuda" and eraser.counts["art"] == 3
+    assert not fallback
+
+
 # ------------------------------------------------------------------ 2: a bubble's outline is not its lettering
 def test_the_ink_of_a_bubble_without_a_text_box_leaves_its_outline_out():
     page = np.full((400, 400, 3), 255, np.uint8)

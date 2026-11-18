@@ -17,15 +17,20 @@ What the rule measures (`GpuFacts`, `gather`):
   loads one) and this process's (torch's reserved memory and its CUDA context); the rest is other programs';
 * what the translation model needs: /api/ps's ``size`` while it is loaded (``size_vram`` where ``ollama_num_gpu`` puts
   only some layers there on purpose; nothing for "0"), learnt for the session with the runner's own memory that
-  /api/ps leaves out (`RUNNER_SHARE`); before it is loaded, what it was measured to add to the card's used memory
-  (`KNOWN_TRANSLATORS`, at the context the app asks for); a model of the reader's own that was never seen loaded is
-  not known, and the readers stay on the CPU (`UNKNOWN`) until it has been.
+  /api/ps leaves out (for a known model no larger than when it was measured, what it was measured to add, below; else
+  `RUNNER_SHARE`); before it is loaded, what it was measured to add to the card's used memory (`KNOWN_TRANSLATORS`,
+  at the context the app asks for); a model of the reader's own that was never seen loaded is not known, and the
+  readers stay on the CPU (`UNKNOWN`) until it has been;
+* where LaMa runs on the GPU, the tallest screen's height (`tall_screen`): its window grows with the lettering's size
+  in pixels, and so with the frames the viewer's window gives (`LAMA_MIB`, `LAMA_TALL_MIB`).
 
 The decision is made when the readers load (`Readers`, the window's start), again once the GPU memory was let go
 (`Readers.release_gpu`: Tools > Release the model now, and before Ollama loads its model unless they stay through the
-load, below; decided again at the next read) and when a setting it depends on changed. A GPU that fails (out of
-memory, a CUDA error) moves the readers to the CPU for the rest of the session, and the crop at hand is read there
-(`DeviceModels.run`). The weights move without being read from disk again: the CPU's copy stays where it is loaded,
+load, below; decided again at the next read) and when a setting it depends on changed. A GPU that fails moves the
+readers to the CPU, and the crop at hand is read there (`DeviceModels.run`): after an out of memory until the GPU
+memory is next let go, which decides again (other programs, or the translation model's load, took the room for a
+time; the page models go on on the CPU until then too), after any other failure (a CUDA error) for the rest of the
+session. The weights move without being read from disk again: the CPU's copy stays where it is loaded,
 the GPU's is made from it and dropped (`to`).
 While a request to the translation model is under way (`translating`, for the translator to wrap its requests in),
 the readers read on the CPU: the two processes share the GPU in time slices, and the OCR's many small steps wait.
@@ -68,22 +73,36 @@ T = TypeVar("T")
 
 SETTING_VALUES = ("auto", "cpu", "gpu")  # ``ocr_runs_on``
 
-# Measured on a GTX 1660 Ti (6 GB, Windows, torch 2.14 cu126; this process's dedicated GPU memory as Windows counts
-# it), rounded up: what each reader on the GPU holds at its peak over the gold set's 933 crops, the largest included -
-# its weights and the caching allocator's blocks (charspot 416 MiB, 50 of them weights; nar 30) - and this process's
-# CUDA context with the libraries a network loads there (77 MiB bare, about 100).
+# What each part holds on the GPU at its peak, measured on a GTX 1660 Ti (6 GB, Windows, torch 2.14 cu126, 2026-11-19):
+# this process's dedicated GPU memory as Windows counts it (CUDA context and library kernels included) and torch's
+# reserved memory, each model alone, over the dataset's 214 pages, the 101 frames of the dev snapshots (1920x1032) and
+# frames of 1904x1072, 2560x1440 and 3840x2160 (two pages scaled to the frame's height). The figures are those peaks
+# and a fifth more, rounded up to 10 MiB, for the inputs not measured.
+# The readers: their weights and the caching allocator's blocks, 326 MiB, and what a crop takes while it is read
+# (charspot 38, nar 35), about 400 in all (the figures, set before, are above that fifth).
 CHARSPOT_MIB = 450
 NAR_MIB = 50
-CONTEXT_MIB = 150
-# ... and the page models at their peak over the gold set's 101 screens and 30 sample pages (LaMa 704 MiB, the layout
-# model 500 more)
-LAMA_MIB = 850
-LAYOUT_MIB = 550
+# this process's CUDA context with the libraries the networks load there: 77 MiB bare, 99 with all of them
+CONTEXT_MIB = 120
+# LaMa: its weights (204 MiB reserved, 12 of kernels) and what the window takes while it is filled. The window is the
+# frame's own pixels around the region, 512 px a side or more for a larger region, so it grows with the screen: at the
+# largest window met, 336 MiB on the dev snapshots' frames (658x512) and 348 on 2560x1440 (815x512), 552 and 564 in
+# all - `LAMA_MIB`, for screens up to `LAMA_SCREEN_PX` high (`GpuFacts.tall_screen`); 588 on 3840x2160 (1188x512), 804
+# in all - `LAMA_TALL_MIB`, for a taller screen or one not known. What a window leaves idle in torch's cache is given
+# back after it (`artwork.give_back_idle`): kept, the blocks of each window size piled up to 2.4 GB in a session.
+LAMA_MIB = 680
+LAMA_TALL_MIB = 970
+LAMA_SCREEN_PX = 1440
+# the layout model: its weights (175 MiB), blocks and kernels, 356 in all, the same on every frame (each page unit is
+# scaled to 640 px square: 123 MiB while it runs, on every input measured)
+LAYOUT_MIB = 430
 # The translation models whole in video memory, at the context the app asks for (PLaMo its own 8192, the chat model
 # ``ollama_num_ctx``'s default): what loading one with the app's options added to the card's used memory, rounded up
-# (Ollama 0.40, KV cache q8_0; /api/ps said 1824 and 3203 MiB of them): (Ollama name, num_ctx) -> MiB
+# (Ollama 0.40, KV cache q8_0; PLaMo 1933 MiB, measured again 2026-11-19). The runner takes it all at the load, KV
+# cache included, and it does not grow, so it is counted as measured: (Ollama name, num_ctx) -> MiB
 KNOWN_TRANSLATORS = {("taslation-plamo3-translate-2b", 8192): 2000, ("qwen3.5:4b", 16384): 4000}
-RUNNER_SHARE = 1.25  # what the runner adds to /api/ps's size, at most (measured 1.06 and 1.23)
+KNOWN_SIZES = {("taslation-plamo3-translate-2b", 8192): 1824, ("qwen3.5:4b", 16384): 3203}  # /api/ps's size then
+RUNNER_SHARE = 1.25  # what the runner adds to /api/ps's size, at most (measured 1.06 and 1.23), for another model
 MARGIN_MIB = 1024  # left free at the peak for other programs that grow (a browser, a video)
 MIN_TOTAL_MIB = 5 * 1024  # a smaller card is the translator's and the page models'
 
@@ -108,8 +127,9 @@ class Placement:
 class GpuFacts:
     """What the rule decides on, in MiB: the card's *total* and *used* memory (all programs), *own* this process's now
     (0 without a CUDA context), *translator* what the translation model needs there at the peak (None: not known) and
-    *translator_now* what of it is there now, whether *lama* and the *layout* model run on the GPU, and whether Ollama
-    *answered* /api/ps (False: taken for a model not loaded)."""
+    *translator_now* what of it is there now, whether *lama* and the *layout* model run on the GPU, whether Ollama
+    *answered* /api/ps (False: taken for a model not loaded), and whether the tallest screen is taller than
+    `LAMA_SCREEN_PX` or not known (*tall_screen*: LaMa's windows are larger there, `LAMA_TALL_MIB`)."""
 
     total: int
     used: int
@@ -119,13 +139,14 @@ class GpuFacts:
     lama: bool = False
     layout: bool = False
     answered: bool = True
+    tall_screen: bool = False
 
 
 def peak_mib(facts: GpuFacts, ocr: int) -> int:
     """What TASlation holds on the GPU at its peak with the readers there (*ocr* MiB): the context, the translation
     model, the page models in use, the readers."""
-    return (CONTEXT_MIB + int(facts.translator or 0) + (LAMA_MIB if facts.lama else 0)
-            + (LAYOUT_MIB if facts.layout else 0) + int(ocr))
+    lama = (LAMA_TALL_MIB if facts.tall_screen else LAMA_MIB) if facts.lama else 0
+    return CONTEXT_MIB + int(facts.translator or 0) + lama + (LAYOUT_MIB if facts.layout else 0) + int(ocr)
 
 
 def room_left(facts: GpuFacts, ocr: int) -> int:
@@ -190,7 +211,16 @@ def gather(settings: Any) -> GpuFacts | None:
     total, used = memory
     need, now, answered = _translator_need(settings)
     lama, layout = page_models_on_gpu(settings)
-    return GpuFacts(total, used, own_mib(), need, now, lama, layout, answered)
+    return GpuFacts(total, used, own_mib(), need, now, lama, layout, answered, lama and tall_screen())
+
+
+def tall_screen() -> bool:
+    """Whether the tallest screen on the desktop is taller than `LAMA_SCREEN_PX` (`devices.screen_height_px`), or its
+    height cannot be read: the frames LaMa's windows come from are as tall as the viewer's window."""
+    from ..devices import screen_height_px
+
+    height = screen_height_px()
+    return height is None or height > LAMA_SCREEN_PX
 
 
 def card_memory() -> tuple[int, int] | None:
@@ -257,8 +287,10 @@ def _translator_need(settings: Any) -> tuple[int | None, int, bool]:
         now = int(entry["size_vram"]) // MiB
         need = int(entry["size"]) // MiB if layers is None else now
         # once it is unloaded, the runner's own memory beside what /api/ps counts (in the used memory while it is
-        # loaded, as other programs' there) is counted in
-        _learnt[key] = round(need * RUNNER_SHARE)
+        # loaded, as other programs' there) is counted in: as measured for a known model of the size it had then
+        known = KNOWN_TRANSLATORS.get(key[:2]) if layers is None else None
+        measured = known is not None and need <= KNOWN_SIZES.get(key[:2], 0)
+        _learnt[key] = known if measured else round(need * RUNNER_SHARE)
         return need, now, True
     if key in _learnt:
         return _learnt[key], 0, answered
@@ -394,6 +426,13 @@ def partly_loaded(share: float) -> bool:
     return True
 
 
+def out_of_memory(error: BaseException) -> bool:
+    """Whether *error* is the GPU's memory running out (torch's ``OutOfMemoryError``, or an error that says so, as
+    CUDA's and its libraries' own do: "out of memory", "..._ALLOC_FAILED"): a state that passes, unlike a CUDA error."""
+    text = str(error).lower()
+    return type(error).__name__ == "OutOfMemoryError" or "out of memory" in text or "alloc_failed" in text
+
+
 def give_back() -> None:
     """The GPU memory torch keeps cached for this process given back (its CUDA context stays)."""
     gc.collect()
@@ -409,7 +448,8 @@ class DeviceModels:
     """A reader's networks: the CPU's (``_cpu_models``, as loaded) and, while `to` has put them there, a copy on the GPU
     (``_copy_to``, the reader's). `run` reads with the copy in force; a failure on the GPU (out of memory, a CUDA error:
     any RuntimeError there) drops the GPU's copy, says so to `on_gpu_failure` (the type name) and reads on the CPU, as
-    it does from then on (``gpu_failed``)."""
+    it does from then on: until the GPU memory is next let go after an out of memory (``gpu_full``), for the session
+    after any other failure (``gpu_failed``)."""
 
     name = "reader"
 
@@ -417,6 +457,7 @@ class DeviceModels:
         self._cpu_models: tuple[Any, ...] = ()
         self._gpu: tuple[str, tuple[Any, ...]] | None = None  # (device, the copy)
         self.gpu_failed = ""  # the type name of the GPU's failure this session ("" none)
+        self.gpu_full = ""  # ... of an out of memory there, until the GPU memory is next let go (`Readers.release_gpu`)
         self.on_gpu_failure: Callable[[str, str], Any] | None = None  # (reader's name, failure's type name)
         self._lock = threading.Lock()
         self._reading = 0  # reads on the GPU's copy under way
@@ -445,20 +486,20 @@ class DeviceModels:
                 dropped = None
                 give_back()
             return True
-        if self.gpu_failed:
+        if self.gpu_failed or self.gpu_full:
             return False
         if self._gpu is not None and self._gpu[0] == device:
             return True
-        why = ""
+        why, full = "", False
         try:
             copy = self._copy_to(device)
         except RuntimeError as e:
-            why = type(e).__name__
+            why, full = type(e).__name__, out_of_memory(e)
         else:
             with self._lock:
                 self._gpu = (device, copy)
             return True
-        self._failed(why)  # (out of the except: its traceback holds the copy's tensors made so far)
+        self._failed(why, full)  # (out of the except: its traceback holds the copy's tensors made so far)
         return False
 
     def run(self, read: Callable[[str, tuple[Any, ...]], T]) -> T:
@@ -470,11 +511,11 @@ class DeviceModels:
                 self._reading += 1
         if held is None:
             return read("cpu", self._cpu_models)
-        why = ""
+        why, full = "", False
         try:
             return read(*held)
         except RuntimeError as e:
-            why = type(e).__name__
+            why, full = type(e).__name__, out_of_memory(e)
         finally:
             held = None
             with self._lock:
@@ -484,16 +525,25 @@ class DeviceModels:
                     self._give_back = False
             if late:
                 give_back()
-        self._failed(why)
+        self._failed(why, full)
         return read("cpu", self._cpu_models)
 
-    def _failed(self, why: str) -> None:
-        LOG.info("the OCR reader %s failed on the GPU (%s): on the CPU for the rest of the session", self.name, why)
-        self.gpu_failed = why or "RuntimeError"
+    def _failed(self, why: str, full: bool = False) -> None:
+        """The GPU failed (*why*, the type name): its copy dropped, the reads on the CPU, and `on_gpu_failure` told. An
+        out of memory there (*full*) holds until the GPU memory is next let go (`gpu_full`, cleared by
+        `Readers.release_gpu`): other programs, or the translation model's load, may have taken the room for a time;
+        any other failure (a CUDA error) holds for the rest of the session (`gpu_failed`)."""
+        if full:
+            LOG.info("the GPU has no room for the OCR reader %s (%s): on the CPU until the GPU memory is next let go",
+                     self.name, why)
+            self.gpu_full = why or "OutOfMemoryError"
+        else:
+            LOG.info("the OCR reader %s failed on the GPU (%s): on the CPU for the rest of the session", self.name, why)
+            self.gpu_failed = why or "RuntimeError"
         self.to("cpu")
         tell = self.on_gpu_failure
         if tell is not None:
             try:
-                tell(self.name, self.gpu_failed)
+                tell(self.name, self.gpu_failed or self.gpu_full)
             except Exception:  # noqa: BLE001 - the crop is read all the same
                 pass

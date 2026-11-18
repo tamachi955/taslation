@@ -113,9 +113,12 @@ class LayoutModel:
                                             scores, ids) if int(i) in CLASSES]
 
     def detect(self, rgb: np.ndarray) -> list[Detection]:
-        """The boxes of one page unit, in its coordinates. With the GPU full (loading or running) it goes on on the
-        CPU; the failed step's tensors are let go first (the exception, whose traceback holds them, is left behind)."""
+        """The boxes of one page unit, in its coordinates. With the GPU full (loading or running: `place.out_of_memory`)
+        it goes on on the CPU until it is next let go (`release`), when the next page loads it where torch has CUDA
+        again; the failed step's tensors are let go first (the exception, whose traceback holds them, is left behind)."""
         import torch
+
+        from ..ocr.place import out_of_memory
 
         with self._lock:
             device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -124,8 +127,8 @@ class LayoutModel:
                 if self._net is None:
                     self._load(device)
                 return self._forward(rgb)
-            except torch.cuda.OutOfMemoryError:
-                if device == "cpu":
+            except Exception as e:  # noqa: BLE001 - only the memory running out on the GPU is handled here
+                if device == "cpu" or not out_of_memory(e):
                     raise
                 full = True
             finally:

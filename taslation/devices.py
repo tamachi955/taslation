@@ -201,6 +201,46 @@ def _nvml_first(ask: Any) -> bool:
         return False
 
 
+# ------------------------------------------------------------------ the screens
+class _DisplayDevice(ctypes.Structure):  # DISPLAY_DEVICEW
+    _fields_ = [("cb", ctypes.c_uint32), ("name", ctypes.c_wchar * 32), ("string", ctypes.c_wchar * 128),
+                ("flags", ctypes.c_uint32), ("id", ctypes.c_wchar * 128), ("key", ctypes.c_wchar * 128)]
+
+
+class _DisplayMode(ctypes.Structure):  # DEVMODEW, its display half
+    _fields_ = [("device", ctypes.c_wchar * 32), ("spec", ctypes.c_uint16), ("driver", ctypes.c_uint16),
+                ("size", ctypes.c_uint16), ("extra", ctypes.c_uint16), ("fields", ctypes.c_uint32),
+                ("x", ctypes.c_int32), ("y", ctypes.c_int32), ("orientation", ctypes.c_uint32),
+                ("fixed_output", ctypes.c_uint32), ("printer", ctypes.c_int16 * 5), ("form", ctypes.c_wchar * 32),
+                ("log_pixels", ctypes.c_uint16), ("bits", ctypes.c_uint32), ("width", ctypes.c_uint32),
+                ("height", ctypes.c_uint32), ("flags", ctypes.c_uint32), ("frequency", ctypes.c_uint32),
+                ("rest", ctypes.c_uint32 * 8)]
+
+
+def screen_height_px() -> int | None:
+    """The height in pixels of the tallest screen on the desktop, in its current mode (the pixels the screen shows,
+    whatever this process's DPI awareness); None where it cannot be read (not Windows). Nothing is loaded for it."""
+    if sys.platform != "win32":
+        return None
+    try:
+        user32 = ctypes.WinDLL("user32")
+        tallest = 0
+        for index in range(64):
+            device = _DisplayDevice()
+            device.cb = ctypes.sizeof(device)
+            if not user32.EnumDisplayDevicesW(None, index, ctypes.byref(device), 0):
+                break
+            if not device.flags & 0x1:  # DISPLAY_DEVICE_ATTACHED_TO_DESKTOP
+                continue
+            mode = _DisplayMode()
+            mode.size = ctypes.sizeof(mode)
+            if user32.EnumDisplaySettingsW(device.name, ctypes.c_uint32(0xFFFFFFFF), ctypes.byref(mode)):
+                tallest = max(tallest, int(mode.height))  # (ENUM_CURRENT_SETTINGS)
+        return tallest or None
+    except (OSError, AttributeError):
+        return None
+
+
 # ------------------------------------------------------------------ the stages
 def stage_devices(settings: Any, translator: Any = None, cuda: bool | None = None,
                   gpu: str | None = None, ocr: Any = None) -> list[StageDevice]:

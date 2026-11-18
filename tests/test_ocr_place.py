@@ -98,16 +98,58 @@ def test_just_before_a_load_the_readers_on_the_gpu_count_once():
     loading = GpuFacts(total=6144, used=others + CONTEXT_MIB + readers_now, own=CONTEXT_MIB + readers_now,
                        translator=PLAMO, translator_now=0, lama=True)
     peak = CONTEXT_MIB + PLAMO + LAMA_MIB + OCR
-    assert peak == 150 + 2000 + 850 + 500 == 3500
-    assert room_left(loading, OCR) == 6144 - others - peak == 1319 == room_left(before, OCR)
+    assert peak == 120 + 2000 + 680 + 500 == 3300
+    assert room_left(loading, OCR) == 6144 - others - peak == 1519 == room_left(before, OCR)
     assert room_left(loading, OCR) != 6144 - (others + readers_now) - peak  # (twice: in the others' memory too)
     assert room_left(loading, OCR) != 6144 - others - (peak - OCR)  # (none: their peak left out)
     kept = through_load(loading, OCR)
-    assert kept == Placement("gpu", place.ROOM, 1319)
-    assert loading.total - loading.used == 4549 >= PLAMO + MARGIN_MIB  # what Ollama finds free at the load
+    assert kept == Placement("gpu", place.ROOM, 1519)
+    assert loading.total - loading.used == 4579 >= PLAMO + MARGIN_MIB  # what Ollama finds free at the load
     # another model in Ollama, of another program's, counts as other programs' memory: no room, let go
     crowded = GpuFacts(total=6144, used=loading.used + 1500, own=loading.own, translator=PLAMO, lama=True)
-    assert room_left(crowded, OCR) == 1319 - 1500 and through_load(crowded, OCR).device == "cpu"
+    assert room_left(crowded, OCR) == 1519 - 1500 and through_load(crowded, OCR).device == "cpu"
+
+
+def test_the_measured_card_has_room_beside_plamo_and_both_page_models():
+    """The 6 GB card with the layout model and LaMa on the GPU (their default there), its screen 1080 px high and
+    1343 MiB held by other programs: room for the readers; above 1390 MiB of them, or on a screen taller than 1440 px
+    (LaMa's larger windows), not."""
+    facts = GpuFacts(total=6144, used=1343, translator=PLAMO, lama=True, layout=True)
+    assert place.peak_mib(facts, OCR) == 120 + 2000 + 680 + 430 + 500 == 3730
+    assert judge(facts, OCR) == Placement("gpu", place.ROOM, 1071)
+    assert judge(GpuFacts(total=6144, used=1390, translator=PLAMO, lama=True, layout=True), OCR).device == "gpu"
+    assert judge(GpuFacts(total=6144, used=1391, translator=PLAMO, lama=True, layout=True), OCR).device == "cpu"
+    tall = GpuFacts(total=6144, used=1343, translator=PLAMO, lama=True, layout=True, tall_screen=True)
+    assert judge(tall, OCR) == Placement("cpu", place.NO_ROOM, 1071 - (place.LAMA_TALL_MIB - LAMA_MIB)) \
+        and 1071 - 290 == 781
+    # a tall screen with LaMa off counts nothing for it
+    assert place.peak_mib(GpuFacts(total=6144, used=0, translator=PLAMO, tall_screen=True), OCR) == 120 + 2000 + 500
+
+
+def test_a_screen_taller_than_1440_px_or_not_known_counts_lama_s_larger_windows(monkeypatch):
+    for height, tall in ((1080, False), (1440, False), (1600, True), (2160, True), (None, True)):
+        monkeypatch.setattr(devices, "screen_height_px", lambda height=height: height)
+        assert place.tall_screen() is tall
+
+
+def test_the_screen_s_height_is_read_without_a_window(monkeypatch):
+    height = devices.screen_height_px()
+    assert height is None or height >= 240  # (whatever this computer's screens are; None off Windows)
+    monkeypatch.setattr(devices.sys, "platform", "linux")
+    assert devices.screen_height_px() is None
+
+
+def test_the_facts_ask_the_screen_only_for_lama_on_the_gpu(tmp_path, monkeypatch):
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, 1325))
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    monkeypatch.setattr(place, "_translator_need", lambda s: (PLAMO, 0, True))
+    asked = []
+    monkeypatch.setattr(devices, "screen_height_px", lambda: asked.append(1) or 2160)
+    for lama, layout in ((True, True), (False, False)):
+        monkeypatch.setattr(place, "page_models_on_gpu", lambda s, lama=lama, layout=layout: (lama, layout))
+        facts = REAL_GATHER(_settings(tmp_path))
+        assert facts.tall_screen is lama
+    assert asked == [1]
 
 
 def test_a_check_before_a_load_needs_every_fact_measured():
@@ -220,6 +262,23 @@ def test_the_translator_s_need_while_loaded_before_and_after(tmp_path, ollama):
     assert not ollama.loads  # nothing was loaded to find out
 
 
+def test_a_known_translator_of_the_size_it_was_measured_at_needs_what_was_measured(tmp_path, ollama):
+    """PLaMo as /api/ps says it (1823 MiB): unloaded, it needs what its load was measured to add to the card's used
+    memory (1933 MiB, 2000 counted), not its size with the largest runner's share (2279), which left this 6 GB card's
+    readers on the CPU after the first unload."""
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    ollama.loaded.add("taslation-plamo3-translate-2b")
+    ollama.size = 1823 * place.MiB + 512 * 1024
+    assert place.translator_need(s) == (1823, 1823)
+    ollama.loaded.clear()
+    assert place.translator_need(s) == (PLAMO, 0) == (2000, 0)
+    ollama.loaded.add("taslation-plamo3-translate-2b")
+    ollama.size = 1900 * place.MiB  # (another build, larger than measured: its size with the runner's share)
+    place.translator_need(s)
+    ollama.loaded.clear()
+    assert place.translator_need(s) == (round(1900 * place.RUNNER_SHARE), 0)
+
+
 def test_a_model_of_the_reader_s_own_is_not_known_until_seen_loaded(tmp_path, ollama):
     s = _settings(tmp_path, ollama_url=ollama.url, ollama_model="someones-model:7b")
     assert place.translator_need(s) == (None, 0)
@@ -276,6 +335,7 @@ class FakeModels(DeviceModels):
         self._cpu_models = ("net@cpu",)
         self.broken = False
         self.copy_fails = False
+        self.error: type[RuntimeError] = MemoryError_  # what a broken GPU raises
         self.reads: list[str] = []
 
     def _copy_to(self, device):
@@ -287,13 +347,18 @@ class FakeModels(DeviceModels):
         def on(device, models):
             self.reads.append(models[0])
             if device != "cpu" and self.broken:
-                raise MemoryError_("CUDA out of memory. Tried to allocate")
+                raise self.error("CUDA out of memory. Tried to allocate" if self.error is MemoryError_
+                                 else "CUDA error: an illegal memory access was encountered")
             return f"{value} read with {models[0]}"
 
         return self.run(on)
 
 
 class MemoryError_(RuntimeError):  # (torch.cuda.OutOfMemoryError is a RuntimeError)
+    pass
+
+
+class CudaError_(RuntimeError):  # (a CUDA error is a RuntimeError too)
     pass
 
 
@@ -311,7 +376,7 @@ def test_a_reader_reads_on_the_copy_in_force(given_back):
     assert m.to("cpu") and m.device == "cpu" and m.read() == "x read with net@cpu" and given_back == [1]
 
 
-def test_out_of_memory_reads_that_crop_on_the_cpu_and_stays_there(given_back):
+def test_out_of_memory_reads_that_crop_on_the_cpu_and_stays_there_until_the_memory_is_let_go(given_back):
     told = []
     m = FakeModels("nar")
     m.on_gpu_failure = lambda reader, why: told.append((reader, why))
@@ -319,8 +384,34 @@ def test_out_of_memory_reads_that_crop_on_the_cpu_and_stays_there(given_back):
     m.broken = True
     assert m.read("crop") == "crop read with net@cpu"  # the page is never failed
     assert m.reads == ["net@cuda", "net@cpu"] and m.device == "cpu"
-    assert m.gpu_failed == "MemoryError_" and told == [("nar", "MemoryError_")]
-    assert not m.to("cuda") and m.device == "cpu"  # for the rest of the session
+    assert m.gpu_full == "MemoryError_" and not m.gpu_failed and told == [("nar", "MemoryError_")]
+    assert not m.to("cuda") and m.device == "cpu"  # until the GPU memory is let go (`Readers.release_gpu`) ...
+    m.gpu_full, m.broken = "", False
+    assert m.to("cuda") and m.read() == "x read with net@cuda"  # ... and then there again
+
+
+def test_a_cuda_error_reads_that_crop_on_the_cpu_and_stays_there_for_the_session(given_back):
+    told = []
+    m = FakeModels("nar")
+    m.on_gpu_failure = lambda reader, why: told.append((reader, why))
+    m.to("cuda")
+    m.broken, m.error = True, CudaError_
+    assert m.read("crop") == "crop read with net@cpu"
+    assert m.gpu_failed == "CudaError_" and not m.gpu_full and told == [("nar", "CudaError_")]
+    assert not m.to("cuda") and m.device == "cpu"
+
+
+def test_only_the_memory_running_out_is_out_of_memory():
+    class OutOfMemoryError(RuntimeError):  # (torch.cuda's, by its name)
+        pass
+
+    assert place.out_of_memory(OutOfMemoryError("Tried to allocate 20.00 MiB"))
+    assert place.out_of_memory(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
+    assert place.out_of_memory(RuntimeError("CUDA error: out of memory"))
+    assert place.out_of_memory(RuntimeError("CUDA error: CUBLAS_STATUS_ALLOC_FAILED when calling `cublasCreate(handle)`"))
+    assert place.out_of_memory(RuntimeError("cuFFT error: CUFFT_ALLOC_FAILED"))
+    assert not place.out_of_memory(RuntimeError("CUDA error: an illegal memory access was encountered"))
+    assert not place.out_of_memory(RuntimeError("cuDNN error: CUDNN_STATUS_EXECUTION_FAILED"))
 
 
 def test_while_the_translator_computes_they_read_on_the_cpu_and_keep_the_gpu_s_copy(given_back):
@@ -341,8 +432,9 @@ def test_a_copy_that_cannot_be_made_leaves_it_on_the_cpu(given_back):
     told = []
     m = FakeModels()
     m.on_gpu_failure = lambda reader, why: told.append(why)
-    m.copy_fails = True
-    assert not m.to("cuda") and m.device == "cpu" and m.gpu_failed == "RuntimeError" and told == ["RuntimeError"]
+    m.copy_fails = True  # (no room for the copy: until the GPU memory is let go)
+    assert not m.to("cuda") and m.device == "cpu" and m.gpu_full == "RuntimeError" and told == ["RuntimeError"]
+    assert not m.gpu_failed
 
 
 def test_a_copy_dropped_during_a_read_gives_its_memory_back_once_the_read_is_done(given_back):
@@ -462,18 +554,39 @@ def test_a_changed_setting_decides_again_at_the_next_read(tmp_path, fake_readers
     assert fake_readers.asked[-1][0] == "gpu" and ocr._nar.device == "cuda"
 
 
-def test_a_failure_of_one_reader_puts_both_on_the_cpu_for_the_session(tmp_path, fake_readers):
+def test_a_cuda_error_of_one_reader_puts_both_on_the_cpu_for_the_session(tmp_path, fake_readers):
     s = _settings(tmp_path)
     ocr = readers.Readers(tmp_path, 0, settings=s)
-    ocr._nar.broken = True
+    ocr._nar.broken, ocr._nar.error = True, CudaError_
     text, _parted = readers.agree("x", readers.written(ocr._nar.read("y")), lambda: "z")
     assert ocr._nar.reads[-1] == "net@cpu"  # that crop read on the CPU
-    assert ocr.placement == Placement("cpu", place.FAILED, error="MemoryError_")
+    assert ocr.placement == Placement("cpu", place.FAILED, error="CudaError_")
     assert ocr.charspot.device == "cpu" and ocr._nar.device == "cpu"
     s.target_language = "German"
     ocr.release_gpu()
     ocr.read_chars(None)
     assert len(fake_readers.asked) == 1 and ocr.charspot.device == "cpu"  # never decided again this session
+
+
+def test_an_out_of_memory_of_one_reader_puts_both_on_the_cpu_until_the_gpu_memory_is_let_go(tmp_path, fake_readers):
+    """The page goes on (that crop read on the CPU); nothing decides while the room is gone (a changed setting, a read
+    neither); the next release of the GPU memory - before the translation model's load, Tools > Release the model now
+    - lets the next read decide again, and the rule puts them back where it finds room."""
+    s = _settings(tmp_path)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    ocr._nar.broken = True
+    assert ocr._nar.read("y") == "y read with net@cpu"
+    assert ocr.placement == Placement("cpu", place.FAILED, error="MemoryError_")
+    assert ocr.charspot.device == "cpu" and ocr._nar.device == "cpu"
+    s.target_language = "German"
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 1 and ocr.charspot.device == "cpu"  # (no room yet: nothing decided)
+    ocr._nar.broken = False
+    ocr.release_gpu(load=True)  # (the release before a load: not kept, the room was gone)
+    assert len(fake_readers.asked) == 1 and not ocr._nar.gpu_full and not ocr.charspot.gpu_full
+    ocr.read_chars(None)
+    assert fake_readers.asked[-1] == ("auto", OCR, "") and ocr.placement == Placement("gpu", place.ROOM, 1500)
+    assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and ocr._nar.read() == "x read with net@cuda"
 
 
 def test_the_window_s_first_reads_find_the_readers_where_they_are(tmp_path, fake_readers):
@@ -605,7 +718,7 @@ def test_a_load_keeps_the_readers_the_rule_put_on_the_gpu_where_they_still_fit(t
     ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
     ocr.release_gpu(load=True)
     assert measured.asked == 1  # asked again at the release
-    assert ocr.placement == Placement("gpu", place.ROOM, 1319) and ocr.holds_gpu()  # (the room of that moment)
+    assert ocr.placement == Placement("gpu", place.ROOM, 1519) and ocr.holds_gpu()  # (the room of that moment)
     assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and not given_back and place._kept
     with place.loading():
         assert ocr.read_chars(None).text == "x read with net@cuda"  # it reads there through the load
@@ -640,7 +753,7 @@ def test_a_load_lets_go_readers_the_setting_forced_there_failed_ones_and_changed
     fake_readers.answer = Placement("gpu", place.ROOM, 1500)
     failed = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
     failed.charspot.broken = True
-    failed.read_chars(None)  # (out of memory on the GPU: the CPU for the session)
+    failed.read_chars(None)  # (out of memory on the GPU: the CPU until this release; the next read decides again)
     failed.release_gpu(load=True)
     assert failed.placement.why == place.FAILED and failed.charspot.device == "cpu" and failed._nar.device == "cpu"
     s = _settings(tmp_path)
@@ -695,7 +808,7 @@ def test_a_load_through_the_translator_keeps_them_and_reads_on_the_gpu_meanwhile
     ollama.answer = answer
     tr.translate_page(["はい"])
     assert during == [(True, "net@cuda"), (False, "net@cpu")]  # the load on the GPU, the request on the CPU
-    assert ocr.placement == Placement("gpu", place.ROOM, 1319) and ollama.loads == 1
+    assert ocr.placement == Placement("gpu", place.ROOM, 1519) and ollama.loads == 1
     ocr.read_chars(None)
     assert len(fake_readers.asked) == 1 and ocr.charspot.reads[-1] == "net@cuda"
 

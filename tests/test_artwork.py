@@ -359,6 +359,56 @@ def test_a_failure_on_the_gpu_moves_to_the_cpu(tmp_path, monkeypatch):
     assert devices == ["cpu"] and not calls and eraser.counts["art"] == 1 and not eraser.failed
 
 
+@pytest.fixture
+def cache(monkeypatch):
+    """torch's caching allocator as a stand-in: *reserved* and *allocated* MiB, and how often it was emptied."""
+    import torch
+
+    state = SimpleNamespace(initialized=True, reserved=1000, allocated=800, emptied=0)
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: state.initialized)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *a: state.reserved * 2 ** 20)
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda *a: state.allocated * 2 ** 20)
+
+    def empty():
+        state.emptied += 1
+        state.reserved = state.allocated
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty)
+    return state
+
+
+def test_more_than_128_mib_left_idle_is_given_back(cache):
+    assert artwork.give_back_idle() and cache.emptied == 1 and cache.reserved == 800  # 200 idle
+    cache.reserved = 800 + artwork.IDLE_MIB
+    assert not artwork.give_back_idle() and cache.emptied == 1  # (128: kept)
+    cache.reserved, cache.initialized = 2000, False
+    assert not artwork.give_back_idle() and cache.emptied == 1  # (no CUDA in use: nothing asked)
+
+
+def test_a_window_filled_on_the_gpu_gives_its_idle_memory_back_and_one_on_the_cpu_does_not(tmp_path, cache):
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel(device="cuda")
+    eraser.erase(lettered(), region())
+    assert eraser.counts["art"] == 1 and cache.emptied == 1
+    cache.reserved = 1000
+    eraser._model = FakeModel(device="cpu")
+    eraser.erase(lettered(), region())
+    assert eraser.counts["art"] == 2 and cache.emptied == 1 and not calls
+
+
+def test_a_cache_that_cannot_be_read_leaves_the_window_filled(tmp_path, monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda *a: 1 / 0)
+    assert not artwork.give_back_idle()
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel(device="cuda")
+    eraser.erase(lettered(), region())
+    assert eraser.counts["art"] == 1 and not calls and not eraser.failed
+
+
 def test_a_failure_on_the_cpu_gives_up_for_good(tmp_path):
     calls, app = fallback_calls()
     eraser = ArtEraser(tmp_path, "auto", app)

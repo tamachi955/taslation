@@ -131,6 +131,7 @@ class Readers:
         self.settings = settings
         self.placement = place.Placement("cpu", place.NOT_ASKED)  # where charspot and nar read now, and why
         self._failed = ""  # a GPU failure this session (its type name): the CPU from then on
+        self._full = ""  # an out of memory on the GPU (its type name): the CPU until the GPU memory is next let go
         self._decided_for: tuple[Any, ...] | None = None  # `place.watched` of the settings the placement was made for
         self._lock = threading.RLock()  # one decision at a time
         if self.missing:
@@ -174,7 +175,7 @@ class Readers:
                 return self.placement
             self._decided_for = place.watched(settings)
             try:
-                decided = place.decide(settings, self.gpu_mib(), self._failed)
+                decided = place.decide(settings, self.gpu_mib(), self._failed or self._full)
             except Exception as e:  # noqa: BLE001 - nothing to judge on: the CPU, as before
                 LOG.info("where the OCR runs could not be decided (%s): on the CPU", type(e).__name__)
                 decided = place.Placement("cpu", place.UNKNOWN)
@@ -192,7 +193,8 @@ class Readers:
         neither loads nor answers (`decide`) - also readers on the CPU, for the facts change with a load (a model of
         the reader's own is known once it was seen loaded). *load*: the release before Ollama loads the translation
         model (`Pipeline.release_before_load`), which leaves them on the GPU where `keeps_through_load` says so: they
-        read there through the load, and the decision stands. Never raises."""
+        read there through the load, and the decision stands. An out of memory on the GPU before it (`_gpu_failed`)
+        holds no longer: the next decision may put them there again. Never raises."""
         with self._lock:
             kept = self.keeps_through_load() if load else None
             place.kept_through_load(kept is not None)
@@ -201,6 +203,10 @@ class Readers:
                 LOG.info("the OCR readers stay on the GPU through the translation model's load (%s MiB left at the "
                          "peak)", kept.room)
                 return
+            if self._full:
+                self._full = ""
+                for engine in self._movable():
+                    engine.gpu_full = ""
             self._decided_for = None
             if self.placement.device != "gpu":
                 return
@@ -216,9 +222,10 @@ class Readers:
         them beside the whole model (`place.through_load` on `place.gather`: other programs may have grown since),
         every fact of it measured. Never raises."""
         settings = self.settings
-        if (settings is None or self._failed or self.placement.device != "gpu" or self.placement.why != place.ROOM
-                or place.watched(settings) != self._decided_for or not place.keeps_through_loads()
-                or any(engine.gpu_failed for engine in self._movable())):
+        if (settings is None or self._failed or self._full or self.placement.device != "gpu"
+                or self.placement.why != place.ROOM or place.watched(settings) != self._decided_for
+                or not place.keeps_through_loads()
+                or any(engine.gpu_failed or engine.gpu_full for engine in self._movable())):
             return None
         try:
             again = place.through_load(place.gather(settings), self.gpu_mib())
@@ -236,19 +243,25 @@ class Readers:
         return self.placement.device == "gpu"
 
     def _gpu_failed(self, reader: str, why: str) -> None:
-        """A reader failed on the GPU (`place.DeviceModels.run`): all of them on the CPU for the rest of the session."""
+        """A reader failed on the GPU (`place.DeviceModels.run`): all of them on the CPU, for the rest of the session,
+        or after an out of memory there (each reader's ``gpu_full``, none's ``gpu_failed``) until the GPU memory is next
+        let go (`release_gpu`), which decides again."""
         with self._lock:
-            self._failed = self._failed or why
-            for engine in self._movable():
+            movable = self._movable()
+            if any(engine.gpu_full for engine in movable) and not any(engine.gpu_failed for engine in movable):
+                self._full = self._full or why
+            else:
+                self._failed = self._failed or why
+            for engine in movable:
                 engine.to("cpu")
-            self.placement = place.Placement("cpu", place.FAILED, error=self._failed)
+            self.placement = place.Placement("cpu", place.FAILED, error=self._failed or self._full)
 
     def _check(self) -> None:
         """Before a read: decide again when the placement is not for the settings in force (released, or a setting it
         depends on changed), unless the translation model loads or answers now (`place.busy`: a later read decides)."""
         settings = self.settings
-        if (settings is not None and not self._failed and place.watched(settings) != self._decided_for
-                and not place.busy()):
+        if (settings is not None and not self._failed and not self._full
+                and place.watched(settings) != self._decided_for and not place.busy()):
             self.decide()
 
     # ------------------------------------------------------------------ reading

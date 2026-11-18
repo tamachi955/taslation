@@ -39,6 +39,7 @@ class FakeOllama(ThreadingHTTPServer):
         self.loads = 0  # how many times a model was loaded
         self.shares: list[float] = []  # the GPU share of the next loads (then 1.0)
         self.share = 1.0  # the GPU share of the model in memory
+        self.size = 3_000_000_000  # /api/ps's size of a model in memory, in bytes
         self.gone = threading.Event()  # the client closed the connection before the answer was over
         self.port = self.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}"
@@ -73,7 +74,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/tags":
             self._json(200, {"models": [{"name": n} for n in self.server.models]})
         elif self.path == "/api/ps" and self.server.tracks_loads:
-            size = 3_000_000_000
+            size = self.server.size
             self._json(200, {"models": [{"name": n, "model": n, "size": size, "size_vram": int(size * self.server.share)}
                                         for n in sorted(self.server.loaded)]})
         else:

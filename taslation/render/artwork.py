@@ -445,7 +445,7 @@ def runs_here(setting: str, cuda: bool | None = None) -> bool:
     `devices.stage_devices`, `health.page_models_missing`, the Settings dialog): "off" never; "lama" always, on the
     CPU too; "auto" (the default) only where torch has a CUDA GPU: *cuda* when the caller knows it, else `has_cuda`,
     asked only for "auto". The weights are `available`'s to check. A GPU that fails at run time moves the work to the
-    CPU for the session (`ArtEraser._fill`): a fallback, not this rule's choice."""
+    CPU until the model is next let go (`ArtEraser._fill`, `ArtEraser.release`): a fallback, not this rule's choice."""
     if setting == "off":
         return False
     if setting == "auto":
@@ -456,6 +456,30 @@ def runs_here(setting: str, cuda: bool | None = None) -> bool:
 def installed(models_dir: Path) -> bool:
     """Whether LaMa's weights are in the models folder (the file is there; nothing is read or loaded for it)."""
     return not LAMA_MODEL.missing(Path(models_dir))
+
+
+IDLE_MIB = 128  # what torch's cache may keep idle after a window filled on the GPU (`give_back_idle`)
+
+
+def give_back_idle(limit_mib: int = IDLE_MIB) -> bool:
+    """The GPU memory torch's caching allocator keeps idle given back when it is more than *limit_mib*, after a window
+    was filled there: each window size leaves blocks of its own (a window 1188 px long, 588 MiB), and over a session
+    they piled up to 2.4 GB (measured 2026-11-19), for on Windows the driver lets a process's GPU memory go on into the
+    computer's own memory rather than run out, so that no out of memory ever asks them back. With it, a session held
+    872 MiB between windows, and the placing rule's figure for LaMa holds (`ocr.place.LAMA_MIB`). It takes about 2 ms,
+    after nearly every window (one takes 140 ms on the 6 GB card), and the next window 2-3 ms more to take its memory
+    again. Whether it gave any back; never raises."""
+    try:
+        import torch
+
+        if not torch.cuda.is_initialized():
+            return False
+        if torch.cuda.memory_reserved() - torch.cuda.memory_allocated() <= limit_mib * 1024 * 1024:
+            return False
+        torch.cuda.empty_cache()
+    except Exception:  # noqa: BLE001 - the memory stays as it is
+        return False
+    return True
 
 
 def available(models_dir: Path, setting: str = "auto", cuda: bool | None = None) -> bool:
@@ -524,7 +548,10 @@ class ArtEraser:
 
     def _fill(self, part: np.ndarray, hole: np.ndarray) -> np.ndarray | None:
         """*part* with *hole* filled; None when LaMa cannot do it. A failure on the GPU (its memory is shared with
-        Ollama), loading or running, moves to the CPU."""
+        Ollama), loading or running, moves to the CPU until the model is next let go (`release`: before Ollama loads
+        its model, Tools > Release the model now), when the next erase loads it on the GPU again; a failure on the CPU
+        leaves the paper fill for the session. After a window on the GPU the idle cache is given back
+        (`give_back_idle`)."""
         gate = self.before_gpu
         if gate is not None and not self.failed and self.uses_gpu():
             gate()
@@ -533,8 +560,10 @@ class ArtEraser:
                 return None
             device = self._model.device if self._model is not None else self._device()
             filled, why = self._try(device, part, hole)
+            if filled is not None and device != "cpu":
+                give_back_idle()
             if filled is None and device != "cpu":
-                LOG.info("inpainting failed on the GPU (%s): on the CPU from now on", why)
+                LOG.info("inpainting failed on the GPU (%s): on the CPU until the model is let go", why)
                 self._drop(device)
                 filled, why = self._try("cpu", part, hole)
             if filled is None:
