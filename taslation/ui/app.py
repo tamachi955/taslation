@@ -125,7 +125,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import area, shortcuts, theme
+from . import area, ime, shortcuts, theme
 from .. import devices
 from .status import StatusMixin
 from .strip import StripMixin, close_warning, release_run_images
@@ -215,6 +215,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         # the window's colours, before any widget is made (the legal notice's too): Windows' own look as it always
         # was, or dark as the setting or Windows' app mode has it; Windows' high contrast first (`theme`)
         theme.apply(self, getattr(settings, "theme", "system"))
+        ime.install(self)  # every box shows the text an IME is composing in it, the notice's too (`ime`)
         self.minsize(*(min(m, s) for m, s in zip(MIN_SIZE, (self.winfo_screenwidth() - 40, self.winfo_screenheight() - 90))))
         state_dir = Path(settings.state_dir)
         # where the reader put the window last, once it had been over the book (overbook: the next start opens there,
