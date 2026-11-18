@@ -39,6 +39,8 @@ As soon as it has been read, and a look has found the picture still the same, th
 watched while the model answers. What it translates is kept in the cache only once the picture has stayed the same for 0.8 seconds (twice the
 `settle_ms` setting, the same for every viewer). If the picture changes before that (a page sliding in, a blurred picture replaced by the sharp one),
 the request is stopped, what was read from the picture is dropped and the page is read again from the new picture.
+A sharp picture that replaces a blurred one later than that drops what was kept from the blurred picture too: while its translation still runs,
+and with a viewer that has drawn a blurred picture first, up to 2 seconds after it is done.
 With `early_start = false` in `taslation.toml`, a page is read only once its picture has stayed the same for `settle_ms`, as in earlier versions.
 A page turned while another is being translated shows at once as the viewer draws it, with nothing of the other page's translation over it;
 that translation is stopped only once the new picture has stayed the same for a moment (0.15 seconds; a black flash or a loading indicator stops
