@@ -14,6 +14,11 @@ blotches what a fill paints as it was: its hole, ring and all, is painted with t
 the hole of outlined lettering on a flat ground, which is no art (`FLAT_RINGS`): the paper fill took a thick white ring
 for paper and left it.
 
+A rectangle the reader drew, or a region they resized or moved, is judged as a detected region is (`drawn_on_art`): on
+the drawing - a gradient, a tone or hatching the paper fill took for paper too - its lettering comes here, and where the
+model does not fill it in only its strokes go (`erase.erase_strokes`), never the whole rectangle in one colour; in a
+bubble, reaching out of one, or on a flat box it is wiped on its paper as before.
+
 What the model filled is pasted as it came, the hole alone (`paste`): no tone matching against the ring round the hole
 and no feathered edge, since neither helped on `tools/erase_eval.py`'s grounds (docs/OFFLINE_VERIFICATION.md, "The
 erase on the art", 2026-11-15).
@@ -42,7 +47,7 @@ import numpy as np
 
 from ..config import LAMA_MODEL
 from ..regions import TextRegion
-from .erase import erase_region, paper_colour, paper_surface
+from .erase import MANUAL_KINDS, erase_region, paper_colour, paper_surface, within_paper
 
 LOG = logging.getLogger(__name__)
 
@@ -68,6 +73,10 @@ GROUND_FILL = True  # the hole on such a ground is painted with that surface bef
 FLAT_RINGS = True  # so is lettering's on a flat ground (not `on_art`): the paper fill took a thick white ring for paper
 EDGE_INK = 0.15  # ... and the ink reaching in from its box's edge at most this share: a thin outline, not the art
 PAPER_SHARE = 0.3  # of an unclosed model bubble's lettering box: the ground between its strokes, when it is paper
+PAPER_LEVELS, PAPER_EVEN = 12, 0.75  # grey levels: the paper a reader's rectangle is cut back to is a bubble's when
+# three in four of its pixels (its lettering and a fringe of 3 px left out) lie this close to its median; a gradient,
+# a tone, the light of a drawing do not (`drawn_on_art`) ...
+PAPER_SURE = 0.95  # ... and a rectangle whose own ground, white (`RINGED` or lighter), is this even lies on a bubble's
 WINDOW = 512  # px: the part of the page the model sees (at least)
 SMALLEST = 256  # px: a page narrower than this is left to the paper fill (the network pads by reflection)
 
@@ -161,14 +170,22 @@ def box_of(image: np.ndarray, region: TextRegion) -> tuple[int, int, int, int]:
 
 def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> bool:
     """Whether *region* is lettering on the page whose ground, in a ring round its box, is not one flat colour; a
-    bubble the classical detectors could not close is judged as the module's docstring says."""
+    bubble the classical detectors could not close, and a rectangle of the reader's (`drawn_on_art`), are judged as
+    the module's docstring says."""
     if region.kind in ("bubble", "dark-bubble"):
         if region.tier == 3:
             return True
         if region.tier != 2:
             return False
+    elif region.kind in MANUAL_KINDS:
+        return drawn_on_art(image, region, flat)
     elif region.kind not in ART_KINDS:
         return False
+    return _ring_not_flat(image, region, flat)
+
+
+def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
+    """Whether the ground in a ring round *region*'s lettering box is not one flat colour (`on_art`)."""
     x0, y0, x1, y1 = box_of(image, region)
     if x1 - x0 < 4 or y1 - y0 < 4:
         return False
@@ -239,14 +256,16 @@ def art_mask(image: np.ndarray, region: TextRegion) -> np.ndarray | None:
     return full
 
 
-def plain_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None = None) -> bool:
+def plain_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None = None,
+                 within: np.ndarray | None = None) -> bool:
     """Whether the ground right round the lettering's *hole* (bool, the page; `GROUND_BAND`), within *box* when given,
     is one colour or a smooth shading of it: a black or white panel, a flat tone, a gradient. There the hole is painted
     with that ground (`fill_ground`) and a model, which makes up a texture, would only blotch it. The erase gives no
     box: the hole holds the white ring of outlined lettering, so the band round it is the ground past the ring. (Within
     the lettering box, a box drawn round the strokes alone, the ring was all the ground there was: lettering on a
-    drawing passed for lettering on white paper, and was painted white.)"""
-    found = _ground(image, hole, box)
+    drawing passed for lettering on white paper, and was painted white.) *within* (bool, the page): the band is taken
+    there alone (a reader's rectangle: `drawn_on_art`)."""
+    found = _ground(image, hole, box, within)
     if found is None:
         return False
     crop, _part, band, surface = found
@@ -254,10 +273,11 @@ def plain_ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, 
     return float(np.percentile(off, 90)) < GROUND_FIT
 
 
-def _ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None
-            ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
-    """The part of the page round *hole* (`GROUND_BAND`, within *box*), the hole and the ground band in it (bool), and
-    the smooth surface fitted to the band (`paper_surface`); None when there is too little of it."""
+def _ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] | None,
+            within: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """The part of the page round *hole* (`GROUND_BAND`, within *box*), the hole and the ground band in it (bool, and
+    in *within* when given), and the smooth surface fitted to the band (`paper_surface`); None when there is too
+    little of it."""
     ys, xs = np.nonzero(hole)
     if not xs.size:
         return None
@@ -270,6 +290,8 @@ def _ground(image: np.ndarray, hole: np.ndarray, box: tuple[int, int, int, int] 
             return None
     part = hole[y0:y1, x0:x1]
     band = (cv2.dilate(part.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (GROUND_BAND,) * 2)) > 0) & ~part
+    if within is not None:
+        band &= within[y0:y1, x0:x1]
     if int(band.sum()) < 16:
         return None
     crop = image[y0:y1, x0:x1, :3]
@@ -312,6 +334,60 @@ def on_paper(image: np.ndarray, region: TextRegion) -> bool:
     surface = paper_surface(crop, ground)
     off = np.sqrt(((crop[ground].astype(np.float32) - surface[ground]) ** 2).sum(axis=1))
     return float(np.percentile(off, 90)) < GROUND_FIT
+
+
+def drawn_on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND, dark_threshold: int = 140) -> bool:
+    """Whether a rectangle the reader drew, or a region they resized or moved (`MANUAL_KINDS`), lies on the drawing,
+    judged as a region the detectors found is: the ground in a ring round its box is not one flat colour (`on_art`),
+    and the ground right round its lettering (`art_mask`; the rectangle's dark, or light, pixels when that finds too
+    little) is no plain ground either (`plain_ground`: a bubble's paper, a flat or shaded box), taken within the
+    rectangle, so that a bubble's outline or the drawing past it is not taken for its ground - unless the rectangle's
+    own ground is white and as even as a bubble's (`PAPER_SURE`). One that the paper fill cuts back to the paper its
+    lettering stands on (`within_paper`: it reaches out of a bubble, or across the light of a drawing) is on the art
+    when that paper is not even (`PAPER_EVEN`): a gradient, a tone, hatching. Then its lettering goes as lettering on
+    the art goes - LaMa fills it where it runs, else its strokes alone are filled in from round them
+    (`erase.erase_strokes`, `Pipeline._paper_erase`) - and the rectangle is never wiped as drawn: a flat box of one
+    colour over the drawing."""
+    if region.kind not in MANUAL_KINDS or not _ring_not_flat(image, region, flat):
+        return False
+    crop = image[region.y0:region.y1, region.x0:region.x1]
+    mask = region.mask
+    if crop.shape[:2] != mask.shape:
+        mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
+    inside = mask > 0
+    if region.kind == "manual":
+        part = within_paper(crop, inside, dark_threshold)
+        even = _evenness(crop, part, dark_threshold)
+        if part is not inside:  # cut back to the paper it stands on: on the art only when that is no paper
+            return even is None or even[0] < PAPER_EVEN  # (none of it clear of the ink: the light of a drawing)
+        if even is not None and even[0] >= PAPER_SURE and even[1] >= RINGED:
+            return False  # a bubble's white, its outline or the drawing past it in the ring round the lettering
+    else:
+        part = inside
+    hole = art_mask(image, region)
+    if hole is None:
+        gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY)
+        ink = ((gray > 255 - DARK) if region.dark else (gray < DARK)) & inside
+        if not ink.any():
+            return True  # nothing to tell paper by: the erase of lettering on the art paints no more than strokes
+        hole = np.zeros(image.shape[:2], bool)
+        hole[region.y0:region.y1, region.x0:region.x1] = cv2.dilate(ink.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    within = np.zeros(image.shape[:2], bool)
+    within[region.y0:region.y1, region.x0:region.x1] = part
+    return not plain_ground(image, hole, within=within)
+
+
+def _evenness(crop: np.ndarray, part: np.ndarray, dark_threshold: int) -> tuple[float, float] | None:
+    """The share of *part*'s light ground (bool, of *crop*: the ink, darker than *dark_threshold*, and 3 px round it
+    left out) within `PAPER_LEVELS` of its median, and that median; None when less than 16 px of it is clear of the
+    ink."""
+    gray = cv2.cvtColor(np.ascontiguousarray(crop[..., :3]), cv2.COLOR_RGB2GRAY).astype(np.int16)
+    ground = part & ~(cv2.dilate((gray < dark_threshold).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0)
+    if int(ground.sum()) < 16:
+        return None
+    level = gray[ground]
+    median = float(np.median(level))
+    return float((np.abs(level - median) <= PAPER_LEVELS).mean()), median
 
 
 def paste(part: np.ndarray, filled: np.ndarray, hole: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -529,6 +605,6 @@ class ArtEraser:
             self._lock.release()
 
 
-__all__ = ["ART_ERASES", "ArtEraser", "around", "art_mask", "available", "fill_ground", "has_cuda", "installed",
-           "is_dash", "on_art", "on_paper", "paste", "plain_ground", "reach_of", "ring_comp", "runs_here", "window",
-           "with_ring"]
+__all__ = ["ART_ERASES", "ArtEraser", "around", "art_mask", "available", "drawn_on_art", "fill_ground", "has_cuda",
+           "installed", "is_dash", "on_art", "on_paper", "paste", "plain_ground", "reach_of", "ring_comp", "runs_here",
+           "window", "with_ring"]

@@ -229,9 +229,15 @@ def test_a_model_bubble_on_a_white_area_goes_by_its_ground():
     assert not on_art(flat(), region("bubble", tier=2))
 
 
-@pytest.mark.parametrize("kind", ["manual", "manual-dark", "cached"])
-def test_a_readers_rectangle_stays_with_the_paper_fill(kind):
-    assert not on_art(toned(), region(kind))
+@pytest.mark.parametrize("kind", ["manual", "manual-dark"])
+def test_a_readers_rectangle_goes_by_its_ground_as_a_detected_region(kind):
+    """(tests/test_drawn_on_art.py: in a bubble, out of one, on a flat box.)"""
+    assert on_art(toned(), region(kind))
+    assert not on_art(flat(), region(kind))
+
+
+def test_a_cached_region_stays_with_the_paper_fill():
+    assert not on_art(toned(), region("cached"))
 
 
 # ------------------------------------------------------------------ the model's handling

@@ -119,7 +119,7 @@ from .render import (FontSpec, Lettering, balance_marks, erase_region, find_font
                      resolve_font, text_room)
 from .annotations import LetteringStyle, RegionStyle, ink_of
 from .render import covers, drawable, strip_marks
-from .render.erase import LINK_LEVELS
+from .render.erase import LINK_LEVELS, MANUAL_KINDS, erase_strokes
 from .render.rooms import in_own_room, room_mask, shifted, share_rooms
 from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat, ink_rgb, letter_text, page_caps
 from .render.vertical import layout_stacked, stacked_room
@@ -3804,7 +3804,13 @@ class Pipeline:
         as much as the lettering) only the lettering is painted out: where its reading found characters (`char_boxes`,
         a little grown), as lettering set on the page is, never the box. A model bubble with a classical shape also loses
         the lettering its text box holds that the shape left out (`_left_out`): a large glyph, a line by the outline.
-        (Also a model region's text: a classical block may hold only part of it.)"""
+        (Also a model region's text: a classical block may hold only part of it.) A rectangle of the reader's on the
+        drawing (`artwork.drawn_on_art`, where LaMa does not fill it in) loses its strokes alone, filled in from the
+        drawing round them (`erase_strokes`: what is far darker than the drawing, in pieces of a glyph's size, and its
+        lettering as LaMa would take it, `artwork.art_mask`), and is never wiped whole in one colour."""
+        if mode == "fill" and region.kind in MANUAL_KINDS and artwork.drawn_on_art(image, region,
+                                                                                  dark_threshold=dark_threshold):
+            return erase_strokes(image, region, artwork.art_mask(image, region), dark)
         if not (region.from_model and mode == "fill"):
             return erase_region(image, region, mode, white_threshold, dark_threshold, dark)
         if region.tier != 3:

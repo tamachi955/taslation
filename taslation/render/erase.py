@@ -226,7 +226,8 @@ def within_paper(crop: np.ndarray, mask: np.ndarray, dark_threshold: int = 140) 
     *mask* is returned as it is, and the rectangle wiped as drawn, when the paper is nearly all of it
     (`RECT_WHOLE`: the rectangle lies within a bubble or on the page's ground), when the paper is less than a third
     of it or holds no lettering (lettering set on the drawing), and when there is lettering beyond the paper too
-    (`RECT_OUTSIDE`: a line of text across the outline, a caption on both sides of a border)."""
+    (`RECT_OUTSIDE`: a line of text across the outline, a caption on both sides of a border). (The pipeline never
+    wipes a rectangle on the drawing so: `artwork.drawn_on_art` sends it to LaMa, or to `erase_strokes`.)"""
     total = int(mask.sum())
     if not total:
         return mask
@@ -533,6 +534,70 @@ def _inpaint(crop: np.ndarray, mask: np.ndarray, dark_threshold: int, dark: bool
     text = cv2.bitwise_and(text, mask)
     if cv2.countNonZero(text):
         crop[:] = cv2.inpaint(np.ascontiguousarray(crop), text, 3, cv2.INPAINT_TELEA)
+
+
+GROUND_WINDOW = 21  # px: the window whose median lightness is the drawing's ground under a stroke (`erase_strokes`)
+STROKE_PIECE = 80  # px: a piece of strokes longer than this, or than 1.15 times the rectangle's short side, is drawing
+GROUND_BAND = 9  # px (a disc): the ground right round a piece of a lettering's hole ...
+RING_LIGHT, RING_SAME = 190, 12  # ... whose light pixels (its ring) are that ground when their median lies this close
+# to its: the page's white round lettering set on it, not a ring to take out (`erase_strokes`)
+
+
+def erase_strokes(image: np.ndarray, region: TextRegion, hole: np.ndarray | None = None,
+                  dark: bool = False) -> tuple[int, int, int]:
+    """Lettering on the drawing erased without a model, in place: its strokes alone, with a pixel of anti-aliasing,
+    filled in from the drawing round them (`cv2.inpaint`); the rest of the region's mask stays as it is. The strokes
+    are what is far darker (lighter, in a dark region: *dark*) than the ground round it (`STROKE_DROP` below the
+    median lightness of `GROUND_WINDOW` px, which a thin stroke does not move), in pieces of a glyph's size
+    (`STROKE_PIECE`) clear of the rectangle's edge - the drawing's lines run on past it, or run long - and of *hole*
+    when given (bool, the page: `artwork.art_mask`'s strokes ringed by white, ring and all), piece by piece: all of a
+    piece when the ground right round it (`GROUND_BAND`) is another than its light ring - the white ring of outlined
+    lettering on the drawing goes - and its darker pixels alone when the ring is that ground (`RING_SAME`): the page's
+    white round lettering set on it stays and is what the strokes are filled from (filled from beyond it, the drawing
+    nearby was smeared into the page). Returns the region's paper colour, as `erase_region` does (what its lettering
+    is drawn against)."""
+    wx0, wy0, wx1, wy1 = _window(image, region)
+    win = image[wy0:wy1, wx0:wx1]
+    crop = image[region.y0:region.y1, region.x0:region.x1]
+    mask = region.mask
+    if crop.shape[:2] != mask.shape:
+        mask = cv2.resize(mask, (crop.shape[1], crop.shape[0]), interpolation=cv2.INTER_NEAREST)
+    bg = paper_colour(crop, mask > 0, dark)
+    inside = np.zeros(win.shape[:2], bool)
+    inside[region.y0 - wy0:region.y1 - wy0, region.x0 - wx0:region.x1 - wx0] = mask > 0
+    light = _lab(win)[..., 0]
+    if dark:
+        light = 100.0 - light
+    level = cv2.medianBlur(np.clip(np.round(light * 2.55), 0, 255).astype(np.uint8), GROUND_WINDOW) / 2.55
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((inside & (light < level - STROKE_DROP)).astype(np.uint8),
+                                                           connectivity=8)
+    x0, y0, x1, y1 = region.x0 - wx0, region.y0 - wy0, region.x1 - wx0, region.y1 - wy0
+    limit = max(STROKE_PIECE, 1.15 * min(x1 - x0, y1 - y0))
+    sx, sy, sw, sh = stats[:, 0], stats[:, 1], stats[:, 2], stats[:, 3]
+    glyph = (np.maximum(sw, sh) <= limit) & (sx > x0) & (sy > y0) & (sx + sw < x1) & (sy + sh < y1)
+    glyph[0] = False
+    strokes = glyph[labels]
+    if hole is not None:
+        taken = hole[wy0:wy1, wx0:wx1]
+        gray = cv2.cvtColor(np.ascontiguousarray(win[..., :3]), cv2.COLOR_RGB2GRAY)
+        if dark:
+            gray = 255 - gray
+        n, parts = cv2.connectedComponents(taken.astype(np.uint8), connectivity=8)
+        near = cv2.dilate(parts.astype(np.float32), _disc(GROUND_BAND)).astype(np.int32)  # the piece a pixel is by
+        band = (near > 0) & ~taken & inside
+        ring = taken & (gray >= RING_LIGHT)
+        kept = np.zeros(n, bool)
+        for i in range(1, n):
+            ground, light_ring = gray[band & (near == i)], gray[ring & (parts == i)]
+            # on the page's white the ring round the strokes is that white: it stays, the strokes are filled from it
+            kept[i] = (ground.size >= 16 and light_ring.size > 0
+                       and abs(float(np.median(ground)) - float(np.median(light_ring))) <= RING_SAME)
+        strokes |= taken & inside & ~(kept[parts] & ring)
+    strokes = (cv2.dilate(strokes.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0) & inside
+    if strokes.any():
+        win[..., :3] = cv2.inpaint(np.ascontiguousarray(win[..., :3]), strokes.astype(np.uint8) * 255, 3,
+                                   cv2.INPAINT_TELEA)
+    return bg
 
 
 def _local_box(region: TextRegion) -> Box:
