@@ -1811,6 +1811,25 @@ def lettered_soft_ms(displays: list[dict[str, Any]], scr: tuple[int, bool], lo: 
     return round(total)
 
 
+def lettering_gone_ms(displays: list[dict[str, Any]], scr: tuple[int, bool], lo: float, hi: float) -> int:
+    """How long, from the stand-in's first draw of *scr* at *lo* to its next turn at *hi*, the window showed *scr*
+    without lettering between two pictures of it with lettering: lettering that left the page and came back (a page
+    lettered on its soft picture, then shown as the sharp one came until that was read)."""
+    total = pending = 0.0
+    seen = False
+    for k, d in enumerate(displays):
+        if not lo <= d["t"] < hi:
+            continue
+        until = min(displays[k + 1]["t"] if k + 1 < len(displays) else hi, hi)
+        if (d["page"], d["spread"]) != scr:
+            pending = 0.0
+        elif lettered_shown(d):
+            total, pending, seen = total + pending, 0.0, True
+        elif seen:
+            pending += until - d["t"]
+    return round(total)
+
+
 def soft_lettering(jobs: list[dict[str, Any]]) -> dict[str, Any]:
     """The page jobs whose page was read from a soft frame and lettered, each against the next job on its screen at
     its frame's size whose page was read from the sharp frame: how many boxes each lettered, and how far the soft
@@ -2033,6 +2052,7 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
         old_page_ms, old_lettering_ms = old_page_times(notes.displays, scr, lo, end)
         mine = [d for d in notes.displays if lo <= d["t"] < hi and (d["page"], d["spread"]) == scr]
         lettered = next((d["t"] for d in mine if lettered_shown(d)), None)
+        lettered_sharp = next((d["t"] for d in mine if lettered_shown(d) and d["from"] == "sharp"), None)
         finished = next((d["t"] for d in mine if d["kind"] == "final" or (d["kind"] == "translated" and d["lettered"])),
                         None)
         empty = next((d["t"] for d in mine if d["kind"] == "translated" and not d["lettered"]), None)
@@ -2074,6 +2094,11 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
             "lettered_unsettled_ms": lettered_unsettled_ms(notes.displays, scr, sharp, hi),
             "lettered_soft_ms": lettered_soft_ms(notes.displays, scr, lo, hi),
+            # a page the cache held whole (its jobs drew it all from the cache, none read a page unit anew): its
+            # lettering from the turn, the first read from the sharp frame, and lettering that left and came back
+            "cached": any(j.get("cache_hits") for j in jobs) and not any(j.get("cache_misses") for j in jobs),
+            "lettered_from_turn_ms": ms(lettered, lo), "lettered_sharp_from_turn_ms": ms(lettered_sharp, lo),
+            "lettering_gone_ms": lettering_gone_ms(notes.displays, scr, lo, hi),
             "status_old_page_ms": status_stayed, "status_old_page_kind": status_kind_,
             "status_other_page_ms": status_other,
         })
@@ -2461,7 +2486,15 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     lettered_soft = {"turns": len(soft_rows), "ms": dist([r["lettered_soft_ms"] for r in soft_rows]),
                      "by_segment": {s: dist([r["lettered_soft_ms"] for r in soft_rows if r["segment"] == s])
                                     for s in dict.fromkeys(r["segment"] for r in soft_rows)},
-                     "read_from_soft": soft_lettering(started)}
+                     "read_from_soft": soft_lettering(started), "cached_pages": {}}
+    for kind, soft in (("soft_first", True), ("sharp_at_once", False)):  # (by the stand-in's draw of the turn)
+        mine = [r for r in rows if r["cached"] and ((r["soft_to_sharp_ms"] or 0) > 0) == soft]
+        gone = [r["lettering_gone_ms"] for r in mine if r["lettering_gone_ms"]]
+        lettered_soft["cached_pages"][kind] = {
+            "turns": len(mine), "lettered_ms": dist([r["lettered_from_turn_ms"] for r in mine]),
+            "lettered_sharp_ms": dist([r["lettered_sharp_from_turn_ms"] for r in mine]),
+            "lettered_on_soft": sum(1 for r in mine if r["lettered_soft_ms"]),
+            "lettering_gone": len(gone), "lettering_gone_ms": dist(gone)}
     ready_at = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
     displays = [[rel(d["t"]), d["page"], int(bool(d["spread"])), d["state"], d["kind"], d["lettered"], d["from"],
                  int(bool(d["quick"]))] for d in notes.displays]
@@ -2742,6 +2775,11 @@ def print_table(report: dict[str, Any], path: Path) -> None:
           f"from a soft frame {read['jobs']} jobs, {read['boxes']} boxes lettered (the sharp frame "
           f"{read['sharp_boxes']}), off the sharp frame's by {read['box_shift_px']} px, per job {read['shift_px']}, "
           f"unmatched {read['unmatched']}")
+    for kind, c in soft["cached_pages"].items():
+        print(f"pages the cache held, drawn {kind.replace('_', ' ')}: {c['turns']} turns, lettered {c['lettered_ms']} "
+              f"ms from the turn, read from the sharp frame {c['lettered_sharp_ms']} ms, lettered on the soft picture "
+              f"{c['lettered_on_soft']}, lettering gone and back {c['lettering_gone']} times, "
+              f"{c['lettering_gone_ms']} ms")
     status = run_["status_line_of_the_page_before"]
     print(f"status line of the page before after a turn: {status['turns_with_a_line_of_the_page_before']} of "
           f"{status['turns']} turns, stayed {status['stayed_ms']}, by kind {status['by_kind']}")

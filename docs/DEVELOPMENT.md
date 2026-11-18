@@ -120,7 +120,9 @@ rows' languages.
   as it reads at other sizes, with the readings it went through, their time and what they found; how long after a turn
   the page before stayed on the page area, and its lettering, by what a whole-book run did then - reading the pages,
   translating, none; how long lettering showed on a soft picture of the page, and how far the boxes of a page read from
-  a soft frame lie from those its sharp frame gives, in pixels) and pictures of TASlation's own window to the `--out`
+  a soft frame lie from those its sharp frame gives, in pixels; for the pages the cache held, drawn soft first or sharp
+  at once, when their lettering came after the turn, when the lettering read from the sharp frame did, and how often
+  and how long lettering left the page and came back) and pictures of TASlation's own window to the `--out`
   folder (one of them 3 s after each change of the stand-in's size, its page at the new size),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and

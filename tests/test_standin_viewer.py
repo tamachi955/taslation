@@ -205,6 +205,10 @@ def test_lettering_on_a_soft_frame_is_told_with_how_far_its_boxes_lie_from_the_s
                 _shown(1100, 4, "soft"), _shown(1400, 4, "sharp"), _shown(1600, 4, "sharp", from_="sharp")]
     assert standin_e2e.lettered_soft_ms(displays, (4, True), 1000, 3000) == 300  # (from 1100 to the sharp picture)
     assert standin_e2e.lettered_soft_ms(displays, (2, True), 0, 1000) == 0
+    gone = [*displays[:3], _shown(1400, 4, "sharp", kind="live", lettered=0, from_=None), displays[4]]
+    assert standin_e2e.lettering_gone_ms(gone, (4, True), 1000, 3000) == 200  # (the sharp picture before its reading)
+    assert standin_e2e.lettering_gone_ms(displays, (4, True), 1000, 3000) == 0  # (lettered throughout)
+    assert standin_e2e.lettering_gone_ms(gone[:4], (4, True), 1000, 3000) == 0  # (never came back: not "gone")
     jobs = [_read(1, 1100, 4, "soft", [[60, 10, 90, 40], [10, 10, 50, 40]]),
             _read(2, 1500, 4, "sharp", [[12, 9, 51, 40], [61, 10, 90, 43]], size=(1904, 1072)),  # (another size)
             _read(3, 1600, 4, "sharp", [[11, 10, 50, 41], [100, 5, 130, 30], [60, 12, 90, 40]]),
