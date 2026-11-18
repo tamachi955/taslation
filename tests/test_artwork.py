@@ -479,14 +479,37 @@ def test_the_default_on_a_computer_without_a_gpu_letters_byte_for_byte_as_off(tm
             (tmp_path / "models" / model.dirname / name).write_bytes(b"x")
     monkeypatch.setattr(ArtEraser, "_load", lambda self, device: pytest.fail("LaMa was loaded"))
     out = {}
-    for name, extra in (("default", {}), ("off", {"art_erase": "off"}), ("auto, auto", {"detect_model": "auto"})):
+    for name, extra in (("default", {}), ("off", {"art_erase": "off"}), ("auto, auto", {"detect_model": "auto"}),
+                        ("the default before 0.2.0", {"detect_model": "off"})):
         s = Settings(state_dir=tmp_path / name, models_dir=tmp_path / "models", **extra)
         p = Pipeline(s, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=None)
         assert p.art_eraser is None and p.layout is None and p.gpu_releases == [], name
         page, r = _art_page()
         p.letter_region(page, r, "Hello")
         out[name] = (page.tobytes(), np.asarray(p.process(sample_page, use_cache=False).image).tobytes())
-    assert out["default"] == out["off"] == out["auto, auto"]
+    assert out["default"] == out["off"] == out["auto, auto"] == out["the default before 0.2.0"]
+
+
+@pytest.mark.page_models
+def test_the_default_where_the_page_models_were_declined_letters_byte_for_byte_as_before(tmp_path, torch_says,
+                                                                                         monkeypatch, sample_page):
+    """A computer with a GPU where the person answered no to the two page models at the installation: the default
+    settings make neither model and letter the page exactly as the defaults before 0.2.0 (detect_model "off")."""
+    from helpers import EN_TEXTS, FakeOcr
+
+    from taslation.translate import DictTranslator
+
+    torch_says(True)
+    monkeypatch.setattr(ArtEraser, "_load", lambda self, device: pytest.fail("LaMa was loaded"))
+    out = {}
+    for name, extra in (("default", {}), ("the default before 0.2.0", {"detect_model": "off"})):
+        s = Settings(state_dir=tmp_path / name, models_dir=tmp_path / "models", **extra)
+        p = Pipeline(s, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=None)
+        assert p.art_eraser is None and p.layout is None and p.gpu_releases == [], name
+        page, r = _art_page()
+        p.letter_region(page, r, "Hello")
+        out[name] = (page.tobytes(), np.asarray(p.process(sample_page, use_cache=False).image).tobytes())
+    assert out["default"] == out["the default before 0.2.0"]
 
 
 def test_the_network_has_the_checkpoints_tensors_and_keeps_the_size_it_was_given():
