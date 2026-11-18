@@ -564,11 +564,15 @@ def follow_held(window: Any) -> bool:
 
 
 def run_page_on_show(window: Any) -> RunPage | None:
-    """The page being translated, when the page area shows it (`follow_held`: not now). The only page of the run's
-    memory the window ever shows (reading is on the viewer: see the module's docstring), and only while the run
+    """The page being translated, when the page area shows it (`follow_held`: not now; beside the run, not while the
+    viewer shows another page than the one it keeps the page area for: `live._run_page_kept`). The only page of the
+    run's memory the window ever shows (reading is on the viewer: see the module's docstring), and only while the run
     translates: `_on_translation_page` takes none outside a run, and `end_follow` drops it as the run ends."""
     view = getattr(window, "_run_view", None)
-    return None if view is None or follow_held(window) else view
+    if view is None or follow_held(window):
+        return None
+    kept = getattr(window, "_run_page_kept", None)
+    return view if kept is None or kept(view) else None
 
 
 def end_follow(window: Any, redisplay: bool = True) -> bool:

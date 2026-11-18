@@ -27,7 +27,7 @@ from taslation.ui.constants import viewer_rests
 from taslation.ui.strip import RunPage
 
 from test_batch_follows_reader import desk  # noqa: F401 - (a fixture)
-from test_follow import _page, setup  # noqa: F401 - (a fixture, the viewer's stand-in pages)
+from test_follow import _count_frames, _page, setup  # noqa: F401 - (a fixture, the viewer's stand-in pages)
 
 
 # ------------------------------------------------------------------ the run's side
@@ -264,6 +264,39 @@ def test_the_busy_badge_tells_of_the_runs_page_and_goes_once_the_reader_turns_be
     assert not w.canvas.badge and w._picture()[0] is page3
     w._handle_event("translation_page", {"seq": 3, "image": lettered(page3), "frame": page3})  # the run comes to it
     assert w.canvas.badge  # its progress, on the very page the viewer shows
+
+
+def test_a_page_turned_beside_the_run_takes_the_page_area_from_the_runs_page_as_the_viewer_draws_it(setup, monkeypatch):
+    """The viewer in front, its frames counted: the run's page being translated, and its badge, leave the page area as
+    soon as the viewer draws another page - not once that page is taken, settle_ms after it stopped changing -, before
+    the reader has turned beside the run as after; back on the run's page, its progress is on show again."""
+    _count_frames(setup, monkeypatch)
+    v = setup.viewer
+    page1 = v.frames[0][1]
+    w, run = _beside_window(setup, owner="viewer", auto=False)
+    w._on_translation_page = lambda data: setattr(w, "_run_view", RunPage(data["seq"], data["frame"], data["image"]))
+    setup.clock.run(5)
+    w._run_view = RunPage(4, page1, lettered(page1))
+    run.following, run.viewer_free = False, True
+    setup.clock.run(1)
+    w._handle_event("progress", {"text": "Translating 1 bubble(s) with qwen3.5:4b..."})
+    assert w._picture()[0] is w._run_view.image and w.canvas.badge  # the run's progress on the page area
+    page2, page3 = _page(2), _page(3)
+    run.answers[id(page2)] = ViewerPage("waiting", seq=2)
+    v.frames.append((setup.clock.now + 0.2, page2))  # the reader's first turn beside the run
+    setup.clock.run(0.25)
+    assert run.asked == [] and w._picture()[0] is page2 and not w.canvas.badge  # drawn as it came, not taken yet
+    setup.clock.run(3)
+    pump(w)
+    assert run.asked == [page2] and w._beside.reading
+    w._handle_event("translation_page", {"seq": 2, "image": lettered(page2), "frame": page2})  # the run comes to it
+    assert w._picture()[0] is w._run_view.image and w.canvas.badge
+    v.frames.append((setup.clock.now + 0.2, page3))  # on from the page the run translates
+    setup.clock.run(0.25)
+    assert run.asked == [page2] and w._picture()[0] is page3 and not w.canvas.badge
+    v.frames.append((setup.clock.now + 0.1, page2))  # and back to it before page 3 was taken
+    setup.clock.run(0.15)
+    assert w._picture()[0] is w._run_view.image and w.canvas.badge
 
 
 def test_the_run_over_the_window_reads_as_ever(setup):

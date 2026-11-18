@@ -72,9 +72,9 @@ the reader's keys and clicks going on to it (`constants.viewer_rests`), and a pa
 worker runs the run, and no request may compete with it - but to the run (`BatchReader.viewer_page`, on a thread of the
 window's own, `_ask_beside`): a page the cache holds is shown lettered from it with no model at all, laid over the
 viewer's frame while it shows that page, and any other says it is not translated yet (`beside_line`). The run's page
-being translated keeps the page area until the reader turns to another page (`Beside.reading`); then the viewer's
-page has it - the run's progress, and its busy badge, only while the viewer shows the very page being translated
-(`_badge_due`) - until the run ends.
+being translated keeps the page area until the reader turns to another page (`Beside.reading`) - from the viewer's
+first frame of it on, not once it is taken (`_run_page_kept`) -; then the viewer's page has it - the run's progress,
+and its busy badge, only while the viewer shows the very page being translated (`_badge_due`) - until the run ends.
 
 Windows tells who is in front and what happens to the viewer's window (`capture.WindowEvents`, whose notes the
 heartbeat takes in: `_beat`), and `follow_decision` decides what each heartbeat does."""
@@ -917,6 +917,8 @@ class LiveViewMixin(BlackViewerMixin):
             self._redisplay()
         elif not filling:
             self._redisplay()  # the viewer back on the page being translated: it shows filling in again
+        if reads_beside(self):
+            self._show_badge()  # (beside a run, its badge goes and comes with its page: `_run_page_kept`)
 
     def _run_frame(self, image: Image.Image) -> None:
         """A frame of the viewer as a whole-book run reading the pages saw it come (``viewer_frame``: the run captures
@@ -2533,6 +2535,22 @@ class LiveViewMixin(BlackViewerMixin):
         if getattr(self, "_run_view", None) is not None:
             end_follow(self)
         return True
+
+    def _run_page_kept(self, view: Any) -> bool:
+        """Beside a run that translates (`Beside`): whether its page being translated (*view*, `strip.RunPage`) keeps
+        the page area, as the viewer's latest frame (`_live`) tells - before the reader has turned, while the viewer
+        shows the page it showed as the translation began (`Beside.base`); once the reader reads beside the run, while
+        it shows that very page (`_shows_page`, against the frame the run read). A page turned to shows as the viewer
+        draws it, not once it is taken (`_beside_page`, settle_ms after it stopped changing: on the browser-type
+        stand-in viewer the run's page stayed 0.5-0.9 s after such a turn), and the badge goes with the run's page
+        (`_show_live`, `_badge_due`)."""
+        b = getattr(self, "_beside", None)
+        live = self._live
+        if b is None or live is None:
+            return True
+        if not b.reading:
+            return b.base is None or not frames_differ(b.base, _thumb(self, live))
+        return self._shows_page(live, view.frame)
 
     # ------------------------------------------------------------------ an operation followed (events)
     def _begin_follow(self, hwnd: int, reference: Any, key: str = "", retried: bool = False, *,

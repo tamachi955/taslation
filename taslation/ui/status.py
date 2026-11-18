@@ -353,15 +353,18 @@ class StatusMixin:
 
     def _badge_due(self) -> bool:
         """Whether the busy badge belongs on the page area: it tells of the page being worked on, so beside a
-        whole-book run that translates, once the reader has turned to a page of their own (`live.Beside.reading`), only
-        while the page area shows the run's page being translated (`strip.run_page_on_show`: the very page the viewer
-        shows). The run's progress is the band's then. While the run reads the pages, whose frames the page area follows
-        as they come (`live._run_frame`), only while it shows the page being read (`live._fill_on_show`)."""
+        whole-book run that translates, once it shows a page of its own or the reader has turned to a page of their own
+        (`live.Beside.reading`), only while the page area shows the run's page being translated
+        (`strip.run_page_on_show`: not once the viewer shows another page, `live._run_page_kept`). The run's progress is
+        the band's then. While the run reads the pages, whose frames the page area follows as they come
+        (`live._run_frame`), only while it shows the page being read (`live._fill_on_show`)."""
         batch = getattr(self, "batch", None)
         if batch is not None and not getattr(batch, "viewer_free", False) and self._fill is not None:
             return self._fill_on_show()
         beside = getattr(self, "_beside", None)
-        return beside is None or not beside.reading or run_page_on_show(self) is not None
+        if beside is None or (not beside.reading and getattr(self, "_run_view", None) is None):
+            return True  # (no reading beside the run, nor a page of the run on the page area yet)
+        return run_page_on_show(self) is not None
 
     def _show_badge(self) -> None:
         """The busy badge on the page area while the busy band is on (`_busy_shown`) and it belongs there
