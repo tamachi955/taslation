@@ -75,6 +75,9 @@ class TextRegion:
     # against the rest's), measured as it is read; None = lettered at one size, or not measured (a page from the
     # cache). Memory only: it indexes the Japanese
     size_mix: Any = None
+    # the part of its translation (`translated_text`) lettered larger than the rest: (start, end, ratio), offsets into
+    # the translation and how many times the rest's size (`render.emphasis`); None = lettered at one size
+    large: tuple[int, int, float] | None = None
 
     @property
     def reused(self) -> bool:

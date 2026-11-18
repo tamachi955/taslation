@@ -18,6 +18,9 @@ per cell. Not handled: tate-chu-yoko (two or three digits set across one cell), 
 metrics (``vmtx``) and the font's own ``vert`` substitutions, emphasis marks (*stressed words* are set plain), and
 the reader's alignment left, centre or right (the columns are centred; top, middle and bottom move each column in
 its run).
+
+A part set larger (`render.emphasis`, `layout_stacked_large`) takes columns of its own, its cells as large as its
+size: the columns before it, its own, then those after it, from the right.
 """
 
 from __future__ import annotations
@@ -62,6 +65,7 @@ class Cell:
     x: float
     y: float
     shift: tuple[float, float] = (0.0, 0.0)  # of the size, right and up
+    size: int = 0  # its own size, in lettering with a part set larger (`layout_stacked_large`; 0: the lettering's)
 
 
 @dataclass
@@ -75,13 +79,15 @@ class Stacked:
     cells: list[Cell] = field(default_factory=list)
     advance: float = 0.0
     overflow: bool = False
+    fonts: dict[int, Any] = field(default_factory=dict)  # the font of each cell's own size (`Cell.size`)
 
     def box(self) -> Box | None:
         """The box the cells take (mask coordinates)."""
         if not self.cells:
             return None
         return (int(min(c.x for c in self.cells)), int(min(c.y for c in self.cells)),
-                int(max(c.x for c in self.cells) + self.size) + 1, int(max(c.y for c in self.cells) + self.size) + 1)
+                int(max(c.x + (c.size or self.size) for c in self.cells)) + 1,
+                int(max(c.y + (c.size or self.size) for c in self.cells)) + 1)
 
 
 def vertical_glyph(ch: str, path: str | None) -> tuple[str, bool]:
@@ -159,9 +165,9 @@ def _runs(inside: np.ndarray, x0: int, x1: int, cy: float, pad: int) -> tuple[in
 
 
 def _place(columns: list[list[str]], spans: list[tuple[int, int]], xs: list[float], size: int, valign: str,
-           path: str | None) -> list[Cell]:
+           path: str | None, own: int = 0) -> list[Cell]:
     """The cells of *columns*, each column at its middle *xs* in its run of *spans*, at the top, the middle or the
-    bottom of it as *valign* says."""
+    bottom of it as *valign* says (*own*: each cell's own size, `Cell.size`)."""
     out: list[Cell] = []
     for column, (top, bottom), x in zip(columns, spans, xs):
         tall = len(column) * size
@@ -175,7 +181,7 @@ def _place(columns: list[list[str]], spans: list[tuple[int, int]], xs: list[floa
                 shift = (CORNER_SHIFT, CORNER_SHIFT)
             elif ch in SMALL_KANA:
                 shift = (SMALL_SHIFT, SMALL_SHIFT)
-            out.append(Cell(shown, turned, x - size / 2.0, y + i * size, shift))
+            out.append(Cell(shown, turned, x - size / 2.0, y + i * size, shift, own))
     return out
 
 
@@ -227,6 +233,103 @@ def layout_stacked(mask: np.ndarray, text: str, font_path: str | Lettering | Non
     return Stacked(font, s, _place(columns, [(by0, by1)] * len(columns), mids, s, valign, path), advance, True)
 
 
+def layout_stacked_large(mask: np.ndarray, parts: list[tuple[str, bool]], ratio: float,
+                         font_path: str | Lettering | None, min_size: int = 9, max_size: int = 64,
+                         line_spacing: float = 1.12, bold_variation: bool = False,
+                         centre: tuple[float, float] | None = None, size: int = 0, valign: str = "middle",
+                         floor: int = 0) -> Stacked | None:
+    """Stacked lettering with a part set larger (`render.emphasis`): each paragraph of *parts* in columns of its own,
+    the part's cells *ratio* times the base's, the columns side by side from the right, each its own size times
+    *line_spacing* wide, round *centre* (the mask's centroid by default). The base the largest from *max_size* down
+    to the larger of *min_size* and *floor* (*size*: that one, fixed), the ratio shrunk at that floor where it must
+    (`emphasis.search`); None when the part cannot be set larger so (the caller stacks the text at one size)."""
+    from .emphasis import MIN_RATIO, RATIO_CAP, search
+    from .typeset import _sizes
+
+    ratio = min(RATIO_CAP, float(ratio))
+    inside = mask > 0
+    h, w = inside.shape
+    ys, xs = np.nonzero(inside)
+    if ratio < MIN_RATIO or xs.size == 0:
+        return None
+    cx, cy = centre if centre is not None else (float(xs.mean()), float(ys.mean()))
+    pad = int(round(STACK_PAD * min(h, w)))
+    path = font_path.path if isinstance(font_path, Lettering) else font_path
+    paras = [(stack_cells(text), big) for text, big in parts]
+    hi = size or max(min_size, max_size)
+    lo = size or min(hi, max(min_size, floor))
+
+    def setting(zs: list[int], counts: list[int]) -> tuple[list[Cell] | None, int, list[int]]:
+        """The cells with *counts* columns for each paragraph, or None, the paragraph that did not fit (-1: the
+        columns are wider than the mask) and the columns each used."""
+        advs = [max(1.0, z * line_spacing) for z in zs]
+        cols = [k for k, n in enumerate(counts) for _ in range(n)]
+        total = sum(advs[k] for k in cols)
+        if total > w - 2 * pad:
+            return None, -1, []
+        mids, x = [], cx + total / 2.0
+        for k in cols:
+            mids.append(x - advs[k] / 2.0)
+            x -= advs[k]
+        spans = [_runs(inside, int(round(m - zs[k] / 2.0)), int(round(m + zs[k] / 2.0)), cy, pad)
+                 for m, k in zip(mids, cols)]
+        rooms = [max(0, (b - t) // zs[k]) for (t, b), k in zip(spans, cols)]
+        cells: list[Cell] = []
+        used: list[int] = []
+        at = 0
+        for k, (paragraphs, _big) in enumerate(paras):
+            mine = rooms[at:at + counts[k]]
+            columns = fill_columns(paragraphs, mine)
+            if columns is None or not all(len(c) <= r + 1 for c, r in zip(columns, mine)):
+                return None, k, []
+            cells.extend(_place(columns, spans[at:at + len(columns)], mids[at:at + len(columns)], zs[k], valign,
+                                path, zs[k]))
+            used.append(len(columns))
+            at += counts[k]
+        return cells, -2, used
+
+    def at_size(base: int, r: float) -> list[Cell] | None:
+        big = max(base + 1, int(round(base * r)))
+        zs = [big if larger else base for _p, larger in paras]
+        counts = [1] * len(paras)
+        for _ in range(256):
+            cells, why, used = setting(zs, counts)
+            if cells is not None:
+                if used != counts:  # a column left empty: as many as are used, where that fits
+                    fewer, _why, _used = setting(zs, used)
+                    cells = fewer if fewer is not None else cells
+                return cells
+            if why < 0:
+                return None
+            counts[why] += 1
+        return None
+
+    found = search(_sizes(lo, hi), ratio, at_size)
+    if found is None:
+        return None
+    base, big, cells = found
+    fonts = {z: styled_font(font_path, z, bold_variation) for z in (base, big)}
+    return Stacked(fonts[base], base, cells, max(1.0, base * line_spacing), False, fonts)
+
+
+def letter_stacked_large(image: Image.Image | None, region: TextRegion, parts: list[tuple[str, bool]], ratio: float,
+                         font_path: str | Lettering | None, min_size: int = 9, max_size: int = 64,
+                         line_spacing: float = 1.12, color: tuple[int, int, int] = (0, 0, 0),
+                         bold_variation: bool = False, outline: bool | None = None,
+                         centre: tuple[float, float] | None = None, size: int = 0, valign: str = "middle",
+                         busy: Any = None, outline_color: tuple[int, int, int] | None = None,
+                         floor: int = 0) -> int | None:
+    """`letter_stacked` with a part set larger (`layout_stacked_large`; on no *image*: only how large): the base's
+    size, or None when the part cannot be set larger (nothing drawn)."""
+    stacked = layout_stacked_large(region.mask, parts, ratio, font_path, min_size, max_size, line_spacing,
+                                   bold_variation, centre, size, valign, floor)
+    if stacked is None:
+        return None
+    if image is not None:
+        draw_stacked(image, region, stacked, color, outline, busy or (lambda _im, _box: False), outline_color)
+    return stacked.size
+
+
 def _draw_cell(image: Image.Image, font: Any, size: int, cell: Cell, x0: float, y0: float,
                fill: Any, outline: tuple[Any, int] | None) -> None:
     """One cell drawn on *image* at (x0, y0) plus its place: the glyph in the middle of its cell (moved by its
@@ -265,13 +368,23 @@ def draw_stacked(image: Image.Image, region: TextRegion, stacked: Stacked, color
         light = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2] >= 128
         outline_color = (0, 0, 0) if light else (255, 255, 255)
     contour = (tuple(outline_color), max(1, round(size / 12))) if outline else None
+
+    def own(cell: Cell) -> tuple[Any, int, tuple[Any, int] | None]:
+        """A cell's font, size and outline: its own size's (`Cell.size`), the outline as wide as that size wants."""
+        if not cell.size:
+            return font, size, contour
+        return (stacked.fonts[cell.size], cell.size,
+                (contour[0], max(1, round(cell.size / 12))) if contour is not None else None)
+
     if not stacked.overflow:
         for cell in stacked.cells:
-            _draw_cell(image, font, size, cell, region.x0, region.y0, color, contour)
+            f, z, c = own(cell)
+            _draw_cell(image, f, z, cell, region.x0, region.y0, color, c)
         return
     part = image.crop((region.x0, region.y0, region.x1, region.y1))
     for cell in stacked.cells:
-        _draw_cell(part, font, size, cell, 0, 0, color, contour)
+        f, z, c = own(cell)
+        _draw_cell(part, f, z, cell, 0, 0, color, c)
     mask = region.mask
     if mask.shape != (part.height, part.width):
         mask = cv2.resize(mask, (part.width, part.height), interpolation=cv2.INTER_NEAREST)

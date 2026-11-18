@@ -2,7 +2,7 @@
 bubble without an emphasis: sample pages lettered by the pipeline (`Pipeline._render`: the erase, the page's caps,
 the rooms of bubbles that overlap) and sample bubbles lettered by the typesetter (`letter_text`: stacked, slanted,
 turned, formatted, in capitals, outlined, in shaped and other scripts), their pixels' digests against goldens made
-from the code before the emphasis (`tests/data/lettering_identity.json`). The goldens hold on the fonts they were
+from the code before the emphasis (`tests/fixtures/lettering_identity.json`). The goldens hold on the fonts they were
 made with: on a computer whose font files differ (another system, another version of a font) the cases are skipped.
 
 ``python tests/test_lettering_identity.py --write`` writes the goldens anew (only ever from code known to letter as

@@ -166,6 +166,7 @@ CHAR_GROW = 0.15  # of a glyph: how far past the reading's character box the let
 LOOSE_KINDS = ("text", "text-dark")  # lettering with nothing round it (a closed block is "text-on-page", "text-on-dark")
 ON_ART_KINDS = ("text", "text-dark", "text-on-page", "text-on-dark")  # lettering set on the page's ground
 DISPLAY_KIND = "shout"  # (one of `UNCAPPED_KINDS`) the kind display lettering on the art is capped as
+OWN_PART: Any = object()  # `Pipeline._set_text`: the region's own part set larger (`TextRegion.large`), if any
 ROOM_GLYPHS = 2.0  # a model's single line of lettering on the page is lettered in a room grown by this many glyphs
 ONE_LINE = 0.5  # a glyph this share of its lettering box's short side: the lettering is one column (or row)
 LARGE_LETTERING = 2.0  # glyphs this many times the book's usual size (the readable one at least) are display lettering
@@ -4030,7 +4031,7 @@ class Pipeline:
         return lettering.formatted(style.italic, style.bold, style.letter_spacing), flags
 
     def _set_text(self, image: Image.Image, region: TextRegion, text: str, background: tuple[int, int, int],
-                  style: RegionStyle | None, scaled: bool = True) -> Lettered:
+                  style: RegionStyle | None, scaled: bool = True, part: Any = OWN_PART) -> Lettered:
         """Letter *text* in *region* on *image* (erased already, *background* its colour): the one place a region's
         text is typeset, in the lettering of its kind as the series sheet gives it, formatted as the reader set it
         in the region editor (*style*; None or an empty one: the automatic lettering), at the slant the reader set
@@ -4038,11 +4039,22 @@ class Pipeline:
         direction set there (`RegionStyle.direction`: across, turned a quarter, or stacked), in the ink set there or
         else the one the sheet gives its kind (`annotations.ink_of`: the text colour, the outline and its colour, each
         automatic when neither sets it); with *scaled* at the lettering size (`_scaled_top`; `cap_sizes` measures the
-        page's sizes without it, as they fit)."""
+        page's sizes without it, as they fit). *part*: the part of *text* set larger (`TextRegion.large`; by default
+        the region's own when *text* is its translation; None: none), never under the readable size
+        (`render.emphasis`)."""
         s = self.settings
         colour, outline, outline_colour = ink_of(style, self.kind_lettering(region.tag))
         lettering, flags = self.region_lettering(text, region.tag, style)
-        text = drawable(lettering.path, text)
+        if part is OWN_PART:
+            part = region.large if text == region.translated_text else None
+        if part:  # each piece drawable on its own, the part's offsets kept on the text drawn
+            a, b, ratio = part
+            pieces = [drawable(lettering.path, t) for t in (text[:a], text[a:b], text[b:])]
+            text = "".join(pieces)
+            part = (len(pieces[0]), len(pieces[0]) + len(pieces[1]), ratio)
+        else:
+            part = None
+            text = drawable(lettering.path, text)
         large = self._display_size()
         region = in_own_room(_art_room(region, image.size if image is not None else None, large))
         fmt = None if style is None or style.formats_nothing else TextFormat(style.align, style.valign, style.size,
@@ -4054,14 +4066,15 @@ class Pipeline:
         top = min(s.max_font_size, region.size_cap) if capped else s.max_font_size
         direction = style.direction if style is not None else ""
         if scaled and (fmt is None or not fmt.size):  # (a size the reader set is kept as set)
-            top = self._scaled_top(region, text, lettering, top, background, fmt, direction)
+            top = self._scaled_top(region, text, lettering, top, background, fmt, direction, part)
         done = letter_text(image, region, text, lettering, s.min_font_size, top, s.line_spacing, s.uppercase,
                            background, False, s.target_language, outline, fmt=fmt, direction=direction,
-                           color=ink_rgb(colour), outline_color=ink_rgb(outline_colour))
+                           color=ink_rgb(colour), outline_color=ink_rgb(outline_colour), large=part,
+                           floor=s.readable_font_size)
         return Lettered(done.size, flags + done.flags, done.won)
 
     def _scaled_top(self, region: TextRegion, text: str, lettering: Any, top: int, background: tuple[int, int, int],
-                    fmt: TextFormat | None, direction: str) -> int:
+                    fmt: TextFormat | None, direction: str, part: tuple[int, int, float] | None = None) -> int:
         """The largest size *text* may be set at in *region* with the lettering size (`Settings.text_scale`, the
         book's own when it has one) applied to *top*, the largest it may be set at as it fits: under 1.0 the size it
         would be set at (found without drawing) times the scale, over 1.0 *top* times the scale (the bubble still
@@ -4073,7 +4086,8 @@ class Pipeline:
         if scale > 1.0:
             return max(s.min_font_size, min(s.max_font_size, round(top * scale)))
         size = letter_text(None, region, text, lettering, s.min_font_size, top, s.line_spacing, s.uppercase,
-                           background, False, s.target_language, fmt=fmt, direction=direction).size
+                           background, False, s.target_language, fmt=fmt, direction=direction, large=part,
+                           floor=s.readable_font_size).size
         return max(s.min_font_size, min(top, round(size * scale))) if size else top
 
     def _display_size(self) -> float:

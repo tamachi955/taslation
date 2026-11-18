@@ -72,6 +72,10 @@ quarter clockwise to read from the top down or a quarter the other way to read f
 always in the region's frame turned, its width and height swapped, then turned onto the page by `render.slant`
 with the slant added: `QUARTER_TURNS`), or stacked in columns of upright glyphs (`render.vertical`). Auto and
 horizontal letter the region as before, byte for byte.
+
+A translation with a part set larger (`TextRegion.large`: the counterpart of Japanese lettered larger than the rest
+of its bubble) is set by `render.emphasis` in paragraphs of their own sizes, where the part fits so; a text without
+one, and one whose part does not fit, is lettered here as always.
 """
 
 from __future__ import annotations
@@ -2234,7 +2238,8 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
                 uppercase: bool = False, background: tuple[int, int, int] = (255, 255, 255),
                 bold_variation: bool = False, language: str = "", outline: bool | None = None,
                 fmt: TextFormat | None = None, *, hyphenate: bool = True, condense: bool = True,
-                direction: str = "", color: Colour | None = None, outline_color: Colour | None = None) -> Lettered:
+                direction: str = "", color: Colour | None = None, outline_color: Colour | None = None,
+                large: tuple[int, int, float] | None = None, floor: int = 0) -> Lettered:
     """Draw *text* inside the bubble (on no *image*: only find out how it would be set): as layout_text sets it (at the limit hyphenated or condensed when *hyphenate*,
     *condense* allow it), or with *fmt* as the reader formatted it (layout_formatted; a text that does not fit at its
     size is cut at the bubble's edge and said, `NO_FIT`). *font_path* may be a Lettering (italic, bold, the cuts for
@@ -2248,10 +2253,17 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     *direction* is the region's text direction (`annotations.DIRECTIONS`): "" and "horizontal" set the lines across
     as always; "down" and "up" set them across in the region's frame turned a quarter (`QUARTER_TURNS`: its width
     and height swapped) and turn them onto the page, through `render.slant` as a slant is, the slant added; "stacked"
-    sets them in columns (`render.vertical`), in the slanted frame when there is a slant."""
+    sets them in columns (`render.vertical`), in the slanted frame when there is a slant.
+
+    *large* (start, end, ratio: offsets into *text*, `TextRegion.large`) sets that part of the text larger, as its own
+    paragraph, the rest at a base size never under *floor* (`render.emphasis`; the size returned is the base's); where
+    it cannot be set so, or is none, the text is lettered as without it."""
+    lead = len(text) - len(text.lstrip())
     text = text.strip()
     if not text:
         return Lettered(0)
+    if large is not None:
+        large = (large[0] - lead, large[1] - lead, large[2])
     quarter = QUARTER_TURNS.get(direction, 0.0)
     angle = getattr(region, "angle", 0.0) + quarter
     if angle:  # slanted or turned lettering: set in the region's own frame, turned onto the page
@@ -2265,14 +2277,28 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
         return letter_slanted(image, turned, lambda im, upright: letter_text(
             im, upright, text, font_path, min_size, max_size, line_spacing, uppercase, background, bold_variation,
             language, outline, fmt, hyphenate=hyphenate, condense=condense, direction=inner, color=color,
-            outline_color=outline_color))
+            outline_color=outline_color, large=large, floor=floor))
     script = script_of(text, language)
+    parts = None
+    if large is not None:
+        from . import emphasis
+
+        parts = emphasis.parts_of(text, large)
     if uppercase and script == "lgc":  # a capital the font lacks is drawn as `fonts.drawable` draws it, as a small one was
-        text = drawable(font_path.path if isinstance(font_path, Lettering) else font_path, text.upper())
+        path = font_path.path if isinstance(font_path, Lettering) else font_path
+        text = drawable(path, text.upper())
+        if parts is not None:
+            parts = [(drawable(path, part.upper()), big) for part, big in parts]
     tx0, ty0, tx1, ty1 = region.letter_box or region.text_box
     anchor = (tx0 - region.x0, ty0 - region.y0, tx1 - region.x0, ty1 - region.y0)
     on_page = region.kind in ("text", "text-dark")
     color = ground_ink(background) if color is None else tuple(color)  # type: ignore[assignment]
+    if parts is not None and large is not None:  # a part set larger, where it can be (else as without one)
+        done = emphasis.letter_large(image, region, parts, emphasis.ratio_of(large), font_path, min_size, max_size,
+                                     line_spacing, bold_variation, script, outline, fmt, direction, color,
+                                     outline_color, on_page, anchor, floor)
+        if done is not None:
+            return done
     if direction == "stacked":  # vertical writing, column by column
         from . import vertical
 
