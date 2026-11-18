@@ -535,6 +535,17 @@ def crispness(image: Image.Image, box: tuple[int, int, int, int] | None = None) 
     return fine / wide if wide > 0 else 0.0
 
 
+def looks_sharp(crisp: float, soft: Sequence[float], sharp: Sequence[float]) -> bool:
+    """Whether a picture whose `crispness` is *crisp* is nearer that of the sharp pictures a viewer drew (*sharp*) than
+    that of the soft ones it drew first (*soft*), on a geometric scale: how a picture of a viewer that draws a page
+    soft first is judged, by a whole-book run (`PageWatch`) and by the live view (`ui.live`). False while either is
+    not known."""
+    if not soft or not sharp:
+        return False
+    lo, hi = float(np.median(soft)), float(np.median(sharp))
+    return hi > lo and crisp >= (lo * hi) ** 0.5
+
+
 TAKE, MISSED, SHARPER_TAKEN = "take", "missed", "sharper"  # what `PageWatch` decides
 
 
@@ -662,8 +673,7 @@ class PageWatch:
             return False
         if s.crisp is None:
             s.crisp = self.crisp_of(s.image)
-        soft, sharp = float(np.median(self.soft)), float(np.median(self.sharp))
-        return sharp > soft and s.crisp >= (soft * sharp) ** 0.5
+        return looks_sharp(s.crisp, self.soft, self.sharp)
 
     def _learn(self, soft: Image.Image, sharp: Image.Image) -> None:
         self.soft_first = True

@@ -662,6 +662,56 @@ def test_a_page_turned_in_the_viewer_is_followed_at_its_first_frame(setup, monke
     assert len(v.captures) <= captures + 1 + 30 // 0.7  # no new frame: polled every auto_interval_ms, as before
 
 
+def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_on_its_sharp_frame(setup, monkeypatch):
+    """The viewer in front, its frames counted, the book's cache holding every page: the first page drawn soft first
+    is taken on its soft frame, as nothing says yet that this viewer draws so, and read again from its sharp one -
+    what the window learns the viewer's soft and sharp pictures by (`batch.crispness`). From then on a soft frame of a
+    page the cache holds is not lettered: the page is taken on its sharp frame as that comes, which the window learns
+    by as well; a page drawn sharp at once is taken at once, as ever. Another viewer chosen has learnt nothing."""
+    _count_frames(setup, monkeypatch)
+    v = setup.viewer
+    w = setup.make(owner="viewer")
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    setup.clock.run(2)
+    w._all_cached = lambda image: True
+    f = w._following
+    soft, sharp = _page(7, soft=3), _page(7)
+    turned = setup.clock.now + 0.3
+    v.frames += [(turned, soft), (turned + 0.25, sharp)]
+    setup.clock.run(0.4)
+    assert w.new_pages[-1][1] is soft and not w._looks_soft(soft)  # taken on its first frame: nothing learnt yet
+    setup.clock.run(0.3)
+    assert f.soft_of == VIEWER.hwnd and len(f.soft) == len(f.sharp) == 1  # come sharper: this viewer draws soft first
+    w.job_done(PageResult(image=soft.copy(), original=soft.copy(), regions=[], cache_hits=1))
+    assert w.new_pages[-1][1] is sharp
+    w.job_done()
+    setup.clock.run(2)
+
+    pages = len(w.new_pages)
+    soft, sharp = _page(8, soft=3), _page(8)
+    turned = setup.clock.now + 0.3
+    v.frames += [(turned, soft), (turned + 0.25, sharp)]
+    setup.clock.run(0.5)
+    assert len(w.new_pages) == pages and w._live is soft and w._looks_soft(soft)  # on the page as it is, unlettered
+    setup.clock.run(0.1)
+    assert [p for _t, p in w.new_pages[pages:]] == [sharp] and w.new_pages[-1][0] - (turned + 0.25) <= 0.03
+    assert len(f.soft) == len(f.sharp) == 2  # (learnt from as it settled)
+    w.job_done()
+    setup.clock.run(2)
+
+    page = _page(9)
+    turned = setup.clock.now + 0.3
+    v.frames.append((turned, page))  # drawn sharp at once: taken on its first frame
+    setup.clock.run(0.4)
+    assert w.new_pages[-1][1] is page and w.new_pages[-1][0] - turned <= 0.03 and not w._looks_soft(page)
+    w.job_done()
+    w.selected = WindowInfo(hwnd=8, title="Another - Google Chrome", class_name="Chrome_WidgetWin_1", pid=8,
+                            rect=(0, 0, 960, 720))
+    assert not w._looks_soft(_page(10, soft=3))  # another viewer: judged by nothing it has not drawn
+
+
 def test_a_frames_thumbnail_from_its_pixels_is_the_batchs_own():
     """The live view takes a frame's pixels out of the picture once (`live.FrameFacts`) and makes its thumbnail from
     them (`live.thumbnail_of`): the very values `batch.thumbnail` gives, which the whole-book run and the pages kept

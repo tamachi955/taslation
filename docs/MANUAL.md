@@ -27,7 +27,9 @@ Everyday use is explained in the app, under "Help > How to use...". This manual 
 
 The window shows the viewer's current display without watching the viewer all the time. When you turn a page from TASlation, it looks right after and once more one second later,
 so even with a viewer that first draws a blurred picture (a viewer read in a browser, for example), it reads from the sharp picture.
-A page whose translations are all in the cache is shown from the cache as soon as the new picture arrives, without an untranslated picture in between. In translator mode,
+A page whose translations are all in the cache is shown from the cache as soon as the new picture arrives, without an untranslated picture in between.
+With a viewer that has drawn a blurred picture first, though, a blurred picture shows as it is, and the page is shown from the cache as soon as the sharp picture arrives
+(on a blurred picture only some of the bubbles are found, and the translations would sit off their places). In translator mode,
 once the picture has settled (no new picture for 0.4 seconds), the page is read once more and the bubbles not in the cache are added.
 While you operate the viewer directly, it looks every 0.7 seconds, and while neither window is in front, it does not look (after a move, a tab switch
 or a scroll it looks once). Windows tells it which window is in front, so it does not read the contents of other windows.

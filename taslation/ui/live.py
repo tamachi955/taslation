@@ -39,8 +39,11 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
 * a page whose every unit is in the cache is taken on its first changed frame, without the wait for it to settle
   (`_take_at_once`: drawn from the cache, nothing read from the frame), and looked at every FOLLOW_STEP_MS for
   RECHECK_MS after: a viewer that draws a soft picture first has it replaced by the sharp one as soon as that comes
-  (`_retake`), and the job on the soft frame, cancelled or done, adds nothing to the cache; in translator mode the
-  page is completed from what it reads once its frame has settled (`_completion`);
+  (`_retake`), and the job on the soft frame, cancelled or done, adds nothing to the cache. Once the viewer has drawn
+  a page soft first (`_drew_soft`), a frame that looks soft by its own soft and sharp pictures (`_looks_soft`) is not
+  taken so: the sharp frame is, as it comes, so that the lettering goes on the page once, where the sharp picture has
+  its bubbles. In translator mode the page is completed from what it reads once its frame has settled
+  (`_completion`);
 * once when TASlation or the viewer comes back to the front, once the viewer's window or TASlation's own stops moving
   (maximised over the viewer, TASlation may make it stop drawing), at once as well when the viewer's window is given
   another size (`_take_notes`: the capture's first frame of the new size may be all that comes, `wgc.restart`), when
@@ -81,6 +84,7 @@ from __future__ import annotations
 import threading
 import time
 import tkinter as tk
+from collections import deque
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -91,7 +95,7 @@ from PIL import Image
 
 from .. import fingerprint as fp
 from .. import recovery
-from ..batch import detail, frames_differ, lower_priority, sharper, thumbnail
+from ..batch import CRISP_KEPT, crispness, detail, frames_differ, looks_sharp, lower_priority, sharper, thumbnail
 from ..capture.windows import BROWSER_CLASSES, covered_by_opaque, window_class
 from ..capture import (
     IS_WINDOWS,
@@ -317,6 +321,13 @@ def _detail(window: Any, image: Image.Image, box: Any) -> np.ndarray:
     return facts.get(("detail", box), lambda: detail(image, box))
 
 
+def _crisp(window: Any, image: Image.Image, box: Any) -> float:
+    """`batch.crispness` of *image* in *box*."""
+    facts = _facts(window, image)
+    box = tuple(box) if box is not None else None
+    return facts.get(("crisp", box), lambda: crispness(image, box))
+
+
 def _units(window: Any, image: Image.Image, margins: Any) -> list[Any]:
     """`fingerprint.analyze` of *image* in the capture area *margins* (shared: never change what it gives). The
     analysis is kept by `fingerprint.analyze` as well, so that the page job that reads this frame takes its units
@@ -378,7 +389,8 @@ class Operation:
     started: float = 0.0
     phase: str = "change"  # "change", "settle", "recheck"
     last: np.ndarray | None = None  # "settle": the frame before ...
-    last_detail: np.ndarray | None = None  # ... and its fine detail
+    last_detail: np.ndarray | None = None  # ... its fine detail ...
+    last_image: Image.Image | None = None  # ... and its capture
     settles: int = 0
     job: str | None = None  # the after() of its next step
     operation: bool = True  # after TASlation's own operation (False: a look found the page changing)
@@ -433,6 +445,11 @@ class Following:
     taken: Taken | None = None  # the page taken last, while a sharper frame of it may come
     retake: Taken | None = None  # such a sharper frame, read once the job on the softer one is done
     unseen: bool = True  # the viewer chosen has no picture on the page yet: it is looked at whoever is in front
+    # a viewer that has drawn a page soft first (`_drew_soft`): its window, and the `batch.crispness` of the soft
+    # pictures it drew and of their sharp ones, what its frames are judged by (`_looks_soft`)
+    soft_of: int | None = None
+    soft: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
+    sharp: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
 
 
 @dataclass
@@ -1091,8 +1108,12 @@ class LiveViewMixin(BlackViewerMixin):
         a frame still on its way is read for nothing. A frame not *shown* yet becomes the live frame without being
         drawn: the page goes from the old page's translation to the new one's, not by way of the untranslated page
         (drawing a full-screen frame took some 40 ms, measured). False when the page is not wholly in the cache (then
-        it settles first, as ever)."""
-        if not self._all_cached(image):
+        it settles first, as ever), and for a soft picture of a viewer that draws a page soft first (`_looks_soft`):
+        the page is taken at once on its sharp frame as that comes, or as it settles. What the cache held was lettered
+        where the soft picture let its bubbles be found: on the browser-type stand-in viewer a quarter of them (11 of
+        44 over 4 pages), 2-25 px (median 10) from where the sharp picture has them, and that left the page as the
+        sharp picture came, for 0.2-1.6 s until it was read; the soft picture stays 0.15-0.45 s there."""
+        if not self._all_cached(image) or self._looks_soft(image):
             return False
         if not shown:
             self._quiet_live(image, thumb)
@@ -2049,7 +2070,35 @@ class LiveViewMixin(BlackViewerMixin):
         soft = f.taken.frame if f.taken is not None else None
         f.taken = None
         f.retake = Taken(image, thumb, frame_detail, time.monotonic(), soft)
+        if soft is not None:
+            self._drew_soft(soft, image)
         self._take_retake(image, thumb)
+
+    def _drew_soft(self, soft: Image.Image, sharp: Image.Image) -> None:
+        """The viewer chosen has drawn a page soft first: *soft*, then its sharp picture *sharp* (`batch.sharper`). The
+        `crispness` of both is kept with the viewer's window, CRISP_KEPT of each at most - what its frames are judged
+        by (`_looks_soft`); a window chosen anew starts afresh, as a whole-book run does (`batch.PageWatch`)."""
+        win = self.selected
+        if win is None:
+            return
+        f = self._following
+        if f.soft_of != win.hwnd:
+            f.soft_of = win.hwnd
+            f.soft.clear()
+            f.sharp.clear()
+        f.soft.append(_crisp(self, soft, self._area_box(soft)))
+        f.sharp.append(_crisp(self, sharp, self._area_box(sharp)))
+
+    def _looks_soft(self, image: Image.Image) -> bool:
+        """Whether *image*, a frame of the viewer chosen, is a soft picture of its page by what that viewer has drawn:
+        it has drawn a page soft first (`_drew_soft`), and the frame's `crispness` is not nearer that of its sharp
+        pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its frames). Never so for
+        a viewer not seen to draw a page soft first: it pays nothing."""
+        f = self._following
+        win = self.selected
+        if win is None or f.soft_of != win.hwnd or not f.soft:
+            return False
+        return not looks_sharp(_crisp(self, image, self._area_box(image)), f.soft, f.sharp)
 
     def _take_retake(self, image: Image.Image, thumb: np.ndarray) -> None:
         """The sharper frame read as the page (`_retake`), once nothing runs: the job on the softer frame is cancelled
@@ -2527,7 +2576,7 @@ class LiveViewMixin(BlackViewerMixin):
         counted from the look that saw the frame (`Look.at`); its frames not counted, it is looked at every
         FOLLOW_STEP_MS meanwhile (`_watched`). The count is the one before that look's capture, so that a frame that
         came during it is captured at the next step."""
-        op.phase, op.last, op.last_detail, op.settles = "settle", thumb, frame_detail, 0
+        op.phase, op.last, op.last_detail, op.last_image, op.settles = "settle", thumb, frame_detail, image, 0
         look = getattr(self, "_look_now", None)
         seen = look is not None and image is not None and look.image is image
         op.last_at = op.settle_from = look.at if seen else now
@@ -2637,7 +2686,10 @@ class LiveViewMixin(BlackViewerMixin):
         self._show_live(image, thumb)
         f.seen = thumb
         if op.phase == "settle":
-            moving = frames_differ(op.last, thumb, SAME_PICTURE) or sharper(op.last_detail, frame_detail)
+            sharpened = sharper(op.last_detail, frame_detail)
+            moving = sharpened or frames_differ(op.last, thumb, SAME_PICTURE)
+            if sharpened and op.last_image is not None and not frames_differ(op.last, thumb):
+                self._drew_soft(op.last_image, image)  # (the page come sharper as it settles: drawn soft first)
             if not moving:
                 self._frame_seen(op, fresh=True)
             if op.turned_at is not None and not op.twice:  # after a key pressed for real: does it turn once more?
@@ -2663,14 +2715,14 @@ class LiveViewMixin(BlackViewerMixin):
             if counted or self._watched(op):  # settled once unchanged for `_settle_s` (frames counted: at each new
                 step = FRAME_STEP_MS if counted else FOLLOW_STEP_MS  # frame; else looked at every FOLLOW_STEP_MS)
                 if moving and now - op.settle_from < SETTLE_TRIES * settle_s:
-                    op.last, op.last_detail, op.last_at = thumb, frame_detail, now
+                    op.last, op.last_detail, op.last_image, op.last_at = thumb, frame_detail, image, now
                     self._next_step(op, step)
                     return
                 if not moving and now - op.last_at < self._settle_s(op):
                     self._next_step(op, step)
                     return
             elif (moving or waiting) and op.settles < SETTLE_TRIES:
-                op.last, op.last_detail, op.settles = thumb, frame_detail, op.settles + 1
+                op.last, op.last_detail, op.last_image, op.settles = thumb, frame_detail, image, op.settles + 1
                 if moving:
                     op.last_at = now
                 self._next_step(op, round(self._settle_s(op) * 1000))
