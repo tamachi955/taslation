@@ -53,7 +53,10 @@ Lettering
 
 Speed and memory
 
-* The translation model loads while the window starts, and the OCR readers run on the GPU where it has room.
+* The translation model loads while the window starts, and the OCR readers run on the GPU where it has room, on a
+  6 GB card too beside the layout model and the inpainting. The inpainting gives back the GPU memory it leaves idle.
+* When the GPU runs out of memory, the OCR readers, the layout model and the inpainting go on on the CPU only until
+  the GPU memory is next let go, no longer until TASlation is closed.
 * Ollama runs only while TASlation needs it, unless the person runs it themselves. Tools → "Release the model now" gives
   the GPU memory back at once.
 
