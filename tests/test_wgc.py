@@ -696,6 +696,7 @@ class Foreground:
         monkeypatch.setattr(windows, "give_foreground", self.give)
         monkeypatch.setattr(windows, "press_key", self.press)
         monkeypatch.setattr(windows, "_redrawn_after_focus", lambda _hwnd: None)
+        monkeypatch.setattr(windows, "_keys_read", lambda hwnd: self.calls.append(("read", hwnd)))
         monkeypatch.setattr(windows, "FOREGROUND_STEP_S", 0.0)
         monkeypatch.setattr(windows, "window_class", lambda _hwnd: "Other")
 
@@ -716,13 +717,13 @@ class Foreground:
 def test_the_hand_back_is_no_alt_tap(monkeypatch):
     f = Foreground(monkeypatch)
     assert windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("press", "F11"), ("give", 9)]
+    assert f.calls == [("give", 5), ("press", "F11"), ("read", 5), ("give", 9)]
 
 
 def test_a_foreground_refused_once_is_asked_for_again_and_the_key_waits_for_it(monkeypatch):
     f = Foreground(monkeypatch, refusing=1)
     assert windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("give", 5), ("press", "F11"), ("give", 9)]
+    assert f.calls == [("give", 5), ("give", 5), ("press", "F11"), ("read", 5), ("give", 9)]
 
 
 def test_a_foreground_that_never_comes_presses_nothing_and_says_so(monkeypatch):
@@ -743,7 +744,7 @@ def test_keys_gathered_go_in_one_handover_in_order(monkeypatch):
     f = Foreground(monkeypatch)
     monkeypatch.setattr(windows, "KEY_SETTLE_S", 0.0)
     assert windows.press_briefly(5, ["Left", "Left", "Right"])
-    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Left"), ("press", "Right"), ("give", 9)]
+    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Left"), ("press", "Right"), ("read", 5), ("give", 9)]
 
 
 def test_a_key_refused_in_a_handover_ends_it(monkeypatch):
@@ -752,7 +753,7 @@ def test_a_key_refused_in_a_handover_ends_it(monkeypatch):
     keys = iter([True, False, True])
     monkeypatch.setattr(windows, "press_key", lambda hwnd, key: f.calls.append(("press", key)) or next(keys))
     assert windows.press_briefly(5, ["Left", "Right", "Up"])  # the first was delivered
-    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Right"), ("give", 9)]
+    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Right"), ("read", 5), ("give", 9)]
     assert not windows.press_briefly(5, [])  # no key: nothing at all
 
 
@@ -761,6 +762,40 @@ def test_a_window_with_the_foreground_keeps_it(monkeypatch):
     f.front = 5
     assert windows.press_briefly(5, "F11")
     assert f.calls == [("give", 5), ("press", "F11")]
+
+
+def _answers(monkeypatch, *answers):
+    """WM_NULL sent to a window that answers as *answers* say, one after the other (a time it takes, or None: it
+    does not answer); what was sent is kept."""
+    sent, clock = [], [0.0]
+
+    def send(hwnd, message, _w, _l, flags, timeout_ms, _result):
+        sent.append((hwnd, message, flags, timeout_ms))
+        took = answers[len(sent) - 1]
+        clock[0] += (timeout_ms / 1000) if took is None else took
+        return 0 if took is None else 1
+
+    monkeypatch.setattr(windows, "user32", SimpleNamespace(SendMessageTimeoutW=send))
+    monkeypatch.setattr(windows, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    return sent
+
+
+def test_the_foreground_goes_back_once_the_window_came_to_its_messages_twice(monkeypatch):
+    sent = _answers(monkeypatch, 0.0, 0.0)
+    windows._keys_read(5)
+    assert sent == [(5, windows.WM_NULL, windows.SMTO_ABORTIFHUNG, 500)] * 2
+
+
+def test_a_window_busy_for_a_while_is_waited_for_within_the_limit(monkeypatch):
+    sent = _answers(monkeypatch, 0.3, 0.0)
+    windows._keys_read(5)
+    assert [timeout for *_, timeout in sent] == [500, 200]  # (one limit for both)
+
+
+def test_a_window_that_does_not_answer_is_not_waited_for_again(monkeypatch):
+    sent = _answers(monkeypatch, None)
+    windows._keys_read(5)
+    assert len(sent) == 1
 
 
 # ------------------------------------------------------------------ the real thing

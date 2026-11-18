@@ -72,7 +72,8 @@ and then gives the focus back, but only when the viewer's picture has not change
 within those 3 seconds are not lost: each of them is pressed for real too, in order, one page each. If two pages were turned even so,
 the status line says so and shows the key that goes back one page. Which way of passing the key turned the page is recorded per viewer in `profiles.json`,
 and from then on that way is used from the first key (the 3-second wait happens only the first time with that viewer). A key sent straight to a browser while it is not in front does not reach it
-(0 out of 9 times, tried with Chrome and Edge). So a browser is brought to the front for a moment every time and the key is pressed for real; when it cannot be brought to the front, nothing is sent,
+(0 out of 9 times, tried with Chrome and Edge). So a browser is brought to the front for a moment every time and the key is pressed for real, and the focus
+comes back once the browser has read the key; when it cannot be brought to the front, nothing is sent,
 and you are told "click the book and turn the page there". To read large, use TASlation's reading mode (F11).
 The viewer's own full-screen display is optional; if you use it, switch it yourself, inside the viewer (see "Over a full-screen viewer", next).
 

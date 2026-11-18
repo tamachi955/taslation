@@ -68,6 +68,7 @@ def _press(monkeypatch, front, covered, browser=True):
     monkeypatch.setattr(windows, "_reach_foreground", lambda _h: True)
     monkeypatch.setattr(windows, "press_key", lambda _h, _k: True)
     monkeypatch.setattr(windows, "give_foreground", lambda _h: True)
+    monkeypatch.setattr(windows, "_keys_read", lambda _h: None)
     monkeypatch.setattr(windows, "KEY_SETTLE_S", 0)
     monkeypatch.setattr(windows, "window_class", lambda _h: "Chrome_WidgetWin_1" if browser else "Other")
     monkeypatch.setattr(windows, "covered_by_opaque", lambda _h: covered)

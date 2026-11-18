@@ -395,6 +395,9 @@ if IS_WINDOWS:
     user32.BringWindowToTop.restype = wintypes.BOOL
     user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     user32.AttachThreadInput.restype = wintypes.BOOL
+    user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                                           wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+    user32.SendMessageTimeoutW.restype = wintypes.LPARAM
     WINEVENTPROC = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND, wintypes.LONG,
                                       wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
     user32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.HMODULE, WINEVENTPROC,
@@ -1169,6 +1172,8 @@ FOREGROUND_STEP_S = 0.03  # ... how often that is tried meanwhile
 REDRAW_STARTS_S = 1.0  # no black frame this long after the foreground came: nothing is being drawn anew (late at times)
 REDRAW_WAIT_S = 2.5  # the longest a key waits for it (a black page of the book is black all this time)
 REDRAW_STEP_S = 0.05  # how often the latest frame is looked at meanwhile
+KEY_READ_WAIT_S = 0.5  # the longest the foreground stays after a brief press for the window to come to its messages
+WM_NULL, SMTO_ABORTIFHUNG = 0x0000, 0x0002
 
 
 def is_fullscreen(hwnd: int) -> bool:
@@ -1222,6 +1227,23 @@ def _redrawn_after_focus(hwnd: int) -> None:
         if spent >= REDRAW_WAIT_S or (not seen and spent >= REDRAW_STARTS_S):
             return
         time.sleep(REDRAW_STEP_S)
+
+
+def _keys_read(hwnd: int) -> None:
+    """Back once the thread of the window *hwnd*, which keys were just pressed in, has come to its messages twice (a
+    WM_NULL sent and answered each time, `SendMessageTimeoutW`): a thread answers only when it comes to read its
+    messages, so the first answer says it is no longer busy and goes on to the keys waiting in its queue, the second
+    that it has come back from them. KEY_READ_WAIT_S at most for both, no wait for a window that does not answer
+    (SMTO_ABORTIFHUNG). Without it the foreground went back KEY_SETTLE_S after the keys whether the window had read
+    them or not: a window busy a moment longer (a browser drawing itself on getting the foreground, a computer at work
+    on a page) would read them once it had lost the foreground, when they may reach nothing."""
+    deadline = time.monotonic() + KEY_READ_WAIT_S
+    answer = ctypes.c_size_t()
+    for _ in range(2):
+        left = int((deadline - time.monotonic()) * 1000)
+        if left <= 0 or not user32.SendMessageTimeoutW(hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, left,
+                                                        ctypes.byref(answer)):
+            return
 
 
 LWA_COLORKEY, LWA_ALPHA = 0x1, 0x2
@@ -1283,8 +1305,9 @@ def press_briefly(hwnd: int, key: str | Sequence[str]) -> bool:
     is seen to have reached it (`_reach_foreground`) and - only for a browser that windows hiding it covered
     (`covered_by_opaque`: it may have stopped drawing, and draws itself anew once in front) - it has drawn itself
     anew (`_redrawn_after_focus`); a browser under TASlation's own see-through window goes on at once. The foreground
-    is handed back to the window that had it with `give_foreground`, so with no ALT tap. The keys are the person's,
-    at the person's pace. Returns whether the keys were delivered: False means nothing was pressed."""
+    is handed back to the window that had it with `give_foreground`, so with no ALT tap, once the window has read the
+    keys (`_keys_read`). The keys are the person's, at the person's pace. Returns whether the keys were delivered:
+    False means nothing was pressed."""
     keys = [key] if isinstance(key, str) else list(key)
     if not keys:
         return False
@@ -1303,6 +1326,8 @@ def press_briefly(hwnd: int, key: str | Sequence[str]) -> bool:
             if not press_key(hwnd, each):
                 break
             pressed = True
+        if pressed and front and front != hwnd:  # (the foreground goes back: not before the window has read them)
+            _keys_read(hwnd)
         time.sleep(KEY_SETTLE_S)
         return pressed
     finally:
