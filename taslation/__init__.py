@@ -7,4 +7,4 @@ your translations keyed by page fingerprints. See ``taslation.netguard`` for
 how the "nothing leaves the machine" rule is enforced at the socket layer.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

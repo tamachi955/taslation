@@ -6,7 +6,6 @@ its About dialog. Dialogs on the shared hidden root, never mapped where it can b
 from __future__ import annotations
 
 import gc
-import importlib.metadata
 import re
 import sys
 import tkinter as tk
@@ -18,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 import taslation
-from taslation import backup, cli
+from taslation import backup, cli, errorlog
 from taslation.cache import CacheStore, CachedBubble, CachedPage
 from taslation.config import Settings
 from taslation.i18n import UI_LANGUAGES, _, set_language
@@ -522,7 +521,7 @@ def test_the_about_dialog(tmp_path, monkeypatch, hidden_root):
     d.withdraw()
     assert placed == [(d, hidden_root)]  # centred over the window
     assert d.title() == "About TASlation" and d.resizable() == (False, False)
-    assert d.version_text == f"Version {importlib.metadata.version('taslation')}" and d.version_text in _texts(d)
+    assert d.version_text == f"Version {taslation.__version__}" and d.version_text in _texts(d)
     assert d.lines == ["Free software under the MIT licence", "Built with PLaMo",
                        "Runs offline: it talks only to Ollama on this computer (localhost:11434)",
                        "Your translations, notes and settings are kept in this folder:",
@@ -541,14 +540,9 @@ def test_the_about_dialog(tmp_path, monkeypatch, hidden_root):
     d.destroy()
 
 
-def test_the_version_comes_from_the_installed_package_or_the_source(monkeypatch):
-    assert about.version() == importlib.metadata.version("taslation")
-
-    def missing(_name):
-        raise importlib.metadata.PackageNotFoundError(_name)
-
-    monkeypatch.setattr(about.importlib.metadata, "version", missing)
-    assert about.version() == taslation.__version__
+def test_the_version_is_that_of_the_program_files_that_run():
+    # (not an installation's record: one of an earlier build beside the program said the old version after an update)
+    assert about.version() == taslation.__version__ == errorlog.program_version()
 
 
 def test_the_about_dialog_in_japanese_and_russian(tmp_path, hidden_root):

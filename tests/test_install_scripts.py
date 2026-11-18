@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from taslation import __version__
 from taslation.config import OCR_MODELS, PAGE_MODELS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1283,7 +1284,7 @@ def test_a_whole_install_says_nothing_of_its_insides_and_ends_ready(tmp_path, ol
                   "Ollama and the translation model", "Final check"):
         assert title in out
     assert out.index("Final check") < out.index("ok: ready") < out.index("TASlation is installed.")
-    assert "Version: 0.1.0, files dated " in out and "cannot translate yet" not in out
+    assert f"Version: {__version__}, files dated " in out and "cannot translate yet" not in out
     assert (tmp_path / "start menu" / "TASlation.lnk").is_file()
     assert not (tmp_path / "bin" / "ollama-args.txt").exists()  # setup_models.py installs the translator
     reading, translator = (co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()

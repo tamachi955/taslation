@@ -3,14 +3,13 @@ is kept and where to read more, given by path: nothing here opens a browser."""
 
 from __future__ import annotations
 
-import importlib.metadata
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import ttk
 
 from ..constants import APP_EXPANSION, APP_NAME
-from ... import __version__, errorlog
+from ... import errorlog
 from ...config import REPO_DIR
 from ...i18n import _
 from ...translator_install import CREDIT
@@ -25,11 +24,8 @@ PATH_CHARS = (40, 100)  # a path's line: at least, at most so many "0" widths (a
 
 
 def version() -> str:
-    """The version of TASlation as installed (`importlib.metadata`), else the package's own."""
-    try:
-        return importlib.metadata.version("taslation")
-    except importlib.metadata.PackageNotFoundError:
-        return __version__
+    """The version of TASlation: that of the program files that run (`errorlog.program_version`)."""
+    return errorlog.program_version()
 
 
 def documents(root: Path = REPO_DIR) -> list[Path]:

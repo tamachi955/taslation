@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import builtins
 import getpass
-import importlib.metadata
 import json
 import logging
 import logging.handlers
@@ -218,12 +217,11 @@ class PrivacyFormatter(logging.Formatter):
 
 # ------------------------------------------------------------------ what TASlation runs on
 def program_version() -> str:
+    """The version of the program files that run (`taslation.__version__`): what an installation's records say may be
+    older, where an update's installation did not finish or a record of an earlier build lies beside the program."""
     from . import __version__
 
-    try:
-        return importlib.metadata.version("taslation")
-    except importlib.metadata.PackageNotFoundError:
-        return __version__
+    return __version__
 
 
 def release_date(package: Path | None = None) -> str:

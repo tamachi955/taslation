@@ -187,6 +187,18 @@ workflow in a copy of the repository agrees through those lines too, so reads th
 
 ## Releases
 
-A release is a git tag: bump `__version__` in `taslation/__init__.py`, commit, tag. GitHub's source ZIP of the tag is
-what people download, and `install.cmd` in it does the rest. Nothing is built. `.gitattributes` keeps CRLF for `*.cmd`
-and `*.ps1` in that ZIP, and leaves `docs/media` and `.github` out of it.
+What people download is GitHub's source ZIP of `main`, and `install.cmd` or `update.cmd` in it does the rest. Nothing is
+built. So every push to `main` that changes what a person installs is a release and carries a new version:
+
+* the version is `X.Y.Z`, written in two places that must agree: `version` in `pyproject.toml` (what `update.cmd` and
+  the installer read from a copy) and `__version__` in `taslation/__init__.py`;
+* `Z` goes up for a push that only fixes or speeds up, `Y` (and `Z` back to 0) for one that adds or changes what a
+  person sees or does; `X` stays 0 until the saved files are promised to stay readable;
+* `CHANGELOG.md` gets an entry for the version at its top, `## X.Y.Z - YYYY-MM-DD`, in the words of someone who uses the
+  program; what only a developer meets (tests, tools, notes) is left out;
+* the commit that is pushed is tagged `vX.Y.Z`, and the tag is pushed with it.
+
+`tools/version_check.py` says before a push whether this was done: it compares the working tree with the newest version
+tag and fails when a file a person installs differs while the version has not gone up, or when the changelog has no
+entry for it. `tests/test_version.py` keeps the two places and the changelog's top entry in step. `.gitattributes`
+keeps CRLF for `*.cmd` and `*.ps1` in the ZIP, and leaves `docs/media` and `.github` out of it.
