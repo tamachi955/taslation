@@ -1,0 +1,437 @@
+{
+ "cases": {
+  "page": {
+   "digest": "6e636aa296e95e4f06a63aba245fb253a3d59b93d6e2625871dad8ab58115f23",
+   "sizes": [
+    26,
+    32,
+    22,
+    23,
+    34,
+    24,
+    38,
+    48,
+    42,
+    32
+   ],
+   "flags": [
+    [],
+    [],
+    [],
+    [
+     "off-centre"
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+   ],
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00",
+    "comicz.ttf": "36eb300a76582b7d39f3d34834ce1255f0b9b2830fb2e81485c4b85a5ff7f03b"
+   }
+  },
+  "plain": {
+   "digest": "0d416c200964139fabc74eb80c0e498ea9956bec87bdded882e473cdebb2c9f1",
+   "size": 23,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "plain:measured": {
+   "digest": "",
+   "size": 23,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "short": {
+   "digest": "004159b174f6434349c64aea37959bbdfb13f941fc64b3918f744ec07a342e88",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "short:measured": {
+   "digest": "",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "narrow": {
+   "digest": "257a593c44897971d1ca0d68fd920bc54daa8d6fceb97bf62e3eb322b682fdf3",
+   "size": 17,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "narrow:measured": {
+   "digest": "",
+   "size": 17,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "stressed": {
+   "digest": "cf9e0955525476e6f942f4e6181e335d542e64c1960b9214a2b88226983a476a",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "stressed:measured": {
+   "digest": "",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "paragraphs": {
+   "digest": "7e0188e43d19ad9e55af1d53af7a8969e6398e53d6e6f623147b3020eb6a4e49",
+   "size": 26,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "paragraphs:measured": {
+   "digest": "",
+   "size": 26,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "capitals": {
+   "digest": "251200c91ad0c3e37a888c0af770214c952e0bf5f0a0e8aaf76e6278166bc5bf",
+   "size": 22,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "capitals:measured": {
+   "digest": "",
+   "size": 22,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "outlined": {
+   "digest": "78ba132e028ca173013a782ecd3e8cfa1a81d912e5dce35e33f007c44d63f8eb",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "outlined:measured": {
+   "digest": "",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "coloured": {
+   "digest": "e7db4f9e27f9f15947c2f4c2c1fe9e0861405dd55484a4eccc06b37a28772b2d",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "coloured:measured": {
+   "digest": "",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "formatted": {
+   "digest": "4ae8edb5d8bdbb7a1809c5b8a21c896507a106b5d6cd61cc14a2ad8ed29e2eed",
+   "size": 16,
+   "flags": [],
+   "won": "rect",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "formatted:measured": {
+   "digest": "",
+   "size": 16,
+   "flags": [],
+   "won": "rect",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "formatted-fixed-over": {
+   "digest": "ac1918e79f1a4b7d04467d50c1d51224319c67d480ae08761ee7589eeb7fda51",
+   "size": 20,
+   "flags": [
+    "no-fit"
+   ],
+   "won": "box",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "formatted-fixed-over:measured": {
+   "digest": "",
+   "size": 20,
+   "flags": [
+    "no-fit"
+   ],
+   "won": "box",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "slanted": {
+   "digest": "d7a66e0d8cf7dec05eded3c310bf32cda65e4027a64b391fbeffdf0a3757a68e",
+   "size": 24,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "slanted:measured": {
+   "digest": "",
+   "size": 24,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "turned-down": {
+   "digest": "57323854bb2ccea719fed31cd197fc3b8c21291034638afec05feef641c78832",
+   "size": 26,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "turned-down:measured": {
+   "digest": "",
+   "size": 26,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "stacked-jp": {
+   "digest": "4df7cd2b57c091fb7d785f6602ab33544d1fa2f2426d610d997151b133e9cdce",
+   "size": 32,
+   "flags": [],
+   "won": "stacked",
+   "fonts": {
+    "YuGothB.ttc": "d923a57f781f06198167da4f58287be7ac64a954a47aff4295e078a42b4b68b2"
+   }
+  },
+  "stacked-jp:measured": {
+   "digest": "",
+   "size": 32,
+   "flags": [],
+   "won": "stacked",
+   "fonts": {
+    "YuGothB.ttc": "d923a57f781f06198167da4f58287be7ac64a954a47aff4295e078a42b4b68b2"
+   }
+  },
+  "stacked-latin": {
+   "digest": "2be2a6241fa9e5ee51ad8c140d90ab91d58bc72593d8cf7d0cf1e48aa36c1464",
+   "size": 40,
+   "flags": [],
+   "won": "stacked",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "stacked-latin:measured": {
+   "digest": "",
+   "size": 40,
+   "flags": [],
+   "won": "stacked",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "horizontal-jp": {
+   "digest": "99266d4cd053e941dd57f00bd3c7e4c0e661ce4e70857f64726f2ddbf28bfd11",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "YuGothB.ttc": "d923a57f781f06198167da4f58287be7ac64a954a47aff4295e078a42b4b68b2"
+   }
+  },
+  "horizontal-jp:measured": {
+   "digest": "",
+   "size": 30,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "YuGothB.ttc": "d923a57f781f06198167da4f58287be7ac64a954a47aff4295e078a42b4b68b2"
+   }
+  },
+  "chinese": {
+   "digest": "693e14cb2d42af3617aa24a0d3f19633005d2e33cc755d13db32ff007302252f",
+   "size": 32,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "msyhbd.ttc": "4508821b3dffe01f0ef5e5326a3e60df705a44633858811f67b6982dce3f6ee6"
+   }
+  },
+  "chinese:measured": {
+   "digest": "",
+   "size": 32,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "msyhbd.ttc": "4508821b3dffe01f0ef5e5326a3e60df705a44633858811f67b6982dce3f6ee6"
+   }
+  },
+  "korean": {
+   "digest": "8f94186df9859975f91e164233be6e272e5895efba33a067b9cf5db41c0cd772",
+   "size": 28,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "malgunbd.ttf": "e8cbc0b2afcc14fb45dfb6086d5102c0b23a96e7b6e708f3122acde1b86c9082"
+   }
+  },
+  "korean:measured": {
+   "digest": "",
+   "size": 28,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "malgunbd.ttf": "e8cbc0b2afcc14fb45dfb6086d5102c0b23a96e7b6e708f3122acde1b86c9082"
+   }
+  },
+  "thai": {
+   "digest": "8a09997bfb4f4ca8c8b8b96d19fe728cd9c6fb365404014c4f458ca70961a191",
+   "size": 32,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "leelawui.ttf": "ca9a670f12d0e47c20441012a22f78ab17c1b126818e0e887ef7db6ecf5e76b4"
+   }
+  },
+  "thai:measured": {
+   "digest": "",
+   "size": 32,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "leelawui.ttf": "ca9a670f12d0e47c20441012a22f78ab17c1b126818e0e887ef7db6ecf5e76b4"
+   }
+  },
+  "hindi": {
+   "digest": "c72ce62c745bc918119abfbd4760459bf4086f11c9f99258e031ded7f630fe6d",
+   "size": 28,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "Nirmala.ttc": "ad02cdfc06e144ac45f318e8e5a64cbe04c7479d4beb91d25f5a319a466b1767"
+   }
+  },
+  "hindi:measured": {
+   "digest": "",
+   "size": 28,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "Nirmala.ttc": "ad02cdfc06e144ac45f318e8e5a64cbe04c7479d4beb91d25f5a319a466b1767"
+   }
+  },
+  "russian": {
+   "digest": "9f30234397dcae44ade3832a2a3717b69fac9a80cee2c0c1566f718692f623f8",
+   "size": 24,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "russian:measured": {
+   "digest": "",
+   "size": 24,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "text-on-page": {
+   "digest": "e7a32a7ced1b6d2e2745ed27c9fb16177aaca0b029a6f76f6230016970fdcfa2",
+   "size": 64,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "text-on-page:measured": {
+   "digest": "",
+   "size": 64,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "dark": {
+   "digest": "a9fc5e86434227f276d40b8267f52a8033ed0c4cc878676d912527f759006090",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  },
+  "dark:measured": {
+   "digest": "",
+   "size": 34,
+   "flags": [],
+   "won": "shape",
+   "fonts": {
+    "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
+   }
+  }
+ }
+}
