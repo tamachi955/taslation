@@ -13,3 +13,5 @@ docs/media/** export-ignore
 # the repository's own checks (the install check): nothing a person installs from the ZIP uses them
 .github export-ignore
 .github/** export-ignore
+# Hyphenation patterns from upstream: data, not counted as source
+taslation/render/hyphenation/*.tex linguist-vendored
