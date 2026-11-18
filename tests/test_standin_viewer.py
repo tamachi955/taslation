@@ -183,6 +183,40 @@ def test_the_looks_for_a_page_as_read_at_other_sizes_are_told_with_their_time():
     assert [r["job"] for r in told["list"]] == [2, 3] and told["list"][1]["t_s"] == 0.3
 
 
+def test_a_turn_is_told_with_what_a_whole_book_run_did_then():
+    modes = [{"t": 0, "run": False, "beside": False}, {"t": 100, "run": True, "beside": False},
+             {"t": 500, "run": True, "beside": True}, {"t": 900, "run": False, "beside": False}]
+    assert [standin_e2e.run_state(modes, t) for t in (50, 100, 499, 700, 950)] == [
+        "no run", "run reading", "run reading", "run translating", "no run"]
+    assert standin_e2e.run_state([], 10) == "no run"
+
+
+def _shown(t, page, state, kind="translated", lettered=3, from_="soft"):
+    return {"t": t, "page": page, "spread": True, "state": state, "kind": kind, "lettered": lettered, "from": from_}
+
+
+def _read(id_, t, page, from_, boxes, size=(1904, 1024)):
+    return {"id": id_, "page": page, "spread": True, "size": list(size), "result_t": t, "result_from": from_,
+            "result_boxes": boxes}
+
+
+def test_lettering_on_a_soft_frame_is_told_with_how_far_its_boxes_lie_from_the_sharp_frames():
+    displays = [_shown(0, 2, "sharp", from_="sharp"), _shown(1000, 4, "soft", kind="live", lettered=0, from_=None),
+                _shown(1100, 4, "soft"), _shown(1400, 4, "sharp"), _shown(1600, 4, "sharp", from_="sharp")]
+    assert standin_e2e.lettered_soft_ms(displays, (4, True), 1000, 3000) == 300  # (from 1100 to the sharp picture)
+    assert standin_e2e.lettered_soft_ms(displays, (2, True), 0, 1000) == 0
+    jobs = [_read(1, 1100, 4, "soft", [[60, 10, 90, 40], [10, 10, 50, 40]]),
+            _read(2, 1500, 4, "sharp", [[12, 9, 51, 40], [61, 10, 90, 43]], size=(1904, 1072)),  # (another size)
+            _read(3, 1600, 4, "sharp", [[11, 10, 50, 41], [100, 5, 130, 30], [60, 12, 90, 40]]),
+            _read(4, 2000, 6, "soft", [[5, 5, 20, 20]]), _read(5, 2400, 6, "sharp", [[30, 5, 40, 20]]),
+            _read(6, 2600, 8, "soft", [[5, 5, 20, 20]])]
+    told = standin_e2e.soft_lettering(jobs)
+    assert [(r["job"], r["sharp_job"], r["shifts_px"], r["shift_px"]) for r in told["list"]] == [
+        (1, 3, [2, 1], 2), (4, 5, [], None), (6, None, [], None)]  # (by overlap; none; no sharp job after it)
+    assert (told["jobs"], told["boxes"], told["sharp_boxes"], told["unmatched"]) == (3, 4, 4, 2)
+    assert told["shift_px"]["max"] == 2 and told["box_shift_px"]["n"] == 2
+
+
 def progress_line(progress, reading=False):  # (as the window's progress line is named where it says it)
     return str(progress)
 

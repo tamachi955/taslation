@@ -117,7 +117,10 @@ rows' languages.
   the page units the cache gave and did not and the requests sent for them, a page alone and a page of a spread told
   apart; each page unit looked for in the cache, with the frame's size, the capture area and the distance of the page
   found and of the nearest one, and the capture areas in force; each look for a page the cache did not hold as found,
-  as it reads at other sizes, with the readings it went through, their time and what they found) and pictures of TASlation's own window to the `--out`
+  as it reads at other sizes, with the readings it went through, their time and what they found; how long after a turn
+  the page before stayed on the page area, and its lettering, by what a whole-book run did then - reading the pages,
+  translating, none; how long lettering showed on a soft picture of the page, and how far the boxes of a page read from
+  a soft frame lie from those its sharp frame gives, in pixels) and pictures of TASlation's own window to the `--out`
   folder (one of them 3 s after each change of the stand-in's size, its page at the new size),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and

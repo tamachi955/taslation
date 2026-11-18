@@ -616,6 +616,7 @@ class Notes:
                 job["result_t"] = t
                 job["result_translated"] = len(getattr(result, "translated", []) or [])
                 job["result_from"] = self.code(self.shown(getattr(result, "original", None)))["state"]
+                job["result_boxes"] = [[int(v) for v in r.bbox] for r in getattr(result, "translated", []) or []]
                 job["cache_hits"] = getattr(result, "cache_hits", None)
                 job["cache_misses"] = getattr(result, "cache_misses", None)
                 job["stored"] = len(data.get("stored") or ())
@@ -1714,7 +1715,25 @@ def flash_near(line: list[tuple[float, Any, str]], t: float, within_ms: float = 
 
 def spread_of(values: list[int]) -> dict[str, Any]:
     return {"n": len(values), "median": median(values), "max": max(values, default=None),
-            "over_500": sum(1 for v in values if v > 500), "over_1000": sum(1 for v in values if v > 1000)}
+            "over_250": sum(1 for v in values if v > 250), "over_500": sum(1 for v in values if v > 500),
+            "over_1000": sum(1 for v in values if v > 1000)}
+
+
+RUN_STATES = ("no run", "run reading", "run translating")
+
+
+def run_state(modes: list[dict[str, Any]], t: float) -> str:
+    """What a whole-book run did at *t*, as the window's modes tell (`Notes.mode`): "run reading" (it reads the pages
+    the reader turns, and captures the viewer itself), "run translating" (the window follows the viewer beside it,
+    `live.reads_beside`), "no run"."""
+    found = None
+    for m in modes:
+        if m["t"] > t:
+            break
+        found = m
+    if found is None or not found["run"]:
+        return "no run"
+    return "run translating" if found["beside"] else "run reading"
 
 
 def turns_of(events: list[dict[str, Any]], offset: float, end: float) -> list[dict[str, Any]]:
@@ -1778,6 +1797,48 @@ def lettered_unsettled_ms(displays: list[dict[str, Any]], scr: tuple[int, bool],
         if b > a and (d["page"], d["spread"]) == scr and lettered_shown(d) and d["from"] not in ("sharp", None):
             total += b - a
     return round(total)
+
+
+def lettered_soft_ms(displays: list[dict[str, Any]], scr: tuple[int, bool], lo: float, hi: float) -> int:
+    """How long, from the stand-in's first draw of *scr* at *lo* to its next turn at *hi*, the window showed lettering
+    on a soft picture of *scr* (a page the cache holds, lettered before the viewer had drawn it sharp)."""
+    total = 0.0
+    for k, d in enumerate(displays):
+        until = displays[k + 1]["t"] if k + 1 < len(displays) else hi
+        a, b = max(d["t"], lo), min(until, hi)
+        if b > a and (d["page"], d["spread"]) == scr and lettered_shown(d) and d["state"] == "soft":
+            total += b - a
+    return round(total)
+
+
+def soft_lettering(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The page jobs whose page was read from a soft frame and lettered, each against the next job on its screen at
+    its frame's size whose page was read from the sharp frame: how many boxes each lettered, and how far the soft
+    frame's boxes lie from where the sharp frame puts them, in pixels - the largest shift of an edge of a box from the
+    sharp frame's box it overlaps most (a box that overlaps none is not counted; None: no such job came)."""
+    from taslation.regions import box_iou
+
+    done = sorted((j for j in jobs if j["result_t"] is not None and j.get("result_boxes")), key=lambda j: j["result_t"])
+    rows = []
+    for k, j in enumerate(done):
+        if j["result_from"] != "soft":
+            continue
+        key = (j["page"], j["spread"], j["size"])
+        sharp = next((o for o in done[k + 1:] if (o["page"], o["spread"], o["size"]) == key
+                      and o["result_from"] == "sharp"), None)
+        shifts = []
+        for box in j["result_boxes"] if sharp is not None else ():
+            other = max(sharp["result_boxes"], key=lambda o: box_iou(box, o))
+            if box_iou(box, other) > 0:
+                shifts.append(max(abs(a - b) for a, b in zip(box, other)))
+        rows.append({"job": j["id"], "page": j["page"], "spread": j["spread"], "size": j["size"],
+                     "boxes": len(j["result_boxes"]), "sharp_job": sharp["id"] if sharp is not None else None,
+                     "sharp_boxes": len(sharp["result_boxes"]) if sharp is not None else None,
+                     "shift_px": max(shifts) if shifts else None, "shifts_px": shifts})
+    return {"jobs": len(rows), "shift_px": dist([r["shift_px"] for r in rows]),
+            "box_shift_px": dist([s for r in rows for s in r["shifts_px"]]),
+            "boxes": sum(r["boxes"] for r in rows), "sharp_boxes": sum(r["sharp_boxes"] or 0 for r in rows),
+            "unmatched": sum(1 for r in rows if r["shift_px"] is None), "list": rows}
 
 
 def status_of_another_page(lines: list[dict[str, Any]], scr: tuple[int, bool], lo: float, hi: float
@@ -2009,8 +2070,10 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "requests": sum(j["requests"] for j in jobs),
             "jobs_discarded": sum(1 for j in jobs if j.get("discarded")),
             "job_at_turn": any(j["t"] <= lo < (j["done_t"] or end) for j in started),
+            "run": run_state(notes.modes, lo),
             "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
             "lettered_unsettled_ms": lettered_unsettled_ms(notes.displays, scr, sharp, hi),
+            "lettered_soft_ms": lettered_soft_ms(notes.displays, scr, lo, hi),
             "status_old_page_ms": status_stayed, "status_old_page_kind": status_kind_,
             "status_other_page_ms": status_other,
         })
@@ -2360,6 +2423,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                  "lettered_events": j["translated"],
                  "first_lettered_s": rel(j["first_translated_t"]), "result_s": rel(j["result_t"]),
                  "result_translated": j["result_translated"], "result_from": j["result_from"],
+                 "result_boxes": j.get("result_boxes"),
                  "cache_hits": j.get("cache_hits"), "cache_misses": j.get("cache_misses"),
                  "stored": j.get("stored"), "stored_at_cancel": j.get("stored_at_cancel"),
                  "cancelled_s": rel(j["cancelled_t"]), "discarded": j["discarded"], "done_s": rel(j["done_t"])}
@@ -2384,7 +2448,20 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "during_job": spread_of([r["old_lettering_ms"] for r in rows if r["job_at_turn"] and r["old_lettering_ms"]]),
         "no_job": spread_of([r["old_lettering_ms"] for r in rows if not r["job_at_turn"] and r["old_lettering_ms"]]),
         "by_segment": {s: spread_of([r["old_lettering_ms"] for r in rows if r["segment"] == s
-                                     and r["old_lettering_ms"]]) for s in dict.fromkeys(r["segment"] for r in rows)}}
+                                     and r["old_lettering_ms"]]) for s in dict.fromkeys(r["segment"] for r in rows)},
+        "by_run": {s: spread_of([r["old_lettering_ms"] for r in rows if r["run"] == s and r["old_lettering_ms"]])
+                   for s in RUN_STATES}}
+    old_page = {  # (the page before on the page area, lettered or not: a whole-book run's reading shows no lettering)
+        "by_run": {s: spread_of([r["old_page_ms"] for r in rows if r["run"] == s and r["old_page_ms"] is not None])
+                   for s in RUN_STATES},
+        "by_segment": {s: spread_of([r["old_page_ms"] for r in rows
+                                     if r["segment"] == s and r["old_page_ms"] is not None])
+                       for s in dict.fromkeys(r["segment"] for r in rows)}}
+    soft_rows = [r for r in rows if r["lettered_soft_ms"]]
+    lettered_soft = {"turns": len(soft_rows), "ms": dist([r["lettered_soft_ms"] for r in soft_rows]),
+                     "by_segment": {s: dist([r["lettered_soft_ms"] for r in soft_rows if r["segment"] == s])
+                                    for s in dict.fromkeys(r["segment"] for r in soft_rows)},
+                     "read_from_soft": soft_lettering(started)}
     ready_at = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
     displays = [[rel(d["t"]), d["page"], int(bool(d["spread"])), d["state"], d["kind"], d["lettered"], d["from"],
                  int(bool(d["quick"]))] for d in notes.displays]
@@ -2473,6 +2550,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                                       "requests": sum(j["requests"] for j in cancelled_after_kept)},
         "request_list": request_list,
         "old_lettering_after_a_turn": old_lettering,
+        "old_page_after_a_turn": old_page,
+        "lettering_on_a_soft_frame": lettered_soft,
         "cancels": {"all": len(cancels), "by_segment": dict(Counter(str(c["segment"]) for c in cancels)),
                     "page_still_on_show": false_cancels, "list": cancels},
         "lettered_unsettled_ms": {"total": sum(r["lettered_unsettled_ms"] for r in rows),
@@ -2655,6 +2734,14 @@ def print_table(report: dict[str, Any], path: Path) -> None:
           f"{cancels['all']} {cancels['by_segment']}, of them with their page still on show "
           f"{len(cancels['page_still_on_show'])}; confirmed on a soft frame {run_['jobs']['confirmed_on_soft']}; kept "
           f"from frames not the sharp one {run_['jobs']['kept_from_unsettled_frames']}")
+    print(f"the page before after a turn, by the run: {run_['old_page_after_a_turn']['by_run']}; its lettering "
+          f"{old['by_run']}")
+    soft = run_["lettering_on_a_soft_frame"]
+    read = soft["read_from_soft"]
+    print(f"lettering on a soft frame: {soft['turns']} turns, {soft['ms']} ms, by segment {soft['by_segment']}; read "
+          f"from a soft frame {read['jobs']} jobs, {read['boxes']} boxes lettered (the sharp frame "
+          f"{read['sharp_boxes']}), off the sharp frame's by {read['box_shift_px']} px, per job {read['shift_px']}, "
+          f"unmatched {read['unmatched']}")
     status = run_["status_line_of_the_page_before"]
     print(f"status line of the page before after a turn: {status['turns_with_a_line_of_the_page_before']} of "
           f"{status['turns']} turns, stayed {status['stayed_ms']}, by kind {status['by_kind']}")
