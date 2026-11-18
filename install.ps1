@@ -1181,7 +1181,7 @@ $torchPlan = Get-TorchPlan $torch $gpu $FromUpdate
 Show-TorchPlan $torchPlan $gpu
 
 # The layout and inpainting models are a person's choice too, and a no leaves TASlation as it was before them. Where
-# TASlation will run on this GPU it uses the inpainting model by default (art_erase "auto"), so Enter means yes there;
+# TASlation will run on this GPU it uses both by default (art_erase and detect_model "auto"), so Enter means yes there;
 # elsewhere it means no. Without a console it is no all the same, and -Yes does not answer it: nobody agreed.
 $pageReady = Test-PageModels $models.Path
 if (-not $pageReady) {
@@ -1192,7 +1192,7 @@ if (-not $pageReady) {
     Write-Info (T 'Two more models find lettering on the drawing and take it out (about 360 MB in all):')
     Write-Info (T '  comic-text-and-bubble-detector is tagged Apache-2.0, the inpainting model LaMa MIT.')
     Write-Info (T 'Neither says where its training images come from. TASlation works without them, as it did before them.')
-    if ($pageDefault) { Write-Info (T 'With this computer''s GPU TASlation uses the inpainting model by default, so Enter here means yes.') }
+    if ($pageDefault) { Write-Info (T 'With this computer''s GPU TASlation uses both models by default, so Enter here means yes.') }
     $pageQuestion = (T 'Download these two models?')
     if ($DryRun) {
         Write-Info "$pageQuestion $pageHint (dry run: would ask; counted as y)"

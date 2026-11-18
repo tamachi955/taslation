@@ -138,12 +138,19 @@ def test_without_cuda_everything_is_on_the_cpu(tmp_path, models):
 
 def test_without_cuda_the_default_inpainting_is_the_paper_fill_and_auto_takes_no_layout_model(tmp_path, models):
     models.update(layout=True, lama=True)
-    rows = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=False))  # the defaults: art_erase "auto"
+    rows = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=False))  # the defaults: both "auto"
     assert rows["erase"].device == "cpu" and rows["erase"].what == "The paper fill"
-    auto = _by_stage(stage_devices(_settings(tmp_path, detect_model="auto"), Ps(None), cuda=False))
-    assert auto["detect"].what == "The classical detectors" and auto["erase"].what == "The paper fill"
+    assert rows["detect"].device == "cpu" and rows["detect"].what == "The classical detectors"  # as before
     with_gpu = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=True, gpu=GPU))
-    assert with_gpu["erase"].where() == f"GPU ({GPU})" and with_gpu["detect"].what == "The classical detectors"
+    assert with_gpu["erase"].where() == f"GPU ({GPU})"
+    assert with_gpu["detect"].where() == f"GPU ({GPU})"
+    assert with_gpu["detect"].what == "The layout model and the classical detectors"
+    off = _by_stage(stage_devices(_settings(tmp_path, detect_model="off"), Ps(None), cuda=True, gpu=GPU))
+    assert off["detect"].what == "The classical detectors" and off["erase"].where() == f"GPU ({GPU})"
+    models.update(layout=False, lama=False)  # a no to the two models at the installation: as before, GPU or none
+    for cuda in (True, False):
+        declined = _by_stage(stage_devices(_settings(tmp_path), Ps(None), cuda=cuda, gpu=GPU))
+        assert declined["detect"].what == "The classical detectors" and declined["erase"].what == "The paper fill"
 
 
 def test_the_system_page_and_the_pipeline_ask_torch_the_same_question(tmp_path, models, monkeypatch):

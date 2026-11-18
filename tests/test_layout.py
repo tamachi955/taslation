@@ -232,7 +232,7 @@ def installed(monkeypatch, settings):
     monkeypatch.setattr(artwork, "available", TRUE_ARTWORK)
     monkeypatch.setattr(artwork, "_cuda", True)
     settings.models_dir = settings.state_dir / "models"
-    settings.detect_model = settings.art_erase = "auto"  # (the layout model: opt-in, off by default)
+    settings.detect_model = settings.art_erase = "auto"  # (both defaults)
     return settings
 
 
@@ -293,14 +293,50 @@ def test_without_a_gpu_auto_and_auto_use_neither_model(installed, monkeypatch):
     assert p.art_eraser is not None and p.layout is not None
 
 
-def test_the_default_layout_setting_loads_no_layout_model_on_a_gpu_machine(installed):
+def test_the_default_settings_use_both_models_on_a_gpu_machine_that_has_them(installed):
     from taslation.config import PAGE_MODELS
 
     _install(installed.models_dir, *PAGE_MODELS)
     defaults = Settings()
-    installed.detect_model, installed.art_erase = defaults.detect_model, defaults.art_erase  # "off" and "auto"
+    assert (defaults.detect_model, defaults.art_erase) == ("auto", "auto")
+    installed.detect_model, installed.art_erase = defaults.detect_model, defaults.art_erase
     p = _built(installed)
-    assert p.art_eraser is not None and p.layout is None and p.gpu_releases == [p.art_eraser.release]
+    assert p.art_eraser is not None and p.layout is not None
+    assert p.gpu_releases == [p.layout.release, p.art_eraser.release]
+
+
+@pytest.mark.parametrize("left_out", ["both", "inpainting", "layout"])
+def test_the_default_settings_detect_as_before_where_the_models_were_declined(installed, left_out):
+    """No to the two page models at the installation (or one of them gone): the default settings build neither model
+    or only the erase, and a page is detected by the classical detectors alone, as with "off"."""
+    from taslation.config import LAMA_MODEL
+
+    fitted = {"both": (), "inpainting": (LAYOUT_MODEL,), "layout": (LAMA_MODEL,)}[left_out]
+    _install(installed.models_dir, *fitted)
+    defaults = Settings()
+    installed.detect_model, installed.art_erase = defaults.detect_model, defaults.art_erase
+    p = _built(installed)
+    assert p.layout is None
+    assert (p.art_eraser is not None) == (left_out == "layout")
+    classical = [region(60, 60, 150, 250)]
+    p._detect_classical = lambda rgb: classical
+    assert p._detect(_page()) == classical
+
+
+def test_the_default_settings_detect_as_before_without_a_gpu(installed, monkeypatch):
+    """A computer whose torch has no CUDA GPU, both page models installed: the default settings build neither, exactly
+    as "off" for both."""
+    from taslation.config import PAGE_MODELS
+
+    _install(installed.models_dir, *PAGE_MODELS)
+    monkeypatch.setattr(artwork, "_cuda", False)
+    defaults = Settings()
+    installed.detect_model, installed.art_erase = defaults.detect_model, defaults.art_erase
+    p = _built(installed)
+    assert p.layout is None and p.art_eraser is None and p.gpu_releases == []
+    installed.detect_model, installed.art_erase = "off", "off"
+    off = _built(installed)
+    assert off.layout is None and off.art_eraser is None and off.gpu_releases == []
 
 
 def test_the_layout_model_stays_out_where_transformers_is_missing(installed, monkeypatch):

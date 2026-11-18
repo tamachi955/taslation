@@ -216,7 +216,7 @@ def stage_devices(settings: Any, translator: Any = None, cuda: bool | None = Non
     name = (gpu_name() if cuda else "") if gpu is None else gpu
     on_gpu = "gpu" if cuda else "cpu"
     models_dir = settings.models_dir
-    detect_model = getattr(settings, "detect_model", "off")
+    detect_model = getattr(settings, "detect_model", "auto")
     art_erase = getattr(settings, "art_erase", "auto")
     lama = getattr(settings, "erase_mode", "fill") == "fill" and artwork.available(models_dir, art_erase, cuda=cuda)
     model = (detect_model == "on" or (detect_model == "auto" and lama)) and layout.available(models_dir)

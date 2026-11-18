@@ -204,11 +204,12 @@ class Settings:
     take_columns_beyond: bool = False  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (off: speed lines there read as text)
     slant_text: bool = True  # lettering set at a slant: measured, read turned upright and lettered at its slant (off: all upright, as before)
     translate_sfx: bool = True  # also translate short katakana sound effects found outside bubbles
-    # the layout model first, the classical detectors adding what it missed: "auto" (where lettering on the art is
-    # inpainted too, as `art_erase` decides for this computer: the extra regions lie on the art, and the paper fill
-    # would damage it), "on" (with or without that) or "off" (the classical detectors alone; the default while the
-    # layout model is measured on more books)
-    detect_model: str = "off"
+    # the layout model first, the classical detectors adding what it missed: "auto", the default (where lettering on
+    # the art is inpainted too, as `art_erase` decides for this computer: the extra regions lie on the art, and the
+    # paper fill would damage it; so on a computer without a GPU, or without the two page models installed, the
+    # classical detectors alone, as before), "on" (with or without that) or "off" (the classical detectors alone, the
+    # default of earlier versions)
+    detect_model: str = "auto"
     margins: tuple[int, int, int, int] = (0, 0, 0, 0)  # left, top, right, bottom pixels of the capture to ignore
 
     # --- rendering ---

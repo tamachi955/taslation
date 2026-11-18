@@ -10,8 +10,8 @@ script you run once, by hand. It fetches:
   person agrees first (install.ps1 asks; run by hand, this script asks);
 * the layout model and the inpainting model (ogkalu/comic-text-and-bubble-detector, Apache-2.0;
   dreMaz/AnimeMangaInpainting, LaMa, MIT; about 360 MB), each into its folder under ``<models>``, at fixed revisions and
-  checked file by file, after a person agreed too (Enter agrees where torch has a CUDA GPU, which the inpainting model
-  then runs on by default, and does not elsewhere). LaMa's checkpoint is read once, as tensors only, and kept as
+  checked file by file, after a person agreed too (Enter agrees where torch has a CUDA GPU, which both models then run
+  on by default, and does not elsewhere). LaMa's checkpoint is read once, as tensors only, and kept as
   safetensors (``taslation.render.lama.convert``); the checkpoint is then deleted. Without them TASlation reads and
   erases as it did before them;
 * optionally (``--font``) the OFL-licensed Comic Neue Bold and Bold Italic fonts from the
@@ -199,8 +199,9 @@ YES = ("y", "yes", "\uff59", "\uff59\uff45\uff53", "\u306f\u3044")  # (also what
 
 
 def gpu_here() -> bool:
-    """Whether TASlation erases lettering on the drawing with the inpainting model by default on this computer: torch
-    has a CUDA GPU (`devices.cuda_available`, the answer art_erase "auto" asks for; no torch, or a CPU build, is no).
+    """Whether TASlation finds and erases lettering on the drawing with the two page models by default on this computer:
+    torch has a CUDA GPU (`devices.cuda_available`, the answer art_erase "auto" asks for, and detect_model "auto" goes
+    with it; no torch, or a CPU build, is no).
     install.ps1 decides the same before torch is there, from the NVIDIA GPU and the GPU build it installs for it."""
     from taslation.devices import cuda_available
 
@@ -209,15 +210,15 @@ def gpu_here() -> bool:
 
 def agreed_to_page_models(default_yes: bool | None = None) -> bool:
     """Whether the person at the console wants the layout and inpainting models on what is known of them. Enter is yes
-    where TASlation would use the inpainting model by default (*default_yes*; `gpu_here` when None), else no; without
-    a console nobody agreed, whatever the default."""
+    where TASlation would use them by default (*default_yes*; `gpu_here` when None), else no; without a console nobody
+    agreed, whatever the default."""
     print(PAGE_TERMS)
     if not sys.stdin.isatty():
         return False
     if default_yes is None:
         default_yes = gpu_here()
     if default_yes:
-        print("With this computer's GPU TASlation uses the inpainting model by default, so Enter here means yes.")
+        print("With this computer's GPU TASlation uses both models by default, so Enter here means yes.")
     answer = input(f"Download them on these terms? {'[Y/n]' if default_yes else '[y/N]'} ").strip().lower()
     return answer in YES or (default_yes and not answer)
 

@@ -357,22 +357,31 @@ def test_no_line_about_models_that_the_settings_would_not_use(tmp_path):
     assert not fresh.page_models_missing(s)
 
 
-def test_with_a_gpu_the_default_asks_for_the_inpainting_alone(tmp_path, monkeypatch):
+def test_with_a_gpu_the_default_asks_for_both_page_models(tmp_path, monkeypatch):
     import importlib
 
     import taslation.health as health
+    from taslation.config import LAYOUT_MODEL
+    from taslation.detect import layout
 
     fresh = importlib.reload(health)
     monkeypatch.setattr(artwork, "available", TRUE_AVAILABLE)
+    monkeypatch.setattr(layout, "available", lambda models_dir: not LAYOUT_MODEL.missing(models_dir))
     monkeypatch.setattr(artwork, "_cuda", True)
     s = Settings(models_dir=tmp_path)
-    assert fresh.page_models_missing(s)  # the inpainting, on by default with a GPU, is not installed: a line says so
+    assert fresh.page_models_missing(s)  # neither is installed (a no at the installation): a line says so, as before
     folder = tmp_path / LAMA_MODEL.dirname
     folder.mkdir()
     (folder / LAMA_MODEL.installed[0]).write_bytes(b"x")
-    assert not fresh.page_models_missing(s)  # the layout model, off by default, is not asked for
-    s.detect_model = "auto"
-    assert fresh.page_models_missing(s)
+    assert fresh.page_models_missing(s)  # the layout model, on by default with the inpainting, is not installed
+    folder = tmp_path / LAYOUT_MODEL.dirname
+    folder.mkdir()
+    for name, _sha in LAYOUT_MODEL.files:
+        (folder / name).write_bytes(b"x")
+    assert not fresh.page_models_missing(s)
+    s.detect_model = "off"  # (a choice of the reader's: the layout model is not asked for)
+    (folder / LAYOUT_MODEL.files[0][0]).unlink()
+    assert not fresh.page_models_missing(s)
     s.detect_model, s.art_erase = "auto", "off"
     assert not fresh.page_models_missing(s)
 
@@ -412,9 +421,9 @@ def test_a_model_region_takes_its_glyph_size_from_its_reading(settings):
     assert r.glyph == pytest.approx(38.0)
 
 
-def test_the_defaults_inpaint_only_with_a_gpu_and_leave_the_layout_model_off():
+def test_the_defaults_inpaint_only_with_a_gpu_and_take_the_layout_model_with_it():
     s = Settings()
-    assert (s.detect_model, s.art_erase) == ("off", "auto")
+    assert (s.detect_model, s.art_erase) == ("auto", "auto")
     assert not TRUE_AVAILABLE(s.models_dir, "off")  # (the suite's stand-in aside, "off" is never available)
     assert not TRUE_AVAILABLE(s.models_dir, "auto", cuda=False)  # nor is "auto" without a GPU
 

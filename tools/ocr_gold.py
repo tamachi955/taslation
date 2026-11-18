@@ -209,9 +209,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--iou", type=float, default=0.5, help="least overlap for a region to count as a gold item")
     p.add_argument("--limit", type=int, default=0, help="only the first N screens")
     # (the default was "auto", which beside art_erase "off", the default of then, was the classical detectors alone:
-    # "off" keeps that now that art_erase "auto" brings the layout model's "auto" in on a computer with a GPU)
+    # "off" keeps that now that art_erase "auto" brings the layout model's "auto" in on a computer with a GPU, and the
+    # gold set's scores stay comparable with those measured before the app's default became "auto")
     p.add_argument("--detect-model", choices=("auto", "on", "off"), default="off",
-                   help="the setting of that name (default off, as the app's; auto follows art_erase's default)")
+                   help="the setting of that name (default off, the app's default before 0.2.0, which the gold set's "
+                        "scores were measured with; auto, the app's default now, follows art_erase's default)")
     p.add_argument("--no-slant", action="store_true", help="slant_text off: every region upright, as before slants")
     p.add_argument("--position-free", action="store_true",
                    help="also pair gold lines and readings by their text, whatever box they were read in (for the layout model, "

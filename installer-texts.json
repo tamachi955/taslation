@@ -26,7 +26,7 @@
   "Two more models find lettering on the drawing and take it out (about 360 MB in all):": {"ja": "さらに2つのモデルが、絵の上の文字を見つけて消します（合わせて約 360 MB）:"},
   "  comic-text-and-bubble-detector is tagged Apache-2.0, the inpainting model LaMa MIT.": {"ja": "  comic-text-and-bubble-detector の表示は Apache-2.0、画像補完モデル LaMa は MIT です。"},
   "Neither says where its training images come from. TASlation works without them, as it did before them.": {"ja": "どちらも学習画像の出どころを明かしていません。これらがなくても、TASlation はこれまでどおり動きます。"},
-  "With this computer's GPU TASlation uses the inpainting model by default, so Enter here means yes.": {"ja": "このコンピューターの GPU では TASlation が既定で画像補完モデルを使うので、ここでは Enter で「はい」になります。"},
+  "With this computer's GPU TASlation uses both models by default, so Enter here means yes.": {"ja": "このコンピューターの GPU では TASlation が既定で2つのモデルを使うので、ここでは Enter で「はい」になります。"},
   "Download these two models?": {"ja": "この2つのモデルをダウンロードしますか?"},
   "They are left out. To add them later, run install.cmd again.": {"ja": "入れずに進めます。あとで追加するには、install.cmd をもう一度実行してください。"},
   "Python {0} or newer was not found.": {"ja": "Python {0} 以降が見つかりませんでした。"},

@@ -257,7 +257,7 @@ def test_open_settings_file_makes_the_file_first_and_opens_it(hidden_root, in_fo
 def test_the_dialog_in_japanese(hidden_root, in_force):
     set_language("ja")
     d = dlg.SettingsDialog(hidden_root, in_force)
-    assert d.title() == "設定" and d.detect.get() == "使わない"
+    assert d.title() == "設定" and d.detect.get() == "インペイントと一緒のときだけ"  # (the default, "auto")
     d.detect.set(_("Always used"))
     d.erase.set(_("Always, also on the CPU"))
     assert d.values()["detect_model"] == "on" and d.values()["art_erase"] == "lama"
@@ -276,6 +276,49 @@ def test_the_inpainting_s_three_choices_come_back_as_they_were_saved(hidden_root
     again = dlg.SettingsDialog(hidden_root, loaded)
     assert again.erase.get() == _(dict(dlg.ERASE_CHOICES)[value]) and again.values()["art_erase"] == value
     assert again.changed() == {}
+
+
+@pytest.mark.parametrize("value", ["off", "auto", "on"])
+def test_the_layout_model_s_three_choices_come_back_as_they_were_saved(hidden_root, in_force, value):
+    got = []
+    in_force.detect_model = "off" if value != "off" else "auto"
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    d.detect.set(_(dict(dlg.DETECT_CHOICES)[value]))
+    assert d.values()["detect_model"] == value and d.save() is True and got == [{"detect_model": value}]
+    loaded = Settings.from_toml(in_force.config_path)
+    assert loaded.detect_model == value
+    again = dlg.SettingsDialog(hidden_root, loaded)
+    assert again.detect.get() == _(dict(dlg.DETECT_CHOICES)[value]) and again.changed() == {}
+
+
+def test_a_layout_model_choice_never_made_is_never_written_and_takes_the_default(hidden_root, in_force, monkeypatch):
+    """The default is "auto" since 0.2.0. A file the dialog made, or Open settings file made, holds the layout model's
+    line as a note while nobody chose it, also after other settings were saved: such a reader gets the new default.
+    A choice of "Not used" made in the dialog is a line of its own and stays."""
+    assert Settings().detect_model == "auto" and in_force.detect_model == "auto"
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    assert d.detect.get() == _("Only with the inpainting")
+    d.scale.set("125 %")
+    assert d.save() is True
+    text = in_force.config_path.read_text(encoding="utf-8")
+    assert not re.search(r"^detect_model\s*=", text, re.M) and re.search(r"^# detect_model = \"auto\"", text, re.M)
+    assert Settings.from_toml(in_force.config_path).detect_model == "auto"
+    opened = in_force.config_path.with_name("opened.toml")
+    monkeypatch.setattr(dlg, "open_in_editor", lambda path: None)
+    d.path = opened
+    assert d.open_file() == opened and Settings.from_toml(opened).detect_model == "auto"
+    # an old file of the dialog's, its note naming the old default: a note sets nothing
+    old = in_force.config_path.with_name("old.toml")
+    old.write_text(NEW_FILE_HEADER + '\n# detect_model = "off"          # (opt-in for now)\nui_scale = 1.25\n',
+                   encoding="utf-8")
+    assert Settings.from_toml(old).detect_model == "auto"
+    loaded = Settings.from_toml(in_force.config_path).with_overrides(state_dir=in_force.state_dir,
+                                                                    models_dir=in_force.models_dir)
+    chosen = dlg.SettingsDialog(hidden_root, loaded)
+    chosen.detect.set(_("Not used"))
+    assert chosen.save() is True
+    assert re.search(r'^detect_model = "off"', in_force.config_path.read_text(encoding="utf-8"), re.M)
+    assert Settings.from_toml(in_force.config_path).detect_model == "off"
 
 
 def test_the_inpainting_row_says_when_this_computer_has_no_gpu(hidden_root, in_force, monkeypatch):

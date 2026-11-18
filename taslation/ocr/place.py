@@ -274,7 +274,7 @@ def page_models_on_gpu(settings: Any) -> tuple[bool, bool]:
     models_dir = settings.models_dir
     lama = getattr(settings, "erase_mode", "fill") == "fill" and artwork.available(
         models_dir, getattr(settings, "art_erase", "auto"), cuda=True)
-    wanted = getattr(settings, "detect_model", "off")
+    wanted = getattr(settings, "detect_model", "auto")
     return lama, (wanted == "on" or (wanted == "auto" and lama)) and layout.available(models_dir)
 
 

@@ -45,7 +45,7 @@ split_joined_bubbles = true   # bubbles that touch or overlap (one white area): 
 take_columns_beyond = false   # dark bubbles: also read a column that goes on past the interior on the bubble's own black
 slant_text = true             # lettering set at a slant: measured, read turned upright and lettered at its slant (false: all upright)
 translate_sfx = true          # translate short katakana sound effects found outside bubbles
-detect_model = "off"          # (opt-in for now: "auto" to use it) the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs too: with its "auto", only on a computer with a GPU), "on" or "off" (classical alone)
+detect_model = "auto"         # the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs too: with its "auto", only on a computer with a GPU and both page models installed; elsewhere classical alone), "on" or "off" (classical alone, the default of earlier versions)
 margins = [0, 0, 0, 0]        # left, top, right, bottom pixels of the capture to ignore ("Set area" in the GUI)
 
 # --- rendering ---

@@ -11,7 +11,9 @@ starts (page by page or the whole book first, with what a store's terms make of 
 optional page models (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither
 says where its training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
 GPU, always): "Only with a GPU" is the default, and where the rule (`artwork.runs_here`) finds no GPU on this computer
-the row says it is not used here (`NO_GPU_TEXT`).
+the row says it is not used here (`NO_GPU_TEXT`). The layout model has three too (`DETECT_CHOICES`: not used, only
+with the inpainting, always): "Only with the inpainting" is the default, so it goes where the inpainting goes. Save
+writes only what was changed, so a choice never made is never written and a later default applies to it.
 
 Three pages (a notebook): General, those settings; Shortcuts, the window's keys (`shortcuts_page.ShortcutsPage`
 over `shortcuts.Keymap`, saved into the state folder with the same Save and applied at once by *on_keys*); System,
@@ -190,9 +192,8 @@ IGNORED_TABLE, IGNORED_ENTRY = "settings", "ignored"  # where ui.json keeps the 
 PAGE_MODELS_TEXT = ("Two optional models: a layout model (comic-text-and-bubble-detector, tagged Apache-2.0) that "
                     "finds lettering on the drawing that the usual detection misses, and an inpainting model (LaMa, "
                     "MIT) that takes lettering out of the drawing. Neither says where its training images come from. "
-                    "The inpainting is on by default where the computer has a GPU TASlation can use and its model is "
-                    "installed; the layout model is off by default while it is measured on more books. TASlation "
-                    "works without them.")
+                    "Both are on by default where the computer has a GPU TASlation can use and they are installed; "
+                    "the layout model is used only together with the inpainting. TASlation works without them.")
 NO_GPU_TEXT = "Not used on this computer: it has no GPU that TASlation can use (NVIDIA, with CUDA)."
 
 
