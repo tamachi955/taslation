@@ -1,9 +1,11 @@
 """Lettering with a part set larger (`render.emphasis`, `TextRegion.large`): the text cut in paragraphs, each at one
-size, the part's the base's times the ratio; the ratio shrinks before the base drops under the readable size, and
-under `MIN_RATIO` the bubble is lettered at one size, as it is without a part (`tests/test_lettering_identity.py`
-holds that pixel for pixel)."""
+size, the part's at most the base's times the ratio; the ratio shrinks before the base drops under its floor (the
+readable size, or `BASE_SHARE` of the size the text gets at one size), and under `MIN_RATIO` the bubble is lettered
+at one size, as it is without a part (`tests/test_lettering_identity.py` holds that pixel for pixel)."""
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 import pytest
@@ -98,15 +100,15 @@ def test_the_ratio_is_capped():
 def test_a_part_is_set_larger_on_lines_of_its_own():
     text = "And then he just looked at me and said... GET OUT!!"
     region = _region(240, 220, text)
+    plain, _ = _letter(region, text, draw=False)
     fit = emphasis.layout_large(region.mask, emphasis.parts_of(text, _span(text, "GET OUT!!", 2.0)), 2.0, _font(),
-                                9, 64, 1.12, floor=11)
-    assert fit is not None and fit.big == round(fit.base * 2.0)
+                                9, 64, 1.12, floor=emphasis.base_floor(plain.size, 11))
+    assert fit is not None and emphasis.MIN_RATIO <= fit.big / fit.base <= 2.0
     big = [ln for ln in fit.lines if ln[3] == fit.big]
     assert "".join(t for t, *_ in big).replace(" ", "") == "GETOUT!!"
     assert all(ln[3] == fit.base for ln in fit.lines if ln not in big)
     tops = [top for _t, _x, top, _z, _k in fit.lines]
     assert tops == sorted(tops)  # the paragraphs in their order, top to bottom
-    plain, _ = _letter(region, text, draw=False)
     done, image = _letter(region, text, _span(text, "GET OUT!!", 2.0))
     assert done.won == "large" and done.size == fit.base < plain.size
     ink = np.asarray(image.convert("L")) < 128
@@ -120,7 +122,7 @@ def test_the_ratio_shrinks_before_the_base_drops_under_the_floor():
     parts = emphasis.parts_of(text, _span(text, "Seriously?!", 2.0))
     fit = emphasis.layout_large(region.mask, parts, 2.0, _font(), 9, 64, 1.12, floor=11)
     assert fit is not None
-    assert fit.base == 11 and emphasis.MIN_RATIO - 0.05 <= fit.ratio < 2.0
+    assert fit.base == 11 and emphasis.MIN_RATIO <= fit.ratio < 2.0
 
 
 def test_no_room_for_a_part_letters_the_text_as_without_one():
@@ -132,6 +134,113 @@ def test_no_room_for_a_part_letters_the_text_as_without_one():
     done, after = _letter(region, text, _span(text, "say to me?", 2.0), floor=16)
     assert (done.size, done.won) == (plain.size, plain.won)
     assert np.array_equal(np.asarray(before), np.asarray(after))
+
+
+def _lettered_sizes(monkeypatch) -> list:
+    """The (base, part) sizes of every layout with a part that `letter_text` sets from now on."""
+    from taslation.render import vertical
+
+    seen: list = []
+    real, stacked = emphasis.layout_large, vertical.layout_stacked_large
+
+    def across(*a, **k):
+        fit = real(*a, **k)
+        if fit is not None:
+            seen.append((fit.base, fit.big))
+        return fit
+
+    def columns(*a, **k):
+        got = stacked(*a, **k)
+        if got is not None:
+            seen.append((got.size, max(c.size or got.size for c in got.cells)))
+        return got
+
+    monkeypatch.setattr(emphasis, "layout_large", across)
+    monkeypatch.setattr(vertical, "layout_stacked_large", columns)
+    return seen
+
+
+def test_the_base_floor_is_a_share_of_the_one_size_and_the_readable_size():
+    assert emphasis.BASE_SHARE == 0.8
+    assert emphasis.base_floor(28, 11) == 23  # 22.4 up
+    assert emphasis.base_floor(20, 11) == 16
+    assert emphasis.base_floor(12, 11) == 11  # the readable size, the larger
+    assert emphasis.base_floor(0, 11) == 11
+
+
+def test_the_ratio_gives_way_before_the_base_drops_under_its_share(monkeypatch):
+    """A narrow bubble: without the guard the base fell to the readable size (11) to keep a part 1.15 times or more;
+    now it stays at four fifths of the size the text gets at one size, and the part is set less larger there."""
+    text = "You... you're actually here?! Seriously?!"
+    region = _region(95, 250, text)
+    large = _span(text, "Seriously?!", 2.0)
+    plain, _ = _letter(region, text, draw=False)
+    least = emphasis.base_floor(plain.size, 11)
+    assert least > 11
+    unguarded = emphasis.layout_large(region.mask, emphasis.parts_of(text, large), 2.0, _font(), 9, 64, 1.12, floor=11)
+    assert unguarded is not None and unguarded.base < least  # what the readable size alone would give
+    seen = _lettered_sizes(monkeypatch)
+    done, _ = _letter(region, text, large)
+    assert done.won == "large" and done.size == least
+    base, big = seen[-1]
+    assert base == least and emphasis.MIN_RATIO <= big / base < 2.0
+
+
+def test_with_room_the_base_stays_above_its_floor_at_the_full_ratio(monkeypatch):
+    text = "I told you it was REALLY dangerous out there."
+    region = _region(230, 200, text)
+    plain, _ = _letter(region, text, draw=False)
+    seen = _lettered_sizes(monkeypatch)
+    done, _ = _letter(region, text, _span(text, "REALLY dangerous", 1.5))
+    base, big = seen[-1]
+    assert done.won == "large" and done.size == base > emphasis.base_floor(plain.size, 11)
+    assert big == math.floor(base * 1.5)
+
+
+def test_no_room_above_the_floor_letters_the_text_at_one_size():
+    """Lettering on the page: with the part, the base would have to fall under four fifths of its size without one,
+    so the text is lettered at one size, pixel for pixel as without a part."""
+    page = TextRegion(30, 30, 330, 180, np.full((150, 300), 255, np.uint8), (50, 50, 310, 160), kind="text",
+                      translated_text="The END of the road", status="translated")
+    page.letter_box = (50, 50, 310, 160)
+    text = page.translated_text
+    large = _span(text, "END", 1.8)
+    plain, before = _letter(page, text)
+    unguarded = emphasis.layout_large(page.mask, emphasis.parts_of(text, large), 1.8, _font(), 9, 64, 1.12,
+                                      on_page=True, anchor=(20, 20, 280, 130), floor=11)
+    assert unguarded is not None and unguarded.base < emphasis.base_floor(plain.size, 11)
+    done, after = _letter(page, text, large)
+    assert (done.size, done.won) == (plain.size, plain.won)
+    assert np.array_equal(np.asarray(before), np.asarray(after))
+
+
+def test_search_gives_way_in_its_order():
+    """`search` alone, with made-up fits: the largest base at the full ratio, else at the floor the largest part that
+    fits, else none; never a base under the sizes given, never a part under `MIN_RATIO` times the base nor over the
+    ratio."""
+    sizes = list(range(30, 11, -1))  # from the cap down to the base's floor
+    assert emphasis.search(sizes, 1.34, lambda b, big: (b, big)) == (30, 40, (30, 40))  # 40.2 down
+    assert emphasis.search(sizes, 1.5, lambda b, big: "ok" if b <= 20 else None) == (20, 30, "ok")
+    assert emphasis.search(sizes, 2.0, lambda b, big: "ok" if b <= 12 and big <= 15 else None) == (12, 15, "ok")
+    assert emphasis.search(sizes, 2.0, lambda b, big: "ok" if b < 12 else None) is None  # never under the floor
+    assert emphasis.search(sizes, 2.0, lambda b, big: "ok" if big <= 13 else None) is None  # 13 / 12 under 1.15
+    assert emphasis.search(sizes, 2.6, lambda b, big: (b, big))[:2] == (30, 60)  # the cap
+    assert emphasis.part_sizes(12, 1.34) == (14, 16) and emphasis.part_sizes(7, 1.25) == (9, 8)  # 8: none at 7
+
+
+@pytest.mark.parametrize("ratio", [1.25, 1.34, 1.37, 1.49, 1.5, 1.77, 1.85, 2.0, 2.6])
+def test_the_part_is_never_set_more_times_larger_than_measured(ratio, monkeypatch):
+    seen = _lettered_sizes(monkeypatch)
+    across = "I told you it was REALLY dangerous out there."
+    for w, h in ((230, 200), (140, 220), (300, 160), (110, 120), (95, 250)):
+        _letter(_region(w, h, across), across, _span(across, "REALLY dangerous", ratio), draw=False)
+    stacked = "你怎么现在才来？我们等了你很久了！"
+    for w, h in ((200, 260), (150, 300), (260, 180)):
+        _letter(_region(w, h, stacked), stacked, _span(stacked, "很久了！", ratio), draw=False,
+                language="Chinese (Simplified)", direction="stacked")
+    assert len(seen) >= 4
+    for base, big in seen:
+        assert emphasis.MIN_RATIO <= big / base <= min(ratio, emphasis.RATIO_CAP) + 1e-9, (base, big)
 
 
 def test_a_ratio_under_the_least_is_no_part():
@@ -166,10 +275,10 @@ def test_slanted_capitals_and_text_on_the_page_take_the_part():
                        large=_span(region.translated_text, "before they find us!", 1.5), floor=11)
     assert done.won == "large"
     page = TextRegion(20, 20, 320, 170, np.full((150, 300), 255, np.uint8), (40, 40, 300, 150), kind="text",
-                      translated_text="The END of the road", status="translated")
+                      translated_text="And that was THE END of it all", status="translated")
     page.letter_box = (40, 40, 300, 150)
     done = letter_text(None, page, page.translated_text, _font(), 9, 64, 1.12,
-                       large=_span(page.translated_text, "END", 1.8), floor=11)
+                       large=_span(page.translated_text, "THE END", 1.8), floor=11)
     assert done.won == "large"
 
 
@@ -198,11 +307,13 @@ def test_stacked_lettering_takes_the_part_in_columns_of_its_own():
     text = "你怎么现在才来？我们等了你很久了！"
     region = _region(200, 260, text)
     font = _font(text, "Chinese (Simplified)")
+    plain, _ = _letter(region, text, language="Chinese (Simplified)", font=font, direction="stacked", draw=False)
     stacked = vertical.layout_stacked_large(region.mask, emphasis.parts_of(text, _span(text, "很久了！", 1.6)), 1.6,
-                                            font, 9, 64, 1.12, floor=11)
+                                            font, 9, 64, 1.12, floor=emphasis.base_floor(plain.size, 11))
     assert stacked is not None
     sizes = {c.size for c in stacked.cells}
-    assert sizes == {stacked.size, round(stacked.size * 1.6)}
+    assert len(sizes) == 2 and stacked.size in sizes
+    assert emphasis.MIN_RATIO <= max(sizes) / stacked.size <= 1.6
     big = [c for c in stacked.cells if c.size > stacked.size]
     small = [c for c in stacked.cells if c.size == stacked.size]
     assert max(c.x for c in big) < min(c.x for c in small)  # the part's columns after the rest's (to the left)

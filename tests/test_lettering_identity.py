@@ -4,6 +4,8 @@ the rooms of bubbles that overlap) and sample bubbles lettered by the typesetter
 turned, formatted, in capitals, outlined, in shaped and other scripts), their pixels' digests against goldens made
 from the code before the emphasis (`tests/fixtures/lettering_identity.json`). The goldens hold on the fonts they were
 made with: on a computer whose font files differ (another system, another version of a font) the cases are skipped.
+The sample page has a golden for each set of fonts it was made with (a checkout with its models folder letters it in
+the fonts that folder brings).
 
 ``python tests/test_lettering_identity.py --write`` writes the goldens anew (only ever from code known to letter as
 before)."""
@@ -218,10 +220,17 @@ def _same_fonts(want: dict[str, str], used: list[str]) -> None:
         pytest.skip("this computer's fonts are not those the goldens were made with")
 
 
+def _page_goldens(golden: dict[str, Any]) -> list[dict[str, Any]]:
+    """The sample page's goldens: the one made with the fonts of the cases, and those made with other fonts (the
+    lettering a checkout's models folder brings, `pages_other_fonts`), all from the code before the emphasis."""
+    return [golden["cases"]["page"]] + list(golden.get("pages_other_fonts", []))
+
+
 def test_the_sample_page_letters_as_before(tmp_path):
-    want = _golden()["cases"]["page"]
     digest, sizes, flags, used = _page_case(tmp_path)
-    _same_fonts(want["fonts"], used)
+    want = next((g for g in _page_goldens(_golden()) if g["fonts"] == _fonts_of(used)), None)
+    if want is None:
+        pytest.skip("this computer's fonts are not those the goldens were made with")
     assert sizes == want["sizes"]
     assert flags == want["flags"]
     assert digest == want["digest"]
@@ -246,5 +255,10 @@ if __name__ == "__main__":
 
     with tempfile.TemporaryDirectory() as folder:
         golden = build(Path(folder))
+    if GOLDEN.is_file():  # the page's goldens made with other fonts are kept, but one with the fonts used now
+        made = golden["cases"]["page"]["fonts"]
+        others = [g for g in _page_goldens(json.loads(GOLDEN.read_text(encoding="utf-8"))) if g["fonts"] != made]
+        if others:
+            golden["pages_other_fonts"] = others
     GOLDEN.write_text(json.dumps(golden, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"written: {GOLDEN}")

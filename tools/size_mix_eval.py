@@ -31,7 +31,8 @@ reports, numbers only:
 * with ``--locate`` (the dataset only): the shipped locating step (`taslation.locate_large`) asked for the same
   cases, both of its steps for every case, so that its rule can be tuned on a person's verdicts (``--show``);
 * with ``--shipped`` (the dataset or frames): the shipped step end to end, on the app's own path (`run_shipped`): per
-  mixed region the step that answered, its requests and time, and whether its lettering came out at two sizes; with
+  mixed region the step that answered, its requests and time, whether its lettering came out at two sizes and at
+  which (the base's and the part's, beside the size it gets at one size); with
   ``--sheets``, each region's crop lettered without and with the part found. Counts and pictures only.
 
 The scan (``--scan FILE``) keeps the regions' boxes, the characters' boxes and their classes (`category`: a letter
@@ -52,6 +53,7 @@ installed first); the state folder should be a scratch one (``TASLATION_STATE_DI
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import json
 import math
@@ -1354,13 +1356,42 @@ def _crop(image: Any, box: Box, grow: int = 16) -> Any:
                        min(image.height, y1 + grow)))
 
 
+@contextlib.contextmanager
+def _sizes_set() -> Any:
+    """The (base, part) sizes of every layout with a part set larger made inside the block (`render.emphasis`,
+    `render.vertical`), in their order."""
+    from taslation.render import emphasis, vertical
+
+    seen: list[tuple[int, int]] = []
+    across, stacked = emphasis.layout_large, vertical.layout_stacked_large
+
+    def across_(*a: Any, **k: Any) -> Any:
+        fit = across(*a, **k)
+        if fit is not None:
+            seen.append((fit.base, fit.big))
+        return fit
+
+    def stacked_(*a: Any, **k: Any) -> Any:
+        got = stacked(*a, **k)
+        if got is not None:
+            seen.append((got.size, max(c.size or got.size for c in got.cells)))
+        return got
+
+    emphasis.layout_large, vertical.layout_stacked_large = across_, stacked_  # type: ignore[assignment]
+    try:
+        yield seen
+    finally:
+        emphasis.layout_large, vertical.layout_stacked_large = across, stacked  # type: ignore[assignment]
+
+
 def run_shipped(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
     """The shipped locating step on the app's own path: the pages that hold a mixed region (and the page before each,
     for its context; with ``--all-pages`` every page) read and translated as the app does (`Pipeline.process`, the
     default translator for ``--target`` with a fixed seed, the pages before as context, each series and each gap
     begun anew), every region its reading measured as mixed (`TextRegion.size_mix`) looked for by `Pipeline.large_part`
-    as its page's translations settle. Per region: the step that answered (counts), its requests and their time, and
-    whether its lettering came out at two sizes (lettered with and without the part found: the pixels differ). With
+    as its page's translations settle. Per region: the step that answered (counts), its requests and their time,
+    whether its lettering came out at two sizes (lettered with and without the part found: the pixels differ) and its
+    sizes (the size it gets at one size; with two, the base's and the part's, `_sizes_set`). With
     ``--sheets``: per region its crop, lettered without the part and with it (pictures only). Numbers only: no text
     is printed or written."""
     from PIL import Image
@@ -1409,18 +1440,22 @@ def run_shipped(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
             large = r.large
             r.large = None
             plain = out.copy()
-            pipe.letter_region(plain, r, r.translated_text)
+            one = pipe._letter_region(plain, r, r.translated_text)[1].size
             r.large = large
             lettered = out.copy()
-            pipe.letter_region(lettered, r, r.translated_text)
+            with _sizes_set() as sizes:
+                pipe.letter_region(lettered, r, r.translated_text)
             two = bool(large) and not np.array_equal(plain, lettered)
+            base, part = sizes[-1] if two and sizes else (one, 0)
             rows.append({"n": len(rows) + 1, "page": k + 1, "step": look["step"], "requests": look["requests"],
                          "ms": round(look["ms"]), "ratio": round(look["ratio"], 2), "found": large is not None,
-                         "two_sizes": two})
+                         "two_sizes": two, "one_size": one, "base": base, "part": part})
             if args.sheets:
+                sized = f"{base}/{part}" if two else f"{one}"
                 cells.append((_crop(image, r.bbox), _crop(Image.fromarray(plain), r.bbox),
                               _crop(Image.fromarray(lettered), r.bbox),
-                              f"{len(rows)}  {look['step'] or 'none'}  x{look['ratio']:.2f}  {'2 sizes' if two else '1 size'}"))
+                              f"{len(rows)}  {look['step'] or 'none'}  x{look['ratio']:.2f}  "
+                              f"{'2 sizes' if two else '1 size'}  {sized} (today {one})"))
         del image
     seconds = time.monotonic() - t0
     total_ms = sum(x["ms"] for x in looks)
@@ -1435,8 +1470,9 @@ def run_shipped(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
         "rows": rows}
     print(json.dumps({k: v for k, v in out_.items() if k != "rows"}, indent=1))
     for r in rows:
+        sized = f"base {r['base']} part {r['part']} (x{r['part'] / r['base']:.2f})" if r["two_sizes"] else ""
         print(f"  {r['n']:2}: step {r['step'] or 'none':6} requests {r['requests']} {r['ms']:5} ms  x{r['ratio']:.2f}"
-              f"  {'two sizes' if r['two_sizes'] else 'one size'}")
+              f"  {'two sizes' if r['two_sizes'] else 'one size'}  one size {r['one_size']}  {sized}")
     if args.sheets and cells:
         args.sheets.mkdir(parents=True, exist_ok=True)
         files = []

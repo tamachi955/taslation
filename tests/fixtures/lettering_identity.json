@@ -433,5 +433,40 @@
     "comicbd.ttf": "128fdcfdfdd358e1624c15dd1f84a4d0689e59afcdefb81f8105efb2253b9c00"
    }
   }
- }
+ },
+ "pages_other_fonts": [
+  {
+   "digest": "a6cb5d269688faa19156f821c5c807cd4b6070b9e977566a8ad2b873c7a70147",
+   "sizes": [
+    30,
+    34,
+    24,
+    24,
+    36,
+    24,
+    44,
+    50,
+    46,
+    36
+   ],
+   "flags": [
+    [],
+    [],
+    [],
+    [
+     "off-centre"
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+   ],
+   "fonts": {
+    "ComicNeue-Bold.ttf": "3e7e5fccfd7e0788f317b43312151c1bd5cf058c9697a8d83eac3939050bd61e",
+    "ComicNeue-BoldItalic.ttf": "5c312c2a2fa64eee82f3b87fcfab8f3b12a5e59b043124401d322eb323cfbf16"
+   }
+  }
+ ]
 }

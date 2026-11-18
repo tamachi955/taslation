@@ -239,10 +239,11 @@ def layout_stacked_large(mask: np.ndarray, parts: list[tuple[str, bool]], ratio:
                          centre: tuple[float, float] | None = None, size: int = 0, valign: str = "middle",
                          floor: int = 0) -> Stacked | None:
     """Stacked lettering with a part set larger (`render.emphasis`): each paragraph of *parts* in columns of its own,
-    the part's cells *ratio* times the base's, the columns side by side from the right, each its own size times
-    *line_spacing* wide, round *centre* (the mask's centroid by default). The base the largest from *max_size* down
-    to the larger of *min_size* and *floor* (*size*: that one, fixed), the ratio shrunk at that floor where it must
-    (`emphasis.search`); None when the part cannot be set larger so (the caller stacks the text at one size)."""
+    the part's cells *ratio* times the base's at most (`emphasis.part_sizes`), the columns side by side from the
+    right, each its own size times *line_spacing* wide, round *centre* (the mask's centroid by default). The base the
+    largest from *max_size* down to the larger of *min_size* and *floor* (the base's floor, `emphasis.base_floor`;
+    *size*: that one, fixed), the ratio shrunk at that floor where it must (`emphasis.search`); None when the part
+    cannot be set larger so (the caller stacks the text at one size)."""
     from .emphasis import MIN_RATIO, RATIO_CAP, search
     from .typeset import _sizes
 
@@ -288,8 +289,7 @@ def layout_stacked_large(mask: np.ndarray, parts: list[tuple[str, bool]], ratio:
             at += counts[k]
         return cells, -2, used
 
-    def at_size(base: int, r: float) -> list[Cell] | None:
-        big = max(base + 1, int(round(base * r)))
+    def at_size(base: int, big: int) -> list[Cell] | None:
         zs = [big if larger else base for _p, larger in paras]
         counts = [1] * len(paras)
         for _ in range(256):

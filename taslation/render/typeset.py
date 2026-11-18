@@ -2256,8 +2256,9 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     sets them in columns (`render.vertical`), in the slanted frame when there is a slant.
 
     *large* (start, end, ratio: offsets into *text*, `TextRegion.large`) sets that part of the text larger, as its own
-    paragraph, the rest at a base size never under *floor* (`render.emphasis`; the size returned is the base's); where
-    it cannot be set so, or is none, the text is lettered as without it."""
+    paragraph, the rest at a base size never under *floor* nor under `emphasis.BASE_SHARE` of the size the text gets
+    without the part (`render.emphasis`; the size returned is the base's); where it cannot be set so, or is none, the
+    text is lettered as without it."""
     lead = len(text) - len(text.lstrip())
     text = text.strip()
     if not text:
@@ -2280,10 +2281,16 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
             outline_color=outline_color, large=large, floor=floor))
     script = script_of(text, language)
     parts = None
+    least = floor
     if large is not None:
         from . import emphasis
 
         parts = emphasis.parts_of(text, large)
+        if parts is not None:  # the base's floor: a share of the size the whole text gets at one size, as without one
+            least = emphasis.base_floor(letter_text(
+                None, region, text, font_path, min_size, max_size, line_spacing, uppercase, background, bold_variation,
+                language, outline, fmt, hyphenate=hyphenate, condense=condense, direction=direction, color=color,
+                outline_color=outline_color).size, floor)
     if uppercase and script == "lgc":  # a capital the font lacks is drawn as `fonts.drawable` draws it, as a small one was
         path = font_path.path if isinstance(font_path, Lettering) else font_path
         text = drawable(path, text.upper())
@@ -2296,7 +2303,7 @@ def letter_text(image: Image.Image | None, region: TextRegion, text: str, font_p
     if parts is not None and large is not None:  # a part set larger, where it can be (else as without one)
         done = emphasis.letter_large(image, region, parts, emphasis.ratio_of(large), font_path, min_size, max_size,
                                      line_spacing, bold_variation, script, outline, fmt, direction, color,
-                                     outline_color, on_page, anchor, floor)
+                                     outline_color, on_page, anchor, least)
         if done is not None:
             return done
     if direction == "stacked":  # vertical writing, column by column

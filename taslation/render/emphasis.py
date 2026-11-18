@@ -1,7 +1,7 @@
 """Lettering with a part set larger: the part of a translation whose Japanese was lettered larger than the rest of its
 bubble (`TextRegion.large`: a range of the translation and how many times larger), set as its own paragraph between
-the rest's, each paragraph at one size: the rest at a base size s, the part at round(s x ratio) (`parts_of` cuts the
-text in up to three: before, the part, after).
+the rest's, each paragraph at one size: the rest at a base size s, the part at a whole size up to s x ratio
+(`parts_of` cuts the text in up to three: before, the part, after).
 
 The block follows the bubble's body as the one-size lettering does (`typeset._bodies`: the tail cut off, two bubbles
 joined at a neck tried one by one too): each line as wide as the body is round one centre axis over the rows its ink
@@ -12,9 +12,13 @@ never split nor hyphenated, and the text is never condensed here: where the part
 at one size as always.
 
 The size: the largest base s within the limits (*max_size*, the page's cap, holds the base) at which the block fits
-with the part at the full ratio; where that would take the base under *floor* (the readable size), the ratio shrinks
-toward 1 first, the base kept at the floor; under `MIN_RATIO` the bubble is set at one size (`layout_large` gives
-None, and the caller letters the text as it does without a part). The size a bubble so lettered reports is its base's.
+with the part at the full ratio; where that would take the base under its floor, the ratio shrinks toward 1 first, the
+base kept at the floor; under `MIN_RATIO` the bubble is set at one size (`layout_large` gives None, and the caller
+letters the text as it does without a part). The base's floor (`base_floor`) is the readable size and `BASE_SHARE` of
+the size the whole text gets at one size under the same limits, whichever is larger: the part never costs the rest
+of the bubble more than that share of its size. The part's size is a whole size between the base's times `MIN_RATIO`
+and the base's times the ratio (`part_sizes`), so that it is never set more times larger than its original was, nor
+than `RATIO_CAP`. The size a bubble so lettered reports is its base's.
 
 Vertical (stacked) lettering is `render.vertical.layout_stacked_large`, column by column the same way."""
 
@@ -38,7 +42,7 @@ from .lettering import Lettering, emphasis_marks, styled_font
 
 MIN_RATIO = 1.15  # a part fitting only under this many times the base's size is not set larger at all
 RATIO_CAP = 2.0  # nor more than this many times larger
-RATIO_PRECISION = 0.02  # how finely a ratio is shrunk to fit
+BASE_SHARE = 0.8  # the rest of a bubble never set under this share of the size the whole text gets at one size
 LAYOUTS_KEPT = 256  # layouts remembered (a page's measure for its caps, then its lettering)
 _LAYOUTS: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 _LAYOUTS_LOCK = threading.Lock()
@@ -142,6 +146,19 @@ def parts_of(text: str, large: tuple[int, int, float] | None) -> list[tuple[str,
 def ratio_of(large: tuple[int, int, float] | None) -> float:
     """How many times larger the part of *large* is set at most (`RATIO_CAP`)."""
     return min(RATIO_CAP, float(large[2])) if large else 1.0
+
+
+def base_floor(one_size: int, floor: int) -> int:
+    """The least base of a text with a part set larger: the readable size *floor*, and `BASE_SHARE` of *one_size*
+    (the size the whole text gets at one size under the same limits), whichever is larger."""
+    return max(int(floor), int(math.ceil(BASE_SHARE * max(0, int(one_size)) - 1e-9)))
+
+
+def part_sizes(base: int, ratio: float) -> tuple[int, int]:
+    """The least and the largest size of a part set larger next to *base* at *ratio* (at most `RATIO_CAP`): from the
+    base's times `MIN_RATIO` up to the base's times the ratio, whole sizes, the least over the largest when none is
+    between them."""
+    return (int(math.ceil(base * MIN_RATIO - 1e-9)), int(math.floor(base * min(RATIO_CAP, float(ratio)) + 1e-9)))
 
 
 # ------------------------------------------------------------------ the layout
@@ -491,31 +508,25 @@ def _largest(sizes: list[int], fits: Callable[[int], Any]) -> tuple[int, Any] | 
     return best
 
 
-def _big(base: int, ratio: float) -> int:
-    return max(base + 1, int(round(base * ratio)))
-
-
-def search(sizes: list[int], ratio: float, at: Callable[[int, float], Any]) -> tuple[int, int, Any] | None:
-    """The base, the part's size and what *at*(base, ratio) gives where the text fits (None where it does not): the
-    largest base of *sizes* (from the largest down) at *ratio*, else at the smallest base the largest ratio from
-    `MIN_RATIO` up that fits (to `RATIO_PRECISION`); None when none does."""
-    found = _largest(sizes, lambda s: at(s, ratio))
-    if found is not None:
-        return found[0], _big(found[0], ratio), found[1]
-    base = sizes[-1]
-    lo, hi = MIN_RATIO, ratio
-    got = at(base, lo)
-    if got is None:
+def search(sizes: list[int], ratio: float, at: Callable[[int, int], Any]) -> tuple[int, int, Any] | None:
+    """The base, the part's size and what *at*(base, part's size) gives where the text fits (None where it does
+    not): the largest base of *sizes* (from the largest down; the base's floor the last) with the part at its largest
+    size (`part_sizes`), else at the smallest base the part's largest size down to its least that fits; None when
+    none does. The ratio gives way before the base would drop under its floor, and the emphasis before the ratio
+    would drop under `MIN_RATIO`."""
+    sizes = [s for s in sizes if part_sizes(s, ratio)[0] <= part_sizes(s, ratio)[1]]
+    if not sizes:
         return None
-    best = (_big(base, lo), got)
-    while hi - lo > RATIO_PRECISION:
-        mid = (lo + hi) / 2.0
-        tried = at(base, mid)
-        if tried is not None:
-            lo, best = mid, (_big(base, mid), tried)
-        else:
-            hi = mid
-    return base, best[0], best[1]
+    found = _largest(sizes, lambda s: at(s, part_sizes(s, ratio)[1]))
+    if found is not None:
+        return found[0], part_sizes(found[0], ratio)[1], found[1]
+    base = sizes[-1]
+    least, most = part_sizes(base, ratio)
+    bigs = list(range(most - 1, least - 1, -1))  # the largest failed already
+    if not bigs:
+        return None
+    got = _largest(bigs, lambda big: at(base, big))
+    return None if got is None else (base, got[0], got[1])
 
 
 def _fit_body(body: Any, parts: list[tuple[str, bool]], ratio: float, sizes: list[int], font_path: Any,
@@ -525,8 +536,8 @@ def _fit_body(body: Any, parts: list[tuple[str, bool]], ratio: float, sizes: lis
     it for each (as the one-size lettering does, `typeset._fit_body`)."""
     from . import typeset as ts
 
-    def at(base: int, r: float) -> Any:
-        return _place(body, parts, base, _big(base, r), font_path, bold_variation, script, line_spacing, valign)
+    def at(base: int, big: int) -> Any:
+        return _place(body, parts, base, big, font_path, bold_variation, script, line_spacing, valign)
 
     found = search(sizes, ratio, at)
     if found is None or found[2][2] == 0:
@@ -535,12 +546,15 @@ def _fit_body(body: Any, parts: list[tuple[str, bool]], ratio: float, sizes: lis
     r = big / base
     score, chosen = float(got[2]), found
     for s in [s for s in sizes if s < base and s >= base * (1.0 - ts.SIZE_TRADE)][:ts.TRADE_TRIES]:
-        other = at(s, r)
+        least, most = part_sizes(s, r)  # never more times larger than the block it trades with
+        if least > most:
+            continue
+        other = at(s, most)
         if other is None:
             continue
         mine = other[2] + (1.0 - s / base) / ts.TRADE_PER_DEFECT
         if mine < score - 1e-9:
-            score, chosen = mine, (s, _big(s, r), other)
+            score, chosen = mine, (s, most, other)
         if other[2] == 0:
             break
     return chosen
@@ -551,9 +565,10 @@ def layout_large(mask: np.ndarray, parts: list[tuple[str, bool]], ratio: float, 
                  script: str = "lgc", on_page: bool = False, anchor: Box | None = None, floor: int = 0,
                  valign: str = "middle", fixed: int = 0) -> LargeFit | None:
     """Where and how large *parts* (`parts_of`) are set inside *mask*, the part set larger *ratio* times (see the
-    module): the base the largest from *max_size* down to the larger of *min_size* and *floor* (*fixed*: that size,
-    never shrunk), the ratio shrunk at that floor where it must, never under `MIN_RATIO`; None when the part cannot be
-    set larger so (the caller sets the text at one size). Remembered as `typeset.layout_text` is."""
+    module): the base the largest from *max_size* down to the larger of *min_size* and *floor* (the base's floor,
+    `base_floor`; *fixed*: that size, never shrunk), the ratio shrunk at that floor where it must, never under
+    `MIN_RATIO`; None when the part cannot be set larger so (the caller sets the text at one size). Remembered as
+    `typeset.layout_text` is."""
     from . import typeset as ts
 
     ratio = min(RATIO_CAP, float(ratio))

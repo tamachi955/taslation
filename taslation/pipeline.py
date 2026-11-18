@@ -4186,8 +4186,8 @@ class Pipeline:
         else the one the sheet gives its kind (`annotations.ink_of`: the text colour, the outline and its colour, each
         automatic when neither sets it); with *scaled* at the lettering size (`_scaled_top`; `cap_sizes` measures the
         page's sizes without it, as they fit). *part*: the part of *text* set larger (`TextRegion.large`; by default
-        the region's own when *text* is its translation; None: none; none at all with ``size_emphasis`` off), never
-        under the readable size (`render.emphasis`)."""
+        the region's own when *text* is its translation; None: none; none at all with ``size_emphasis`` off), the rest
+        never under the readable size nor under `render.emphasis.BASE_SHARE` of its size without the part."""
         s = self.settings
         colour, outline, outline_colour = ink_of(style, self.kind_lettering(region.tag))
         lettering, flags = self.region_lettering(text, region.tag, style)
