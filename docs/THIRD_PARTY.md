@@ -51,8 +51,8 @@ after a person said yes (install.ps1 asks; run by hand, the script asks), with t
 their training images shown first. Enter is yes where TASlation will run the inpainting model on the GPU (install.ps1:
 an NVIDIA GPU the GPU build of PyTorch runs on; by hand: PyTorch has CUDA) and no elsewhere; a run without a console
 never agrees. TASlation works without them, as it did before them. Once installed, the inpainting model is used by
-default where PyTorch has a CUDA GPU (`art_erase = "auto"`; `"lama"` uses it on the CPU too, `"off"` never); the layout
-model is off by default (`detect_model`).
+default where PyTorch has a CUDA GPU (`art_erase = "auto"`; `"lama"` uses it on the CPU too, `"off"` never), and so is
+the layout model where the inpainting model runs (`detect_model = "auto"`; `"on"` always, `"off"` never).
 
 | Model | Licence, as its repository states it | Lineage | Training data |
 |---|---|---|---|

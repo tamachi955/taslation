@@ -942,7 +942,10 @@ On other computers, erasing works as with "Not used", and the model is not even 
 On a computer without a GPU (AMD and Intel GPUs are not counted as GPUs either), with an old driver, or where the GPU build did not work, the CPU build is installed, and the inpainting is not used there (README, "Installation").
 On a computer where an installation before this version put in the CPU build, running `install.cmd` again replaces it with the GPU build. The installation after `update.cmd` does not replace it, and says so.
 With "Always, also on the CPU", it is used even without a GPU, but takes about 4 seconds a screen (about 0.6 seconds on a GPU).
-The layout model is not used by default while it is measured on more books. Neither model makes clear where the images used to train it come from (`docs/THIRD_PARTY.md`).
+For the layout model (it finds lettering on the drawing that the usual detection misses), choose "Not used", "Only with the inpainting" or "Always used". The default is "Only with the inpainting".
+It is used on a computer that uses the inpainting, so on a computer without a GPU, or without the two models, detection works as before.
+Before version 0.2.0 the default was "Not used". If you never chose, the new default applies. A settings file that says `detect_model = "off"` (a copy of the old `taslation.toml.example` has that line too) keeps it off.
+Neither model makes clear where the images used to train it come from (`docs/THIRD_PARTY.md`).
 The two models are installed together, with one question (`install.cmd` tells you about their origin before it asks). On a computer where TASlation uses LaMa on the GPU (one where the GPU build of PyTorch is being or has been installed),
 Enter installs them ([Y/n]); elsewhere Enter does not ([y/N]). A run without a console installs them on neither (`-Yes` does not answer this question either).
 Running `python setup_models.py` by hand asks the same way, and what Enter means is decided by whether PyTorch can use a CUDA GPU (the same judgement as "Only with a GPU"). With `--agreed`, it installs them without asking.
@@ -1007,7 +1010,7 @@ chunk_bubbles = 30           # lines per translation request in context mode (3-
 erase_mode = "fill"          # "fill": the bubble's own paper, flat or along its shading, within its outline;
                              # "inpaint": the same way, inpainted; "classic": the erase before 2026-10-30, byte for byte
 art_erase = "auto"           # with "fill", lettering on the drawing is inpainted by LaMa once installed: "auto" only where PyTorch has a CUDA GPU (else as "off"), "lama" also on the CPU, "off"
-detect_model = "off"         # (opt-in for now: "auto") the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs), "on", "off"
+detect_model = "auto"        # the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs), "on", "off" (the default of earlier versions)
 ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: "2h", "90s", seconds; "-1" never
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number

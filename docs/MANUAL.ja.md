@@ -936,7 +936,10 @@ Qwen3 4B は 30B をわずかに下回りました（162行のうち 30B の訳�
 GPU のないパソコン（AMD と Intel の GPU も GPU として数えません）、ドライバーが古いパソコン、GPU 版が動かなかったパソコンには CPU 版を入れ、そこでは使いません（README の「インストール」）。
 この版より前のインストールで CPU 版が入っているパソコンでは、`install.cmd` を実行し直すと GPU 版に置き換えます。`update.cmd` のあとのインストールは置き換えず、そう表示します。
 「いつも使う（CPU でも）」なら GPU がなくても使いますが、1画面に約4秒かかります（GPU では約0.6秒）。
-レイアウトモデルは、もっと多くの本で測るあいだは既定で使いません。どちらのモデルも、学習に使った画像の出どころを明らかにしていません（`docs/THIRD_PARTY.md`）。
+レイアウトモデル（ふつうの検出が見落とす絵の上の文字を見つける）は「使わない」「インペイントと一緒のときだけ」「いつも使う」から選びます。既定は「インペイントと一緒のときだけ」です。
+インペイントを使うパソコンで使うので、GPU のないパソコンや2つのモデルが入っていないパソコンでは、検出はこれまでと同じです。
+0.2.0 より前の既定は「使わない」でした。選んだことがなければ新しい既定になります。設定ファイルに `detect_model = "off"` と書いてあれば（古い `taslation.toml.example` を写したファイルにもあります）、使わないままです。
+どちらのモデルも、学習に使った画像の出どころを明らかにしていません（`docs/THIRD_PARTY.md`）。
 2つのモデルは1つの質問でまとめて入れます（`install.cmd` が、その出どころのことを示してから尋ねます）。TASlation が GPU で LaMa を使うパソコン（GPU 版の PyTorch が入る、または入っているパソコン）では
 Enter で入れ（[Y/n]）、それ以外では Enter で入れません（[y/N]）。コンソールのない実行では、どちらでも入れません（`-Yes` もこの質問には答えません）。
 `python setup_models.py` を手で実行したときも同じように尋ね、Enter の意味は PyTorch が CUDA の GPU を使えるかどうか（「GPU があるときだけ」と同じ判断）で決めます。`--agreed` を付けると尋ねずに入れます。
@@ -1001,7 +1004,7 @@ chunk_bubbles = 30           # lines per translation request in context mode (3-
 erase_mode = "fill"          # "fill": the bubble's own paper, flat or along its shading, within its outline;
                              # "inpaint": the same way, inpainted; "classic": the erase before 2026-10-30, byte for byte
 art_erase = "auto"           # with "fill", lettering on the drawing is inpainted by LaMa once installed: "auto" only where PyTorch has a CUDA GPU (else as "off"), "lama" also on the CPU, "off"
-detect_model = "off"         # (opt-in for now: "auto") the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs), "on", "off"
+detect_model = "auto"        # the layout model first, the classical detectors add what it missed: "auto" (where art_erase runs), "on", "off" (the default of earlier versions)
 ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: "2h", "90s", seconds; "-1" never
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number

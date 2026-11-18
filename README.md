@@ -217,7 +217,7 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
    The main points of PLaMo's licence (as revised on November 9, 2026): free for non-commercial use with no registration, 18 or older or a guardian's consent, the rights needed for what goes in and what comes out are yours to secure, and what you must say when you give a translation to someone or make it public (`docs/THIRD_PARTY.md`; TASlation asks you not to publish translations). If you answer the remaining questions with Enter, this computer gets everything it needs.
    If you answer Y to the questions whether to install Python and Ollama, you also agree to the terms of use shown by winget (Windows' package manager), which installs them (so that winget does not ask you partway through).
    It also asks whether to install the two models that find and erase lettering on the drawing (a layout model, about 170 MB, and an inpainting model, LaMa, about 200 MB).
-   On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses LaMa on the GPU by default),
+   On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses both on the GPU by default),
    and on a computer without a GPU, Enter does not ([y/N]; on such a computer they are models not used by default). A run without a console, and `-Yes`, do not install them on either kind of computer.
    The questions are shown in Japanese if Windows' display language is Japanese, and in English otherwise.
 4. Start it from "TASlation" in the Start menu.
