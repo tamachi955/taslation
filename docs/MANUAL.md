@@ -1074,13 +1074,13 @@ and it is not an error. Running `install.cmd` installs the other two.
 The OCR runs on the CPU, and the three models share the `ocr_threads` setting. When the CPU is busy with
 other work, setting `ocr_threads` to half the number of cores can make it faster.
 With an NVIDIA GPU, `ocr_runs_on` (`"auto"` by default) puts manga-ocr-charspot-small and manga-ocr-nar-small on the GPU, but only when it has room for them at TASlation's peak:
-the translation model whole in video memory, LaMa and the layout model when they are used, PyTorch's own memory, and what other programs hold now, with 1 GB left over.
+the translation model whole in video memory, LaMa and the layout model when they are used (LaMa needs more on a screen taller than 1440 pixels, where the lettering is larger in pixels), PyTorch's own memory, and what other programs hold now, with 1 GB left over.
 A card of less than 5 GB is never used for them, and the larger translation model (Qwen3.5 4B) leaves no room on a 6 GB card. The third model reads only a few lines a page and stays on the CPU.
 TASlation decides when the OCR models load, again after the GPU memory was let go ("Tools > Release the model now", and before Ollama loads its model when the room is no longer there), and when a setting it depends on changes.
 While Ollama loads its model, the two stay on the GPU as long as the room is still there at that moment; with `"gpu"` they go back to the CPU for the load, as before.
 It never decides while the translation model loads or answers, but at the first line read after that (at start, after the translation model's load when that is still under way).
 While the translation model answers (the next page of a spread is read meanwhile, for one), the two read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
-If the GPU fails (out of memory or another CUDA error), that line is read on the CPU, and the OCR stays on the CPU until the window closes. The readings are the same on both.
+If the GPU fails, that line is read on the CPU. When its memory ran out, the OCR stays on the CPU until the GPU memory is next let go (before the translation model's next load, or "Tools > Release the model now"), and TASlation then decides again; after another CUDA error it stays on the CPU until the window closes. The layout model and LaMa do the same when the GPU's memory runs out: they go on on the CPU until it is next let go, and the page comes out as usual. The readings are the same on both.
 `"cpu"` keeps the OCR on the CPU; `"gpu"` puts the two on the GPU wherever there is one, without looking at the room. The "System" page says where they are and why.
 
 Ollama's model is put in GPU memory only while it is needed. The window loads it at start, while the OCR models load (`load_model_at_start = true`, the default;
