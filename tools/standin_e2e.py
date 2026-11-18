@@ -67,7 +67,10 @@ and translated, from which frame; the page jobs and the translator's requests pe
 went out under (a page started early asks before its frame is confirmed); the requests sent for nothing (a job on a
 frame that was not the sharp one, or one dropped as its frame changed: how long each ran, how long after its job's
 cancel, and when the next request went out and how long that waited at the server, against Ollama's own time for
-it); the jobs kept from a frame that was not the sharp one (must be none); the jobs cancelled, per scenario (d, the
+it); the jobs on a soft frame whose frame was confirmed, those of them whose confirmation was taken back (while they
+ran, after them), and the jobs on a frame that was not the sharp one with a page unit or a kept line of theirs in the
+cache the window left (must be none where the sharp frame of their page came: each told with its page, how late the
+window captured that sharp frame and why); the jobs cancelled, per scenario (d, the
 flashes and spinners: none); overlays left on a page the stand-in had left; that no profile in the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
@@ -90,9 +93,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import ctypes
+import hashlib
 import http.client
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -542,6 +547,7 @@ class Notes:
         self.run_ends: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []  # each page unit a page job looked for in the cache, and what it found
         self.resolves: list[dict[str, Any]] = []  # ... and each look for the page as read at other sizes
+        self.decides: list[dict[str, Any]] = []  # each page job kept for now, decided (`Pipeline.decide_kept`): how
         self.on_display: Callable[[dict[str, Any]], None] | None = None
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
@@ -568,7 +574,8 @@ class Notes:
                "size": list(image.size) if image is not None else None, "started": False,
                "gate": False, "requests": 0, "translated": 0, "first_translated_t": None,
                "result_t": None, "result_translated": None, "result_from": None, "cancelled_t": None,
-               "discarded": None, "done_t": None, "gate_end": None}
+               "discarded": None, "done_t": None, "gate_end": None, "over_t": None, "open_for": None,
+               "open_until_t": None, "units": [], "line_ids": []}
         with self.lock:
             self.jobs.append(job)
             self.by_image[id(image)] = job
@@ -590,11 +597,50 @@ class Notes:
             return job
 
     def job_over(self, job: dict[str, Any] | None) -> None:
+        """The job's end: its gate's state then (``gate_end``), and the gate kept for the end of the run, when the
+        window may have taken its confirmation back since (`gates_at_end`), with the end of its open time
+        (`PageGate.open_until`) on this tool's clock."""
         with self.lock:
             if job is not None:
                 gate = job.pop("_gate", None)
                 job["gate_end"] = getattr(gate, "state", None)
+                job["over_t"] = now_ms()
+                if gate is not None:
+                    job["gate_obj"] = gate
+                    job["open_for"] = getattr(gate, "open_for", None)
+                    until = getattr(gate, "open_until", None)
+                    if until is not None and math.isfinite(until):
+                        job["open_until_t"] = job["over_t"] + (until - time.monotonic()) * 1000
             self.current = None
+
+    def gates_at_end(self) -> None:
+        """(the window closed) Each job's gate as the run left it: its state (``gate_final``: "dropped" after a
+        confirmation is one taken back, `PageGate.take_back`) and whether it was ever confirmed (``confirmed_ever``:
+        its open time set, `PageGate.confirm`)."""
+        with self.lock:
+            for job in self.jobs:
+                gate = job.pop("gate_obj", None) or job.pop("_gate", None)
+                if gate is None:
+                    continue
+                until = getattr(gate, "open_until", None)
+                job["gate_final"] = getattr(gate, "state", None)
+                job["confirmed_ever"] = (math.isfinite(until) if until is not None
+                                         else job["gate_end"] == "confirmed")
+
+    def line_put(self, line: str) -> None:
+        """A kept line the job running put first (`linememo.LineMemo.put`), by `line_id`."""
+        with self.lock:
+            if self.current is not None:
+                self.current["line_ids"].append(line)
+
+    def decided(self, gate: Any, kept: bool | None) -> None:
+        """The page job kept for now whose gate is *gate* decided (`Pipeline.decide_kept`): *kept* for good (True) or
+        put back (False), and by the job that runs then (None: between jobs, or the window's close)."""
+        with self.lock:
+            job = next((j for j in reversed(self.jobs) if gate is not None
+                        and (j.get("gate_obj") is gate or j.get("_gate") is gate)), None)
+            self.decides.append({"t": now_ms(), "job": job["id"] if job else None, "kept": kept,
+                                 "by": self.current["id"] if self.current else None})
 
     def tag(self, item: Any) -> None:
         if isinstance(item, tuple) and len(item) == 2 and item[0] in KINDS and isinstance(item[1], dict):
@@ -624,6 +670,8 @@ class Notes:
                 job["cancelled_t"] = t
                 job["discarded"] = bool(data.get("discarded"))
                 job["stored_at_cancel"] = len(data.get("stored") or ())
+            if kind in ("result", "page_cancelled"):  # the page units it said it stored anew, for the end's look
+                job["units"] += [fp for fp, _aspect in data.get("stored") or () if fp not in job["units"]]
             elif kind == "translate_done":
                 job["done_t"] = t
 
@@ -957,6 +1005,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     import taslation.capture.windows as windows
     from taslation import batch as batch_mod
     from taslation import fingerprint
+    from taslation import linememo
     from taslation import pageimages
     from taslation import pipeline as pipeline_mod
     from taslation.ocr import place
@@ -1086,6 +1135,24 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return out
 
     pipeline_mod.Pipeline._resolve, fingerprint.readings = resolved, counted_readings
+    put_line, decide_kept = linememo.LineMemo.put, pipeline_mod.Pipeline.decide_kept
+
+    def line_kept(self: Any, scope: str, key: str, *a: Any, **k: Any) -> Any:  # a kept line put first, by its job
+        scope = scope[:linememo.MAX_SCOPE]
+        first = self.find(scope, key) is None
+        changed = put_line(self, scope, key, *a, **k)
+        if changed and first and self.rings:
+            notes.line_put(line_id(self.rings[0].secret, scope, self.rings[0].digest(key)))
+        return changed
+
+    def kept_decided(self: Any) -> Any:  # a page job kept for now, decided: when, how, by which job
+        held = getattr(self, "_kept_open", None)
+        kept = decide_kept(self)
+        if held is not None:
+            notes.decided(getattr(held, "gate", None), kept)
+        return kept
+
+    linememo.LineMemo.put, pipeline_mod.Pipeline.decide_kept = line_kept, kept_decided
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -2017,6 +2084,105 @@ def readings_on_a_miss(resolves: list[dict[str, Any]], rel: Callable[[Any], Any]
             "list": [{**{k: v for k, v in r.items() if k != "t"}, "t_s": rel(r["t"])} for r in ran]}
 
 
+def line_id(secret: bytes, scope: str, digest: str) -> str:
+    """A kept line as this tool's notes name it: its ring's secret, its scope and its digest (`linememo.Ring`) hashed
+    together, so that neither the line nor the book's secret is held in the notes or written anywhere."""
+    return hashlib.sha256(b"\0".join((secret, scope.encode("utf-8", "surrogatepass"), digest.encode("ascii")))
+                          ).hexdigest()[:32]
+
+
+def cache_at_end(settings: Any) -> dict[str, Any]:
+    """The book's cache as the window left it on disk, read once the window has closed: its page units' fingerprints
+    and its kept lines (`line_id`) - or the type of what went wrong."""
+    try:
+        from taslation.cache import CacheStore
+
+        book = CacheStore(settings.cache_dir).open(BOOK, PLAMO, "English")
+        return {"units": {page.fingerprint for page in book.pages},
+                "lines": {line_id(ring.secret, name, digest) for ring in book.lines.rings
+                          for name, entries in ring.scopes.items() for digest in entries}}
+    except Exception as e:  # noqa: BLE001 - said by its type
+        return {"error": type(e).__name__}
+
+
+DECIDE_SLACK_MS = 20  # a page kept for now decided this close to the end of its open time: its time was up (the clocks)
+
+
+def left_why(job: dict[str, Any], sharp_seen: float | None, decide: dict[str, Any] | None) -> str:
+    """Why something *job* stored (on a frame that was not the sharp one) is in the cache at the end: no sharp frame
+    of its page was captured after it; it had no gate (not started early); its gate was dropped, and yet (what putting
+    a job back must never leave); its confirmation was not taken back though the sharp frame came while it ran or
+    within its open time; it was kept for good as it ended (no open time: a viewer not yet seen drawing soft first);
+    kept for now, it was decided for good before its open time was up and before the sharp frame came (*decide*:
+    `Notes.decided`, by the job that came next); the sharp frame came after its open time."""
+    if sharp_seen is None:
+        return "no sharp frame"
+    if not job.get("gate"):
+        return "no gate"
+    if job.get("gate_final") != "confirmed":
+        return "put back, yet left"
+    over = job.get("over_t")
+    if over is None or sharp_seen <= over:
+        return "sharp frame not taken back"
+    if not job.get("open_for"):
+        return "viewer not yet seen drawing soft first"
+    until = job.get("open_until_t")
+    if (decide is not None and decide["kept"] and until is not None
+            and decide["t"] < min(until - DECIDE_SLACK_MS, sharp_seen)):
+        return "decided by another job"
+    if until is not None and sharp_seen >= until:
+        return "later than the open time"
+    return "sharp frame not taken back"
+
+
+def soft_frames_at_end(jobs: list[dict[str, Any]], turns: list[dict[str, Any]], captures: list[dict[str, Any]],
+                       decides: list[dict[str, Any]], cache_end: dict[str, Any] | None,
+                       rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The page jobs on a frame that was not the sharp one, by what is true at the end of the run: those on a soft
+    frame whose frame was confirmed (at any time: ``confirmed_ever``, `Notes.gates_at_end`); of them, those whose
+    confirmation the window took back (`PageGate.take_back`) while they ran (their gate dropped as they ended) or
+    after them (kept for now: confirmed as they ended); and every job with something of its own in the cache the
+    window left on disk (*cache_end*: `cache_at_end`) - a page unit it said it stored anew, a kept line it put first,
+    neither stored anew by a later job (which it would not have been, had it still been there). Each of those is told
+    with its page, how late the window captured the sharp frame of its page after the stand-in drew it, and why
+    (`left_why`); none must be left where that sharp frame came."""
+    started = [j for j in jobs if j["started"]]
+    confirmed = [j for j in started if j["state"] == "soft" and j.get("confirmed_ever")]
+    taken_back = [j for j in confirmed if j.get("gate_final") == "dropped"]
+    out: dict[str, Any] = {
+        "confirmed": len(confirmed),
+        "taken_back": {"while_running": sum(1 for j in taken_back if j["gate_end"] == "dropped"),
+                       "after_the_job": sum(1 for j in taken_back if j["gate_end"] == "confirmed")},
+        "left_in_the_cache": None, "left_though_the_sharp_frame_came": None, "left": [],
+        "cache": "not read" if cache_end is None else cache_end.get("error", "read")}
+    if cache_end is None or "error" in cache_end:
+        return out
+    for job in started:
+        if job["state"] == "sharp":
+            continue
+        later = [j for j in started if j["id"] > job["id"]]
+        units = [u for u in job.get("units") or () if u in cache_end["units"]
+                 and not any(u in (j.get("units") or ()) for j in later)]
+        lines = [line for line in job.get("line_ids") or () if line in cache_end["lines"]
+                 and not any(line in (j.get("line_ids") or ()) for j in later)]
+        if not units and not lines:
+            continue
+        screen = (job["page"], bool(job["spread"]))
+        turn = next((t for t in turns if t["soft_t"] <= job["t"] < t["next_t"] and t["screen"] == screen), None)
+        end = turn["next_t"] if turn is not None else math.inf
+        sharp_seen = next((c["t"] for c in captures if job["t"] <= c["t"] < end and c["state"] == "sharp"
+                           and (c["page"], bool(c["spread"])) == screen), None)
+        decide = next((d for d in reversed(decides) if d["job"] == job["id"]), None)
+        out["left"].append({
+            "id": job["id"], "t_s": rel(job["t"]), "page": job["page"], "spread": job["spread"],
+            "frame": job["state"], "units_left": len(units), "lines_left": len(lines),
+            "sharp_captured_late_ms": ms(sharp_seen, turn["sharp_t"]) if turn is not None else None,
+            "why": left_why(job, sharp_seen, decide), "decided_by": decide["by"] if decide is not None else None})
+    out["left_in_the_cache"] = len(out["left"])
+    out["left_though_the_sharp_frame_came"] = sum(1 for r in out["left"] if r["why"] != "no sharp frame")
+    return out
+
+
 def server_wait(r: dict[str, Any]) -> int | None:
     """How long a request waited beyond the model's work for it (its HTTP exchange less Ollama's load, prompt and
     answer durations; not less its total_duration, which takes in a wait behind another request): the wait for the
@@ -2400,11 +2566,15 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
             demo_video.finish_app(app)
         director.close_saver()
         logging.getLogger().removeHandler(tap)
-    return summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode)
+    return summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode,
+                     cache_at_end(settings))
 
 
 def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.StandinBrowser, patched: dict[str, Any],
-              guard: Any, began: float, ended: float, top: int, dpr: float, mode: str) -> dict[str, Any]:
+              guard: Any, began: float, ended: float, top: int, dpr: float, mode: str,
+              cache_end: dict[str, Any]) -> dict[str, Any]:
+    """The report's run, from the notes once the window has closed; *cache_end*: the cache it left (`cache_at_end`)."""
+    notes.gates_at_end()
     events = director.events
     lat = [e["recv"] - e["t"] for e in events]
     offset = min(lat) if lat else 0.0
@@ -2614,8 +2784,11 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                  "gate_end": dict(Counter(str(j["gate_end"]) for j in started)),
                  "discarded": sum(1 for j in started if j.get("discarded")),
                  "results_from": dict(Counter(str(j["result_from"]) for j in started if j["result_t"])),
+                 # (by the gate as each job ended - a confirmation taken back after that still counts -, as before)
                  "confirmed_on_soft": sum(1 for j in started if j["state"] == "soft" and j["gate_end"] == "confirmed"),
                  "kept_from_unsettled_frames": [j["id"] for j in kept_soft],
+                 # (by what is true at the end: the gates as the run left them, and the cache on disk)
+                 "soft_frames_at_end": soft_frames_at_end(jobs, turns, notes.captures, notes.decides, cache_end, rel),
                  "on_black_spinner_unknown_shown": sum(1 for j in started if j["state"] in ("black", "spinner",
                                                                                             "unknown")
                                                       and j["result_t"] and j["result_translated"])},
@@ -2765,8 +2938,15 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     old, cancels = run_["old_lettering_after_a_turn"], run_["cancels"]
     print(f"old lettering after a turn, job running: {old['during_job']}; no job: {old['no_job']}; jobs cancelled "
           f"{cancels['all']} {cancels['by_segment']}, of them with their page still on show "
-          f"{len(cancels['page_still_on_show'])}; confirmed on a soft frame {run_['jobs']['confirmed_on_soft']}; kept "
-          f"from frames not the sharp one {run_['jobs']['kept_from_unsettled_frames']}")
+          f"{len(cancels['page_still_on_show'])}")
+    at_end = run_["jobs"]["soft_frames_at_end"]
+    left = [(r["id"], r["page"], r["sharp_captured_late_ms"], r["why"]) for r in at_end["left"]]
+    print(f"soft frames at the end: confirmed {at_end['confirmed']}; taken back "
+          f"{at_end['taken_back']['while_running']} while running, {at_end['taken_back']['after_the_job']} after the "
+          f"job; left in the cache {at_end['left_in_the_cache']} ({at_end['left_though_the_sharp_frame_came']} though "
+          f"the sharp frame came; cache {at_end['cache']}) {left}; by the gate as the job ended: confirmed on a soft "
+          f"frame {run_['jobs']['confirmed_on_soft']}, kept from frames not the sharp one "
+          f"{run_['jobs']['kept_from_unsettled_frames']}")
     print(f"the page before after a turn, by the run: {run_['old_page_after_a_turn']['by_run']}; its lettering "
           f"{old['by_run']}")
     soft = run_["lettering_on_a_soft_frame"]

@@ -221,6 +221,133 @@ def test_lettering_on_a_soft_frame_is_told_with_how_far_its_boxes_lie_from_the_s
     assert told["shift_px"]["max"] == 2 and told["box_shift_px"]["n"] == 2
 
 
+def _turn(page, soft_t, sharp_after=700, late=200):
+    """A turn of the stand-in to the spread *page*: drawn soft at *soft_t*, sharp *sharp_after* ms later (None: never),
+    and the window's captures of both, the sharp one *late* ms after the stand-in drew it."""
+    sharp_t = soft_t + sharp_after if sharp_after is not None else None
+    captures = [{"t": soft_t + 50, "page": page, "spread": True, "state": "soft"}]
+    if sharp_t is not None:
+        captures.append({"t": sharp_t + late, "page": page, "spread": True, "state": "sharp"})
+    return {"screen": (page, True), "soft_t": soft_t, "sharp_t": sharp_t, "next_t": soft_t + 4000}, captures
+
+
+def _ended(id_, t, page, frame="soft", gate=True, end="confirmed", final="confirmed", ever=True, over=600,
+           open_for=0.0, units=(), lines=()):
+    """A page job as the notes have it at the end (`Notes.gates_at_end`): its gate as it ended and as the run left it,
+    whether it was ever confirmed, its end (*over* ms after its start), its open time and what it stored."""
+    over_t = t + over
+    return {"id": id_, "t": t, "page": page, "spread": True, "state": frame, "started": True, "gate": gate,
+            "gate_end": end if gate else None, "gate_final": final if gate else None, "confirmed_ever": ever,
+            "over_t": over_t, "open_for": open_for, "open_until_t": over_t + open_for * 1000 if ever else None,
+            "units": list(units), "line_ids": list(lines)}
+
+
+def test_a_soft_frames_job_is_judged_by_what_its_gate_and_the_cache_hold_at_the_end():
+    plan = [_turn(2, 0), _turn(4, 4000), _turn(6, 8000), _turn(8, 12000), _turn(10, 16000, sharp_after=2600, late=100),
+            _turn(12, 20000, sharp_after=None), _turn(14, 24000), _turn(16, 28000), _turn(18, 32000),
+            _turn(20, 36000)]
+    turns = [turn for turn, _ in plan]
+    captures = [c for _, caps in plan for c in caps]
+    jobs = [
+        _ended(1, 100, 2, end="dropped", final="dropped", units=["u1"], lines=["l1"]),  # taken back while it ran
+        _ended(2, 950, 2, frame="sharp", units=["u2"]),
+        _ended(3, 4100, 4, final="dropped", open_for=2.0, units=["u3"]),  # ... after it: kept for now, then put back
+        _ended(4, 4950, 4, frame="sharp", units=["u4"]),
+        _ended(5, 8100, 6, units=["u5"], lines=["l5"]),  # kept for good as it ended: no open time
+        _ended(6, 12100, 8, open_for=2.0, units=["u6"]),  # kept for now, decided for good by the next job
+        _ended(7, 16100, 10, open_for=2.0, units=["u7"]),  # its sharp frame after its open time
+        _ended(8, 20100, 12, units=["u8"]),  # no sharp frame came
+        _ended(9, 24100, 14, units=["u9"], lines=["l9"]),  # its unit and line in the cache: stored anew by job 10 ...
+        _ended(10, 24950, 14, frame="sharp", units=["u9"], lines=["l9"]),  # ... which it would not be, had they stayed
+        _ended(11, 28100, 16, gate=False, ever=False, units=["u11"]),  # settled on a soft frame: not started early
+        _ended(12, 32100, 18, end="dropped", final="dropped", ever=False, units=["u12"]),  # dropped, and yet
+        _ended(13, 36100, 20, over=1500, units=["u13"]),  # its sharp frame came while it ran: not taken back
+        _ended(14, 36200, 20, frame="black", gate=False, ever=False)]
+    decides = [{"t": 12800, "job": 6, "kept": True, "by": None}, {"t": 4900, "job": 3, "kept": False, "by": 4}]
+    cache = {"units": {"u2", "u4", "u5", "u6", "u7", "u8", "u9", "u11", "u12", "u13"}, "lines": {"l5", "l9"}}
+    told = standin_e2e.soft_frames_at_end(jobs, turns, captures, decides, cache, lambda t: t / 1000)
+    assert told["confirmed"] == 8  # (on a soft frame, confirmed at any time)
+    assert told["taken_back"] == {"while_running": 1, "after_the_job": 1}
+    assert [(r["id"], r["page"], r["why"], r["units_left"], r["lines_left"], r["sharp_captured_late_ms"])
+            for r in told["left"]] == [
+        (5, 6, "viewer not yet seen drawing soft first", 1, 1, 200), (6, 8, "decided by another job", 1, 0, 200),
+        (7, 10, "later than the open time", 1, 0, 100), (8, 12, "no sharp frame", 1, 0, None),
+        (11, 16, "no gate", 1, 0, 200), (12, 18, "put back, yet left", 1, 0, 200),
+        (13, 20, "sharp frame not taken back", 1, 0, 200)]
+    assert (told["left_in_the_cache"], told["left_though_the_sharp_frame_came"], told["cache"]) == (7, 6, "read")
+    assert told["left"][0]["t_s"] == 8.1
+    # nothing left once every soft frame's job was put back: the must-be-none number at 0
+    clean = standin_e2e.soft_frames_at_end(jobs, turns, captures, decides, {"units": {"u2", "u4", "u9"},
+                                                                            "lines": {"l9"}}, lambda t: t)
+    assert (clean["left_in_the_cache"], clean["left_though_the_sharp_frame_came"], clean["left"]) == (0, 0, [])
+    unread = standin_e2e.soft_frames_at_end(jobs, turns, captures, decides, {"error": "OSError"}, lambda t: t)
+    assert (unread["confirmed"], unread["left_in_the_cache"], unread["cache"]) == (8, None, "OSError")
+
+
+def test_a_decision_at_the_end_of_the_open_time_is_its_time_being_up():
+    job = _ended(1, 0, 4, open_for=2.0)  # (over at 600, open until 2600)
+    near = {"t": 2590, "job": 1, "kept": True, "by": None}
+    assert standin_e2e.left_why(job, 2700, near) == "later than the open time"
+    assert standin_e2e.left_why(job, 2700, {**near, "t": 900}) == "decided by another job"
+    assert standin_e2e.left_why(job, 2500, None) == "sharp frame not taken back"  # (within its open time)
+    assert standin_e2e.left_why(job, 500, None) == "sharp frame not taken back"  # (while it ran)
+
+
+def test_the_notes_keep_a_jobs_gate_units_lines_and_decision_for_the_end():
+    from taslation.pipeline import PageGate
+
+    notes = standin_e2e.Notes(31, 1.0)
+    gate = PageGate(open_for=2.0)
+    job = notes.new_job(None)
+    notes.job_started(job, None, True, gate)
+    assert notes.take_job(None, gate) is job
+    result = {"result": SimpleNamespace(translated=[], original=None, cache_hits=0, cache_misses=2),
+              "stored": [("f1", 1.0), ("f2", 0.7)]}
+    cancelled = {"discarded": False, "stored": [("f2", 0.7), ("f3", 1.0)]}
+    for kind, data in (("result", result), ("page_cancelled", cancelled)):
+        notes.tag((kind, data))
+        notes.app_event(None, kind, data)
+    notes.line_put("l1")
+    assert gate.confirm()
+    notes.job_over(job)
+    notes.line_put("l2")  # (no job running: nobody's)
+    assert gate.take_back()  # the sharper frame came after the job: the page kept for now put back
+    notes.decided(gate, False)
+    other, dropped = notes.new_job(None), PageGate()  # (a frame that changed before its confirmation)
+    notes.job_started(other, None, True, dropped)
+    notes.take_job(None, dropped)
+    dropped.drop()
+    notes.job_over(other)
+    notes.gates_at_end()
+    assert job["units"] == ["f1", "f2", "f3"] and job["line_ids"] == ["l1"] and other["line_ids"] == []
+    assert (job["gate_end"], job["gate_final"], job["confirmed_ever"], job["open_for"]) == (
+        "confirmed", "dropped", True, 2.0)
+    assert 1900 < job["open_until_t"] - job["over_t"] <= 2000
+    assert (other["gate_end"], other["gate_final"], other["confirmed_ever"], other["open_until_t"]) == (
+        "dropped", "dropped", False, None)
+    assert notes.decides == [{"t": notes.decides[0]["t"], "job": job["id"], "kept": False, "by": None}]
+    assert "gate_obj" not in job and "gate_obj" not in other
+
+
+def test_the_cache_at_the_end_is_read_by_its_page_units_and_its_kept_lines(tmp_path):
+    from taslation.cache import CachedBubble, CachedPage, CacheStore
+    from taslation.config import Settings
+    from taslation.fingerprint import FINGERPRINT_HEX_LEN
+
+    settings = Settings(state_dir=tmp_path)
+    book = CacheStore(settings.cache_dir).open(standin_e2e.BOOK, standin_e2e.PLAMO, "English")
+    fingerprint = ("5a" * FINGERPRINT_HEX_LEN)[:FINGERPRINT_HEX_LEN]
+    book.add(CachedPage(fingerprint, 1.0, [CachedBubble((0.1, 0.1, 0.3, 0.3), "Line 1.")]))
+    book.lines.put("scope", "key", "Line 1.")
+    book.save()
+    ring = book.lines.rings[0]
+    line = standin_e2e.line_id(ring.secret, "scope", ring.digest("key"))
+    assert standin_e2e.cache_at_end(settings) == {"units": {fingerprint}, "lines": {line}}
+    assert re.fullmatch(r"[0-9a-f]{32}", line) and line != standin_e2e.line_id(ring.secret, "scope2",
+                                                                               ring.digest("key"))
+    assert standin_e2e.cache_at_end(SimpleNamespace(cache_dir=None)) == {"error": "TypeError"}
+
+
 def progress_line(progress, reading=False):  # (as the window's progress line is named where it says it)
     return str(progress)
 
