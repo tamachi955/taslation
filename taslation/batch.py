@@ -2150,6 +2150,7 @@ class BatchReader:
                 meta=meta, call_args=call, cancel=self._stop)[0])
         per_unit: list[dict[int, str]] = [{} for _ in units]
         per_unit_flags: list[dict[int, list[str]]] = [{} for _ in units]
+        per_unit_large: list[dict[int, tuple[int, int, float]]] = [{} for _ in units]  # the parts set larger
         counted: list[set[int]] = [set() for _ in units]  # the lines of each unit stored and counted so far
 
         def usable(k: int, text: str) -> bool:
@@ -2158,7 +2159,10 @@ class BatchReader:
         def settle(lines: list[int], replies: Sequence[str], context: list[tuple[str, str]]) -> None:
             """The *replies* of *lines* (indices into the run) spelt as the series sheet spells, checked and
             tightened; the real translations kept for their page units, with their flags, and carried on as context.
-            A reused line was held to the sheet already (`linememo.held_to`); the memo keeps the rest as spelt here."""
+            A reused line was held to the sheet already (`linememo.held_to`); the memo keeps the rest as spelt here.
+            Then each final translation whose Japanese lettering set a part larger gets the part of it to set larger
+            (`Pipeline.large_part`: requests beside the run's, after the pairs the next run starts from, never cut
+            here; stopped by Stop as the run's are)."""
             entries: list[dict[str, Any]] = []
             for k in lines:
                 ui, i = slots[k]
@@ -2180,6 +2184,20 @@ class BatchReader:
                         # (a line reused without a request is not in the request's history, so not in pairs that
                         # only grow either: the next run's prompt extends this run's last one)
                         recent.append((r.source_text, r_out))
+            mixed = [k for k in lines if units[slots[k][0]].japanese()[slots[k][1]].size_mix is not None
+                     and slots[k][1] in per_unit[slots[k][0]]]
+            if not mixed or not getattr(self.pipeline.settings, "size_emphasis", True):
+                return
+            after = list(recent)  # (a copy: the pairs are not cut here)
+            for k in mixed:
+                ui, i = slots[k]
+                r = units[ui].japanese()[i]
+                part = self.pipeline.large_part(r.source_text, r.size_mix, per_unit[ui][i], region_meta(r), after,
+                                                notes_text, self._stop, self._on_slow, self._storing)
+                if part is not None:
+                    per_unit_large[ui][i] = part
+                else:
+                    per_unit_large[ui].pop(i, None)
 
         def commit(which: list[int]) -> list[int]:
             """The page units *which* stored with what they have, the lines kept for reuse first (`linememo`, saved
@@ -2191,7 +2209,7 @@ class BatchReader:
             for ui in which:
                 fresh = len(per_unit[ui].keys() - counted[ui])  # stored now, not by the commit before this one
                 counted[ui].update(per_unit[ui])
-                if not self._store_unit(units[ui], per_unit[ui], per_unit_flags[ui], fresh):
+                if not self._store_unit(units[ui], per_unit[ui], per_unit_flags[ui], fresh, per_unit_large[ui]):
                     left.append(ui)
                 else:  # (complete: none of its lines is asked again)
                     self._units_final([units[ui]])
@@ -2241,17 +2259,21 @@ class BatchReader:
     def _note(self, note: Message) -> None:
         self._deferred(lambda: self.progress.notes.append(note))
 
-    def _store_unit(self, unit: ScannedUnit, texts: dict[int, str], flags: dict[int, list[str]], fresh: int) -> bool:
-        """*unit* stored with *texts* (and their *flags*, `Pipeline.commit_unit`) and told to the view, its lines kept
+    def _store_unit(self, unit: ScannedUnit, texts: dict[int, str], flags: dict[int, list[str]], fresh: int,
+                    large: dict[int, tuple[int, int, float]] | None = None) -> bool:
+        """*unit* stored with *texts* (and their *flags* and the parts of them set larger, *large*:
+        `Pipeline.commit_unit`) and told to the view, its lines kept
         for `_find_names`, the *fresh* lines (not stored by a commit before this one) counted; whether it is complete.
         While frames are still read it waits (`_deferred`), and its completeness is what the store will return
         (`_would_complete`)."""
         texts, flags = dict(texts), {i: list(f) for i, f in flags.items()}
+        parts = dict(large or {})
         complete: list[bool] = []
 
         def store() -> None:
             with self._storing:
-                complete.append(self.pipeline.commit_unit(unit, texts, flags))
+                complete.append(self.pipeline.commit_unit(unit, texts, flags, parts) if parts
+                                else self.pipeline.commit_unit(unit, texts, flags))
             self._tell_view("stored", unit, texts)
             self._keep_said(unit, texts)
             p = self.progress

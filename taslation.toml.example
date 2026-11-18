@@ -58,6 +58,7 @@ readable_font_size = 11      # a translation set smaller than this is flagged "s
 spellcheck = true            # flag a word the dictionary does not know (pip install pyspellchecker; offline word lists)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering" for review
 uppercase = false
+size_emphasis = true          # the part of a bubble the original letters larger is set larger in the translation too, where it is found there (one or two requests beside the page's for such a bubble; the words never change) and the bubble holds both sizes; false: every translation at one size
 erase_mode = "fill"           # "fill": the bubble's own paper, flat or along its shading, within its outline; "inpaint": the lettering inpainted (keeps toned bubble interiors); "classic": the erase of before 2026-10-30 (one flat colour, lettering told by light and dark alone)
 art_erase = "auto"            # with "fill", lettering on the drawing is inpainted by LaMa, once its model is installed: "auto" only where PyTorch has a CUDA GPU (elsewhere the erase is as with "off"), "lama" always, on the CPU too (about 4 s a screen), or "off"
 

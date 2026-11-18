@@ -34,6 +34,10 @@ before the pages, so that the other volumes of a series read it from the header:
 line's translation under a keyed hash of its normalised Japanese, never the Japanese. It goes wherever the cache
 goes (saved, merged, exported, imported, renamed, deleted with it); a bubble given a translation reused so is marked
 (`CachedBubble.reused`), which translator mode's region editor says.
+
+A bubble whose original lettering set part of it larger may keep the part of its translation set larger too
+(`CachedBubble.large`: offsets into the translation and a ratio, never the Japanese nor an offset into it), so that a
+page from the cache is lettered as it was without asking the model where that part is.
 """
 
 from __future__ import annotations
@@ -54,6 +58,7 @@ from . import protect
 from .atomic import write_atomic
 from .fingerprint import FINGERPRINT_BITS, FINGERPRINT_HEX_LEN, hamming
 from .linememo import LineMemo
+from .locate_large import checked, follow
 from .names import (
     DAMAGED, WINDOWS_DEVICES, Unreadable, check_schema, delete_files, drop_leftovers, file_names, files_of, is_copy,
     is_listed, language_key, load_object, pick, read_object, set_aside, slugify,
@@ -105,6 +110,11 @@ class CachedBubble:
     # again keeps it without asking the model (`Pipeline.forget_page`'s *keep_edited*, `Pipeline.scan`'s), and "My
     # corrections" lists it (`BookCache.corrections`). A file without the mark is read as none
     edited: bool = False
+    # the part of its text set larger than the rest, as the original lettered it (`TextRegion.large`: start, end and
+    # ratio, offsets into *text*); written only when set, as ``"large": [[start, end, ratio]]``, and checked when read
+    # (`locate_large.checked`: inside the text, the ratio over 1 and at most the cap; else dropped). Versions before
+    # it ignore the key, as they do every key they do not know. No Japanese, no offset into it
+    large: tuple[int, int, float] | None = None
 
     def to_json(self) -> dict[str, Any]:
         d: dict[str, Any] = {"box": [round(v, 4) for v in self.box], "text": self.text}
@@ -120,22 +130,29 @@ class CachedBubble:
             d["reused"] = True
         if self.edited:
             d["edited"] = True
+        large = checked(self.text, self.large)
+        if large is not None:
+            d["large"] = [[large[0], large[1], round(large[2], 3)]]
         return d
 
     @classmethod
     def from_json(cls, d: dict[str, Any]) -> "CachedBubble":
         """The bubble *d* describes; ValueError (or TypeError, KeyError) for one no pipeline wrote, such as a
         position that is not a finite number on the page (drawing it would fail). The "draft" mark an earlier version
-        wrote on a first draft is left out: the bubble is a translation like any other."""
+        wrote on a first draft is left out: the bubble is a translation like any other. A part set larger that does
+        not fit the text is dropped, the bubble kept (`locate_large.checked`)."""
         box = tuple(_coord(v) for v in d["box"])
         if len(box) != 4:
             raise ValueError("bad box")
         poly = [(_coord(p[0]), _coord(p[1])) for p in d.get("poly", [])]
         flags = [str(f) for f in d.get("flags", []) if f]
         angle = _finite(d.get("angle", 0.0))
-        return cls(box=box, text=str(d.get("text", "")), poly=poly, flags=flags,  # type: ignore[arg-type]
+        text = str(d.get("text", ""))
+        spans = d.get("large")
+        large = checked(text, spans[0]) if isinstance(spans, list) and len(spans) == 1 else None
+        return cls(box=box, text=text, poly=poly, flags=flags,  # type: ignore[arg-type]
                    note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0,
-                   reused=d.get("reused") is True, edited=d.get("edited") is True)
+                   reused=d.get("reused") is True, edited=d.get("edited") is True, large=large)
 
 
 @dataclass
@@ -362,7 +379,8 @@ class TextEdit(NamedTuple):
     """A bubble's text changed from *old* to *new* (`BookCache.put_texts`): the bubble is the one of the page
     *fingerprint* at *box* that holds *old*. *mark*: what its `CachedBubble.edited` becomes (True: a person's change,
     Find and replace; None: it stays, as for a spelling made consistent), and once the edit is made, *was*: what it
-    was before."""
+    was before. *large*: what its part set larger becomes (`CachedBubble.large`; ``...``, the default: the part
+    follows the edit, `locate_large.follow`), and once the edit is made, *large_was*: what it was before."""
 
     fingerprint: str
     box: NBox
@@ -370,10 +388,13 @@ class TextEdit(NamedTuple):
     new: str
     mark: bool | None = None
     was: bool | None = None
+    large: Any = ...
+    large_was: Any = None
 
     def undone(self) -> "TextEdit":
-        """The same edit the other way round (the mark too)."""
-        return self._replace(old=self.new, new=self.old, mark=self.was, was=self.mark)
+        """The same edit the other way round (the mark and the part set larger too)."""
+        return self._replace(old=self.new, new=self.old, mark=self.was, was=self.mark, large=self.large_was,
+                             large_was=None)
 
 
 class Correction(NamedTuple):
@@ -661,6 +682,7 @@ class BookCache:
                 for rx, new in compiled:
                     text = rx.sub(new, text)
                 if text != b.text:
+                    b.large = follow(b.text, text, b.large)  # (moved with the text, or gone where a name in it changed)
                     b.text = text
                     touched = True
                     changed += 1
@@ -682,8 +704,10 @@ class BookCache:
         note, the page's mark and every position stay, as in `rename`). A line kept for reuse whose translation is the
         old text of an edit made gets its new text too (`lines`: Find and replace changes the book's translations,
         the lines to come among them). An edit with a *mark* sets the bubble's `edited` to it (and keeps what it was in
-        the edit made, for `TextEdit.undone`). Returns the edits that were made; a save writes them, and a merging save
-        keeps them as it keeps a page added."""
+        the edit made, for `TextEdit.undone`); its part set larger follows the edit (`locate_large.follow`: moved, or
+        gone where the edit touched it), or becomes the edit's *large* when it gives one, and what it was is kept in the
+        edit made too. Returns the edits that were made; a save writes them, and a merging save keeps them as it keeps
+        a page added."""
         pages = {page.fingerprint: page for page in self.pages}
         made: list[TextEdit] = []
         for edit in edits:
@@ -692,11 +716,13 @@ class BookCache:
                 continue
             for bubble in page.bubbles:
                 if bubble.text == edit.old and all(abs(a - b) <= SAME_BOX for a, b in zip(bubble.box, edit.box)):
-                    if edit.mark is None:
-                        made.append(edit)
-                    else:
-                        made.append(edit._replace(was=bubble.edited))
+                    done = edit._replace(large_was=bubble.large)
+                    if edit.mark is not None:
+                        done = done._replace(was=bubble.edited)
                         bubble.edited = edit.mark
+                    made.append(done)
+                    bubble.large = (follow(edit.old, edit.new, bubble.large) if edit.large is ...
+                                    else checked(edit.new, edit.large))
                     bubble.text = edit.new
                     self.touched[page.fingerprint] = page
                     self.dirty = True

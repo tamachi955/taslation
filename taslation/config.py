@@ -222,6 +222,11 @@ class Settings:
     text_scale: float = 1.0
     line_spacing: float = 1.12
     uppercase: bool = False
+    # the part of a bubble's lettering the original set larger than the rest is set larger in the translation too:
+    # where its counterpart in the translation is found (`locate_large`: one or two requests beside the page's for such
+    # a bubble, the words never changed) and the bubble holds both sizes (`render.emphasis`). Off: every translation
+    # at one size, and no request for it
+    size_emphasis: bool = True
     readable_font_size: int = 11  # a translation set smaller than this is flagged "small" for review (0 = never)
     enforce_terms: bool = True  # a translation that misses a rendering from the series sheet is flagged "rendering"
     spellcheck: bool = True  # flag a translation with a word the dictionary does not know (needs the optional pyspellchecker package)

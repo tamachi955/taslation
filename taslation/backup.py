@@ -101,6 +101,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from . import protect
 from .atomic import write_atomic
+from .locate_large import follow
 
 if TYPE_CHECKING:
     from .annotations import (AnnotationStore, BookAnnotations, Conflict, Glossary, GlossaryStore, Review,
@@ -641,7 +642,9 @@ def _incoming_cache(data: Any) -> "BookCache":
         raise BackupError("damaged file")
     for page in incoming.pages:
         for b in page.bubbles:
-            b.text = _CONTROLS_BUT_LINES.sub("", b.text)
+            text = _CONTROLS_BUT_LINES.sub("", b.text)
+            b.large = follow(b.text, text, b.large)  # (its part set larger moved with the text, or gone)
+            b.text = text
             b.note = _CONTROLS_BUT_LINES.sub("", b.note)
             b.flags = [f for f in (_CONTROLS.sub("", f) for f in b.flags) if f]
     return incoming

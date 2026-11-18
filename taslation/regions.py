@@ -76,7 +76,8 @@ class TextRegion:
     # cache). Memory only: it indexes the Japanese
     size_mix: Any = None
     # the part of its translation (`translated_text`) lettered larger than the rest: (start, end, ratio), offsets into
-    # the translation and how many times the rest's size (`render.emphasis`); None = lettered at one size
+    # the translation and how many times the rest's size (`render.emphasis`); found once the translation is final
+    # (`Pipeline._locate_large`), taken from the cache with it (`CachedBubble.large`); None = lettered at one size
     large: tuple[int, int, float] | None = None
 
     @property

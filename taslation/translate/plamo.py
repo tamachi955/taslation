@@ -432,6 +432,20 @@ class PlamoTranslator(OllamaTranslator):
             raise TranslationError(Message("ollama.bad_answer", chars=0))
         return out
 
+    def translate_aside(self, text: str, context: Sequence[tuple[str, str]] = (), notes: str = "",
+                        cancel: threading.Event | None = None,
+                        on_slow: Callable[[float], None] | None = None) -> str:
+        """One request beside a page's own (`locate_large`: where a bubble's larger lettering is in its translation):
+        *text* translated after the earlier pairs *context* with the premises *notes*, as a line of the page is
+        (`_line`, without the Japanese after it), and nothing of it kept - no pair for the next request, no name
+        learnt, no draw counted (a line asked for later is drawn as it would have been). Cancelled as a page is."""
+        target = self.target_code
+        source = one_line(text)
+        history = [(one_line(src), dst) for src, dst in list(context)[-self.history_pairs:]]
+        max_tokens = max(128, 4 * len(source) + 64)
+        prompt = self._fit(source, target, self._context(notes), history, glossary_for(notes, source), max_tokens)
+        return " ".join(self._generate(prompt, max_tokens, 0, cancel, on_slow).split())
+
     @staticmethod
     def _following(lines: Sequence[str], facts: Sequence[dict[str, Any]], after: Sequence[str], k: int) -> list[str]:
         """The Japanese given as the context of line *k* (or of the run that ends with it): the lines that follow it,

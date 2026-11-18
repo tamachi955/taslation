@@ -82,6 +82,7 @@ from PIL import Image
 
 from . import fingerprint as fp
 from . import linememo
+from . import locate_large
 from . import size_mix
 from .size_mix import SizeMix
 from .pageimages import ErasedRegion, PageImages, packed_mask, region_digest
@@ -142,6 +143,10 @@ def check_cancel(cancel: threading.Event | None) -> None:
     """Raise `Cancelled` once *cancel* is set."""
     if cancel is not None and cancel.is_set():
         raise Cancelled()
+
+
+class _NoAnswer(Exception):
+    """A request beside a page's failed (`Pipeline.large_part`): the look ends with nothing found."""
 
 
 class _Timer:
@@ -420,6 +425,8 @@ class ScannedRegion:
     aliases: tuple[Box, ...] = ()  # the boxes of the regions it was read in place of (a classical repeat of its lettering)
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`TextRegion.angle`)
     reused_text: str = ""  # the translation kept for an identical line before it (`TextRegion.reused_text`)
+    # the part of its Japanese lettered larger than the rest (`TextRegion.size_mix`); memory only: it indexes the Japanese
+    size_mix: Any = None
 
     @property
     def is_japanese(self) -> bool:
@@ -484,14 +491,17 @@ class PageScan:
         return sum(len(u.japanese()) for u in self.units)
 
 
-def scanned_bubble(unit: ScannedUnit, region: ScannedRegion, text: str, flags: Sequence[str] = ()) -> CachedBubble:
-    """The cached bubble of *region*, a region of the scanned *unit*, translated as *text*: its box and its outline in
-    the unit's terms, as `Pipeline.commit_unit` stores it and `PageDraft` letters it before it is stored."""
+def scanned_bubble(unit: ScannedUnit, region: ScannedRegion, text: str, flags: Sequence[str] = (),
+                   large: tuple[int, int, float] | None = None) -> CachedBubble:
+    """The cached bubble of *region*, a region of the scanned *unit*, translated as *text* (*large*: the part of it set
+    larger, `CachedBubble.large`): its box and its outline in the unit's terms, as `Pipeline.commit_unit` stores it
+    and `PageDraft` letters it before it is stored."""
     pu = fp.PageUnit(unit.box, unit.fingerprint, unit.index)
     x0, y0 = region.bbox[0], region.bbox[1]
     poly = [pu.normalize((int(x) + x0, int(y) + y0, int(x) + x0, int(y) + y0))[:2] for x, y in region.poly]
     return CachedBubble(box=pu.normalize(region.bbox), text=text, poly=poly, flags=list(flags), angle=region.angle,
-                        reused=bool(region.reused_text) and region.reused_text == text)
+                        reused=bool(region.reused_text) and region.reused_text == text,
+                        large=locate_large.checked(text, large))
 
 
 def erases(region: Any) -> bool:
@@ -1005,7 +1015,8 @@ class Provisional:
         self.series_lines = pipeline.series_lines
         self.save_due = pipeline._save_due
         self.held = [(obj, _held_state(obj)) for obj in (pipeline.book_names, pipeline.line_tally, pipeline.stage_times,
-                                                         pipeline.shown_pages) if obj is not None]
+                                                         pipeline.shown_pages, getattr(pipeline, "large_tally", None))
+                     if obj is not None]
         self.translator = pipeline.translator
         draws = getattr(self.translator, "draws", None)
         self.draws = draws() if draws is not None else None
@@ -1354,6 +1365,8 @@ class Pipeline:
         # count of the lines reused and asked (Settings > System)
         self.series_lines: linememo.SeriesLines | None = None
         self.line_tally = linememo.Tally()
+        # this session's looks for the part of a translation to set larger (`large_part`): counts and time only
+        self.large_tally = locate_large.Tally()
         # the readings a person corrected this session (`correct_reading`), newest last: taken wherever the same
         # misreading is read at the same place again (`_take_corrections`). Memory only: never stored, never logged
         self.corrected_readings: deque[CorrectedReading] = deque(maxlen=CORRECTIONS_HELD)
@@ -2214,7 +2227,8 @@ class Pipeline:
                                                            self.settings, r.kind, r.x0, r.y0, self.suggested_font,
                                                            direction_of(r))
                                      if r.status == "untranslated" else 0,
-                                     aliases=tuple(stands_for.get(id(r), ())), angle=r.angle)
+                                     aliases=tuple(stands_for.get(id(r), ())), angle=r.angle,
+                                     size_mix=r.size_mix if r.status == "untranslated" else None)
                        for r in unit_regions]
             if fill is not None:
                 for r, kept in zip(unit_regions, scanned):
@@ -2411,8 +2425,10 @@ class Pipeline:
         self._save_store("cache", self.cache)
 
     def commit_unit(self, unit: ScannedUnit, translations: dict[int, str],
-                    flags: dict[int, list[str]] | None = None) -> bool:
-        """Store translations (keyed by region index, with their review flags) for a scanned page unit. What is
+                    flags: dict[int, list[str]] | None = None,
+                    large: dict[int, tuple[int, int, float]] | None = None) -> bool:
+        """Store translations (keyed by region index, with their review flags and the parts of them set larger,
+        *large*: `CachedBubble.large`) for a scanned page unit. What is
         translated is always kept: whatever the unit has is stored, seen before or not, and a region without a
         translation stays untranslated. Only what `is_real_translation` accepts becomes a bubble. Returns True if
         complete: every region has its bubble; else the entry is marked `CachedPage.incomplete`, and the next reading
@@ -2422,9 +2438,12 @@ class Pipeline:
         new: list[CachedBubble] = []
         complete = True
         for i, r in enumerate(unit.japanese()):
-            text = (translations.get(i) or "").strip()
+            raw = translations.get(i) or ""
+            text = raw.strip()
             if text and self.real_translation(r.source_text, text):
-                new.append(scanned_bubble(unit, r, text, (flags or {}).get(i, [])))
+                part = (large or {}).get(i)
+                part = locate_large.follow(raw, text, part) if part is not None else None  # (as stripped)
+                new.append(scanned_bubble(unit, r, text, (flags or {}).get(i, []), part))
             else:
                 complete = False  # that bubble stays untranslated; the next reading or run picks it up
         bubbles = list(unit.kept) + new
@@ -2611,7 +2630,8 @@ class Pipeline:
             poly = [unit.normalize((int(x) + r.x0, int(y) + r.y0, int(x) + r.x0, int(y) + r.y0))[:2]
                     for x, y in mask_polygon(r.mask)]
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
-                                        note=r.reader_note, angle=r.angle))
+                                        note=r.reader_note, angle=r.angle,
+                                        large=locate_large.checked(r.translated_text, r.large)))
             r.from_cache = not page.incomplete  # (a marked page's are new to the reader, and to a run's count)
         self._save_page(page.fingerprint, page.aspect, bubbles, lacking)
         return err
@@ -2630,14 +2650,19 @@ class Pipeline:
             return hit[0]
         return CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=[], seq=-1)
 
-    def set_translation(self, result: PageResult, region: TextRegion, text: str, edited: bool = True) -> bool:
+    def set_translation(self, result: PageResult, region: TextRegion, text: str, edited: bool = True,
+                        large: Any = ...) -> bool:
         """Store *text* as the translation of *region* (on its cached page) and redraw the result. A short line's is
         kept as a person's translation for the identical lines to come (`linememo.remember_edit`). *edited*: the
         person wrote it (`CachedBubble.edited`: kept when the page is translated again, listed in "My corrections");
-        False for the model's answer the person took as it came (the editor's Ask again)."""
+        False for the model's answer the person took as it came (the editor's Ask again). *large*: the part of *text*
+        to set larger (`TextRegion.large`; None: none); by default the region's part follows the change of its text
+        (`locate_large.follow`: moved, or gone where the change touched it)."""
         text = text.strip()
         if self.cache is None or region.unit >= len(result.units) or not text:
             return False
+        large = (locate_large.follow(region.translated_text or "", text, region.large) if large is ...
+                 else locate_large.checked(text, large))
         linememo.remember_edit(self, result, region, text)  # (saved with the page, below)
         region.reused_text = ""
         unit = result.units[region.unit]
@@ -2649,14 +2674,16 @@ class Pipeline:
             best.flags = []  # the reader has looked at it
             best.reused = False
             best.edited = edited
+            best.large = large
         else:
             poly = [unit.normalize((int(x) + region.x0, int(y) + region.y0, int(x) + region.x0, int(y) + region.y0))[:2]
                     for x, y in mask_polygon(region.mask)]
             page.bubbles.append(CachedBubble(box=nbox, text=text, poly=poly, note=region.reader_note, angle=region.angle,
-                                             edited=edited))
+                                             edited=edited, large=large))
         # a page that enters the cache with this one line alone may lack the others: the next reading sees
         self._save_page(page.fingerprint, page.aspect, page.bubbles, page.incomplete or page.seq < 0)
         region.translated_text = text
+        region.large = large
         region.status = "translated"
         region.from_cache = True
         region.flags = []
@@ -2690,6 +2717,19 @@ class Pipeline:
         text = spelt_right(self.check_sheet(), source, ((outs[0] if outs else "") or "").strip(), region.speaker)
         text = balance_marks(text)
         return text if text and self.real_translation(source, text) else ""
+
+    def large_of(self, result: PageResult, region: TextRegion, text: str, source: str | None = None
+                 ) -> tuple[int, int, float] | None:
+        """The part of *text*, an answer of `ask_again` for *region*, to set larger where the region's Japanese
+        lettering set a part larger (`TextRegion.size_mix`, read again for a page from the cache by `read_source`):
+        found as a page's is (`large_part`), after the page's earlier lines; None when there is none. *source*: the
+        reading the answer was asked for, as `ask_again` takes it (the part mapped onto it)."""
+        mix = region.size_mix
+        source = clean_reading(source) if source else ""
+        if mix is not None and source and source != region.source_text:
+            mix = mix.on(source)
+        return self.large_part(source or region.source_text, mix, text, region_meta(region),
+                               self.page_context(result, region))
 
     def read_source(self, result: PageResult, region: TextRegion) -> str:
         """The Japanese of *region* read again from the capture *result* was made from, as a page's reading reads it
@@ -3092,7 +3132,8 @@ class Pipeline:
                         for x, y in mask_polygon(region.mask)]
                 bubbles = [b for b in page.bubbles if box_iou(b.box, nbox) < s.match_min_iou]  # type: ignore[arg-type]
                 bubbles.append(CachedBubble(box=nbox, text=region.translated_text, poly=poly, flags=list(region.flags),
-                                            note=region.reader_note, angle=region.angle, edited=edited))
+                                            note=region.reader_note, angle=region.angle, edited=edited,
+                                            large=locate_large.checked(region.translated_text, region.large)))
                 self._save_page(page.fingerprint, page.aspect, bubbles, page.incomplete)
                 region.from_cache = True
         self.rerender(result)
@@ -3632,7 +3673,9 @@ class Pipeline:
         takes ``cancel``) and after it. A short line the book or its series translated before is not sent: it takes
         that translation, held to the series sheet as it is now (`linememo.plan_for`), and what the model answers is
         kept, respelt, for the lines to come; *reuse* False asks every line and keeps the answers ("Translate again"),
-        None neither reuses nor keeps."""
+        None neither reuses nor keeps. Once the translations are final, one whose Japanese lettering set a part larger
+        than the rest (`TextRegion.size_mix`) gets the part of it to set larger (`_locate_large`: requests beside the
+        page's, its words never changed)."""
         todo = [r for r in regions if r.status == "untranslated"]
         if not todo:
             return ""
@@ -3747,6 +3790,9 @@ class Pipeline:
                     asked.append((r.source_text, out))
             else:
                 r.status = "untranslated"
+        # the part of each final translation to set larger where its lettering had one (the words stay as they are;
+        # cancelled here, nothing of the page is kept, as in the review)
+        self._locate_large(todo, asked if grows_context(self.translator) else pairs, cancel, on_slow)
         plan.learn_regions(todo)  # (kept for the lines to come; saved with the page)
         if pairs and self._context.maxlen:
             self._context.append(pairs)
@@ -3811,6 +3857,81 @@ class Pipeline:
         sheet is flagged too."""
         return [balance_marks(str(e.get("text", ""))) for e in entries]
 
+    def large_part(self, source: str, mix: Any, translation: str, facts: dict[str, Any] | None = None,
+                   context: Sequence[tuple[str, str]] = (), notes: str | None = None,
+                   cancel: threading.Event | None = None, on_slow: SlowFn | None = None,
+                   lock: Any = None) -> tuple[int, int, float] | None:
+        """The part of *translation* to set larger, as (start, end, ratio): the counterpart of the part of the Japanese
+        *source* its lettering set larger (*mix*, a `size_mix.SizeMix`), found as `locate_large.locate` finds it, the
+        translation never changed. None when there is nothing to look for (no *mix*, ``size_emphasis`` off, a
+        translator that cannot be asked beside a page: no ``translate_aside``) or nothing was found. Its requests start
+        from the pairs *context* with the premises *notes* (the page's, `premises`, when None) and stop as a page's
+        request does (*cancel* set: `Cancelled`); a request that fails ends the look with nothing found. A part the
+        book translated before as a short line of its own is not asked for (`linememo`, with the facts *facts* of the
+        region, `region_meta`; under *lock* when given: a whole-book run's, whose pages may be read meanwhile), and
+        nothing is kept of any answer. Counted in `large_tally`."""
+        if mix is None or not getattr(self.settings, "size_emphasis", True) or not translation.strip():
+            return None
+        aside = getattr(self.translator, "translate_aside", None)
+        if aside is None:
+            return None
+        notes = self.premises() if notes is None else notes
+        call = cancel_args(aside, cancel, on_slow)
+        pairs = list(context)
+        facts = {"speaker": str((facts or {}).get("speaker", "") or ""), "kind": str((facts or {}).get("kind", "") or "")}
+        asked = [0]
+
+        def ask(text: str) -> str:
+            check_cancel(cancel)
+            asked[0] += 1
+            try:
+                return str(aside(text, pairs, notes, **call) or "")
+            except TranslationError:
+                raise _NoAnswer() from None
+
+        def known(part: str) -> str | None:
+            key = linememo.material(part, facts)
+            if key is None:
+                return None
+            with lock if lock is not None else nullcontext():
+                lines = linememo.held_lines(self)
+                entry = (lines.find(linememo.scope(self.translator, self.settings.target_language), key)
+                         if lines is not None else None)
+            if entry is None:
+                return None
+            return linememo.held_to(entry.text, part, self.check_sheet(), facts["speaker"]) or None
+
+        t0 = time.perf_counter()
+        try:
+            found = locate_large.locate(source, (mix.start, mix.end), translation, ask, known)
+        except _NoAnswer:
+            found = locate_large.Located(None, "", asked[0])
+        self.large_tally.add(found, (time.perf_counter() - t0) * 1000.0)
+        if found.at is None:
+            return None
+        return locate_large.checked(translation, (found.at[0], found.at[1], float(mix.ratio)))
+
+    def _locate_large(self, regions: Sequence[TextRegion], page_pairs: Sequence[tuple[str, str]],
+                      cancel: threading.Event | None = None, on_slow: SlowFn | None = None) -> None:
+        """Each of *regions* just translated gets the part of its translation to set larger (`TextRegion.large`,
+        `large_part`) where its Japanese lettering had one (`TextRegion.size_mix`); the others none. The requests start
+        from the pairs the next page's request would (*page_pairs*: this page's, after the pages' before it, read
+        without cutting them: `context_pairs` does that for the next page as it would have)."""
+        for r in regions:
+            r.large = None
+        mixed = [r for r in regions if r.status == "translated" and r.size_mix is not None and r.translated_text]
+        if not mixed or not getattr(self.settings, "size_emphasis", True):
+            return
+        if grows_context(self.translator):
+            context = [*self._grown, *page_pairs]
+        else:
+            context = [pair for page in self._context for pair in page]
+            context = [*context, *page_pairs][-40:]
+        notes = self.premises()
+        for r in mixed:
+            r.large = self.large_part(r.source_text, r.size_mix, r.translated_text, region_meta(r), context, notes,
+                                      cancel, on_slow)
+
     def _cacheable(self, regions: list[TextRegion]) -> bool:
         """A page with a genuine translation goes to the cache, marked while a bubble lacks one (`_store_regions`).
 
@@ -3828,7 +3949,8 @@ class Pipeline:
             poly = [unit.normalize((int(x) + r.x0, int(y) + r.y0, int(x) + r.x0, int(y) + r.y0))[:2]
                     for x, y in mask_polygon(r.mask)]
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
-                                        note=r.reader_note, angle=r.angle, reused=r.reused))
+                                        note=r.reader_note, angle=r.angle, reused=r.reused,
+                                        large=locate_large.checked(r.translated_text, r.large)))
         page = CachedPage(fingerprint=unit.fingerprint, aspect=unit.aspect, bubbles=bubbles, seq=-1,
                           incomplete=any(r.status == "untranslated" for r in regions))
         page = self.cache.add(page)
@@ -3884,6 +4006,7 @@ class Pipeline:
             r.flags = list(cb.flags)
             r.reader_note = cb.note
             r.reused_text = cb.text if cb.reused else ""
+            r.large = locate_large.checked(cb.text, cb.large)  # (the part set larger as it was: no request for it)
             r.angle, r.tilt = cb.angle, "set"  # (the slant it was lettered at: the cache's, never measured again)
             regions.append(r)
         known = [r for r in regions if r.status == "translated" and any(q.from_model for q in live)]
@@ -4040,13 +4163,15 @@ class Pipeline:
         else the one the sheet gives its kind (`annotations.ink_of`: the text colour, the outline and its colour, each
         automatic when neither sets it); with *scaled* at the lettering size (`_scaled_top`; `cap_sizes` measures the
         page's sizes without it, as they fit). *part*: the part of *text* set larger (`TextRegion.large`; by default
-        the region's own when *text* is its translation; None: none), never under the readable size
-        (`render.emphasis`)."""
+        the region's own when *text* is its translation; None: none; none at all with ``size_emphasis`` off), never
+        under the readable size (`render.emphasis`)."""
         s = self.settings
         colour, outline, outline_colour = ink_of(style, self.kind_lettering(region.tag))
         lettering, flags = self.region_lettering(text, region.tag, style)
         if part is OWN_PART:
             part = region.large if text == region.translated_text else None
+        if part and not getattr(s, "size_emphasis", True):  # (the setting off: every translation at one size)
+            part = None
         if part:  # each piece drawable on its own, the part's offsets kept on the text drawn
             a, b, ratio = part
             pieces = [drawable(lettering.path, t) for t in (text[:a], text[a:b], text[b:])]
@@ -4124,8 +4249,10 @@ class Pipeline:
                 if kept is not None and kept[0] == key:
                     sized.append(kept[2])
                     continue
+            # (at one size, a part set larger or not: the page's caps are what they were, and the cap of a region with
+            # such a part holds its base)
             one = (DISPLAY_KIND if _art_room(r, None, large) is not r else r.tag,
-                   self._set_text(None, r, t, (255, 255, 255), None, scaled=False).size, r.glyph)
+                   self._set_text(None, r, t, (255, 255, 255), None, scaled=False, part=None).size, r.glyph)
             if measured is not None:
                 measured[id(r)] = (key, (r, held), one)  # (what the key names by identity is held with it)
             sized.append(one)

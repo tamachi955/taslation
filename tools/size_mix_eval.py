@@ -27,7 +27,12 @@ reports, numbers only:
   (``--markers``); for each how often it answers, its requests' time and, for the requests that would replace the
   region's own, the translation's chrF against the dataset's beside the same request without a marker.
   ``--show N`` prints N random cases (source, span, translation, each method's answer) to the terminal for a person
-  to judge; nothing of a text is written to a file (``--json`` holds the numbers).
+  to judge; nothing of a text is written to a file (``--json`` holds the numbers);
+* with ``--locate`` (the dataset only): the shipped locating step (`taslation.locate_large`) asked for the same
+  cases, both of its steps for every case, so that its rule can be tuned on a person's verdicts (``--show``);
+* with ``--shipped`` (the dataset or frames): the shipped step end to end, on the app's own path (`run_shipped`): per
+  mixed region the step that answered, its requests and time, and whether its lettering came out at two sizes; with
+  ``--sheets``, each region's crop lettered without and with the part found. Counts and pictures only.
 
 The scan (``--scan FILE``) keeps the regions' boxes, the characters' boxes and their classes (`category`: a letter
 for kanji, kana, small kana, punctuation, ...), never a character or a text, so that the rule can be tuned again
@@ -173,11 +178,12 @@ class Item:
         return f"{self.series}#{self.index}"
 
 
-def dataset_items(root: Path, series: Sequence[str] | None, pages: int) -> list[Item]:
+def dataset_items(root: Path, series: Sequence[str] | None, pages: int, skip: int = 0) -> list[Item]:
+    """The dataset's pages: of every series the first *pages* (0: all), the first *skip* of them left out."""
     found = openmantra.load(root, series)
     out = []
     for name, group in openmantra.by_series(found).items():
-        for page in group[: pages or None]:
+        for page in group[skip: pages or None]:
             out.append(Item(name, page.index, page.open, [b.box for b in page.bubbles], page=page))
     return out
 
@@ -1191,6 +1197,271 @@ def run_translate(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
     return out
 
 
+# ------------------------------------------------------------------ the shipped locating step
+HISTORIES = ("before", "page")  # the pairs a locating request starts from: those the region's own did, or the page's
+
+
+def _aside(tr: Any, text: str, history: list[tuple[str, str]], notes: str) -> tuple[str, float]:
+    """One request beside the page's (`translate_aside`, as the app makes it): its answer and its time in ms."""
+    t0 = time.monotonic()
+    got = tr.translate_aside(text, history, notes)
+    return got, (time.monotonic() - t0) * 1000.0
+
+
+def run_locate(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
+    """The test of the shipped locating step (`taslation.locate_large`): the pages translated as the app does, the
+    cases found as for ``--translate`` (`run_translate`), and for every case and every history of ``--history`` the
+    two steps asked for both (the app asks the second only when the first found nothing): the part alone found in the
+    translation (`from_alone`) and the marked request's part found in it (`from_marked`; before its plausibility
+    check too, with the share ratio, for tuning). Counts and times; ``--show`` prints the cases to the terminal for a
+    person to judge. Stops asking after ``--max-seconds`` (what was asked is reported)."""
+    from taslation import locate_large as ll
+    from taslation.translate.base import TranslationError
+
+    if args.frames:
+        raise SystemExit("--locate takes the dataset only (the frames' text is never shown nor kept)")
+    histories = [h for h in args.history.split(",") if h]
+    if any(h not in HISTORIES for h in histories):
+        raise SystemExit("--history takes " + ", ".join(HISTORIES))
+    pipe = make_pipeline(args.detect_model, target=args.target, seed=args.seed)
+    tr = pipe.translator
+    watch = Watch(pipe)
+    notes = pipe.premises()
+    rnd = random.Random(args.seed)
+    cases: list[tuple[Case, list[tuple[str, str]]]] = []
+    series = None
+    t0 = time.monotonic()
+    for item in items:
+        if len(cases) >= args.limit or time.monotonic() - t0 > args.max_seconds / 2:
+            break
+        if item.series != series:
+            series = item.series
+            pipe.reset_context()
+        before = list(pipe.context_pairs())
+        image = item.open()
+        regions, _n = scan_page(pipe, watch, item, image, translate=True)
+        page_history = list(pipe.context_pairs())  # (the page's pairs too: the request after the page starts so)
+        history = list(before)
+        for r in regions:
+            if not r.translation:
+                continue
+            span, real = None, False
+            if len(r.chars) >= 2 and (m := find_mix(r, rule)).mixed:
+                span, real = m.spans[0], True
+            elif not args.real_only:
+                span = synthetic_span(r, rnd)
+            if span is not None and len(cases) < args.limit:
+                at = text_range(r, *span)
+                r.text, at = _as_one_line(r.text, at)
+                if r.text[at[0]:at[1]].strip() and (r.text[:at[0]].strip() or r.text[at[1]:].strip()):
+                    cases.append((Case(r, span, real, at, "", list(history)), page_history))
+            history.append((r.text, r.translation))
+    print(f"{len(cases)} cases ({sum(c.real for c, _h in cases)} real) [{time.monotonic() - t0:.0f} s]", flush=True)
+    rows: list[dict[str, Any]] = []
+    for case, page_history in cases:
+        if time.monotonic() - t0 > args.max_seconds:
+            break
+        text, (a, b) = case.region.text, case.at
+        whole = case.region.translation
+        part = text[a:b].strip()
+        row: dict[str, Any] = {"case": case, "real": case.real}
+        try:
+            for h in histories:  # the part alone after each history
+                hist = case.history if h == "before" else page_history
+                alone, ms = _aside(tr, part, hist, notes)
+                at = ll.from_alone(whole, alone)
+                row["alone:" + h] = {"text": alone, "at": at, "ms": ms,
+                                     "share": ll.share_ratio(whole, at, text, (a, b)) if at else None}
+            hist = case.history if args.marked_history == "before" else page_history
+            answer, ms = _aside(tr, ll.marked_source(text, (a, b)), hist, notes)
+        except TranslationError:
+            continue
+        inner = ll.marked_part(answer)
+        raw = (ll.find_exact(whole, inner) or ll.find_loose(whole, inner)) if inner and ll._letters(inner) else None
+        raw = ll.snap(whole, raw) if raw is not None else None
+        mine = row.get("alone:" + args.marked_history, {}).get("text", "")
+        kept = ll.from_marked(whole, answer, text, (a, b), mine)
+        row["marked"] = {"text": answer, "at": raw, "ms": ms,
+                         "share": ll.share_ratio(whole, raw, text, (a, b)) if raw is not None else None,
+                         "kept": kept is not None}
+        # what the shipped step gives (`locate`: the part alone after the marked request's history, else the marked)
+        first = row.get("alone:" + args.marked_history, {}).get("at")
+        row["final"] = ("alone", first) if first is not None else ("marked", kept) if kept is not None else ("", None)
+        for h in histories:  # how far the part alone agrees with what the marked request points at
+            alone = row["alone:" + h]["text"]
+            row["agree:" + h] = round(ll.agreement(whole[raw[0]:raw[1]], alone), 3) if raw is not None else None
+            alone_at = (0, len(alone)) if alone else None
+            row["alone_share:" + h] = (round(((ll._letters(alone) / max(1, ll._letters(whole)))
+                                              / max(1e-6, ll._letters(text[a:b]) / max(1, ll._letters(text)))), 3)
+                                       if alone_at else None)
+        rows.append(row)
+    out: dict[str, Any] = {"cases": len(rows), "real": sum(r["real"] for r in rows), "target": args.target,
+                           "seconds": round(time.monotonic() - t0), "marked_history": args.marked_history,
+                           "steps": {}, "rows": []}
+    for h in histories:
+        got = [r["alone:" + h] for r in rows]
+        out["steps"]["alone:" + h] = {"found": sum(g["at"] is not None for g in got),
+                                      "ms_median": round(statistics.median(g["ms"] for g in got)) if got else 0}
+    marked = [r["marked"] for r in rows]
+    out["steps"]["marked"] = {"pointed": sum(m["at"] is not None for m in marked),
+                              "kept": sum(m["kept"] for m in marked),
+                              "ms_median": round(statistics.median(m["ms"] for m in marked)) if marked else 0}
+    out["final"] = {"alone": sum(r["final"][0] == "alone" for r in rows),
+                    "marked": sum(r["final"][0] == "marked" for r in rows),
+                    "none": sum(r["final"][0] == "" for r in rows)}
+    for n, r in enumerate(rows, 1):  # numbers only, for the rules tuned on a person's verdicts
+        out["rows"].append({"n": n, "real": r["real"], "final": r["final"][0], "marked_share": r["marked"]["share"],
+                            "marked_pointed": r["marked"]["at"] is not None,
+                            **{f"alone_found:{h}": r["alone:" + h]["at"] is not None for h in histories},
+                            **{f"alone_part_share:{h}": r["alone:" + h]["share"] for h in histories},
+                            **{f"agree:{h}": r["agree:" + h] for h in histories},
+                            **{f"alone_letters:{h}": ll._letters(r["alone:" + h]["text"]) for h in histories},
+                            **{f"alone_words:{h}": len(ll.normalised(r["alone:" + h]["text"])[0].split())
+                               for h in histories},
+                            **{f"alone_share:{h}": r["alone_share:" + h] for h in histories}})
+    print(json.dumps({k: v for k, v in out.items() if k != "rows"}, indent=1))
+    if args.show:
+        for k, r in enumerate(rows[: args.show], 1):
+            c = r["case"]
+            text, (a, b) = c.region.text, c.at
+            whole = c.region.translation
+            print(f"\n=== {args.tag}{k} {'REAL' if c.real else 'synthetic'}")
+            print("  source :", text[:a] + "[[" + text[a:b] + "]]" + text[b:])
+            print("  app    :", whole)
+            for h in histories:
+                g = r["alone:" + h]
+                print(f"  alone {h:6}: {g['text']!r} -> {_shown(whole, g['at']) if g['at'] else '--'}"
+                      f"  agree {r['agree:' + h]}  alone_share {r['alone_share:' + h]}")
+            m = r["marked"]
+            share = f"{m['share']:.2f}" if m["share"] is not None else "-"
+            print(f"  marked      : {m['text']!r} -> {_shown(whole, m['at']) if m['at'] else '--'}  share {share}")
+            step, at = r["final"]
+            print(f"  FINAL {step or 'none':6}: {_shown(whole, at) if at else '--'}")
+    return out
+
+
+# ------------------------------------------------------------------ the shipped path, end to end
+def mixed_pages(args: Any, items: list[Item], rule: Rule) -> list[int]:
+    """The indices into *items* of the pages the scan (``--scan``, made when missing) finds a mixed region on."""
+    data = load_or_scan(args, items)
+    keys = {r.page for v in data["pages"].values() for r in v if len(r.chars) >= 2 and find_mix(r, rule).mixed}
+    return [k for k, item in enumerate(items) if item.key in keys]
+
+
+def _crop(image: Any, box: Box, grow: int = 16) -> Any:
+    x0, y0, x1, y1 = box
+    return image.crop((max(0, x0 - grow), max(0, y0 - grow), min(image.width, x1 + grow),
+                       min(image.height, y1 + grow)))
+
+
+def run_shipped(args: Any, items: list[Item], rule: Rule) -> dict[str, Any]:
+    """The shipped locating step on the app's own path: the pages that hold a mixed region (and the page before each,
+    for its context; with ``--all-pages`` every page) read and translated as the app does (`Pipeline.process`, the
+    default translator for ``--target`` with a fixed seed, the pages before as context, each series and each gap
+    begun anew), every region its reading measured as mixed (`TextRegion.size_mix`) looked for by `Pipeline.large_part`
+    as its page's translations settle. Per region: the step that answered (counts), its requests and their time, and
+    whether its lettering came out at two sizes (lettered with and without the part found: the pixels differ). With
+    ``--sheets``: per region its crop, lettered without the part and with it (pictures only). Numbers only: no text
+    is printed or written."""
+    from PIL import Image
+
+    pipe = make_pipeline(args.detect_model, target=args.target, seed=args.seed)
+    real = pipe.large_part
+    looks: list[dict[str, Any]] = []
+
+    def watched(source: str, mix: Any, translation: str, *a: Any, **k: Any) -> Any:
+        t = pipe.large_tally
+        before = (t.requests, t.alone, t.marked, t.ms)
+        got = real(source, mix, translation, *a, **k)
+        step = "alone" if t.alone > before[1] else "marked" if t.marked > before[2] else ""
+        looks.append({"key": (source, translation), "step": step if got is not None else "",
+                      "requests": t.requests - before[0], "ms": t.ms - before[3], "ratio": float(mix.ratio)})
+        return got
+
+    pipe.large_part = watched  # type: ignore[method-assign]
+    chosen = list(range(len(items))) if args.all_pages else mixed_pages(args, items, rule)
+    wanted = sorted({k for i in chosen for k in (i - 1, i) if 0 <= k < len(items)})
+    rows: list[dict[str, Any]] = []
+    cells: list[tuple[Any, Any, Any, str]] = []
+    previous, series = -2, None
+    t0 = time.monotonic()
+    page_ms: list[float] = []
+    for k in wanted:
+        item = items[k]
+        if item.series != series or k != previous + 1:
+            pipe.reset_context()
+        series, previous = item.series, k
+        image = item.open()
+        if item.margins is not None:
+            pipe.settings.margins = tuple(item.margins)
+        n0 = len(looks)
+        started = time.monotonic()
+        res = pipe.process(image, translate=True, use_cache=False)
+        page_ms.append((time.monotonic() - started) * 1000.0)
+        mine = looks[n0:]
+        out = np.asarray(res.original).copy()
+        for r in res.regions:
+            if r.size_mix is None or r.status != "translated":
+                continue
+            look = next((x for x in mine if x["key"] == (r.source_text, r.translated_text)), None)
+            if look is None:
+                continue
+            large = r.large
+            r.large = None
+            plain = out.copy()
+            pipe.letter_region(plain, r, r.translated_text)
+            r.large = large
+            lettered = out.copy()
+            pipe.letter_region(lettered, r, r.translated_text)
+            two = bool(large) and not np.array_equal(plain, lettered)
+            rows.append({"n": len(rows) + 1, "page": k + 1, "step": look["step"], "requests": look["requests"],
+                         "ms": round(look["ms"]), "ratio": round(look["ratio"], 2), "found": large is not None,
+                         "two_sizes": two})
+            if args.sheets:
+                cells.append((_crop(image, r.bbox), _crop(Image.fromarray(plain), r.bbox),
+                              _crop(Image.fromarray(lettered), r.bbox),
+                              f"{len(rows)}  {look['step'] or 'none'}  x{look['ratio']:.2f}  {'2 sizes' if two else '1 size'}"))
+        del image
+    seconds = time.monotonic() - t0
+    total_ms = sum(x["ms"] for x in looks)
+    out_: dict[str, Any] = {
+        "pages_read": len(wanted), "pages_in_set": len(items), "mixed_regions": len(rows),
+        "steps": dict(Counter(r["step"] or "none" for r in rows)), "two_sizes": sum(r["two_sizes"] for r in rows),
+        "requests": sum(x["requests"] for x in looks), "looks": len(looks),
+        "ms_per_mixed_bubble": round(total_ms / len(looks)) if looks else 0,
+        "requests_per_mixed_bubble": round(sum(x["requests"] for x in looks) / len(looks), 2) if looks else 0,
+        "ms_per_page_at_the_sets_rate": round(total_ms / max(1, len(items))),
+        "page_ms_median": round(statistics.median(page_ms)) if page_ms else 0, "seconds": round(seconds),
+        "rows": rows}
+    print(json.dumps({k: v for k, v in out_.items() if k != "rows"}, indent=1))
+    for r in rows:
+        print(f"  {r['n']:2}: step {r['step'] or 'none':6} requests {r['requests']} {r['ms']:5} ms  x{r['ratio']:.2f}"
+              f"  {'two sizes' if r['two_sizes'] else 'one size'}")
+    if args.sheets and cells:
+        args.sheets.mkdir(parents=True, exist_ok=True)
+        files = []
+        per = 4
+        for s in range(0, len(cells), per):
+            group = cells[s:s + per]
+            scale = [CELL / max(c[0].width, c[0].height) for c in group]
+            h = max(round(c[0].height * f) for c, f in zip(group, scale)) + 22
+            sheet = Image.new("RGB", (3 * (CELL + 8), len(group) * (h + 8)), (200, 200, 200))
+            from PIL import ImageDraw
+
+            draw = ImageDraw.Draw(sheet)
+            for row, ((orig, before, after, label), f) in enumerate(zip(group, scale)):
+                for col, pic in enumerate((orig, before, after)):
+                    pic = pic.resize((max(1, round(pic.width * f)), max(1, round(pic.height * f))), Image.LANCZOS)
+                    sheet.paste(pic, (col * (CELL + 8), row * (h + 8) + 22))
+                draw.text((4, row * (h + 8) + 4), label + "   (original | today | with the part)", fill=(0, 0, 0))
+            path = args.sheets / f"{args.tag or 'shipped'}-{s // per + 1}.png"
+            sheet.save(path)
+            files.append(str(path))
+        print("sheets: " + ", ".join(files))
+        out_["sheets"] = files
+    return out_
+
+
 # ------------------------------------------------------------------ picture sheets
 CELL = 320  # a crop's longer side on a sheet
 PER_SHEET = (4, 3)  # columns, rows
@@ -1284,6 +1555,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=openmantra.DEFAULT_ROOT)
     ap.add_argument("--series", action="append")
     ap.add_argument("--pages", type=int, default=0, help="only the first N pages of every series")
+    ap.add_argument("--skip-pages", type=int, default=0, help="the first N of those left out (a held-out set)")
     ap.add_argument("--frames", help="a glob of frames (a book's dev snapshots) in place of the dataset")
     ap.add_argument("--detect-model", choices=("auto", "on", "off"))
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR here (boxes and classes, no text)")
@@ -1309,10 +1581,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--markers", default=",".join(MARKERS), help="the markers to try, of " + ", ".join(MARKERS))
     ap.add_argument("--real-only", action="store_true", help="(--translate) only the spans the rule finds")
     ap.add_argument("--show", type=int, default=0, help="(--translate) random cases printed for a person to judge")
+    ap.add_argument("--locate", action="store_true", help="the test of the shipped locating step (dataset)")
+    ap.add_argument("--history", default="page", help="(--locate) the pairs the part alone is asked after, of "
+                    + ", ".join(HISTORIES) + " (several: each asked)")
+    ap.add_argument("--marked-history", default="page", choices=HISTORIES,
+                    help="(--locate) the pairs the marked request is asked after")
+    ap.add_argument("--max-seconds", type=float, default=140.0, help="(--locate) no request asked after this")
+    ap.add_argument("--shipped", action="store_true", help="the shipped step on the app's own path, end to end "
+                    "(dataset or frames; counts and pictures only)")
+    ap.add_argument("--all-pages", action="store_true", help="(--shipped) every page, not only those with a mixed "
+                    "region and the page before each")
     args = ap.parse_args(argv)
-    items = frame_items(args.frames) if args.frames else dataset_items(args.root, args.series, args.pages)
+    items = frame_items(args.frames) if args.frames else dataset_items(args.root, args.series, args.pages,
+                                                                       args.skip_pages)
     rule = Rule(args.ratio, args.min_span, not args.no_smooth, not args.by_char, args.min_sure, args.measure,
                 args.min_base, not args.box_lines, args.confirm)
+    if args.shipped:
+        report = run_shipped(args, items, rule)
+        if args.json:
+            args.json.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+        return 0
+    if args.locate:
+        report = run_locate(args, items, rule)
+        if args.json:
+            args.json.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+        return 0
     if args.translate:
         args.synthetic = not args.real_only
         report = run_translate(args, items, rule)

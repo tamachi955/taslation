@@ -891,6 +891,17 @@ class OllamaTranslator:
         learn(notes, zip(texts, result))  # the book's names: what these lines show of them
         return result
 
+    def translate_aside(self, text: str, context: Sequence[tuple[str, str]] = (), notes: str = "",
+                        cancel: threading.Event | None = None,
+                        on_slow: Callable[[float], None] | None = None) -> str:
+        """One request beside a page's own (`locate_large`: where a bubble's larger lettering is in its translation):
+        *text* translated as a page of one bubble after the earlier pairs *context*, with the premises *notes*, and
+        nothing of it kept (no name learnt). "" when the answer holds no translation."""
+        messages = self.build_messages([text], context, notes, (), None)
+        content = self._chat_json(messages, RESPONSE_SCHEMA, self.output_budget([text]), None, cancel, on_slow)
+        result = parse_translations(content, 1)
+        return result[0] if result else ""
+
 
 def request_terms(notes: str, rows: Sequence[dict[str, Any]]) -> list[str]:
     """The sheet's entries for the bubbles in *rows* that the premises *notes* were cut short of
