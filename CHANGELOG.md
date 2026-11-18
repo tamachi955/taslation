@@ -14,7 +14,8 @@ Reading
 * The status line and the busy badge speak of the page on show only.
 * After the viewer's window is given another size, the page shows as fast as any new frame.
 * While a whole-book run reads or translates, a page turned in the viewer shows on the window at once.
-* On a viewer that draws a page soft first, saved lettering goes on the sharp picture, once.
+* On a viewer that draws a page soft first, saved lettering goes on the sharp picture, once, and nothing read from
+  the soft picture is kept once the sharp one comes.
 * The bubble under the pointer shows its other side, its Japanese can be selected and copied, and F3 and Shift+F3 go
   from bubble to bubble.
 * A book's reading direction is set in Book settings.
@@ -45,6 +46,10 @@ Lettering
   the page that came apart in pieces is read as one.
 * A rectangle you draw on the drawing, or a region you move or resize there, is no longer wiped as a flat box: only
   its lettering is erased and the drawing under it is filled in.
+* On a computer with an NVIDIA GPU and the two page models installed, the layout model finds the lettering by
+  default, together with the inpainting (`detect_model = "auto"`): lettering on the drawing is found far more often.
+  A computer without a GPU, or without the two models, detects as before, and a settings file that says
+  `detect_model = "off"` keeps it off.
 
 Speed and memory
 
