@@ -2691,6 +2691,27 @@ class Pipeline:
         self.rerender(result)
         return True
 
+    def set_large(self, result: PageResult, region: TextRegion, large: Any) -> bool:
+        """Store *large* as the part of *region*'s translation to set larger (the region editor's Larger and One
+        size, the text itself unchanged: `TextRegion.large`, checked against the text; None: none) on its cached
+        page, and redraw the result. The translation stays whose it was (`CachedBubble.edited` untouched). False
+        without a cache, a translation, or the bubble in the cache."""
+        text = region.translated_text or ""
+        if self.cache is None or region.unit >= len(result.units) or not text.strip():
+            return False
+        large = locate_large.checked(text, large) if large is not None else None
+        unit = result.units[region.unit]
+        page = self._page_for(unit)
+        nbox = unit.normalize(region.bbox)
+        best = max(page.bubbles, key=lambda b: box_iou(b.box, nbox), default=None)  # type: ignore[arg-type]
+        if best is None or box_iou(best.box, nbox) < self.settings.match_min_iou or best.text != text:  # type: ignore[arg-type]
+            return False
+        best.large = large
+        self._save_page(page.fingerprint, page.aspect, page.bubbles, page.incomplete or page.seq < 0)
+        region.large = large
+        self.rerender(result)
+        return True
+
     def page_context(self, result: PageResult, region: TextRegion, limit: int = 12) -> list[tuple[str, str]]:
         """The page's translated lines before *region* in reading order, as (Japanese, translation)."""
         pairs: list[tuple[str, str]] = []
@@ -4110,8 +4131,10 @@ class Pipeline:
         return self._letter_region(out, region, text, style, quick)[0]
 
     def _letter_region(self, out: np.ndarray, region: TextRegion, text: str,
-                       style: RegionStyle | None = None, quick: bool = False) -> tuple[Box, Lettered]:
-        """`letter_region`, and what the lettering did (its size, what it could not do as formatted)."""
+                       style: RegionStyle | None = None, quick: bool = False,
+                       part: Any = OWN_PART) -> tuple[Box, Lettered]:
+        """`letter_region`, and what the lettering did (its size, what it could not do as formatted); *part* as
+        `_set_text` takes it."""
         s = self.settings
         h, w = out.shape[:2]
         x0, y0 = max(0, region.x0 - region.width), max(0, region.y0 - region.height)
@@ -4125,7 +4148,7 @@ class Pipeline:
         local.panel = _shift(region.panel, -x0, -y0) if region.panel is not None else None
         local.ceded = shifted(region.ceded, -x0, -y0)
         around = Image.fromarray(out[y0:y1, x0:x1].copy())
-        done = self._set_text(around, local, text, bg, region.style if style is None else style)
+        done = self._set_text(around, local, text, bg, region.style if style is None else style, part=part)
         out[y0:y1, x0:x1] = np.asarray(around)
         ys, xs = np.nonzero(np.any(out[y0:y1, x0:x1] != before, axis=2))
         box = region.bbox
@@ -4434,12 +4457,14 @@ class Pipeline:
         return out
 
     def preview_region(self, page: np.ndarray, region: TextRegion, text: str,
-                       style: RegionStyle | None) -> tuple[np.ndarray, Lettered]:
+                       style: RegionStyle | None, part: Any = OWN_PART) -> tuple[np.ndarray, Lettered]:
         """A copy of *page* (`page_without`) with *region* erased and *text* lettered in it as *style* formats it
-        (an empty style: automatic), and what the lettering did: the region editor's live preview. Nothing is
-        stored, and the region is not changed."""
+        (an empty style: automatic), *part* of it set larger (the editor's: a range of *text* and a ratio, or None;
+        by default the region's own while *text* is its translation), and what the lettering did: the region
+        editor's live preview. Nothing is stored, and the region is not changed."""
         out = page.copy()
-        _box, done = self._letter_region(out, region, text, RegionStyle() if style is None else style)
+        part = locate_large.checked(text, part) if part is not OWN_PART and part is not None else part
+        _box, done = self._letter_region(out, region, text, RegionStyle() if style is None else style, part=part)
         return out, done
 
 

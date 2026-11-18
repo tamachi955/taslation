@@ -24,6 +24,7 @@ import functools
 import hashlib
 import math
 import threading
+import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -98,15 +99,37 @@ def _part(text: str, stressed: list[bool | None], a: int, b: int) -> str:
     return "".join(out).strip()
 
 
+def _clings(ch: str) -> bool:
+    """Whether *ch*, right after the part, goes with it: a mark that closes or follows (a comma, a full stop, a
+    closing quote or bracket, a dash, a tilde, a symbol, a combining sign), not a letter, a digit, a space or a mark
+    that opens what follows."""
+    cat = unicodedata.category(ch)
+    return cat in ("Po", "Pe", "Pf", "Pd", "So", "Mn", "Mc", "Me") or ch in "~～"
+
+
+def _opens(text: str, i: int) -> bool:
+    """Whether *text*[i], right before the part, opens it and goes with it: an opening quote or bracket, ¡ or ¿, or
+    a straight quote at the text's start or after a space."""
+    ch = text[i]
+    if ch in "\"'":
+        return i == 0 or text[i - 1].isspace()
+    return unicodedata.category(ch) in ("Ps", "Pi") or ch in "¡¿"
+
+
 def parts_of(text: str, large: tuple[int, int, float] | None) -> list[tuple[str, bool]] | None:
     """*text* cut where its part *large* (start, end, ratio: offsets into *text*) begins and ends: the paragraphs
     (text, set larger) in their order, the empty ones left out, each with its stressed words marked on its own; None
-    when there is no part, or nothing but the part."""
+    when there is no part, or nothing but the part. The marks right after the part (", I ...") and an opening mark
+    right before it go with the part, so that no paragraph begins with a comma or ends with an open quote."""
     if not large:
         return None
     a, b = max(0, min(int(large[0]), len(text))), max(0, min(int(large[1]), len(text)))
     if b <= a:
         return None
+    while b < len(text) and _clings(text[b]):
+        b += 1
+    while a > 0 and _opens(text, a - 1):
+        a -= 1
     stressed = _stressed(text)
     parts = [(_part(text, stressed, 0, a), False), (_part(text, stressed, a, b), True),
              (_part(text, stressed, b, len(text)), False)]

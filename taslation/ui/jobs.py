@@ -1071,7 +1071,9 @@ class JobsMixin:
         elif kind == "asked":
             editor = self._editor
             if editor is not None and editor.winfo_exists():
-                editor.show_answers(data["mode"], data["texts"])
+                # (with the part of each answer to set larger, where one was found: `TranslatorMixin._ask_model`)
+                editor.show_answers(data["mode"], data["texts"], **({"larges": data["larges"]} if data.get("larges")
+                                                                    else {}))
             if data["texts"] and self.last_result is not None:
                 result = self.last_result
                 self._page_status(lambda: self._page_line(result), result.original)

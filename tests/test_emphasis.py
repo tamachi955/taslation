@@ -62,6 +62,23 @@ def test_no_part_or_nothing_but_the_part_is_no_cut():
     assert emphasis.parts_of(text, (-5, 3, 1.5)) == [("GET", True), ("OUT!!", False)]  # held inside the text
 
 
+def test_the_marks_round_the_part_go_with_it():
+    text = "Hey, I don't get it, so explain it to me!"
+    assert emphasis.parts_of(text, _span(text, "Hey", 1.5)) == [("Hey,", True),
+                                                               ("I don't get it, so explain it to me!", False)]
+    text = "Man, my shop's short-staffed~, so this'll help."
+    assert emphasis.parts_of(text, _span(text, "short-staffed", 1.5)) == [
+        ("Man, my shop's", False), ("short-staffed~,", True), ("so this'll help.", False)]
+    text = 'He said "stop" and left.'
+    assert emphasis.parts_of(text, _span(text, "stop", 1.5)) == [("He said", False), ('"stop"', True),
+                                                                ("and left.", False)]
+    text = "Now, let's get down to business—chin..."
+    assert emphasis.parts_of(text, _span(text, "business", 1.5)) == [
+        ("Now, let's get down to", False), ("business—", True), ("chin...", False)]
+    text = "やあ、元気？"
+    assert emphasis.parts_of(text, (0, 2, 1.5)) == [("やあ、", True), ("元気？", False)]
+
+
 def test_a_stressed_run_cut_by_the_part_is_marked_on_each_side():
     text = "Don't you *dare touch* that thing."
     parts = emphasis.parts_of(text, _span(text, "touch* that thing.", 1.6))

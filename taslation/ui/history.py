@@ -288,7 +288,7 @@ def _same_note(a: RegionNote, b: RegionNote) -> bool:
 
 def _same_bubble(a: CachedBubble, b: CachedBubble) -> bool:
     return (_same_box(a.box, b.box) and a.text == b.text and a.note == b.note and list(a.flags) == list(b.flags)
-            and a.edited == b.edited)
+            and a.edited == b.edited and a.large == b.large)  # (the part set larger too: a change of its own)
 
 
 def _differ(frm: Sequence[Any], to: Sequence[Any], same: Callable[[Any, Any], bool]) -> list[Any]:

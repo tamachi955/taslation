@@ -31,7 +31,7 @@ from ..capture import CaptureError, caption_rows, post_click
 from ..i18n import _, load_ui_flag, load_ui_table, save_ui_entry, save_ui_flag
 from ..messages import message_of
 from ..notes import sheet_key
-from ..pipeline import unit_for
+from ..pipeline import OWN_PART, unit_for
 from ..render.fonts import font_families
 from .font_memory import FontMemory
 from ..render.slant import slanted_outline
@@ -246,7 +246,8 @@ class LivePreview:
         self.before = result.image  # the page's own rendering, put back unless the editor saves
         self.mine: Any = None  # the preview's own picture on the page last (only that one is taken off again)
         self.bed: Any = None  # the page with every other region lettered (worker)
-        self.asked: tuple[int, str, RegionStyle] | None = None  # (number, text, style): the newest request
+        # (number, text, style, the part set larger: the editor's, or `OWN_PART`): the newest request
+        self.asked: tuple[int, str, RegionStyle, Any] | None = None
         self.made: tuple[int, Image.Image | None, Any] | None = None  # (number, picture, what the lettering did)
         self.serial = 0  # requests made so far
         self.shown = 0  # the newest request whose picture is on the page
@@ -1278,7 +1279,8 @@ class TranslatorMixin:
                                         on_ask=(lambda mode, answer, r=region: self._ask_model(r, mode, answer, result))
                                         if can_ask else None,
                                         place=(number, max(number, len(shown))),
-                                        on_preview=lambda text, style: self._preview_region(preview, text, style),
+                                        on_preview=lambda text, style, large=OWN_PART: self._preview_region(
+                                            preview, text, style, large),
                                         on_cancel=lambda: self._end_preview(preview),
                                         families=lambda: font_families(fonts_dir), faces=faces,
                                         crop=editor_crop(getattr(result, "original", None), region.bbox),
@@ -1289,7 +1291,8 @@ class TranslatorMixin:
                                         at=at, note=self._editor_note(region),
                                         clip=self.format_clip() if hasattr(self, "format_clip") else None,
                                         font_memory=FontMemory(self.settings.state_dir),
-                                        hint_support=hint_support(pipeline.translator) if can_ask else HINT_FOLLOWS)
+                                        hint_support=hint_support(pipeline.translator) if can_ask else HINT_FOLLOWS,
+                                        sizes=bool(getattr(self.settings, "size_emphasis", True)))
 
     def _step_editor(self, region: Any, result: Any, preview: LivePreview | None, delta: int,
                      data: dict[str, Any] | None, at: tuple[int, int]) -> None:
@@ -1344,24 +1347,27 @@ class TranslatorMixin:
             pass
 
     # ------------------------------------------------------------------ the editor's live preview
-    def _preview_region(self, preview: LivePreview | None, text: str, style: RegionStyle) -> None:
-        """The editor asks for its text and formatting on the page: lettered in the worker (the newest request only;
-        one that waited behind another job takes what the editor shows by then), shown once it is there."""
+    def _preview_region(self, preview: LivePreview | None, text: str, style: RegionStyle,
+                        large: Any = OWN_PART) -> None:
+        """The editor asks for its text and formatting on the page, *large* its part set larger (a range of *text*
+        and a ratio, None: none; by default the region's own): lettered in the worker (the newest request only; one
+        that waited behind another job takes what the editor shows by then), shown once it is there."""
         if preview is None or not preview.open or self.pipeline is None:
             return
         pipeline = self.pipeline
         preview.serial += 1
-        preview.asked = (preview.serial, text, style)
+        preview.asked = (preview.serial, text, style, large)
 
         def job() -> None:
             asked = preview.asked
             if not preview.open or asked is None or (preview.made is not None and preview.made[0] >= asked[0]):
                 return
-            number, text_now, style_now = asked
+            number, text_now, style_now, large_now = asked
             try:
                 if preview.bed is None:
                     preview.bed = pipeline.page_without(preview.result, preview.region)
-                page, done = pipeline.preview_region(preview.bed, preview.region, text_now, style_now)
+                part = {} if large_now is OWN_PART else {"part": large_now}
+                page, done = pipeline.preview_region(preview.bed, preview.region, text_now, style_now, **part)
                 preview.made = (number, Image.fromarray(page), done)
             except Exception:  # noqa: BLE001 - a preview that fails shows nothing new; Save letters the page all the same
                 preview.made = (number, None, None)
@@ -1411,8 +1417,9 @@ class TranslatorMixin:
         """From the editor: one more translation of the region ("again"), on the page *result* the editor was opened
         on, of the reading in *answer*'s "source" (the editor's "Read as:", which the person may have corrected; the
         region's own reading when there is none). The answers go to the open editor
-        (`EditBubbleDialog.show_answers`), whatever happens, with the model's error in *answer* when there was one.
-        False when the model cannot be asked."""
+        (`EditBubbleDialog.show_answers`), whatever happens, with the model's error in *answer* when there was one,
+        and where the region's Japanese lettering set a part larger, the part of each answer to set larger
+        (`Pipeline.large_of`: "larges", given only when one was found). False when the model cannot be asked."""
         result, pipeline = result if result is not None else self.last_result, self.pipeline
         if pipeline is None or result is None:
             return False
@@ -1421,13 +1428,22 @@ class TranslatorMixin:
 
         def job() -> None:
             texts: list[str] = []
+            larges: list[Any] = []
             try:
                 source = str(answer.get("source") or "")
                 texts = [pipeline.ask_again(result, region, source) if source else pipeline.ask_again(result, region)]
+                texts = [t for t in texts if t]
+                find = getattr(pipeline, "large_of", None)
+                if find is not None and getattr(region, "size_mix", None) is not None:
+                    try:
+                        larges = [find(result, region, t, source or None) for t in texts]
+                    except Exception:  # noqa: BLE001 - the answer comes all the same, at one size
+                        larges = []
             except TranslationError as e:
                 answer["error"] = rendered(message_of(e))
             finally:  # the editor waits for the answers: they come in any case
-                self._post("asked", mode=mode, texts=[t for t in texts if t])
+                found = {"larges": larges} if any(large is not None for large in larges) else {}
+                self._post("asked", mode=mode, texts=[t for t in texts if t], **found)
                 if answer.get("error"):
                     self._post("status", text=answer["error"])
 
@@ -1684,7 +1700,8 @@ class TranslatorMixin:
         `_rotate_region`; "direction": T's, `_turn_direction`). A region that left that page meanwhile is refused.
         A translation saved is marked as the person's (`CachedBubble.edited`: "Translate again" keeps it, "My
         corrections" lists it), but for the model's answer to Ask again saved as it came ("asked"), which clears
-        the mark.
+        the mark. The part of the translation set larger ("large") is stored with it; where only that changed, it is
+        stored alone (`Pipeline.set_large`) and the translation stays whose it was.
         A reading the person corrected ("source": the editor's "Read as:") the region takes first, in memory only
         (`Pipeline.correct_reading`): no change of the stores, and none Ctrl+Z takes back; the translation is kept
         for that reading (`linememo.remember_edit`)."""
@@ -1715,17 +1732,25 @@ class TranslatorMixin:
                 if isinstance(style, RegionStyle) and style != (getattr(region, "style", None) or RegionStyle()):
                     if not pipeline.set_region_style(result, region, style):  # before the page is lettered again
                         self._post("status", key="Could not store the formatting: give the book a name first (the Book field).")
+                # the part of the translation set larger, as the editor has it (an editor of before: as it follows)
+                large = data["large"] if "large" in data else ...
                 if text and text != region.translated_text:
                     old = region.translated_text
                     # the person's translation (`CachedBubble.edited`), but for the model's answer to Ask again taken
                     # as it came ("asked")
-                    if not pipeline.set_translation(result, region, text, edited=not data.get("asked")):
+                    if not pipeline.set_translation(result, region, text, edited=not data.get("asked"),
+                                                    **({} if large is ... else {"large": large})):
                         self._post("status", key="Could not keep the translation: give the book a name first (the Book field).")
                         pipeline.rerender(result)  # the page as it is stored, not as the editor's preview showed it
                     else:
                         changes = rendering_changes(pipeline.check_sheet(), region.source_text, old, text, region.speaker)
                         if changes:
                             self._post("propose", changes=changes)
+                elif (text and large is not ... and large != getattr(region, "large", None)
+                      and hasattr(pipeline, "set_large")):  # only the part set larger changed: the text stays whose it is
+                    if not pipeline.set_large(result, region, large):
+                        self._post("status", key="Could not keep the translation: give the book a name first (the Book field).")
+                        pipeline.rerender(result)
                 else:
                     pipeline.rerender(result)
                 step.settle(pipeline)

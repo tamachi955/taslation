@@ -18,9 +18,11 @@ from PIL import Image, ImageTk
 from ...annotations import (ALIGNS, DIRECTIONS, ERASE_ONLY, INK_NAMES, LETTER_SPACINGS, REGION_KINDS, SLANTS,
                              STYLE_SIZES, VALIGNS, RegionStyle, ink_code)
 from ...i18n import _
+from ...locate_large import checked, follow
 from ...regions import ERASED
 from ...review import reason_label
 from ...textclean import clean_reading
+from ...translate.base import accepts
 from .. import shortcuts, theme
 from ..layout import FlowBar, fit_combobox, place_window, wrap_label
 from ..font_memory import StarButton, font_choices
@@ -100,6 +102,15 @@ STEP_ACTIONS = {-1: "editor_previous", 1: "editor_next"}
 STEP_TIPS = {-1: "Go to the region before this one in reading order. What you changed here is saved first.",
              1: "Go to the region after this one in reading order. What you changed here is saved first."}
 DISCARD = "Discard your changes to this region?"
+# the part of the translation set larger (`TextRegion.large`, `render.emphasis`): larger in the translation's box, set
+# on the words selected there or cleared on the bar (`locales.features.size_emphasis`)
+LARGER_WORDS = {"set": "Set larger", "clear": "One size"}
+LARGER_TIPS = {"set": "Letter the words selected in the translation larger than the rest, as the original letters part "
+                      "of this bubble larger. The box shows them larger.",
+               "clear": "Letter the whole translation at one size."}
+LARGER_SELECT = "Select the words to set larger in the translation first (not all of it)."
+LARGER_RATIO = 1.5  # how many times larger a part the person sets is, where the original's lettering gives no ratio
+LARGER_SHOWN = 1.4  # how many times larger the box shows it
 
 
 def kind_words() -> list[str]:
@@ -462,7 +473,15 @@ class EditBubbleDialog(tk.Toplevel):
     where the editor opens on the screen (the place the one before it had), else over *master*. *note*: a line the
     window has to say once (the spellcheck that cannot run), under the header. *hint_support*: how far the translation
     model in use follows the hint for the model (`translate.base.hint_support`); when only sometimes, a line under the
-    hint says so (`HINT_SOMETIMES`); for a model that follows it, nothing is said."""
+    hint says so (`HINT_SOMETIMES`); for a model that follows it, nothing is said.
+
+    The part of the translation set larger (`TextRegion.large`: where the original lettering set a part of the
+    bubble larger, found in the translation, or set here) shows larger in the translation's box and follows the
+    edits there; an edit that touches it drops it (`locate_large.follow`). On the bar, Set larger sets it on the words
+    selected in the box (at the original's ratio where it was measured, else `LARGER_RATIO`) and One size clears it;
+    the preview, Save ("large": a range of the saved text and its ratio, or None) and Ask again's answers (their parts
+    found by the window) take it. With *sizes* False (the setting ``size_emphasis`` off) the box shows it no larger
+    and the bar has neither button."""
 
     def __init__(self, master: tk.Misc, region: Any, speakers: list[str], on_save: Callable[[dict[str, Any]], None],
                  on_drop: Callable[[], None], on_ask: Callable[[str, dict[str, str]], bool] | None = None,
@@ -474,11 +493,17 @@ class EditBubbleDialog(tk.Toplevel):
                  on_read: Callable[[Callable[[str, str], None]], bool] | None = None,
                  on_step: Callable[[int, dict[str, Any] | None, tuple[int, int]], None] | None = None,
                  at: tuple[int, int] | None = None, note: str = "", clip: Any = None, font_memory: Any = None,
-                 hint_support: str = "follows"):
+                 hint_support: str = "follows", sizes: bool = True):
         super().__init__(master)
         self.title(_("Edit region"))
         self.transient(master)
         self.region = region
+        self._sizes = bool(sizes)  # the part set larger shown, and Set larger and One size on the bar
+        # the text in the box as the part set larger last followed it, and that part (a range of it and a ratio)
+        self._raw = str(getattr(region, "translated_text", "") or "")
+        self._large = checked(self._raw, getattr(region, "large", None))
+        mix = getattr(region, "size_mix", None)
+        self._ratio = self._large[2] if self._large is not None else float(getattr(mix, "ratio", 0.0) or LARGER_RATIO)
         self.clip = clip  # what the window copied (`formats.FormatClip`: its `style`); None: no Copy and Paste format
         self.on_ask, self.on_save, self.on_preview, self.on_cancel = on_ask, on_save, on_preview, on_cancel
         self.on_read, self.on_step = on_read, on_step
@@ -557,6 +582,11 @@ class EditBubbleDialog(tk.Toplevel):
         self.text.insert("1.0", region.translated_text)
         self.text.edit_reset()  # Ctrl+Z in the box takes back typing, not the text it opened with
         self.text.edit_modified(False)
+        shown = tkfont.nametofont("TkDefaultFont")
+        self._large_font = shown.copy()  # the part set larger, in the box
+        self._large_font.configure(size=round(int(shown.actual("size")) * LARGER_SHOWN))
+        self.text.tag_configure("large", font=self._large_font)
+        self._show_large()
         self.text.bind("<<Modified>>", self._text_changed)
         self.text.bind("<Control-Return>", lambda _e: (self._save(), "break")[1])
         ttk.Label(frm, text=_("Enter starts a new line; Ctrl+Enter saves."), foreground=theme.colour("hint")).pack(anchor="w")
@@ -833,6 +863,14 @@ class EditBubbleDialog(tk.Toplevel):
         tip(_("Squeeze the letters a little so that the text fits."), self.condense_box)
         if self._condense is None:
             self.condense_box.state(["alternate"])
+        if self._sizes:  # the part set larger: on the words selected in the box, or none
+            g = bar.group()
+            self.larger_btn = ttk.Button(g, text=_(LARGER_WORDS["set"]), command=self.set_larger)
+            self.larger_btn.pack(side="left")
+            tip(_(LARGER_TIPS["set"]), self.larger_btn)
+            self.one_size_btn = ttk.Button(g, text=_(LARGER_WORDS["clear"]), command=self.one_size)
+            self.one_size_btn.pack(side="left", padx=(6, 0))
+            tip(_(LARGER_TIPS["clear"]), self.one_size_btn)
         g = bar.group()
         self.align_var = tk.StringVar(value=style.align)
         self.align_btns = []
@@ -1103,7 +1141,66 @@ class EditBubbleDialog(tk.Toplevel):
     def _text_changed(self, _event: Any = None) -> None:
         if self.text.edit_modified():
             self.text.edit_modified(False)
+            self._follow_text()
             self._changed()
+
+    # ------------------------------------------------------------------ the part set larger
+    def _follow_text(self) -> None:
+        """The part set larger after a change of the text in the box: moved with it, or gone where the change touched
+        it (`locate_large.follow`)."""
+        now = self.text.get("1.0", "end-1c")
+        if now != self._raw:
+            self._large = follow(self._raw, now, self._large)
+            self._raw = now
+            self._show_large()
+
+    def _show_large(self) -> None:
+        """The part set larger shown larger in the box (with *sizes*)."""
+        self.text.tag_remove("large", "1.0", "end")
+        if self._sizes and self._large is not None:
+            a, b, _ratio = self._large
+            self.text.tag_add("large", f"1.0 + {a} chars", f"1.0 + {b} chars")
+
+    def part(self) -> tuple[int, int, float] | None:
+        """The part set larger as a range of the translation Save keeps (the box's text without the spaces round
+        it) and its ratio; None for none."""
+        self._follow_text()  # (a change whose event has not come yet)
+        if self._large is None:
+            return None
+        lead = len(self._raw) - len(self._raw.lstrip())
+        a, b, ratio = self._large
+        return checked(self._raw.strip(), (a - lead, b - lead, ratio))
+
+    def set_larger(self) -> None:
+        """Set larger: the words selected in the box (the spaces round them left out) are the part set larger, at
+        the original's ratio where it was measured; with nothing selected, or all of it, a line says what to do."""
+        self._follow_text()
+        try:
+            a, b = len(self.text.get("1.0", "sel.first")), len(self.text.get("1.0", "sel.last"))
+        except tk.TclError:  # nothing selected
+            a = b = 0
+        raw = self._raw
+        while a < b and raw[a].isspace():
+            a += 1
+        while b > a and raw[b - 1].isspace():
+            b -= 1
+        large = checked(raw, (a, b, self._ratio)) if b > a else None
+        if large is None or not (raw[:a] + raw[b:]).strip():
+            self.busy_var.set(_(LARGER_SELECT))
+            return
+        self.busy_var.set("")
+        self._large = large
+        self._show_large()
+        self._changed()
+
+    def one_size(self) -> None:
+        """One size: no part set larger."""
+        self._follow_text()
+        if self._large is None:
+            return
+        self._large = None
+        self._show_large()
+        self._changed()
 
     def _changed(self) -> None:
         """A change of the text or of the formatting: the page shows it once the reader pauses."""
@@ -1122,7 +1219,11 @@ class EditBubbleDialog(tk.Toplevel):
         self._preview_job = None
         if self.on_preview is not None and not self._closed:
             erase_only = kind_of(self.kind_var.get().strip()) == ERASE_ONLY  # erased, nothing set
-            self.on_preview("" if erase_only else self.text.get("1.0", "end").strip(), self.style())
+            text = "" if erase_only else self.text.get("1.0", "end").strip()
+            if accepts(self.on_preview, "large"):  # (the part set larger as the box has it)
+                self.on_preview(text, self.style(), large=None if erase_only else self.part())
+            else:
+                self.on_preview(text, self.style())
 
     def _save(self) -> None:
         """Save (the button, Ctrl+Enter): what the editor shows is kept; not while the model is asked."""
@@ -1156,9 +1257,10 @@ class EditBubbleDialog(tk.Toplevel):
         self.busy_bar.start(15)
         self._set_buttons("disabled")
 
-    def show_answers(self, mode: str, texts: list[str]) -> None:
-        """What the model gave: one more translation replaces the text (the box lights up for a moment); the line
-        says so, or that nothing came, and why."""
+    def show_answers(self, mode: str, texts: list[str], larges: list[Any] | None = None) -> None:
+        """What the model gave: one more translation replaces the text (the box lights up for a moment), with the
+        part of it to set larger the window found (*larges*, one per text: a range of it and a ratio, or None); the
+        line says so, or that nothing came, and why."""
         if self._closed:
             return
         self.busy_bar.stop()
@@ -1170,7 +1272,7 @@ class EditBubbleDialog(tk.Toplevel):
             self.busy_var.set(_("No answer from the model: {error}").format(error=error) if error
                               else _("The model gave no other translation."))
             return
-        self._use(texts[0])
+        self._use(texts[0], larges[0] if larges else None)
         self._answer_text = self.text.get("1.0", "end").strip()
         self._flash()
         self.busy_var.set(_("The model's new translation is in the box: Save keeps it, Cancel keeps the old one."))
@@ -1217,17 +1319,23 @@ class EditBubbleDialog(tk.Toplevel):
                 pass
         super().destroy()
 
-    def _use(self, text: str) -> None:
+    def _use(self, text: str, large: Any = None) -> None:
+        """*text* in the box in place of what was there, *large* its part set larger (None: none)."""
         self.text.delete("1.0", "end")
         self.text.insert("1.0", text)
+        self._raw = self.text.get("1.0", "end-1c")  # (the change's own event then finds nothing to follow)
+        self._large = checked(self._raw, large) if large is not None else None
+        if self._large is not None:
+            self._ratio = self._large[2]
+        self._show_large()
 
     def _data(self) -> dict[str, Any]:
-        """What Save keeps: the fields, the formatting, the reading ("source", as the person may have corrected it)
-        and whether the translation is the model's answer to Ask again as it came ("asked": not the person's own,
-        `CachedBubble.edited`)."""
+        """What Save keeps: the fields, the formatting, the reading ("source", as the person may have corrected it),
+        the part of the translation set larger ("large": `part`) and whether the translation is the model's answer
+        to Ask again as it came ("asked": not the person's own, `CachedBubble.edited`)."""
         text = self.text.get("1.0", "end").strip()
         return {"text": text, "speaker": self.speaker_var.get().strip(),
                 "kind": kind_of(self.kind_var.get().strip()), "continues": bool(self.cont_var.get()),
                 "note": self.note_var.get().strip(), "reader_note": self.reader_var.get().strip(),
-                "style": self.style(), "source": self._source(),
+                "style": self.style(), "source": self._source(), "large": self.part(),
                 "asked": self._answer_text is not None and text == self._answer_text}

@@ -152,8 +152,9 @@ def sheet_rendering(sheet: Any, query: Query) -> str | None:
 
 
 def reletter(pipeline: Any, result: Any, edits: Sequence[TextEdit]) -> bool:
-    """The regions of the page *result* whose bubbles *edits* changed take the new text (nothing else of them
-    changes), and the page is lettered again; False when none did."""
+    """The regions of the page *result* whose bubbles *edits* changed take the new text and its part set larger as
+    the bubble now has it (`CachedBubble.large`: moved with the text, or gone where the change touched it; nothing
+    else of them changes), and the page is lettered again; False when none did."""
     moved = {(e.old, e.new) for e in edits}
     cache, settings = pipeline.cache, pipeline.settings
     changed = False
@@ -169,6 +170,7 @@ def reletter(pipeline: Any, result: Any, edits: Sequence[TextEdit]) -> bool:
         if (best is not None and box_iou(best.box, nbox) >= settings.match_min_iou
                 and (region.translated_text, best.text) in moved):
             region.translated_text = best.text
+            region.large = getattr(best, "large", None)
             changed = True
     if changed:
         pipeline.rerender(result)

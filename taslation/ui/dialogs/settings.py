@@ -105,6 +105,9 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                "With the flash, the system's default sound plays once."),
     SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
                "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
+    SettingRow("size_emphasis", "Set larger what the original sets larger",
+               "Where the original letters part of a bubble larger than the rest, that part is looked for in the translation (one or two short requests beside the page's; the words never change) and lettered larger too, where the bubble holds both sizes. Off: every translation at one size.",
+               section="lettering", page=True),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 

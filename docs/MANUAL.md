@@ -506,6 +506,9 @@ and the page can be edited.
   With the kind set to "Erase only", the region's original lettering is only erased, and nothing is lettered there (as soon as you choose it, the page behind shows it erased).
   It is not sent for translation (in whole-book processing either), and it is counted neither as flagged for review nor as untranslated. The earlier translation stays in the cache, so setting the kind back letters it again.
   The change can be taken back with Ctrl+Z.
+  Where the original letters part of the bubble larger than the rest and that part was found in the translation ("Settings", `size_emphasis`), those words show larger in the translation's box.
+  They follow your typing; an edit that touches them letters the bubble at one size again. "Set larger" and "One size" on the formatting bar set and clear them.
+  "Ask again" looks for the part in the new answer too.
   At the top of the editor, the region as it originally looks is shown, cut out of the captured screen (an image in memory only, saved nowhere).
   A page shown from the cache has no Japanese (the cache keeps only translations), so "Read the Japanese" reads it again there and then;
   "Read as:" then appears, and "Ask again" can be used too (if you press "Ask again" without having read it, it reads first).
@@ -522,6 +525,7 @@ and the page can be edited.
   (the last 10); pressing ★ again removes the star; you can also move to it with Tab and press it with Space; only the font's family name is remembered,
   saved in this computer's ui.json), **Size** ("Auto" is the largest size that fits; a fixed size is not shrunk,
   and text that does not fit is cut off at the bubble's edge, which is shown), "Condense to fit" (automatic under 14 points),
+  "Set larger" (the words selected in the translation are lettered larger than the rest, as many times larger as the original's larger part where it was measured, else 1.5 times; the box shows them larger) and "One size" (the whole translation at one size),
   align left, centre and right, and align top, middle and bottom, **Line spacing**, **Letter spacing**, **Slant** (the angle, anticlockwise; "Auto" keeps the original lettering's slant), **Text direction** (as in a Word text box: Auto, Horizontal, Rotate all text 90° (reads from the top down, the direction of an English book's spine), Rotate all text 270° (reads from the bottom up), and Stacked (vertical writing: the letters are stacked downward, and the columns run from right to left; the long-vowel mark "ー", dashes, "…" and brackets take their vertical forms, small kana and punctuation sit in their vertical positions, and Latin letters are stacked upright one at a time; horizontal-in-vertical (tate-chū-yoko) and ruby are not supported); combined with a slant, the text in the chosen direction is slanted together with its frame), **Text colour** and **Outline colour** (Auto, Black, White, Custom...; with Custom, you choose any colour in Windows' colour dialog, and clicking the colour swatch beside it lets you choose again; nothing is asked of the network), **Outline** (Auto, With outline, No outline), and "Reset formatting". "Auto" for the colours and the outline follows the colour and outline the series sheet set for that kind; if it set none, the text is black or white to suit the background, the outline is drawn only on art and screentone, and the outline colour is the opposite of the text's. Colours and outlines do not change the text's size or line breaks. "Copy format" (Ctrl+Shift+C) remembers the bar's formatting, and "Paste format" (Ctrl+Shift+V) puts it into the bar of another region's editor (confirmed with "Save"). In translator mode, pressing T on the selected region, or the "Text direction (T)" button, switches in the order Auto → rotated 90° → rotated 270° → stacked → Auto (Ctrl+Z takes it back). After a change,
   the page behind is lettered again a moment later. The formatting is saved with the book's page information.
 * **Into the series sheet**: when your edit replaces a name or term that the series sheet renders differently, it asks whether to make yours the series sheet's rendering,
@@ -571,6 +575,7 @@ and the page can be edited.
   The page on show is lettered again at once, and other pages show the new translations the next time they are shown.
 
   Only the translations change. Review flags, notes to the reader, draft marks, marks of unfinished pages and the bubbles' positions stay as they are.
+  A part of a translation set larger moves with its words; where the replacement touches it, that bubble is lettered at one size.
   The lines were not looked at and corrected one by one, so, unlike an edit of a region, it does not clear review flags. A bubble whose translation would become empty is not replaced, and this is said.
   A replacement is one change as a whole: while it is the book's latest change, Ctrl+Z takes it back on all pages at once, whatever page is shown,
   and Ctrl+Y applies it again (in the Find and replace window as well). If you edit another page after it, that edit must be taken back first.
@@ -682,7 +687,7 @@ at first it goes by series, volume and language. Ctrl+click and Shift+click choo
 (the translations in other languages stay), after one question that names the book, or how many and which. The confirmation's default button is "Keep them", and the files can be restored from the Recycle Bin. When a file cannot be moved to the Recycle Bin
 (on a drive without one, for example), it is not deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before.
 "Rename..." gives the one book chosen a new name in its Series and Volume fields; the rename then goes as the window's own does (the review first where the series sheets
-say otherwise), its translations in every language, page information and series sheet moving along, and the list follows once it is done. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader.
+say otherwise), its translations in every language, page information and series sheet moving along, and the list follows once it is done. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader (and, for a bubble with a part set larger, that part's place in its translation).
 The model never writes notes about the story to keep (note files that an old version wrote in
 `~/.taslation/series` are left as they are, unread; delete them if you do not need them).
 
@@ -933,7 +938,13 @@ The settings you change often can be changed in the window under "Tools > Settin
 the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
 in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; the window's colours (light, dark, or as Windows is set); whether to stay always on top; how a book starts (page by page, or the whole book first);
-and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before) are listed here too.
+and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before, setting larger what the original sets larger) are listed here too.
+"Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
+that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
+where it is not found, the bubble's line is asked once more with the part marked, and the answer only points at the words in the translation (kept only where their share of the translation fits the Japanese part's share and the part's own translation bears them out).
+These are one or two short requests beside the page's, only for such a bubble (on the test volume about one bubble in ten pages, and about half a second for each such bubble). Measured with stand-in parts on a test set, the words it found were the right ones about 11 times in 12, and it found some for about half of the parts.
+The part found is lettered larger (at most twice the size; the rest never smaller than the review size; where the bubble cannot hold both sizes, it is lettered at one size); where nothing is found, the bubble is lettered as before.
+The translation cache keeps the part as its place in the translation (no Japanese), so a page from the cache asks nothing. With the setting off, every translation is lettered at one size. The hover panel and copying keep the plain text.
 Under the rows for the bubble under the pointer are "Panel text size" (`panel_font_size`: 0, automatic, or 6 to 72 points) and "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default); a number out of these bounds is not saved.
 For the inpainting (erasing lettering on the drawing with LaMa and filling in the drawing), choose "Not used", "Only with a GPU" or "Always, also on the CPU". The default is "Only with a GPU":
 it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
@@ -999,6 +1010,7 @@ ollama_model = "auto"        # "auto": PLaMo 3 Translate 2B, or Qwen3.5 4B for B
 ollama_num_ctx = 16384       # the chat translator's context window (a batch request needs ~10K); PLaMo has its own (8192)
 target_language = "English"
 uppercase = false            # scanlation-style capitals (Latin script only)
+size_emphasis = true         # the part the original letters larger is set larger in the translation too, where it is found there
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
 text_scale = 1.0             # the lettering size (0.5-2.0): 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering"
