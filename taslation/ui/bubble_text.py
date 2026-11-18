@@ -2,7 +2,10 @@
 own (a pop-up dictionary over the text, or one that watches the clipboard) and to hold a translation against what it
 translates. In reading mode and in the Reader role, in both modes of `Settings.hover_shows`, both ways of
 `Settings.hover_reveal` (with "in_place" this is the one panel there is, opened on request) and whatever
-`Settings.bubble_zoom` says; the Translator role's region editor has its regions' Japanese already ("Read as:").
+`Settings.bubble_zoom` says; in the Translator role's normal window too (its page translated), while no press on the
+page is under way and no region editor or modal dialog is open (`hover.hover_usable`; the region editor has its
+region's Japanese itself, "Read as:"). Their keys are none of the Translator's (`shortcuts.Keymap.problem` refuses a
+key another action has).
 
 * Show (the key of "show_japanese", F2 at first): the popup of `zoom` for the bubble under the pointer, pinned, with
   the bubble's Japanese as text under what the popup shows (its original and its translation, or the translation
@@ -32,8 +35,9 @@ translates. In reading mode and in the Reader role, in both modes of `Settings.h
   asked for (`TranslatorMixin._read_source`: `Pipeline.read_source` in the worker, as the region editor's "Read the
   Japanese" does, the popup's line or the status line saying so meanwhile), kept with the region in memory and never
   written anywhere. Neither text is logged, nor said in the status line.
-* Without a pointer (a touch screen, where a tap goes on to the viewer and nothing hovers): a press held still on a
-  bubble, or a right click on it, pins its popup (`zoom.BubbleZoomMixin._hold_press`, `_pin_bubble`).
+* Without a pointer (a touch screen, where a tap goes on to the viewer and nothing hovers): in reading mode and the
+  Reader role a press held still on a bubble, or a right click on it, pins its popup
+  (`zoom.BubbleZoomMixin._hold_press`, `_pin_bubble`); in the Translator role they are the Translator's.
 * Over the full-screen viewer, where the viewer keeps the keys, these keys are hot keys while the pointer is on
   TASlation's page or a popup is pinned (`text_hotkeys`, `overbook.OverBookMixin._over_keys`): no other key and no
   click is taken from the viewer, and a key of the viewer's (the page keys) can never be one of them
@@ -50,6 +54,7 @@ from ..i18n import _
 from ..render.lettering import strip_marks
 from . import shortcuts, theme
 from .dialogs.review import NOT_READ, READING, SelectableLine
+from .hover import hover_usable
 from .zoom import STILL_PX, text_target, zoom_colours
 
 # the actions' names, the mixin's methods too
@@ -62,7 +67,6 @@ CONTRAST_SELECTED = ("SystemHighlight", "SystemHighlightText")  # ... while Wind
 # what is said (in the window's language)
 NO_BUBBLE = "Rest the pointer on a bubble of the translated page first."
 NO_TRANSLATION = "This bubble has no translation."
-NOT_HERE = "In the Translator role, the region editor shows the Japanese of a region."
 JAPANESE_COPIED = "The bubble's Japanese is on the clipboard."
 TRANSLATION_COPIED = "The bubble's translation is on the clipboard."
 COPY_JAPANESE, COPY_TRANSLATION, CLOSE = "Copy the Japanese", "Copy the translation", "Close"
@@ -110,7 +114,6 @@ class BubbleTextMixin:
         pinned (`_text_bubble`) - shows the translation a popup pinned with the original on the page holds back
         (`zoom.BubbleZoomMixin._zoom_unveil`), else closes it."""
         if not self._text_usable():
-            self.say(NOT_HERE)
             return
         found = self._text_bubble(pointer_only=True)
         if getattr(self, "_zoom_pinned", False):
@@ -138,7 +141,6 @@ class BubbleTextMixin:
         one, else from the one under the pointer; with neither, the first (1) or the last (-1). At an end nothing
         changes and the status line says so; else it says which bubble of how many (no text of the bubble)."""
         if not self._text_usable():
-            self.say(NOT_HERE)
             return
         bubbles = self._text_bubbles()
         if not bubbles:
@@ -177,7 +179,6 @@ class BubbleTextMixin:
         part selected in its pinned popup, else all of it, read first where the page came from the cache (the status
         line says so meanwhile)."""
         if not self._text_usable():
-            self.say(NOT_HERE)
             return
         found = self._text_bubble()
         if found is None:
@@ -203,7 +204,6 @@ class BubbleTextMixin:
         """The key of "copy_translation" and the popup's Copy the translation: the bubble's translation on the
         clipboard, without the lettering's marks."""
         if not self._text_usable():
-            self.say(NOT_HERE)
             return
         found = self._text_bubble()
         if found is None:
@@ -217,13 +217,10 @@ class BubbleTextMixin:
 
     # ------------------------------------------------------------------ the bubble and its Japanese
     def _text_usable(self) -> bool:
-        """Whether the actions work now: in reading mode or the Reader role (the Translator has the region editor)."""
-        if getattr(self, "reading", False):
-            return True
-        try:
-            return self.role_var.get() == "reader"
-        except tk.TclError:
-            return False
+        """Whether the actions work now (`hover.hover_usable`): in reading mode and the Reader role, and in the
+        Translator role's normal window while no press on the page is under way and no region editor or modal dialog
+        is open; else a key of theirs does nothing (the press, the editor or the dialog is the Translator's)."""
+        return hover_usable(self)
 
     def _pointer_on_page(self) -> tuple[int, int] | None:
         """The pointer on the page's canvas (its pixels), while it is on the canvas; else None."""

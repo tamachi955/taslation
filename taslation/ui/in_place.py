@@ -1,6 +1,7 @@
 """A bubble the pointer rests on shows its other side in its own place (`Settings.hover_reveal` "in_place", `hover`):
-in reading mode and the Reader role, the bubble itself changes while the pointer rests on it and changes back when it
-leaves - the other way of showing what the panel beside a bubble shows (`zoom`, "panel").
+in reading mode, the Reader role and the Translator role's normal window, the bubble itself changes while the pointer
+rests on it and changes back when it leaves - the other way of showing what the panel beside a bubble shows (`zoom`,
+"panel").
 
 * With the translation on the page (`Settings.hover_shows` "original"): the bubble shows the page as the viewer has
   it there - its original lettering, in its own font and style. The pixels where the translated page differs from its
@@ -13,6 +14,13 @@ leaves - the other way of showing what the panel beside a bubble shows (`zoom`, 
   the panel does not show. While the page is being translated, a box still waiting for its translation shows the
   outline the page filling in gives it (`progress.Filling.outlines`, `hovered_outline`), one lettered already its
   lettering; once the page is done, the bubble under the pointer shows at once (the pointer has rested there).
+* In the Translator role's normal window the page is the translated one, so the bubble shows its original lettering
+  as with the translation on the page, while the Translator's pointer leaves room for it (`hover.translator_free`,
+  `zoom.BubbleZoomMixin._pointer_at_work`: no button down, no handle of the selected region under it, no region editor
+  or modal dialog open). The patch lies under everything drawn over the picture, so the regions' frames, numbers,
+  labels and flags and the selected region's frame and handles stay drawn over the original lettering; nothing of the
+  page, its regions or the history changes (no edit, nothing to take back), and a press takes it away before the
+  press selects.
 
 When: after the panel's delays (`zoom.ZOOM_DELAY_MS` with the original on the page or on a bubble hard to read where
 it is, `zoom.ZOOM_REST_MS` on any other one; `Settings.hover_delay_ms`: `zoom.hover_delays`), so that a pointer
@@ -20,10 +28,11 @@ passing over the page changes nothing. Until the
 pointer leaves the bubble - `REVEAL_HOLD_PX` round it still keep it, so that a pointer on its edge does not make it
 come and go. One bubble at a time: the pointer on another bubble takes it away, and that one shows after the same
 rest. It is drawn over the picture as a part of it (`preview.ImageCanvas.set_patch`), nothing else drawn again; it
-goes on a click (which goes on to the viewer as ever), the wheel, a key, Esc (taken for it while it shows), the pointer
-off the page, a panel pinned with the bubble's Japanese (`bubble_text`), and as soon as its page is not on show any
-more (`_reveal_watch`, every `zoom.ZOOM_WATCH_MS`). Nothing of a page is written anywhere: the patches are cut from
-the pictures in memory."""
+goes on a click (which goes on to the viewer as ever, or in the Translator role selects), the wheel, a key, Esc (taken
+for it while it shows), the pointer off the page, the Translator's pointer at work, a panel pinned with the bubble's
+Japanese (`bubble_text`), and as soon as its page is not on show any more or the region editor or a modal dialog opens
+(`_reveal_watch`, every `zoom.ZOOM_WATCH_MS`). Nothing of a page is written anywhere: the patches are cut from the
+pictures in memory."""
 
 from __future__ import annotations
 
@@ -157,8 +166,9 @@ class InPlaceMixin:
 
     # ------------------------------------------------------------------ the bubble under the pointer
     def _reveal_on(self) -> bool:
-        """Whether a bubble shows its other side in its place now (`hover.reveal_wanted`), and - with the translation
-        on the page - Show original not showing the whole page as the viewer has it anyway."""
+        """Whether a bubble shows its other side in its place now (`hover.reveal_wanted`: in the Translator role only
+        while its pointer leaves room for it), and - with the translation on the page - Show original not showing the
+        whole page as the viewer has it anyway."""
         if not reveal_wanted(self, "in_place"):
             return False
         return reverse_on(self) or not self.original_var.get()

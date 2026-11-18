@@ -96,7 +96,7 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                "How a bubble under the pointer shows the other side: in a panel beside it, both in sight at once; or in the bubble itself, with the original lettering, or what was read as text, erased and set. Also in the View menu.",
                choices=(("panel", "A panel beside the bubble"), ("in_place", "The bubble itself"))),
     SettingRow("bubble_zoom", "Enlarge the bubble under the pointer",
-               "In reading mode and the Reader role, with the translation on the page, a translated bubble the pointer rests on shows its original: enlarged beside it, or in its place (Under the pointer)."),
+               "With the translation on the page (always so in the Translator role), a translated bubble the pointer rests on shows its original: enlarged beside it, or in its place (Under the pointer)."),
     SettingRow("flash_when_done", "Flash the taskbar button when a whole-book run ends",
                "When a whole-book run finishes, or stops on a problem, while TASlation is not in front, its taskbar button flashes. TASlation does not take the focus."),
     SettingRow("sound_when_done", "Also play a sound when a whole-book run ends",

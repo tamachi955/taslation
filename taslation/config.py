@@ -279,8 +279,9 @@ class Settings:
     # over a viewer in full screen on the same monitor, the window stays on top without taking the foreground (the
     # viewer keeps the keys); View > Over the full-screen viewer turns it off for the next starts too (`ui.overbook`)
     over_book: bool = True
-    # reading mode and the Reader role, the translation on the page: a translated bubble the pointer rests on shows its
-    # original (enlarged beside it, `ui.zoom`, or in its place, `ui.in_place`); off, nothing shows under the pointer
+    # the translation on the page (reading mode and the Reader role by hover_shows, the Translator role's normal window
+    # always): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its
+    # place, `ui.in_place`); off, nothing shows under the pointer
     bubble_zoom: bool = True
     # reading mode and the Reader role: what a bubble the pointer rests on shows, the page showing the other
     # (`ui.hover`): "original" (the page translated, the bubble's original under the pointer: `bubble_zoom`) or

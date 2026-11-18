@@ -114,7 +114,8 @@ with a viewer that does not, the page says so: press Esc and read in the normal 
 
 ### The bubble under the pointer: the original, the translation, and copying the Japanese
 
-In reading mode, and in the Reader role in the normal window, resting the pointer on a bubble shows that bubble's "other side".
+In reading mode and in the normal window, in either role, resting the pointer on a bubble shows that bubble's "other side"
+(how the Translator role's normal window differs is under "In the Translator role" below).
 Two choices decide what the page shows and how the other side is shown. Both are in the View menu and in Tools > Settings..., and a choice applies at once to the page on show
 (nothing is translated again). They are kept in the settings file (`hover_shows`, `hover_reveal`).
 Each has a shortcut action ("Switch between the translation and the original on the page", "Switch between a panel and the bubble itself under the pointer"),
@@ -139,8 +140,8 @@ The wait before either shows is the same. With the translation on the page, a bu
 or one shown on the screen smaller than the readable size `readable_font_size`) shows after about 0.5 seconds and other bubbles after about 1.2 seconds; with the original on the page,
 every bubble after about 0.5 seconds. So a pointer that merely passes over the page shows nothing.
 "Delay under the pointer" in Tools > Settings... (`hover_delay_ms`, 450 by default) changes both waits: that many milliseconds, and about 2.7 times as long for the other bubbles; 0 shows at once. One bubble at a time;
-it goes back when the pointer leaves the bubble, on a click (the click goes to the viewer as before), on the wheel, a key or Esc, and when the page changes.
-It shows when you rest the pointer, not on a click (since clicks on the page belong to the viewer).
+it goes back when the pointer leaves the bubble, on a click (the click goes to the viewer as before; in the Translator role it selects a region), on the wheel, a key or Esc, and when the page changes.
+It shows when you rest the pointer, not on a click (since clicks on the page belong to the viewer, and in the Translator role to selecting the regions).
 The panel's translation is twice `readable_font_size` (22 pixels by default), and never smaller than on the page.
 With "Panel text size" in Tools > Settings... (`panel_font_size`, in points; 0, the default, keeps that automatic size) it is the size you set, which grows with the window's text size and the monitor's scaling as the rest of the window's text does, up to about 8 % of the screen's height;
 a panel that would not fit on the screen has its text made smaller until it does. The panel never covers the bubble and takes no focus,
@@ -150,11 +151,23 @@ so even over a full-screen viewer, keys reach the viewer. The enlargement of the
 (meanwhile the bubble itself shows nothing different; the panel still opens). With the original on the page, Show original is greyed in the Reader role
 and its key does nothing (reading mode turns Show original off as it starts). "Enlarge the bubble under the pointer" in Tools > Settings...
 (`bubble_zoom`) off shows nothing under the pointer while the translation is on the page. With the original on the page the pointer is the way to the translation,
-so the setting does not count there. In the Translator role's normal window the pointer selects and edits the regions, so whatever is chosen, the window shows the translated page with its frames as before.
-The page a whole-book run shows while it translates, and the page strip, are as they always were.
+so the setting does not count there.
+The page a whole-book run shows while it translates, and the page strip, are as they always were in either role: nothing shows under the pointer there.
 
-**The bubble's Japanese as text, and copying**: in reading mode and in the Reader role you can do this with the bubble under the pointer
-(in every combination, and over a full-screen viewer too):
+**In the Translator role**: the normal window's page is always the translated page with the regions' frames, whatever "On the page" says
+(the original on the page is a choice of reading mode and the Reader role; View > Show original works as before).
+Resting the pointer on a translated bubble shows its original in the way "Under the pointer" chooses, with the same waits and the same `bubble_zoom`.
+The pointer is still the Translator's (a press selects; a drag moves, resizes, turns or draws a new region; a double click opens the editor),
+so nothing shows while a button is down, while you drag or draw a rectangle, on a handle of the selected region (a corner, a side, the round handle),
+or while the region editor or a dialog that holds the window is open (inside the selected region it does show).
+What shows goes on a press (and the press selects or drags as ever), on the wheel, a key or Esc.
+Esc takes it away first; the next Esc clears the selection as before.
+The panel never covers the bubble, nor the selected region's frame and handles while there is room for it on a side.
+The original lettering that "The bubble itself" puts back lies under the regions' frames, numbers, flags and the selection, changes none of them and is no edit (there is nothing to undo).
+It goes back to the translation the moment the pointer leaves or a press comes.
+
+**The bubble's Japanese as text, and copying**: in reading mode and in the normal window, in either role, you can do this with the bubble under the pointer
+(in every combination, and over a full-screen viewer too; in the Translator role, not while a button is down or the region editor or a dialog is open):
 
 * F2: opens the bubble's panel pinned, with its Japanese as text you can select, and the buttons "Copy the Japanese", "Copy the translation" and "Close".
   It stays while the pointer moves to it, and closes with F2 again, Close, Esc, a click on the page, the wheel, and when the page changes.
@@ -176,6 +189,7 @@ and the viewer's the rest of the time. No page key and no click is taken.
 Without the pointer: F3 and Shift+F3 go from bubble to bubble, and while the pointer stays where it was, F2, Shift+F2 and Ctrl+F2 act on the pinned bubble (move the pointer onto a bubble and they act on that one again).
 On a touch screen, where a tap goes to the viewer and nothing rests on the page, press and hold a bubble (about 0.6 seconds, without moving) to pin its panel; that touch is not passed to the viewer, and a short tap goes to the viewer as before.
 Windows turns a touch held still into a right click while its "press and hold" setting is on, so a right click on a bubble pins its panel too.
+Pinning by a press held still or a right click is reading mode's and the Reader role's only: in the Translator role a press held is the start of a drag, and a right click only closes a panel that shows.
 
 ### Two ways to read
 
@@ -460,6 +474,8 @@ and the page can be edited.
   Rotation is the same setting as "Slant" in the editor; a slanted frame is shown at that angle, and its handles sit on the slanted frame.
   A handle of a slanted frame widens or narrows the original (unslanted) frame on the side the handle faces on the page. Delete removes a region,
   and a removed region is remembered as "not text" on that page, so a false detection never comes back.
+* **The original under the pointer**: resting the pointer on a translated bubble shows its original, as in the Reader role ("In the Translator role" in "The bubble under the pointer").
+  Pressing, dragging, the handles and editing are as before, and nothing shows meanwhile.
 * **Selecting several regions**: as with shapes in office software, Shift+click adds a region to the selection, and clicking it again removes it.
   Shift+drag draws a dotted rectangle and adds every region that lies entirely inside it to the selection (Shift on a selected region's handles or
   round handle resizes, and rotates in 15° steps, as before; dragging on empty space without Shift

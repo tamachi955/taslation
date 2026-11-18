@@ -52,7 +52,7 @@ def test_the_settings_start_with_the_translation_on_the_page_and_a_panel_and_tak
     Settings(hover_shows="translation", hover_reveal="in_place").validate()
 
 
-def test_the_choices_count_in_reading_mode_and_the_reader_role_alone():
+def test_what_the_page_shows_counts_in_reading_mode_and_the_reader_role_and_the_translator_s_pointer_shows_the_original():
     def window(shows="original", reveal="panel", role="reader", reading=False, zoom_on=True):
         settings = SimpleNamespace(hover_shows=shows, hover_reveal=reveal, bubble_zoom=zoom_on)
         return SimpleNamespace(settings=settings, role_var=SimpleNamespace(get=lambda: role), reading=reading)
@@ -66,15 +66,37 @@ def test_the_choices_count_in_reading_mode_and_the_reader_role_alone():
     assert not reveal_wanted(window(zoom_on=False), "panel")  # the translation on the page: bubble_zoom counts ...
     assert not reveal_wanted(window(reveal="in_place", zoom_on=False), "in_place")
     assert reveal_wanted(window("translation", zoom_on=False), "panel")  # ... with the original on the page it does not
-    assert not reveal_wanted(window(role="translator"), "panel")  # the Translator's pointer edits the regions
+    # the Translator role: the page translated whatever is chosen, its pointer showing the original as "original" has
+    # it - bubble_zoom counting -, the Translator's press, editor and modal dialogs first
+    for shows in ("original", "translation"):
+        assert reveal_wanted(window(shows, role="translator"), "panel"), shows
+        assert reveal_wanted(window(shows, "in_place", role="translator"), "in_place"), shows
+        assert not reveal_wanted(window(shows, role="translator", zoom_on=False), "panel"), shows
+    assert hover.reader_pointer(window()) and not hover.reader_pointer(window(role="translator"))
+    assert hover.translator_window(window(role="translator"))
+    assert not hover.translator_window(window(role="translator", reading=True))
+    pressed = window(role="translator")
+    pressed._drag_start = (3, 4)  # a press on the page under way: selecting, moving, resizing, turning, drawing
+    editing = window(role="translator")
+    editing._editor = SimpleNamespace(winfo_exists=lambda: True)  # the region editor open
+    modal = window(role="translator")
+    modal.grab_current = lambda: object()  # a modal dialog holding the window's input
+    for busy in (pressed, editing, modal):
+        assert not hover.hover_usable(busy) and not reveal_wanted(busy, "panel")
+    editing._editor = SimpleNamespace(winfo_exists=lambda: False)  # (closed)
+    assert hover.hover_usable(editing)
+    clicked = window()
+    clicked._drag_start = (3, 4)  # the reader's press is a click for the viewer: as ever, nothing held back
+    assert hover.hover_usable(clicked)
     assert original_idle(window("translation")) and not original_idle(window("translation", reading=True,
                                                                              role="translator"))
+    assert not original_idle(window("translation", role="translator"))  # Show original as ever for the Translator
 
 
 def test_every_new_line_of_the_window_is_in_every_language():
     keys = [label for _v, label in hover.HOVER_LABELS + hover.REVEAL_LABELS]
     keys += [*hover.HOVER_TIPS, *hover.REVEAL_TIPS, *hover.CHOSEN.values(), hover.ZOOM_OFF, hover.NOT_KEPT,
-             zoom.ZOOM_HINT, zoom.FILL_WAIT, bubble_text.NO_BUBBLE, bubble_text.NO_TRANSLATION, bubble_text.NOT_HERE,
+             zoom.ZOOM_HINT, zoom.FILL_WAIT, bubble_text.NO_BUBBLE, bubble_text.NO_TRANSLATION,
              bubble_text.JAPANESE_COPIED, bubble_text.TRANSLATION_COPIED, bubble_text.COPY_JAPANESE,
              bubble_text.COPY_TRANSLATION]
     for key in keys:
@@ -411,7 +433,7 @@ def test_show_original_and_bubble_zoom_with_the_translation_on_the_page(make):
     assert w.later == []
 
 
-def test_the_translator_role_keeps_its_page_and_its_pointer(make):
+def test_the_translator_role_keeps_its_translated_page_and_its_pointer_shows_the_original(make):
     for shows, reveal in (("original", "panel"), ("original", "in_place"), ("translation", "panel"),
                           ("translation", "in_place")):
         w = make(shows, reveal)
@@ -419,8 +441,20 @@ def test_the_translator_role_keeps_its_page_and_its_pointer(make):
         w._redisplay()
         assert w.shown_at(150, 200) == SET, (shows, reveal)  # the translated page, whatever is chosen
         w.point(150, 200)
-        assert w.later == [], (shows, reveal)
-        w.reading = True  # ... but reading mode shows as the choices say
+        due = "_zoom_due" if reveal == "panel" else "_reveal_due"
+        assert w.delays(due) == [ZOOM_DELAY_MS], (shows, reveal)  # (hard to read where it is, as ever)
+        w.due(due)
+        if reveal == "panel":  # the original, enlarged beside the bubble, with its translation
+            labels = _labels(w._zoom_popup)
+            assert any(str(lbl.cget("image")) for lbl in labels) and "A small thought." in [
+                str(lbl.cget("text")) for lbl in labels], (shows, reveal)
+            assert w.canvas.patch is None
+        else:  # the original lettering in its place, the rest of the page translated
+            assert w._zoom_popup is None and w.shown_at(125, 130) == INK and w.shown_at(450, 150) == SET, (shows, reveal)
+        w.point(550, 150)  # a bubble that reads well: the longer rest, as with the translation on the page
+        assert w.delays(due) == [ZOOM_REST_MS], (shows, reveal)
+        w._bubbles_away()
+        w.reading = True  # reading mode shows as the choices say
         w._redisplay()
         assert w.shown_at(150, 200) == (INK if shows == "translation" else SET), (shows, reveal)
         w.point(155, 205)
@@ -583,10 +617,14 @@ def test_copying_puts_the_text_on_the_clipboard_then_and_only_then(make, caplog)
     w._zoom_hide()
     w.copy_japanese()
     assert w.said[-1] == bubble_text.NO_BUBBLE and len(w.clipboard) == 4
-    w.role_var.set("translator")  # the region editor has the Japanese there
+    w.role_var.set("translator")  # the Translator role's page: the same, by the key alone
     w.point(150, 200)
     w.copy_japanese()
-    assert w.said[-1] == bubble_text.NOT_HERE and len(w.clipboard) == 4
+    assert w.clipboard[-1] == ("append", JAPANESE) and len(w.clipboard) == 6
+    w._drag_start = (300, 400)  # ... but not while a press of the Translator's is under way: nothing at all
+    said = list(w.said)
+    w.copy_translation()
+    assert len(w.clipboard) == 6 and w.said == said
 
 
 def test_a_page_from_the_cache_has_its_japanese_read_on_demand_and_kept_in_memory_alone(make, tmp_path, caplog):
@@ -678,15 +716,29 @@ def test_with_the_pointer_left_on_another_bubble_the_keys_act_on_the_pinned_one(
     assert w._zoom_pinned and w._zoom_for[1] is regions[0]
 
 
-def test_the_keys_go_nowhere_without_a_translated_page_or_in_the_translator_role(make):
+def test_the_keys_go_nowhere_without_a_translated_page_nor_while_the_translator_s_pointer_is_at_work(make):
     w = make()
     w.last_result = None
     w.next_bubble()
     assert w.said[-1] == bubble_text.STEP_NONE and getattr(w, "_zoom_popup", None) is None
     w = make()
-    w.role_var.set("translator")  # the Translator has Tab through the regions
+    w.role_var.set("translator")  # the Translator role's page: they work there too (Tab still selects the regions)
+    w._drag_start = (5, 5)  # ... but not while a press of its own is under way: nothing, and nothing said
+    said = list(w.said)
+    for key in (w.previous_bubble, w.next_bubble, w.show_japanese, w.copy_japanese, w.copy_translation):
+        key()
+    assert w.said == said and getattr(w, "_zoom_popup", None) is None and w.clipboard == []
+    w._drag_start = None
+    w._editor = SimpleNamespace(winfo_exists=lambda: True)  # nor while the region editor is open
     w.previous_bubble()
-    assert w.said[-1] == bubble_text.NOT_HERE and getattr(w, "_zoom_popup", None) is None
+    assert w.said == said and getattr(w, "_zoom_popup", None) is None
+    w._editor = None
+    w.previous_bubble()
+    assert w._zoom_pinned and w._zoom_for[1] is w.last_result.regions[2] and w.said[-1] == bubble_text.STEP_AT
+    w._editor = SimpleNamespace(winfo_exists=lambda: True)  # an editor opening takes the pinned panel away
+    w.due("_zoom_watch")
+    assert w._zoom_popup is None
+    w._editor = None
     w.reading = True  # reading mode edits nothing: the keys work there
     w.previous_bubble()
     assert w._zoom_pinned
@@ -827,8 +879,12 @@ def test_over_the_full_screen_viewer_the_keys_are_taslation_s_only_while_the_poi
     w._over_keys()
     assert "copy_japanese" in w._over_hotkeys.registered
     w._zoom_pinned = False
-    w.role_var.set("translator")  # not in the Translator role's normal window
+    w.role_var.set("translator")  # the Translator role's normal window: the same while the pointer is on its page ...
     w.on_page = True
+    w._over_keys()
+    assert {"show_japanese", "copy_japanese", "copy_translation", "next_bubble",
+            "previous_bubble"} <= w._over_hotkeys.registered
+    w._drag_start = (1, 1)  # ... but not while a press of the Translator's on the page is under way
     w._over_keys()
     assert w._over_hotkeys.registered == {"F5"}
 

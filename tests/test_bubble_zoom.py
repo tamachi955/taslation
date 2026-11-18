@@ -67,6 +67,15 @@ def test_the_popup_goes_beside_the_bubble_and_never_over_it():
     assert fallback_place(size, (100, 100), WORK) == (1620, 840)
 
 
+def test_the_popup_keeps_clear_of_boxes_it_is_given_where_a_side_has_room():
+    size, bubble = (300, 200), (400, 300, 600, 500)
+    handles = (608, 290, 640, 330)  # (the Translator's selected region's handles, to the bubble's right)
+    assert zoom_place(size, bubble, WORK, (handles,)) == (400 - ZOOM_GAP - 300, 300)  # its left instead
+    everywhere = (0, 0, 1920, 1040)
+    assert zoom_place(size, bubble, WORK, (everywhere,)) is None  # no side clear of it: `_zoom_place` then takes ...
+    assert zoom_place(size, bubble, WORK) == (600 + ZOOM_GAP, 300)  # ... a side beside the bubble all the same
+
+
 # ------------------------------------------------------------------ the popup on a stand-in
 def _region(x0, y0, x1, y1, text="A line.", font_size=30, flags=(), status="translated"):
     return TextRegion(x0, y0, x1, y1, np.full((y1 - y0, x1 - x0), 255, np.uint8), (x0, y0, x1, y1),
@@ -87,6 +96,7 @@ class Page(tk.Toplevel):
 
     _watch_bubbles = A._watch_bubbles
     _bubbles_motion = A._bubbles_motion
+    _pointer_at_work = A._pointer_at_work
     _bubbles_left = A._bubbles_left
     _bubbles_away = A._bubbles_away
     _zoom_wanted = A._zoom_wanted
@@ -104,6 +114,7 @@ class Page(tk.Toplevel):
     _zoom_escape = A._zoom_escape
     _zoom_show = A._zoom_show
     _zoom_place = A._zoom_place
+    _zoom_keep_clear = A._zoom_keep_clear
     _zoom_watch = A._zoom_watch
     _zoom_hide = A._zoom_hide
     _page_regions = A._page_regions
@@ -235,12 +246,15 @@ def test_its_binding_tag_comes_first_and_leaves_the_pages_own_handlers(page):
     assert not page.canvas.bind("<ButtonPress-1>")  # (nothing put on the page's own tag: its clicks stay its own)
 
 
-def test_it_shows_in_reading_mode_and_the_reader_role_only_with_the_setting_on(page):
+def test_it_shows_in_every_role_while_the_pointer_is_free_and_only_with_the_setting_on(page):
     assert page._zoom_wanted()
-    page.role_var.set("translator")  # the Translator's pointer selects and edits the regions
+    page.role_var.set("translator")  # the Translator's page is the translated one: its pointer shows the original
+    assert page._zoom_wanted()
+    page._drag_start = (10, 10)  # ... but not while a press of the Translator's is under way
     assert not page._zoom_wanted()
-    page.reading = True  # ... but not in reading mode
+    page.reading = True  # (reading mode edits nothing)
     assert page._zoom_wanted()
+    page._drag_start = None
     page.on_show = False  # another page than the one translated
     assert not page._zoom_wanted()
     page.on_show = True

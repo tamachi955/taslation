@@ -19,8 +19,9 @@ drawing.
   browser's own F5 would reload the book, which the store counts), and in reading mode F11 and Esc (leave it). F11
   and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered. The keys that
   show and copy a bubble's Japanese and translation and go from bubble to bubble (`bubble_text`, F2, Shift+F2,
-  Ctrl+F2, F3, Shift+F3 at first, as the keymap has them) are hot keys too, in reading mode and the Reader role, only
-  while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it (`_over_text_keys`).
+  Ctrl+F2, F3, Shift+F3 at first, as the keymap has them) are hot keys too, wherever they work in the window (reading
+  mode, the Reader role, the Translator role while its pointer is free: `hover.hover_usable`), only while the pointer
+  is on TASlation's page or a bubble's Japanese is pinned beside it (`_over_text_keys`).
 * Tk makes its window anew for its full screen (reading mode in and out), without the style, and activates it: the
   style goes on again and the foreground goes back to the viewer once (`_over_rewrapped`).
 * Where the reader put the window (`PLACE_TABLE` in ui.json): once it has been over the book - moved there with "Move
@@ -49,6 +50,7 @@ from ..capture.overlay import HotKeys, has_over, set_over
 from ..i18n import load_ui_flag, load_ui_table, save_ui_flag, save_ui_entry
 from . import shortcuts
 from .bubble_text import TEXT_ACTIONS, text_hotkeys
+from .hover import hover_usable
 from .layout import initial_geometry, kept_place
 
 OVER_TICK_MS = 100  # how often the window looks whether it should be over the book, and takes the hot keys pressed
@@ -428,10 +430,11 @@ class OverBookMixin:
 
     def _over_text_keys(self, wanted: frozenset[str]) -> dict[str, tuple[int, int]]:
         """The keys of a bubble's Japanese and translation to hold besides *wanted* (`bubble_text.text_hotkeys`:
-        action name -> (modifiers, virtual-key code)): only with those (the viewer or TASlation in front), in reading
-        mode or the Reader role, and while the pointer is on TASlation's page or a bubble's Japanese is pinned beside
-        it - so the viewer keeps them whenever they cannot be meant for TASlation -; never one of *wanted*'s keys."""
-        if not wanted or not (self.reading or self.role_var.get() == "reader"):
+        action name -> (modifiers, virtual-key code)): only with those (the viewer or TASlation in front), where the
+        keys work in the window (`hover.hover_usable`: reading mode, the Reader role, the Translator role while its
+        pointer is free), and while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it - so
+        the viewer keeps them whenever they cannot be meant for TASlation -; never one of *wanted*'s keys."""
+        if not wanted or not hover_usable(self):
             return {}
         pointer = getattr(self, "_pointer_on_page", None)
         if not (getattr(self, "_zoom_pinned", False) or (pointer is not None and pointer() is not None)):
