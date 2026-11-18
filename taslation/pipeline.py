@@ -2401,9 +2401,11 @@ class Pipeline:
             regions = merge_regions(regions, drop_nested(focus_oversized(self.detector.detect(sub, inverted=True)),
                                                          255 - gray, dark))
         if self.text_detector is not None:
-            # text blocks are looked for outside the lettering of the bubbles (regions closed by an outline)
+            # text blocks are looked for outside the lettering of the regions found so far: bubbles (closed by an
+            # outline), and the text a white or dark area too large for a bubble was cut down to (`focus_oversized`),
+            # whose glyphs a block would read and letter a second time
             check_cancel(cancel)
-            bubbles = [r for r in regions if r.kind in ("bubble", "dark-bubble")]
+            bubbles = list(regions)
             regions = merge_regions(regions, self.text_detector.detect(sub, taken=bubbles))
             if self.settings.detect_dark_bubbles:
                 check_cancel(cancel)

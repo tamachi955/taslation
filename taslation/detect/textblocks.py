@@ -255,6 +255,141 @@ def _count_lines(sorted_centres: list[float], tolerance: float) -> int:
     return lines
 
 
+def _room_around(text_box: tuple[int, int, int, int], glyph: float, width: int, height: int
+                 ) -> tuple[int, int, int, int] | None:
+    """A text block's region round its *text_box*: room for the translation (wider than vertical Japanese), within
+    the page (*width*, *height*); None when it would be too small to letter in."""
+    bx0, by0, bx1, by1 = text_box
+    bw, bh = bx1 - bx0, by1 - by0
+    pad = int(glyph * 0.6) + 2
+    side = max(bw, bh)
+    want_w, want_h = max(bw + 2 * pad, int(side * 0.9)), max(bh + 2 * pad, int(side * 0.6))
+    cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
+    rx0, ry0 = max(0, int(cx - want_w / 2)), max(0, int(cy - want_h / 2))
+    rx1, ry1 = min(width, int(cx + want_w / 2)), min(height, int(cy + want_h / 2))
+    if rx1 - rx0 < 8 or ry1 - ry0 < 8:
+        return None
+    return rx0, ry0, rx1, ry1
+
+
+JOIN_SIZE = 1.35  # the lines of two fragments of one text are this alike in thickness at most
+JOIN_ALONG = 2.0  # line thicknesses: a line of lettering goes on past a gap this wide (a mark left out, a space)
+JOIN_ACROSS = 1.2  # line thicknesses: the next column of a text lies this near
+JOIN_BUSY = 0.25  # the gap between two fragments of one text is this dark at most (pieces of neither aside)
+
+Found = tuple[list[int], float, tuple[int, int, int, int], tuple[int, int, int, int]]
+
+
+def _join_fragments(found: list[Found], boxes: list[tuple[int, int, int, int]], ids: list[int], labels: np.ndarray,
+                    stats: np.ndarray, width: int, height: int, list_pitch: float = 1.8) -> list[Found]:
+    """The blocks of *found* (members as indices into *boxes*, glyph, text box, region) with the fragments of one
+    text joined: a column (a row) of lettering broken where a mark too long or too small to be a piece sits (a dash,
+    the kanji for one, a comma off the line's middle) or at a wider space, and the lines of one paragraph set further
+    apart than the linking of pieces reaches (small print, a profile's description). Read apart, each fragment would
+    be translated on its own, half a sentence each, and lettered over its neighbour's room.
+
+    Two blocks are fragments of one text when both run the same way, their lines are alike in thickness (a column's
+    width, a row's height: the size of the type, `JOIN_SIZE`), and a line of one either goes on in a line of the
+    other (in line, the gap at most `JOIN_ALONG` thicknesses) or lies next to it (side by side along most of the
+    shorter one, at most `JOIN_ACROSS` thicknesses apart; rows no further apart than the lines of a list are,
+    *list_pitch* line heights from one to the next, which are separate texts), with nothing between them: no dark
+    piece of the page reaches across the gap (the outline of a bubble or a frame between two texts), and the gap is
+    no darker than `JOIN_BUSY` (the drawing). The lines are those of the blocks' glyphs (`letter_lines`; a block
+    with none, its text box); a joined block's region is made again round its text."""
+    if len(found) < 2:
+        return found
+    lines: list[list[tuple[int, int, int, int]]] = []
+    upright: list[bool] = []
+    sizes: list[float] = []
+    for members, glyph, tb, _room in found:
+        member_boxes = [boxes[i] for i in members]
+        groups, vertical = letter_lines(member_boxes, glyph)
+        spans = [(min(member_boxes[i][0] for i in g), min(member_boxes[i][1] for i in g),
+                  max(member_boxes[i][2] for i in g), max(member_boxes[i][3] for i in g)) for g in groups] or [tb]
+        lines.append(spans)
+        upright.append(vertical)
+        main = spans[int(np.argmax([len(g) for g in groups]))] if groups else tb  # (its longest line)
+        sizes.append(float((main[2] - main[0]) if vertical else (main[3] - main[1])))
+    own = [{ids[i] for i in members} for members, *_rest in found]
+
+    def clear(a: int, b: int, gap: tuple[int, int, int, int], across_x: bool, glyph: float) -> bool:
+        gx0, gy0, gx1, gy1 = max(0, gap[0]), max(0, gap[1]), min(width, gap[2]), min(height, gap[3])
+        if gx1 <= gx0 or gy1 <= gy0:
+            return True  # (the lines touch)
+        lab = labels[gy0:gy1, gx0:gx1]
+        theirs = own[a] | own[b]
+        other = (lab > 0) & ~np.isin(lab, list(theirs))
+        if other.mean() > JOIN_BUSY:
+            return False
+        reach = 0.5 * glyph
+        for k in np.unique(lab[other]):
+            x, y, w, h = (int(v) for v in stats[int(k)][:4])
+            if max(w, h) < 2.0 * glyph:
+                continue  # glyph-sized: a mark of the lettering (a dash, the kanji for one)
+            if (across_x and x <= gx0 - reach and x + w >= gx1 + reach) or (
+                    not across_x and y <= gy0 - reach and y + h >= gy1 + reach):
+                return False  # a line drawn across the gap and well past it
+        return True
+
+    def fragments(a: int, b: int) -> bool:
+        ga, gb = sizes[a], sizes[b]
+        if upright[a] != upright[b] or min(ga, gb) <= 0 or max(ga, gb) > JOIN_SIZE * min(ga, gb):
+            return False
+        g = max(ga, gb)
+        vertical = upright[a]
+        across = JOIN_ACROSS if vertical else min(JOIN_ACROSS, list_pitch - 1.0)
+        for la in lines[a]:
+            for lb in lines[b]:
+                # (along: the axis the line runs on; across: the other)
+                a0, a1, b0, b1 = (1, 3, 1, 3) if vertical else (0, 2, 0, 2)
+                c0, c1 = (0, 2) if vertical else (1, 3)
+                cross = min(la[c1], lb[c1]) - max(la[c0], lb[c0])
+                run = min(la[a1], lb[b1]) - max(la[a0], lb[b0])
+                if cross >= 0.5 * min(la[c1] - la[c0], lb[c1] - lb[c0]) and -run <= JOIN_ALONG * g:
+                    # in line: the gap between them along the line, its width that of the lines' overlap
+                    lo, hi = (la, lb) if la[a0] <= lb[a0] else (lb, la)
+                    if vertical:
+                        gap = (max(la[0], lb[0]), lo[3], min(la[2], lb[2]), hi[1])
+                    else:
+                        gap = (lo[2], max(la[1], lb[1]), hi[0], min(la[3], lb[3]))
+                    if run >= 0 or clear(a, b, gap, vertical, g):
+                        return True
+                if run >= 0.5 * min(la[a1] - la[a0], lb[b1] - lb[b0]) and -cross <= across * g:
+                    # side by side: the gap between them across the lines, its length that of their overlap
+                    lo, hi = (la, lb) if la[c0] <= lb[c0] else (lb, la)
+                    if vertical:
+                        gap = (lo[2], max(la[1], lb[1]), hi[0], min(la[3], lb[3]))
+                    else:
+                        gap = (max(la[0], lb[0]), lo[3], min(la[2], lb[2]), hi[1])
+                    if cross >= 0 or clear(a, b, gap, not vertical, g):
+                        return True
+        return False
+
+    uf = _UnionFind(len(found))
+    for a in range(len(found)):
+        for b in range(a + 1, len(found)):
+            if uf.find(a) != uf.find(b) and fragments(a, b):
+                uf.union(a, b)
+    groups: dict[int, list[int]] = {}
+    for i in range(len(found)):
+        groups.setdefault(uf.find(i), []).append(i)
+    out: list[Found] = []
+    for group in groups.values():
+        if len(group) == 1:
+            out.append(found[group[0]])
+            continue
+        members = [i for k in group for i in found[k][0]]
+        glyph = float(np.median([max(boxes[i][2] - boxes[i][0], boxes[i][3] - boxes[i][1]) for i in members]))
+        text_box = (min(found[k][2][0] for k in group), min(found[k][2][1] for k in group),
+                    max(found[k][2][2] for k in group), max(found[k][2][3] for k in group))
+        room = _room_around(text_box, glyph, width, height)
+        if room is None:
+            out.extend(found[k] for k in group)
+            continue
+        out.append((members, glyph, text_box, room))
+    return out
+
+
 class _UnionFind:
     def __init__(self, n: int) -> None:
         self.parent = list(range(n))
@@ -397,15 +532,11 @@ class TextBlockDetector:
             pad = int(glyph * 0.6) + 2
             if light_share(bx0 - pad, by0 - pad, bx1 + pad, by1 + pad) < cfg.min_block_light:
                 continue
-            # room for the translation (wider than vertical Japanese)
-            side = max(bw, bh)
-            want_w, want_h = max(bw + 2 * pad, int(side * 0.9)), max(bh + 2 * pad, int(side * 0.6))
-            cx, cy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
-            rx0, ry0 = max(0, int(cx - want_w / 2)), max(0, int(cy - want_h / 2))
-            rx1, ry1 = min(w, int(cx + want_w / 2)), min(h, int(cy + want_h / 2))
-            if rx1 - rx0 < 8 or ry1 - ry0 < 8:
+            room = _room_around((bx0, by0, bx1, by1), glyph, w, h)
+            if room is None:
                 continue
-            found.append((members, glyph, (bx0, by0, bx1, by1), (rx0, ry0, rx1, ry1)))
+            found.append((members, glyph, (bx0, by0, bx1, by1), room))
+        found = _join_fragments(found, boxes, ids, labels, stats, w, h, cfg.list_pitch)
         all_pieces = {ids[i] for members, *_rest in found for i in members}
         regions: list[TextRegion] = []
         for members, glyph, text_box, (rx0, ry0, rx1, ry1) in found:
