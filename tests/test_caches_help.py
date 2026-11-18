@@ -504,28 +504,29 @@ def test_the_help_menu_comes_after_language_and_alone_has_the_notice(hidden_root
     set_language("en")
 
 
-def test_help_about_opens_with_the_state_folder_the_ollama_port_and_the_guard(tmp_path, monkeypatch):
+def test_help_about_opens_with_the_state_folder(tmp_path, monkeypatch):
     made = []
-    monkeypatch.setattr(about, "AboutDialog", lambda master, state_dir, port, guard: made.append((master, state_dir, port, guard)))
-    window = SimpleNamespace(settings=Settings(state_dir=tmp_path / "state", ollama_url="http://127.0.0.1:11500"),
-                             _guard_line=lambda: "Offline guard: off.")
+    monkeypatch.setattr(about, "AboutDialog", lambda master, state_dir: made.append((master, state_dir)))
+    window = SimpleNamespace(settings=Settings(state_dir=tmp_path / "state", ollama_url="http://127.0.0.1:11500"))
     app_mod.App.open_about(window)
-    assert made == [(window, tmp_path / "state", 11500, "Offline guard: off.")]
+    assert made == [(window, tmp_path / "state")]  # (the offline guard's state goes with Copy details)
 
 
 def test_the_about_dialog(tmp_path, monkeypatch, hidden_root):
     placed = []
     monkeypatch.setattr(about, "place_window", lambda win, parent=None: placed.append((win, parent)))
     state = tmp_path / "state folder"
-    d = about.AboutDialog(hidden_root, state, port=11434, root=ROOT)
+    d = about.AboutDialog(hidden_root, state, root=ROOT)
     d.withdraw()
     assert placed == [(d, hidden_root)]  # centred over the window
     assert d.title() == "About TASlation" and d.resizable() == (False, False)
     assert d.version_text == f"Version {taslation.__version__}" and d.version_text in _texts(d)
     assert d.lines == ["Free software under the MIT licence", "Built with PLaMo",
-                       "Runs offline: it talks only to Ollama on this computer (localhost:11434)",
                        "Your translations, notes and settings are kept in this folder:",
                        "More in the README and in docs/THIRD_PARTY.md (the projects TASlation uses and their licences):"]
+    assert not any("offline" in text.lower() or "Ollama" in text for text in [*d.lines, *_texts(d)])
+    # the licence and the credit together, the folder a block of its own below them
+    assert [tuple(label.pack_info()["pady"]) for label in d._labels[:3]] == [(12, 0), (2, 0), (12, 2)]
     assert all(_shows(label, text, d.text_width) for label, text in zip(d._labels, d.lines))
     assert d.paths == [str(state), str(ROOT / "README.md"), str(ROOT / "docs" / "THIRD_PARTY.md")]
     assert [field.get() for field in d._fields] == d.paths  # each path in a line of its own ...
@@ -534,9 +535,9 @@ def test_the_about_dialog(tmp_path, monkeypatch, hidden_root):
     assert "webbrowser" not in source and "startfile" not in source  # nothing opens a browser or a file
     d.destroy()
     assert about.documents(tmp_path) == []  # an installed package without the source: the sentence names them
-    d = about.AboutDialog(hidden_root, state, root=tmp_path, guard="Offline guard: off.")
+    d = about.AboutDialog(hidden_root, state, root=tmp_path)
     assert d.paths == [str(state)]
-    assert d.lines[2:4] == ["Runs offline: it talks only to Ollama on this computer (localhost:11434)", "Offline guard: off."]
+    assert d.lines[2] == "Your translations, notes and settings are kept in this folder:"
     d.destroy()
 
 
@@ -546,8 +547,8 @@ def test_the_version_is_that_of_the_program_files_that_run():
 
 
 def test_the_about_dialog_in_japanese_and_russian(tmp_path, hidden_root):
-    for code, sentence in (("ja", "オフラインで動作します。通信するのはこのパソコンの Ollama（localhost:11434）だけです"),
-                           ("ru", "Работает офлайн: обращается только к Ollama на этом компьютере (localhost:11434)")):
+    for code, sentence in (("ja", "MIT ライセンスのフリーソフトウェアです"),
+                           ("ru", "Свободная программа под лицензией MIT")):
         set_language(code)
         d = about.AboutDialog(hidden_root, tmp_path, root=ROOT)
         d.withdraw()

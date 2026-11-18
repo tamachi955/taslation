@@ -1,5 +1,6 @@
-"""The About dialog (Help > About TASlation): the version, the licence, that TASlation runs offline, where its data
-is kept and where to read more, given by path: nothing here opens a browser."""
+"""The About dialog (Help > About TASlation): the version, the licence, where its data is kept and where to read
+more, given by path: nothing here opens a browser. The offline guard's state is in Copy details
+(`errorlog.guard_line`), not in the dialog's text."""
 
 from __future__ import annotations
 
@@ -37,12 +38,12 @@ def documents(root: Path = REPO_DIR) -> list[Path]:
 class AboutDialog(tk.Toplevel):
     """About TASlation, modal over the window and centred over it: the icon, the name, the version (`version`) and the
     date of its program files (``date_text``, as install.cmd and update.cmd print it);
-    free software under the MIT licence; runs offline, talking only to Ollama on this computer, with the offline
-    guard's state (*guard*, a line); the folder where its data is kept, then the README and docs/THIRD_PARTY.md, each path in a read-only line that can be selected and
-    copied; Copy details (``details_btn``: the version, the system and the last error for a report, nothing of the
-    books) and Close. ``paths`` holds the paths shown, ``lines`` the sentences."""
+    free software under the MIT licence, with PLaMo's credit; the folder where its data is kept, then the README and
+    docs/THIRD_PARTY.md, each path in a read-only line that can be selected and copied; Copy details (``details_btn``:
+    the version, the system, the offline guard's state and the last error for a report, nothing of the books) and
+    Close. ``paths`` holds the paths shown, ``lines`` the sentences."""
 
-    def __init__(self, master: tk.Misc, state_dir: Path | str, port: int = 11434, root: Path = REPO_DIR, guard: str = ""):
+    def __init__(self, master: tk.Misc, state_dir: Path | str, root: Path = REPO_DIR):
         super().__init__(master)
         self.title(_("About TASlation"))
         self.transient(master)
@@ -81,10 +82,6 @@ class AboutDialog(tk.Toplevel):
         # PLaMo's licence, article 4 (1) (ii): these words as they are (since the revision of November 9, 2026 asked of
         # whoever provides the model or a model made from it; TASlation provides neither and keeps the credit)
         self._line(frm, CREDIT, pady=(2, 0))
-        self._line(frm, _("Runs offline: it talks only to Ollama on this computer (localhost:{port})").format(port=port),
-                   pady=(2, 0))
-        if guard:
-            self._line(frm, guard, pady=(2, 0))
         self._line(frm, _("Your translations, notes and settings are kept in this folder:"), pady=(12, 2))
         self._path(frm, str(Path(state_dir)))
         self._line(frm, _("More in the README and in docs/THIRD_PARTY.md (the projects TASlation uses and their licences):"),

@@ -153,8 +153,6 @@ KEYS: list[str] = [
     "Reading mode",
     "View",
     "TASlation blocked {blocked} attempt(s) to reach the internet. Nothing left this computer; you need do nothing.",
-    "Offline guard: off.",
-    "Offline guard: on. Only this computer's port {port} (Ollama) can be reached; {blocked} other connection attempt(s) were blocked.",
     "TASlation - translating...",
     "This viewer cannot be read behind the reading window; press Esc",
     "Reading mode translates page by page; the whole-book scan waits until you leave it (Esc).",

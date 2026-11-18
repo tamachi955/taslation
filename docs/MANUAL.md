@@ -437,7 +437,7 @@ and the country with "Legal notice..." in that menu (it is also in the "Help" me
 There are 17 built-in languages: English, 日本語, Español, Português (Brasil), Français, Deutsch,
 Italiano, Nederlands, Polski, Русский, Türkçe, Bahasa Indonesia, Tiếng Việt, 简体中文,
 繁體中文, 한국어, ไทย. This is the language of the menus and messages, not of the translations. Translations can be into any of the 20 languages of the "To:" box.
-"About TASlation" in the "Help" menu shows the version, the licence, the fact that the only thing it talks to is Ollama on this computer, the state of the offline guard,
+"About TASlation" in the "Help" menu shows the version, the licence,
 the folder where the cache, series sheets and settings are kept, and where the README and docs/THIRD_PARTY.md are.
 
 ### Translator mode
@@ -1120,14 +1120,15 @@ warnings, and errors with where they happened (the program's file name and line)
 It does not write the page's text, OCR results, translations, book titles or window titles. For file locations, it writes only the state folder and the models folder, by name (`<state dir>` and the like),
 and replaces the file names beyond them, and any other place, with `<path>`. Quotations in error messages, and characters that are not ASCII (Japanese and so on), are replaced with `…`.
 
-"Copy details", in "Help > About TASlation" and on the screens that report an error, puts the same content (environment, changed settings, the last error) on the clipboard.
+"Copy details", in "Help > About TASlation" and on the screens that report an error, puts the same content (environment, changed settings, the last error) on the clipboard,
+with the offline guard's state added (on or off, the address of Ollama on this computer it can reach, and how many connection attempts it blocked).
 Paste it when you report a problem. It sends nothing anywhere. On the screen shown when it could not start, too, "Yes" copies it.
 
 ## Checking for yourself that it works offline
 
 1. Check that `taslation doctor` prints
    `Network guard: ON (loopback:11434 only ...)`.
-   In the window, "About TASlation" in the "Help" menu shows the same state. The status bar shows something
+   In the window, "Copy details" in "Help > About TASlation" copies the same state, as a line `Offline guard: on; ...`. The status bar shows something
    only when the guard has blocked an attempt to connect (it then stays until you close the window).
 2. `taslation audit tests/fixtures/sample_page.png --translator echo`
    runs the whole detection and OCR process and shows every network connection the process made. With the echo translator the list is empty;

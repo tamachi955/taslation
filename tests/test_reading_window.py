@@ -73,9 +73,8 @@ class Window(BlackViewerMixin):
     _job_line = app_mod.App._job_line
     _overlay_items = app_mod.App._overlay_items
     _page_regions = app_mod.App._page_regions
-    _guard_numbers = app_mod.App._guard_numbers
+    _guard_blocked = app_mod.App._guard_blocked
     _sync_guard = app_mod.App._sync_guard
-    _guard_line = app_mod.App._guard_line
     _show_progress = app_mod.App._show_progress
     _picture = app_mod.App._picture
     _fill_on_show = app_mod.App._fill_on_show
@@ -261,9 +260,7 @@ def test_the_status_bar_warns_only_once_the_offline_guard_blocked_something(hidd
     monkeypatch.setattr(netguard, "state", lambda: state)
     w = Window(hidden_root)
     w._sync_guard()
-    assert w.guard_var.get() == ""  # nothing blocked: nothing on screen
-    assert w._guard_line() == ("Offline guard: on. Only this computer's port 11434 (Ollama) can be reached; "
-                         "0 other connection attempt(s) were blocked.")
+    assert w.guard_var.get() == "" and w._guard_blocked() == 0  # nothing blocked: nothing on screen
     state.blocked.append("TASlation network guard blocked connect to 203.0.113.9:443")
     w._sync_guard()
     assert w.guard_var.get() == ("TASlation blocked 1 attempt(s) to reach the internet. Nothing left this computer; "
@@ -272,8 +269,10 @@ def test_the_status_bar_warns_only_once_the_offline_guard_blocked_something(hidd
     w._sync_guard()
     assert w.guard_var.get() == "TASlation はインターネットへの接続の試みを 1 回止めました。このパソコンから外には何も出ていません。何もする必要はありません。"
     i18n.set_language("en")
-    monkeypatch.setattr(netguard, "state", lambda: None)
-    assert w._guard_line() == "Offline guard: off."
+    monkeypatch.setattr(netguard, "state", lambda: None)  # the guard off: nothing blocked, nothing said
+    assert w._guard_blocked() == 0
+    w._sync_guard()
+    assert w.guard_var.get() == ""
 
 
 def test_the_area_dialog_resizes_moves_and_redraws_the_area(hidden_root):

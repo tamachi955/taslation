@@ -1045,11 +1045,11 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         warn_ignored(self, self.settings, boxes.tell)
 
     def open_about(self) -> None:
-        """Help > About TASlation: the version, the licence, that it runs offline with the offline guard's state, and
-        where its data is kept, modal and centred over the window."""
+        """Help > About TASlation: the version, the licence and where its data is kept, modal and centred over the
+        window (the offline guard's state goes with its Copy details: `errorlog.guard_line`)."""
         from .dialogs.about import AboutDialog
 
-        AboutDialog(self, Path(self.settings.state_dir), self.settings.ollama_port, guard=self._guard_line())
+        AboutDialog(self, Path(self.settings.state_dir))
 
     def _close_allowed(self) -> bool:
         """At closing: with pages read and not translated yet (a run reading them, or what a stopped run left) or

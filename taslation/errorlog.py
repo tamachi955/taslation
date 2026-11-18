@@ -15,7 +15,8 @@ string as ``'…'`` unless the code of the traceback names it (a key such as 'te
 window title, and no path under the reader's profile but the state folder's (by name alone) reaches the file.
 
 `details_text` is what Copy details (Help > About TASlation, an error box: `ui.copy_details`; a failed start:
-`cli._complain`) gives: the environment, Ollama's version, the settings and the last error, through the same `scrub`.
+`cli._complain`) gives: the environment, Ollama's version, the offline guard's state (`guard_line`), the settings and
+the last error, through the same `scrub`.
 """
 
 from __future__ import annotations
@@ -312,13 +313,28 @@ def last_error() -> tuple[float, str] | None:
         return _last_error
 
 
+def guard_line() -> str:
+    """The offline guard's state for a report (`netguard.state`): on or off, the address on this computer it lets
+    TASlation reach (Ollama's port on the loopback) and how many other connection attempts it blocked in this
+    session - their targets are left out."""
+    from . import netguard  # (standard library only, like this module; installing it is the entry points' work)
+
+    st = netguard.state()
+    if st is None or not st.installed:
+        return "Offline guard: off"
+    where = ", ".join(f"localhost:{port}" for port in sorted(st.allowed_ports))
+    return (f"Offline guard: on; it lets TASlation reach only Ollama on this computer ({where}); "
+            f"{len(st.blocked)} other connection attempt(s) blocked in this session")
+
+
 def details_text(settings: Any = None, port: int | None = None, ollama: bool = True) -> str:
-    """What Copy details gives, for a report: the environment, Ollama, the window's language, the target language,
-    the translator setting and the other settings changed, the settings file's place by folder, and the last error -
-    no text, title or path of the reader's."""
+    """What Copy details gives, for a report: the environment, Ollama, the offline guard's state (`guard_line`), the
+    window's language, the target language, the translator setting and the other settings changed, the settings
+    file's place by folder, and the last error - no text, title or path of the reader's."""
     settings = settings if settings is not None else _settings
     lines = ["TASlation details for a report (no text, titles or file names from your books):"]
     lines += environment(ollama=ollama, port=port or getattr(settings, "ollama_port", None))
+    lines.append(guard_line())
     if settings is not None:
         lines.append(scrub(f"Window language: {getattr(settings, 'ui_language', '') or 'as chosen at the first start'}; "
                            f"translation into {getattr(settings, 'target_language', '?')}; "

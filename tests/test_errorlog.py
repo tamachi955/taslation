@@ -210,6 +210,28 @@ def test_without_an_error_the_details_say_so():
     assert errorlog.details_text(Settings(), ollama=False).endswith("Last error: none in this session")
 
 
+def test_the_details_carry_the_offline_guard_s_state_its_address_and_what_it_blocked(monkeypatch):
+    from taslation import netguard
+
+    state = netguard.GuardState(allowed_ports=frozenset({11434}), installed=True)
+    monkeypatch.setattr(netguard, "state", lambda: state)
+    on = ("Offline guard: on; it lets TASlation reach only Ollama on this computer (localhost:11434); "
+          "0 other connection attempt(s) blocked in this session")
+    assert errorlog.guard_line() == on
+    lines = errorlog.details_text(Settings(), ollama=False).splitlines()
+    assert on in lines and lines.index(on) == 6  # after the environment (its five lines), before the settings
+    state.blocked += ["TASlation network guard blocked connect to 203.0.113.9:443 (only loopback:11434 is allowed)"] * 2
+    text = errorlog.details_text(Settings(), ollama=False)
+    assert "2 other connection attempt(s) blocked in this session" in text
+    assert "203.0.113.9" not in text  # how many, not where to
+    state.allowed_ports = frozenset({11434, 11500})
+    assert "(localhost:11434, localhost:11500)" in errorlog.guard_line()
+    state.installed = False
+    assert errorlog.guard_line() == "Offline guard: off"
+    monkeypatch.setattr(netguard, "state", lambda: None)
+    assert "Offline guard: off" in errorlog.details_text(Settings(), ollama=False).splitlines()
+
+
 def test_ollama_s_version_is_asked_on_this_computer_without_a_proxy(monkeypatch):
     import io
     import urllib.request
@@ -243,6 +265,8 @@ def test_about_copies_the_details(hidden_root, tmp_path, monkeypatch):
     assert str(d.details_btn.cget("text")) == "Copy details"
     d.details_btn.invoke()
     assert len(copied) == 1 and copied[0].startswith("TASlation details for a report")
+    assert errorlog.guard_line() in copied[0].splitlines()  # the offline guard's state: here, not in the dialog
+    assert errorlog.guard_line() not in d.lines
     assert str(d.details_btn.cget("text")) == "Copied"
     set_language("ja")
     d = about.AboutDialog(hidden_root, tmp_path, root=ROOT)

@@ -208,9 +208,6 @@ JA: dict[str, str] = {
     "View": "表示",
     "TASlation blocked {blocked} attempt(s) to reach the internet. Nothing left this computer; you need do nothing.":
         "TASlation はインターネットへの接続の試みを {blocked} 回止めました。このパソコンから外には何も出ていません。何もする必要はありません。",
-    "Offline guard: off.": "オフライン保護: 無効。",
-    "Offline guard: on. Only this computer's port {port} (Ollama) can be reached; {blocked} other connection attempt(s) were blocked.":
-        "オフライン保護: 有効。接続できるのはこのパソコンのポート {port}（Ollama）だけで、他への接続の試み {blocked} 件を遮断しました。",
     "TASlation - translating...": "TASlation - 翻訳中...",
     "This viewer cannot be read behind the reading window; press Esc": "このビューアは読書モードの画面の裏では読み取れません。Esc を押してください",
     "Reading mode translates page by page; the whole-book scan waits until you leave it (Esc).":

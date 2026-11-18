@@ -3,7 +3,7 @@ chosen and whether it still shows the book, the capture area set by hand (the ou
 bound of what is read, the page panel found inside it read of it: `live.LiveViewMixin._find_page`), the viewer's
 keys (`pagekeys.page_keys_for`; Page keys...), the viewer's window shown again when it is chosen minimised
 (`show_minimised`), enlarged as it is chosen (`_enlarge_first`) and put back afterwards, and the offline guard's
-state."""
+warning in the status bar once it has blocked something."""
 
 from __future__ import annotations
 
@@ -117,32 +117,25 @@ class ViewerMixin:
     state it uses is made by `App.__init__`; the other parts are reached through ``self``)."""
 
     # ------------------------------------------------------------------ the offline guard
-    def _guard_numbers(self) -> tuple[str, int] | None:
-        """The offline guard's allowed port(s) and how many attempts it blocked; None when it is off."""
+    def _guard_blocked(self) -> int:
+        """How many connection attempts the offline guard blocked in this session (0 when it is off; its state for a
+        report is in Copy details: `errorlog.guard_line`)."""
         st = netguard.state()
         if st is None or not st.installed:
-            return None
-        return ",".join(str(p) for p in sorted(st.allowed_ports)), len(st.blocked)
+            return 0
+        return len(st.blocked)
 
     def _sync_guard(self) -> None:
         """Once the offline guard has blocked a connection attempt, the status bar says so until the window closes."""
-        numbers = self._guard_numbers()
+        blocked = self._guard_blocked()
         text = ""
-        if numbers is not None and numbers[1]:
+        if blocked:
             text = _("TASlation blocked {blocked} attempt(s) to reach the internet. Nothing left this computer; you need do nothing.").format(
-                blocked=numbers[1])
+                blocked=blocked)
         if self.guard_var.get() != text:
             self.guard_var.set(text)
             if hasattr(self, "status_label"):  # the warning takes room from the status line
                 self.after_idle(self._wrap_status)
-
-    def _guard_line(self) -> str:
-        """The offline guard's state in a line, for Help > About TASlation."""
-        numbers = self._guard_numbers()
-        if numbers is None:
-            return _("Offline guard: off.")
-        return _("Offline guard: on. Only this computer's port {port} (Ollama) can be reached; {blocked} other connection attempt(s) were blocked.").format(
-            port=numbers[0], blocked=numbers[1])
 
     # ------------------------------------------------------------------ windows
     def refresh_windows(self, select: str | None = None) -> None:
