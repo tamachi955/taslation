@@ -82,6 +82,8 @@ from PIL import Image
 
 from . import fingerprint as fp
 from . import linememo
+from . import size_mix
+from .size_mix import SizeMix
 from .pageimages import ErasedRegion, PageImages, packed_mask, region_digest
 from .render.memo import ErasedRegions, ShownPages, changed_pixels, pixels_digest, signature
 from .devices import StageTimes
@@ -2702,6 +2704,7 @@ class Pipeline:
         reading = self._read(rgb, region, region.text_box, view)
         reading = self._settle(rgb, region, region.text_box, reading, view)
         region.source_text = reading.text
+        region.size_mix = self._size_mix(rgb, region, region.text_box, reading, view)
         region.ocr_reading = None
         region.ocr_confidence = min(reading.score, SPLIT_CONFIDENCE) if reading.split else reading.score
         if region.unit < len(result.units):
@@ -2725,8 +2728,10 @@ class Pipeline:
             self._forget_correction(unit, unit.normalize(region.bbox))
         if text == misread:  # back to what the OCR read
             region.source_text, region.ocr_reading = misread, None
+            region.size_mix = region.size_mix.on(misread) if region.size_mix is not None else None
             return True
         region.source_text, region.ocr_reading = text, misread
+        region.size_mix = region.size_mix.on(text) if region.size_mix is not None else None
         region.ocr_confidence, region.ocr_split = 1.0, False  # (the person's reading is no unsure one)
         if region.status in ("ocr-empty", "not-japanese"):
             region.status = "untranslated"
@@ -2764,6 +2769,7 @@ class Pipeline:
             if hit is None:
                 continue
             r.source_text, r.ocr_reading = hit.text, hit.misread
+            r.size_mix = r.size_mix.on(hit.text) if r.size_mix is not None else None
             r.ocr_confidence, r.ocr_split = 1.0, False
             if not keep_status and r.status in ("ocr-empty", "not-japanese"):
                 r.status = "untranslated"
@@ -3312,10 +3318,13 @@ class Pipeline:
                 status = self._verdict(r, reading, pieces, usual, unanimous)
             r.source_text = reading.text
             r.char_size = max((max(c.box[2] - c.box[0], c.box[3] - c.box[1]) for c in reading.chars), default=0.0)
+            boxes = None
             if r.from_model:
                 if not r.glyph and reading.chars:
                     r.glyph = float(reading.size)
                 r.char_boxes, r.char_quads = self._char_boxes(rgb, r, box, reading.chars, view)
+                boxes = r.char_boxes
+            r.size_mix = self._size_mix(rgb, r, box, reading, view, boxes) if status == "untranslated" else None
             r.ocr_split = reading.split
             r.ocr_confidence = min(reading.score, SPLIT_CONFIDENCE) if reading.split else reading.score
             r.status = status
@@ -3404,6 +3413,17 @@ class Pipeline:
         boxes = [(int(math.floor(min(p[0] for p in q))), int(math.floor(min(p[1] for p in q))),
                   int(math.ceil(max(p[0] for p in q))), int(math.ceil(max(p[1] for p in q)))) for q in quads]
         return boxes, quads
+
+    def _size_mix(self, rgb: np.ndarray, r: TextRegion, box: Box, reading: CharspotReading,
+                  view: np.ndarray | None = None, boxes: Sequence[Box] | None = None) -> SizeMix | None:
+        """The part of *r*'s lettering set larger than the rest, as its reading of *box* tells it (`size_mix.measure`
+        on the first reader's characters, their boxes on the page *boxes* when known); None for lettering of one size
+        or a reading too short to tell."""
+        if len(reading.chars) < size_mix.MIN_CHARS or not reading.text:
+            return None
+        if boxes is None or len(boxes) != len(reading.chars):
+            boxes, _quads = self._char_boxes(rgb, r, box, reading.chars, view)
+        return size_mix.measure(size_mix.glyphs_of(reading.chars, boxes), reading.text)
 
     @staticmethod
     def _crop_origin(r: TextRegion, box: Box) -> tuple[int, int]:

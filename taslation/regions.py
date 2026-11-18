@@ -71,6 +71,10 @@ class TextRegion:
     # the part of its mask that its lettering gives up to a neighbour whose room overlaps it, (page box, bool mask in
     # that box), shared out anew each time the page is lettered (`render.rooms.share_rooms`); None = none. Memory only
     ceded: Any = None
+    # the part of its Japanese lettered larger than the rest (`size_mix.SizeMix`: a range of `source_text` and its size
+    # against the rest's), measured as it is read; None = lettered at one size, or not measured (a page from the
+    # cache). Memory only: it indexes the Japanese
+    size_mix: Any = None
 
     @property
     def reused(self) -> bool:
