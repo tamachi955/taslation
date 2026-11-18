@@ -91,6 +91,11 @@ rows' languages.
 * `tools/make_sample_page.py` draws the synthetic test pages in `tests/fixtures/` (no real book is in the repository).
 * `tools/fake_viewer.py` shows those pages in a window of its own, so the whole flow can be tried without a viewer.
 * `tools/page_area.py` prints what the page-area detector finds in a window, for tuning.
+* `tools/room_eval.py` letters the regions of OpenMantra's pages (or of a book's dev snapshots, `--frames`) with
+  canned English and counts, numbers only, the regions whose rooms or lettering run into each other's, fragments of
+  one block of text read as several regions, and gold texts merged into one region or split over several; `--pictures`
+  draws the worst cases and a sample of ordinary regions into a scratch folder, `--compare` the lettering sizes of two
+  runs.
 * `tools/premises_eval.py` measures the effect of the series sheet on the translations (`tools/premises_eval_set.json`); `--long-sheet 200` measures the entries the premises block cuts, block alone against those entries after the bubbles.
 * `tools/hint_eval.py` measures whether PLaMo 3 Translate follows a region's hint for the model, its kind or its room put in its PFML3 ``context`` block, on lines written for the test (in several wordings, ``bare`` being the one the app sends; against the prompt without a hint; seeds 1 to 3; the answers kept in a JSON file to go on from).
 * `tools/make_icon.py` draws the window's icon with Pillow alone.

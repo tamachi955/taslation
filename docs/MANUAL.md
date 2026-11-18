@@ -1154,7 +1154,9 @@ with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change
   Text that runs into busy drawing of the same darkness is missed. With `translate_sfx = false`,
   hand-drawn sound effects are left as drawn. Why no neural-network detector is bundled is explained in `docs/THIRD_PARTY.md`.
 * Bubbles that touch or overlap and form one white area are cut apart where they narrow, or where the outline turns sharply inward from both sides, and each is translated on its own.
+  This also holds when the two texts sit offset from each other, as long as they are set further apart than the lines within each.
   A single bubble with two sets of columns stays one region (`split_joined_bubbles`, which can also be changed in the book's settings).
+  Where the boxes of two regions overlap, each translation is set in the part nearest its own Japanese, so no two translations run over each other; pages from the cache get this as they are shown.
   Pages cached by an earlier version hold only one translation for a pair of touching bubbles, so translate them again with "Translate again" (not using the cache).
 * OCR accuracy hardly depends on the size of the letters (clean vertical text reads as well at 12 px as at 28 px,
   and enlarging the crop changes nothing). What lowers the accuracy is text on screentone, decorative typefaces, and regions that are not text at all; these are problems of detection.
