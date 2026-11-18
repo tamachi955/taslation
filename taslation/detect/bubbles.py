@@ -454,10 +454,13 @@ def _notch_owner(inside: np.ndarray, depth: np.ndarray, dark: np.ndarray, blocks
     """Which bubble every pixel of the area belongs to (0 or 1, -1 outside it) when the area is two bubbles that
     overlap, else None. Where two bubbles overlap and the outline between them is left out, the outline turns
     sharply inward on both sides of the junction: two notches, each deeper than *notch* times the area's depth
-    (the largest distance from the outline) and much deeper than any other bend (every other one at most
-    *dominance* times the shallower notch: the many bends of a cloud or of a spiky shout do not count). The cut is
-    the straight line between the two notches: it runs across the white, crosses no lettering and leaves blocks on
-    both sides (the base of a tail leaves none on its side)."""
+    (the largest distance from the outline). When they are much deeper than any other bend (every other one at
+    most *dominance* times the shallower notch), the cut is the straight line between them, when it runs across
+    the white, crosses no lettering and leaves blocks on both sides (the base of a tail leaves none on its side).
+    Else (a tail's base as deep as the junction's notches, or two bubbles fused so wide that their texts sit offset
+    and the line clips one of them) the cut runs between the texts (`_between_texts`) from one deep notch to
+    another; an outline with more than `NOTCH_BENDS` deep bends (a cloud, a spiky shout) is never cut there, as
+    its bends say nothing about bubbles."""
     R = float(depth.max())
     if R <= 0:
         return None
@@ -477,14 +480,32 @@ def _notch_owner(inside: np.ndarray, depth: np.ndarray, dark: np.ndarray, blocks
                     for d in np.asarray(defects).reshape(-1, 4)), reverse=True)
     if len(found) < 2 or found[1][0] < notch * R:
         return None
-    if len(found) > 2 and found[2][0] > dominance * found[1][0]:
-        return None  # more bends as deep as the notches: a cloud, a spiky outline, a tail beside the junction
-    (_da, pa), (_db, pb) = found[0], found[1]
+    if len(blocks) >= 2 and (len(found) == 2 or found[2][0] <= dominance * found[1][0]):
+        owner = _straight_cut(inside, dark, blocks, labels, found[0][1], found[1][1])
+        if owner is not None:
+            return owner
+    deep = [p for d, p in found if d >= notch * R]
+    if len(deep) > NOTCH_BENDS:
+        return None  # a cloud, a spiky outline
+    for a in range(len(deep)):
+        for b in range(a + 1, len(deep)):
+            owner = _between_texts(inside, dark, blocks, deep[a], deep[b], R)
+            if owner is not None:
+                return owner
+    return None
+
+
+def _straight_cut(inside: np.ndarray, dark: np.ndarray, blocks: list[list[int]], labels: np.ndarray,
+                  pa: tuple[int, int], pb: tuple[int, int]) -> np.ndarray | None:
+    """`_notch_owner`'s straight cut from notch *pa* to notch *pb*, or None when the line leaves the white, runs
+    through lettering, or leaves blocks on one side only."""
     n = int(np.hypot(pa[0] - pb[0], pa[1] - pb[1])) + 1
     xs = np.round(np.linspace(pa[0], pb[0], n)).astype(int)
     ys = np.round(np.linspace(pa[1], pb[1], n)).astype(int)
-    if inside[ys, xs].mean() < 0.9 or int((dark[ys, xs] > 0).sum()) > 2:
-        return None  # the line leaves the white, or runs through the lettering
+    if inside[ys, xs].mean() < 0.9:
+        return None  # the line leaves the white
+    if int((dark[ys, xs] > 0).sum()) > 2:
+        return None  # the line runs through lettering
     cut = inside.astype(np.uint8)
     cv2.line(cut, pa, pb, 0, 3)
     _n, sides = cv2.connectedComponents(cut, connectivity=4)
@@ -500,6 +521,120 @@ def _notch_owner(inside: np.ndarray, depth: np.ndarray, dark: np.ndarray, blocks
     dist = np.stack([cv2.distanceTransform((sides != side).astype(np.uint8), cv2.DIST_L2, 5)
                      for side in sorted(set(owners))])
     return np.where(inside, np.argmin(dist, axis=0), -1)
+
+
+NOTCH_BENDS = 4  # deep bends of joined bubbles' outline: the junction's two notches and the two at a tail's base
+NOTCH_REACH = 0.5  # of the area's depth: a cut between two texts passes this near both notches of the junction
+LINE_ACROSS = 1 / 3  # a line of lettering with this share of its ink on the far side of the junction crosses it
+WAIST = 0.9  # a junction is at most this share of each bubble's reach along it
+
+
+def _between_texts(inside: np.ndarray, dark: np.ndarray, blocks: list[list[int]], pa: tuple[int, int],
+                   pb: tuple[int, int], depth: float) -> np.ndarray | None:
+    """Which bubble every pixel belongs to (0 or 1, -1 outside the area) when *pa* and *pb* are the two notches of
+    a junction between two bubbles whose texts the straight line between the notches does not keep apart: two
+    bubbles fused wide whose texts are offset (one lobe's text above and beside the other's, the line clipping a
+    corner of one), two texts set so close that they chain up into one block of lettering.
+
+    The texts fall on either side of the line: a block of lettering (`_blocks`) on the side that holds most of its
+    ink; a single block line by line (its columns or rows, `textblocks.letter_lines`), and when a line has
+    `LINE_ACROSS` of its ink or more on the far side, it is one text that runs across the junction and nothing is
+    cut. Each side must hold lettering (the base of a tail holds none). Every pixel then goes to the side whose
+    lettering is nearer, so that the cut runs through the white between the texts. It must be a junction: it passes
+    within `NOTCH_REACH` of the area's *depth* of both notches, and the notches are nearer each other than `WAIST`
+    times each part's reach along the line between them (one bubble's two halves reach no further along the cut
+    than the cut itself). None when any of this fails."""
+    from .textblocks import letter_lines  # (textblocks imports this module)
+
+    n, lab, stats, cents = cv2.connectedComponentsWithStats(dark, connectivity=8, ltype=cv2.CV_32S)
+    if n <= 3:
+        return None
+    stats, cents = stats[1:], cents[1:]
+    ink = stats[:, cv2.CC_STAT_AREA].astype(np.float64)
+    glyph = max(8.0, float(np.percentile(np.maximum(stats[:, 2], stats[:, 3]), 90)))
+    (ax, ay), (bx, by) = pa, pb
+    side = ((bx - ax) * (cents[:, 1] - ay) - (by - ay) * (cents[:, 0] - ax)) > 0  # per piece: which side of the line
+
+    def lean(members: list[int]) -> float:  # the share of their ink on the line's positive side
+        return float(ink[members][side[members]].sum()) / max(1.0, float(ink[members].sum()))
+
+    groups: list[list[int]] = [[], []]
+    if len(blocks) >= 2:
+        for block in blocks:
+            groups[0 if lean(block) >= 0.5 else 1].extend(block)
+    elif blocks:
+        block = blocks[0]
+        boxes = [(int(stats[i, 0]), int(stats[i, 1]), int(stats[i, 0] + stats[i, 2]), int(stats[i, 1] + stats[i, 3]))
+                 for i in block]
+        lines, _vertical = letter_lines(boxes, glyph)
+        if not lines:
+            return None
+        spans: list[list[tuple[int, int, int, int]]] = [[], []]
+        for line in lines:
+            members = [block[i] for i in line]
+            share = lean(members)
+            if LINE_ACROSS <= share <= 1.0 - LINE_ACROSS:
+                return None  # a line of lettering runs across the junction: one text
+            groups[0 if share > 0.5 else 1].extend(members)
+            spans[0 if share > 0.5 else 1].append((min(boxes[i][0] for i in line), min(boxes[i][1] for i in line),
+                                                   max(boxes[i][2] for i in line), max(boxes[i][3] for i in line)))
+        if not _apart(spans, glyph):
+            return None  # the lines on the two sides are set as one text's (a caption's step): one text
+    if not groups[0] or not groups[1] or min(float(ink[g].sum()) for g in groups) < 0.25 * glyph * glyph:
+        return None  # lettering on one side only (a tail's base), or a speck on the other
+    near = []
+    for group in groups:
+        own = np.isin(lab, np.asarray(group) + 1)
+        near.append(cv2.distanceTransform((~own).astype(np.uint8), cv2.DIST_L2, 5))
+    owner = np.where(inside, (near[1] < near[0]).astype(np.int64), -1)
+    edge = np.zeros(inside.shape, bool)
+    edge[:, 1:] |= (owner[:, 1:] != owner[:, :-1]) & inside[:, 1:] & inside[:, :-1]
+    edge[1:, :] |= (owner[1:, :] != owner[:-1, :]) & inside[1:, :] & inside[:-1, :]
+    if not edge.any():
+        return None
+    to_edge = cv2.distanceTransform((~edge).astype(np.uint8), cv2.DIST_L2, 5)
+    if max(float(to_edge[ay, ax]), float(to_edge[by, bx])) > NOTCH_REACH * depth:
+        return None  # the cut between the texts leaves the junction: it would cut across a bubble
+    if _waist_share(owner, pa, pb) > WAIST:
+        return None  # no narrowing: one bubble's two halves
+    return owner
+
+
+LINES_APART = 2.0  # two texts' lines lie this many times further apart than the lines within each text, at least
+
+
+def _apart(spans: list[list[tuple[int, int, int, int]]], glyph: float) -> bool:
+    """Whether the lines of lettering *spans* (two groups of line boxes) are set as two texts: the nearest two lines
+    of different groups at least `LINES_APART` times as far apart as neighbouring lines within a group are (and half
+    a glyph at least), so that two columns set at a text's own spacing on either side of a junction are one text."""
+
+    def gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+        return float(max(0, max(a[0], b[0]) - min(a[2], b[2]), max(a[1], b[1]) - min(a[3], b[3])))
+
+    if not spans[0] or not spans[1]:
+        return False
+    between = min(gap(a, b) for a in spans[0] for b in spans[1])
+    within = [min(gap(a, b) for b in group if b is not a) for group in spans if len(group) >= 2 for a in group]
+    spacing = float(np.median(within)) if within else 0.0
+    return between >= max(LINES_APART * spacing, 0.5 * glyph)
+
+
+def _waist_share(owner: np.ndarray, pa: tuple[int, int], pb: tuple[int, int]) -> float:
+    """The length of the junction from *pa* to *pb* over the shorter reach of the two parts of *owner* (0 and 1)
+    along it (the extent of each part's pixels on the line through the notches)."""
+    (ax, ay), (bx, by) = pa, pb
+    length = float(np.hypot(bx - ax, by - ay))
+    if length <= 0:
+        return 1.0
+    ux, uy = (bx - ax) / length, (by - ay) / length
+    reach = []
+    for li in (0, 1):
+        ys, xs = np.nonzero(owner == li)
+        if xs.size == 0:
+            return 1.0
+        along = xs * ux + ys * uy
+        reach.append(float(along.max() - along.min()) + 1.0)
+    return length / min(reach)
 
 
 def _solidity(part: np.ndarray) -> float:
@@ -522,7 +657,9 @@ def split_lobes(filled: np.ndarray, inner: np.ndarray, dark: np.ndarray, neck: f
     as wide between the blocks as around them and the outline bends outward all round; between two bubbles the
     white narrows to a neck (see _neck_owner) or, where they overlap, the outline turns sharply inward on both
     sides of the junction (see _notch_owner). A block is a chain of dark pieces within *link* glyphs of one
-    another holding at least a glyph's worth of ink; specks go with the part they fall in. A part is cut again,
+    another holding at least a glyph's worth of ink; specks go with the part they fall in. Two texts set close
+    enough to chain into one block are told apart at the notches by their lines (_between_texts): two groups of
+    lines, one on each side of the junction, set further apart than the lines within each. A part is cut again,
     up to *rounds* times in all (three bubbles in a row). Only bubbles are cut apart: when more than *drawing* of
     the area's ink lies in strokes far longer than a glyph, or a part would not be convex (its area under *convex*
     times its convex hull's, where a bubble's is nearly all of it), the area is a stretch of page or of the drawing,
@@ -534,14 +671,14 @@ def split_lobes(filled: np.ndarray, inner: np.ndarray, dark: np.ndarray, neck: f
     in the area's box and the three arrays cut to it; the erase mask keeps its erosion along the outline, none
     along the cut), or None when the area is one bubble."""
     blocks, labels, stats, glyph = _blocks(dark, link)
-    if len(blocks) < 2:
+    if not blocks:
         return None
     ink = stats[:, cv2.CC_STAT_AREA].astype(np.float64)
     if ink[np.maximum(stats[:, 2], stats[:, 3]) > 2.5 * glyph].sum() > drawing * ink.sum():
         return None  # strokes far longer than a glyph: a drawing on a stretch of white page, not bubbles
     inside = filled > 0
     depth = cv2.distanceTransform(np.pad(inside.astype(np.uint8), 1), cv2.DIST_L2, 5)[1:-1, 1:-1]  # box edge: outline
-    owner = _neck_owner(inside, depth, blocks, stats, neck)
+    owner = _neck_owner(inside, depth, blocks, stats, neck) if len(blocks) >= 2 else None
     if owner is None:
         owner = _notch_owner(inside, depth, dark, blocks, labels, notch)
     if owner is None:
