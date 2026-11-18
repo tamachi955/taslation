@@ -3,7 +3,7 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
-## 0.2.0 - 2026-11-18
+## 0.2.0 - 2026-11-19
 
 Reading
 
@@ -18,6 +18,10 @@ Reading
 * The bubble under the pointer shows its other side, its Japanese can be selected and copied, and F3 and Shift+F3 go
   from bubble to bubble.
 * A book's reading direction is set in Book settings.
+* In the Translator role too, resting the pointer on a translated bubble shows its original, in a panel beside it
+  or in the bubble itself; a click still selects the region. F2, Shift+F2, Ctrl+F2, F3 and Shift+F3 work there too.
+* A page key is no longer lost when the viewer is slow for a moment: the viewer keeps the focus until it has taken
+  the key. On a desktop viewer TASlation does not know yet, every press turns one page.
 
 Translating
 
@@ -35,6 +39,12 @@ Lettering
   between words, and Hindi and Bengali are shaped with HarfBuzz.
 * Outlined lettering on the art is erased with its ring, and a region moved or resized is erased on its paper alone.
 * The lettering size goes up to 200 %, and the panel's text size is a setting.
+* Translations of bubbles that touch or overlap are not lettered over each other: each keeps the part of the shared
+  space nearest to its own text. Pages translated before look right when shown again.
+* Two bubbles joined into one shape are read and translated as two when their texts sit apart, and a paragraph on
+  the page that came apart in pieces is read as one.
+* A rectangle you draw on the drawing, or a region you move or resize there, is no longer wiped as a flat box: only
+  its lettering is erased and the drawing under it is filled in.
 
 Speed and memory
 
@@ -53,6 +63,8 @@ Saved files
 Other
 
 * The window can be dark, following Windows' app mode.
+* Text typed through an input method (Japanese, Chinese, Korean) shows in the box while it is being composed.
+* Help → "About TASlation" shows the version of the program files that run.
 * The translation model is pinned to its publisher's revision of November 9, 2026.
 
 ## 0.1.0 - 2026-11-15
