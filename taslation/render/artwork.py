@@ -4,7 +4,9 @@ Paint cannot do this: a bubble has paper to fill, lettering on hatching, tone or
 in a ring round its box, is not one flat colour (`on_art`) goes here: `art_mask` finds its lettering, the dark pieces
 ringed by white with their rings (`ring_comp`, on the negative too for light lettering), wherever the ring lies (past
 the box too, `with_ring`) and a little more (`GROW`), and LaMa (`lama`) fills just that. Everything else stays with
-`erase_region`, bubbles on their paper; so does a region whose box holds too little of such lettering to be sure.
+`erase_region`, bubbles on their paper; so does a region whose box holds too little of such lettering to be sure. A
+layout model's region that took the shape of a classical region is judged as that region was without the model, on its
+lettering box (`as_judged`); only the hole the model fills takes in the model's text box too (`box_of`).
 
 A model "bubble" that the classical detectors could not close is judged here too: with its plain box as the mask (tier
 3) always, with a white area (tier 2) when its ground is not flat; one that has paper between its strokes after all
@@ -35,6 +37,7 @@ of the session (a fallback, not the rule's choice), one on the CPU leaves the re
 
 from __future__ import annotations
 
+import copy
 import gc
 import hashlib
 import logging
@@ -184,9 +187,25 @@ def on_art(image: np.ndarray, region: TextRegion, flat: float = FLAT_GROUND) -> 
     return _ring_not_flat(image, region, flat)
 
 
+def as_judged(region: TextRegion) -> TextRegion:
+    """*region* as its ground is judged (`on_art`, the lettering `plain_ground` is judged round): a layout model's
+    region that took its shape from a classical region (tier 0, `adopted`) as that region was judged without the model,
+    on its own lettering box (the classical region's, as far as it lies in it); any other as it is. The model's text box
+    round lettering on white paper often reaches the bubble's outline, whose ring is never flat, and the lettering
+    followed in it reaches the outline's band: such lettering went to the inpainting for the outline alone (on
+    OpenMantra's 214 pages with both page models, 593 regions on paper, 68 with the layout model off, 69 since), where
+    the paper fill takes it as before. Only the hole the inpainting fills takes in the model's text box as well
+    (`box_of`)."""
+    if region.from_model and region.adopted is not None and region.letter_box is not None:
+        own = copy.copy(region)
+        own.from_model = False
+        return own
+    return region
+
+
 def _ring_not_flat(image: np.ndarray, region: TextRegion, flat: float) -> bool:
-    """Whether the ground in a ring round *region*'s lettering box is not one flat colour (`on_art`)."""
-    x0, y0, x1, y1 = box_of(image, region)
+    """Whether the ground in a ring round *region*'s lettering box (`as_judged`) is not one flat colour (`on_art`)."""
+    x0, y0, x1, y1 = box_of(image, as_judged(region))
     if x1 - x0 < 4 or y1 - y0 < 4:
         return False
     h, w = image.shape[:2]
@@ -543,26 +562,31 @@ class ArtEraser:
         paper colour is what its lettering is drawn against. What the model filled is kept on the region (memory only)
         and used again while the part of the page it saw is the same (a page lettered again, a preview)."""
         app = lambda: self.fallback(image, region, mode, white_threshold, dark_threshold, dark)  # noqa: E731
+        judged = as_judged(region)
         if self.failed or not on_art(image, region):
             self.counts["plain"] += 1
             if not self.failed and FLAT_RINGS and region.kind in ART_KINDS:
-                full = art_mask(image, region)  # outlined lettering on a flat ground: its ring painted that ground
+                full = art_mask(image, judged)  # outlined lettering on a flat ground: its ring painted that ground
                 if full is not None and plain_ground(image, full):
                     fill_ground(image, full)
             return app()
         if on_paper(image, region):
             self.counts["ground"] += 1
             return app()
-        full = art_mask(image, region)
+        full = art_mask(image, judged)
         if full is None:
             self.counts["weak"] += 1
             return app()
-        x0, y0, x1, y1 = box_of(image, region)
         if plain_ground(image, full):
             self.counts["ground"] += 1
             if GROUND_FILL:
                 fill_ground(image, full)  # (strokes, ring and all; the paper fill takes what is left)
             return app()
+        if judged is not region:  # the hole takes in the model's text box too
+            wider = art_mask(image, region)
+            if wider is not None:
+                full = full | wider
+        x0, y0, x1, y1 = box_of(image, region)
         wx0, wy0, wx1, wy1 = window(image.shape, x0, y0, y1 - y0, x1 - x0)
         part, hole = image[wy0:wy1, wx0:wx1], full[wy0:wy1, wx0:wx1]
         key = hashlib.sha1(np.ascontiguousarray(part).tobytes() + np.packbits(hole).tobytes()).digest()

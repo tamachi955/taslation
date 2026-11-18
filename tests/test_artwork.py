@@ -634,3 +634,68 @@ def test_a_model_bubble_with_paper_under_its_lettering_goes_to_the_paper_fill(tm
     assert calls and eraser.counts["ground"] == 1 and eraser._model.runs == 0
     assert not artwork.on_paper(_unclosed_bubble(drawn()), r)
     assert not artwork.on_paper(paper, region("bubble", (120, 100, 180, 260), tier=0, from_model=True))
+
+
+def _in_a_bubble_on_a_tone():
+    """A white bubble with a black outline on a tone, outlined lettering inside it; the lettering box (125, 125, 175,
+    275) round it, the bubble's inside (63, 63, 297, 397)."""
+    page = toned()
+    cv2.rectangle(page, (60, 60), (300, 400), (255, 255, 255), -1)
+    cv2.rectangle(page, (60, 60), (300, 400), (0, 0, 0), 3)
+    gray = np.ascontiguousarray(page[100:300, 100:200, 0])
+    ringed_glyphs(gray)
+    page[100:300, 100:200] = np.dstack([gray] * 3)
+    return page
+
+
+def model_text(box, letter_box, adopted=True):
+    """A layout model's text region with the text box *box*, shaped (tier 0) by a classical region round *letter_box*
+    (or by none)."""
+    own = region("text-on-page", letter_box) if adopted else None
+    return region("text-on-page", box, from_model=True, tier=0, letter_box=letter_box, adopted=own)
+
+
+def test_a_model_region_shaped_by_a_classical_one_is_judged_on_that_one_s_lettering_box(tmp_path):
+    """Lettering on a bubble's white paper, whose model text box reaches the bubble's outline: the ring round that box
+    is not flat, the one round the classical region's lettering box is, and the paper fill takes it as it did without
+    the model; the hole would still take in the model's box."""
+    page = _in_a_bubble_on_a_tone()
+    r = model_text((64, 64, 296, 396), (125, 125, 175, 275))
+    judged = artwork.as_judged(r)
+    assert artwork.box_of(page, judged) == (125, 125, 175, 275) and artwork.box_of(page, r) == (64, 64, 296, 396)
+    assert r.from_model and not on_art(page, r)
+    assert on_art(page, model_text((64, 64, 296, 396), (125, 125, 175, 275), adopted=False))  # judged on the union
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    eraser.erase(page, r)
+    assert calls and eraser._model.runs == 0 and not eraser.counts["art"]
+
+
+def test_a_model_region_shaped_by_a_classical_one_takes_the_paper_fill_where_its_own_lettering_lies_on_paper(tmp_path):
+    """Its own ring reaches a small bubble's outline, so it is on the art as it was without the model; the ground right
+    round its own lettering's hole is the bubble's paper, and that hole alone is painted. The lettering followed in the
+    model's larger text box took the small outline for a stroke ringed by white."""
+    page = _in_a_bubble_on_a_tone()
+    cv2.rectangle(page, (114, 114), (186, 286), (0, 0, 0), 2)  # a small bubble's outline, 10 px from the lettering
+    r = model_text((64, 64, 296, 396), (125, 125, 175, 275))
+    hole = art_mask(page, artwork.as_judged(r))
+    assert on_art(page, r) and artwork.plain_ground(page, hole) and not hole[200, 114]
+    assert art_mask(page, r)[200, 114]
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    eraser.erase(page, r)
+    assert calls and eraser._model.runs == 0 and eraser.counts["ground"] == 1
+    assert (page[200, 114] == 0).all() and (page[150, 140] == 255).all()  # the outline stays, a stroke is painted
+
+
+def test_a_model_region_shaped_by_a_classical_one_on_the_art_still_goes_to_the_model(tmp_path):
+    page = lettered()
+    r = model_text((90, 90, 210, 310), (100, 100, 200, 300))
+    assert on_art(page, r)
+    calls, app = fallback_calls()
+    eraser = ArtEraser(tmp_path, "auto", app)
+    eraser._model = FakeModel()
+    eraser.erase(page, r)
+    assert not calls and eraser.counts["art"] == 1

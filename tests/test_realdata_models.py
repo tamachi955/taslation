@@ -250,7 +250,7 @@ def test_small_white_bubbles_lose_all_their_lettering(read_volume):
             if (ring >= 225).mean() < 0.6:
                 continue  # not a white bubble
             if artwork.on_art(rgb, r) and not artwork.on_paper(rgb, r):
-                hole = artwork.art_mask(rgb, r)
+                hole = artwork.art_mask(rgb, artwork.as_judged(r))  # (judged as the eraser judges it)
                 if hole is None or not artwork.plain_ground(rgb, hole, (x0, y0, x1, y1)):
                     continue  # lettering on the drawing, the model's: the drawing stays in its box
             out, _q = _erased(p, rgb, r)
