@@ -46,7 +46,10 @@ inspected and only what is needed is extracted; the provenance goes to `SOURCE.m
 never reads it. `python tools/openmantra_eval.py` prints numbers only: detection precision, recall and F1 at IoU 0.5,
 the OCR character error rate, chrF of the default model's translation against the professional English, and the share
 of lines the review flags (`--pages 4` for a quick run, `--no-translate` without Ollama); results go to the dataset
-folder's `results/`. The measurements so far are in `docs/OFFLINE_VERIFICATION.md`. Work that uses the dataset cites
+folder's `results/`. It detects with the app's default `detect_model`, "auto" since 0.2.0: on a computer with a CUDA
+GPU and both page models installed its numbers are the layout model's, elsewhere the classical detectors' as before;
+`--detect-model off` gives the classical detectors' on any computer, the default of earlier versions. The measurements so far are in
+`docs/OFFLINE_VERIFICATION.md`. Work that uses the dataset cites
 the paper.
 
 ### Comparing two settings fairly
@@ -146,7 +149,9 @@ rows' languages.
   held, and hands it a press as Windows would. Over the book the window gives the stand-in the foreground from its
   own window, as the mode does; the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
-  changes. OpenMantra pages from the datasets folder, or `--synthetic`.
+  changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
+  a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
+  its times are not comparable with runs of earlier versions there.
 
 ## The README and the manual
 
