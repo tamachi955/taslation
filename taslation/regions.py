@@ -68,6 +68,9 @@ class TextRegion:
     # what the OCR read, once a person corrected the reading in the region editor (`Pipeline.correct_reading`; ""
     # when it read nothing): `source_text` is then the person's. None: the OCR's reading stands. Memory only
     ocr_reading: str | None = None
+    # the part of its mask that its lettering gives up to a neighbour whose room overlaps it, (page box, bool mask in
+    # that box), shared out anew each time the page is lettered (`render.rooms.share_rooms`); None = none. Memory only
+    ceded: Any = None
 
     @property
     def reused(self) -> bool:

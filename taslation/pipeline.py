@@ -120,6 +120,7 @@ from .render import (FontSpec, Lettering, balance_marks, erase_region, find_font
 from .annotations import LetteringStyle, RegionStyle, ink_of
 from .render import covers, drawable, strip_marks
 from .render.erase import LINK_LEVELS
+from .render.rooms import in_own_room, room_mask, shifted, share_rooms
 from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat, ink_rgb, letter_text, page_caps
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
@@ -625,6 +626,8 @@ class PageFill:
         self.emit("page", {"image": image})
 
     def _cap_shown(self) -> None:
+        h, w = self.rgb.shape[:2]
+        self.pipeline.share_rooms(self.regions, (w, h))  # (the same parts as before, the very objects, while unchanged)
         self.pipeline.cap_sizes([self.regions[i] for i in self.shown], list(self.shown.values()),
                                 measured=self._measured if DRAFT_SIZES_KEPT else None)
 
@@ -776,6 +779,9 @@ class PageDraft:
                 backgrounds.append(erased.background)
             else:
                 backgrounds.append(p._erase(self.work, r, quick=True))
+        keys = {key for key, _r in placed}  # (the run's regions not lettered here keep their part of a shared room)
+        p.share_rooms([r for _key, r in placed], (self.rgb.shape[1], self.rgb.shape[0]),
+                      [r for n, r in enumerate(self.regions) if n not in keys])
         p.cap_sizes([r for _key, r in placed], [r.translated_text for _key, r in placed])
         pil = Image.fromarray(self.work)
         for (key, r), bg in zip(new, backgrounds):
@@ -1353,6 +1359,7 @@ class Pipeline:
         todo = [r for r in placed if erases(r)]  # (an "erase only" region: erased, nothing set)
         if not todo:
             return None
+        self.share_rooms(placed, (rgb.shape[1], rgb.shape[0]), [r for r in live if all(r is not q for q in placed)])
         out = rgb.copy()
         found = store.find([self.erase_key(rgb, r) for r in todo], rgb.shape) if store is not None else {}
         backgrounds = []
@@ -1918,6 +1925,7 @@ class Pipeline:
                         self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
                     self._take_corrections(unit, unit_regions)
                     self._order_read(rgb, unit.box, unit_regions)
+                    self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (each translation's room: its part)
                     timer.lap("ocr")
                     if translate:
                         beside = self._read_beside(rgb, plans, n, fill, cancel)
@@ -2109,11 +2117,12 @@ class Pipeline:
             stands_for: dict[int, list[Box]] = {}  # a region's id -> the boxes of the regions it repeated
             for gone in left_out or []:
                 stands_for.setdefault(id(gone.repeats), []).append(gone.bbox)
+            self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (the room hint: its own part of a room)
             scanned = [ScannedRegion(bbox=r.bbox, text_box=r.letter_box or r.text_box, poly=mask_polygon(r.mask),
                                      source_text=r.source_text, status=r.status, order=r.order,
                                      kind=r.kind, ocr_confidence=r.ocr_confidence, pieces=r.pieces,
                                      speaker=r.speaker, tag=r.tag, continues=r.continues, remark=r.remark,
-                                     room=translation_room(r.mask, r.letter_box or r.text_box, r.source_text,
+                                     room=translation_room(room_mask(r), r.letter_box or r.text_box, r.source_text,
                                                            self.settings, r.kind, r.x0, r.y0, self.suggested_font,
                                                            direction_of(r))
                                      if r.status == "untranslated" else 0,
@@ -3530,7 +3539,8 @@ class Pipeline:
         # else while the model writes (on the drafts' thread, before the drafts) or once it has answered - the same
         # rooms on the regions either way
         later = not uses_room(self.translator)
-        sizing = [(r, (r.mask.copy() if later else r.mask, r.letter_box or r.text_box, r.source_text, self.settings,
+        sizing = [(r, (room_mask(r).copy() if later else room_mask(r), r.letter_box or r.text_box, r.source_text,
+                       self.settings,
                        r.kind, r.x0, r.y0, self.suggested_font, direction_of(r))) for r in todo]
         measured = [False]
 
@@ -3878,6 +3888,7 @@ class Pipeline:
         local.text_box = _shift(region.text_box, -x0, -y0)
         local.letter_box = _shift(region.letter_box, -x0, -y0) if region.letter_box is not None else None
         local.panel = _shift(region.panel, -x0, -y0) if region.panel is not None else None
+        local.ceded = shifted(region.ceded, -x0, -y0)
         around = Image.fromarray(out[y0:y1, x0:x1].copy())
         done = self._set_text(around, local, text, bg, region.style if style is None else style)
         out[y0:y1, x0:x1] = np.asarray(around)
@@ -3922,7 +3933,7 @@ class Pipeline:
         lettering, flags = self.region_lettering(text, region.tag, style)
         text = drawable(lettering.path, text)
         large = self._display_size()
-        region = _art_room(region, image.size if image is not None else None, large)
+        region = in_own_room(_art_room(region, image.size if image is not None else None, large))
         fmt = None if style is None or style.formats_nothing else TextFormat(style.align, style.valign, style.size,
                                                                            style.line_spacing, style.condense)
         if style is not None and style.slant is not None and style.slant != region.angle:
@@ -4005,10 +4016,27 @@ class Pipeline:
         held.extend((sheet, style))
         return large, tuple(sorted(vars(self.settings).items())), id(sheet), id(style), self.suggested_font
 
+    def share_rooms(self, regions: Sequence[TextRegion], page: tuple[int, int] | None,
+                    among: Sequence[TextRegion] = ()) -> int:
+        """The rooms of *regions*, regions of one page (*page*: its width and height), shared out where they overlap
+        (`render.rooms.share_rooms`: each region's `TextRegion.ceded`), each room as `_set_text` letters in it (grown
+        for display lettering on the art, `_art_room`), so that no two translations of the page are set over each
+        other. *among*: more regions of the page whose text is lettered, or stays, beside them (not changed here).
+        Returns the number of regions that gave part of their room up."""
+        large = self._display_size()
+        rooms: dict[int, TextRegion] = {}
+        for r in (*regions, *among):
+            grown = _art_room(r, page, large)
+            if grown is not r:
+                rooms[id(r)] = grown
+        return share_rooms(regions, rooms, among)
+
     def _render(self, out: np.ndarray, regions: list[TextRegion], record: bool = True, recap: bool = True,
-                quick: bool = False, cancel: threading.Event | None = None) -> None:
+                quick: bool = False, cancel: threading.Event | None = None,
+                among: Sequence[TextRegion] = ()) -> None:
         """Erase every translated region of *regions* on the page *out* and letter its translation, in place (a region
-        made "erase only", `ERASED`, is erased and nothing set); with
+        made "erase only", `ERASED`, is erased and nothing set), each in its own part of a room it shares with another
+        (`share_rooms`; *among*: regions of the page left as they are, whose rooms count all the same); with
         *record*, each region keeps the size it was set at and what its lettering could not do as formatted, and with
         *recap* too the sizes of the page are kept alike anew (`cap_sizes`). A region's erase comes from the erased
         pages of a run (`erased_ahead`) or this session's erases (`erased_regions`) when one of them holds it (its
@@ -4017,6 +4045,7 @@ class Pipeline:
         region's erase or lettering: *out* is then half done (the caller drops it), and each erase kept is whole."""
         s = self.settings
         backgrounds: dict[int, tuple[int, int, int]] = {}
+        self.share_rooms(regions, (out.shape[1], out.shape[0]), among)
         todo = [i for i, r in enumerate(regions) if erases(r)]
         keys = [self.erase_key(out, regions[i]) for i in todo]
         ahead = self._erased_for(out, [regions[i] for i in todo], keys)
@@ -4145,9 +4174,11 @@ class Pipeline:
 
     def page_without(self, result: PageResult, region: TextRegion) -> np.ndarray:
         """*result*'s page lettered as `rerender` letters it, but for *region*, which is left as it was captured:
-        what the region editor's preview letters the region on (nothing on the regions is changed)."""
+        what the region editor's preview letters the region on (nothing on the regions is changed but the parts of
+        their rooms they give up to each other, `share_rooms`: *region* keeps its part, as on the page)."""
         out = np.asarray(result.original).copy()
-        self._render(out, [r for r in result.regions if r is not region], record=False)
+        self.share_rooms(result.regions, (out.shape[1], out.shape[0]))
+        self._render(out, [r for r in result.regions if r is not region], record=False, among=[region])
         return out
 
     def preview_region(self, page: np.ndarray, region: TextRegion, text: str,

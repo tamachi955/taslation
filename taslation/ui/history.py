@@ -37,7 +37,9 @@ NBox = tuple[float, float, float, float]
 SAME = 1e-3  # two normalised boxes this close are the same box (a saved file keeps four decimals)
 NEAR = 0.5  # cached bubbles overlapping this much belong to the same region
 OWN_PAGE = 6  # bits: the annotations a change writes are those of the page this near (`BookAnnotations.page`)
-KEPT_AS_IS = ("order", "order_hint")  # a region's place in the reading order is the page's, not the change's
+# a region's place in the reading order is the page's, not the change's; the part of its room it gives up to a
+# neighbour (`TextRegion.ceded`) is shared out anew each time the page is lettered
+KEPT_AS_IS = ("order", "order_hint", "ceded")
 READING = ("source_text", "ocr_reading", "ocr_confidence", "ocr_split")  # a reading the person corrected stays
 
 
