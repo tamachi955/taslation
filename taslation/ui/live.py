@@ -408,6 +408,7 @@ class Operation:
     looked_at: float = 0.0  # "change" with frames counted: when the frame was last captured
     redo: bool = False  # "settle": the page started early was dropped; started again once the worker is free
     over_job: bool = False  # "settle": begun while a page job runs, on a frame of another page (`_look_over_job`)
+    keys: tuple[str, ...] = ()  # "change": the posted keys awaited, the first one's own wait for all (`_held_keys`)
 
 
 @dataclass
@@ -2562,13 +2563,22 @@ class LiveViewMixin(BlackViewerMixin):
         frame count when *reference* was captured, at each new frame as it comes, `_counted_change`), "settle" (it has
         changed: *last* is the frame seen, *image* its capture; *operation*: after TASlation's own operation;
         *over_job*: a frame of another page than the running job's, `_look_over_job`) or, *fast*, "recheck" (a page
-        just taken at once: `_take_at_once`)."""
+        just taken at once: `_take_at_once`). A posted key that comes while the one before is still awaited with
+        nothing changed goes with it (`_held_keys`)."""
         f = self._follower()
+        held = self._held_keys(f.op, hwnd) if phase == "change" and key and not retried else None
         self._end_follow()
         if phase == "change":
             f.retake = None  # an operation: the page a sharper frame waited for is not the one to come
         op = Operation(hwnd, reference, key, retried or not key, time.monotonic(), phase, last, last_detail,
                        operation=phase == "change" or operation, over_job=over_job)
+        if key and phase == "change":
+            op.keys = (key,)
+        if held is not None:  # (its wait goes on from the first key, the frames before it the same)
+            op.keys, op.started, op.reference, op.prev = (*held.keys, key), held.started, held.reference, held.prev
+            if held.pressed:  # the keys before it pressed for real already, and the page not turned yet: it too
+                press_briefly(hwnd, key)
+                op.retried = op.pressed = True
         f.op = op
         if phase == "settle":
             self._settle_on(op, last, last_detail, op.started, image)
@@ -2582,6 +2592,21 @@ class LiveViewMixin(BlackViewerMixin):
             op.job = self.after(FRAME_STEP_MS, self._follow_step)
             return
         op.job = self.after(FOLLOW_STEP_MS if phase == "change" or fast else self.settings.settle_ms, self._follow_step)
+
+    @staticmethod
+    def _held_keys(op: Operation | None, hwnd: int) -> Operation | None:
+        """The operation *op* followed when a new posted key comes for the viewer *hwnd*, if its own posted keys are
+        still awaited with nothing changed at all (no frame moved, not raised for a look): the new key goes with them.
+        Once the first one's page_turn_wait_ms has passed with nothing changed all of them are pressed for real, in
+        order (`_await_change`); when they were pressed for real already, the new one is pressed for real at once
+        (`_begin_follow`). Else the new key would have ended that wait, and the keys before it, never pressed for
+        real, would have turned nothing - two keys within the wait turned one page -, or, coming after they were, it
+        would have taken their page turn for its own, and the viewer for one that takes posted keys. None when there
+        is no such operation (and for keys pressed for real from the start, which nothing follows up)."""
+        if (op is None or op.phase != "change" or op.hwnd != hwnd or not op.keys or (op.retried and not op.pressed)
+                or op.raised or op.stirred_at is not None):
+            return None
+        return op
 
     def _settle_on(self, op: Operation, thumb: np.ndarray | None, frame_detail: np.ndarray | None, now: float,
                    image: Image.Image | None = None) -> None:
@@ -2880,7 +2905,8 @@ class LiveViewMixin(BlackViewerMixin):
             f.seen = thumb
             frame_detail = _detail(self, image, self._area_box(image))
             if op.pressed:
-                op.turned_at = now  # (does it turn once more, soon? "settle" watches)
+                if len(op.keys) <= 1:
+                    op.turned_at = now  # (does it turn once more, soon? "settle" watches; several keys turn several)
             elif self._take_at_once(op.hwnd, image, thumb, frame_detail, operation=True, shown=False):
                 return  # a page the cache holds: taken on its first frame, then rechecked
             self._show_live(image, thumb)  # the turned page shows at once
@@ -2896,8 +2922,9 @@ class LiveViewMixin(BlackViewerMixin):
             return
         if not op.retried and op.stirred_at is None and now - op.started >= wait:
             # The posted key changed nothing at all (a window that ignores posted keys): the person's key pressed for
-            # real, once (`press_briefly`: the foreground handed over and back, no ALT tap).
-            press_briefly(op.hwnd, op.key)
+            # real, once (`press_briefly`: the foreground handed over and back, no ALT tap) - with the keys pressed
+            # since, in order (`_held_keys`), each of them once.
+            press_briefly(op.hwnd, list(op.keys) if len(op.keys) > 1 else op.key)
             op.retried, op.pressed, op.started = True, True, time.monotonic()
             self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
             return

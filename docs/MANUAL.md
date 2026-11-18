@@ -68,7 +68,8 @@ The basic way is to turn the pages in the TASlation window. You can operate the 
   shows a translated page, clicks belong to TASlation, which uses them to select and edit text regions (pages can be turned with the keys).
 
 To a desktop viewer, keys are sent straight to its window without taking the focus. For a viewer that ignores them, TASlation presses the key for real
-and then gives the focus back, but only when the viewer's picture has not changed at all for 3 seconds (`page_turn_wait_ms`). If two pages were turned even so,
+and then gives the focus back, but only when the viewer's picture has not changed at all for 3 seconds (`page_turn_wait_ms`). Keys you press again
+within those 3 seconds are not lost: each of them is pressed for real too, in order, one page each. If two pages were turned even so,
 the status line says so and shows the key that goes back one page. Which way of passing the key turned the page is recorded per viewer in `profiles.json`,
 and from then on that way is used from the first key (the 3-second wait happens only the first time with that viewer). A key sent straight to a browser while it is not in front does not reach it
 (0 out of 9 times, tried with Chrome and Edge). So a browser is brought to the front for a moment every time and the key is pressed for real; when it cannot be brought to the front, nothing is sent,

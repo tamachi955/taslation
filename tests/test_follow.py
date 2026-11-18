@@ -1195,6 +1195,97 @@ def test_a_key_pressed_for_real_that_turns_two_pages_is_said(setup, monkeypatch)
         i18n.set_language("en")
 
 
+def _ignores_posted(setup, monkeypatch, delay=0.1):
+    """A viewer that ignores posted keys and turns one page for each key pressed for real (`press_briefly`), *delay*
+    after the press and a key 0.6 s after the one before it; every handover recorded as the list of its keys."""
+    v = setup.viewer
+    handovers: list[list[str]] = []
+
+    def press(hwnd, keys):
+        keys = [keys] if isinstance(keys, str) else list(keys)
+        handovers.append(keys)
+        turned = sum(map(len, handovers)) - len(keys)
+        for n, _key in enumerate(keys):
+            v.frames.append((setup.clock.now + delay + 0.6 * n, _page(30 + turned + n)))
+        return True
+
+    monkeypatch.setattr(live, "press_briefly", press)
+    return handovers
+
+
+@pytest.mark.parametrize("keys", [("Left", "Left"), ("Left", "Right"), ("Left", "Left", "Left")])
+def test_keys_pressed_before_a_posted_key_was_found_ignored_each_turn_a_page(setup, monkeypatch, keys):
+    """A viewer not known yet that ignores posted keys: the reader pressed again before the first key's
+    page_turn_wait_ms was over (each press a second after the one before). Every key is pressed for real once that
+    wait is over, in order, in one handover - one press one page - and nothing is said of two turns. A key that came
+    while the one before was still awaited used to end that wait: the keys before it were never pressed for real, and
+    two presses turned one page."""
+    v = setup.viewer
+    handovers = _ignores_posted(setup, monkeypatch)
+    w = setup.make()
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    first = setup.clock.now
+    for key in keys:
+        w.forward_key(key)
+        setup.clock.run(1.0)
+    for _step in range(16):
+        setup.clock.run(0.5)
+        if w.busy:
+            w.job_done()
+    assert [key for _t, key in v.keys] == list(keys)  # posted first, as to any viewer not known yet
+    assert handovers == [list(keys)]  # then every one of them pressed for real, once
+    assert w.new_pages[-1][1] is v.frames[-1][1] and w.new_pages[-1][0] - first > 3  # the last page they turned to
+    assert not any("turned two pages" in line for line in w.statuses)
+    assert key_ways(w).real(VIEWER.hwnd)  # the next keys go for real at once
+
+
+def test_a_key_pressed_while_the_one_before_is_pressed_for_real_is_pressed_for_real_too(setup, monkeypatch):
+    """The first key, posted, did nothing and was pressed for real after page_turn_wait_ms; the reader pressed again
+    just after, before the viewer drew the page that press turned to. The new key is pressed for real at once - it
+    does not take the page turn of the key before it for its own, nor the viewer for one that takes posted keys - and
+    each key turns its page."""
+    v = setup.viewer
+    handovers = _ignores_posted(setup, monkeypatch, delay=0.5)
+    w = setup.make()
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    w.forward_key("Left")
+    setup.clock.run(3.1)
+    assert handovers == [["Left"]]  # pressed for real; the page not drawn yet
+    w.forward_key("Left")
+    assert handovers == [["Left"], ["Left"]]
+    for _step in range(12):
+        setup.clock.run(0.5)
+        if w.busy:
+            w.job_done()
+    assert len(v.keys) == 2 and w.new_pages[-1][1] is v.frames[-1][1]
+    assert key_ways(w).real(VIEWER.hwnd) and not key_ways(w).posted(VIEWER.hwnd)
+    assert not any("turned two pages" in line or "did not change" in line for line in w.statuses)
+
+
+def test_a_key_after_the_page_turned_at_a_posted_key_is_followed_as_its_own(setup, monkeypatch):
+    """A viewer that takes posted keys: a key pressed after the page turned at the one before is posted and followed
+    from the page it turned to, with no key pressed for real."""
+    v = setup.viewer
+    handovers = _ignores_posted(setup, monkeypatch)
+    w = setup.make()
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    page2, page3 = _page(2), _page(3)
+    _turn(setup, w, (0.4, page2))
+    setup.clock.run(1.0)
+    _turn(setup, w, (0.4, page3))
+    for _step in range(10):
+        setup.clock.run(0.5)
+        if w.busy:
+            w.job_done()
+    assert len(v.keys) == 2 and handovers == [] and [p for _t, p in w.new_pages][-2:] == [page2, page3]
+
+
 def test_a_viewer_chosen_while_another_window_is_in_front_gets_its_first_frame_on_the_page(setup, monkeypatch):
     """After a restart with a terminal in front: the viewer chosen is looked at at once whoever is in front, and
     while no frame of it could be shown yet (it drew nothing) again every auto_interval_ms; once one is on the page,
@@ -1379,6 +1470,56 @@ def test_a_key_a_browser_did_not_take_is_never_posted(setup, monkeypatch):
     w.forward_key("Left")
     setup.clock.run(0.05)  # (the keys gathered for one handover: reading.KEY_QUIET_MS)
     assert v.keys == [] and w.statuses[-1] == "The browser did not take the key: click the book and turn the page there."
+
+
+@pytest.mark.parametrize("state", ["idle", "busy", "reading", "translator"])
+@pytest.mark.parametrize("way", ["browser", "posted", "real"])
+def test_every_press_is_one_key_to_the_viewer_and_one_page(setup, monkeypatch, way, state):
+    """Presses of the reader, some quick after the one before (0.15 s, 0.3 s), some after a while: the viewer gets
+    each of them once - a browser pressed for real, a desktop viewer known to take posted keys posted, one known to
+    take only real presses pressed for real - and turns one page for each; no key goes that the reader did not press.
+    So between pages (idle), while the page is translated (busy: the job never ends), in reading mode and in the
+    Translator role."""
+    from taslation.capture import windows as W
+
+    v = setup.viewer
+    monkeypatch.setattr(reading, "time", live.time)  # (the test's clock)
+    if way == "browser":
+        for module in (reading, live, W):
+            monkeypatch.setattr(module, "window_class", lambda hwnd: W.BROWSER_CLASSES[0])
+    w = setup.make()
+    if way != "browser":
+        key_ways(w).seed(VIEWER.hwnd, way)
+    turns: list[str] = []
+
+    def turn(keys):
+        for key in [keys] if isinstance(keys, str) else keys:
+            turns.append(key)
+            v.frames.append((setup.clock.now + 0.1, _page(50 + len(turns))))
+
+    real: list[str] = []
+    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, keys: real.extend([keys] if isinstance(keys, str)
+                                                                                  else keys) or turn(keys) or True)
+    monkeypatch.setattr(live, "press_briefly", lambda hwnd, keys: pytest.fail("a key pressed for real once more"))
+    monkeypatch.setattr(reading, "post_key", lambda hwnd, key: v.keys.append((setup.clock.now, key)) or turn(key))
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    if state == "reading":
+        w.reading = True
+    elif state == "translator":
+        w.role_var.set("translator")
+    presses = ["Left", "Left", "Right", "Left", "Left", "Left"]
+    for key, gap in zip(presses, (2.0, 0.3, 1.0, 4.0, 0.15, 3.0)):
+        w.forward_key(key)
+        setup.clock.run(gap)
+        if w.busy and state != "busy":
+            w.job_done()
+    setup.clock.run(4)
+    delivered = real if way != "posted" else [key for _t, key in v.keys]
+    assert delivered == presses and turns == presses  # one press one key one page, in order
+    assert (v.keys == []) if way != "posted" else (real == [])
+    assert not any("turned two pages" in line or "did not change" in line for line in w.statuses)
 
 
 def test_each_window_handle_learns_for_itself(setup, monkeypatch):
