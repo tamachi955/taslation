@@ -822,12 +822,20 @@ class PageGate:
     the translator's model is loaded for it (`LoadAhead`), the job asks whether its frame is on show still
     (`on_show`), and the window answers at its next look at the viewer that finds it so (`seen`: a capture of the same
     picture, or the viewer's frame count unchanged since that frame was captured) - tens of ms, the time to the next
-    frame step. A frame that changes meanwhile, or while the request runs, is dropped, and its job cancelled."""
+    frame step. A frame that changes meanwhile, or while the request runs, is dropped, and its job cancelled.
 
-    def __init__(self) -> None:
+    A confirmation can be taken back (`take_back`: a sharper picture of the page came after it, a viewer that draws
+    a soft picture first) until the worker has made what the job stored last for good (`seal`): while the job runs,
+    and - *open_for* seconds after the confirmation, the window's choice for a viewer seen to draw soft first - once
+    it is done (`Provisional.keep`, `Pipeline.decide_kept`)."""
+
+    def __init__(self, open_for: float = 0.0) -> None:
         self._cond = threading.Condition()
         self._state = "pending"  # "pending", "confirmed", "dropped"
         self._seen = float("-inf")  # the last moment the window knew the frame on show (`seen`)
+        self._sealed = False  # what the job stored lasts for good: no confirmation is taken back (`seal`)
+        self.open_for = max(0.0, open_for)
+        self.open_until = float("-inf")  # the confirmation plus *open_for* (`confirm`)
 
     @property
     def state(self) -> str:
@@ -847,16 +855,37 @@ class PageGate:
     def confirm(self) -> bool:
         """(the window) The frame stayed as it is: the job keeps what it stores. False when the job gave the page up
         first (nothing of it was kept)."""
-        return self._decide("confirmed")
+        with self._cond:  # (a re-entrant lock: `_decide` takes it again)
+            if self._state == "pending":
+                self.open_until = time.monotonic() + self.open_for
+            return self._decide("confirmed")
 
     def drop(self) -> None:
         """(the window) The frame changed, or is followed no further: nothing the job did lasts."""
         self._decide("dropped")
 
     def close(self) -> bool:
-        """(the worker) The job gives up waiting: whether the gate was confirmed before that."""
+        """(the worker) The job gives up waiting: whether the gate was confirmed before that (and not taken back)."""
         self._decide("dropped")
         return self.confirmed
+
+    def take_back(self) -> bool:
+        """(the window) A sharper picture of the page came after the frame was confirmed: nothing the job did lasts,
+        unless the worker has made it last for good (`seal`) - then False, and nothing changes. A gate still pending is
+        dropped. True: the job keeps nothing (its worker puts it back, or the worker before its next job)."""
+        with self._cond:
+            if self._sealed and self._state == "confirmed":
+                return False
+            self._state = "dropped"
+            self._cond.notify_all()
+            return True
+
+    def seal(self) -> bool:
+        """(the worker) What the job stored lasts for good, when the gate is confirmed: no `take_back` from now on.
+        False when it is not (dropped, or taken back first)."""
+        with self._cond:
+            self._sealed = True
+            return self._state == "confirmed"
 
     def seen(self, at: float) -> None:
         """(the window) The frame the job reads was on show at *at* (`time.monotonic`): a look at the viewer then
@@ -936,7 +965,10 @@ class Provisional:
     counts as asked for before (a line asked for again is drawn anew: `PlamoTranslator.draws`), the series' lines, the
     session's line tally and stage times, and the pages kept lettered for showing again. `restore` puts it all back
     (the frame changed: nothing of the job lasts, and a line its request asked for is drawn on the sharp frame as if it
-    never had been); `commit` keeps it (the frame kept). The memos keyed by the very pixels
+    never had been); `commit` keeps it (the frame kept). A job kept while the window may still take its confirmation
+    back (`keep`) leaves it held after the job, its saves waiting, until the pipeline decides it - before the worker's
+    next job, once that time is up, at the close (`Pipeline.decide_kept`): one page's snapshot at most, for at most the
+    window's TAKE_BACK_MS after the confirmation. The memos keyed by the very pixels
     (the OCR's readings, the erases) are left as they are: the same pixels read the same. While it is held, a save of
     the cache waits and leaves the cache marked as it was (`Pipeline._save_store`), so that neither another save nor
     the window's close writes any of it; the close writes the cache and the stage times as they were before the job
@@ -1010,6 +1042,21 @@ class Provisional:
         if self.stored and self.cache is not None:
             self.cache.dirty = True
 
+    def keep(self) -> bool:
+        """(the worker, the job's frame confirmed) What the job did lasts: for good (`commit`, the gate sealed) - or,
+        while the window may still take the confirmation back (`PageGate.open_until`: a viewer that draws soft first),
+        for now: held as it is, the cache's saves waiting, until the pipeline decides it (`Pipeline.decide_kept`:
+        before the worker's next job, and once that time is up). False when the confirmation was taken back first."""
+        gate = self.gate
+        if gate is not None and gate.confirmed and time.monotonic() < gate.open_until:
+            with self.pipeline._open_lock:
+                self.pipeline._kept_open = self
+            return True
+        if gate is not None and not gate.seal():
+            return False
+        self.commit()
+        return True
+
     def settled(self) -> None:
         """(the worker, once `PageWork` has kept or put back what the job did) Nothing more of the job changes what
         this holds: the window's close waits for this (`Pipeline.drop_unconfirmed`), and writes the stores as they are
@@ -1047,13 +1094,14 @@ class Provisional:
 class PageWork:
     """A page job on show in the window (`Pipeline.page_on_show`): the page units it stored anew (``stored``: their
     fingerprints and aspects, what the window forgets when the page comes again sharper) and, while its frame is not
-    kept (*gate*), what goes back should it never be (`Provisional`). ``kept``: None while that is not decided, then
-    whether what the job did lasts."""
+    kept (*gate*), what goes back should it never be (`Provisional`) - one confirmed before the job began too, for its
+    confirmation may be taken back while the job runs (`PageGate.take_back`). ``kept``: None while that is not
+    decided, then whether what the job did lasts."""
 
     def __init__(self, pipeline: "Pipeline", gate: PageGate | None):
         self.gate = gate
         self.stored: list[tuple[str, float]] = []
-        self.provisional = Provisional(pipeline, gate) if gate is not None and not gate.confirmed else None
+        self.provisional = Provisional(pipeline, gate) if gate is not None else None
         self.kept: bool | None = None if self.provisional is not None else True
 
     @property
@@ -1065,8 +1113,8 @@ class PageWork:
         held, self.provisional = self.provisional, None
         if held is not None:
             if keep:
-                held.commit()
-            else:
+                keep = held.keep()  # (False: the window took the confirmation back meanwhile)
+            if not keep:
                 held.restore()  # (again, when the window's close put it back first: the same state)
                 self.stored.clear()
             held.settled()
@@ -1075,7 +1123,8 @@ class PageWork:
 
     def settle(self, cancel: Any = None) -> bool:
         """(the worker, the page shown) The frame waited for until it is kept (`PageGate.wait`): True when it is -
-        what the job stored lasts, and `flush_saves` saves it -, False when it is not (cancelled, dropped, too long):
+        what the job stored lasts, and `flush_saves` saves it (or, kept for now, the pipeline once it is decided:
+        `Provisional.keep`) -, False when it is not (cancelled, dropped, too long, the confirmation taken back):
         everything the job changed goes back. A page done before its frame stayed as it is for the window's fixed
         time (every line reused, a short page) waits here for it."""
         if self.provisional is None or self.gate is None:
@@ -1250,6 +1299,8 @@ class Pipeline:
         self._save_due: BookCache | None = None  # the cache whose save waits
         self._held_for: Provisional | None = None  # a page job's frame not confirmed yet: what goes back if never
         self._provisional: Provisional | None = None  # ... until the job's worker decided it (`Provisional.settled`)
+        self._kept_open: Provisional | None = None  # a page job kept for now (`Provisional.keep`, `decide_kept`)
+        self._open_lock = threading.Lock()  # (`decide_kept`: the worker's, or the window's close)
         self._overrides: dict[str, Any] = {}  # the book's own detection/OCR settings (from its annotations)
         self.annotations: BookAnnotations | None = None  # reader-made premises for the current book
         self.glossary_text: str = ""  # the series sheet (characters, glossary, style), rendered for the prompt
@@ -1533,7 +1584,9 @@ class Pipeline:
         what it changes that lasts is held (`Provisional`): the job shows the page, then calls the `PageWork`'s
         ``settle`` - kept once the frame is confirmed, all of it put back when it is not. A job that raises before that
         puts it all back (unless the frame was confirmed first), before the save `saves_held` makes. What it yields
-        says which page units the job stored anew."""
+        says which page units the job stored anew. A page job kept for now before it is decided first
+        (`decide_kept`)."""
+        self.decide_kept()
         before = getattr(_ON_SHOW, "window", False)
         held_work = getattr(_ON_SHOW, "work", None)
         work = PageWork(self, gate)
@@ -1596,7 +1649,10 @@ class Pipeline:
         (`CLOSE_WAIT_S`), then puts it back from this thread. A worker held on the job longer (a model's load) may store
         more of the page meanwhile, in memory alone: until it has decided the job, the close writes the cache and the
         stage times as they were before the job (`to_save`), and the worker's own save comes after it has put the job
-        back itself (`PageWork.give_up`, `settle`; `flush_saves`). Whether a page was given up."""
+        back itself (`PageWork.give_up`, `settle`; `flush_saves`). A page job kept for now is decided (`decide_kept`).
+        Whether a page was given up."""
+        if self.decide_kept() is False:
+            return True
         held = self._provisional
         if held is None:
             return False
@@ -1610,6 +1666,35 @@ class Pipeline:
         if not held.over.wait(max(0.0, CLOSE_WAIT_S if wait is None else wait)):
             held.restore()
         return True
+
+    def decide_kept(self) -> bool | None:
+        """(the worker: before each of its jobs, and once the time is up, `ui.jobs`; the window's close) The page job
+        kept for now (`Provisional.keep`) decided: put back whole when the window took its confirmation back meanwhile
+        (`PageGate.take_back`: a sharper picture of its page came) - False -, else kept for good, its gate sealed,
+        and saved (`flush_saves`) - True. None when there was none. Before any other job, so that no job changes the
+        stores a put-back would take back: a job that is not the one on the sharper picture keeps the page."""
+        with self._open_lock:  # (held until it is decided and saved: the close's decision waits for the worker's)
+            held = self._kept_open
+            if held is None:
+                return None
+            try:
+                if held.gate is not None and not held.gate.seal():
+                    held.restore()
+                    return False
+                held.commit()
+                self.flush_saves()
+                return True
+            finally:
+                self._kept_open = None
+
+    def kept_open_left(self) -> float | None:
+        """The seconds until the page job kept for now is to be decided (`decide_kept`), 0 when that time is up; None
+        when there is none."""
+        held = self._kept_open
+        if held is None:
+            return None
+        until = held.gate.open_until if held.gate is not None else float("-inf")
+        return max(0.0, until - time.monotonic())
 
     def to_save(self, store: Any) -> Any:
         """(the window, as it closes: `ui.app.last_save`, `devices.save_times`) What is written of *store* - the

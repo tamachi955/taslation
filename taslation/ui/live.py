@@ -35,7 +35,10 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   (`_show_held`); this delays no request. A request may so go out for a frame that changes after it (a soft picture
   read before the sharp one came), and is cancelled with its job. After the confirmation it is as for a page that
   settled: a frame of the page sharper within RECHECK_MS is read again (`_retake`), and another page cancels the job
-  as while a job runs (below). Off: the fixed wait;
+  as while a job runs (below) - what the job stored lasts, and its lines are reused. A sharper frame takes the
+  confirmation back (a sharp picture that reached the window late): nothing of the job on the softer frame lasts -
+  put back while the job runs, and once it is done within TAKE_BACK_MS of the confirmation for a viewer seen to draw
+  soft first -, put back before the job on the sharp frame begins. Off: the fixed wait;
 * a page whose every unit is in the cache is taken on its first changed frame, without the wait for it to settle
   (`_take_at_once`: drawn from the cache, nothing read from the frame), and looked at every FOLLOW_STEP_MS for
   RECHECK_MS after: a viewer that draws a soft picture first has it replaced by the sharp one as soon as that comes
@@ -174,6 +177,14 @@ PIXELS_KEPT = 2  # ... with the pixels of so many of them (and of the frame capt
 # twice settle_ms confirmed none there. A viewer slower at times than that has its page read again once it sharpens
 # (`_retake`), as with the fixed wait.
 KEEP_SETTLES = 2
+# A sharper picture of a page started early that comes after its frame was confirmed takes the confirmation back
+# (`_retake`, `PageGate.take_back`): nothing its job stored lasts - put back while the job runs, whenever it comes; once
+# the job is done, within so long after the confirmation, for a viewer seen to draw a page soft first (`PageGate`'s
+# *open_for*; a viewer that never did pays nothing: its page jobs are kept for good as they end). The stay counts the
+# frames as they reach the capture: a sharp picture drawn late, or one that reaches the window a few hundred ms after
+# the viewer drew it (a busy computer), comes after a soft picture already confirmed. Twice the recheck that follows a
+# confirmation (RECHECK_MS); meanwhile one page's snapshot of the stores is held and the cache's save waits.
+TAKE_BACK_MS = 2000
 # While a page job runs, a frame of another page cancels it once it has stayed as it is for this long (`_settle_s`):
 # long enough to say that the viewer left the job's page - under 150 ms (three frame gaps, FRAME_GAP_MS) a frame of a
 # viewer's slide could pass for one -, not that the new picture is final, for the new page is then started early with
@@ -367,7 +378,8 @@ def follow_decision(mode: str, owner: str, *, following: bool, look_due: bool, p
 @dataclass
 class Taken:
     """A frame taken as the page (follow = "events"), for the looks after it: the frame, its thumbnail and its fine
-    detail, when; for a sharper frame waiting to be read again, the softer frame read before."""
+    detail, when; for a sharper frame waiting to be read again, the softer frame read before - None when nothing of
+    the job on it lasts (its confirmation taken back: nothing of it to drop from the cache)."""
 
     frame: Image.Image
     thumb: np.ndarray
@@ -375,6 +387,7 @@ class Taken:
     at: float
     soft: Image.Image | None = None
     complete: bool = False  # translator mode: shown from the cache at once, completed once the frame has settled
+    gate: PageGate | None = None  # the gate of the page job started early on the frame (`_early_start`)
 
 
 @dataclass
@@ -2045,12 +2058,13 @@ class LiveViewMixin(BlackViewerMixin):
         return "started"
 
     def _mark_taken(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None) -> None:
-        """The page just taken, for the looks after it (a sharper frame of it may come)."""
+        """The page just taken, for the looks after it (a sharper frame of it may come), with the gate its job is
+        started with when it is started early (`_early_start`)."""
         f = self._following
         f.retake = None
         if frame_detail is None:
             frame_detail = _detail(self, image, self._area_box(image))
-        f.taken = Taken(image, thumb, frame_detail, time.monotonic())
+        f.taken = Taken(image, thumb, frame_detail, time.monotonic(), gate=getattr(self, "_early_gate", None))
 
     def _check_sharper(self, image: Image.Image, thumb: np.ndarray) -> bool:
         """Whether *image* is the page taken lately (within RETAKE_WITHIN_MS) come again sharper; then it is read
@@ -2068,13 +2082,18 @@ class LiveViewMixin(BlackViewerMixin):
     def _retake(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray) -> None:
         """The page taken has come sharper (a viewer that draws a soft picture first): it is read from this frame - at
         once when the job on the softer frame is done; else, as no running job can be stopped, once it is (`_queue`;
-        `_look` takes it then)."""
+        `_look` takes it then). A page started early on the softer frame has its confirmation taken back
+        (`PageGate.take_back`) where it still can be - its job running, or done within TAKE_BACK_MS of the
+        confirmation for a viewer seen to draw soft first -: nothing of that job lasts, put back before the job on
+        this frame begins (`Pipeline.decide_kept`), so that this one stores the page."""
         f = self._following
-        soft = f.taken.frame if f.taken is not None else None
-        f.taken = None
-        f.retake = Taken(image, thumb, frame_detail, time.monotonic(), soft)
+        taken, f.taken = f.taken, None
+        soft = taken.frame if taken is not None else None
         if soft is not None:
             self._drew_soft(soft, image)
+        if taken is not None and taken.gate is not None and taken.gate.take_back():
+            soft = None  # (nothing of the soft frame's job to drop from the cache: `_take_retake`)
+        f.retake = Taken(image, thumb, frame_detail, time.monotonic(), soft)
         self._take_retake(image, thumb)
 
     def _drew_soft(self, soft: Image.Image, sharp: Image.Image) -> None:
@@ -2097,11 +2116,16 @@ class LiveViewMixin(BlackViewerMixin):
         it has drawn a page soft first (`_drew_soft`), and the frame's `crispness` is not nearer that of its sharp
         pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its frames). Never so for
         a viewer not seen to draw a page soft first: it pays nothing."""
+        if not self._draws_soft_first():
+            return False
+        f = self._following
+        return not looks_sharp(_crisp(self, image, self._area_box(image)), f.soft, f.sharp)
+
+    def _draws_soft_first(self) -> bool:
+        """Whether the viewer chosen has drawn a page soft first (`_drew_soft`)."""
         f = self._following
         win = self.selected
-        if win is None or f.soft_of != win.hwnd or not f.soft:
-            return False
-        return not looks_sharp(_crisp(self, image, self._area_box(image)), f.soft, f.sharp)
+        return win is not None and f.soft_of == win.hwnd and bool(f.soft)
 
     def _take_retake(self, image: Image.Image, thumb: np.ndarray) -> None:
         """The sharper frame read as the page (`_retake`), once nothing runs: the job on the softer frame is cancelled
@@ -2109,7 +2133,9 @@ class LiveViewMixin(BlackViewerMixin):
         The page units that job stored anew (as it said, done or stopped after its storing: `_page_stored`) are
         dropped first, so that their bubbles are read again from the sharp picture (nothing older goes: a page unit
         that was in the cache keeps its translations and is only drawn again on the sharp picture). A job that said
-        nothing of it (none but a stand-in's) is judged by its page: dropped when none of it came from the cache."""
+        nothing of it (none but a stand-in's) is judged by its page: dropped when none of it came from the cache. A
+        job started early whose confirmation `_retake` took back leaves nothing at all (no page unit, no line kept for
+        reuse, no line drawn by its requests: `pipeline.Provisional`), so nothing is dropped here."""
         f = self._following
         if reads_beside(self):  # beside a run that translates: the sharper frame is asked of the run
             retake, f.retake = f.retake, None
@@ -2275,7 +2301,7 @@ class LiveViewMixin(BlackViewerMixin):
         if not self._early_allowed(op, image, thumb):
             return False
         f = self._following
-        gate = PageGate()
+        gate = PageGate(TAKE_BACK_MS / 1000 if self._draws_soft_first() else 0.0)
         look = getattr(self, "_look_now", None)
         early = Early(op, gate, image, thumb, self._auto_last, self._auto_candidate, f.taken, f.retake,
                       look if look is not None and look.image is image else None)

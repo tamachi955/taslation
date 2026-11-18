@@ -175,6 +175,23 @@ def keep_page_names(window: Any, result: Any, book: str, model: str, language: s
                      lines=[line._replace(source="") for line in lines])
 
 
+def next_job(window: Any) -> Callable[[], None]:
+    """*window*'s worker's next job (`JobsMixin._worker_loop`). A page job kept for now (`Pipeline.decide_kept`: its
+    stores put back still, should a sharper picture of its page come) is decided before it, and once its time is up
+    while none comes."""
+    while True:
+        pipeline = getattr(window, "pipeline", None)
+        left = pipeline.kept_open_left() if hasattr(pipeline, "kept_open_left") else None
+        try:
+            job = window._jobs.get() if left is None else window._jobs.get(timeout=left)
+        except queue.Empty:
+            job = None
+        if hasattr(pipeline, "decide_kept"):
+            pipeline.decide_kept()
+        if job is not None:
+            return job
+
+
 def job_news(window: Any, data: dict[str, Any]) -> None:
     """(a page job's "result" or "page_cancelled", on the Tk thread) What *window*'s live view keeps of it: the page
     units it stored anew (`LiveViewMixin._page_stored`), and a page started early whose frame was never confirmed
@@ -327,7 +344,7 @@ class JobsMixin:
 
     def _worker_loop(self) -> None:
         while True:
-            job = self._jobs.get()
+            job = next_job(self)
             try:
                 job()
             except Cancelled:

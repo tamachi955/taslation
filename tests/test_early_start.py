@@ -39,7 +39,9 @@ class Worker:
     *ask_s*, stores the page and shows it; what it stored is kept once its gate is confirmed. With *asks* False (every
     line reused) the page is stored and shown as soon as it is read, and kept once the gate is confirmed. A cancel - or
     a gate dropped - ends a job CANCEL_S later, its request with it: what it did lasts only when its gate was confirmed
-    first. ``jobs``: what each job did, when; ``kept``: the pages whose store lasted, in order."""
+    first. A page kept seals its gate (`PageGate.seal`: no confirmation taken back), but within its gate's open time
+    (`PageGate.open_for`: tests/test_take_back.py has the stores that a confirmation taken back puts back). ``jobs``:
+    what each job did, when; ``kept``: the pages whose store lasted, in order."""
 
     def __init__(self, w, clock, name, asks=True, ask_s=None):
         self.w, self.clock, self.name, self.asks = w, clock, name, asks
@@ -78,6 +80,8 @@ class Worker:
             if now - job.cancel_seen + 1e-9 < CANCEL_S:
                 return self._again(job)
             lasts = gate is None or gate.close()
+            if lasts and gate is not None and now >= gate.open_until:
+                gate.seal()
             job.discarded = not lasts
             data = {"gate": gate, "discarded": job.discarded, "stored": []}
             if job.shown is not None:
@@ -107,6 +111,8 @@ class Worker:
     def _keep(self, job):
         job.stored = self.clock.now
         self.kept.append(job.name)
+        if job.gate is not None and self.clock.now >= job.gate.open_until:
+            job.gate.seal()
 
     def _end(self, job, how):
         job.ended, job.how = self.clock.now, how
@@ -129,14 +135,15 @@ def _environment(hidden_root, monkeypatch, path, counted=True):
     names: dict[int, str] = {id(first): "1"}
 
     class Gate(PageGate):
-        def __init__(self):
-            super().__init__()
+        def __init__(self, *args):
+            super().__init__(*args)
             self.made, self.confirmed_at, self.dropped_at = clock.now, None, None
 
         def confirm(self):
             ok = super().confirm()
             if ok and self.confirmed_at is None:
                 self.confirmed_at = clock.now
+                self.open_until = clock.now + self.open_for  # (on the test's clock)
             return ok
 
         def drop(self):
@@ -163,14 +170,15 @@ def _environment(hidden_root, monkeypatch, path, counted=True):
     if not counted:
         monkeypatch.setattr(live, "frame_count", lambda hwnd: None)
 
-    def make(early=True, asks=True, profiles=None, selected=VIEWER, ask_s=None):
+    def make(early=True, asks=True, profiles=None, selected=VIEWER, ask_s=None, worker=Worker):
+        """The window and its worker (*worker*: `Worker`, or a stand-in made as it is), page 1 taken and done."""
         w = Window(hidden_root, clock, owner="viewer")
         w.settings.early_start = early
         w.selected = selected
         w._starts_book = lambda image: False  # (the book is started: tests/test_start_flow.py)
         w._enlarge_asked = selected.hwnd  # (the window enlarged for this viewer already: tests/test_enlarge.py)
         w.profiles = profiles if profiles is not None else Profiles(path)
-        w._jobs = worker = Worker(w, clock, lambda image: names.get(id(image), "?"), asks, ask_s)
+        w._jobs = worker = worker(w, clock, lambda image: names.get(id(image), "?"), asks, ask_s)
         w.start()
         clock.run(3)  # page 1 taken and done
         assert worker.kept == ["1"]

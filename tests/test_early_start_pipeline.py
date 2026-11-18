@@ -9,6 +9,7 @@ readings) stay. The window's page job (`_job_translate`) shows the page first, t
 anew goes to the window with the page."""
 from __future__ import annotations
 
+import queue
 import threading
 import time
 from types import SimpleNamespace
@@ -272,6 +273,140 @@ def test_a_cancel_after_the_confirmation_keeps_the_page_stored_as_ever(sample_pa
     job.join()
     assert isinstance(job.error, Cancelled) and job.work.kept is True
     assert len(_on_disk(settings, "Confirmed then stopped")) == 1  # stored whole, and saved, as ever
+
+
+# ------------------------------------------------------------------ a confirmation taken back (a sharper picture came)
+def test_a_confirmation_taken_back_while_the_request_runs_puts_back_everything(sample_page, sample_page2, settings,
+                                                                               monkeypatch):
+    monkeypatch.setattr(pipeline_mod, "size_sample", lambda reading: 21.0)
+    p = _pipeline(settings, "Taken back in flight")
+    p.process(sample_page2)  # a page before
+    p.translator = translator = Slow(EN_TEXTS)
+    translator.asked = {"before": 1}
+    before, stamp = _state(p), p.cache.path.stat().st_mtime_ns
+    gate, cancel = PageGate(), threading.Event()
+    job = Job(p, sample_page, gate, cancel)
+    _read_and_waiting(p, job)
+    gate.seen(time.monotonic())
+    assert translator.running.wait(20.0)
+    assert gate.confirm()  # the frame stayed: confirmed, its request running ...
+    assert gate.take_back()  # ... then its sharper picture came: the window takes it back and cancels the job
+    cancel.set()
+    job.join()
+    assert isinstance(job.error, Cancelled) and job.work.kept is False and job.work.stored == []
+    assert _state(p) == before and p.cache.path.stat().st_mtime_ns == stamp
+    assert translator.asked == {"before": 1} and p._kept_open is None
+
+
+@pytest.mark.parametrize("taken_back", [True, False])
+def test_a_page_kept_for_now_is_put_back_whole_or_kept_for_good_before_anything_else(sample_page, settings,
+                                                                                    taken_back):
+    """A viewer seen to draw soft first (the gate open for a while after its confirmation): the page done and its
+    frame confirmed is kept for now - shown, its save waiting -; the window takes the confirmation back when the sharp
+    picture comes, and the pipeline puts the job back whole before the next job (`decide_kept`); else it is kept for
+    good and saved then."""
+    book = f"For now {taken_back}"
+    p = _reused_page(settings, book, sample_page)
+    before, stamp = _state(p), p.cache.path.stat().st_mtime_ns
+    gate = PageGate(open_for=30.0)
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and job.error is None, job.error
+    assert gate.confirm()
+    job.join()
+    assert job.kept is True and p._kept_open is not None and len(p.cache) == 1  # kept, for now: ...
+    assert not p.flush_saves() and p.cache.path.stat().st_mtime_ns == stamp  # ... nothing saved, ...
+    app_mod.last_save(p)
+    assert p.cache.path.stat().st_mtime_ns == stamp  # (... not even by another save of the window's)
+    assert 0 < p.kept_open_left() <= 30.0
+    if taken_back:
+        assert gate.take_back()
+        assert p.decide_kept() is False
+        assert _state(p) == before and _on_disk(settings, book) == [] and gate.state == "dropped"
+    else:
+        assert p.decide_kept() is True
+        assert not gate.take_back() and gate.state == "confirmed"  # (sealed: kept for good)
+        assert len(_on_disk(settings, book)) == 1
+    assert p._kept_open is None and p._held_for is None and p.kept_open_left() is None
+    assert p.decide_kept() is None
+
+
+def test_a_page_job_decides_the_page_kept_for_now_before_it_reads(sample_page, sample_page2, settings):
+    p = _reused_page(settings, "Next job", sample_page)
+    gate = PageGate(open_for=30.0)
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and gate.confirm()
+    job.join()
+    kept_for_now = {u.fingerprint for u in job.result.units}
+    assert kept_for_now <= {pg.fingerprint for pg in p.cache.pages}
+    assert gate.take_back()  # the sharp picture came: the job on it begins
+    nxt = Job(p, sample_page2, None)
+    nxt.join()
+    assert nxt.error is None and nxt.kept is True and p._kept_open is None
+    assert {pg.fingerprint for pg in p.cache.pages} == {u.fingerprint for u in nxt.result.units}  # its page alone
+    assert not kept_for_now & {pg.fingerprint for pg in p.cache.pages}
+
+
+def test_without_an_open_time_a_page_is_kept_for_good_as_it_ends(sample_page, settings):
+    """A viewer never seen to draw soft first pays nothing: the gate is sealed as the job ends, the page saved at
+    once, and no confirmation is taken back after that."""
+    p = _reused_page(settings, "For good", sample_page)
+    gate = PageGate()
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and gate.confirm()
+    job.join()
+    assert job.kept is True and p._kept_open is None and p._held_for is None and p.kept_open_left() is None
+    assert not gate.take_back() and gate.state == "confirmed"
+    assert p.flush_saves() and len(_on_disk(settings, "For good")) == 1
+
+
+@pytest.mark.parametrize("taken_back", [True, False])
+def test_the_close_decides_a_page_kept_for_now(sample_page, settings, taken_back):
+    book = f"Closed {taken_back}"
+    p = _reused_page(settings, book, sample_page)
+    before = _state(p)
+    gate = PageGate(open_for=30.0)
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and gate.confirm()
+    job.join()
+    if taken_back:
+        gate.take_back()
+    assert p.drop_unconfirmed() is taken_back  # (given up: put back)
+    app_mod.last_save(p)
+    if taken_back:
+        assert _state(p) == before and _on_disk(settings, book) == []
+    else:
+        assert len(_on_disk(settings, book)) == 1 and not gate.take_back()
+    assert p._kept_open is None
+
+
+def test_the_worker_decides_a_page_kept_for_now_once_its_time_is_up_or_at_its_next_job(sample_page, settings):
+    p = _reused_page(settings, "Worker", sample_page)
+    worker = SimpleNamespace(pipeline=p, _jobs=queue.Queue())
+    gate = PageGate(open_for=1.0)
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and gate.confirm()
+    job.join()
+    assert p._kept_open is not None
+    got: list = []
+    thread = threading.Thread(target=lambda: got.append(jobs.next_job(worker)), daemon=True)
+    thread.start()
+    time.sleep(0.15)
+    assert p._kept_open is not None and _on_disk(settings, "Worker") == []  # (its time not up yet)
+    end = time.monotonic() + 5.0
+    while p._kept_open is not None and time.monotonic() < end:
+        time.sleep(0.02)
+    assert p._kept_open is None and len(_on_disk(settings, "Worker")) == 1 and thread.is_alive()  # decided, saved
+    worker._jobs.put("next")
+    thread.join(5.0)
+    assert got == ["next"]
+
+    gate = PageGate(open_for=30.0)  # a job that comes first decides it before it runs
+    job = Job(p, sample_page, gate)
+    assert job.processed.wait(20.0) and gate.confirm()
+    job.join()
+    assert p._kept_open is not None
+    worker._jobs.put("another")
+    assert jobs.next_job(worker) == "another" and p._kept_open is None and not gate.take_back()
 
 
 def test_the_model_loads_ahead_once_the_window_sees_the_frame(settings):
