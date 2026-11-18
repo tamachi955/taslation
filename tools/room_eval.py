@@ -32,7 +32,8 @@ DIR, with ``cases.json`` listing them; ``--again cases.json`` draws those very c
 ``--tag``). Pictures are for the developer's eyes only: they go to the folder given (a scratch folder), never into the
 repository. ``--scan FILE`` keeps the detection and the OCR (the regions and their masks; the Japanese is never
 written: only its length) and letters from FILE again when the settings agree (the settings are all it checks: after
-a change of the detection, start from a new FILE).
+a change of the detection, start from a new FILE). The detection is the app's default on this computer (the layout
+model where the inpainting would run, though the erase here is always the paper fill), or ``--detect-model``'s.
 
     python tools/room_eval.py --pictures <scratch>/before --json <scratch>/before.json --scan <scratch>/scan.pkl
     python tools/room_eval.py --detect-model on --pages 6
@@ -479,11 +480,16 @@ def main(argv: list[str] | None = None) -> int:
     from taslation.ocr import Readers
     from taslation.pipeline import Pipeline
 
+    from taslation.render import artwork
+
     s = Settings()
-    s.art_erase = "off"  # (the paper fill: the rooms and the lettering do not hang on how the art is erased)
     if args.detect_model:
         s.detect_model = args.detect_model
+    elif s.detect_model == "auto" and artwork.available(s.models_dir, s.art_erase):
+        s.detect_model = "on"  # the app's default here: the layout model, which runs where the inpainting does
+    s.art_erase = "off"  # (the paper fill: the rooms and the lettering do not hang on how the art is erased)
     s.validate()
+    print(f"detect_model {s.detect_model}", flush=True)
     items = frame_items(args.frames) if args.frames else dataset_items(args.root, args.series, args.pages)
     settings_key = {"version": SCAN_VERSION, "detect_model": s.detect_model, "pages": [i.key for i in items],
                     "frames": bool(args.frames)}
