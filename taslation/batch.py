@@ -38,9 +38,10 @@ went by too quickly to be taken (on show for less than half of settle_ms, or onl
 the translation then has it in its place. The OCR takes seconds a screen meanwhile: the whole book can wait there. Only when the frames still to read
 fill the memory cap (``batch_memory_mb``, at most a quarter of the machine's memory; frames already read, erased pages
 and frames waiting for their erase make room first) does the band ask the reader to wait (``batch.backlog_full``), and
-the frame on show is taken as soon as there is room. The page on show goes on the window at once (``batch_page``); the
-rectangles of the page being read show only when that is the page on show. A page whose fingerprints this run has seen
-is skipped, already by the sampler (going back reads nothing twice and changes no order). Nothing here decides that the
+the frame on show is taken as soon as there is room. The page on show goes on the window at once (``batch_page``) -
+in the whole book, every frame of the viewer's goes there as it comes (``viewer_frame``), so that a page turned shows
+before it is taken; the rectangles of the page being read show only when that is the page on show. A page whose
+fingerprints this run has seen is skipped, already by the sampler (going back reads nothing twice and changes no order). Nothing here decides that the
 book has ended: `finish` (the band's Finished reading, Enter at the command line) lets the backlog drain and goes on
 to the translation.
 
@@ -84,7 +85,8 @@ layout model go on (measured in Chrome while 30 pages were turned in 20 s: no fr
 the keydown drawn in 24-29 ms, with the layout model running or waiting; waiting, nothing was read while the pages
 were turned). The erase ahead also waits while frames wait to be read (`_reading_first`).
 
-What a window gets, through *show* (kind, data), besides ``batch_page`` {image} and the pipeline's page events:
+What a window gets, through *show* (kind, data), besides ``batch_page`` {image}, ``viewer_frame`` {image} and the
+pipeline's page events:
 
 * ``page_stage`` {seq, fingerprint, stage, state[, thumb]}: a page's way through the run, at every change. *seq* is the
   page's place in the order of first sight in this run (1, 2, ...; a frame without a page unit has none), *fingerprint*
@@ -574,6 +576,7 @@ class PageWatch:
         self.detail_of = detail_of
         self.crisp_of = crisp_of
         self.shown: _Shown | None = None  # the picture on show, not taken yet
+        self.seen: np.ndarray | None = None  # the `thumbnail` of the latest frame seen
         self.last: np.ndarray | None = None  # the `page_thumb` of the page taken last
         self.last_detail: np.ndarray | None = None
         self.last_image: Image.Image | None = None
@@ -590,7 +593,7 @@ class PageWatch:
         s = self.shown
         if s is not None and image is s.image or s is None and image is self.last_image:
             return self.tick(now)  # (the very frame again: a viewer that has drawn nothing new)
-        thumb = thumbnail(image)
+        thumb = self.seen = thumbnail(image)
         page, d = page_thumb(thumb), self.detail_of(image)
         if s is not None and same_page(s.page, page, s.detail, d, self.scale):  # the same page (a soft picture of it)
             if sharper(s.detail, d):  # the same page come sharper: this viewer draws soft first
@@ -888,6 +891,7 @@ class BatchReader:
         self._told_finished = False  # `batch.finishing` has been said
         self._looked_seq: int | None = None  # the capture session's count of frames at the sampler's last look
         self._on_show: Image.Image | None = None  # the frame taken last: the page the reader has on show
+        self._told: np.ndarray | None = None  # the `thumbnail` of the viewer's frame the window was told last
         self._says = threading.RLock()  # the sampler and the reading loop both speak (`_emit`)
         self._line_said = 0.0  # when a line answered was last told (`_answered`)
         self.following = False  # the reading pass is on: the reader's keys go on to the viewer (`ui.live`)
@@ -1422,9 +1426,12 @@ class BatchReader:
     def _look(self, watch: PageWatch, last_look: bool) -> bool:
         """One look of the sampler: wait for the viewer's next frame (the capture's frame events, `frame_wait`; without
         them, `sample_s`), no longer than until `PageWatch.due`, then capture it, or tell the watch the time; its
-        decisions go to the packer (`_decided`). No new frame: only whether the window is still there. On the last
-        look (*last_look*: the reader has finished) the frame on show is captured at once, and the page on show taken
-        once it is sure, at the latest `recheck_s` after it settled; True once nothing is left on show to take."""
+        decisions go to the packer (`_decided`). The whole book: a frame that differs at all from the one the window was
+        told of last goes on the window as it comes (``viewer_frame``), as the live view draws each frame without a run,
+        so that a page turned shows at once, not when it is taken. No new frame: only whether the window is still
+        there. On the last look (*last_look*: the reader has finished) the frame on show is captured at once, and the
+        page on show taken once it is sure, at the latest `recheck_s` after it settled; True once nothing is left on
+        show to take."""
         first_last = last_look and not self._looked_last
         self._looked_last = last_look
         due = watch.due(time.monotonic())
@@ -1456,6 +1463,9 @@ class BatchReader:
         if last_look and watch.shown is not None and now - watch.shown.since >= watch.recheck_s:
             decisions += watch.take_now()
         self._decided(decisions)
+        if new and self.context_mode and frames_differ(self._told, watch.seen, 0.0):
+            self._told = watch.seen  # (after the decisions: a page taken as the reader turned on from it came before)
+            self._show("viewer_frame", image=image)
         return watch.shown is None
 
     def _decided(self, decisions: Sequence[tuple[str, Image.Image]]) -> None:

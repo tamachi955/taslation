@@ -1096,6 +1096,8 @@ class JobsMixin:
             self._run_queued()
         elif kind == "batch_page":
             self._batch_page(data["image"])
+        elif kind == "viewer_frame":  # a frame of the viewer as a whole-book run's reading saw it come
+            self._run_frame(data["image"])
         elif kind == "page_area":  # the page panels a run found in the pages it took: into the window's record
             self._run_found(data)
         elif kind == "batch":
@@ -1270,7 +1272,7 @@ class JobsMixin:
             base = result.image if result is not None and frame is result.original else frame
             self._fill = Filling(frame, base, [tuple(b) for b in data["boxes"]])
             self._busy_shown = True
-            self.canvas.set_busy(self._busy_text)
+            self._show_badge()  # (not on another page the viewer shows meanwhile: `_badge_due`)
         elif fill is None:
             return
         elif kind == "read":

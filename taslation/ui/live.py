@@ -62,8 +62,9 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   goes on the page, the capture area is the new size's own, and Auto goes on from there (`_resize_begins`,
   `_look_afresh`).
 
-While a whole-book run reads the pages the reader turns, the run captures the viewer and the window none of it. Once the
-run translates, it needs the viewer no more (`BatchReader.viewer_free`): the window follows the viewer again as above,
+While a whole-book run reads the pages the reader turns, the run captures the viewer and the window none of it: in the
+whole book each frame the run captures goes on the page as it comes (`_run_frame`), so that a page turned shows as
+without a run, and the page being read shows its rectangles only while the viewer shows it. Once the run translates, it needs the viewer no more (`BatchReader.viewer_free`): the window follows the viewer again as above,
 the reader's keys and clicks going on to it (`constants.viewer_rests`), and a page taken goes not to a page job - the
 worker runs the run, and no request may compete with it - but to the run (`BatchReader.viewer_page`, on a thread of the
 window's own, `_ask_beside`): a page the cache holds is shown lettered from it with no model at all, laid over the
@@ -899,6 +900,20 @@ class LiveViewMixin(BlackViewerMixin):
             self._redisplay()
         elif not filling:
             self._redisplay()  # the viewer back on the page being translated: it shows filling in again
+
+    def _run_frame(self, image: Image.Image) -> None:
+        """A frame of the viewer as a whole-book run reading the pages saw it come (``viewer_frame``: the run captures
+        the viewer then, the live view does not): on the page as the live view puts a frame there (`_show_live`), so
+        that a page turned shows as soon as the viewer draws it, as without a run, not once the run takes it
+        (``batch_page``); a frame of nothing is left out, as ever. The badge of the page being read is on the page only
+        while that page is (`_badge_due`). Once the run needs the viewer no more the window looks itself."""
+        if self.batch is None or reads_beside(self):
+            return
+        thumb = _thumb(self, image)
+        if self._drew_nothing(thumb):
+            return
+        self._show_live(image, thumb)
+        self._show_badge()
 
     def _quiet_live(self, image: Image.Image, thumb: np.ndarray) -> None:
         """*image* the live frame (`_show_live`), not drawn yet: what is drawn next shows it."""

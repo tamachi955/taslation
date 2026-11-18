@@ -212,6 +212,29 @@ def test_finished_reading_lets_the_backlog_drain_and_goes_on_to_the_translation(
     assert reader.left is None
 
 
+@pytest.mark.parametrize("context_mode", (True, False))
+def test_the_whole_book_run_tells_the_window_each_frame_of_the_viewer_as_it_comes(desk, settings, sample_page,
+                                                                                  sample_page2, context_mode):
+    settings.settle_ms = 3000  # (no page is taken while the reader turns: the frames go to the window all the same)
+    told = []
+    reader, _cache = whole_book(desk, settings, sample_page, sample_page2,
+                                show=lambda kind, data: told.append((kind, data.get("image"))))
+    reader.context_mode, reader.sample_s = context_mode, 0.01
+
+    def frames():
+        return [image for kind, image in told if kind == "viewer_frame"]
+
+    thread, _results = in_hand(reader.run)
+    assert until(lambda: reader.watch is not None and reader.watch.shown is not None)
+    desk.index = 1
+    assert until(lambda: reader.watch.shown is not None and reader.watch.shown.image is desk.pages[1])
+    time.sleep(0.1)  # (the same frame captured again and again meanwhile)
+    assert not [kind for kind, _image in told if kind == "batch_page"]  # (nothing taken yet)
+    assert frames() == ([desk.pages[0], desk.pages[1]] if context_mode else [])  # (each once; page by page: none)
+    reader.stop()
+    thread.join(20)
+
+
 def test_finished_reading_takes_the_page_just_turned(desk, settings):
     reader, pipeline = pagewise(desk, settings)
     thread, _results = in_hand(reader.run)
@@ -433,10 +456,19 @@ class Window:
     _fill_on_show = LiveViewMixin._fill_on_show
     _shows_page = LiveViewMixin._shows_page
     _sharper_than = LiveViewMixin._sharper_than
+    _area_thumb = LiveViewMixin._area_thumb
+    _run_frame = LiveViewMixin._run_frame
+    _show_live = LiveViewMixin._show_live
+    _drew_nothing = LiveViewMixin._drew_nothing
+    _black_open = LiveViewMixin._black_open
     _keep_pace = JobsMixin._keep_pace
+    _badge_due = StatusMixin._badge_due
+    _show_badge = StatusMixin._show_badge
 
     def __init__(self):
         self.canvas = Canvas()
+        self.batch = None
+        self._thumbs = []
         self.last_result = self._live = self._live_thumb = self._fill = self._job_frame = None
         self._chosen_region = self._grip_box = self._scan = None
         self._fill_dirty = False
@@ -465,6 +497,9 @@ class Window:
 
     def _same_page(self, result, live):
         return live is result.original
+
+    def _margins_of(self, image):
+        return (0, 0, 0, 0)
 
     def _lettered(self, result, live):
         return result.image
@@ -497,6 +532,31 @@ def test_the_window_shows_each_page_at_once_fills_it_in_and_takes_the_finished_p
     window._handle_event("batch", {"progress": progress, "result": _result(frame, done), "message": ""})
     assert window._fill is None and window._job_frame is None and window.canvas.busy is None
     assert window._picture()[0] is done
+
+
+def test_while_the_run_reads_the_page_area_follows_the_viewers_frames_as_they_come():
+    window = Window()
+    window.batch = SimpleNamespace(viewer_free=False)  # (the run reads the pages the reader turns)
+    taken, turned = page(0), page(1)
+    window._handle_event("batch_page", {"image": taken})
+    window._handle_event("regions", {"boxes": [(10, 10, 60, 60)], "size": taken.size})
+    assert window._picture()[0] is taken and window.canvas.busy is not None
+    drawn = window.drawn
+    window._handle_event("viewer_frame", {"image": turned})  # the reader turned: on the page at once, not taken yet
+    assert window._picture()[0] is turned and window.drawn == drawn + 1
+    assert window.canvas.busy is None  # (the badge of the page being read is not on another page)
+    window._handle_event("regions", {"boxes": [(10, 10, 60, 60)], "size": taken.size})  # (its reading goes on)
+    assert window._picture()[0] is turned and window.canvas.busy is None
+    window._handle_event("viewer_frame", {"image": taken})  # back on the page being read: filling in, its badge with it
+    assert window._picture()[0] is taken and window.canvas.busy is not None
+    window._handle_event("viewer_frame", {"image": Image.new("RGB", taken.size, "black")})  # a frame of nothing
+    assert window._picture()[0] is taken
+    window.batch.viewer_free = True  # the run translates: the window looks at the viewer itself (`reads_beside`)
+    window._handle_event("viewer_frame", {"image": turned})
+    assert window._picture()[0] is taken
+    window.batch = None
+    window._handle_event("viewer_frame", {"image": turned})  # (one told as the run ended)
+    assert window._picture()[0] is taken
 
 
 def test_a_page_of_the_run_stopped_half_way_leaves_no_fill_behind(tmp_path):
