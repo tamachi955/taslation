@@ -467,7 +467,8 @@ and the page can be edited.
   and "..." where a sentence continues, are shown too. Frames, the selection frame, handles, the rotation handle and the rectangle being dragged are drawn in two-colour lines, a dark line under the coloured one,
   so they show on white pages and black pages alike. Labels such as the speaker are placed, where there is room, where they do not cover a neighbouring region (above, below, then left or right).
   Draw a rectangle around text that was not detected, and it is read, translated
-  and added to the page (later readings and batches use it too). Like shapes in office software, a region is selected with a click, moved by dragging,
+  and added to the page (later readings and batches use it too). On the drawing, only the lettering inside it is erased and the drawing under it filled in (by the inpainting model where it runs, otherwise from the drawing around the strokes);
+  in a bubble or on a flat box, the rectangle is wiped on its paper, and the outline and the drawing beyond it stay. Like shapes in office software, a region is selected with a click, moved by dragging,
   and resized with its handles, and it is read again only when the new frame covers a larger area. Drag the round handle that sticks out from the middle of the selected frame's top edge,
   and the frame rotates around its centre, as a shape in Word does, and is lettered again where you let go (with Shift held, in 15° steps;
   without it, it snaps straight within 3° either side of 0°; the range is up to 89° either way; Esc cancels the drag, and Ctrl+Z takes it back).
