@@ -3,6 +3,38 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.5.0 - 2026-11-20
+
+Installing
+
+* The installer stops at a no to a licence, to Python, to Ollama or to the translation model: nothing is downloaded
+  or installed, and running `install.cmd` again asks again.
+* A download that fails is tried 3 times, 15 seconds apart, and then the installation stops; a server that refuses
+  the download stops it at once. What was already downloaded is kept, and running `install.cmd` again goes on from
+  there.
+* An installation that stopped makes no Start-menu shortcut and says that TASlation is not installed yet, what failed
+  and how to go on (`docs/INSTALL.md`, "If the installation stops").
+
+Lettering
+
+* English is hyphenated by American English patterns (hyph-utf8): a word broken over two lines in a narrow bubble
+  breaks where English breaks it (for-ward, hyphen-ation), not between any two letters.
+
+Translating
+
+* Translating with PLaMo asks less of Ollama: a page's lines are held for the next request as Ollama computed them,
+  so the next request goes on from the last one. On the sample dataset the translation takes 6 to 7 % less time at the
+  same quality.
+* A page whose reading was taken back (a viewer that draws a page soft first) no longer leaves its lines in what the
+  translation model is given as the story so far.
+
+Other
+
+* Messages that asked you to name the book first pointed at a Book field the tool bar no longer has; they now point
+  at the Series field (and the volume beside it), in every language.
+* The spelling check is off by default: its word lists are an optional extra that TASlation does not install. Turned
+  on without them, the region editor says so once and tells you where to turn it off; it no longer asks you to run pip.
+
 ## 0.4.0 - 2026-11-19
 
 Reading
