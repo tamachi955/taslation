@@ -506,14 +506,24 @@ def _keep_stats(tr: Any) -> None:
     tr._chat = counted
 
 
+RECOMPUTED_S = 0.6  # a request whose prompt took the server this long or longer computed most of it again
+
+
 def speed_of(requests: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Requests, tokens and tokens a second (Ollama's own counts) of *requests*."""
+    """Requests, tokens and tokens a second (Ollama's own counts) of *requests*; the time of their prompts and of their
+    answers apart, and the requests whose prompt the server computed (mostly) again (`RECOMPUTED_S`: one that extends
+    the request before takes a tenth of a second or two), with their prompts' time. (Ollama's ``prompt_eval_count`` is
+    the whole prompt, whatever the server took from the request before.)"""
     ev = sum(x.get("eval_count") or 0 for x in requests)
     evd = sum(x.get("eval_duration") or 0 for x in requests) / 1e9
     pe = sum(x.get("prompt_eval_count") or 0 for x in requests)
     ped = sum(x.get("prompt_eval_duration") or 0 for x in requests) / 1e9
+    again = [(x.get("prompt_eval_duration") or 0) / 1e9 for x in requests
+             if (x.get("prompt_eval_duration") or 0) / 1e9 >= RECOMPUTED_S]
     return {"requests": len(requests), "eval_tokens": ev, "eval_tok_per_s": round(ev / evd, 1) if evd else None,
-            "prompt_tokens": pe, "prompt_tok_per_s": round(pe / ped, 1) if ped else None}
+            "prompt_tokens": pe, "prompt_tok_per_s": round(pe / ped, 1) if ped else None,
+            "prompt_s": round(ped, 1), "eval_s": round(evd, 1),
+            "recomputed": {"requests": len(again), "prompt_s": round(sum(again), 1)}}
 
 
 def _loaded(tr: Any, model: str) -> dict[str, Any]:
@@ -632,13 +642,16 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
     pipeline = _eval_pipeline(settings, translator, sheet)
     out = []
     t0 = time.monotonic()
-    for page_items in items:
+    for page, page_items in zip(pages, items):
         regions = []
         for it in page_items:
             bbox, mask, text_box, letter_box, kind = it["geo"]
             regions.append(TextRegion(x0=bbox[0], y0=bbox[1], x1=bbox[2], y1=bbox[3], mask=mask.copy(), text_box=text_box,
                                       kind=kind, source_text=it["text"], status="untranslated", letter_box=letter_box))
-        if regions and pipeline._translate_regions(regions, lambda _m: None):
+        # the page unit's box, as the app hands it over (`Pipeline.process`): the rule of a sentence going on in the
+        # next bubble needs it (without it no line was joined with the next, as none is in the app)
+        if regions and pipeline._translate_regions(regions, lambda _m: None,
+                                                   unit_box=(0, 0, *page_size(page, page_items))):
             stats.requests_failed += 1
         if any(r.status != "translated" for r in regions):
             stats.left_incomplete += 1
@@ -882,6 +895,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="where each line is set: the matched detected region, else the gold box (default); or always the gold box")
     ap.add_argument("--chunk-bubbles", type=int, help="the setting of that name: lines per request in book mode (default: TASlation's)")
     ap.add_argument("--model", help="the Ollama model (default: the one the target language chooses, as the app)")
+    ap.add_argument("--url", help="the Ollama server, on this machine (default: the app's, 127.0.0.1:11434): a "
+                                  "second server of the developer's own, on another port")
     ap.add_argument("--target", choices=("en", "zh"), default="en",
                     help="the target language and the gold translation scored against (zh: Traditional Chinese)")
     ap.add_argument("--detect-model", choices=("auto", "on", "off"), help="the setting of that name (default: TASlation's)")
@@ -918,6 +933,10 @@ def main(argv: list[str] | None = None) -> int:
     s = Settings()
     if args.model:
         s.ollama_model = args.model
+    if args.url:
+        s.ollama_url = args.url
+        s.validate()  # (loopback only)
+        netguard.install(allowed_ports={s.ollama_port})
     if args.chunk_bubbles:
         s.chunk_bubbles = args.chunk_bubbles
     if args.detect_model:

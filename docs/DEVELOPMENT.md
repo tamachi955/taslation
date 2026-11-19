@@ -101,6 +101,12 @@ rows' languages.
   runs.
 * `tools/premises_eval.py` measures the effect of the series sheet on the translations (`tools/premises_eval_set.json`); `--long-sheet 200` measures the entries the premises block cuts, block alone against those entries after the bubbles.
 * `tools/hint_eval.py` measures whether PLaMo 3 Translate follows a region's hint for the model, its kind or its room put in its PFML3 ``context`` block, on lines written for the test (in several wordings, ``bare`` being the one the app sends; against the prompt without a hint; seeds 1 to 3; the answers kept in a JSON file to go on from).
+* `tools/prompt_replay.py` replays OpenMantra's pages through PLaMo's two ways of translating, page by page and the
+  whole-book run, and counts for every request whether its prompt extends the last request's prompt and answer, and
+  where and why it parts from it (the context block, a joined run, a pair changed or gone, the glossary, a cut, a
+  request beside the page, a line asked again), with the tokens that then have to be computed again, numbers only.
+  A stand-in model answers with the gold English (no Ollama, about 30 s); `--answers live --url` asks a server of
+  the developer's own instead and adds Ollama's own counters per reason.
 * `tools/make_icon.py` draws the window's icon with Pillow alone.
 * `tools/strip_demo.py` runs the page strip in the real window with a made-up whole-book run (`tests/fake_strip.FakeRun`)
   and measures the Tk loop's lateness and the strip's memory; no viewer is chosen and no other window is touched.
