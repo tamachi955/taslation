@@ -3,6 +3,32 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.4.0 - 2026-11-19
+
+Reading
+
+* "Reading mode" is now called "Full screen" (Japanese フルスクリーン) on its button, in the help, in the settings and in
+  every language. `taslation gui --full-screen` starts in it, and `--reading` still works.
+* The full screen keeps the role you chose. The Reader role is as before. In the Translator role the page keeps its
+  frames and marks, and the pointer and keys are the Translator's: a click selects a region, a drag moves or resizes it,
+  a double click opens the editor. No click goes to the viewer there, the page keys still turn the viewer's pages, and
+  Auto stays as you set it. Esc first lets go of a selected region, then leaves; F11 always leaves.
+* Starting a whole-book run by its key on the full screen says to leave the full screen first.
+
+Translating
+
+* Chapter labels and the words of a contents page are translated wherever they stand, a contents list row by row.
+* Japanese that was read surely beside digits or Latin letters is translated; before, such a reading was taken for a
+  drawing. A Japanese heading with a subtitle in Latin letters is translated too.
+* A paragraph set across, as on an explanation page, is read and lettered as one region instead of in pieces.
+* Prices, addresses, colophons, a viewer's own panels and a title page's title and author stay as they are.
+
+Other
+
+* The README is short: what TASlation is, its features, what it does not do, installing in three steps and the
+  requirements. The installer's questions and steps are now in `docs/INSTALL.md`, and the legal position, country by
+  country, in `docs/LEGAL.md`.
+
 ## 0.3.0 - 2026-11-19
 
 Lettering
