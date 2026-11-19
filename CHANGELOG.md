@@ -3,6 +3,14 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.6.1 - 2026-11-20
+
+Other
+
+* The README is shorter: it says in one sentence which viewers TASlation works with (every viewer a screenshot can
+  be taken of), and it no longer carries the benchmark's figures, the note on which languages were measured, or the
+  long note under the recording. Nothing in the program changed.
+
 ## 0.6.0 - 2026-11-20
 
 Speed and memory
