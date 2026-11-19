@@ -123,8 +123,9 @@ def test_ollama_down_has_start_translator_again(flow, monkeypatch):
     started = []
 
     class Starter:
-        def __init__(self, url, on_starting=None, state_dir=None, own=()):  # (the window's record and own models)
-            started.append(url)
+        def __init__(self, url, on_starting=None, state_dir=None, own=(), settings=None):  # (the window's record,
+            started.append(url)  # own models and settings)
+            assert settings is flow.settings
 
         def start(self, cancel=None):
             return None

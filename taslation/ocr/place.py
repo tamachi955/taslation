@@ -17,10 +17,11 @@ What the rule measures (`GpuFacts`, `gather`):
   loads one) and this process's (torch's reserved memory and its CUDA context); the rest is other programs';
 * what the translation model needs: /api/ps's ``size`` while it is loaded (``size_vram`` where ``ollama_num_gpu`` puts
   only some layers there on purpose; nothing for "0"), learnt for the session with the runner's own memory that
-  /api/ps leaves out (for a known model no larger than when it was measured, what it was measured to add, below; else
-  `RUNNER_SHARE`); before it is loaded, what it was measured to add to the card's used memory (`KNOWN_TRANSLATORS`,
-  at the context the app asks for); a model of the reader's own that was never seen loaded is not known, and the
-  readers stay on the CPU (`UNKNOWN`) until it has been;
+  /api/ps leaves out (for a known model, what it was measured to add with the server's cache whose /api/ps size is the
+  smallest that holds it, below, which tells the server's cache apart whoever started it; else `RUNNER_SHARE`); before
+  it is loaded, what it was measured to add to the card's used memory (`KNOWN_TRANSLATORS`, at the context the app
+  asks for, with the KV cache type and the window cache the server has: `server_cache`); a model of the reader's own
+  that was never seen loaded is not known, and the readers stay on the CPU (`UNKNOWN`) until it has been;
 * where LaMa runs on the GPU, the tallest screen's height (`tall_screen`): its window grows with the lettering's size
   in pixels, and so with the frames the viewer's window gives (`LAMA_MIB`, `LAMA_TALL_MIB`).
 
@@ -55,6 +56,11 @@ at the release before the translator's second load, and no load keeps them again
 beside the readers kept in 10 loads of 10 (/api/ps 1823 of 1823 MiB); with a page read meanwhile a crop took 43-47 ms
 through the load against 146-226 on the CPU with them let go, and the load 5.0-5.3 s against 5.5-6.5 (once 7.1, the
 first load of a round); alone 4.8-5.1 s kept, 5.1 let go; the readings were those of the CPU.
+
+The Ollama TASlation starts asks the rule once, as it starts (`full_window_placements`, for
+`taslation.ollama_start.server_setup`): where the readers would run with the translation model at its footprint
+without the full-size window cache and with it (130 MiB more for PLaMo with q8_0, 220 with f16); the server gets the
+cache unless only the second puts them on the CPU.
 """
 
 from __future__ import annotations
@@ -97,11 +103,20 @@ LAMA_SCREEN_PX = 1440
 # scaled to 640 px square: 123 MiB while it runs, on every input measured)
 LAYOUT_MIB = 430
 # The translation models whole in video memory, at the context the app asks for (PLaMo its own 8192, the chat model
-# ``ollama_num_ctx``'s default): what loading one with the app's options added to the card's used memory, rounded up
-# (Ollama 0.40, KV cache q8_0; PLaMo 1933 MiB, measured again 2026-11-19). The runner takes it all at the load, KV
-# cache included, and it does not grow, so it is counted as measured: (Ollama name, num_ctx) -> MiB
-KNOWN_TRANSLATORS = {("taslation-plamo3-translate-2b", 8192): 2000, ("qwen3.5:4b", 16384): 4000}
-KNOWN_SIZES = {("taslation-plamo3-translate-2b", 8192): 1824, ("qwen3.5:4b", 16384): 3203}  # /api/ps's size then
+# ``ollama_num_ctx``'s default), by the server's KV cache type (``OLLAMA_KV_CACHE_TYPE``; `DEFAULT_KV` where it is set
+# nowhere) and whether its cache of the windowed layers is full-size (``LLAMA_ARG_SWA_FULL``: `taslation.ollama_start`):
+# what loading one with the app's options added to the card's used memory, rounded up to the next 100 MiB, and
+# /api/ps's size then, rounded up (Ollama 0.40.16, three loads each, the same to 1 MiB, 2026-11-20). PLaMo: 1933 MiB
+# (/api/ps 1823.9) with q8_0, 2065 (1955.5) with q8_0 and the full window, 2009 (1881.4) with f16, 2229 (2101.4) with
+# f16 and the full window. Qwen3.5 4B: 3939 (3203) with q8_0 either way: it has no windowed layers. The runner takes it
+# all at the load, KV cache included, and it does not grow, so it is counted as measured:
+# (Ollama name, num_ctx) -> {(KV cache type, full window): (MiB added, /api/ps MiB)}
+KNOWN_TRANSLATORS: dict[tuple[str, int], dict[tuple[str, bool], tuple[int, int]]] = {
+    ("taslation-plamo3-translate-2b", 8192): {("q8_0", False): (2000, 1824), ("q8_0", True): (2100, 1956),
+                                               ("f16", False): (2100, 1882), ("f16", True): (2300, 2102)},
+    ("qwen3.5:4b", 16384): {("q8_0", False): (4000, 3203), ("q8_0", True): (4000, 3203)},
+}
+DEFAULT_KV = "f16"  # Ollama's KV cache type where OLLAMA_KV_CACHE_TYPE is set nowhere
 RUNNER_SHARE = 1.25  # what the runner adds to /api/ps's size, at most (measured 1.06 and 1.23), for another model
 MARGIN_MIB = 1024  # left free at the peak for other programs that grow (a browser, a video)
 MIN_TOTAL_MIB = 5 * 1024  # a smaller card is the translator's and the page models'
@@ -198,20 +213,98 @@ def decide(settings: Any, ocr: int, failed: str = "", cuda: bool | None = None,
     return judge((facts or gather)(settings), ocr)
 
 
+def readers_need(settings: Any) -> int:
+    """What the readers that go to the GPU need there, in MiB, by the readers installed (`Readers.gpu_mib` once they
+    are loaded)."""
+    from .readers import missing_readers
+
+    return CHARSPOT_MIB + (0 if missing_readers(settings.models_dir) else NAR_MIB)
+
+
+def full_window_placements(settings: Any, kv: str, ocr: int | None = None, cuda: bool | None = None,
+                           facts: Callable[[Any, tuple[str, bool]], GpuFacts | None] | None = None
+                           ) -> tuple[Placement, Placement]:
+    """Where `decide` puts the readers of *settings* (their need *ocr* MiB, `readers_need` when None) with the
+    translation model at its footprint on a server whose KV cache is *kv*: without the full-size window cache, and with
+    it (`taslation.ollama_start.server_setup` asks it once, as it starts the server; "auto" gives the server the cache
+    unless only the second is the CPU). *facts*(settings, (kv, full window)): `gather` when None, on one `snapshot`
+    for both, so that they differ by the translation model's figure alone, and without asking Ollama what it has
+    loaded (the server is about to be started: nothing is, and a server that is not there takes Windows about 2 s
+    to refuse)."""
+    need = readers_need(settings) if ocr is None else ocr
+    if facts is None:
+        memory, own = snapshot()
+
+        def look(s: Any, cache: tuple[str, bool]) -> GpuFacts | None:
+            return gather(s, cache, memory, own, ask=False)
+    else:
+        look = facts
+    return tuple(decide(settings, need, cuda=cuda, facts=lambda s, full=full: look(s, (kv, full)))
+                 for full in (False, True))  # type: ignore[return-value]
+
+
 # ------------------------------------------------------------------ the facts
-_learnt: dict[tuple[str, int, int | None], int] = {}  # translation models seen loaded this session -> MiB they need
+# translation models seen loaded this session -> MiB they need: (name, num_ctx, layers, KV type, full window)
+_learnt: dict[tuple[str, int, int | None, str, bool], int] = {}
 
 
-def gather(settings: Any) -> GpuFacts | None:
+def gather(settings: Any, cache: tuple[str, bool] | None = None, memory: tuple[int, int] | None = None,
+           own: int | None = None, ask: bool = True) -> GpuFacts | None:
     """The facts of the moment for *settings* (see the module's docstring); None when the card's memory cannot be
-    read."""
-    memory = card_memory()
+    read. *cache*: the server's KV cache type and full window to count the translation model with (`server_cache`
+    when None); *memory* and *own*: the card's (total, used) and this process's MiB as `snapshot` read them together
+    (each read now when None); *ask*: False counts the translation model as not loaded, Ollama not asked."""
+    memory = card_memory() if memory is None else memory
     if memory is None:
         return None
     total, used = memory
-    need, now, answered = _translator_need(settings)
+    need, now, answered = _translator_need(settings, cache, ask)
     lama, layout = page_models_on_gpu(settings)
-    return GpuFacts(total, used, own_mib(), need, now, lama, layout, answered, lama and tall_screen())
+    own = own_mib() if own is None else own
+    return GpuFacts(total, used, own, need, now, lama, layout, answered, lama and tall_screen())
+
+
+def snapshot(tries: int = 3) -> tuple[tuple[int, int] | None, int]:
+    """The card's (total, used) memory and this process's own (`own_mib`) read together: this process's read before
+    and after the card, and all of it again while that changed between (a reader or a page model moving to the GPU on
+    another thread meanwhile: the card's used memory and this process's part of it must be of the same moment, or the
+    other programs' share is off by what moved), at most *tries* times."""
+    memory: tuple[int, int] | None = None
+    own = 0
+    for _attempt in range(tries):
+        before = own_mib()
+        memory = card_memory()
+        own = own_mib()
+        if own == before:
+            break
+    return memory, own
+
+
+def server_cache(settings: Any) -> tuple[str, bool]:
+    """The KV cache type and whether the window cache is full-size of the Ollama at the address of *settings*
+    (`taslation.ollama_start.server_cache`: as TASlation started it, else as the variables say)."""
+    from ..ollama_start import server_cache as of
+
+    return of(getattr(settings, "ollama_url", ""), getattr(settings, "state_dir", None))
+
+
+def known_translator(name: str, num_ctx: int, cache: tuple[str, bool]) -> tuple[int, int] | None:
+    """(MiB it adds, /api/ps MiB) measured for the model *name* at *num_ctx* on a server with *cache* (KV type, full
+    window; a KV type not measured counts as `DEFAULT_KV`, then as the model's largest); None for a model not
+    measured."""
+    table = KNOWN_TRANSLATORS.get((name, int(num_ctx)))
+    if not table:
+        return None
+    kv, full = cache
+    return table.get((kv, bool(full))) or table.get((DEFAULT_KV, bool(full))) or max(table.values())
+
+
+def known_for_size(name: str, num_ctx: int, size_mib: int) -> int | None:
+    """What the model *name* at *num_ctx*, loaded with an /api/ps size of *size_mib*, was measured to add: that of the
+    server's cache with the smallest size that holds it (the size tells the caches apart, whoever started the server);
+    None for a model not measured, or larger than every cache measured."""
+    fits = [mib for mib, size in KNOWN_TRANSLATORS.get((name, int(num_ctx)), {}).values() if size_mib <= size]
+    return min(fits) if fits else None
 
 
 def tall_screen() -> bool:
@@ -260,8 +353,11 @@ def translator_need(settings: Any) -> tuple[int | None, int]:
     return need, now
 
 
-def _translator_need(settings: Any) -> tuple[int | None, int, bool]:
-    """`translator_need`, and whether Ollama answered /api/ps (True where nothing was asked of it)."""
+def _translator_need(settings: Any, cache: tuple[str, bool] | None = None,
+                     ask: bool = True) -> tuple[int | None, int, bool]:
+    """`translator_need`, and whether Ollama answered /api/ps (True where nothing was asked of it); the model counted
+    on a server with *cache* (KV type, full window; `server_cache` when None); *ask* False: as not loaded, Ollama not
+    asked."""
     from ..translate import TranslationError
     from ..translate.models import make_translator, wanted_name
     from ..translate.ollama import num_gpu_value
@@ -275,26 +371,29 @@ def _translator_need(settings: Any) -> tuple[int | None, int, bool]:
     try:
         name = wanted_name(settings.ollama_model, settings.target_language)
         translator = make_translator(settings, name)
-        key = (name, int(getattr(translator, "num_ctx", 0) or 0), layers)
+        num_ctx = int(getattr(translator, "num_ctx", 0) or 0)
     except (TranslationError, ValueError, AttributeError):
         return None, 0, True
+    kv, full = server_cache(settings) if cache is None else cache
+    key = (name, num_ctx, layers, str(kv), bool(full))
     answered = True
     try:
-        entry = translator._loaded(name)
+        entry = translator._loaded(name) if ask else None
     except (TranslationError, OSError, ValueError):
         entry, answered = None, False
     if entry and entry.get("size") and entry.get("size_vram") is not None:
         now = int(entry["size_vram"]) // MiB
         need = int(entry["size"]) // MiB if layers is None else now
         # once it is unloaded, the runner's own memory beside what /api/ps counts (in the used memory while it is
-        # loaded, as other programs' there) is counted in: as measured for a known model of the size it had then
-        known = KNOWN_TRANSLATORS.get(key[:2]) if layers is None else None
-        measured = known is not None and need <= KNOWN_SIZES.get(key[:2], 0)
-        _learnt[key] = known if measured else round(need * RUNNER_SHARE)
+        # loaded, as other programs' there) is counted in: as measured for a known model with the server's cache of
+        # the size it had then
+        known = known_for_size(name, num_ctx, need) if layers is None else None
+        _learnt[key] = known if known is not None else round(need * RUNNER_SHARE)
         return need, now, True
     if key in _learnt:
         return _learnt[key], 0, answered
-    return (KNOWN_TRANSLATORS.get(key[:2]) if layers is None else None), 0, answered
+    measured = known_translator(name, num_ctx, (str(kv), bool(full))) if layers is None else None
+    return (measured[0] if measured else None), 0, answered
 
 
 def page_models_on_gpu(settings: Any) -> tuple[bool, bool]:

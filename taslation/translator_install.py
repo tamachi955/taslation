@@ -458,7 +458,7 @@ class Installer:
 
     def __init__(self, language: str, models_dir: Path | str, state_dir: Path | str, url: str | None = None,
                  on_progress: Callable[[dict[str, Any]], None] | None = None, python: str | None = None,
-                 script: Path | None = None, where: str = "window"):
+                 script: Path | None = None, where: str = "window", settings: Any = None):
         self.language = language
         self.models_dir = Path(models_dir)
         self.state_dir = Path(state_dir)
@@ -467,6 +467,7 @@ class Installer:
         self.python = python or _console_python()
         self.script = script or setup_script()
         self.where = where
+        self.settings = settings  # (what the Ollama it may start is given: `ollama_start.server_setup`)
         self._cancel = threading.Event()
         self._proc: subprocess.Popen | None = None
         self.last: dict[str, Any] = {}
@@ -496,7 +497,7 @@ class Installer:
             # would start Ollama's tray app instead, and with it Ollama's start with Windows
             from .ollama_start import OllamaStarter
 
-            OllamaStarter(self.url, state_dir=self.state_dir).start()
+            OllamaStarter(self.url, state_dir=self.state_dir, settings=self.settings).start()
         exe = find_ollama()
         before = listed(exe, self.url) if exe else None
         env = ollama_env(self.url)

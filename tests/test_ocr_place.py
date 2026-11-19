@@ -24,8 +24,8 @@ from taslation.ocr.place import (CHARSPOT_MIB, CONTEXT_MIB, KNOWN_TRANSLATORS, L
                                  NAR_MIB, DeviceModels, GpuFacts, Placement, decide, judge, room_left, through_load)
 
 OCR = CHARSPOT_MIB + NAR_MIB
-PLAMO = KNOWN_TRANSLATORS[("taslation-plamo3-translate-2b", 8192)]
-QWEN = KNOWN_TRANSLATORS[("qwen3.5:4b", 16384)]
+PLAMO = KNOWN_TRANSLATORS[("taslation-plamo3-translate-2b", 8192)][("q8_0", False)][0]  # (the 6 GB card's server)
+QWEN = KNOWN_TRANSLATORS[("qwen3.5:4b", 16384)][("q8_0", False)][0]
 GPU = "NVIDIA Test GPU"
 REAL_GATHER = place.gather  # (taken before conftest's stand-in is put in its place for every test)
 
@@ -142,7 +142,7 @@ def test_the_screen_s_height_is_read_without_a_window(monkeypatch):
 def test_the_facts_ask_the_screen_only_for_lama_on_the_gpu(tmp_path, monkeypatch):
     monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, 1325))
     monkeypatch.setattr(place, "own_mib", lambda: 0)
-    monkeypatch.setattr(place, "_translator_need", lambda s: (PLAMO, 0, True))
+    monkeypatch.setattr(place, "_translator_need", lambda s, cache=None, ask=True: (PLAMO, 0, True))
     asked = []
     monkeypatch.setattr(devices, "screen_height_px", lambda: asked.append(1) or 2160)
     for lama, layout in ((True, True), (False, False)):
@@ -273,10 +273,132 @@ def test_a_known_translator_of_the_size_it_was_measured_at_needs_what_was_measur
     ollama.loaded.clear()
     assert place.translator_need(s) == (PLAMO, 0) == (2000, 0)
     ollama.loaded.add("taslation-plamo3-translate-2b")
-    ollama.size = 1900 * place.MiB  # (another build, larger than measured: its size with the runner's share)
+    ollama.size = 1900 * place.MiB  # (a server with another cache: what that one was measured to add)
     place.translator_need(s)
     ollama.loaded.clear()
-    assert place.translator_need(s) == (round(1900 * place.RUNNER_SHARE), 0)
+    assert place.translator_need(s) == (2100, 0)
+    ollama.loaded.add("taslation-plamo3-translate-2b")
+    ollama.size = 2500 * place.MiB  # (another build, larger than every cache measured: its size, the runner's share)
+    place.translator_need(s)
+    ollama.loaded.clear()
+    assert place.translator_need(s) == (round(2500 * place.RUNNER_SHARE), 0)
+
+
+PLAMO_NAME = "taslation-plamo3-translate-2b"
+# what loading PLaMo added to the card's used memory and /api/ps's size, by the server's KV cache and window cache
+# (Ollama 0.40.16, measured 2026-11-20): (KV type, full window) -> (MiB added, /api/ps bytes)
+MEASURED = {("q8_0", False): (1933, 1912550194), ("q8_0", True): (2065, 2050500853),
+            ("f16", False): (2009, 1972759429), ("f16", True): (2229, 2203446149)}
+
+
+def test_plamo_is_counted_as_measured_for_each_kv_cache_and_window_cache():
+    for cache, (added, size) in MEASURED.items():
+        counted, ps = place.known_translator(PLAMO_NAME, 8192, cache)
+        assert added <= counted < added + 100 and counted % 100 == 0, cache  # (rounded up to the next 100 MiB)
+        assert size // place.MiB < ps and ps - size / place.MiB < 1, cache  # (/api/ps's size, rounded up)
+    assert place.known_translator(PLAMO_NAME, 8192, ("q8_0", False)) == (2000, 1824)  # (today's figure kept)
+    assert place.known_translator(PLAMO_NAME, 8192, ("q4_0", True)) == (2300, 2102)  # (a type not measured: f16's)
+    assert place.known_translator(PLAMO_NAME, 4096, ("q8_0", False)) is None  # (another context: not measured)
+    for cache in MEASURED:
+        assert place.known_translator("qwen3.5:4b", 16384, cache) == (4000, 3203)  # (no windowed layers)
+
+
+@pytest.mark.parametrize("cache", list(MEASURED))
+def test_before_it_loads_plamo_needs_what_it_adds_on_the_server_it_runs_on(tmp_path, monkeypatch, ollama, cache):
+    monkeypatch.setattr(place, "server_cache", lambda settings: cache)
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    assert place.translator_need(s) == (place.known_translator(PLAMO_NAME, 8192, cache)[0], 0)
+    assert place._translator_need(s, ("q8_0", False)) == (2000, 0, True)  # (a cache given: that one's)
+
+
+@pytest.mark.parametrize("cache", list(MEASURED))
+def test_seen_loaded_plamo_is_learnt_by_its_size_whoever_started_the_server(tmp_path, monkeypatch, ollama, cache):
+    """/api/ps's size tells the caches apart: learnt at what that cache was measured to add, not at its size with the
+    runner's largest share (2444 MiB for a full window with q8_0, which moved the 6 GB card's readers to the CPU at
+    1.0 GB of other programs; 2351 for f16 on a larger card), even where the server's cache was guessed otherwise."""
+    for expected in (cache, ("q8_0", False)):
+        place._learnt.clear()
+        monkeypatch.setattr(place, "server_cache", lambda settings, guess=expected: guess)
+        s = _settings(tmp_path, ollama_url=ollama.url)
+        ollama.loaded.add(PLAMO_NAME)
+        ollama.size = MEASURED[cache][1]
+        assert place.translator_need(s) == (MEASURED[cache][1] // place.MiB,) * 2
+        ollama.loaded.clear()
+        need, now = place.translator_need(s)
+        assert now == 0 and need == place.known_translator(PLAMO_NAME, 8192, cache)[0]
+        assert need < round(MEASURED[cache][1] // place.MiB * place.RUNNER_SHARE)
+        assert MEASURED[cache][0] <= need < MEASURED[cache][0] + 100  # neither under nor over what it adds
+
+
+def _band(other, cache, setting="auto", cuda=True, tall=False):
+    """Where the readers go on the 6 GB card (LaMa and the layout model on the GPU) with *other* MiB of other
+    programs, without the full window and with it."""
+    s = Settings(ocr_runs_on=setting)
+
+    def facts(settings, server):
+        assert server[0] == cache
+        return GpuFacts(total=6144, used=other, translator=place.known_translator(PLAMO_NAME, 8192, server)[0],
+                        lama=True, layout=True, tall_screen=tall)
+
+    return place.full_window_placements(s, cache, ocr=OCR, cuda=cuda, facts=facts)
+
+
+def test_the_losing_band_is_where_only_the_window_cache_s_mib_move_the_readers():
+    """On the 6 GB card, a screen up to 1440 px: the readers keep the GPU without the window cache up to 1390 MiB of
+    other programs, with it up to 1290 (q8_0); between the two the window cache would cost them the GPU."""
+    peak = CONTEXT_MIB + LAMA_MIB + place.LAYOUT_MIB + OCR
+    assert 6144 - 1390 - (peak + 2000) == MARGIN_MIB == 6144 - 1290 - (peak + 2100)
+    for other, wanted in ((717, ("gpu", "gpu")), (1024, ("gpu", "gpu")), (1290, ("gpu", "gpu")),
+                          (1291, ("gpu", "cpu")), (1372, ("gpu", "cpu")), (1390, ("gpu", "cpu")),
+                          (1391, ("cpu", "cpu"))):
+        before, after = _band(other, "q8_0")
+        assert (before.device, after.device) == wanted, other
+        assert before.room - after.room == 100
+    before, after = _band(1100, "q8_0", tall=True)  # (a taller screen: LaMa's larger windows)
+    assert (before.device, after.device) == ("gpu", "cpu")
+    before, after = _band(1300, "q8_0", setting="gpu")  # (the place set: the same either way)
+    assert before == after == Placement("gpu", place.SET)
+    before, after = _band(1300, "q8_0", cuda=False)
+    assert before == after == Placement("cpu", place.NO_CUDA)
+
+
+def test_on_an_8_gb_card_the_band_is_far_above_what_other_programs_hold():
+    def facts(settings, server):
+        return GpuFacts(total=8192, used=1340, translator=place.known_translator(PLAMO_NAME, 8192, server)[0],
+                        lama=True, layout=True)
+
+    before, after = place.full_window_placements(Settings(), "f16", ocr=OCR, cuda=True, facts=facts)
+    assert before.device == after.device == "gpu" and before.room - after.room == 200
+
+
+def test_ollama_s_start_asks_the_rule_with_the_facts_of_the_moment(tmp_path, monkeypatch):
+    from taslation import ollama_start
+    from taslation.render import artwork
+
+    asked = []
+    # the card's used memory, and this process's own: the first call only looks whether there is an NVIDIA GPU; then
+    # the readers move to the GPU on another thread while the card is read (own 0, then 500), so it is read again
+    readings = iter([(6144, 1890), (6144, 1390), (6144, 1890), (6144, 1890),
+                     (6144, 1200), (6144, 1200), (6144, 2000)])
+    owns = iter([0, 500, 500, 500, 0, 0, 0])
+
+    def gather(settings, cache=None, memory=None, own=None, ask=True):
+        assert ask is False  # (the server is about to be started: nothing is loaded in it, and it is not asked)
+        asked.append((cache, memory, own))
+        total, used = memory
+        return GpuFacts(total=total, used=used, own=own, translator=place.known_translator(PLAMO_NAME, 8192, cache)[0],
+                        lama=True, layout=True)
+
+    monkeypatch.setattr(place, "gather", gather)
+    monkeypatch.setattr(place, "card_memory", lambda: next(readings))
+    monkeypatch.setattr(place, "own_mib", lambda: next(owns))
+    monkeypatch.setattr(artwork, "_cuda", True)
+    s = _settings(tmp_path)  # (its models folder has no second reader: charspot's 450 MiB alone)
+    assert ollama_start.window_choice(s, "q8_0") == (False, ollama_start.WHY_READERS, (1074, 974))
+    # one snapshot for both, the card and this process's part of it of the same moment: the two differ by the
+    # translation model's figure alone (other programs 1390 MiB either way, not 890 for the second look)
+    assert asked == [(("q8_0", False), (6144, 1890), 500), (("q8_0", True), (6144, 1890), 500)]
+    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1264, 1164))
 
 
 def test_a_model_of_the_reader_s_own_is_not_known_until_seen_loaded(tmp_path, ollama):
@@ -1057,3 +1179,77 @@ def test_the_new_lines_are_in_every_language():
     for key in (system_page.OCR_RUNS_ON_LABEL, system_page.OCR_RUNS_ON_TEXT,
                 *(label for _value, label in system_page.OCR_RUNS_ON_CHOICES)):
         assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+
+
+# ------------------------------------------------------------------ the window cache of the Ollama TASlation starts
+def test_the_system_page_shows_and_saves_the_window_cache(hidden_root, tmp_path, monkeypatch):
+    from taslation import ollama_start
+    from taslation.i18n import set_language
+    from taslation.ui.dialogs import settings as dlg
+    from taslation.ui.dialogs import system_page
+
+    monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
+    in_force = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
+                        config_path=tmp_path / "taslation.toml")
+    got = []
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    assert [v for v, _label in system_page.WINDOW_CACHE_CHOICES] == list(ollama_start.WINDOW_CACHE_VALUES)
+    assert d.system.window_cache.get() == "On, unless the OCR then leaves the GPU"
+    assert d.values()["ollama_window_cache"] == "auto"
+    d.system.window_cache.set("Off")
+    assert d.save() is True and got == [{"ollama_window_cache": "off"}]
+    assert Settings.from_toml(in_force.config_path).ollama_window_cache == "off"
+    d.destroy()
+    set_language("ja")
+    in_force.ollama_window_cache = "on"
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    assert d.system.window_cache.get() == "常に使う" and d.values()["ollama_window_cache"] == "on"
+
+
+def test_the_translator_s_row_says_what_the_server_taslation_started_got(tmp_path, monkeypatch):
+    from taslation import ollama_start
+    from taslation.ollama_start import WHY_NO_GPU, WHY_READERS, WHY_SET, WHY_SETTING, ServerSetup
+
+    s = _settings(tmp_path)
+    translator = SimpleNamespace(model="m", _loaded=lambda model: None)
+    assert devices._translator_device(s, translator, GPU).what == "Ollama: m"  # (an Ollama TASlation did not start)
+    for setup, key in ((ServerSetup("q8_0", True, "256", WHY_NO_GPU), "on"),
+                       (ServerSetup("q8_0", False, "0", WHY_READERS), "readers"),
+                       (ServerSetup("f16", False, "0", WHY_SETTING), "off"),
+                       (ServerSetup("f16", False, "0", WHY_SET), "off")):
+        monkeypatch.setattr(ollama_start, "setup_of", lambda url, state_dir=None, setup=setup: setup)
+        assert devices._translator_device(s, translator, GPU).what == "Ollama: m; " + devices.WINDOW_CACHE_ROWS[key]
+    line = "\n".join(devices.lines(s, translator=translator, cuda=False, gpu=""))  # (`taslation doctor`'s lines)
+    assert devices.WINDOW_CACHE_ROWS["off"] in line
+
+
+def test_the_window_cache_s_lines_are_in_every_language():
+    from taslation.i18n import FEATURE_LANGUAGES
+    from taslation.locales.features import window_cache
+    from taslation.ui.dialogs import system_page
+
+    keys = (system_page.WINDOW_CACHE_LABEL, system_page.WINDOW_CACHE_TEXT,
+            *(label for _value, label in system_page.WINDOW_CACHE_CHOICES), *devices.WINDOW_CACHE_ROWS.values())
+    assert sorted(window_cache.TEXTS) == sorted(keys)
+    for key in keys:
+        assert sorted(window_cache.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
+
+
+def test_at_ollama_s_start_the_rule_does_not_ask_the_server_what_it_has_loaded(tmp_path, monkeypatch, ollama):
+    """The server is about to be started when the rule is asked for its window cache: nothing is loaded in it, and
+    one that is not there takes Windows about 2 s to refuse, twice. The model is counted at its figures, not asked."""
+    from taslation import ollama_start
+    from taslation.render import artwork
+
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    ollama.loaded.add(PLAMO_NAME)  # (were it asked, it would say the model is loaded at 3,000,000,000 bytes)
+    assert place._translator_need(s, ("q8_0", False)) == (3_000_000_000 // place.MiB,) * 2 + (True,)
+    place._learnt.clear()
+    assert place._translator_need(s, ("q8_0", True), ask=False) == (2100, 0, True)
+    monkeypatch.setattr(place, "gather", REAL_GATHER)
+    monkeypatch.setattr(place, "card_memory", lambda: (6144, 1200))
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    monkeypatch.setattr(place, "page_models_on_gpu", lambda settings: (True, True))
+    monkeypatch.setattr(place, "tall_screen", lambda: False)
+    monkeypatch.setattr(artwork, "_cuda", True)
+    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1264, 1164))  # (charspot alone)

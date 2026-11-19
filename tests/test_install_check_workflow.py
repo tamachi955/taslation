@@ -115,6 +115,8 @@ def test_the_steps_run_in_an_order_that_shows_what_the_install_left_running():
     assert "'no process of Ollama is left running after doctor'" in doctor
     held = _step("prompt cache")[1]["run"]
     assert "hold-ollama.py" in held and "Get-ProcessVariable" in held
+    # (a runner has no NVIDIA GPU: "auto" gives the server the full window cache, and the 256 MiB beside it)
+    assert "'LLAMA_ARG_SWA_FULL'" in held and "$_.Value -ne '256' -or $_.Window -ne '1'" in held
     assert "'no process of Ollama is left running'" in held
     translation = _step("Translate a synthetic test page")[1]["run"]
     assert ("'no process of Ollama runs before the translation'" in translation

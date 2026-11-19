@@ -387,7 +387,7 @@ class JobsMixin:
 
         def run() -> None:
             try:
-                failed = OllamaStarter(s.ollama_url, state_dir=s.state_dir, own=own_models(s)).start()
+                failed = OllamaStarter(s.ollama_url, state_dir=s.state_dir, own=own_models(s), settings=s).start()
             except Exception as e:  # noqa: BLE001 - said; the banner stays
                 failed = message_of(f"{type(e).__name__}: {e}")
             self._post("translator_restarted", message=failed)
@@ -419,7 +419,7 @@ class JobsMixin:
         readers = load_readers(s)
         self._ollama = OllamaStarter(s.ollama_url,
                                      lambda: self._post("status", key="Starting the translation program..."),
-                                     state_dir=s.state_dir, own=own_models(s))
+                                     state_dir=s.state_dir, own=own_models(s), settings=s)
         failed = self._ollama.start()
         if failed is not None and failed.code in POPUP_CODES:
             self._post("ollama_failed", message=failed)

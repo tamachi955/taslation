@@ -44,14 +44,15 @@ def main() -> int:
     url = settings.ollama_url
     state: dict = {"url": url, "answered_before": health.ollama_running(url)}
     began = time.monotonic()
-    starter = ollama_start.OllamaStarter(url, state_dir=settings.state_dir, own=ollama_start.own_models(settings))
+    starter = ollama_start.OllamaStarter(url, state_dir=settings.state_dir, own=ollama_start.own_models(settings),
+                                         settings=settings)
     failed = starter.start()
     state.update(start_s=round(time.monotonic() - began, 1), failure=failed.code if failed is not None else None,
                  owned=ollama_start.owns_server())
     record = ollama_start.record_path(settings.state_dir)
     try:
         data = json.loads(record.read_text("utf-8"))
-        state["record"] = {k: data.get(k) for k in ("pid", "exe", "started", "url")}
+        state["record"] = {k: data.get(k) for k in ("pid", "exe", "started", "url", "setup")}
         state["record"]["users"] = len(data.get("users") or [])
     except (OSError, ValueError, AttributeError):
         state["record"] = None

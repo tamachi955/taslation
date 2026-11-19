@@ -169,6 +169,13 @@ class Settings:
     # that the first page to translate does not wait for it; it then goes as ollama_keep_alive says, as after a page.
     # Nothing with ollama_keep_alive "0"; the commands never. False: the first line to translate loads it, as before.
     load_model_at_start: bool = True
+    # The Ollama TASlation starts itself keeps the cache of the translation model's whole window
+    # (``LLAMA_ARG_SWA_FULL``) and 256 MiB of earlier prompts in RAM, so that a request goes on from the last one:
+    # translation about a quarter faster, for 132 MiB more GPU memory with q8_0 (220 with f16). "auto": unless the OCR
+    # readers would leave the GPU for those MiB (`ocr.place`'s rule, asked when Ollama starts); "on" always; "off"
+    # never, as before. A variable set on the computer wins, and an Ollama the person runs is their own setup
+    # (`ollama_start.server_setup`).
+    ollama_window_cache: str = "auto"
     target_language: str = "English"
     # live mode: previous pages passed to the model as context (memory only); PLaMo's earlier pairs instead grow from page
     # to page and are cut back rarely (`translate.base.GrowingContext`: 60, then the newest 20); 0: none for either
@@ -367,6 +374,8 @@ class Settings:
             raise ConfigError("detect_model must be 'auto', 'on' or 'off'")
         if self.ocr_runs_on not in ("auto", "cpu", "gpu"):
             raise ConfigError("ocr_runs_on must be 'auto', 'cpu' or 'gpu'")
+        if self.ollama_window_cache not in ("auto", "off", "on"):
+            raise ConfigError("ollama_window_cache must be 'auto', 'off' or 'on'")
         from .translate.ollama import NUM_GPU_MOST, keep_alive_value, num_gpu_value
 
         try:

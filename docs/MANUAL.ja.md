@@ -1004,6 +1004,9 @@ Ollama の要求の `num_gpu` オプションとして送ります。保存す�
 層の数を指定したときは、モデルが GPU と CPU に分かれていても読み込み直したり知らせたりしません（そう指定したためです）。空欄か 0〜999 の整数以外は保存しません。
 その下の「OCR の実行場所」（`ocr_runs_on`）で、OCR の読み手をどこで動かすかを選べます。「空きがあれば GPU」（既定）、「CPU」、「GPU」の3つです（後述）。
 今どこで動いていてなぜかは、上の OCR の行に出ます。保存すると次のページから使います。
+最後の「翻訳モデルのウィンドウキャッシュ」（`ollama_window_cache`）で、TASlation が起動する Ollama が翻訳モデルのウィンドウ全体のキャッシュを持つかどうかを決めます。
+「OCR が GPU に残るなら使う」（既定）、「使わない」、「常に使う」の3つです（後述）。次に Ollama が起動したときから適用され、いま動いている Ollama が使っているかどうかは、
+上の翻訳の行に出ます（「TASlation が起動（ウィンドウキャッシュあり）」、または「なし」とその理由）。
 
 設定ファイル `taslation.toml` は、`--config` で指定したもの、実行したフォルダの `./taslation.toml`、状態フォルダ（`~/.taslation`、
 または環境変数 `TASLATION_STATE_DIR` の場所）の `taslation.toml` の順に探し、最初に見つかったものを読みます（どれもなければ既定値）。
@@ -1033,6 +1036,7 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 load_model_at_start = true   # the window loads the translation model at start, beside the OCR models; false: the first line to translate does
+ollama_window_cache = "auto" # the Ollama TASlation starts: the cache of the model's whole window, unless the OCR readers would then leave the GPU; "off"; "on"
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
@@ -1124,10 +1128,21 @@ Ollama は、TASlation が使うあいだだけ動きます。翻訳するとき
 止まらなかったときは記録を残し、次に TASlation が終わるときに止めます。TASlation が途中で落ちて Ollama が残ったときは、次に TASlation が使うときに引き継ぎます。
 自分で起動した Ollama（スタートメニューから、または `ollama serve`）は、TASlation が起動したものではないので止めません。
 「翻訳プログラムが起動しませんでした」などの表示でパソコンを再起動するよう勧めるのは、応答しなくなった Ollama を確実に終わらせるためです。再起動のあとは、TASlation が翻訳するときに改めて起動します。
-Ollama は、以前の要求のキャッシュに RAM を最大 8 GB 使います。TASlation が起動する Ollama には、環境変数 `LLAMA_ARG_CACHE_RAM` を渡してこれを切ります。
-TASlation 自身の環境にこの変数がなければ、Windows がこのユーザー（またはこのパソコン）に保存している値を、それもなければ 0 を渡します。
-NVIDIA の GPU のメモリが 6 GB 以下なら、`OLLAMA_KV_CACHE_TYPE` も同じように、保存している値か `q8_0` を渡します。設定されている値は変えません。
-前からある Ollama には、`install.cmd` がこの2つをこの Windows ユーザーの環境変数として設定します（docs/INSTALL.ja.md の「インストール」）。
+TASlation が起動する Ollama には、環境変数を3つ渡します。TASlation 自身の環境にない変数は、Windows がこのユーザー（またはこのパソコン）に保存している値を、
+それもないときだけ TASlation の値を渡します。設定されている値は変えません。
+NVIDIA の GPU のメモリが 6 GB 以下なら、`OLLAMA_KV_CACHE_TYPE` は `q8_0` です（Ollama が GPU のメモリーを節約します）。
+`LLAMA_ARG_SWA_FULL=1` で llama.cpp は翻訳モデルのウィンドウ全体のキャッシュを持ち、要求ごとにプロンプト全体を計算し直さずに前の要求の続きから計算します。
+`LLAMA_ARG_CACHE_RAM=256` で以前の要求 256 MB 分を RAM に置きます（この変数がないと Ollama はそれに最大 8 GB 使います）。
+TASlation の 6 GB の GPU での測定では、この2つで翻訳の時間が約4分の1減り（214 ページの一冊通しで 401 秒が 296 秒、GPU なしで1行 1.28 秒が 0.98 秒）、
+モデルの GPU メモリーは 130 MB 増えました（Ollama 既定の KV キャッシュでは 220 MB）。
+どうするかは設定「翻訳モデルのウィンドウキャッシュ」（`ollama_window_cache`）で決めます。「OCR が GPU に残るなら使う」（既定）では、TASlation が Ollama を起動するたびに、
+ウィンドウキャッシュなしのモデルの大きさとありの大きさで、OCR の読み手がどこで動くか（`ocr_runs_on`、後述）を調べます。その 130 MB だけで読み手が CPU に移ることになるときは、
+ウィンドウキャッシュなし、`LLAMA_ARG_CACHE_RAM=0` で Ollama を起動し、それ以外は両方を渡します（使える GPU がないパソコンや、読み手の場所を「GPU」か「CPU」にしたときも両方です）。
+「使わない」はいつも `LLAMA_ARG_CACHE_RAM=0` だけで、これまでどおりです。「常に使う」はいつも両方です。どうしたかは、Ollama を起動するたびにログに1行出し、
+「システム」ページと `taslation doctor` の翻訳の行にも出ます。
+前からある Ollama には、`install.cmd` が `LLAMA_ARG_CACHE_RAM=0` と、GPU が 6 GB 以下なら `OLLAMA_KV_CACHE_TYPE=q8_0` を、この Windows ユーザーの環境変数として設定します
+（docs/INSTALL.ja.md の「インストール」。自分の Ollama にウィンドウキャッシュを使わせる方法もそこにあります）。Windows がそれを保存しているので、そのパソコンで TASlation が起動する Ollama も
+`LLAMA_ARG_CACHE_RAM=0` になり、RAM の 256 MB なしでウィンドウキャッシュを使います（上の測定で 296 秒の代わりに 317 秒）。
 
 ### 本がなくても試すには
 

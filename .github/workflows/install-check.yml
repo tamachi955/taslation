@@ -349,23 +349,25 @@ jobs:
           Add-LifetimeCheck $step 'no process of Ollama is left running after doctor' (($before -gt 0) -or ($left.Count -eq 0)) (($left | ForEach-Object { "$($_.Name) (pid $($_.Id))" }) -join ', ')
           Complete-Step $step
 
-      - name: The server TASlation starts keeps no prompt cache in RAM
+      - name: The server TASlation starts gets its prompt cache in RAM and the full window cache
         if: ${{ !cancelled() && env.INSTALL_DIR != '' }}
         timeout-minutes: 25
         run: |
           . .github/install-check/checks.ps1
-          $step = 'Prompt cache off'
+          $step = 'Prompt cache and window cache'
           Set-Location -LiteralPath $InstallDir
-          # The install sets nothing for the user: TASlation gives the server it starts LLAMA_ARG_CACHE_RAM=0 itself
-          # (taslation/ollama_start.py, server_env). hold-ollama.py starts Ollama with the installed program's own
-          # starter, loads the translation model in it and holds the server while this step reads the environment of
-          # its processes, llama.cpp's server among them (it runs the model, and reads the variable); then it lets the
-          # product stop the server, as a command does at its end. This step's own environment has no
-          # LLAMA_ARG_CACHE_RAM: nothing here passes it on.
+          # The install sets nothing for the user: TASlation gives the server it starts LLAMA_ARG_CACHE_RAM and
+          # LLAMA_ARG_SWA_FULL itself (taslation/ollama_start.py, server_setup); on this runner, which has no NVIDIA GPU,
+          # ollama_window_cache "auto" gives it the full window cache and 256 MiB of prompt cache. hold-ollama.py starts
+          # Ollama with the installed program's own starter, loads the translation model in it and holds the server
+          # while this step reads the environment of its processes, llama.cpp's server among them (it runs the model,
+          # and reads the variables); then it lets the product stop the server, as a command does at its end. This
+          # step's own environment has neither variable: nothing here passes them on.
           Add-LifetimeCheck $step 'no process of Ollama runs before' (@(Get-OllamaProcesses).Count -eq 0)
           # Ollama's processes: those of its program folder and every process they started, each with its kind (the
           # app in the tray, the server `ollama serve`, or one that runs a model: llama.cpp's server, wherever it is)
-          # and LLAMA_ARG_CACHE_RAM as it sees it ('' for none, $null when it cannot be read).
+          # and LLAMA_ARG_CACHE_RAM and LLAMA_ARG_SWA_FULL as it sees them ('' for none, $null when they cannot be
+          # read).
           function Show-Processes([string]$When) {
               $all = @(Get-CimInstance -ClassName Win32_Process)
               $ours = @($all | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($OllamaHome + '\', [StringComparison]::OrdinalIgnoreCase) })
@@ -382,11 +384,15 @@ jobs:
                   if ($p.Name -ieq 'ollama app.exe') { $kind = 'app' }
                   elseif ($p.Name -ieq 'ollama.exe' -and "$($p.CommandLine)" -match '\sserve(\s|$)') { $kind = 'server' }
                   $value = $null
+                  $window = $null
                   try { $value = Get-ProcessVariable $p.ProcessId 'LLAMA_ARG_CACHE_RAM' } catch { $value = $null }
+                  try { $window = Get-ProcessVariable $p.ProcessId 'LLAMA_ARG_SWA_FULL' } catch { $window = $null }
                   $shown = 'unreadable'
                   if ($null -ne $value) { $shown = $(if ($value) { $value } else { 'not set' }) }
-                  Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown)
-                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Id = $p.ProcessId; Value = $value }
+                  $shownWindow = 'unreadable'
+                  if ($null -ne $window) { $shownWindow = $(if ($window) { $window } else { 'not set' }) }
+                  Write-Host ("  {0} ({1}; pid {2}, started {3:u}): LLAMA_ARG_CACHE_RAM {4}, LLAMA_ARG_SWA_FULL {5}" -f $p.Name, $kind, $p.ProcessId, $p.CreationDate.ToUniversalTime(), $shown, $shownWindow)
+                  [pscustomobject]@{ Name = $p.Name; Kind = $kind; Id = $p.ProcessId; Value = $value; Window = $window }
               }
           }
           $state = Join-Path $CheckDir 'hold-ollama.json'
@@ -422,17 +428,17 @@ jobs:
           if ($held['record']) { $recorded = $held['record']['pid'] }
           Add-LifetimeCheck $step 'the server is the process the record names' (@($servers | Where-Object { $_.Id -eq $recorded }).Count -eq 1) "record: pid $recorded; servers: $(($servers | ForEach-Object { $_.Id }) -join ', ')"
           Add-LifetimeCheck $step 'Ollama''s app does not run (TASlation starts the server itself, never the app)' (@($processes | Where-Object { $_.Kind -eq 'app' }).Count -eq 0)
-          $read = @($servers | Where-Object { $null -ne $_.Value })
+          $read = @($servers | Where-Object { $null -ne $_.Value -and $null -ne $_.Window })
           if ($read.Count -eq 0) {
-              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" $null 'its environment could not be read here'
+              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" $null 'its environment could not be read here'
           } else {
-              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { if ($_.Value) { $_.Value } else { 'not set' } }) -join ', ')
+              Add-Check $step "Ollama's server runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" (@($read | Where-Object { $_.Value -ne '256' -or $_.Window -ne '1' }).Count -eq 0) (($read | ForEach-Object { "$(if ($_.Value) { $_.Value } else { 'not set' }) / $(if ($_.Window) { $_.Window } else { 'not set' })" }) -join ', ')
           }
-          $read = @($processes | Where-Object { $_.Kind -eq 'model' -and $null -ne $_.Value })
+          $read = @($processes | Where-Object { $_.Kind -eq 'model' -and $null -ne $_.Value -and $null -ne $_.Window })
           if ($read.Count -eq 0) {
-              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" $null 'no process of it found, or its environment could not be read'
+              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" $null 'no process of it found, or its environment could not be read'
           } else {
-              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=0" (@($read | Where-Object { $_.Value -ne '0' }).Count -eq 0) (($read | ForEach-Object { "$($_.Name): $(if ($_.Value) { $_.Value } else { 'not set' })" }) -join ', ')
+              Add-Check $step "the model's server (llama.cpp) runs with LLAMA_ARG_CACHE_RAM=256 and LLAMA_ARG_SWA_FULL=1" (@($read | Where-Object { $_.Value -ne '256' -or $_.Window -ne '1' }).Count -eq 0) (($read | ForEach-Object { "$($_.Name): $(if ($_.Value) { $_.Value } else { 'not set' }) / $(if ($_.Window) { $_.Window } else { 'not set' })" }) -join ', ')
           }
           # the product's end: the server it started is stopped, and nothing of Ollama is left
           Set-Content -LiteralPath $release -Value 'done'

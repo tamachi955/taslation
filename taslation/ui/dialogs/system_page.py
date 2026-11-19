@@ -14,7 +14,10 @@ what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM
 at its start (``load_model_at_start``, a checkbox with its line: `load_at_start`, from the next start). Then where the
 OCR readers run (``ocr_runs_on``, `OCR_RUNS_ON_CHOICES`: the GPU when it has room, the processor, the GPU), a list
 with its line (`ocr_runs_on`, from the next page); where they are now and why is the OCR's row in the list above
-(`devices.ocr_device`)."""
+(`devices.ocr_device`). Last, the window cache of the Ollama TASlation starts (``ollama_window_cache``,
+`WINDOW_CACHE_CHOICES`: on unless the OCR then leaves the GPU, off, always on), a list with its line
+(`window_cache`, from Ollama's next start); what the server running now got is in the translator's row above
+(`devices.window_cache_text`)."""
 
 from __future__ import annotations
 
@@ -47,6 +50,15 @@ OCR_RUNS_ON_CHOICES = (("auto", "The GPU when it has room"), ("cpu", "The proces
 OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU while at least 1 GB of it stays free "
                     "beside the translation model and the page models, else the processor; the readings are the same. "
                     "The OCR row above says where they are now. From the next page.")
+# the window cache of the Ollama TASlation starts (``ollama_window_cache``, `taslation.ollama_start.server_setup`); the
+# 16 languages: `locales/features/window_cache.py`
+WINDOW_CACHE_LABEL = "Translator's window cache:"
+WINDOW_CACHE_CHOICES = (("auto", "On, unless the OCR then leaves the GPU"), ("off", "Off"), ("on", "Always on"))
+WINDOW_CACHE_TEXT = ("The Ollama TASlation starts keeps the cache of the translation model's whole window, and 256 MB "
+                     "of earlier requests in RAM, so that each request goes on from the last: translation about a "
+                     "quarter faster, for about 130 MB more GPU memory (220 MB on a GPU of more than 6 GB). The "
+                     "default leaves it off where those MB would move two of the OCR readers to the processor. Not for "
+                     "an Ollama you run yourself. From the next start of Ollama.")
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -135,12 +147,30 @@ class SystemPage(ttk.Frame):
                          foreground=theme.colour("note"))
         line.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(OCR_RUNS_ON_TEXT), name, box)
+        name = ttk.Label(layers, text=_(WINDOW_CACHE_LABEL))
+        name.grid(row=6, column=0, sticky="w", pady=(10, 0))
+        shown = [_(label) for _value, label in WINDOW_CACHE_CHOICES]
+        now = str(getattr(settings, "ollama_window_cache", "auto") or "auto")
+        self.window_cache = tk.StringVar(self, value=next((_(label) for value, label in WINDOW_CACHE_CHOICES
+                                                           if value == now), shown[0]))
+        box = ttk.Combobox(layers, textvariable=self.window_cache, values=shown, state="readonly",
+                           width=max(len(s) for s in shown) + 2)
+        box.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        line = ttk.Label(layers, text=in_lines(_(WINDOW_CACHE_TEXT), width), justify="left",
+                         foreground=theme.colour("note"))
+        line.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(WINDOW_CACHE_TEXT), name, box)
         self.looked = False
 
     def ocr_runs_on_value(self) -> str:
         """Where the OCR list says the readers run, as ``ocr_runs_on`` keeps it ("auto", "cpu", "gpu")."""
         shown = self.ocr_runs_on.get()
         return next((value for value, label in OCR_RUNS_ON_CHOICES if _(label) == shown), OCR_RUNS_ON_CHOICES[0][0])
+
+    def window_cache_value(self) -> str:
+        """What the window cache's list says, as ``ollama_window_cache`` keeps it ("auto", "off", "on")."""
+        shown = self.window_cache.get()
+        return next((value for value, label in WINDOW_CACHE_CHOICES if _(label) == shown), WINDOW_CACHE_CHOICES[0][0])
 
     # ------------------------------------------------------------------ the layers on the GPU
     def num_gpu_value(self) -> str:

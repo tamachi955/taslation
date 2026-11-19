@@ -156,7 +156,8 @@ class ModelSwitchMixin:
         remove = agreed
         state_dir = Path(self.settings.state_dir)
         name = tinstall.shown_name(switch.needed)
-        installer = tinstall.Installer(switch.language, self.settings.models_dir, state_dir, self.settings.ollama_url)
+        installer = tinstall.Installer(switch.language, self.settings.models_dir, state_dir, self.settings.ollama_url,
+                                       settings=self.settings)
         after = None
         if remove and switch.unneeded is not None:
             def after() -> bool:

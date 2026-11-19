@@ -19,8 +19,8 @@ Three pages (a notebook): General, those settings; Shortcuts, the window's keys 
 over `shortcuts.Keymap`, saved into the state folder with the same Save and applied at once by *on_keys*); System,
 what each stage of a page runs on and the seconds a page there (`system_page.SystemPage`, looked at when first
 shown), how many of the translation model's layers Ollama puts on the GPU (``ollama_num_gpu``), whether the window
-loads that model at its start (``load_model_at_start``) and where the OCR readers run (``ocr_runs_on``), saved with
-the others.
+loads that model at its start (``load_model_at_start``), where the OCR readers run (``ocr_runs_on``) and the window
+cache of the Ollama TASlation starts (``ollama_window_cache``), saved with the others.
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
 `Settings` has the key, written and applied like the others. A whole number is one line in `NUMBER_ROWS` (a
@@ -170,11 +170,12 @@ def whole_number(text: str) -> int | str:
 
 SHOWN_ROWS = shown_rows()
 SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
-# (ollama_num_gpu, load_model_at_start and ocr_runs_on: on the System page, `system_page.SystemPage.num_gpu`,
-# `load_at_start` and `ocr_runs_on`)
+# (ollama_num_gpu, load_model_at_start, ocr_runs_on and ollama_window_cache: on the System page,
+# `system_page.SystemPage.num_gpu`, `load_at_start`, `ocr_runs_on` and `window_cache`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
         "theme", "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
-        *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on")
+        *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
+        "ollama_window_cache")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set
 PAGE_SETTINGS = frozenset({*SIZE_KEYS, "text_scale", "uppercase", "slant_text", "detect_model", "art_erase",
@@ -518,6 +519,7 @@ class SettingsDialog(tk.Toplevel):
         out["ollama_num_gpu"] = self.system.num_gpu_value()  # (the System page's box, as typed when it is none)
         out["load_model_at_start"] = bool(self.system.load_at_start.get())
         out["ocr_runs_on"] = self.system.ocr_runs_on_value()
+        out["ollama_window_cache"] = self.system.window_cache_value()
         return out
 
     def number_problem(self, values: dict[str, Any]) -> str | None:

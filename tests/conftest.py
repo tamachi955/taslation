@@ -198,8 +198,11 @@ def classical_unless_asked(request, monkeypatch):
 def no_real_gpu_measured_for_the_ocr(monkeypatch):
     """Where the OCR readers would run is never judged on this machine's GPU or its Ollama: the rule's facts
     (`ocr.place.gather`: NVML, /api/ps) are none, so "auto" keeps them on the CPU wherever torch has CUDA; a test of the
-    rule gives its own facts."""
-    monkeypatch.setattr(place, "gather", lambda settings: None)
+    rule gives its own facts. The translation model is counted as on a server with a q8_0 KV cache and no full-size
+    window cache (`ocr.place.server_cache`: never this machine's variables or its NVML), unless a test says
+    otherwise."""
+    monkeypatch.setattr(place, "gather", lambda settings, cache=None, memory=None, own=None, ask=True: None)
+    monkeypatch.setattr(place, "server_cache", lambda settings: ("q8_0", False))
 
 
 @pytest.fixture(scope="session")

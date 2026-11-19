@@ -13,7 +13,8 @@ _loaded`), which says how much of a loaded model is in video memory and never lo
 * OCR: where the readers are (`ocr.Readers.placement`: charspot and nar on the GPU where it has room for them, else
   on the CPU, and why; CPT on the CPU); without loaded readers (``taslation doctor``), where the rule would put them now
   (`ocr.place.decide`, which asks NVML and /api/ps, as above);
-* translation: Ollama's model on the GPU, the CPU or both, as /api/ps says while it is loaded;
+* translation: Ollama's model on the GPU, the CPU or both, as /api/ps says while it is loaded, and for an Ollama
+  TASlation started, whether it got the window cache (`window_cache_text`, `ollama_start.setup_of`);
 * erasing: the paper fill on the CPU; LaMa on the art where `art_erase` runs it on this computer and it is installed
   (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU too), on the GPU where torch has CUDA."""
 
@@ -308,6 +309,28 @@ def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
     return StageDevice("ocr", "gpu" if on_gpu else "cpu", what, gpu if on_gpu else "")
 
 
+WINDOW_CACHE_ROWS = {  # what the server TASlation started got (`ollama_start.ServerSetup`), in the translator's row
+    "on": "Started by TASlation with the window cache",
+    "readers": "Started by TASlation without the window cache, which would move the OCR readers to the processor",
+    "off": "Started by TASlation without the window cache",
+}
+
+
+def window_cache_text(settings: Any) -> str:
+    """What the Ollama at the address of *settings* got from TASlation, in the window's language (`WINDOW_CACHE_ROWS`;
+    the record in the state folder says it for a server another TASlation started); "" for an Ollama TASlation did not
+    start."""
+    from .ollama_start import WHY_READERS, setup_of
+
+    try:
+        setup = setup_of(settings.ollama_url, getattr(settings, "state_dir", None))
+    except (OSError, ValueError, AttributeError):
+        return ""
+    if setup is None:
+        return ""
+    return _(WINDOW_CACHE_ROWS["on" if setup.full_window else "readers" if setup.why == WHY_READERS else "off"])
+
+
 def _translator_device(settings: Any, translator: Any, gpu: str) -> StageDevice:
     """Where Ollama has the translator's model: all of it in video memory, none, or a part (/api/ps)."""
     from .translate import TranslationError
@@ -322,6 +345,9 @@ def _translator_device(settings: Any, translator: Any, gpu: str) -> StageDevice:
     except (TranslationError, OSError, AttributeError, ValueError):
         return StageDevice("translate", "", _("Ollama"), why=_("Ollama is not answering"))
     what = _("Ollama: {model}").format(model=model) if model else _("Ollama")
+    cache = window_cache_text(settings)
+    if cache:
+        what = f"{what}; {cache}"
     if entry is None:
         return StageDevice("translate", "", what, why=_("Not loaded now: Ollama loads it for the first line"))
     size, vram = entry.get("size"), entry.get("size_vram")

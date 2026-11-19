@@ -71,6 +71,32 @@ and tells you to start Ollama from the Start menu or restart the PC (the setting
 `uninstall.cmd` removes each value the installer set if it still has that value. To undo one by hand, search the Start menu for "environment variables",
 open "Edit environment variables for your account", delete the variable and restart Ollama.
 
+The Ollama TASlation starts also gets the full window cache: `LLAMA_ARG_SWA_FULL=1`, and `LLAMA_ARG_CACHE_RAM=256` instead of `0`
+(the setting "Translator's window cache" in Tools > Settings... > System, `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
+(in TASlation's environment, or kept by Windows for this user or this computer) is passed on as it is.
+With it, llama.cpp keeps the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
+and keeps 256 MB of earlier requests in RAM. By default ("On, unless the OCR then leaves the GPU") TASlation decides each time it starts Ollama:
+it leaves the window cache out when its extra GPU memory would move two of the OCR readers from the GPU to the processor
+(on a 6 GB GPU, only when other programs hold about 1.3 to 1.4 GB of it). "Off" never uses it, "Always on" always does.
+The window and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
+
+For an Ollama you run yourself, neither the installer nor TASlation sets these two variables. To use the window cache there,
+set `LLAMA_ARG_SWA_FULL=1` and `LLAMA_ARG_CACHE_RAM=256` for your account as above and restart Ollama; they apply to every model that Ollama runs.
+What TASlation measured with its translation model (PLaMo 3 Translate 2B, the 214 pages of the OpenMantra dataset, Ollama 0.40.16, an NVIDIA GPU with 6 GB;
+docs/OFFLINE_VERIFICATION.md, "The full-size window cache"):
+
+| | Without (`LLAMA_ARG_CACHE_RAM=0`) | With (`LLAMA_ARG_SWA_FULL=1`, `LLAMA_ARG_CACHE_RAM=256`) |
+|---|---|---|
+| Translating the whole book | 401 s | 296 s |
+| Translating page by page | 412 s | 299 s |
+| Without a GPU, per line | 1.28 s | 0.98 s |
+| GPU memory of the loaded model, `OLLAMA_KV_CACHE_TYPE=q8_0` | 1,933 MB | 2,065 MB |
+| GPU memory of the loaded model, Ollama's default KV cache (f16) | 2,009 MB | 2,229 MB |
+| RAM of the model's server at its peak (whole book) | 2.0 GB | 0.9 GB |
+
+The translations scored the same (chrF 41.18 and 40.99 for the whole book; the difference is within what one run to the next varies).
+For a model with windowed layers and a long context, the full window cache can take much more GPU memory than it does here.
+
 When a download fails, it is tried again after 15 seconds, three times in all (it says what failed, which attempt it was and how long it waits).
 When all three fail, the installation stops. When the publisher's server refused a download or no longer has the file
 (HTTP 401, 403, 404, 410), trying again will not help, so it stops at once and tells you to update TASlation (download its newest copy and run `update.cmd`)

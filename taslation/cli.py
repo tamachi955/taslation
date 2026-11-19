@@ -429,7 +429,7 @@ def start_ollama_for(settings: Settings, translator: Any = None, quiet: bool = F
     from .ollama_start import OllamaStarter, own_models
 
     starter = OllamaStarter(settings.ollama_url, lambda: _note("Starting the translation program..."),
-                            state_dir=settings.state_dir, own=own_models(settings))
+                            state_dir=settings.state_dir, own=own_models(settings), settings=settings)
     failed = starter.start()
     if failed is not None and not quiet:
         _note(failed)

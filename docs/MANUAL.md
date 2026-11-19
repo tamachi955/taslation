@@ -1010,6 +1010,9 @@ It is sent as the `num_gpu` option of Ollama's requests. Once saved, the next re
 With a number of layers set, a model split between the GPU and the processor is neither loaded again nor reported (it was asked for). Anything but empty or a whole number from 0 to 999 is not saved.
 Under that, "OCR runs on" (`ocr_runs_on`) chooses where the OCR readers run: "The GPU when it has room" (the default), "The processor (CPU)" or "The GPU" (see below).
 Where they run now, and why, is in the OCR row above. Once saved, it applies from the next page.
+Last, "Translator's window cache" (`ollama_window_cache`) decides whether the Ollama TASlation starts keeps the cache of the translation model's whole window:
+"On, unless the OCR then leaves the GPU" (the default), "Off" or "Always on" (see below). It applies from the next start of Ollama; the translation's row above
+says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it, and why).
 
 The settings file `taslation.toml` is looked for in this order: the one given with `--config`, `./taslation.toml` in the folder it was run from, and `taslation.toml` in the state folder (`~/.taslation`,
 or the place in the environment variable `TASLATION_STATE_DIR`); the first one found is read (with none, the defaults apply).
@@ -1039,6 +1042,7 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 load_model_at_start = true   # the window loads the translation model at start, beside the OCR models; false: the first line to translate does
+ollama_window_cache = "auto" # the Ollama TASlation starts: the cache of the model's whole window, unless the OCR readers would then leave the GPU; "off"; "on"
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
 ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
@@ -1130,10 +1134,21 @@ it stops that Ollama. It does not stop it while another TASlation still uses it,
 When it does not stop, the record is kept, and it is stopped the next time TASlation ends. When TASlation crashed and left Ollama running, the next TASlation that uses it takes it over.
 An Ollama you started yourself (from the Start menu, or with `ollama serve`) was not started by TASlation, and is never stopped by it.
 When a message such as "The translation program did not start" tells you to restart your PC, that is to end for certain an Ollama that stopped answering. After the restart, TASlation starts it again when it translates.
-Ollama uses up to 8 GB of RAM for a cache of earlier requests. TASlation switches it off for the Ollama it starts by passing the environment variable `LLAMA_ARG_CACHE_RAM`.
-When TASlation's own environment lacks this variable, it passes on the value Windows keeps for this user (or this computer), or 0 when there is none.
-On an NVIDIA GPU with 6 GB of memory or less, it passes `OLLAMA_KV_CACHE_TYPE` the same way: the value Windows keeps, or `q8_0`. A value that is set is never changed.
-For an Ollama that was there before, `install.cmd` sets both as environment variables of this Windows user ("Installation" in docs/INSTALL.md).
+TASlation gives the Ollama it starts three environment variables. When TASlation's own environment lacks one, it passes on the value Windows keeps for this user (or this computer),
+and only when there is none, its own; a value that is set is never changed.
+On an NVIDIA GPU with 6 GB of memory or less, `OLLAMA_KV_CACHE_TYPE` is `q8_0` (Ollama then uses less GPU memory).
+`LLAMA_ARG_SWA_FULL=1` makes llama.cpp keep the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
+and `LLAMA_ARG_CACHE_RAM=256` keeps 256 MB of earlier requests in RAM (without the variable Ollama uses up to 8 GB for them).
+In TASlation's measurements on a 6 GB GPU, translating took about a quarter less time with them (296 s instead of 401 s for a whole book of 214 pages,
+0.98 s instead of 1.28 s a line without a GPU), and the model took 130 MB more GPU memory (220 MB with Ollama's default KV cache).
+The setting "Translator's window cache" (`ollama_window_cache`) decides: with "On, unless the OCR then leaves the GPU" (the default) TASlation looks, each time it starts Ollama,
+where the OCR readers would run (`ocr_runs_on`, below) with the model at its size without the window cache and with it. When only those 130 MB would move them to the processor,
+it starts Ollama without the window cache and with `LLAMA_ARG_CACHE_RAM=0`; otherwise with both (on a computer without a usable GPU, or with the readers' place set to "The GPU" or "The processor", too).
+"Off" always starts it with `LLAMA_ARG_CACHE_RAM=0` alone, as before; "Always on" always with both. What it chose is in the log, one line each time it starts Ollama,
+and in the translation's row of the System page and of `taslation doctor`.
+For an Ollama that was there before, `install.cmd` sets `LLAMA_ARG_CACHE_RAM=0` and, on a GPU of 6 GB or less, `OLLAMA_KV_CACHE_TYPE=q8_0` as environment variables of this Windows user
+("Installation" in docs/INSTALL.md, which also says how to give your own Ollama the window cache). Because Windows keeps them, the Ollama TASlation starts on that computer gets `LLAMA_ARG_CACHE_RAM=0` too: the window cache without the 256 MB in RAM
+(317 s instead of 296 s in the measurement above).
 
 ### Trying it without a book
 
