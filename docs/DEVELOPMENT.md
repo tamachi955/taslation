@@ -164,6 +164,18 @@ rows' languages.
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
   its times are not comparable with runs of earlier versions there.
+* `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
+  window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
+  state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is
+  loaded and a page that is not shown has been translated; then it turns N pages at a set pace and keeps pictures of
+  TASlation's own window, each with its time, in a recording file (`--ollama` another server on this computer,
+  `--package` another checkout of the package, `--label` for each). `render` makes a video of one recording or two
+  side by side at real speed: only a pause between pages may be shortened, and the caption says so; per page a
+  stopwatch from the turn to the last bubble lettered and the count of bubbles lettered, both sides starting each
+  page together; title and end cards; the sample pages' credit on every frame. MP4 (H.264 by Media Foundation through
+  OpenCV, read back to check) or else a GIF of at most 15 MB. `info` prints a recording's pages and times; `sample`
+  renders made-up frames to check the layout. The videos go to `promo/` (listed in `.git/info/exclude`: never
+  committed, never shipped) or another folder git ignores; recordings go to a scratch folder outside the repository.
 
 ## The README and the manual
 
