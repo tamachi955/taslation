@@ -62,6 +62,15 @@ repeats the translation (detection and OCR are computed once); every run is kept
 (``translation.run_results``), with the speed of its requests (Ollama's own counts) and the model's place in GPU
 memory.
 
+``--start-ollama PORT`` measures the server TASlation starts: TASlation's own starter (`cli.start_ollama_for`, as a
+command starts it) starts Ollama on that loopback port, where nothing may answer, with the environment it chooses for
+the settings (``--ollama-window-cache``: the setting of that name), and stops it at the end; the port it starts on is
+set to PORT in this process alone, the server is told it by OLLAMA_HOST in this process's environment (with
+OLLAMA_NOPRUNE, so that a second server leaves the model store it shares as it is), and what the starter chose goes
+into the results (``translation.server_started``). The Ollama on the default port is never touched.
+
+    python tools/openmantra_eval.py --geometry-scan g.pkl --seed 1 --start-ollama 11436 --ollama-window-cache off
+
 The results (numbers, the model, the settings; never text) go to
 ``~/.taslation/datasets/openmantra/results/<date>-<time>.json``. Page images stay in memory (``--scan`` keeps
 regions, masks and the OCR's text, no image). Nothing goes over the
@@ -900,6 +909,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="the Ollama model (default: the one the target language chooses, as the app)")
     ap.add_argument("--url", help="the Ollama server, on this machine (default: the app's, 127.0.0.1:11434): a "
                                   "second server of the developer's own, on another port")
+    ap.add_argument("--start-ollama", type=int, metavar="PORT",
+                    help="TASlation's own starter starts Ollama on this loopback port (where nothing answers) with "
+                         "the environment it chooses, and stops it at the end")
+    ap.add_argument("--ollama-window-cache", choices=("auto", "off", "on"),
+                    help="the setting of that name (default: TASlation's); with --start-ollama")
     ap.add_argument("--target", choices=("en", "zh"), default="en",
                     help="the target language and the gold translation scored against (zh: Traditional Chinese)")
     ap.add_argument("--detect-model", choices=("auto", "on", "off"), help="the setting of that name (default: TASlation's)")
@@ -924,6 +938,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the end-to-end arm needs the OCR (leave out --no-ocr)")
     if args.geometry_scan and (args.scan or "e2e" in arms):
         raise SystemExit("--geometry-scan is for the official arm alone, without --scan")
+    if args.start_ollama and args.url:
+        raise SystemExit("--start-ollama gives the server's address itself: leave out --url")
     scan_path = args.scan or args.geometry_scan
 
     started = datetime.now()
@@ -952,6 +968,8 @@ def main(argv: list[str] | None = None) -> int:
         s.detect_model = args.detect_model
     if args.no_slant:
         s.slant_text = False
+    if args.ollama_window_cache:
+        s.ollama_window_cache = args.ollama_window_cache
     global REFERENCE
     REFERENCE = args.target
     if args.target == "zh":
@@ -959,6 +977,53 @@ def main(argv: list[str] | None = None) -> int:
     s.validate()
     sheets = load_glossary(args.glossary, s.target_language)
     names = load_names(args.names)
+    started_server = start_own_ollama(s, args.start_ollama) if args.start_ollama and not args.no_translate else None
+    try:
+        return _main(args, s, arms, scan_path, started, t_start, groups, pages, sheets, names, started_server)
+    finally:
+        if started_server is not None:
+            from taslation import health, ollama_start
+
+            ollama_start.finish_all()  # (TASlation's own end: the server it started stopped)
+            print(f"the server started on port {args.start_ollama} "
+                  f"{'still answers' if health.ollama_running(s.ollama_url) else 'stopped'}", flush=True)
+
+
+def start_own_ollama(s: Settings, port: int) -> dict[str, Any]:
+    """``--start-ollama``: Ollama started on *port* by TASlation's own starter (see the module's docstring) for the
+    settings *s*, which then name it. What the starter chose (`ollama_start.setup_of`) and how long the start took."""
+    import os
+
+    from taslation import health, ollama_start
+    from taslation.cli import start_ollama_for
+
+    if port == ollama_start.DEFAULT_PORT:
+        raise SystemExit("--start-ollama is a port other than Ollama's default")
+    s.ollama_url = f"http://127.0.0.1:{port}"
+    s.validate()
+    netguard.install(allowed_ports={port})
+    if health.ollama_running(s.ollama_url):
+        raise SystemExit(f"something answers at {s.ollama_url} already: --start-ollama needs a port where nothing does")
+    os.environ["OLLAMA_HOST"] = f"127.0.0.1:{port}"
+    os.environ["OLLAMA_NOPRUNE"] = "1"
+    ollama_start.DEFAULT_PORT = port  # (this process alone: the port its starter starts Ollama on)
+    t0 = time.monotonic()
+    start_ollama_for(s)
+    answered = health.ollama_running(s.ollama_url)
+    setup = ollama_start.setup_of(s.ollama_url, s.state_dir)
+    record = {"port": port, "answered": answered, "start_s": round(time.monotonic() - t0, 1),
+              "setup": setup.to_record() if setup is not None else None,
+              "readers_room_mib": list(setup.rooms) if setup is not None else None}
+    print(f"Ollama started by TASlation on port {port}: {record}", flush=True)
+    if not answered:
+        ollama_start.finish_all()
+        raise SystemExit("the Ollama TASlation started did not answer")
+    return record
+
+
+def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Path | None, started: datetime,
+          t_start: float, groups: dict[str, Any], pages: list[Any], sheets: dict[str, Any], names: Any,
+          started_server: dict[str, Any] | None) -> int:
     from taslation import health
     from taslation.translate.models import choose
 
@@ -1023,6 +1088,8 @@ def main(argv: list[str] | None = None) -> int:
             translation = {"model": model_name, "translator": type(tr).__name__, "ollama": tr.version(),
                            "mode": args.mode, "geometry": args.geometry, "target": args.target, "seed": args.seed,
                            "runs": args.runs, "arms": arms, "sheets": sorted(sheets)}
+            if started_server is not None:
+                translation["server_started"] = started_server
             t0 = time.monotonic()
             log = lambda msg: print(msg, flush=True)  # noqa: E731
             run_records = []

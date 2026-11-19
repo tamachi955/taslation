@@ -5,7 +5,7 @@ part of a release.
     python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,w,x,f,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
-                                [--ocr-runs-on auto|cpu|gpu]
+                                [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
 
 What runs, all on this computer:
 
@@ -27,7 +27,12 @@ What runs, all on this computer:
   (TASLATION_MODELS_DIR) and the default translator through the Ollama on this computer (requests only: it is
   never started, stopped or set up here; what the window loaded it lets go of at its close, and the end checks
   /api/ps). *--canned* (or an Ollama that does not answer or lacks the model) answers from a small server of this
-  tool instead ("Line N.", after a load and an answer time like the real model's), which the report says;
+  tool instead ("Line N.", after a load and an answer time like the real model's), which the report says. With
+  *--start-ollama PORT* the window's own starter starts Ollama instead, on that loopback port where nothing may
+  answer, with the environment it chooses for the window's settings (*--ollama-window-cache*): the port it starts on
+  is set to PORT in this process alone, the server is told it by OLLAMA_HOST in this process's environment (with
+  OLLAMA_NOPRUNE: a second server leaves the model store as it is); at the end what the starter chose goes into the
+  report (``server_started``) and the server is stopped as TASlation's own end stops it;
 * the window sees one window, the stand-in's - found by the process tree this tool started AND the token in its
   title, never by another window's title, which is never read - and the guard (`demo_video.Guard`, keys and
   clicks refused outright): every function that captures, moves, raises or enlarges a window acts on the
@@ -2759,14 +2764,21 @@ def run(args: argparse.Namespace) -> int:
     canned: Canned | None = None
     ps_before: list[str] | None = None
     mode = "canned" if args.canned else "real"
-    if not args.canned:
+    if args.start_ollama:  # the server TASlation starts, on a port of its own (see `parse`)
+        url = f"http://127.0.0.1:{args.start_ollama}"
+        if ollama_get(url, "/api/version") is not None:
+            raise SystemExit(f"something answers at {url} already: --start-ollama needs a port where nothing does")
+        os.environ["OLLAMA_HOST"] = f"127.0.0.1:{args.start_ollama}"
+        os.environ["OLLAMA_NOPRUNE"] = "1"
+        mode, ps_before = "real (the server TASlation starts)", []
+    elif not args.canned:
         tags = ollama_get(url, "/api/tags")
         names_there = [str(m.get("name", "")) for m in (tags or {}).get("models", [])] if isinstance(tags, dict) else []
         if not any(n.split(":")[0] == PLAMO for n in names_there):
             mode = "canned (Ollama did not answer, or has no PLaMo)"
         else:
             ps_before = loaded_models(url)
-    if mode != "real":
+    if not mode.startswith("real"):
         canned = Canned(args.canned_load_s, args.canned_ms)
         url = canned.url
     report["translator"] = mode
@@ -2778,6 +2790,10 @@ def run(args: argparse.Namespace) -> int:
 
     if not Path(taslation.__file__).resolve().is_relative_to(ROOT):
         raise SystemExit(f"taslation comes from {taslation.__file__}, not from {ROOT}: set PYTHONPATH")
+    if args.start_ollama:
+        from taslation import ollama_start
+
+        ollama_start.DEFAULT_PORT = args.start_ollama  # (this process alone: the port its starter starts Ollama on)
     enable_dpi_awareness()
     standin_rect, app_rect = Monitors().places()
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
@@ -2801,11 +2817,31 @@ def run(args: argparse.Namespace) -> int:
             canned.stop()
             report["canned_requests"] = dict(canned.counts)
         closed = browser.close()
+    if args.start_ollama:
+        report["server_started"] = stop_started(url, state)
     report["cleanup"] = cleanup(report, closed, state, standin_dir, mode, url if mode == "real" else "", ps_before)
     path = out / "report.json"
     path.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     print_table(report, path)
     return 0 if not report["run"].get("failed") else 1
+
+
+def stop_started(url: str, state: Path) -> dict[str, Any]:
+    """``--start-ollama``, once the window has closed: what TASlation's starter chose for the server it started
+    (`ollama_start.setup_of`), the models still loaded in it (none: the window let go of its model), and the server
+    stopped as TASlation's own end stops it (`ollama_start.finish_all`; the scratch state still holds its record)."""
+    from taslation import ollama_start
+
+    setup = ollama_start.setup_of(url, state)
+    out: dict[str, Any] = {"setup": setup.to_record() if setup is not None else None,
+                           "readers_room_mib": list(setup.rooms) if setup is not None else None,
+                           "loaded_at_close": loaded_models(url)}
+    mine = [m for m in out["loaded_at_close"] or [] if m.split(":")[0] == PLAMO]
+    if mine:
+        out["unloaded_by_driver"] = [ollama_unload(url, m) for m in mine]
+    out["finish"] = ollama_start.finish_all()
+    out["stopped"] = ollama_get(url, "/api/version") is None
+    return out
 
 
 def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.StandinBrowser, hwnd: int,
@@ -2854,7 +2890,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
                         flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
-                        ocr_runs_on=args.ocr_runs_on)
+                        ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache)
     settings.validate()
     errorlog.setup(settings)
     tap = LogTap(notes)
@@ -3351,6 +3387,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "developer's own on another port, set up otherwise, is never started or stopped here)")
     ap.add_argument("--ocr-runs-on", default="auto", choices=("auto", "cpu", "gpu"),
                     help="the setting ocr_runs_on of the window (default: the app's, auto)")
+    ap.add_argument("--start-ollama", type=int, metavar="PORT",
+                    help="the window's own starter starts Ollama on this loopback port, where nothing answers (instead "
+                         "of --ollama-url), with the environment it chooses; stopped at the end")
+    ap.add_argument("--ollama-window-cache", default="auto", choices=("auto", "off", "on"),
+                    help="the setting ollama_window_cache of the window (default: the app's, auto)")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
     ap.add_argument("--browser", default="auto", choices=("auto", "chrome", "edge"))

@@ -2942,3 +2942,152 @@ The format has no place for a line's own reference after the earlier pairs, so n
 in), the translator role with speakers, a request beside a page in a run (the official arm asks none; the tests show
 its prompt extends the page's last one), a computer without a GPU (where a whole prompt takes 10 to 13 s), and the
 server's options in a run of the app.
+
+## The full-size window cache (2026-11-20)
+
+PLaMo 3 Translate 2B has 24 layers, 21 of them with a sliding window of 2,048 tokens. llama.cpp's server, which runs
+the model inside Ollama, keeps those layers' cache at 3,072 cells and, to go back in a prompt, saves "context
+checkpoints" of it; a request that extends the last one still goes back to the newest checkpoint, and one that parts
+from it further back than the checkpoints reach is computed from its start ("What a PLaMo request costs the server"
+above). With `LLAMA_ARG_SWA_FULL=1` the server keeps the windowed layers' cache full-size and needs no checkpoints:
+each request computes only what the last one did not hold. The Ollama TASlation starts now gets it, with
+`LLAMA_ARG_CACHE_RAM=256` instead of `0`, unless the extra GPU memory would move the OCR readers off the GPU
+(`taslation/ollama_start.py`, `server_setup`; the setting `ollama_window_cache`).
+
+**How it was measured.** The development machine (Intel Core i7-9700F, 48 GB, GeForce GTX 1660 Ti 6 GB, Ollama
+0.40.16, PLaMo 3 Translate 2B Q4_K_M, context 8192), with nothing of the owner's loaded in the Ollama on 11434 before
+or after any run. First a second server of the developer's own on 127.0.0.1:11435, the variables under test in its
+environment only (the configurations below), `OLLAMA_KV_CACHE_TYPE=q8_0` as this machine has it unless a row says f16;
+then the path a person gets: `tools/openmantra_eval.py --start-ollama 11436` and `tools/standin_e2e.py --start-ollama
+11436`, where TASlation's own starter starts Ollama on a spare port with the environment it chooses and stops it at
+the end, the environment of the server and of llama.cpp's server read back from their processes (the install check's
+reader of a process's environment block). OpenMantra, the official arm (the gold Japanese in the gold order, every
+line set where the detection put it: one geometry scan for every run), seed 1, all 214 pages, 1,586 lines; the
+server's memory sampled every 0.5 s (the card's used memory by NVML, llama.cpp's server's working set and commit by
+the system's own counters); chrF's difference paired by series (`tools/compare_runs.py`).
+
+| configuration | `LLAMA_ARG_SWA_FULL` | `LLAMA_ARG_CACHE_RAM` | KV cache |
+|---|---|---|---|
+| C0 (TASlation until now) | - | 0 | q8_0 |
+| C1 | 1 | 0 | q8_0 |
+| C2-256 (what the Ollama TASlation starts now gets) | 1 | 256 | q8_0 |
+| C2-1024 | 1 | 1024 | q8_0 |
+| C0-256 | - | 256 | q8_0 |
+| F0, F2-256 (a GPU of more than 6 GB: Ollama's own KV cache) | -, 1 | 0, 256 | f16 |
+
+**On a server of the developer's own.** Translation seconds (the official arm's whole pass), the prompts' and the
+answers' time by Ollama's own counters, the requests computed from their start (the eval's count, and their prompt
+seconds), chrF and its difference from C0 of the same mode (95 % interval), the lines no request translated:
+
+| run | translation s | prompts s | answers s | computed from the start | chrF | difference from C0 | untranslated |
+|---|---|---|---|---|---|---|---|
+| C0, whole book | 400.6 | 264.5 | 93.8 | 59, 91.0 s | 41.18 | | 0 |
+| C0-256, whole book | 397.9 | 262.1 | 93.7 | 59, 89.0 s | 41.19 | +0.01 [0.00, +0.04] | 0 |
+| C1, whole book | 317.4 | 181.5 | 93.8 | 51, 78.3 s | 41.09 | -0.08 [-0.31, +0.14] | 0 |
+| C2-256, whole book | 296.3 | 160.4 | 93.4 | 47, 55.6 s | 40.99 | -0.18 [-0.55, +0.24] | 0 |
+| C2-1024, whole book | 294.4 | 159.7 | 92.8 | 47, 55.4 s | 40.99 | -0.18 [-0.55, +0.24] | 0 |
+| F0 (f16), whole book | 415.8 | 280.6 | 93.5 | 61, 92.9 s | 41.06 | | 0 |
+| F2-256 (f16), whole book | 294.8 | 158.1 | 93.9 | 47, 55.9 s | 40.89 | -0.17 [-0.60, +0.22] from F0 | 0 |
+| C0, page by page | 412.2 | 278.9 | 92.5 | 66, 109.4 s | 41.40 | | 0 |
+| C1, page by page | 351.3 | 216.4 | 93.5 | 64, 115.0 s | 41.56 | +0.16 [-0.13, +0.46] | 0 |
+| C2-256, page by page | 299.3 | 161.2 | 94.2 | 43, 52.8 s | 41.22 | -0.19 [-0.45, +0.16] | 0 |
+
+The answers take the same time in every row: the full window cache saves prompt time only, and C2-256 takes 26 %
+(whole book) and 27 % (page by page) off the translation. The RAM cache alone does nothing (C0-256); with the full
+window it gives back the state before a request whose ``context`` differs (the requests computed from the start fall
+from 51 to 47 and their time from 78 to 56 s), and 1,024 MiB gain nothing over 256. Between 203 and 215 of the 1,586
+lines changed their wording (a request computed on another cache, the same seed); every difference from C0 is within
+what one run to the next varies.
+
+Without a GPU (a server that sees none: `CUDA_VISIBLE_DEVICES=-1` and its kin; one series, 4 pages, 29 lines, page by
+page; C0 twice): 37.1 and 37.5 s (1.28 s a line), C1 32.5 s (1.12), C2-256 28.3 s (0.98 s a line, 24 % less); the
+server's working set 2.39 GB, 2.29 GB and 2.29 GB at its peak. The chrF of 29 lines of one series (39.87, 42.65,
+42.60) says nothing either way.
+
+**What the model takes.** Loaded alone by one short request, nothing else on the server, PLaMo added to the card's
+used memory and `/api/ps` gave:
+
+| KV cache, window | added to the card (MiB) | `/api/ps` size (bytes) | `place.KNOWN_TRANSLATORS` (MiB added, `/api/ps` MiB) |
+|---|---|---|---|
+| q8_0, checkpoints (C0) | 1,933 | 1,912,550,194 | 2000, 1824 |
+| q8_0, full window (C1, C2) | 2,065 | 2,050,500,853 | 2100, 1956 |
+| f16, checkpoints (F0) | 2,009 | 1,972,759,429 | 2100, 1882 |
+| f16, full window (F2) | 2,229 | 2,203,446,149 | 2300, 2102 |
+
+Qwen 3.5 4B (the translator for Brazilian Portuguese and Turkish) has no windowed layers: 3,939 MiB with and without
+`LLAMA_ARG_SWA_FULL`. llama.cpp's server held at its peak (working set / commit, whole book): C0 1,986 / 4,091 MB (the
+checkpoints are kept in RAM), C1 684 / 2,924, C2-256 937 / 3,172, C2-1024 1,706 / 3,940, F2-256 931 / 3,324.
+
+**Where the OCR readers go.** `taslation.ocr.place` puts two of the three readers on the GPU when the room left at
+TASlation's peak - the card, less what other programs hold, less the CUDA context (120 MiB), the translation model,
+LaMa (680 MiB; 970 on a screen taller than 1,440 px), the layout model (430) and the readers (500) - is 1,024 MiB or
+more. Until now it counted PLaMo at 2,000 MiB before it was seen loaded and, once seen, at its `/api/ps` size times
+1.25: 2,280 MiB with checkpoints, but 2,444 with the full window (and 2,351 for f16 with checkpoints on a larger
+card), more than the 2,065 and 2,009 it adds. So it now counts the figure measured for the server's KV cache and
+window (`known_translator`; a KV type not measured as f16), and a model seen loaded at the smallest of those figures
+whose `/api/ps` size holds it (`known_for_size`; a model larger than every one, as before). Where the readers go on a
+6 GB card, by what other programs hold:
+
+| other programs (MiB), screen up to 1,440 px | 717 | 1,024 | 1,290 | 1,291 to 1,390 | 1,391 |
+|---|---|---|---|---|---|
+| without the window cache (2,000 counted) | GPU | GPU | GPU | GPU | CPU |
+| with it (2,100 counted) | GPU | GPU | GPU | CPU | CPU |
+| with it as the old count learnt it (2,444) | GPU | CPU | CPU | CPU | CPU |
+
+On a taller screen the band is 1,001 to 1,100 MiB; on an 8 GB card with f16, about 3,140 to 3,340 MiB, which other
+programs do not hold here. The rule's "auto" for the window cache (`ollama_start.window_choice`) asks the placing rule
+once as it starts the server, both ways on one snapshot of the card, and leaves the window cache out only in the band.
+Two readers on the processor cost 0.66 to 0.73 s a page here (40 pages, the readers alone).
+
+**The path a person gets.** `tools/openmantra_eval.py --start-ollama 11436`, with `ollama_window_cache` "off" and with
+the default: TASlation's starter started Ollama, chose its environment, logged it, and stopped the server at the end
+(no process left, the record gone). What the server and llama.cpp's server got, read back from their processes:
+`LLAMA_ARG_CACHE_RAM=0` and no `LLAMA_ARG_SWA_FULL` with "off"; `LLAMA_ARG_SWA_FULL=1` and `LLAMA_ARG_CACHE_RAM=256`
+with the default; `OLLAMA_KV_CACHE_TYPE=q8_0` (this user's own) in both. Other programs held 1,247 to 1,258 MiB of the
+card when the server started, so the default's rule found the readers' room 1,174 and 1,074 MiB (whole book), 1,156
+and 1,056 MiB (page by page) without and with the window cache: on the GPU either way ("the OCR readers run in the
+same place either way"), and the window cache on.
+
+| run | translation s | prompts s | answers s | computed from the start | chrF | difference from "off" | untranslated | server's peak, working set / commit (MB) | card's used memory at most (MiB) |
+|---|---|---|---|---|---|---|---|---|---|
+| "off", whole book | 399.8 | 264.7 | 93.5 | 61, 92.6 s | 41.18 | | 0 | 1,986 / 4,090 | 3,205 |
+| default, whole book | 295.6 | 160.9 | 93.7 | 47, 56.1 s | 40.99 | -0.18 [-0.55, +0.24] | 0 | 939 / 3,170 | 3,332 |
+| "off", page by page | 412.6 | 279.4 | 92.4 | 65, 109.3 s | 41.40 | | 0 | 1,894 / 3,999 | 3,193 |
+| default, page by page | 293.6 | 160.5 | 93.0 | 43, 52.6 s | 41.22 | -0.19 [-0.45, +0.16] | 0 | 939 / 3,173 | 3,323 |
+
+26.1 % and 28.8 % less time, the same scores as on the server of the developer's own (every request is the same with
+the same seed), 203 and 209 lines worded otherwise. The start of Ollama took 4.4 s with "off" and 10.3 s with the
+default (below).
+
+**The window on the stand-in viewer.** `tools/standin_e2e.py --start-ollama 11436`, scenario a (slow reading: 9 turns
+6 to 8 s apart), twice for each setting, where the window's own starter starts Ollama at the window's start, beside
+the OCR models' load. Other programs held 1,235 to 1,250 MiB of the card before the stand-in's browser opened, which
+holds some of it too: here the rule found the readers' room 1,063 and 963 MiB, then 1,058 and 958 MiB, without and
+with the window cache, so in this setting this computer is in the band. The first bubble is from the stand-in's sharp
+frame to the first lettered bubble of the page; "finished in time" counts the pages lettered in full before the next
+turn, of 18, and their median time.
+
+| `ollama_window_cache`, `ocr_runs_on` | what the starter chose | where the readers read (each run) | first bubble, median (range), ms | finished in time, median ms | card's used memory at most (MiB) |
+|---|---|---|---|---|---|
+| default ("auto"), "auto" | no window cache: with it the readers would leave the GPU | GPU, GPU | 1,668 (1,138 to 3,172) | 9, 5,421 | 4,512, 4,522 |
+| "off", "auto" | no window cache | CPU, GPU | 2,035 (1,205 to 3,572) | 6, 5,242 | 4,021, 4,523 |
+| "on", "auto" | the window cache | CPU, CPU | 2,481 (1,689 to 3,521) | 9, 5,570 | 4,291, 4,296 |
+| default, "gpu" | the window cache (the readers' place is set) | GPU, GPU | 1,346 (1,039 to 3,023) | 16, 5,375 | 4,649, 4,646 |
+| "off", "gpu" | no window cache | GPU, GPU | 1,641 (1,117 to 3,125) | 10, 5,530 | 4,503, 4,514 |
+
+Here the rule kept the settings of before, and the window was as fast as with "off" while its readers held the GPU
+(1.67 against 1.64 s); with the window cache forced on, the readers read on the processor from the start (2.48 s).
+Where the readers' place does not hang on it (set to the GPU: what a computer outside the band gets), the window cache
+took the first bubble from 1.64 to 1.35 s and finished 16 pages of 18 before the next turn instead of 10, for about
+140 MiB more of the card at its peak (1,495 MiB were left). In one of the two "off" runs the readers found no room at
+the window's start either: other programs at the edge of the margin (the browser's share of the card moves by tens of
+MiB). Each run stopped the server it started, with no model left loaded in it.
+
+Two faults of the first version of the change were found on this path and mended. Before the runs above: the two
+looks of the rule each read this process's own part of the card anew while the readers moved to the GPU on the
+start's other thread (1,063 and 1,463 MiB in one run: the window cache came on, and the readers then left the GPU at
+the model's load, 2.67 s to the first bubble); they now share one `place.snapshot`, the card and this process's part
+of it read together. After them: each look asked the server about to be started what it had loaded, which Windows
+takes about 2 s to refuse, so the start of Ollama took 10.3 s in the benchmark instead of 4.4 s with "off"; the
+start's looks no longer ask (the same choice; 6.5 s, of which about 2 s are torch's import in a process that had not
+loaded it). The times above are of the translation and of the turns, after the start.
