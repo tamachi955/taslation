@@ -122,7 +122,7 @@ def test_the_translator_role_names_the_key_and_a_reader_sees_the_page_turn(hidde
 
 
 class Reading(tk.Toplevel):
-    """Reading mode in and out on a withdrawn window of the hidden root (full screen and alpha are only recorded)."""
+    """The full screen in and out on a withdrawn window of the hidden root (full screen and alpha are only recorded)."""
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     enter_reading = app_mod.App.enter_reading
@@ -303,7 +303,7 @@ def test_set_area_is_offered_first_where_the_browsers_tabs_would_be_read(hidden_
     w.enter_reading()
     _buttons(w._area_offer)["Set area..."].invoke()
     assert chosen == [(0, 0, 0, 0)] and w._manual_area and tuple(w.settings.margins) == (295, 85, 295, 0)
-    assert w.reading  # then the reading window, once the area is set
+    assert w.reading  # then the full screen, once the area is set
     w.leave_reading()
     w = Reading(hidden_root)
     w.enter_reading()

@@ -97,7 +97,7 @@ def test_a_soft_picture_is_told_from_the_sharp_one_though_their_thumbnails_are_a
 
 def test_who_is_in_front():
     own = os.getpid()
-    assert capture.front_owner(own, (5, 5, 5), own, viewer=7) == "own"  # the window, the reading window, a dialog
+    assert capture.front_owner(own, (5, 5, 5), own, viewer=7) == "own"  # the window, the full screen, a dialog
     assert capture.front_owner(99, (7, 7, 7), own, viewer=7) == "viewer"
     assert capture.front_owner(99, (8, 8, 7), own, viewer=7) == "viewer"  # a popup the viewer's window owns
     assert capture.front_owner(99, (9, 9, 9), own, viewer=7) == "other"  # another window of the same browser too
@@ -248,7 +248,7 @@ WINDOW_PARTS = {name: value for part in (jobs.JobsMixin, status.StatusMixin) for
 
 
 class Window(BlackViewerMixin):
-    """The App's live view, reading mode's keys, the status line and the requests, borrowed; the viewer, the
+    """The App's live view, the full screen's keys, the status line and the requests, borrowed; the viewer, the
     clock and Windows' notes are the test's."""
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
@@ -464,7 +464,7 @@ def test_nothing_while_neither_is_in_front_and_one_look_when_one_comes_back(setu
 def test_over_the_book_a_click_on_the_window_leaves_the_viewer_in_front_and_its_turns_followed(setup, monkeypatch):
     """Over a full-screen viewer the window never takes the foreground, but a click on it (Finished reading, the page
     strip) gives Windows' note that it came to the front, and no note follows: who is in front is what Windows says
-    now, and the pages turned in the viewer are followed - in reading mode too."""
+    now, and the pages turned in the viewer are followed - on the full screen too."""
     v = setup.viewer
     monkeypatch.setattr(live, "foreground_window", lambda: BROWSER)  # the viewer keeps the foreground throughout
     for reading_mode in (False, True):
@@ -1488,7 +1488,7 @@ def test_every_press_is_one_key_to_the_viewer_and_one_page(setup, monkeypatch, w
     """Presses of the reader, some quick after the one before (0.15 s, 0.3 s), some after a while: the viewer gets
     each of them once - a browser pressed for real, a desktop viewer known to take posted keys posted, one known to
     take only real presses pressed for real - and turns one page for each; no key goes that the reader did not press.
-    So between pages (idle), while the page is translated (busy: the job never ends), in reading mode and in the
+    So between pages (idle), while the page is translated (busy: the job never ends), on the full screen and in the
     Translator role."""
     from taslation.capture import windows as W
 

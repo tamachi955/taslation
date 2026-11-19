@@ -594,7 +594,7 @@ def test_reading_mode_refuses_a_queued_batch():
             self.said.append(key)
 
         def _enlarge_first(self, then):
-            raise AssertionError("the reading window must not start")
+            raise AssertionError("the full screen must not start")
 
     w = Entering()
     w.enter_reading()

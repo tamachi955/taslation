@@ -1,4 +1,4 @@
-"""The window's page canvas: the busy badge, reading mode's capture and crop, the offline guard's warning, the
+"""The window's page canvas: the busy badge, the full screen's capture and crop, the offline guard's warning, the
 area dialog's handles. Parts of the App are borrowed onto small stand-ins on the shared hidden root."""
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class Window(BlackViewerMixin):
     _window_size = app_mod.App._window_size
     _blank_lasted = app_mod.App._blank_lasted
 
-    """The parts of the App that the worker's events, the busy band, reading mode and the guard use."""
+    """The parts of the App that the worker's events, the busy band, the full screen and the guard use."""
 
     _handle_event = app_mod.App._handle_event
     _go_busy = app_mod.App._go_busy

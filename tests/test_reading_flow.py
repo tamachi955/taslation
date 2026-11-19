@@ -35,7 +35,7 @@ def _bound(widget, sequence):
 # ------------------------------------------------------------------ the close button at the top edge
 def test_the_close_button_shows_at_the_top_edge_and_goes_further_down(hidden_root):
     w = _reading(hidden_root)
-    w._top_edge_moved(SimpleNamespace(y=0))  # not in reading mode: nothing
+    w._top_edge_moved(SimpleNamespace(y=0))  # not on the full screen: nothing
     assert getattr(w, "_close_button", None) is None
     w.enter_reading()
     w._top_edge_moved(SimpleNamespace(y=TOP_EDGE_PX + 40))  # on the page: nothing yet
@@ -57,7 +57,7 @@ def test_the_close_button_shows_at_the_top_edge_and_goes_further_down(hidden_roo
     assert not button.place_info()
     w._top_edge_moved(SimpleNamespace(y=0))
     w.leave_reading()
-    assert not button.place_info()  # out of reading mode with it
+    assert not button.place_info()  # off the full screen with it
 
 
 def test_a_click_on_the_close_button_leaves_reading_mode_and_the_pages_pointer_handling_stays(hidden_root):
@@ -189,7 +189,7 @@ def test_a_run_with_auto_off_before_says_nothing_of_it(hidden_root, tmp_path, de
     assert w.status_var.get() == "Whole-book run starting..." and not getattr(w, "_run_auto_told", False)
 
 
-# ------------------------------------------------------------------ a book with no name read in reading mode
+# ------------------------------------------------------------------ a book with no name read on the full screen
 def _read_in_reading_mode(flow, pages=2):
     flow.reading = True
     asked = len(flow.dialogs)
@@ -221,7 +221,7 @@ def test_leaving_reading_mode_asks_once_for_the_name_of_a_book_kept_nowhere(flow
 def test_nothing_is_asked_when_the_book_has_a_name_or_nothing_was_read(flow, monkeypatch):
     monkeypatch.setattr(type(flow), "_ask_name_after_reading", A._ask_name_after_reading, raising=False)
     flow.after_idle = lambda func: func()
-    flow._ask_name_after_reading()  # nothing read in reading mode
+    flow._ask_name_after_reading()  # nothing read on the full screen
     assert flow.dialogs == []
     _read_in_reading_mode(flow)
     flow.book_var.set("Star Road 1")  # named meanwhile

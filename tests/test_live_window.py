@@ -413,7 +413,7 @@ def test_the_status_bar_names_the_stage_in_the_windows_language(hidden_root, vie
 
 
 class Said(Window):
-    """The window with its own status line (`status`), the reading window's note on the page included."""
+    """The window with its own status line (`status`), the full screen's note on the page included."""
 
     status = app_mod.App.status
     _note_ms = app_mod.App._note_ms
@@ -548,7 +548,7 @@ def test_a_viewer_hidden_behind_taslation_keeps_the_last_good_frame(hidden_root,
     w._tick()
     assert viewer.asked[-1] is True and w._live is not viewer.frame  # a blank frame is neither shown nor kept
     w._black_watch = None  # (black: the heartbeat follows that now, `test_black_viewer`)
-    w.reading = True  # behind the reading window: as before, a message instead of the picture
+    w.reading = True  # behind the full screen: as before, a message instead of the picture
     w._tick()
     assert viewer.asked[-1] is False and w._viewer_hidden
 

@@ -1,5 +1,5 @@
 """The window's layout and its place on the screen: the toolbar that flows into rows in every language, one place for
-every command, comboboxes as wide as their entries, the target languages in the window's language, the status line said again after a language switch, reading mode giving the window back
+every command, comboboxes as wide as their entries, the target languages in the window's language, the status line said again after a language switch, the full screen giving the window back
 its size and place, the page panel found in the viewer's frames, the hint on an empty canvas, readable labels and
 handles, the Caches, notice, passphrase and region dialogs, the icon. Parts of the App are borrowed onto stand-ins
 on the shared hidden root (never mapped)."""
@@ -350,7 +350,7 @@ def test_reading_mode_gives_the_window_back_its_size_and_place_after_tks_own_res
 
 
 class Reading(tk.Toplevel):
-    """Reading mode in and out on a withdrawn window of the hidden root (full screen is only recorded)."""
+    """The full screen in and out on a withdrawn window of the hidden root (full screen is only recorded)."""
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     enter_reading = app_mod.App.enter_reading
@@ -438,7 +438,7 @@ def test_leaving_reading_mode_puts_back_the_place_and_the_normal_status(hidden_r
         assert w.status_var.get() == "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it."
         w.leave_reading()
         assert not w.reading and w.attrs["-fullscreen"] is False and str(w.cget("menu")) == str(w.menubar)
-        assert w.status_var.get() == "Viewer: " + VIEWER.title  # not the reading window's line any more
+        assert w.status_var.get() == "Viewer: " + VIEWER.title  # not the full screen's line any more
         w.geometry("640x460+0+0")  # what Tk might leave meanwhile
         w.update_idletasks()  # the idle callbacks: the size and place come back after Tk's own resizing
         assert w.geometry() == "640x480+2000+40" and not w._restoring
@@ -817,7 +817,7 @@ def test_clear_area_is_a_button_of_the_set_area_dialog(hidden_root, viewer, monk
     left = []
     viewer.after = lambda ms, then: left.append(then)
     viewer.set_area(then=lambda: left.append("reading"))
-    opened[1]()  # reading mode offered the area first: it opens after this too
+    opened[1]()  # the full screen offered the area first: it opens after this too
     assert len(left) == 1 and left[0]() is None and left[-1] == "reading"
 
     cleared = []

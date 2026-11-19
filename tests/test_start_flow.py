@@ -1488,7 +1488,7 @@ def test_the_colophons_name_is_offered_once_and_used_when_nothing_is_kept_yet(fl
     offers = Offers()
     monkeypatch.setattr(jobs, "ColophonOffer", offers)
     event = {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"}
-    flow.reading = True  # read behind the reading window: offered once it is left
+    flow.reading = True  # read behind the full screen: offered once it is left
     flow._handle_event("colophon", event)
     assert not offers.made and flow._colophon_found is not None
     flow.reading = False
@@ -1628,7 +1628,7 @@ def test_an_old_cache_kept_under_the_viewers_name_is_renamed_and_the_start_that_
     made = _offers(monkeypatch)
     _cache(flow.store, "Yomizuq", [_page(3), _page(4)])  # kept before the name was asked for
     flow.settings.scan_mode = "page"
-    flow.reading = True  # read behind the reading window: offered once it is left
+    flow.reading = True  # read behind the full screen: offered once it is left
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"})
     flow.reading = False
     flow._start_pending, flow._start_whole = (_viewer(_page(70)), None), False  # a book's start waits meanwhile

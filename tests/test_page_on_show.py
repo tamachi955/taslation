@@ -99,7 +99,7 @@ def test_the_canvas_draws_the_page_large_and_keeps_it_put(hidden_root):
     assert canvas.to_image_coords(x, y) == (box[0], box[1])
     canvas.set_image(_screen([_page(830, 1170, 5)]))
     assert canvas.shown_box() == box  # the next page: the same part
-    canvas.crop = (0, 0, 1920, 1080)  # a crop asked for (the reading window's area) wins
+    canvas.crop = (0, 0, 1920, 1080)  # a crop asked for (the full screen's area) wins
     canvas.set_image(frame)
     assert canvas.shown_box() == (0, 0, 1920, 1080)
     canvas.crop = None
@@ -183,7 +183,7 @@ def test_a_narrow_browser_window_draws_the_page_and_none_of_the_browser_or_the_b
         box = canvas.shown_box()
         assert box[1] >= TITLE_ROWS + BAND_ROWS and _holds(box, page)  # the page whole, the bars left out
         if margins == panel:
-            assert box == page  # the page fills its panel: the panel drawn (as reading mode crops to it)
+            assert box == page  # the page fills its panel: the panel drawn (as the full screen crops to it)
         else:  # the reader's area: the ground round the page left out as on a full-screen viewer
             pad = area.TRIM_PAD * max(frame.size) + 2 * max(1.0, max(frame.size) / area.TRIM_WORK)  # (working copy)
             assert all(0 <= d <= pad for d in (page[0] - box[0], page[1] - box[1], box[2] - page[2],
@@ -251,7 +251,7 @@ def test_a_page_that_fills_the_frame_is_drawn_whole(hidden_root):
         canvas.set_image(full)
         assert canvas.shown_box() == (0, 0, 900, 1200)
         canvas.destroy()
-    canvas = _canvas(hidden_root, lambda: (20, 30, 40, 50))  # an area within it: that area, as reading mode shows
+    canvas = _canvas(hidden_root, lambda: (20, 30, 40, 50))  # an area within it: that area, as the full screen shows
     canvas.set_image(full)
     assert canvas.shown_box() == (20, 30, 860, 1150)
     canvas.destroy()
