@@ -169,7 +169,10 @@ rows' languages.
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is
   loaded and a page that is not shown has been translated; then it turns N pages at a set pace and keeps pictures of
   TASlation's own window, each with its time, in a recording file (`--ollama` another server on this computer,
-  `--package` another checkout of the package, `--label` for each). `render` makes a video of one recording or two
+  `--package` another checkout of the package, `--label` for each; `--start-ollama PORT` with
+  `--ollama-window-cache` and `--ocr-runs-on`: the window's own starter starts Ollama on a spare port, as
+  `standin_e2e.py --start-ollama` does, and the recording keeps what it chose and where the OCR readers read while
+  the pictures were taken). `render` makes a video of one recording or two
   side by side at real speed: only a pause between pages may be shortened, and the caption says so; per page a
   stopwatch from the turn to the last bubble lettered and the count of bubbles lettered, both sides starting each
   page together; title and end cards; the sample pages' credit on every frame. MP4 (H.264 by Media Foundation through

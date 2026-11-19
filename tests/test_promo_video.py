@@ -194,6 +194,14 @@ def test_the_cards(tmp_path):
     rec.close()
 
 
+def test_an_end_line_too_long_is_set_smaller_before_it_is_wrapped():
+    short, long = "Short", "A line of the end card that is much too long to stand at the card's own size"
+    assert pv.fitting_size([short], 34, 24, 600) == 34
+    size = pv.fitting_size([short, long], 34, 10, 1000)
+    assert size < 34 and pv.text_width(long, pv.font(size)) <= 1000 < pv.text_width(long, pv.font(size + 1))
+    assert pv.fitting_size([long], 34, 24, 200) == 24  # (no smaller than that: wrapped instead)
+
+
 def test_every_frame_carries_the_credit(tmp_path):
     a = made_up(tmp_path, "a", [(2000, 3), (1500, 2)], pauses=[2000, 5000])
     b = made_up(tmp_path, "b", [(1500, 3), (1200, 2)])
@@ -371,6 +379,45 @@ def test_settings_another_checkout_lacks_are_left_out():
 
     made = pv.settings_for(Older, state_dir="x", ui_language="en", ollama_url="http://127.0.0.1:11434")
     assert made == Older("x", "en")
+    assert pv.settings_for(Older, asked=["ui_language"], state_dir="x", ui_language="ja") == Older("x", "ja")
+    with pytest.raises(SystemExit):  # (a setting asked for on the command line that the package lacks)
+        pv.settings_for(Older, asked=["ollama_window_cache"], state_dir="x", ollama_window_cache="off")
+
+
+def test_the_server_taslation_starts_is_on_a_spare_port():
+    assert pv.started_url(11436) == "http://127.0.0.1:11436"
+    for bad in (11434, 80, 0, 70000):  # (never the default port: the server there is the person's own)
+        with pytest.raises(SystemExit):
+            pv.started_url(bad)
+    args = pv.parse(["record", "--out", "x.zip", "--start-ollama", "11436", "--ollama-window-cache", "off",
+                     "--ocr-runs-on", "gpu"])
+    assert (args.start_ollama, args.ollama_window_cache, args.ocr_runs_on) == (11436, "off", "gpu")
+    plain = pv.parse(["record", "--out", "x.zip"])
+    assert (plain.start_ollama, plain.ollama_window_cache, plain.ocr_runs_on) == (None, None, None)
+
+
+def test_where_the_readers_read_while_the_pictures_were_taken():
+    def at(t, *engines, device="gpu", why="setting"):
+        return {"t": t, "device": device, "why": why, "engines": list(engines), "loading": False}
+
+    records = [at(0, "cpu", "cpu", device="cpu", why="not_asked"), at(100, "cuda", "cuda"),
+               at(900, "cpu", "cpu", device="cpu", why="released"), at(950, "cuda", "cuda")]
+    held = pv.readers_during(records, 200, 800)  # (the one in force at the start, none after it)
+    assert held == {"placements": [{"device": "gpu", "why": "setting", "engines": ["cuda", "cuda"]}], "all_gpu": True}
+    late = pv.readers_during(records, 200, 1000)  # (the readers on the CPU for a while: not all on the GPU)
+    assert not late["all_gpu"] and len(late["placements"]) == 2
+    assert not pv.readers_during(records, 50, 80)["all_gpu"]  # (on the CPU at the start)
+    assert pv.readers_during([], 0, 10) == {"placements": [], "all_gpu": False}
+    assert pv.readers_during(records, None, None)["all_gpu"] is False
+
+
+def test_what_the_starter_chose_is_kept():
+    started = {"setup": {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "setting",
+                         "rooms": [None, None]}, "loaded_at_close": None, "finish": [], "stopped": True}
+    assert pv.server_summary(started) == {"full_window": False, "cache_ram_mib": "0", "kv_cache": "q8_0",
+                                          "why": "setting", "readers_room_mib": [None, None], "stopped": True,
+                                          "loaded_at_close": None}
+    assert pv.server_summary(None) is None
 
 
 def coded(page: int, top: int = 31) -> Image.Image:

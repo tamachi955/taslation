@@ -5,6 +5,8 @@ release; the videos show CC BY-NC pages and are never committed or shipped.
 
     python tools/promo_video.py record --out REC.zip [--label L] [--ollama URL] [--package CHECKOUT] [--turns 6]
                                        [--pace 2] [--series 1] [--first 2] [--layout single|spread] [--fps 15]
+                                       [--start-ollama PORT] [--ollama-window-cache auto|off|on]
+                                       [--ocr-runs-on auto|cpu|gpu]
     python tools/promo_video.py render REC.zip [REC_B.zip] --out promo/NAME.mp4 [--title TEXT] [--end LINE]...
                                        [--labels A B] [--pages FROM-TO] [--max-pause 2.5] [--format auto|mp4|gif]
     python tools/promo_video.py info REC.zip [REC_B.zip]
@@ -28,7 +30,15 @@ and outside ``~/.taslation``: the scratch folder), so that a video can be made a
   translator through the Ollama at *--ollama* (requests only: never started, stopped or set up here; what the window
   loaded it lets go of at its close, and what is still loaded of it at the end that was not before is unloaded).
   *--package* runs another checkout's ``taslation`` package (the one under that folder) in the same way, so that two
-  versions can be recorded alike; *--label* names the recording (default: TASlation and the package's version);
+  versions can be recorded alike; *--label* names the recording (default: TASlation and the package's version).
+  With *--start-ollama PORT* the window's own starter starts Ollama instead, as `tools/standin_e2e.py --start-ollama`
+  has it: on that loopback port, where nothing may answer (never the default port, whose server is the person's), with
+  the environment the starter chooses for the window's settings (*--ollama-window-cache*, *--ocr-runs-on*: the
+  window's settings ``ollama_window_cache`` and ``ocr_runs_on``, the app's defaults where not given); the port is set
+  in this process alone, the server told it by OLLAMA_HOST in this process's environment (with OLLAMA_NOPRUNE: the
+  model store stays as it is); what the starter chose goes into the recording (``server``), and the server is stopped
+  as TASlation's own end stops it. Where the OCR readers read while the pictures were taken goes in as well
+  (``readers``, looked at every half second);
 * the guard of `tools/demo_video.py`, as `tools/standin_e2e.py` has it: the window list the app sees holds the
   stand-in alone (found by the process tree this tool started AND the token in its title; no other window's title
   is read), every function that captures, moves, raises or enlarges a window acts on the stand-in or this process's
@@ -80,6 +90,7 @@ import contextlib
 import hashlib
 import io
 import json
+import logging
 import math
 import os
 import queue
@@ -112,7 +123,8 @@ PROJECT = "github.com/tamachi955/taslation"
 FORMAT = 1  # the recording file's
 BOOK = "OpenMantra sample"
 PLAMO = "taslation-plamo3-translate-2b"
-DEFAULT_OLLAMA = "http://127.0.0.1:11434"
+DEFAULT_PORT = 11434
+DEFAULT_OLLAMA = f"http://127.0.0.1:{DEFAULT_PORT}"
 LETTERED_KINDS = ("filling", "final", "translated")  # what the window's page shows when it shows lettering
 MAX_END_LINES = 4
 CUT_TOLERANCE_MS = 60.0  # a pause shown this much shorter than it was is one cut
@@ -124,6 +136,7 @@ TICK_MS = 40
 REST_S = 1.5  # the window at rest so long after the first page before the pictures begin
 PREROLL_S = 1.0  # the pictures this long before the first turn
 END_HOLD_S = 2.5  # ... and this long after the last page finished
+PLACEMENT_EVERY_S = 0.5  # where the OCR readers read, looked at so often
 TURN_WAIT_S = 10.0  # the stand-in's draw of a turn released, at most this long after
 GRAB_TK_MIN_MS = 10
 
@@ -613,6 +626,15 @@ def text_width(text: str, face: Any) -> float:
     return ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(text, font=face)
 
 
+def fitting_size(texts: Sequence[str], largest: int, smallest: int, width: float) -> int:
+    """The largest size from *largest* down to *smallest* at which every one of *texts* is at most *width* wide
+    (*smallest* where none is: those are wrapped)."""
+    size = largest
+    while size > smallest and max((text_width(t, font(size)) for t in texts), default=0) > width:
+        size -= 1
+    return size
+
+
 def wrap(text: str, face: Any, width: float) -> list[str]:
     """*text* in lines no wider than *width* (its own line breaks kept; a word longer than that alone on a line)."""
     out: list[str] = []
@@ -710,8 +732,8 @@ class Layout:
             lines = [(line, big, TEXT) for line in wrap(parts[0], big, w * 0.86)]
             if len(parts) > 1:
                 lines += [(line, small, DIM) for line in wrap(parts[1], small, w * 0.86)]
-        else:
-            face = font(round(34 * s))
+        else:  # (each line on one line where a smaller face, down to 24 points at this scale, holds it)
+            face = font(fitting_size(self.video.end_lines, round(34 * s), max(14, round(24 * s)), w * 0.86))
             lines = [(line, face, TEXT if PROJECT not in line else GREEN) for text in self.video.end_lines
                      for line in wrap(text, face, w * 0.86)]
         heights = [round(face.size * 1.5) for _line, face, _c in lines]
@@ -1200,12 +1222,50 @@ def loopback(url: str) -> str:
     return url.rstrip("/")
 
 
-def settings_for(settings_cls: Any, **values: Any) -> Any:
-    """Settings with those of *values* the package's `Settings` has (another checkout may lack some)."""
+def started_url(port: int) -> str:
+    """The address of the server TASlation's starter starts for *--start-ollama PORT*: a spare loopback port, never
+    Ollama's default one (the server there is the person's own, never started, stopped or set up here)."""
+    if not 1024 < port < 65536 or port == DEFAULT_PORT:
+        raise SystemExit(f"--start-ollama is a spare port above 1024, not {DEFAULT_PORT} (got {port})")
+    return f"http://127.0.0.1:{port}"
+
+
+def settings_for(settings_cls: Any, asked: Sequence[str] = (), **values: Any) -> Any:
+    """Settings with those of *values* the package's `Settings` has (another checkout may lack some); a setting named
+    in *asked* (given on the command line) that it lacks ends the run instead."""
     import dataclasses
 
     names = {f.name for f in dataclasses.fields(settings_cls)}
+    lacking = sorted(k for k in asked if k not in names)
+    if lacking:
+        raise SystemExit(f"this package's settings have no {', '.join(lacking)}")
     return settings_cls(**{k: v for k, v in values.items() if k in names})
+
+
+def readers_during(records: Sequence[dict[str, Any]], start: float | None, end: float | None) -> dict[str, Any]:
+    """Where the OCR readers read while the pictures were taken, from the placements noted as they changed
+    (`standin_e2e.Notes.placement`: each with its time, the rule's device and why, and each reader's device): the one
+    in force at *start* and those after it until *end*; *all_gpu* when each of them had every reader on the GPU."""
+    if start is None:
+        return {"placements": [], "all_gpu": False}
+    before = [r for r in records if float(r["t"]) <= start]
+    inside = [r for r in records if start < float(r["t"]) <= (end if end is not None else float("inf"))]
+    held = ([before[-1]] if before else []) + inside
+    seen = [{"device": r.get("device"), "why": r.get("why"), "engines": list(r.get("engines") or [])} for r in held]
+    unique = [s for k, s in enumerate(seen) if s not in seen[:k]]
+    ok = bool(held) and all(r.get("engines") and all(e == "cuda" for e in r["engines"]) for r in held)
+    return {"placements": unique, "all_gpu": ok}
+
+
+def server_summary(started: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What TASlation's starter chose for the server it started (`standin_e2e.stop_started`'s record), and whether it
+    was stopped: the KV cache, the full-size window cache, the RAM cache and why."""
+    if not started:
+        return None
+    setup = started.get("setup") or {}
+    return {"full_window": setup.get("full_window"), "cache_ram_mib": setup.get("cache_ram"),
+            "kv_cache": setup.get("kv_cache"), "why": setup.get("why"), "readers_room_mib": setup.get("rooms"),
+            "stopped": started.get("stopped"), "loaded_at_close": started.get("loaded_at_close")}
 
 
 class Probe:
@@ -1445,6 +1505,7 @@ class Director:
         self.failed = ""
         self.facts: dict[str, Any] = {}
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
+        self.placed_at = 0.0
 
     def start(self) -> None:
         self.app.after(TICK_MS, self.tick)
@@ -1473,6 +1534,9 @@ class Director:
             self.stop("the stand-in browser ended")
         elif self.recorder is not None and self.recorder.failed:
             self.stop(self.recorder.failed)
+        if time.monotonic() - self.placed_at >= PLACEMENT_EVERY_S:  # where the OCR readers read, as it changes
+            self.placed_at = time.monotonic()
+            self.probe.notes.placement(self.app)
 
     def stop(self, why: str) -> None:
         if self.over:
@@ -1602,7 +1666,7 @@ def record(args: argparse.Namespace) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     if args.first < (3 if args.layout == "spread" else 2):
         raise SystemExit("--first is a page after the one the start-up translates (2 or more; 3 with spreads)")
-    url = loopback(args.ollama)
+    url = started_url(args.start_ollama) if args.start_ollama else loopback(args.ollama)
     package = Path(args.package).resolve() if args.package else ROOT
     if not (package / "taslation" / "__init__.py").is_file():
         raise SystemExit(f"{package} holds no taslation package")
@@ -1621,11 +1685,16 @@ def record(args: argparse.Namespace) -> int:
     pictures = e2e.dataset_pages(args.series, start_page, count)
     if not pictures or len(pictures) < count:
         raise SystemExit("the dataset's pages are needed (tools/fetch_openmantra.py), enough of them from --first")
-    tags = e2e.ollama_get(url, "/api/tags")
-    there = [str(m.get("name", "")) for m in (tags or {}).get("models", [])] if isinstance(tags, dict) else []
-    if not any(name.split(":")[0] == PLAMO for name in there):
-        raise SystemExit(f"the Ollama at {url} does not answer, or has no {PLAMO}: start the server set-up first")
-    ps_before = e2e.loaded_models(url)
+    if args.start_ollama:  # the server TASlation's starter starts (as `tools/standin_e2e.py --start-ollama` does)
+        if e2e.ollama_get(url, "/api/version") is not None:
+            raise SystemExit(f"something answers at {url} already: --start-ollama needs a port where nothing does")
+        ps_before: list[str] | None = []
+    else:
+        tags = e2e.ollama_get(url, "/api/tags")
+        there = [str(m.get("name", "")) for m in (tags or {}).get("models", [])] if isinstance(tags, dict) else []
+        if not any(name.split(":")[0] == PLAMO for name in there):
+            raise SystemExit(f"the Ollama at {url} does not answer, or has no {PLAMO}: start the server set-up first")
+        ps_before = e2e.loaded_models(url)
     found = sv.find_browser(args.browser)
     if found is None:
         raise SystemExit("neither Chrome nor Edge is installed here")
@@ -1637,12 +1706,21 @@ def record(args: argparse.Namespace) -> int:
     os.environ["TASLATION_STATE_DIR"] = str(state)  # (before TASlation is imported: nothing finds ~/.taslation)
     os.environ.pop("SELFTRANS_STATE_DIR", None)
     os.environ["TASLATION_MODELS_DIR"] = models
+    if args.start_ollama:  # (this process alone: the server is told its port, and leaves the model store as it is)
+        os.environ["OLLAMA_HOST"] = f"127.0.0.1:{args.start_ollama}"
+        os.environ["OLLAMA_NOPRUNE"] = "1"
     sys.path.insert(0, str(package))
     import taslation
     from taslation.capture import enable_dpi_awareness
 
     if not Path(taslation.__file__).resolve().is_relative_to(package):
         raise SystemExit(f"taslation comes from {taslation.__file__}, not from {package}")
+    if args.start_ollama:
+        try:
+            from taslation import ollama_start
+        except ImportError:
+            raise SystemExit("this package has no starter of its own for Ollama: --start-ollama needs one") from None
+        ollama_start.DEFAULT_PORT = args.start_ollama  # (this process alone: the port its starter starts Ollama on)
     version = str(getattr(taslation, "__version__", "?"))
     label = args.label or f"TASlation {version}"
     sv.write_page_list(standin_dir, pictures)
@@ -1671,14 +1749,26 @@ def record(args: argparse.Namespace) -> int:
         report["failed"] = str(e) if isinstance(e, SystemExit) else f"{type(e).__name__} in the driver"
     finally:
         closed = browser.close()
+        if args.start_ollama:  # what the starter chose, and the server stopped as TASlation's own end stops it
+            try:
+                report["server_started"] = e2e.stop_started(url, state)
+            except Exception as e:  # noqa: BLE001 - said; the cleanup below still runs
+                report["server_started"] = {"error": type(e).__name__}
         report["cleanup"] = cleanup(state, scratch, url, ps_before)
         report["cleanup"]["browser"] = closed
+    server = server_summary(report.get("server_started"))
+    report["server"] = server
+    if meta is not None:
+        meta["server"] = server
+        meta["settings_asked"] = {"ollama_window_cache": args.ollama_window_cache, "ocr_runs_on": args.ocr_runs_on}
+        report["readers"] = meta.get("readers")
     if meta is None or meta.get("failed"):
         writer.abandon()
         report["failed"] = report.get("failed") or (meta or {}).get("failed")
         print(json.dumps(report, indent=1, default=str))
         return 1
-    meta.update(label=label, version=version, package=str(package), ollama=url, fps=args.fps, pace_s=args.pace,
+    meta.update(label=label, version=version, package=str(package), ollama=url,
+                ollama_started_by_taslation=bool(args.start_ollama), fps=args.fps, pace_s=args.pace,
                 layout=args.layout, soft_ms=list(soft), seed=args.seed, series=args.series, first=args.first,
                 made_up=False)
     writer.finish(meta)
@@ -1742,11 +1832,15 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
     profiles.set_margins(info, area, large=True)
-    settings = settings_for(Settings, state_dir=state, ui_language="en", target_language="English", over_book=False,
-                            flash_when_done=False, sound_when_done=False, always_on_top=False,
-                            models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url)
+    chosen = {k: v for k, v in (("ollama_window_cache", args.ollama_window_cache), ("ocr_runs_on", args.ocr_runs_on))
+              if v is not None}
+    settings = settings_for(Settings, asked=list(chosen), state_dir=state, ui_language="en", target_language="English",
+                            over_book=False, flash_when_done=False, sound_when_done=False, always_on_top=False,
+                            models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url, **chosen)
     settings.validate()
     errorlog.setup(settings)
+    tap = e2e.LogTap(notes)  # (where the OCR readers went, by the log's templates: codes and numbers only)
+    logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer
     app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
     x, y, w, h = app_rect
@@ -1765,6 +1859,7 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
                 app.destroy()  # (another window was chosen: nothing more is done with it)
         else:
             demo_video.finish_app(app)
+        logging.getLogger().removeHandler(tap)
     lags = sorted(director.lags)
     offset = lags[0] if lags else 0.0
     turns = [dict(t) for t in director.turns]
@@ -1775,9 +1870,16 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
                     turn[key] = turn[key] + offset
     recorder = director.recorder.facts() if director.recorder is not None else {}
     failed = director.failed or ("" if writer.stored else "no picture was taken")
+    start_t = director.recorder.began if director.recorder else None
+    end_t = director.recorder.ended if director.recorder else None
+    with notes.lock:
+        placements = [dict(r) for r in notes.ocr]
+        ocr_log = [dict(r) for r in notes.ocr_log]
+    readers = {**readers_during(placements, start_t, end_t), "all_placements": [
+        {**r, "t": round(float(r["t"]) - (start_t or 0.0), 1)} for r in placements],
+        "log": [{**r, "t": round(float(r["t"]) - (start_t or 0.0), 1)} for r in ocr_log]}
     return {"failed": failed, "turns": turns, "displays": probe.displays(), "results": probe.results,
-            "start_t": director.recorder.began if director.recorder else None,
-            "end_t": director.recorder.ended if director.recorder else None,
+            "start_t": start_t, "end_t": end_t, "readers": readers,
             "picture": list(writer.size) if writer.size else None, "pictures": recorder, "start_up": director.facts,
             "clock": {"standin_lag_ms_min": round(offset, 1), "standin_lag_ms_median":
                       round(lags[len(lags) // 2], 1) if lags else None},
@@ -1839,7 +1941,10 @@ def info(paths: Sequence[Path]) -> dict[str, Any]:
                               "size": list(rec.size),
                               "pages": [{k: p.get(k) for k in ("k", "first_ms", "page_ms", "result_ms", "bubbles",
                                                                "finished")} for p in rec.pages],
-                              "recorder": rec.meta.get("pictures"), "start_up": rec.meta.get("start_up")}
+                              "recorder": rec.meta.get("pictures"), "start_up": rec.meta.get("start_up"),
+                              "settings_asked": rec.meta.get("settings_asked"), "server": rec.meta.get("server"),
+                              "readers": {k: v for k, v in (rec.meta.get("readers") or {}).items()
+                                          if k in ("placements", "all_gpu")}}
         finally:
             rec.close()
     return out
@@ -1852,6 +1957,13 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--out", type=Path, required=True, help="the recording file (a ZIP in a scratch folder)")
     rec.add_argument("--label", default="", help="the recording's name in a video (default: TASlation VERSION)")
     rec.add_argument("--ollama", default=DEFAULT_OLLAMA, help="the translator's server on this computer")
+    rec.add_argument("--start-ollama", type=int, default=None, metavar="PORT",
+                     help="TASlation's own starter starts Ollama on this loopback port, where nothing may answer (not "
+                          "the default port; instead of --ollama), with the environment it chooses; stopped at the end")
+    rec.add_argument("--ollama-window-cache", default=None, choices=("auto", "off", "on"),
+                     help="the window's setting ollama_window_cache (default: the app's)")
+    rec.add_argument("--ocr-runs-on", default=None, choices=("auto", "cpu", "gpu"),
+                     help="the window's setting ocr_runs_on (default: the app's)")
     rec.add_argument("--package", type=Path, default=None, help="another checkout whose taslation package runs")
     rec.add_argument("--turns", type=int, default=6)
     rec.add_argument("--pace", type=float, default=2.0, help="seconds from a finished page to the next turn")
