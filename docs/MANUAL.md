@@ -681,8 +681,11 @@ so the change reaches the whole volume (cached pages are replaced, but for the t
 add `--replace-corrections` to have those translated again too).
 
 When the reading reaches the end of the volume, some viewers show an end-of-book panel (ratings, the next volume). The arrow keys may not get you out of this panel,
-so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers)
-is taken as print, not dialogue, and left as it is.
+so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers:
+prices, addresses, ratings, dates of publication, the record of where each chapter first ran) is taken as print, not dialogue, and left as it is, and so are the title and the author's name on a title page.
+A chapter's label and the words of a contents page (第3話, 第十二章, 最終話, 番外編, 目次, あとがき and the like) are translated wherever they stand: set across, on a band, beside a page number,
+and a contents list row by row. Japanese read surely beside digits or Latin letters (3年B組, a heading with a subtitle in Latin letters) is translated too; a subtitle on a line of its own in Latin letters
+is left as it is. A paragraph set across (an explanation page, a foreword) is read and lettered as one, not in pieces.
 
 ### The translation cache and backups
 
