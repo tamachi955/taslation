@@ -1,7 +1,7 @@
 """The legal notice shown when the window starts, in the window's language, until the reader ticks "do not show
 this again": a general part (here) and a part for the reader's country (``jurisdictions``).
 
-What it says, and why, is in README "Legal position". The general text says the same thing in every language,
+What it says, and why, is in docs/LEGAL.md (the README links to it). The general text says the same thing in every language,
 written in each language's own register rather than translated word for word. The reader's choices are remembered
 in ``~/.taslation/notice.json`` (the country, the notice version dismissed, the time, the language it was shown
 in); raising ``NOTICE_VERSION`` shows it again. The command line prints the notice once, the first time a command

@@ -1,6 +1,6 @@
 # 法的な位置づけの出典
 
-README の「法的な位置づけ」の出典です。
+[docs/LEGAL.ja.md](LEGAL.ja.md)（法的な位置づけ）の出典です。
 
 * 日本、著作権法: 第30条と第47条の6（私的使用と、そのための翻訳）。国立国会図書館の講座資料による解説
   <https://ndl.go.jp/jp/library/supportvisual/docs/kouza/r6_kouza04-2.pdf>。

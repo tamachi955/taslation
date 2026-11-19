@@ -1,11 +1,12 @@
-"""The English README and manual beside their Japanese originals (docs/DEVELOPMENT.md, "The README and the manual")."""
+"""The English README, manual, installation and legal texts beside their Japanese originals (docs/DEVELOPMENT.md, "The README and the manual")."""
 import re
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-PAIRS = (("README.md", "README.ja.md"), ("docs/MANUAL.md", "docs/MANUAL.ja.md"))
+PAIRS = (("README.md", "README.ja.md"), ("docs/MANUAL.md", "docs/MANUAL.ja.md"),
+         ("docs/INSTALL.md", "docs/INSTALL.ja.md"), ("docs/LEGAL.md", "docs/LEGAL.ja.md"))
 
 
 def _levels(path: Path) -> list[int]:

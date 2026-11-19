@@ -950,7 +950,7 @@ For the inpainting (erasing lettering on the drawing with LaMa and filling in th
 it is used only on a computer where the model is installed and there is a GPU TASlation can use (an NVIDIA GPU with CUDA, one that PyTorch can use with CUDA).
 On other computers, erasing works as with "Not used", and the model is not even loaded (the setting's row then says so).
 `install.cmd` installs PyTorch's GPU build (the CUDA build) on a computer with an NVIDIA GPU, so there it is used with "Only with a GPU" as it is.
-On a computer without a GPU (AMD and Intel GPUs are not counted as GPUs either), with an old driver, or where the GPU build did not work, the CPU build is installed, and the inpainting is not used there (README, "Installation").
+On a computer without a GPU (AMD and Intel GPUs are not counted as GPUs either), with an old driver, or where the GPU build did not work, the CPU build is installed, and the inpainting is not used there (docs/INSTALL.md, "Installation").
 On a computer where an installation before this version put in the CPU build, running `install.cmd` again replaces it with the GPU build. The installation after `update.cmd` does not replace it, and says so.
 With "Always, also on the CPU", it is used even without a GPU, but takes about 4 seconds a screen (about 0.6 seconds on a GPU).
 For the layout model (it finds lettering on the drawing that the usual detection misses), choose "Not used", "Only with the inpainting" or "Always used". The default is "Only with the inpainting".
@@ -970,7 +970,7 @@ In the settings file it is `theme` (`"system"`, `"light"` or `"dark"`).
 "Open settings file" opens `taslation.toml`, with every setting in it, in a text editor. If there is no file, it first makes one from `taslation.toml.example`.
 In the file it makes, every setting is a description with `#` at the start of the line, and removing the `#` turns that setting on (no default value is written in, so if a later version changes a default, you get the new default).
 It is made where the settings are read from (the file that was read, or else `taslation.toml` in the state folder; the state folder survives updates).
-Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation folder (README, "Updating").
+Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation folder (docs/INSTALL.md, "Updating").
 Settings changed in the file take effect from the next start.
 
 The "Shortcuts" page of "Settings" changes the window's keys. Choose an action in the list (translating the page on show, reading mode, Undo, Redo,
@@ -1121,7 +1121,7 @@ When a message such as "The translation program did not start" tells you to rest
 Ollama uses up to 8 GB of RAM for a cache of earlier requests. TASlation switches it off for the Ollama it starts by passing the environment variable `LLAMA_ARG_CACHE_RAM`.
 When TASlation's own environment lacks this variable, it passes on the value Windows keeps for this user (or this computer), or 0 when there is none.
 On an NVIDIA GPU with 6 GB of memory or less, it passes `OLLAMA_KV_CACHE_TYPE` the same way: the value Windows keeps, or `q8_0`. A value that is set is never changed.
-For an Ollama that was there before, `install.cmd` sets both as environment variables of this Windows user ("Installation" in the README).
+For an Ollama that was there before, `install.cmd` sets both as environment variables of this Windows user ("Installation" in docs/INSTALL.md).
 
 ### Trying it without a book
 

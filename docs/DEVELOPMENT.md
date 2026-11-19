@@ -155,13 +155,16 @@ rows' languages.
 
 ## The README and the manual
 
-`README.md` and `docs/MANUAL.md` are in English, for the public repository; `README.ja.md` and `docs/MANUAL.ja.md` are
-the Japanese originals, and the English says that the Japanese prevails where the two differ. Each file links to the
+`README.md`, `docs/MANUAL.md`, `docs/INSTALL.md` and `docs/LEGAL.md` are in English, for the public repository;
+`README.ja.md`, `docs/MANUAL.ja.md`, `docs/INSTALL.ja.md` and `docs/LEGAL.ja.md` are the Japanese originals, and the English says that the Japanese prevails where the two differ. Each file links to the
 other in its first lines. A change goes into the Japanese text and the English one together, in the same commit: the
 same headings in the same order, the same tables, commands, file names, numbers and caveats, and the legal sections'
 hedges exactly as strong. The English takes the window's labels from the app's English strings (the `_()` source
 strings), not from a translation of the Japanese labels. `tests/test_translator_install.py` checks that both READMEs
-carry the PLaMo credit and the download sizes.
+carry the PLaMo credit and the download sizes. The README is kept short (what it is, its features, what it does not
+do, installing in three steps, the requirements as a table); the long explanations live in `docs/INSTALL` (every
+question and step of the installer, updating, uninstalling, the measurements) and `docs/LEGAL` (the legal position,
+country by country, what is left out on purpose).
 
 ## The install check
 
