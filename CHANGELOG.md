@@ -3,6 +3,24 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.6.0 - 2026-11-20
+
+Speed and memory
+
+* Translating is about a quarter faster where TASlation starts Ollama itself. The server keeps the cache of PLaMo's
+  whole window (`LLAMA_ARG_SWA_FULL=1`) and 256 MB of earlier requests in RAM (`LLAMA_ARG_CACHE_RAM=256`), so a
+  request no longer goes back over the lines before it. Measured on the sample dataset with a 6 GB GPU: 413 to 294
+  seconds page by page (29 % less), 400 to 296 seconds for the whole book (26 % less); without a GPU, 1.28 to 0.98
+  seconds a line. The translations score the same.
+* It takes 132 MB more GPU memory (220 MB with the f16 cache) and about 1 GB less RAM. Where those MB would move
+  the OCR readers from the GPU to the processor, TASlation starts Ollama as before: this is decided at each start,
+  and the System page and `taslation doctor` say which.
+* The new setting `ollama_window_cache` ("auto", "off", "on"; also on the System page) chooses it.
+* The rule that places the OCR readers counts the translation model's GPU memory as measured for the server's
+  settings; it counted too much before.
+* An Ollama that was running before TASlation is left as it is. `docs/INSTALL.md` says how to set the two variables
+  for your own Ollama.
+
 ## 0.5.0 - 2026-11-20
 
 Installing
