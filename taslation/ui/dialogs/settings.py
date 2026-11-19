@@ -91,7 +91,7 @@ class SettingRow:
 # and tip need the 16 languages (`locales/features/settings_dialog.py`; `tests/test_settings_rows.py` checks them).
 EXTRA_ROWS: tuple[SettingRow, ...] = (
     SettingRow("hover_shows", "On the page:",
-               "In reading mode and the Reader role: the page translated, a bubble under the pointer showing its original; or the page as the viewer shows it, a bubble under the pointer showing its translation. Also in the View menu.",
+               "In the Reader role: the page translated, a bubble under the pointer showing its original; or the page as the viewer shows it, a bubble under the pointer showing its translation. Also in the View menu.",
                choices=(("original", "The translation (the original under the pointer)"),
                         ("translation", "The original (the translation under the pointer)"))),
     SettingRow("hover_reveal", "Under the pointer:",

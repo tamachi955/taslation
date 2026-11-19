@@ -171,7 +171,7 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
                                          "Over the full-screen viewer", "Reading-order numbers"]
     assert _menu_labels(menus["Help"]) == ["How to use...", "Keys...", "Legal notice...", "About TASlation"]
     shown = [text for _kind, text in _texts(w.toolbar)]
-    assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Reading mode (F11)", "Reader", "Translator",
+    assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Full screen (F11)", "Reader", "Translator",
                                     "Read whole book...", "Stop (Esc)"])
     set_language("en")
 
@@ -265,6 +265,7 @@ def test_the_target_languages_show_in_the_windows_language_and_stay_english(hidd
 # ------------------------------------------------------------------ the status line
 class Line:
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
 
     def __init__(self, root):
@@ -353,8 +354,10 @@ class Reading(tk.Toplevel):
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     enter_reading = app_mod.App.enter_reading
+    _reading_role = app_mod.App._reading_role
     leave_reading = app_mod.App.leave_reading
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
     _normal_status = app_mod.App._normal_status
     _page_status = app_mod.App._page_status
@@ -388,6 +391,7 @@ class Reading(tk.Toplevel):
         self.notes_label = ttk.Label(self)
         self.status_var = tk.StringVar(self)
         self.original_var, self.auto_var, self.top_var = tk.BooleanVar(self), tk.BooleanVar(self), tk.BooleanVar(self)
+        self.role_var = tk.StringVar(self, value="reader")
         self.selected, self.last_result = VIEWER, None
         self.reading = self._batching = self._viewer_hidden = self._scan_waits_told = self._restoring = False
         self._ordering = self._chosen_region = self._status_render = self._status_key = None
@@ -431,21 +435,32 @@ def test_leaving_reading_mode_puts_back_the_place_and_the_normal_status(hidden_r
     for _cycle in range(3):
         w.enter_reading()
         assert w.reading and w.attrs["-fullscreen"] is True and str(w.cget("menu")) == ""
-        assert w.status_var.get() == "Reading mode: page keys turn the viewer's pages; F11 or Esc leaves it."
+        assert w.status_var.get() == "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it."
         w.leave_reading()
         assert not w.reading and w.attrs["-fullscreen"] is False and str(w.cget("menu")) == str(w.menubar)
         assert w.status_var.get() == "Viewer: " + VIEWER.title  # not the reading window's line any more
         w.geometry("640x460+0+0")  # what Tk might leave meanwhile
         w.update_idletasks()  # the idle callbacks: the size and place come back after Tk's own resizing
         assert w.geometry() == "640x480+2000+40" and not w._restoring
+    w.role_var.set("translator")  # the full screen in the Translator role leaves the same way
+    w.say("Viewer: {title}", title=VIEWER.title)
+    w.enter_reading()
+    assert w.reading and w.attrs["-fullscreen"] is True and w.status_var.get().startswith("Full screen, Translator role")
+    w.leave_reading()
+    assert not w.reading and w.attrs["-fullscreen"] is False and str(w.cget("menu")) == str(w.menubar)
+    assert w.status_var.get() == "Viewer: " + VIEWER.title
+    w.update_idletasks()
+    assert w.geometry() == "640x480+2000+40" and not w._restoring
 
 
-def test_reading_mode_rests_show_original_and_gives_it_back(hidden_root):
-    """Show original is in a menu, and the reading window has none: left on, it would show originals with no way back."""
+@pytest.mark.parametrize("role", ["reader", "translator"])
+def test_the_full_screen_rests_show_original_and_gives_it_back(hidden_root, role):
+    """Show original is in a menu, and the full screen has none: left on, it would show originals with no way back."""
     w = Reading(hidden_root)
+    w.role_var.set(role)
     w.original_var.set(True)
     w.enter_reading()
-    assert w.reading and not w.original_var.get()  # the translation, as in reading mode
+    assert w.reading and not w.original_var.get()  # the translation, in either role
     w.leave_reading()
     assert not w.reading and w.original_var.get()  # as the reader had it
     w.original_var.set(False)

@@ -174,6 +174,7 @@ class Win(tk.Toplevel):
     _on_new_page = A._on_new_page
     translate_now = A.translate_now
     status = A.status
+    _note_ms = A._note_ms
     say = A.say
 
     def __init__(self, root, tmp_path):

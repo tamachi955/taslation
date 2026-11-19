@@ -15,8 +15,8 @@ plain keys too); an "editor" key in the region editor (`dialogs.review.EditBubbl
 Ctrl or Alt or an F key as in the window. Copy format and Paste format work on the page and in the editor alike
 (`Action.editor`). Translator mode's tools (`Action.translator`) do nothing in the Reader role, where their buttons are
 not there. Never a key of another action that works in the same place (`meet`), a key passed on to the viewer
-(`constants.FORWARDED_KEYS`, with any modifier) for the window or the page, Esc (`FIXED`: it leaves reading mode, lets
-go of the chosen box, stops a run and closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), nor in the window or
+(`constants.FORWARDED_KEYS`, with any modifier) for the window or the page, Esc (`FIXED`: it lets go of the chosen
+box, leaves the full screen, stops a run and closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), nor in the window or
 the editor Ctrl+A, C, V or X (the boxes' editing): `Keymap.problem`. The table's own keys of an action pass those
 rules for it: Tab and Shift+Tab going through the regions and Alt with an arrow nudging them hold the keys on the page
 themselves ("break"), and Ctrl+C and Ctrl+V copy and paste a region on the page, which has no text to edit.
@@ -69,7 +69,7 @@ class Action:
 
 ACTIONS: tuple[Action, ...] = (
     Action("translate_now", "Translate the page on show", ("F5",)),
-    Action("reading_mode", "Reading mode", ("F11",)),
+    Action("reading_mode", "Full screen", ("F11",)),  # (its name kept: shortcuts.json)
     Action("undo", "Undo", ("Control-z",)),
     Action("redo", "Redo", ("Control-y",)),
     Action("show_original", "Show original"),
@@ -120,7 +120,7 @@ ACTIONS: tuple[Action, ...] = (
     Action("editor_next", "Region editor: save and go to the next region", ("Alt-Down",), "editor"),
 )
 BY_NAME = {action.name: action for action in ACTIONS}
-FIXED_ESCAPE = "Leave reading mode, or let go of the chosen box"
+FIXED_ESCAPE = "Let go of the chosen box, or leave full screen"
 FIXED_PAGE_KEYS = "Passed on to the viewer, which turns its pages with the keys of Page > Page keys..."
 # translator mode's mouse gestures, read-only like Esc: (what it does, the gesture), keys of the window's catalogs
 FIXED_GESTURES = (
@@ -263,7 +263,7 @@ class Keymap:
         if base in FORWARDED_KEYS and action.scope != "editor" and not own:
             return _("{key} turns the viewer's pages (Page > Page keys...).").format(key=shown)
         if base == "Escape":
-            return _("Esc is fixed: it leaves reading mode, lets go of the chosen box and closes the dialogs.")
+            return _("Esc is fixed: it lets go of the chosen box, leaves full screen and closes the dialogs.")
         if (base in WINDOWS_KEYS or (base == "F4" and "Alt" in mods)) and not own:
             return _("{key} is a key of Windows.").format(key=shown)
         if (action.scope in ("window", "editor") or action.editor) and not own:  # (the editor has boxes to type in)

@@ -137,9 +137,9 @@ rows' languages.
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
   profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 6
   minutes): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and spinners; e,
-  turning back to cached pages; r, reading mode, entered and left by F11's own handler; o, over the book (the stand-in
-  made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Reading mode
-  button, reading mode left by the F11 hot key); z, TASlation's text size at 150 %; w, a whole-book run on a short
+  turning back to cached pages; r, the full screen in the Reader role, entered and left by F11's own handler; o, over the book (the stand-in
+  made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Full screen
+  button, the full screen left by the F11 hot key); z, TASlation's text size at 150 %; w, a whole-book run on a short
   stretch, started as the dialog's Start starts it, then Finished reading, with w2, the window beside the run as the
   stand-in turns back to the run's pages and on past them (w and w2 come together); x, a request cancelled in flight
   at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`

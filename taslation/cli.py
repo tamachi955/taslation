@@ -104,8 +104,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Auto (on by default): every page turn in the viewer is translated; --no-auto starts with it off")
     g.add_argument("--on-top", action="store_true",
                    help="keep the window above the viewer (single screen: turn pages with the arrow keys on it)")
-    g.add_argument("--reading", action="store_true",
-                   help="start in reading mode (the page alone, full screen) once the viewer is chosen; F11 or Esc leaves it")
+    g.add_argument("--full-screen", "--reading", dest="reading", action="store_true",
+                   help="start on the full screen (the page alone, in the role chosen) once the viewer is chosen; F11 "
+                        "leaves it (--reading, its earlier name, does the same)")
     g.add_argument("--mode", choices=["book", "page"],
                    help="'page' (default): page by page; 'book': read and translate the whole book first")
     g.add_argument("--role", choices=["reader", "translator"],

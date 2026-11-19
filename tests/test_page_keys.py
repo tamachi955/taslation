@@ -169,6 +169,7 @@ class Band(BlackViewerMixin, tk.Toplevel):
     open_batch_dialog = A.open_batch_dialog
     say = A.say
     status = A.status
+    _note_ms = A._note_ms
     _build_strips = A._build_strips
     _place_strip = A._place_strip
     _band_view = A._band_view
@@ -397,6 +398,7 @@ class Viewer:
     _title_book = A._title_book
     _warm_page_models = A._warm_page_models
     status = A.status
+    _note_ms = A._note_ms
     say = A.say
 
     def __init__(self, root, tmp_path):

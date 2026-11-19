@@ -7,7 +7,8 @@ set: `LivePreview`), added and dropped with the pointer,
 every one of those changes taken back and made again (Ctrl+Z, Ctrl+Y: `history`), the model asked again from the
 editor (the Japanese read again first on a page shown from the cache), the editor taken through the page's regions in
 reading order (Previous, Next), and a rendering the reader changed offered to the series sheet; in reader mode a click
-on the page goes to the viewer."""
+on the page goes to the viewer. All of it works on the full screen too (F11, `reading`), which keeps the role chosen:
+there the strip is away with the toolbar, and its tools are had by their keys."""
 
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ from .constants import FIRST_PAGE, FORWARDED_KEYS, READER_AFTER_RUN, THIS_PAGE, 
 from .dialogs import caches as boxes
 from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, review_rows
 from .history import BookStep, Step, carry, owner, page_units, put_back, stores_differ, unit_states
+from .hover import clicks_kept
 from .layout import FlowBar, wrap_label
 from .progress import rendered
 from .series_scope import (ALL_VOLUMES, VolumeCount, change_volumes, changed_lines, changed_somewhere,
@@ -464,7 +466,7 @@ class TranslatorMixin:
         (reading order, skip page, translate again; book settings, series sheet, review, my corrections, lines to
         review; find and replace, the selected region's text direction, undo, redo)
         and a line on what the pointer does on the page: these tools are here and nowhere else. `_sync_tools` shows it
-        while the Translator role is chosen; reading mode hides it with the toolbar. Ctrl+Y makes again what Ctrl+Z took
+        while the Translator role is chosen; the full screen hides it with the toolbar. Ctrl+Y makes again what Ctrl+Z took
         back. The buttons and the line name the keys as the keymap has them (`KEYED_TOOLS`, `hint_text`; again after a
         change: `_show_tool_keys`)."""
         keymap = getattr(self, "keymap", None) or shortcuts.current()
@@ -752,7 +754,8 @@ class TranslatorMixin:
 
     def _on_role_changed(self, chosen: bool = True) -> None:
         """The role changed: the reader *chose* it (kept for the book in the Book box, `remember_role`, which opens in
-        it next time), or the book's start set it (`_apply_role`)."""
+        it next time), or the book's start set it (`_apply_role`). On the full screen, which keeps the role, the full
+        screen follows it (`ReadingMixin._reading_role`: Auto and the first line as the role has them there)."""
         book = self.book_var.get().strip()
         if chosen and book and not generic_book_name(book):
             remember_role(self.settings.state_dir, book, self.role_var.get())
@@ -763,6 +766,11 @@ class TranslatorMixin:
             self._on_escape()
         self._chosen_region = None
         self._redisplay()
+        if getattr(self, "reading", False):
+            self._reading_role()
+            if self.role_var.get() == "translator":
+                self._complete_on_show()
+            return
         if self.role_var.get() == "translator":  # the strip under the toolbar says the rest
             self.say("Translator mode: the line under the toolbar says what the pointer does on the page; keys still turn the viewer's pages.")
             self._complete_on_show()
@@ -776,16 +784,16 @@ class TranslatorMixin:
         (`translate_now`: those regions read and judged, a line among them translated), so that they are outlined
         and labelled for what they are - or not at all (`_page_regions`). Not while a run is on or a job runs."""
         result = self.last_result
-        if (result is None or self.reading or self.batch is not None or getattr(self, "_batching", False)
+        if (result is None or self.batch is not None or getattr(self, "_batching", False)
                 or not self.ready or self.busy or not any(r.status == "unmatched" for r in result.regions)):
             return
         self.after_idle(self.translate_now)
 
     # ------------------------------------------------------------------ the regions under the pointer
     def _editing(self) -> bool:
-        """Whether the page's regions are edited by the pointer (translator mode, not in the reading window, and
-        the page on show is the one they belong to)."""
-        return self.role_var.get() == "translator" and not self.reading and self._result_on_show()
+        """Whether the page's regions are edited by the pointer (translator mode, in the window or on the full screen,
+        and the page on show is the one they belong to)."""
+        return self.role_var.get() == "translator" and self._result_on_show()
 
     def _turn_of(self, region: Any) -> float:
         """The slant *region* is lettered at: the reader's (`RegionStyle.slant`, the editor's Slant), else its own
@@ -1120,9 +1128,14 @@ class TranslatorMixin:
         if start is None:
             return
         moved = abs(e.x - start[0]) > 6 or abs(e.y - start[1]) > 6
-        if not self._editing():  # a click that is not TASlation's own goes on to the viewer (`_forward_click`)
-            if not moved:
-                self._forward_click(e)
+        if not self._editing():  # a click that is not TASlation's own goes on to the viewer (`_forward_click`) ...
+            if moved:
+                return
+            if clicks_kept(self):  # ... but for one on the Translator's full screen, which stays TASlation's
+                if not self.busy and self.canvas.inside(e.x, e.y):
+                    self.say(FIRST_PAGE)
+                return
+            self._forward_click(e)
             return
         if self.last_result is None or self.busy or self.pipeline is None:
             return
@@ -1556,7 +1569,7 @@ class TranslatorMixin:
         """Take back (*back*) or make again the newest change on the page on show. When the page on show is the very
         one the change was made on, its regions are put back in place; else (the page was read again since) the
         page is read again from the stores. The status line says what was done."""
-        if self.role_var.get() != "translator" or self.pipeline is None or self.busy or self.reading:
+        if self.role_var.get() != "translator" or self.pipeline is None or self.busy:
             return
         if self._ordering is not None:
             self.say("Reading order: click the regions in the order they are read, then press Finish order (Esc cancels).")
@@ -1801,11 +1814,14 @@ class TranslatorMixin:
     def _forward_click(self, event: tk.Event) -> None:
         """A click on the page that is not TASlation's own goes on to the viewer at the same place (a viewer that turns
         its pages by clicks, its toolbar, a panel's close button), the person's click passed on as a page key is: in the
-        Reader role, in reading mode, and in the Translator role while the page on show is not the translated one
-        (`_editing`: there a click selects and edits the text areas, and the page keys turn the pages). It is followed
-        as a page-turn key is (`_follow_change`): from the frame Auto took last, else from the frame on show - also
-        before Auto has taken any page. In the Translator role the status line says so, as it does for a key."""
+        Reader role, in the window and on the full screen, and in the Translator role's window while the page on show
+        is not the translated one (`_editing`: there a click selects and edits the text areas, and the page keys turn
+        the pages). On the full screen in the Translator role no click goes on (`hover.clicks_kept`). It is followed as
+        a page-turn key is (`_follow_change`): from the frame Auto took last, else from the frame on show - also before
+        Auto has taken any page. In the Translator role the status line says so, as it does for a key."""
         if self.selected is None or (self.last_result is None and self._live is None) or viewer_rests(self):
+            return
+        if clicks_kept(self):
             return
         if not self.canvas.inside(event.x, event.y) or self.canvas.in_busy_band(event.x, event.y):
             return  # beside the page, or on the busy band
@@ -1819,7 +1835,7 @@ class TranslatorMixin:
             self.say("Viewer: {error}", error=e)
             return
         hwnd = self.selected.hwnd
-        if not self.reading and self.role_var.get() == "translator":  # a reader sees the page turn
+        if self.role_var.get() == "translator":  # a reader sees the page turn
             self.status(lambda: _("Sent a click to the viewer..."))
         reference = self._auto_last if self._auto_last is not None else self._live_thumb
         self._follow_change(hwnd, reference, "", time.monotonic(), retried=True)

@@ -2,12 +2,12 @@
 
 Layout: menus for what is used seldom, a toolbar for what is used all the time, whose
 groups of controls flow into as many rows as the window's width needs (the viewer,
-the target language, Translate / Auto / Reading mode, the role, the book and the
+the target language, Translate / Auto / Full screen, the role, the book and the
 batch), translator mode's strip under it while the Translator role is chosen, a
 canvas and a status bar: every command has one place. The canvas shows the chosen viewer
 live - its latest frame, with the translation laid over it while it shows a
 translated page - and a page being translated fills in on it bubble by bubble.
-Reading mode (F11) shows the page alone, full screen. All heavy work runs in
+Full screen (F11) shows the page alone, in the role chosen. All heavy work runs in
 one worker thread; Tk only draws. Page images live in memory only; nothing is
 written to disk except the text-only translation cache and the per-window
 capture margins.
@@ -196,7 +196,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
     """The reader window. Its state is made here (`__init__`), and its widgets (`_build_ui`, again after a language
     switch); the small dialogs open from here. What it does comes from the mixins: the status line and the busy badge
     (`status`), the capture, the live picture and Auto (`live`), the worker, its events and the requests (`jobs`),
-    reading mode and the window's size and place (`reading`), translator mode (`translator`; several regions selected
+    the full screen and the window's size and place (`reading`), translator mode (`translator`; several regions selected
     and the reading-order badges: `selection`), the viewer list, the area and the offline guard (`viewers`), the
     window over a full-screen viewer (`overbook`)."""
 
@@ -284,12 +284,12 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._events: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
         self._jobs: queue.Queue[Callable[[], None]] = queue.Queue()
 
-        self.reading = False  # the reading window: the page alone, full screen, above the viewer
-        self._reading_at_start = reading  # --reading: the reading window opens once a viewer is chosen
-        # before the reading window: ((size and place, maximised), Auto, alpha)
+        self.reading = False  # the full screen (F11; `reading`): the page alone, above the viewer, in the role chosen
+        self._reading_at_start = reading  # --full-screen: the full screen opens once a viewer is chosen
+        # before the full screen: ((size and place, maximised), Auto, alpha)
         self._reading_saved: tuple[tuple[str, bool], bool, float] = (("", False), True, 1.0)
-        self._original_saved = False  # Show original before the reading window, which has no way to change it
-        self._viewer_hidden = False  # reading mode: the viewer gives no frame of its own behind the reading window
+        self._original_saved = False  # Show original before the full screen, which has no way to change it
+        self._viewer_hidden = False  # the full screen: the viewer gives no frame of its own behind it
         self._enlarged: Enlarged | None = None  # the chosen viewer's window as TASlation enlarged it, to put back
         self._enlarge_asked: int | None = None  # the viewer whose window was enlarged, or looked at for it, once
         self._enlarging: dict[str, Any] | None = None  # the enlarged window being waited for (`_enlarge_wait`)
@@ -495,8 +495,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
     def _offer_first_steps(self) -> None:
         """A first start on this machine: the small popup on what to do first, once: closed, it does not come again
         (ui.json). It waits while a dialog holds the window (the legal notice among them), while a book's start is
-        under way (the start dialog comes first: its answer is what the popup's last step goes on from) and in
-        reading mode; it is no dialog itself: the start's work goes on behind it. One window at a time: a dialog that
+        under way (the start dialog comes first: its answer is what the popup's last step goes on from) and on the
+        full screen; it is no dialog itself: the start's work goes on behind it. One window at a time: a dialog that
         holds the window while the popup is up puts it away until that dialog is answered (`_first_steps_wait`)."""
         if getattr(self, "_first_steps", None) is not None or not first_steps_due(self.settings.state_dir):
             return
@@ -603,7 +603,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.canvas = ImageCanvas(self, bg="#202020")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.on_redraw = self._page_drawn  # the reading-order badges and the selection (`selection`)
-        # out of reading mode as in it, no more of a frame is drawn than the capture area in force, which every part
+        # off the full screen as on it, no more of a frame is drawn than the capture area in force, which every part
         # of TASlation reads (a browser's title bar and a viewer's bands are in the capture of its client area; a frame
         # of a new size while a page job runs, that size's own: `_margins_of`)
         self.canvas.read_area_of = lambda image: area.margins_to_box(self._margins_of(image), image.size)
@@ -771,11 +771,11 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
 
     def _build_toolbar(self) -> None:
         """The toolbar: groups of controls that flow into as many rows as the window's width needs (`FlowBar`), the
-        viewer first, then the target language, Translate / Auto / Reading mode, the role, the book and the batch; under
+        viewer first, then the target language, Translate / Auto / Full screen, the role, the book and the batch; under
         it, while the Translator role is chosen, translator mode's strip with its tools and a line on what the pointer
         does (`_build_translator_tools`). Every command has one place: what is used seldom is in the menus only. Every
         control says what it does in a tooltip."""
-        top = ttk.Frame(self)  # the toolbar and translator mode's strip, hidden together in reading mode
+        top = ttk.Frame(self)  # the toolbar and translator mode's strip, hidden together on the full screen
         top.pack(fill="x")
         bar = FlowBar(top, gap=TOOLBAR_GAP)
         bar.pack(fill="x")
@@ -815,9 +815,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         check = ttk.Checkbutton(page, text=_("Auto"), variable=self.auto_var)
         check.pack(side="left", padx=(8, 0))
         tip(_("Translate each new page as you turn it in the viewer."), check)
-        button = self.reading_btn = ttk.Button(page, text=_("Reading mode") + " (F11)", command=self.enter_reading)
+        button = self.reading_btn = ttk.Button(page, text=_("Full screen") + " (F11)", command=self.enter_reading)
         button.pack(side="left", padx=(8, 0))
-        tip(_("Show the page alone on the full screen. F11 or Esc leaves it."), button)
+        tip(_("Show the page alone on the full screen, in the role you chose. F11 leaves it, and Esc too when no region is selected."), button)
 
         role = bar.group()  # the Translator role's strip, once chosen, says what to do
         radio = ttk.Radiobutton(role, text=_("Reader"), value="reader", variable=self.role_var,
@@ -850,7 +850,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         tip(_("Stop the whole-book run, or the page being translated."), self.stop_btn, disabled=_("Nothing is running to stop."))
         self.toolbar = bar
         self._build_translator_tools(top)
-        self._bars = (top,)  # hidden in reading mode
+        self._bars = (top,)  # hidden on the full screen
         self._sync_tools()
 
     _wrap = staticmethod(wrap_label)  # a label wraps at a width (`layout.wrap_label`)
@@ -981,7 +981,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self.translate_btn.configure(text=text)
         if getattr(self, "reading_btn", None) is not None:
             shown = keymap.shown("reading_mode")
-            self.reading_btn.configure(text=_("Reading mode") + (f" ({shown})" if shown else ""))
+            self.reading_btn.configure(text=_("Full screen") + (f" ({shown})" if shown else ""))
 
     def _shortcuts_saved(self, keymap: shortcuts.Keymap) -> None:
         """The Settings dialog saved the window's keys: bound at once, and Help's Keys say them."""

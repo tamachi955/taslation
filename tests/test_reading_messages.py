@@ -1,8 +1,8 @@
-"""Reading mode and the viewer's messages: full screen on the window's own monitor, no note about the keys in the
-reading window and the keys named as the reader knows them in the normal one, F11's refusal during a batch kept on
-the page, Set area... offered first where a browser's tabs and address bar would be read, the area set said in
-words, the line while the browser shows another tab. Parts of the App are borrowed onto stand-ins on the shared
-hidden root (never mapped)."""
+"""The full screen and the viewer's messages: on the window's own monitor, the keys named as the reader knows them
+in the Translator role (in a note on the full screen too) and nothing said in the Reader's, F11's refusal during a
+batch kept on the page, Set area... offered first where a browser's tabs and address bar would be read, the area set
+said in words, the line while the browser shows another tab. Parts of the App are borrowed onto stand-ins on the
+shared hidden root (never mapped)."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -25,7 +25,7 @@ from taslation.ui.viewers import looks_like_browser
 CHROME = WindowInfo(hwnd=7, title="Yomizuq - Google Chrome", class_name="Chrome_WidgetWin_1", pid=7, rect=(0, 0, 960, 540))
 VIEWER_APP = WindowInfo(hwnd=8, title="Yomizuq for PC", class_name="Qt5QWindowIcon", pid=8, rect=(0, 0, 960, 540))
 WAITING = ("Waiting: the browser shows another tab. Bring the book's tab back, or drag that tab out into a window of its own.")
-REFUSED = "Reading mode waits for the whole-book run to finish (Stop ends it)."
+REFUSED = "Full screen waits for the whole-book run to finish (Stop ends it)."
 
 
 def test_keys_are_named_as_the_reader_knows_them():
@@ -58,6 +58,7 @@ class Keys:
     _page_key_pair = app_mod.App._page_key_pair
     _say_waiting = app_mod.App._say_waiting
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
 
     def __init__(self, root):
@@ -99,14 +100,19 @@ def test_the_translator_role_names_the_key_and_a_reader_sees_the_page_turn(hidde
         assert w._status_render() == "ビューアに スペース を送信..."  # said again in the window's language after a switch
     finally:
         i18n.set_language("en")
-    w.reading = True
+    w.reading = True  # the full screen keeps the role: the Translator is told there too, in a note on the page
     w.status_var.set("")
     w.forward_key("Right")
-    assert sent[-1] == "Right" and w.status_var.get() == "" and not w.canvas.note  # no note in the reading window
+    assert sent[-1] == "Right" and w.status_var.get() == "Sent → to the viewer..." == w.canvas.note
     assert w.followed[-1] == ("Right", False)
+    w.role_var.set("reader")  # the Reader sees the page turn: no line, no note
+    w.status_var.set(""), w.canvas.set_note("")
+    w.forward_key("Down")
+    assert sent[-1] == "Down" and w.status_var.get() == "" and not w.canvas.note
+    assert w.followed[-1] == ("Down", False)
     w.reading, w.in_front = False, False  # the browser window shows another tab: the key is not sent
     w.forward_key("Left")
-    assert sent[-1] == "Right" and w.status_var.get() == WAITING
+    assert sent[-1] == "Down" and w.status_var.get() == WAITING
     i18n.set_language("ja")
     try:
         w.forward_key("Left")
@@ -120,8 +126,10 @@ class Reading(tk.Toplevel):
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     enter_reading = app_mod.App.enter_reading
+    _reading_role = app_mod.App._reading_role
     leave_reading = app_mod.App.leave_reading
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
     _normal_status = app_mod.App._normal_status
     _page_status = app_mod.App._page_status
@@ -165,6 +173,7 @@ class Reading(tk.Toplevel):
         self.notes_label = ttk.Label(self)
         self.status_var = tk.StringVar(self)
         self.original_var, self.auto_var, self.top_var = tk.BooleanVar(self), tk.BooleanVar(self), tk.BooleanVar(self)
+        self.role_var = tk.StringVar(self, value="reader")
         self.selected, self.last_result = CHROME, None
         self.reading = self._batching = self._viewer_hidden = self._scan_waits_told = self._restoring = False
         self._ordering = self._chosen_region = self._status_render = self._status_key = None
@@ -333,6 +342,7 @@ class Chooser:
     _learn_covered_soon = lambda self: None  # (whether the viewer draws while covered: tests/test_covered_viewer.py)
     _warm_page_models = app_mod.App._warm_page_models
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
 
     def __init__(self, root, margins):
@@ -395,4 +405,4 @@ def test_the_band_about_the_viewer_covered_does_not_follow_into_reading_mode(hid
     w.auto_var.set(True)  # (Auto on already: the plain first line)
     w.enter_reading()
     assert w.reading and w.canvas.banner == "" and not w._covered
-    assert w.status_var.get() == "Reading mode: page keys turn the viewer's pages; F11 or Esc leaves it."
+    assert w.status_var.get() == "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it."

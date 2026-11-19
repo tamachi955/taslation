@@ -1604,7 +1604,7 @@ def window_at_pointer() -> int:
 
 def front_owner(pid: int, tops: Sequence[int], own_pid: int, viewer: int) -> str:
     """Whose window is in front, from that window's process *pid* and its top-level windows *tops* (itself, its root,
-    its owner's root): "own" (a window of this program: the window, the reading window, a dialog, a message box),
+    its owner's root): "own" (a window of this program: the window, the full screen, a dialog, a message box),
     "viewer" (the viewer's window *viewer*, or a popup it owns), "other" (anything else, or nothing)."""
     if pid and pid == own_pid:
         return "own"

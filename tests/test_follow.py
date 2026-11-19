@@ -576,7 +576,7 @@ def test_a_key_is_followed_until_the_page_settles_and_the_page_starts_at_once(se
     setup.clock.run(60)
     assert len(v.captures) == 5  # nothing after that
     w.job_done()
-    w.reading = True  # reading mode: no note about the key
+    w.reading = True  # the Reader's full screen: no note about the key either
     lines = len(w.statuses)
     _turn(setup, w, (0.1, _page(3)))
     assert len(w.statuses) == lines
@@ -925,6 +925,16 @@ def test_a_click_passed_on_is_followed_as_a_key_is_also_before_any_page_was_take
     w._forward_click(SimpleNamespace(x=500, y=60))  # beside the page: nothing goes on, nothing is followed
     setup.clock.run(5)
     assert len(clicks) == 2 and len(v.captures) == count
+    w.reading = True  # the full screen keeps the role: the Translator's click goes nowhere, whatever the page shows
+    w.role_var.set("translator")
+    w._forward_click(SimpleNamespace(x=50, y=60))
+    setup.clock.run(5)
+    assert len(clicks) == 2 and len(v.captures) == count
+    w.role_var.set("reader")  # the Reader's goes on to the viewer there as in the window
+    v.frames.append((setup.clock.now + 0.2, _page(9)))
+    w._forward_click(SimpleNamespace(x=50, y=60))
+    assert len(clicks) == 3 and clicks[-1][0] == VIEWER.hwnd and w._following.op is not None
+    w.reading = False
 
 
 def test_without_the_hooks_the_viewer_is_polled_as_before(hidden_root, monkeypatch):

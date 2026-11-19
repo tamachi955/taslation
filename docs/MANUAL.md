@@ -66,7 +66,7 @@ The basic way is to turn the pages in the TASlation window. You can operate the 
 * The arrow keys, Page Up/Down, Home, End and Space pressed on the page are sent to the viewer, and each new page, as soon as it is shown,
   is translated or brought from the cache.
 * A click on the page is passed to the same place in the viewer (a viewer that turns pages on a click, its toolbar, the next-page arrow, closing a panel, and so on).
-  Clicks are passed on in reader mode, in reading mode, and in translator mode while a page that is not translated is shown. While translator mode
+  Clicks are passed on in reader mode, in the window and on the full screen, and in translator mode while a page that is not translated is shown in the window (on the full screen in the Translator role they never are). While translator mode
   shows a translated page, clicks belong to TASlation, which uses them to select and edit text regions (pages can be turned with the keys).
 
 To a desktop viewer, keys are sent straight to its window without taking the focus. For a viewer that ignores them, TASlation presses the key for real
@@ -76,7 +76,7 @@ the status line says so and shows the key that goes back one page. Which way of 
 and from then on that way is used from the first key (the 3-second wait happens only the first time with that viewer). A key sent straight to a browser while it is not in front does not reach it
 (0 out of 9 times, tried with Chrome and Edge). So a browser is brought to the front for a moment every time and the key is pressed for real, and the focus
 comes back once the browser has read the key; when it cannot be brought to the front, nothing is sent,
-and you are told "click the book and turn the page there". To read large, use TASlation's reading mode (F11).
+and you are told "click the book and turn the page there". To read large, use TASlation's full screen (F11).
 The viewer's own full-screen display is optional; if you use it, switch it yourself, inside the viewer (see "Over a full-screen viewer", next).
 
 ### Over a full-screen viewer
@@ -87,8 +87,8 @@ It always stays on top, but clicking it does not bring it to the foreground (whe
 so the page keys reach the viewer directly as usual, and TASlation follows to the new page. Browsers go on drawing too.
 
 * TASlation's buttons, checkboxes, the page strip and so on work with a click as usual.
-* F5 (translate) goes to TASlation even while the viewer is in the foreground (it does not reload the browser). In reading mode,
-  F11 and Esc also belong to TASlation and end reading mode.
+* F5 (translate) goes to TASlation even while the viewer is in the foreground (it does not reload the browser). On TASlation's full screen,
+  F11 and Esc also belong to TASlation and leave it (in the Translator role Esc first lets go of a selected region).
   Otherwise F11 and Esc, and the page keys, belong to the viewer (you can use them to switch the viewer's own full screen). TASlation takes these keys only in this mode, and only while the viewer or TASlation is in the foreground.
 * When you click a box you type in (Book, To:), press on the page in translator mode, or open a dialog (book settings, the series sheet,
   editing and so on), TASlation becomes an ordinary window for that time and takes key presses. Click the book
@@ -97,27 +97,35 @@ so the page keys reach the viewer directly as usual, and TASlation follows to th
 * Untick "View > Over the full-screen viewer" to turn it off; it stays off at the next start too (`over_book = false`
   in `taslation.toml` also turns it off by default).
 
-### Reading mode
+### Full screen
 
-"Reading mode" (the toolbar button, or F11) is a mode for reading as you would read the original book. It puts a black full screen over the viewer,
+"Full screen" (the toolbar button, or F11) shows the page alone on the whole screen, in the role you chose. It puts a black full screen over the viewer,
 enlarges the capture area to fill the screen, and shows only the translated page. Fit the area exactly to the page first.
-Page keys and clicks go to the viewer, and Auto follows (if it was off, it is on only while you read, and this is said at the start of each such session). The status is shown at the bottom of the screen for a few seconds only.
+The toolbar, the menus, the page strip and the status bar are away while it lasts; the status is shown at the bottom of the screen instead.
 It opens on the monitor the window is on, and for a browser window where neither an area nor the page part is known, F11 first asks whether to "Set area..." or "Read as it is".
-Esc or F11 takes you back to the window. To go back with the mouse, move the pointer to the top edge of the screen: a faint "✕ Leave reading mode (Esc)" appears at the top right,
-and you click it (it disappears when you move the pointer down; clicks anywhere else go to the viewer as before). With `taslation gui --reading`,
-reading mode starts as soon as the viewer is chosen.
-When you translate a book that has no name yet (in a browser viewer whose tab title is only the viewer's name, for example) in reading mode, those translations are not saved anywhere.
-When you leave reading mode, the book's name is asked for once; once you name it, the pages from then on are saved under that name (the page on show can be saved with F5).
 
-Once you have read the whole book with the whole-book reading, every page is shown at once, which makes reading comfortable. Reading mode translates untranslated pages one page at a time,
-and a whole-book reading waits until you leave reading mode (reading mode does not start while a batch is running). The full-screen window covers the viewer,
+* **In the Reader role** it is for reading as you would read the original book. Page keys and clicks go to the viewer, and Auto follows (if it was off, it is on only while you read, and this is said at the start of each such session). The status shows for a few seconds only.
+* **In the Translator role** the page keeps the Translator's pointer and keys, as in the window: a click selects a region, a drag moves, resizes, turns or draws one, and a double click or Enter opens the editor;
+  F5, Undo, Delete, Tab and the other keys of translator mode work, and the regions' frames, numbers and flags show as in the window. Clicks stay TASlation's whatever the page shows:
+  none goes to the viewer (a click on a page that is not translated yet says to press F5), and the page keys still turn the viewer's pages. Auto stays as you set it.
+  The region editor and the other dialogs open above the full screen, and closing them brings you back to it. A status line stays longer there, by its length (up to 12 seconds).
+  Changing the role, the Book, Series and Volume fields, and starting a whole-book run need the toolbar: leave the full screen for them (a key you gave "Read whole book..." says so there).
+
+F11 takes you back to the window, and so does Esc (in the Translator role Esc first lets go of a selected region). To go back with the mouse, move the pointer to the top edge of the screen: a faint "✕ Leave full screen (F11)" appears at the top right,
+and you click it (it disappears when you move the pointer down; clicks anywhere else go on as before). With `taslation gui --full-screen`,
+the full screen starts as soon as the viewer is chosen (`--reading`, its earlier name, does the same).
+When you translate a book that has no name yet (in a browser viewer whose tab title is only the viewer's name, for example) on the full screen, those translations are not saved anywhere.
+When you leave the full screen, the book's name is asked for once; once you name it, the pages from then on are saved under that name (the page on show can be saved with F5).
+
+Once you have read the whole book with the whole-book reading, every page is shown at once, which makes reading comfortable. The full screen translates untranslated pages one page at a time,
+and a whole-book reading waits until you leave the full screen (the full screen does not start while a batch is running). The full-screen window covers the viewer,
 so the page can be taken only from what the viewer itself draws. Chromium-based viewers, such as the viewers read in a browser, do draw;
-with a viewer that does not, the page says so: press Esc and read in the normal window.
+with a viewer that does not, the page says so: press F11 and read in the normal window.
 
 ### The bubble under the pointer: the original, the translation, and copying the Japanese
 
-In reading mode and in the normal window, in either role, resting the pointer on a bubble shows that bubble's "other side"
-(how the Translator role's normal window differs is under "In the Translator role" below).
+In the window and on the full screen, in either role, resting the pointer on a bubble shows that bubble's "other side"
+(how the Translator role differs is under "In the Translator role" below).
 Two choices decide what the page shows and how the other side is shown. Both are in the View menu and in Tools > Settings..., and a choice applies at once to the page on show
 (nothing is translated again). They are kept in the settings file (`hover_shows`, `hover_reveal`).
 Each has a shortcut action ("Switch between the translation and the original on the page", "Switch between a panel and the bubble itself under the pointer"),
@@ -151,13 +159,13 @@ so even over a full-screen viewer, keys reach the viewer. The enlargement of the
 
 **View > Show original and the bubble zoom setting**: with the translation on the page, View > Show original shows the whole page as the viewer does
 (meanwhile the bubble itself shows nothing different; the panel still opens). With the original on the page, Show original is greyed in the Reader role
-and its key does nothing (reading mode turns Show original off as it starts). "Enlarge the bubble under the pointer" in Tools > Settings...
+and its key does nothing (the full screen turns Show original off as it starts). "Enlarge the bubble under the pointer" in Tools > Settings...
 (`bubble_zoom`) off shows nothing under the pointer while the translation is on the page. With the original on the page the pointer is the way to the translation,
 so the setting does not count there.
 The page a whole-book run shows while it translates, and the page strip, are as they always were in either role: nothing shows under the pointer there.
 
-**In the Translator role**: the normal window's page is always the translated page with the regions' frames, whatever "On the page" says
-(the original on the page is a choice of reading mode and the Reader role; View > Show original works as before).
+**In the Translator role**: the page is always the translated page with the regions' frames, in the window and on the full screen, whatever "On the page" says
+(the original on the page is a choice of the Reader role; View > Show original works as before).
 Resting the pointer on a translated bubble shows its original in the way "Under the pointer" chooses, with the same waits and the same `bubble_zoom`.
 The pointer is still the Translator's (a press selects; a drag moves, resizes, turns or draws a new region; a double click opens the editor),
 so nothing shows while a button is down, while you drag or draw a rectangle, on a handle of the selected region (a corner, a side, the round handle),
@@ -168,7 +176,7 @@ The panel never covers the bubble, nor the selected region's frame and handles w
 The original lettering that "The bubble itself" puts back lies under the regions' frames, numbers, flags and the selection, changes none of them and is no edit (there is nothing to undo).
 It goes back to the translation the moment the pointer leaves or a press comes.
 
-**The bubble's Japanese as text, and copying**: in reading mode and in the normal window, in either role, you can do this with the bubble under the pointer
+**The bubble's Japanese as text, and copying**: in the window and on the full screen, in either role, you can do this with the bubble under the pointer
 (in every combination, and over a full-screen viewer too; in the Translator role, not while a button is down or the region editor or a dialog is open):
 
 * F2: opens the bubble's panel pinned, with its Japanese as text you can select, and the buttons "Copy the Japanese", "Copy the translation" and "Close".
@@ -191,7 +199,7 @@ and the viewer's the rest of the time. No page key and no click is taken.
 Without the pointer: F3 and Shift+F3 go from bubble to bubble, and while the pointer stays where it was, F2, Shift+F2 and Ctrl+F2 act on the pinned bubble (move the pointer onto a bubble and they act on that one again).
 On a touch screen, where a tap goes to the viewer and nothing rests on the page, press and hold a bubble (about 0.6 seconds, without moving) to pin its panel; that touch is not passed to the viewer, and a short tap goes to the viewer as before.
 Windows turns a touch held still into a right click while its "press and hold" setting is on, so a right click on a bubble pins its panel too.
-Pinning by a press held still or a right click is reading mode's and the Reader role's only: in the Translator role a press held is the start of a drag, and a right click only closes a panel that shows.
+Pinning by a press held still or a right click is the Reader role's only: in the Translator role a press held is the start of a drag, and a right click only closes a panel that shows.
 
 ### Two ways to read
 
@@ -334,7 +342,7 @@ by "Start". The larger the viewer's window, the better it is read (the "Read who
 In a whole-book reading, everything shown is counted in "lines". Pages translated before are shown as "N lines already translated", and the "Read" count in the banner
 is the same number of pages as the status bar and the page strip show. When a page in the cache is shown, it says "Looking at the page..." rather than "Translating...".
 
-Some viewers stop drawing while they are hidden. When you choose the viewer, and when reading mode starts, if the viewer is completely hidden by other windows,
+Some viewers stop drawing while they are hidden. When you choose the viewer, and when the full screen starts, if the viewer is completely hidden by other windows,
 TASlation asks it to redraw without pressing any key (the same request Windows makes when another window is moved away), checks whether it draws while still hidden,
 and records that per viewer in `profiles.json`. Only a viewer that did not draw is brought to the front for a moment at each page when reading page by page
 (with no key press and no change of focus), and put back in its place in the order at once. A viewer that is even partly visible goes on drawing, so it is not brought to the front.
@@ -806,7 +814,7 @@ the letter next to theirs.
 ```
 taslation                      open the TASlation window (the same as `taslation gui`)
 taslation gui --window "<title>" --on-top   open with the viewer chosen, and keep the window over the viewer (Auto on; --no-auto starts with it off)
-taslation gui --reading        start in reading mode (the page alone, full screen) once the viewer is chosen
+taslation gui --full-screen    start on the full screen (the page alone, in the role chosen) once the viewer is chosen
 taslation windows              list the windows that can be captured
 taslation doctor               check the models, fonts, Ollama, the network guard, and whether each stage runs on the GPU or the CPU
 taslation notice [--country CODE] [--reset]   show the legal notice of the start for a country (ISO code); --reset shows it again at the next start
@@ -874,7 +882,7 @@ TASlation installs only one translation model at a time. For a model TASlation d
 it asks separately whether to remove it, and keeps it by default. The first time PLaMo is installed, it first asks for your agreement to its licence (the PLaMo Community License as revised on November 9, 2026;
 the main points are in `docs/THIRD_PARTY.md`). A PLaMo installed after agreeing to the earlier text goes on working as it is; agreement to the revised text is asked the next time PLaMo is installed.
 When the publisher's server refused the download or no longer has the file, trying again will not help, so it tells you to update TASlation or to see the project's issues page.
-While it lies over the book, in reading mode, and during a whole-book run, it does not ask; it asks when you are back in the window.
+While it lies over the book, on the full screen, and during a whole-book run, it does not ask; it asks when you are back in the window.
 On the command line, `--language` asks the same, and `python setup_models.py --translator-for "Turkish"` installs it too.
 When `ollama_model` names a model of your own, nothing is offered.
 When PLaMo is not installed but Qwen is, it translates with Qwen meanwhile, and the banner above the page says so.
@@ -973,7 +981,7 @@ It is made where the settings are read from (the file that was read, or else `ta
 Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation folder (docs/INSTALL.md, "Updating").
 Settings changed in the file take effect from the next start.
 
-The "Shortcuts" page of "Settings" changes the window's keys. Choose an action in the list (translating the page on show, reading mode, Undo, Redo,
+The "Shortcuts" page of "Settings" changes the window's keys. Choose an action in the list (translating the page on show, full screen, Undo, Redo,
 menu commands, translator mode's tools and the keys on the page (next and previous region, moving a region by 1 pixel, copying and pasting formatting and regions),
 "Previous" and "Next" in the region editor, and so on), press "Change key...", then press the new key (Esc cancels).
 "No key" removes the key, "Default" puts that action's key back to the initial one, and "Reset all" puts all the keys back to the initial ones.
@@ -1034,7 +1042,7 @@ font_path = ""               # auto: the series sheet's font where installed, th
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
 sound_when_done = false      # ... and plays the system's default sound
-hover_shows = "original"     # reading mode and the Reader role: the translation on the page ("original" under the
+hover_shows = "original"     # the Reader role: the translation on the page ("original" under the
                              # pointer), or the page as the viewer shows it ("translation" under the pointer)
 hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page

@@ -1,14 +1,23 @@
-"""Reading mode (F11): the page alone, full screen above the viewer on the window's own monitor, the page keys passed
-on to the viewer (`forward_key`, named as the reader knows them: `key_label`), Set area... offered first where the
-capture would take in a browser's tabs and address bar; and the window's size and place, kept while it is neither
-maximised nor full screen and put back afterwards.
+"""The full screen (F11; the person knows it as Full screen, the code as reading: `App.reading`, `enter_reading`): the
+page alone, full screen above the viewer on the window's own monitor, the page keys passed on to the viewer
+(`forward_key`, named as the reader knows them: `key_label`), Set area... offered first where the capture would take
+in a browser's tabs and address bar; and the window's size and place, kept while it is neither maximised nor full
+screen and put back afterwards.
 
-Ways out and what changes meanwhile: F11 and Esc, and a faint close button at the top right that shows while the
-pointer is at the top edge of the screen (`TOP_EDGE_PX`) and goes once it is further down than `TOP_BAND_PX`
-(`_top_edge_moved`); a click on the button is TASlation's own, every other click on the page still goes on to the
-viewer. Auto is on while reading mode is, and said so in its first line the first time a session it was off before
-(`READING_MODE_AUTO`). Pages translated there under a name that names no book are kept nowhere: leaving asks for the
-book's name once a session for the viewer (`_ask_name_after_reading`)."""
+It keeps the role chosen. In the Reader role every click on the page goes on to the viewer, and Auto is on while the
+full screen is, said so in its first line the first time a session it was off before (`READING_MODE_AUTO`). In the
+Translator role the pointer and the keys are the Translator's as on the page in the window (`translator`: a click
+selects, a drag moves, resizes, turns or draws, a double click opens the editor, the frames and their marks show; a
+click goes on to the viewer only while the page on show is not the translated one, as in the window), Auto stays as
+the person set it, and a status line stays at the bottom long enough to read (`StatusMixin._note_ms`). Whatever needs the toolbar
+(the role, the Book, Series and Volume fields, a whole-book run) is done after leaving it; should the role change
+meanwhile (a book's start), the full screen follows it (`_reading_role`).
+
+Ways out: F11; Esc, which in the Translator role first lets go of the selected region (`JobsMixin._on_escape`); and a
+faint close button at the top right that shows while the pointer is at the top edge of the screen (`TOP_EDGE_PX`) and
+goes once it is further down than `TOP_BAND_PX` (`_top_edge_moved`), a click on it TASlation's own. Pages translated
+there under a name that names no book are kept nowhere: leaving asks for the book's name once a session for the viewer
+(`_ask_name_after_reading`)."""
 
 from __future__ import annotations
 
@@ -36,6 +45,7 @@ from ..i18n import _
 from ..pagekeys import key_ways, passed_on, viewer_key
 from .constants import (
     CLOSE_READING,
+    FULL_SCREEN_TRANSLATOR,
     KEPT_FROM_NOW,
     KEY_ARROWS,
     READING_MODE,
@@ -58,7 +68,7 @@ from .zoom import BubbleZoomMixin
 # pressed while the window was busy go in one handover of the foreground (`_hand_over`).
 KEY_QUIET_MS = 20
 KEY_GATHERS = 5
-# The reading window's close button: shown while the pointer is this near the top of the screen, gone once it is
+# The full screen's close button: shown while the pointer is this near the top of the screen, gone once it is
 # further down than TOP_BAND_PX; faint over the black screen, lit under the pointer (background, text).
 TOP_EDGE_PX = 2
 TOP_BAND_PX = 120
@@ -77,7 +87,7 @@ def key_label(key: str) -> str:
 
 
 def bubbles_away(window: object) -> None:
-    """The page moves (reading mode in or out, the widgets made anew): no panel beside a bubble where it was
+    """The page moves (the full screen in or out, the widgets made anew): no panel beside a bubble where it was
     (`zoom`), nor a bubble showing its other side in its place (`in_place`), where the window has them."""
     for name in ("_zoom_hide", "_reveal_hide"):
         hide = getattr(window, name, None)
@@ -86,7 +96,7 @@ def bubbles_away(window: object) -> None:
 
 
 class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMixin):
-    """Reading mode and the window's size and place, the panel beside a bubble while reading (`zoom.BubbleZoomMixin`)
+    """The full screen and the window's size and place, the panel beside a bubble while reading (`zoom.BubbleZoomMixin`)
     or the bubble itself showing its other side (`in_place.InPlaceMixin`), what the page and the bubble under the
     pointer show and how (`hover.HoverChoiceMixin`) and a bubble's Japanese and translation at hand
     (`bubble_text.BubbleTextMixin`). A part of `app.App` (no `__init__`: the state it uses is made by `App.__init__`;
@@ -95,7 +105,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
     # ------------------------------------------------------------------ the window's size and place
     def _track_geometry(self, event: tk.Event) -> None:
         """Keep the window's size and place while it is neither maximised nor full screen: what a maximised window
-        returns to, and what reading mode and a language switch put back."""
+        returns to, and what the full screen and a language switch put back."""
         if event.widget is not self or self.reading or self._restoring:
             return
         try:
@@ -148,23 +158,24 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
 
         self.after_idle(apply)
 
-    # ------------------------------------------------------------------ reading mode
+    # ------------------------------------------------------------------ the full screen
     def toggle_reading(self) -> None:
-        """F11: the reading window on or off."""
+        """F11: the full screen on or off."""
         if self.reading:
             self.leave_reading()
         else:
             self.enter_reading()
 
     def enter_reading(self, offered: bool = False) -> None:
-        """The page alone on a black full screen above the viewer, on the monitor the window is on: the page keys
-        turn the viewer's pages, Auto follows them, clicks go through to the viewer, and status lines show at the
-        bottom for a few seconds. F11 or Esc leaves it. Not while a batch runs or waits to run: that is said on the
-        page for a few seconds, where the batch's own lines do not take its place. Where the capture would take in a browser's
-        tabs and address bar, Set area... is offered first (`_offer_area`; *offered*: it was); the viewer's window is
-        enlarged before either (`_enlarge_first`). Show original rests while it is on: the reading window has no menu
-        to turn it off with. Auto is on while it is: the first time a session that turns it on, the first line says
-        so (`READING_MODE_AUTO`). A faint close button shows at the top edge (`_top_edge_moved`)."""
+        """The page alone on a black full screen above the viewer, on the monitor the window is on, in the role
+        chosen (`_reading_role`): the page keys turn the viewer's pages, and status lines show at the bottom for a few
+        seconds (`_note_ms`); in the Reader role Auto follows the pages turned and clicks go through to the viewer, in
+        the Translator role the pointer selects and edits the regions as in the window. F11 leaves it, and Esc too
+        once no region is selected. Not while a batch runs or waits to run: that is said on the page for a few
+        seconds, where the batch's own lines do not take its place. Where the capture would take in a browser's tabs
+        and address bar, Set area... is offered first (`_offer_area`; *offered*: it was); the viewer's window is
+        enlarged before either (`_enlarge_first`). Show original rests while it is on: the full screen has no menu to
+        turn it off with. A faint close button shows at the top edge (`_top_edge_moved`)."""
         if self.reading:
             return
         if self.selected is None:
@@ -172,9 +183,9 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             return
         queued = getattr(self, "_queued", None)
         if self._batching or (queued is not None and queued[0] == "batch"):
-            self.say("Reading mode waits for the whole-book run to finish (Stop ends it).")
+            self.say("Full screen waits for the whole-book run to finish (Stop ends it).")
             # on the page for a few seconds: the batch's next line takes the status bar at once
-            self.canvas.set_note(_("Reading mode waits for the whole-book run to finish (Stop ends it)."), READING_NOTE_MS)
+            self.canvas.set_note(_("Full screen waits for the whole-book run to finish (Stop ends it)."), READING_NOTE_MS)
             return
         if not self._enlarge_first(lambda: self.enter_reading(offered)):
             return
@@ -190,8 +201,6 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         except (tk.TclError, ValueError):
             alpha = 1.0
         self._reading_saved = (self._current_geometry(), bool(self.auto_var.get()), alpha)
-        quiet = self._reading_saved[1] or getattr(self, "_reading_auto_told", False)  # Auto on already, or said once
-        self._reading_auto_told = True
         self._unkept_reading = 0  # pages translated here under a name that names no book (`_ask_name_after_reading`)
         self._original_saved = bool(self.original_var.get())
         self.original_var.set(False)
@@ -205,7 +214,6 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         place_strip(self)  # (away while reading)
         self.config(menu="")
         self.canvas.configure(bg="#000000", cursor="")
-        self.auto_var.set(True)  # pages turned in the viewer are followed
         try:
             if monitor is not None:
                 self.attributes("-alpha", 0.0)  # unseen until it is on its own monitor
@@ -218,12 +226,28 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         self._apply_on_top()
         self.canvas.focus_set()
         self._redisplay()
-        self.say(READING_MODE if quiet else READING_MODE_AUTO)
+        self._reading_role()
         self._watch_top_edge()
         if hasattr(self, "_over_soon"):  # Tk made its window anew for the full screen: over the book again at once
             self._over_soon()
         if hasattr(self, "_learn_covered_soon"):  # the page alone hides the viewer: does it draw so?
             self._learn_covered_soon()
+
+    def _reading_role(self) -> None:
+        """The full screen in the role chosen now, as it starts (`enter_reading`) and when the role changes on it (a
+        book's start: `TranslatorMixin._on_role_changed`). The Reader role has Auto on, so that the pages turned in the
+        viewer are followed: the first time a session that turns it on, the first line says so (`READING_MODE_AUTO`).
+        The Translator role keeps Auto as the person set it (`_reading_saved`), and its first line says what the
+        pointer does (`FULL_SCREEN_TRANSLATOR`)."""
+        auto = self._reading_saved[1]
+        if self.role_var.get() == "translator":
+            self.auto_var.set(auto)
+            self.say(FULL_SCREEN_TRANSLATOR)
+            return
+        quiet = auto or getattr(self, "_reading_auto_told", False)  # Auto on already, or said once
+        self._reading_auto_told = True
+        self.auto_var.set(True)
+        self.say(READING_MODE if quiet else READING_MODE_AUTO)
 
     def _window_monitor(self) -> Rect | None:
         """The whole rectangle of the monitor the window is on (Windows; None elsewhere)."""
@@ -254,8 +278,8 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         return known is not None and known[1] is None
 
     def _offer_area(self) -> None:
-        """Before the reading window, where the capture takes in a browser's tabs and address bar: Set area... (the
-        area dialog, then the reading window once the area is set) or Read as it is; Esc or closing the box leaves
+        """Before the full screen, where the capture takes in a browser's tabs and address bar: Set area... (the
+        area dialog, then the full screen once the area is set) or Read as it is; Esc or closing the box leaves
         everything as it was. Asked once a session for each viewer."""
         offered = getattr(self, "_area_offered", None)
         if offered is None:
@@ -301,9 +325,10 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
     def leave_reading(self, restore: bool = True) -> None:
         """Back to the window as it was: its size and place (put back once the menu bar is; maximised again on its
         own monitor when it was), Always on top, Auto and Show original as the reader had them, and the status line of
-        the normal window. A language switch puts the size and place back itself (*restore* False). Pages translated
-        in reading mode under a name that names no book were kept nowhere: the name is asked for then
-        (`_ask_name_after_reading`; not at a language switch, which comes back to reading mode)."""
+        the normal window, in either role (the Reader role's Auto was its own while the full screen lasted). A
+        language switch puts the size and place back itself (*restore* False). Pages translated on the full screen
+        under a name that names no book were kept nowhere: the name is asked for then (`_ask_name_after_reading`; not
+        at a language switch)."""
         if not self.reading:
             return
         saved, auto, alpha = self._reading_saved
@@ -331,7 +356,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         self.original_var.set(self._original_saved)
         self.canvas.focus_set()
         self._redisplay()
-        if self._status_key in READING_ONLY:  # a line about the reading window: the normal window's own instead
+        if self._status_key in READING_ONLY:  # a line about the full screen: the normal window's own instead
             self._normal_status()
         if hasattr(self, "_over_soon"):
             self._over_soon()
@@ -350,7 +375,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         canvas.bind("<Leave>", self._top_edge_left, add="+")
 
     def _top_edge_moved(self, event: tk.Event) -> None:
-        """In reading mode: the pointer at the top edge (`TOP_EDGE_PX`) shows the close button, further down than
+        """On the full screen: the pointer at the top edge (`TOP_EDGE_PX`) shows the close button, further down than
         `TOP_BAND_PX` it goes."""
         if not self.reading:
             return
@@ -372,8 +397,8 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             self._hide_close()
 
     def _show_close(self) -> None:
-        """The close button at the top right of the reading window, faint (`CLOSE_FAINT`), lit under the pointer: a
-        click on it leaves reading mode (and goes nowhere else). A label, not a ttk button: its colours are its own
+        """The close button at the top right of the full screen, faint (`CLOSE_FAINT`), lit under the pointer: a
+        click on it leaves the full screen (and goes nowhere else). A label, not a ttk button: its colours are its own
         over the black screen."""
         button = getattr(self, "_close_button", None)
         if button is not None and not button.winfo_exists():
@@ -392,7 +417,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             button.lift()
 
     def _close_clicked(self, _event: tk.Event | None = None) -> None:
-        """A click on the close button: reading mode ends (the click is TASlation's own, nothing goes to the viewer)."""
+        """A click on the close button: the full screen ends (the click is TASlation's own, nothing goes to the viewer)."""
         self.leave_reading()
 
     def _hide_close(self) -> None:
@@ -401,9 +426,9 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         if button is not None and button.winfo_exists():
             button.place_forget()
 
-    # ------------------------------------------------------------------ a book with no name read in reading mode
+    # ------------------------------------------------------------------ a book with no name read on the full screen
     def _ask_name_after_reading(self) -> None:
-        """Out of reading mode after pages were translated there under a name that names no book (`_unkept_reading`,
+        """Off the full screen after pages were translated there under a name that names no book (`_unkept_reading`,
         counted by `_on_new_page`; nothing of them was kept): the book's name is asked for (`_ask_name`, offering the
         books the page on show is recognised as), once a session for the viewer, with the cache on and the Book box
         still naming no book. The name given keeps the pages from then on (`KEPT_FROM_NOW`)."""
@@ -420,7 +445,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         asked.add(key)
 
         def ask() -> None:
-            if not self.reading and self._name_needed():  # (back in reading mode meanwhile, or named: not now)
+            if not self.reading and self._name_needed():  # (back on the full screen meanwhile, or named: not now)
                 self._ask_name(lambda name: self.say(KEPT_FROM_NOW, book=name), getattr(self, "_live", None))
 
         self.after_idle(ask)
@@ -436,7 +461,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
                 pass
 
     def _apply_on_top(self) -> None:
-        """Always on top (or reading mode) as the reader has it; over the book the window stays topmost whatever
+        """Always on top (or the full screen) as the reader has it; over the book the window stays topmost whatever
         it is (`overbook`), set again with SWP_NOACTIVATE after Tk's own call."""
         try:
             self.attributes("-topmost", bool(self.top_var.get()) or self.reading)
@@ -461,10 +486,10 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         the foreground did not come the keys are posted after all, but never to a browser: measured, a key posted to
         a browser that is not in front reaches nothing (0 of 9, Chrome and Edge 156), and the reader is told to turn
         the page in the viewer. Over a full-screen viewer (`overbook`) the keys go to the viewer itself and none comes
-        here. In the Translator role the status line names the key as the reader knows it (`key_label`); the Reader
-        role and the reading window see the page turn and say nothing of it. While a run reads the pages the reader
-        turns the key goes on all the same, one press of the reader one key; once it has gone on to the translation
-        nothing goes. The key goes on as the viewer's own key of the same meaning (`_key_for_viewer`): the window's
+        here. In the Translator role the status line names the key as the reader knows it (`key_label`), in the window
+        and on the full screen; the Reader role sees the page turn and says nothing of it. While a run reads the pages
+        the reader turns the key goes on all the same, one press of the reader one key; once it has gone on to the
+        translation nothing goes. The key goes on as the viewer's own key of the same meaning (`_key_for_viewer`): the window's
         next and previous keys as the keys saved for the viewer in Page keys..., one press one key."""
         hwnd = self._key_viewer()
         if hwnd is None:
@@ -529,7 +554,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         except ViewerCovered:
             self._set_covered(True)  # the key goes all the same: the page turns, and shows once the viewer draws
         except CaptureError as e:
-            if not self.reading:  # the reading window says so on the page
+            if not self.reading:  # the full screen says so on the page
                 self.say("Viewer: {error}", error=e)
             return
         self._raise_for_key(hwnd)
@@ -545,7 +570,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             if not self.reading:
                 self.say("Viewer: {error}", error=e)
             return
-        if not self.reading and self.role_var.get() == "translator":  # a reader sees the page turn
+        if self.role_var.get() == "translator":  # a reader sees the page turn
             self.status(lambda: _("Sent {key} to the viewer...").format(key=key_label(key)))
         if reference is not None:
             self._follow_change(hwnd, reference, key, time.monotonic(), retried=pressed, seq=seq)

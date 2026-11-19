@@ -52,7 +52,7 @@ def test_the_settings_start_with_the_translation_on_the_page_and_a_panel_and_tak
     Settings(hover_shows="translation", hover_reveal="in_place").validate()
 
 
-def test_what_the_page_shows_counts_in_reading_mode_and_the_reader_role_and_the_translator_s_pointer_shows_the_original():
+def test_what_the_page_shows_counts_in_the_reader_role_and_the_translator_s_pointer_shows_the_original():
     def window(shows="original", reveal="panel", role="reader", reading=False, zoom_on=True):
         settings = SimpleNamespace(hover_shows=shows, hover_reveal=reveal, bubble_zoom=zoom_on)
         return SimpleNamespace(settings=settings, role_var=SimpleNamespace(get=lambda: role), reading=reading)
@@ -60,7 +60,10 @@ def test_what_the_page_shows_counts_in_reading_mode_and_the_reader_role_and_the_
     assert hover.hover_shows(window(shows="x")) == "original" and hover.hover_reveal(window(reveal="x")) == "panel"
     assert hover.other_side("original") == "translation" and hover.other_reveal("panel") == "in_place"
     assert reverse_on(window("translation")) and not reverse_on(window("translation", role="translator"))
-    assert reverse_on(window("translation", role="translator", reading=True))  # the reading window edits nothing
+    # the full screen keeps the role: the Reader's page as in the window, the Translator's the translated one
+    assert reverse_on(window("translation", reading=True))
+    assert not reverse_on(window("translation", role="translator", reading=True))
+    assert reverse_on(window("translation", role="", reading=True))  # (no role chosen: the full screen reads)
     assert reveal_wanted(window(), "panel") and not reveal_wanted(window(), "in_place")
     assert reveal_wanted(window(reveal="in_place"), "in_place")
     assert not reveal_wanted(window(zoom_on=False), "panel")  # the translation on the page: bubble_zoom counts ...
@@ -74,15 +77,21 @@ def test_what_the_page_shows_counts_in_reading_mode_and_the_reader_role_and_the_
         assert not reveal_wanted(window(shows, role="translator", zoom_on=False), "panel"), shows
     assert hover.reader_pointer(window()) and not hover.reader_pointer(window(role="translator"))
     assert hover.translator_window(window(role="translator"))
-    assert not hover.translator_window(window(role="translator", reading=True))
+    assert hover.translator_window(window(role="translator", reading=True))  # its pointer is the Translator's there
+    assert not hover.reader_pointer(window(role="translator", reading=True))
+    assert hover.reader_pointer(window(reading=True)) and not hover.translator_window(window(reading=True))
     pressed = window(role="translator")
     pressed._drag_start = (3, 4)  # a press on the page under way: selecting, moving, resizing, turning, drawing
     editing = window(role="translator")
     editing._editor = SimpleNamespace(winfo_exists=lambda: True)  # the region editor open
     modal = window(role="translator")
     modal.grab_current = lambda: object()  # a modal dialog holding the window's input
-    for busy in (pressed, editing, modal):
+    full_screen = window(role="translator", reading=True)
+    full_screen._drag_start = (3, 4)  # ... on the full screen as in the window
+    for busy in (pressed, editing, modal, full_screen):
         assert not hover.hover_usable(busy) and not reveal_wanted(busy, "panel")
+    full_screen._drag_start = None
+    assert hover.hover_usable(full_screen) and reveal_wanted(full_screen, "panel")
     editing._editor = SimpleNamespace(winfo_exists=lambda: False)  # (closed)
     assert hover.hover_usable(editing)
     clicked = window()
@@ -454,10 +463,16 @@ def test_the_translator_role_keeps_its_translated_page_and_its_pointer_shows_the
         w.point(550, 150)  # a bubble that reads well: the longer rest, as with the translation on the page
         assert w.delays(due) == [ZOOM_REST_MS], (shows, reveal)
         w._bubbles_away()
-        w.reading = True  # reading mode shows as the choices say
+        w.reading = True  # the full screen keeps the role: the translated page, its pointer showing the original
+        w._redisplay()
+        assert w.shown_at(150, 200) == SET, (shows, reveal)
+        w.point(155, 205)
+        assert w.delays(due) == [ZOOM_DELAY_MS], (shows, reveal)
+        w._bubbles_away()
+        w.role_var.set("reader")  # the Reader's full screen shows as the choices say
         w._redisplay()
         assert w.shown_at(150, 200) == (INK if shows == "translation" else SET), (shows, reveal)
-        w.point(155, 205)
+        w.point(150, 200)
         assert w.later, (shows, reveal)
 
 
@@ -739,7 +754,12 @@ def test_the_keys_go_nowhere_without_a_translated_page_nor_while_the_translator_
     w.due("_zoom_watch")
     assert w._zoom_popup is None
     w._editor = None
-    w.reading = True  # reading mode edits nothing: the keys work there
+    w.reading = True  # the full screen keeps the role: the keys work there, the Translator's press first as ever
+    w._zoom_hide()
+    w._drag_start = (5, 5)
+    w.previous_bubble()
+    assert getattr(w, "_zoom_popup", None) is None
+    w._drag_start = None
     w.previous_bubble()
     assert w._zoom_pinned
 

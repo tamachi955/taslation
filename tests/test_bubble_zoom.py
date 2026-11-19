@@ -252,9 +252,11 @@ def test_it_shows_in_every_role_while_the_pointer_is_free_and_only_with_the_sett
     assert page._zoom_wanted()
     page._drag_start = (10, 10)  # ... but not while a press of the Translator's is under way
     assert not page._zoom_wanted()
-    page.reading = True  # (reading mode edits nothing)
-    assert page._zoom_wanted()
+    page.reading = True  # the full screen keeps the role: the Translator's press holds it back there too
+    assert not page._zoom_wanted()
     page._drag_start = None
+    assert page._zoom_wanted()
+    page.reading = False
     page.on_show = False  # another page than the one translated
     assert not page._zoom_wanted()
     page.on_show = True

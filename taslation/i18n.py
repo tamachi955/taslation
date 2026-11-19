@@ -60,8 +60,8 @@ JA: dict[str, str] = {
     "Getting the Japanese reader ready (the first time takes a few seconds)...": "日本語の読み取り機能を準備しています（初回は数秒かかります）...",
     "\n\nPages already translated still show; new pages cannot be read.":
         "\n\n翻訳済みのページは表示できますが、新しいページは読めません。",
-    "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: reading mode.":
-        "準備完了。このウィンドウでページ送りのキーを押すか、ページをクリックしてめくります。F5: このページを今すぐ翻訳・F11: 読書モード",
+    "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen.":
+        "準備完了。このウィンドウでページ送りのキーを押すか、ページをクリックしてめくります。F5: このページを今すぐ翻訳・F11: フルスクリーン",
     "Viewer: {title}": "ビューア: {title}",
     "Viewer: {error}": "ビューア: {error}",
     "Translating...": "翻訳中...",
@@ -204,17 +204,17 @@ JA: dict[str, str] = {
     "asking the model": "モデルに問い合わせ中",
     "Translating... ({seconds} s)": "翻訳中...（{seconds} 秒）",
     "Translating... {stage} ({seconds} s)": "翻訳中... {stage}（{seconds} 秒）",
-    "Reading mode": "読書モード",
+    "Full screen": "フルスクリーン",
     "View": "表示",
     "TASlation blocked {blocked} attempt(s) to reach the internet. Nothing left this computer; you need do nothing.":
         "TASlation はインターネットへの接続の試みを {blocked} 回止めました。このパソコンから外には何も出ていません。何もする必要はありません。",
     "TASlation - translating...": "TASlation - 翻訳中...",
-    "This viewer cannot be read behind the reading window; press Esc": "このビューアは読書モードの画面の裏では読み取れません。Esc を押してください",
-    "Reading mode translates page by page; the whole-book scan waits until you leave it (Esc).":
-        "読書モードでは1ページずつ翻訳します。1冊まるごと読み取りは読書モードを抜けるまで待ちます（Esc）。",
-    "Reading mode waits for the whole-book run to finish (Stop ends it).": "読書モードは1冊まるごと読み取りが終わるまで待ちます（「停止」で中断できます）。",
-    "Reading mode: page keys turn the viewer's pages; F11 or Esc leaves it.":
-        "読書モード: ページ送りキーでビューアのページをめくります。F11 か Esc で戻ります。",
+    "This viewer cannot be read behind the full screen; press F11": "このビューアはフルスクリーンの裏では読み取れません。F11 を押してください",
+    "The full screen translates page by page; the whole-book scan waits until you leave it (F11).":
+        "フルスクリーンでは1ページずつ翻訳します。1冊まるごと読み取りはフルスクリーンを抜けるまで待ちます（F11）。",
+    "Full screen waits for the whole-book run to finish (Stop ends it).": "フルスクリーンは1冊まるごと読み取りが終わるまで待ちます（「停止」で中断できます）。",
+    "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it.":
+        "フルスクリーン: ページ送りキーでビューアのページをめくります。F11 か Esc で戻ります。",
     "{done} of {total} line(s) done": "{total} 行中 {done} 行完了",
     "getting the Japanese reader ready": "日本語の読み取り機能を準備中",
     "Translating... {stage}": "翻訳中... {stage}",

@@ -147,7 +147,7 @@ class ImageCanvas(tk.Canvas):
         self.overlay: list[tuple[tuple[int, int, int, int], str, str]] = []  # (box in image pixels, colour, label)
         self.edged_tags: set[str] = {"chosen"}  # the tags `draw_frame` and the like draw two-tone (the selection)
         self.outlines: list[tuple[tuple[int, int, int, int], str, bool]] = []  # (box in image pixels, colour, dashed)
-        self.enlarge = False  # a picture smaller than the canvas is enlarged too (the reading window)
+        self.enlarge = False  # a picture smaller than the canvas is enlarged too (the full screen)
         self.crop: tuple[int, int, int, int] | None = None  # the part of the image shown (image pixels); None = all
         # with no crop: no more of a frame than the part the reading takes of it (`read_area_of`), and in that part a
         # page on a plain ground drawn alone (`area.page_bounds`), the boxes found joined while the frames keep their

@@ -1,10 +1,10 @@
-"""What the page shows in reading mode and the Reader role, and how a bubble the pointer rests on shows the other
-side, there and in the Translator role's normal window: two settings, each chosen in the View menu, in Tools >
-Settings... and with an optional key (none at first), kept in the settings file and applied at once to the page on
-show, nothing translated again.
+"""What the page shows in the Reader role, and how a bubble the pointer rests on shows the other side, there and in
+the Translator role: two settings, each chosen in the View menu, in Tools > Settings... and with an optional key (none
+at first), kept in the settings file and applied at once to the page on show, nothing translated again. The full
+screen (F11, `reading`) keeps the role chosen: what holds for a role in the window holds there too.
 
-`Settings.hover_shows`, what is on the page in reading mode and the Reader role (`set_hover_shows`; the key of
-"hover_shows": `flip_hover_shows`):
+`Settings.hover_shows`, what is on the page in the Reader role (`set_hover_shows`; the key of "hover_shows":
+`flip_hover_shows`):
 
 * "original" (the default): the page translated - the Japanese erased, the translation set -, and a bubble under the
   pointer shows its original. View > Show original shows the whole page as the viewer does, for as long as it is
@@ -13,7 +13,7 @@ show, nothing translated again.
   its translation. Show original has nothing to do in the Reader role then (its entry is greyed and its key does
   nothing: `original_idle`); `bubble_zoom` does not count (the pointer is the way to the translation here).
 
-The Translator role's normal window shows the translated page with its frames whatever `hover_shows` says, and a bubble
+The Translator role shows the translated page with its frames whatever `hover_shows` says, and a bubble
 under the pointer shows its original as "original" has it (`bubble_zoom` and Show original counting), while the
 Translator's pointer leaves room for it (`hover_usable`, `translator_free`; at a motion: `zoom.BubbleZoomMixin
 ._pointer_at_work`): a press, a drag, a handle of the selected region, the region editor and a modal dialog are the
@@ -50,7 +50,7 @@ HOVER_LABELS = (("original", "Translation on the page, original under the pointe
                 ("translation", "Original on the page, translation under the pointer"))
 HOVER_TIPS = ("The page translated; rest the pointer on a bubble to see its original "
               "(the Translator role always shows the page so).",
-              "Reading mode and the Reader role: the page as the viewer shows it; "
+              "In the Reader role: the page as the viewer shows it; "
               "rest the pointer on a bubble to see its translation.")
 REVEAL_LABELS = (("panel", "Under the pointer: a panel beside the bubble"),
                  ("in_place", "Under the pointer: the bubble itself"))
@@ -59,7 +59,7 @@ REVEAL_TIPS = ("The other side in a panel beside the bubble: both are in sight a
 # what the status line says once a choice is made: (setting, value) -> line (keys of the window's catalogs)
 CHOSEN = {
     ("hover_shows", "translation"): "The page shows the original; rest the pointer on a bubble to see its translation "
-                                    "(Reader role and reading mode).",
+                                    "(Reader role).",
     ("hover_shows", "original"): "The page shows the translation; rest the pointer on a bubble to see its original.",
     ("hover_reveal", "panel"): "A bubble under the pointer shows the other side in a panel beside it.",
     ("hover_reveal", "in_place"): "A bubble under the pointer shows the other side in its own place.",
@@ -99,16 +99,27 @@ def _role(window: Any) -> str:
 
 
 def reader_pointer(window: Any) -> bool:
-    """Whether the pointer on the page is the reader's: in reading mode (whatever the role: the reading window edits
-    nothing) or in the Reader role. Only there may the page show the original (`reverse_on`), and a press held still or
-    a right click on a bubble pins its panel (`zoom.BubbleZoomMixin._hold_bubble`); in the Translator role's normal
-    window a press selects and edits the regions, and a held one is the start of a drag."""
-    return bool(getattr(window, "reading", False)) or _role(window) == "reader"
+    """Whether the pointer on the page is the reader's: in the Reader role, in the window and on the full screen alike
+    (the full screen keeps the role chosen; a window with no role chosen reads on the full screen). Only there may the
+    page show the original (`reverse_on`), and a press held still or a right click on a bubble pins its panel
+    (`zoom.BubbleZoomMixin._hold_bubble`); in the Translator role a press selects and edits the regions, and a held one
+    is the start of a drag."""
+    role = _role(window)
+    return role == "reader" or (bool(getattr(window, "reading", False)) and role != "translator")
 
 
 def translator_window(window: Any) -> bool:
-    """Whether *window* is the Translator role's normal window (not reading mode): its pointer selects and edits."""
-    return not getattr(window, "reading", False) and _role(window) == "translator"
+    """Whether *window* is in the Translator role, in the window or on the full screen: its pointer selects and
+    edits."""
+    return _role(window) == "translator"
+
+
+def clicks_kept(window: Any) -> bool:
+    """Whether no click on the page goes on to the viewer, whatever the page shows: on the full screen in the
+    Translator role, whose clicks are the Translator's (`TranslatorMixin._on_release`, `_forward_click`; the page keys
+    still turn the viewer's pages there). In the window the Translator's click on a page that is not the translated
+    one goes on, and the Reader's always does."""
+    return bool(getattr(window, "reading", False)) and _role(window) == "translator"
 
 
 def translator_free(window: Any) -> bool:
@@ -129,15 +140,15 @@ def translator_free(window: Any) -> bool:
 
 
 def hover_usable(window: Any) -> bool:
-    """Whether the pointer may show a bubble's other side now: in reading mode and the Reader role
-    (`reader_pointer`), and in the Translator role's normal window - its page translated, the pointer showing the
-    original - while the Translator's pointer leaves room for it (`translator_free`)."""
+    """Whether the pointer may show a bubble's other side now: in the Reader role (`reader_pointer`), and in the
+    Translator role - its page translated, the pointer showing the original - while the Translator's pointer leaves
+    room for it (`translator_free`); on the full screen as in the window."""
     return reader_pointer(window) or (translator_window(window) and translator_free(window))
 
 
 def reverse_on(window: Any) -> bool:
     """Whether the page shows the original now and a bubble under the pointer its translation: "translation" chosen,
-    in reading mode or the Reader role (`reader_pointer`; the Translator's page is the translated one)."""
+    in the Reader role (`reader_pointer`; the Translator's page is the translated one)."""
     return hover_shows(window) == "translation" and reader_pointer(window)
 
 
@@ -152,7 +163,7 @@ def reveal_wanted(window: Any, style: str) -> bool:
 
 def original_idle(window: Any) -> bool:
     """Whether View > Show original has nothing to do: the Reader role with "translation" chosen, whose page shows
-    the original already (reading mode, which has no menu, turns Show original off as it starts)."""
+    the original already (the full screen, which has no menu, turns Show original off as it starts)."""
     return hover_shows(window) == "translation" and _role(window) == "reader"
 
 

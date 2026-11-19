@@ -19,7 +19,7 @@ from ..render.shaping import letter_by_letter
 from . import taskbar, trouble
 from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, band_fraction, band_text,
                      blocking, busy_title, is_notice)
-from .constants import READER_AFTER_RUN, READING_NOTE_MS, READY, in_a_run
+from .constants import NOTE_MS_PER_CHAR, READER_AFTER_RUN, READING_NOTE_MS, READY, TRANSLATOR_NOTE_MAX_MS, in_a_run
 from .constants import APP_TITLE
 from .progress import busy_line, rendered
 from .strip import run_page_on_show
@@ -63,8 +63,8 @@ class StatusMixin:
 
     def status(self, text: str | Message | Callable[[], str]) -> None:
         """The status line: *text*, a Message in the window's language, or what a callable gives in the window's
-        language (each asked again after a language switch); in the reading window the line shows at the bottom of
-        the page for a while."""
+        language (each asked again after a language switch); on the full screen the line shows at the bottom of the
+        page for a while (`_note_ms`)."""
         if isinstance(text, Message):
             message = text
             text = lambda: rendered(message)  # noqa: E731 - said again after a language switch
@@ -73,7 +73,15 @@ class StatusMixin:
         self._status_render, self._status_key, self._status_page = render, None, None
         self.status_var.set(line)
         if self.reading:  # no status bar there: the line shows at the bottom of the page for a while
-            self.canvas.set_note(line, READING_NOTE_MS)
+            self.canvas.set_note(line, self._note_ms(line))
+
+    def _note_ms(self, line: str) -> int:
+        """How long the status line *line* stays at the bottom of the full screen: `READING_NOTE_MS` in the Reader
+        role, which sees the page turn; in the Translator role, whose lines say what is selected and what failed, as
+        long as it takes to read it (`NOTE_MS_PER_CHAR`), never shorter and at most `TRANSLATOR_NOTE_MAX_MS`."""
+        if self.role_var.get() != "translator":
+            return READING_NOTE_MS
+        return max(READING_NOTE_MS, min(TRANSLATOR_NOTE_MAX_MS, NOTE_MS_PER_CHAR * len(line)))
 
     def say(self, key: str | Message, /, **values: Any) -> None:
         """The status line *key* in the window's language with *values* filled in (said again after a switch; a
@@ -92,8 +100,8 @@ class StatusMixin:
         self._status_page = page
 
     def _job_line(self, render: Callable[[], str]) -> None:
-        """The status line of the page job at work (its progress, a request that is slow; no note on the reading
-        window's page): about the page the job reads (`_job_frame`), so it goes while the viewer shows another page
+        """The status line of the page job at work (its progress, a request that is slow; no note on the full
+        screen's page): about the page the job reads (`_job_frame`), so it goes while the viewer shows another page
         (`_status_follows_page`); a whole-book run's is about the run, whatever the viewer shows."""
         self.status_var.set(render())
         self._status_render, self._status_key = render, None
@@ -138,7 +146,7 @@ class StatusMixin:
     # ------------------------------------------------------------------ the strips over the page
     def _build_strips(self) -> None:
         """Between the toolbar and the page: the setup banner and the scan band, each away while it has nothing to
-        say; the reading window hides them with the toolbar."""
+        say; the full screen hides them with the toolbar."""
         self.strips = ttk.Frame(self)
         self.strips.pack(fill="x")
         self.setup_banner = SetupBanner(self.strips)

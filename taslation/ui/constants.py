@@ -49,8 +49,12 @@ FOLLOW_WAITS = 3
 TWO_TURNS_S = 1.0
 VIEWER_LOADING = "The viewer is still loading; TASlation is waiting."  # (`live._black_step`)
 VIEWER_BLACK = "The viewer still shows nothing. Reload the book in its own window: click the book, then press its reload key (F5 in a browser). In TASlation's window F5 translates instead. TASlation carries on once the page shows."  # TASlation presses no key for it
-READING_NOTE_MS = 4000  # how long a status line stays at the bottom of the reading window
-WINDOW_ALPHA = 0.99  # not quite opaque (Windows, and the reading window): a Chromium viewer that an opaque window covers entirely stops drawing
+READING_NOTE_MS = 4000  # how long a status line stays at the bottom of the full screen
+# ... in the Translator role, where the line says what is selected and what failed: as long as it takes to read it
+# (about 14 characters a second), never shorter than READING_NOTE_MS nor longer than TRANSLATOR_NOTE_MAX_MS
+NOTE_MS_PER_CHAR = 70
+TRANSLATOR_NOTE_MAX_MS = 12000
+WINDOW_ALPHA = 0.99  # not quite opaque (Windows, and the full screen): a Chromium viewer that an opaque window covers entirely stops drawing
 LIVE_CHANGE = 0.0  # the live view draws a frame whose thumbnail differs at all from the one on show
 BLANK_SPREAD = 8  # a frame whose thumbnail spans fewer grey levels is blank (as capture.is_blank judges a frame)
 QUEUE_RANK = {"auto": 0, "translate": 1, "batch": 2}  # a waiting request gives way to one ranked higher
@@ -58,19 +62,24 @@ APP_NAME = "TASlation"
 APP_EXPANSION = "Tool Assisting Self-translation"  # TAS as in the tool-assisted speedrun: the tool assists, you translate
 APP_TITLE = f"{APP_NAME} - {APP_EXPANSION}"  # the main window's title; dialogs keep the short name
 
-READY = "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: reading mode."
+READY = "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen."
 NO_VIEWER = ("Open your book in its viewer (a desktop viewer, or a browser-based viewer in a browser window of its "
              "own). TASlation finds it by itself - or pick its window in the Viewer list above.")
-READING_MODE = "Reading mode: page keys turn the viewer's pages; F11 or Esc leaves it."
-# ... the first time in a session that reading mode turns Auto on for itself (it is off again afterwards)
-READING_MODE_AUTO = "Reading mode: page keys turn the viewer's pages, and Auto is on until you leave, so each page is translated as you turn it. F11 or Esc leaves it."
-READING_ONLY = (READING_MODE, READING_MODE_AUTO,
-                "Reading mode translates page by page; the whole-book scan waits until you leave it (Esc).")
+# The full screen (F11, `reading`) as it starts, in the Reader role ...
+READING_MODE = "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it."
+# ... the first time in a session that it turns Auto on for itself (it is off again afterwards) ...
+READING_MODE_AUTO = "Full screen: page keys turn the viewer's pages, and Auto is on until you leave, so each page is translated as you turn it. F11 or Esc leaves it."
+# ... and in the Translator role, whose pointer and keys work there as in the window
+FULL_SCREEN_TRANSLATOR = "Full screen, Translator role: click a region to select it, double-click to edit it; page keys turn the viewer's pages. Esc lets go of the selection, then leaves; F11 leaves at once."
+FULL_SCREEN_SCAN_WAITS = "The full screen translates page by page; the whole-book scan waits until you leave it (F11)."
+# a whole-book run asked for on the full screen (its key: the menu and the toolbar are away there)
+FULL_SCREEN_NO_RUN = "A whole-book run starts from the window: leave the full screen first (F11)."
+READING_ONLY = (READING_MODE, READING_MODE_AUTO, FULL_SCREEN_TRANSLATOR, FULL_SCREEN_SCAN_WAITS, FULL_SCREEN_NO_RUN)
 # The first time in a session that a whole-book run turns Auto off (the run reads the pages turned; Auto comes back)
 RUN_AUTO_OFF = "Whole-book run starting... Auto is off while the run reads each page you turn, and on again when it ends."
-# Leaving reading mode after pages were translated there under a name that names no book: the name given since
+# Leaving the full screen after pages were translated there under a name that names no book: the name given since
 KEPT_FROM_NOW = "The pages are kept under {book} from now on (F5 keeps the page on show too)."
-CLOSE_READING = "Leave reading mode (Esc)"  # the faint button at the top edge of the reading window
+CLOSE_READING = "Leave full screen (F11)"  # the faint button at the top edge of the full screen
 # A browser window minimised after it was chosen: its frames are blank, and it is not restored again by itself
 BROWSER_MINIMISED = "Waiting: the browser window with the book is minimised. Click it on the taskbar to bring it back."
 VIEWER_RESTORED = "Viewer: {title}  (restored from the taskbar)"  # the viewer chosen was minimised: it is shown again

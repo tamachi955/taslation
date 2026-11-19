@@ -207,10 +207,11 @@ def test_the_window_starts_with_auto_on_unless_told_otherwise(monkeypatch):
     parser = cli.build_parser()
     assert parser.parse_args(["gui"]).auto is True and parser.parse_args(["gui", "--auto"]).auto is True
     assert parser.parse_args(["gui", "--no-auto"]).auto is False
-    assert parser.parse_args(["gui", "--reading"]).reading and not parser.parse_args(["gui"]).reading
+    assert parser.parse_args(["gui", "--full-screen"]).reading and not parser.parse_args(["gui"]).reading
+    assert parser.parse_args(["gui", "--reading"]).reading  # (its earlier name)
     seen = []
     monkeypatch.setitem(cli.COMMANDS, "gui", lambda args, settings: seen.append(args) or 0)
-    assert main([]) == 0 and main(["gui", "--no-auto", "--reading"]) == 0
+    assert main([]) == 0 and main(["gui", "--no-auto", "--full-screen"]) == 0
     assert (seen[0].auto, seen[0].reading) == (True, False) and (seen[1].auto, seen[1].reading) == (False, True)
 
 

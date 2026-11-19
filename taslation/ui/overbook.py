@@ -16,13 +16,13 @@ drawing.
   (the reader clicks the book).
 * TASlation's own keys while the viewer has the foreground are hot keys (`OVER_HOTKEYS`), registered only while the
   mode is on and the viewer or TASlation is in front, taken back when it ends and at closing: F5 (translate; the
-  browser's own F5 would reload the book, which the store counts), and in reading mode F11 and Esc (leave it). F11
-  and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered. The keys that
+  browser's own F5 would reload the book, which the store counts), and on TASlation's full screen F11 and Esc (leave
+  it; in the Translator role Esc lets go of a selected region first). F11 and Esc otherwise stay the viewer's (its own full screen), and the page keys are never registered. The keys that
   show and copy a bubble's Japanese and translation and go from bubble to bubble (`bubble_text`, F2, Shift+F2,
-  Ctrl+F2, F3, Shift+F3 at first, as the keymap has them) are hot keys too, wherever they work in the window (reading
-  mode, the Reader role, the Translator role while its pointer is free: `hover.hover_usable`), only while the pointer
-  is on TASlation's page or a bubble's Japanese is pinned beside it (`_over_text_keys`).
-* Tk makes its window anew for its full screen (reading mode in and out), without the style, and activates it: the
+  Ctrl+F2, F3, Shift+F3 at first, as the keymap has them) are hot keys too, wherever they work in the window (the
+  Reader role, the Translator role while its pointer is free, on the full screen as in the window:
+  `hover.hover_usable`), only while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it (`_over_text_keys`).
+* Tk makes its window anew for its full screen (TASlation's full screen in and out), without the style, and activates it: the
   style goes on again and the foreground goes back to the viewer once (`_over_rewrapped`).
 * Where the reader put the window (`PLACE_TABLE` in ui.json): once it has been over the book - moved there with "Move
   TASlation there" or by hand - its size and place and the monitor's rectangle are kept, then again at each closing,
@@ -55,7 +55,7 @@ from .layout import initial_geometry, kept_place
 
 OVER_TICK_MS = 100  # how often the window looks whether it should be over the book, and takes the hot keys pressed
 OVER_OFF_FLAG = "over_book_off"  # in ui.json: true once the reader turned the mode off
-# TASlation's keys while the viewer has the foreground: name -> virtual-key code; the reading-mode ones only there
+# TASlation's keys while the viewer has the foreground: name -> virtual-key code; the full screen's only there
 OVER_HOTKEYS = {"F5": 0x74, "F11": 0x7A, "Escape": 0x1B}
 READING_HOTKEYS = ("F11", "Escape")
 # the status line when the book is full screen on another monitor (`_over_offer`), and its button
@@ -94,7 +94,7 @@ def over_due(*, enabled: bool, viewer_fills: bool, same_monitor: bool, held: boo
 
 def wanted_hotkeys(on: bool, reading: bool, owner: str) -> frozenset[str]:
     """The hot keys to hold now: none while the mode is off or a third program is in front (they would be taken from
-    it); F5 while the viewer or TASlation is; F11 and Esc too in reading mode."""
+    it); F5 while the viewer or TASlation is; F11 and Esc too on TASlation's full screen."""
     if not on or owner not in ("viewer", "own"):
         return frozenset()
     if reading:
@@ -267,7 +267,7 @@ class OverBookMixin:
             self.say("TASlation stays over the full-screen viewer: your keys go to the book, and F5 still translates. View > Over the full-screen viewer turns this off.")
 
     def _over_leave(self, keep_top: bool = False) -> None:
-        """A normal window again: no hot keys, no style, Always on top (or reading mode) as the reader has it - and
+        """A normal window again: no hot keys, no style, Always on top (or the full screen) as the reader has it - and
         topmost while a dialog holds the mode over the full-screen viewer (*keep_top*): the window the dialog
         belongs to stays in sight."""
         self._over_on = False
@@ -385,10 +385,10 @@ class OverBookMixin:
         self._over_take_keys(widget)
 
     def _over_page_press(self, _event: tk.Event | None = None) -> None:
-        """The page pressed in the Translator role while over the book: the page takes the keys (Enter, Delete and
-        Ctrl+Z work on its boxes). In the Reader role a press on the page goes on to the viewer, and the keys stay
-        there."""
-        if self.role_var.get() == "translator" and not self.reading:
+        """The page pressed in the Translator role while over the book, in the window or on the full screen: the page
+        takes the keys (Enter, Delete and Ctrl+Z work on its boxes). In the Reader role a press on the page goes on to
+        the viewer, and the keys stay there."""
+        if self.role_var.get() == "translator":
             self._over_take_keys(self.canvas)
 
     def _over_take_keys(self, widget: Any) -> None:
@@ -431,8 +431,8 @@ class OverBookMixin:
     def _over_text_keys(self, wanted: frozenset[str]) -> dict[str, tuple[int, int]]:
         """The keys of a bubble's Japanese and translation to hold besides *wanted* (`bubble_text.text_hotkeys`:
         action name -> (modifiers, virtual-key code)): only with those (the viewer or TASlation in front), where the
-        keys work in the window (`hover.hover_usable`: reading mode, the Reader role, the Translator role while its
-        pointer is free), and while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it - so
+        keys work in the window (`hover.hover_usable`: the Reader role, the Translator role while its pointer is free,
+        on the full screen as in the window), and while the pointer is on TASlation's page or a bubble's Japanese is pinned beside it - so
         the viewer keeps them whenever they cannot be meant for TASlation -; never one of *wanted*'s keys."""
         if not wanted or not hover_usable(self):
             return {}

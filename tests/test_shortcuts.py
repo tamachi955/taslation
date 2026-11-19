@@ -232,11 +232,11 @@ def test_the_menus_and_the_toolbar_name_the_keys_in_force(hidden_root):
                         translate_btn=tk.Button(hidden_root), reading_btn=tk.Button(hidden_root))
     app_mod.App._show_keys(w)
     assert menu.entrycget(0, "accelerator") == "" and w.translate_btn.cget("text") == "Translate (F5)"
-    assert w.reading_btn.cget("text") == "Reading mode (F11)"
+    assert w.reading_btn.cget("text") == "Full screen (F11)"
     w.keymap = Keymap().with_key("settings", "Control-comma").with_key("translate_now", "F6").with_key("reading_mode", None)
     app_mod.App._show_keys(w)
     assert menu.entrycget(0, "accelerator") == "Ctrl+," and w.translate_btn.cget("text") == "Translate (F6)"
-    assert w.reading_btn.cget("text") == "Reading mode"
+    assert w.reading_btn.cget("text") == "Full screen"
 
 
 def test_saved_keys_are_bound_at_once_and_help_says_them(hidden_root):
@@ -259,7 +259,7 @@ def test_help_s_keys_follow_the_keymap_in_force():
     lines = help_mod.topic_lines("Keys", topic)
     assert "F6: Translate the page on show" in lines and "R: Review..." in lines
     assert not any(line.startswith(("F5", "Tab")) for line in lines)
-    assert "Esc: Leave reading mode, or let go of the chosen box" in lines
+    assert "Esc: Let go of the chosen box, or leave full screen" in lines
     assert help_mod.topic_lines("Page keys", ("Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.",))[0].startswith("Page >")
 
 
@@ -345,7 +345,7 @@ def test_esc_cancels_and_no_key_default_and_reset_all(dialog):
     page.tree.selection_set("translate_now")
     page.change()
     _press(page, "F11")  # refused: said in the message line, the wait goes on
-    assert "Reading mode" in d.message_var.get() and page.capturing == "translate_now"
+    assert "Full screen" in d.message_var.get() and page.capturing == "translate_now"
     _press(page, "Escape")
     assert page.capturing is None and page.keymap == Keymap() and d.winfo_exists()
     assert d.message_var.get() == ""  # the refusal goes with the wait

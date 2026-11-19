@@ -75,8 +75,8 @@ from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from . import area, name_check
 from .attention import tell_run_ended
 from .banner import ScanState, blocking, busy_title, group_digits
-from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, QUEUE_RANK, READING_NOTE_MS, READY, VIEWER_BLACK,
-                        VIEWER_LOADING, VIEWER_RESTORED, in_a_run)
+from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, FULL_SCREEN_NO_RUN, QUEUE_RANK, READING_NOTE_MS, READY,
+                        VIEWER_BLACK, VIEWER_LOADING, VIEWER_RESTORED, in_a_run)
 from .dialogs import caches as boxes
 from .dialogs.batch import BatchDialog
 from .dialogs.rename_review import RenameReviewDialog
@@ -914,13 +914,13 @@ class JobsMixin:
 
     def _warn_unasked(self, text: str, said: bool = False) -> None:
         """A warning nobody asked for (the worker's: a page that failed, a model partly on the CPU, Ollama not
-        started). While the reader reads - reading mode, or the window over the full-screen viewer - no box comes up
+        started). While the reader reads - the full screen, or the window over the full-screen viewer - no box comes up
         over the book to take its keys: the status line says it (*said*: it says it already) and, over the book, the
         page shows it for a while. Otherwise TASlation's own box, which the window does not wait for."""
         if self.reading or getattr(self, "_over_on", False):
             if not said:
                 self.status(text)
-            if not self.reading:  # (the reading window shows the status line on the page by itself)
+            if not self.reading:  # (the full screen shows the status line on the page by itself)
                 self.canvas.set_note(text, WARNING_NOTE_MS)
             return
         boxes.tell(self, text, wait=False)
@@ -1011,7 +1011,7 @@ class JobsMixin:
             self.ready = True
             if self._area_hint_due():  # the chosen viewer's frames showed no page panel: Set area... is the way
                 self._area_hinted = True
-                self.status(lambda: _("Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: reading mode.")
+                self.status(lambda: _("Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen.")
                             + "\n" + _("No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."))
             else:
                 self.say(READY)
@@ -1109,7 +1109,7 @@ class JobsMixin:
             if self._fill is not None:  # the job ended without its page (it failed): the viewer's picture again
                 self._fill = None
                 self._redisplay()
-            if self._colophon_found is not None:  # one that waited for reading mode to end
+            if self._colophon_found is not None:  # one that waited for the full screen to end
                 self._offer_colophon()
             offer_standard_name(self)  # a book kept under an older spelling of its name (`book_fields`)
             self._run_queued()
@@ -1689,7 +1689,7 @@ class JobsMixin:
         annotations, series sheet and notes to the new name (`_plan_rename`: where the new name's series has a sheet
         that says otherwise, after the review; `_rename_book`). Keep leaves the name. The colophon's
         details go into the header of the cache of the name the book ends up with (`_keep_details`, or the rename
-        itself), which keeps the offer from being made again in a later session. It waits while reading mode, a
+        itself), which keeps the offer from being made again in a later session. It waits while the full screen, a
         dialog of the start or a batch is on."""
         from .banner import break_lines
         from .dialogs.start import WRAP
@@ -1943,21 +1943,25 @@ class JobsMixin:
                             or (queued is not None and queued[0] == "batch")))
 
     def _on_escape(self) -> None:
+        """Esc, one thing at a time: a bubble's pinned panel closed, a drag taken back, the reading order cancelled,
+        the selected region let go, then the full screen left; in the window, a run's Stop. In the Reader role the full
+        screen has none of the Translator's, so Esc leaves it at once; in the Translator role a region selected on a
+        page that is not on show any more (the viewer turned it) holds nothing back."""
         if getattr(self, "_zoom_pinned", False):  # a bubble's Japanese pinned beside it (`bubble_text`): closed first
             self._zoom_hide()
             return
         if self._cancel_drag():  # a region being dragged, turned or drawn: back as it was
-            return
-        if self.reading:
-            self.leave_reading()
             return
         if self._ordering is not None:
             self._end_order()
             self.say("Reading order cancelled.")
             self._redisplay()
             return
-        if self._chosen_region is not None:
+        if self._chosen_region is not None and (not self.reading or self._editing()):
             self._choose(None)
+            return
+        if self.reading:
+            self.leave_reading()
             return
         if in_a_run(self):  # a key alone never ends a run: the question comes first, however little was read
             self._ask_stop()
@@ -2083,7 +2087,7 @@ class JobsMixin:
         """Translate (F5): the page in the viewer read and translated now (from the cache when it is there),
         whether or not Auto has taken it. While the models load or a job runs it waits, and runs after. A viewer
         not read yet has its window enlarged first (`_enlarge_first`). A Book box that names no book gets its name
-        first (`_ask_name`; not over the reading window, where the page is translated and nothing of it kept)."""
+        first (`_ask_name`; not over the full screen, where the page is translated and nothing of it kept)."""
         if not self.ready or self.busy:
             self._queue("translate")
             return
@@ -2239,7 +2243,11 @@ class JobsMixin:
     # ------------------------------------------------------------------ the batch
     def open_batch_dialog(self) -> None:
         """Batch: read whole book...: its options, then the batch; its Start asks for the book's name first while
-        the Book box names none (`_ask_name`: nothing of the batch could be kept)."""
+        the Book box names none (`_ask_name`: nothing of the batch could be kept). Not from the full screen, which a run
+        and its band have no place on (its key, the menu being away there: `FULL_SCREEN_NO_RUN`)."""
+        if getattr(self, "reading", False):
+            self.say(FULL_SCREEN_NO_RUN)
+            return
         if self.busy:
             self.say("A job is running: wait for it to end, or press Stop.")
             return

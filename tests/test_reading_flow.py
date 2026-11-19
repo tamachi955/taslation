@@ -1,7 +1,8 @@
-"""Reading mode's ways out and what it changes: the faint close button at the top edge (a click on it leaves reading
-mode, the page's other pointer handling stays bound), Auto turned on by reading mode and off by a whole-book run said
-once a session, and a book read in reading mode under a name that names no book named once on leaving. Parts of the
-App are borrowed onto stand-ins on the shared hidden root (never mapped); Windows' side is a fake."""
+"""The full screen's ways out and what it changes: the faint close button at the top edge (a click on it leaves the
+full screen, the page's other pointer handling stays bound), Auto turned on by the Reader's full screen and off by a
+whole-book run said once a session, the Translator's full screen keeping Auto as set and following a role change, its
+notes long enough to read, and a book read on the full screen under a name that names no book named once on leaving.
+Parts of the App are borrowed onto stand-ins on the shared hidden root (never mapped); Windows' side is a fake."""
 from __future__ import annotations
 
 import queue
@@ -12,7 +13,8 @@ from test_reading_messages import Reading
 from test_start_flow import _frame, flow  # noqa: F401 - flow is test_start_flow's fixture
 
 from taslation.ui import app as app_mod
-from taslation.ui.constants import KEPT_FROM_NOW, READING_MODE, READING_MODE_AUTO, RUN_AUTO_OFF
+from taslation.ui.constants import (FULL_SCREEN_TRANSLATOR, KEPT_FROM_NOW, NOTE_MS_PER_CHAR, READING_MODE,
+                                    READING_MODE_AUTO, READING_NOTE_MS, RUN_AUTO_OFF, TRANSLATOR_NOTE_MAX_MS)
 from taslation.ui.reading import TOP_BAND_PX, TOP_EDGE_PX
 
 A = app_mod.App
@@ -40,7 +42,7 @@ def test_the_close_button_shows_at_the_top_edge_and_goes_further_down(hidden_roo
     assert getattr(w, "_close_button", None) is None
     w._top_edge_moved(SimpleNamespace(y=0))
     button = w._close_button
-    assert button.place_info() and str(button.cget("text")).endswith("Leave reading mode (Esc)")
+    assert button.place_info() and str(button.cget("text")).endswith("Leave full screen (F11)")
     w._top_edge_moved(SimpleNamespace(y=TOP_BAND_PX // 2))  # on its way down to the button: it stays
     assert button.place_info()
     w._top_edge_moved(SimpleNamespace(y=TOP_BAND_PX + 1))
@@ -85,6 +87,69 @@ def test_reading_mode_says_once_a_session_that_it_turned_auto_on(hidden_root):
     assert w.status_var.get() == READING_MODE
     w.leave_reading()
     assert w.auto_var.get()
+
+
+# ------------------------------------------------------------------ the full screen in the Translator role
+class Roles(Reading):
+    """`Reading` with the role switch of the App (`_on_role_changed`); what it starts is recorded."""
+
+    _on_role_changed = A._on_role_changed
+
+    def __init__(self, root):
+        super().__init__(root)
+        self._manual_area = True
+        self.book_var = SimpleNamespace(get=lambda: "")  # (no book: no role kept for one)
+        self.completed = 0
+
+    def _sync_tools(self):
+        pass
+
+    def _close_find(self):
+        pass
+
+    def _complete_on_show(self):
+        self.completed += 1
+
+
+def test_the_translator_s_full_screen_keeps_auto_as_set_and_says_what_the_pointer_does(hidden_root):
+    for auto in (False, True):
+        w = _reading(hidden_root, auto=auto)
+        w.role_var.set("translator")
+        w.enter_reading()
+        assert w.reading and w.auto_var.get() is auto  # Auto as the person set it: never turned on for them
+        assert w.status_var.get() == FULL_SCREEN_TRANSLATOR == w.canvas.note
+        w.leave_reading()
+        assert not w.reading and w.auto_var.get() is auto and w.status_var.get().startswith("Viewer: ")
+    assert not getattr(w, "_reading_auto_told", False)  # the Reader's line about Auto never said for it
+
+
+def test_the_full_screen_follows_a_role_change_and_leaving_gives_auto_back(hidden_root):
+    w = Roles(hidden_root)
+    w.enter_reading()  # the Reader's: Auto on while it lasts
+    assert w.auto_var.get() and w.status_var.get() == READING_MODE_AUTO
+    w.role_var.set("translator")  # a book's start sets the role (`_apply_role`): the full screen follows
+    w._on_role_changed(chosen=False)
+    assert w.reading and not w.auto_var.get() and w.status_var.get() == FULL_SCREEN_TRANSLATOR
+    assert w.completed == 1  # the regions a Reader's page from the cache never read are read for the Translator
+    w.role_var.set("reader")
+    w._on_role_changed(chosen=False)
+    assert w.reading and w.auto_var.get() and w.status_var.get() == READING_MODE  # (Auto said once a session)
+    w.leave_reading()
+    assert not w.auto_var.get()  # as the person had it before the full screen
+
+
+def test_the_translator_s_notes_stay_long_enough_to_read_and_the_reader_s_as_ever(hidden_root):
+    w = _reading(hidden_root)
+    w.enter_reading()
+    short, long = "Saved.", "x" * 400
+    assert w._note_ms(short) == w._note_ms(long) == READING_NOTE_MS  # the Reader's: a few seconds
+    w.role_var.set("translator")
+    assert w._note_ms(short) == READING_NOTE_MS  # a short line: as long as the Reader's
+    assert w._note_ms("y" * 100) == 100 * NOTE_MS_PER_CHAR > READING_NOTE_MS  # longer by its length
+    assert w._note_ms(long) == TRANSLATOR_NOTE_MAX_MS  # and never more than this
+    w.say("Translate a page first: press F5.")  # what the window's status line says, on the page
+    assert w.canvas.note == "Translate a page first: press F5." and w.canvas._note_job is not None
+    w.leave_reading()
 
 
 def _run_window(hidden_root, tmp_path):

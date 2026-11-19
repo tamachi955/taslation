@@ -2,7 +2,7 @@
 stand-in viewer (`tools/standin_viewer`), with no real book and no real viewer - a developer's debugging aid, never
 part of a release.
 
-    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,o,z,w,x,f,f2] [--canned] [--scale 1.0]
+    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,w,x,f,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700]
 
@@ -15,7 +15,9 @@ What runs, all on this computer:
   the series chosen by its place in the sorted list, *--series*, never by name; no picture is copied), or with
   *--synthetic* (or no dataset) the repository's two test pages, turned and flipped. The page TURNS BY ITSELF from a
   script in its URL, released part by part through a control file in the scratch folder: no key, no click, nothing
-  is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here);
+  is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here; in
+  scenario t the key the window hands to the viewer for a page key pressed on its page is noted, never sent, and
+  releases the stand-in's turn);
 * TASlation's window in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: page by page, Auto
   on, the Reader role, early start and the load of the model at the start as the defaults have them), on a scratch
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
@@ -44,9 +46,16 @@ The scenarios, in this order (each released once the window has come to rest aft
   c  turns while the model still loads at the start         a  slow reading: 9 turns 6-8 s apart
   b  fast flipping: 10 turns 0.3-0.5 s apart, then a rest   d  black flashes and spinners between turns
   e  turning back to pages translated (cache hits)
-  r  reading mode, entered and left by F11's own handler (`toggle_reading`): slow turns, a quick one, back
+  r  the full screen in the Reader role, entered and left by F11's own handler (`toggle_reading`): slow turns, a
+     quick one, back
+  t  the full screen in the Translator role: the toolbar's Translator, F11's own handler; at rest a region selected
+     by a click on the page and the region editor opened by a double click (Tk's own pointer events on the page,
+     no input of the system's) and closed by its Esc, the selection let go by Esc; then the window's next page key
+     (Tk's key event on the page) turns the page - the key the window hands to the viewer releases the stand-in's
+     turn (`page_key`) -, and t2 its previous page key back; the full screen left by Esc, the Reader role again
+     (t brings t2, t2 brings t)
   o  over the book: the stand-in made to fill its monitor, View > Over the full-screen viewer on, the status bar's
-     Move TASlation there, the Reading mode button; turns as in r; reading mode left by the F11 hot key, the mode
+     Move TASlation there, the Full screen button; turns as in r; the full screen left by the F11 hot key, the mode
      turned off, both windows put back
   z  TASlation's text size at 150 % of the run's (Settings), turns, back
   w  a whole-book run (as the dialog's Start starts it) on a short stretch: the run reads the screens the stand-in
@@ -154,7 +163,9 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "d": ("black flashes, spinners", ["n", "w6000", "f800", "w5000", "s1500", "w5000", "n", "w300", "f700",
                                       "w6000", "s2500", "n", "w6000"]),
     "e": ("turning back", ["p", "w3000", "p", "w3000", "p", "w3000", "n", "w3000", "n", "w4000"]),
-    "r": ("reading mode", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000", "p", "w3000"]),
+    "r": ("full screen, Reader role", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000", "p", "w3000"]),
+    "t": ("full screen, Translator role", ["n", "w6000"]),  # (each turn released by a page key: `Director.page_key`)
+    "t2": ("its page key back", ["p", "w4000"]),
     "o": ("over the book", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000"]),
     "z": ("text size", ["n", "w6000", "p", "w3000", "n", "w4000"]),
     "w": ("whole-book run", ["w1500", "n", "w2500-3000", "n", "w2500-3000", "n", "w2500-3000", "n", "w3000"]),
@@ -163,14 +174,17 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
 }
-ORDER = ["c", "a", "b", "d", "e", "r", "o", "z", "w", "w2", "x", "f", "f2"]
-PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"))  # a scenario that brings another with it
+ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
+PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
+KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
+ACTS_WAIT_S = 90.0  # scenario t: the Translator's acts begin at rest on a translated page, or after this long at most
 # the turns whose soft frame and sharp frame drawn quickly are pictured (turns that come to a window at rest), and
 # (scenario, turn) -> (seconds after the turn began, name): the other pictures of a turn
-SOFT_SHOTS = {"a": (1,), "e": (3,), "r": (1,), "o": (1,), "x": (1,), "f2": (1,)}
+SOFT_SHOTS = {"a": (1,), "e": (3,), "r": (1,), "t": (1,), "o": (1,), "x": (1,), "f2": (1,)}
 SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5): (5.2, "a_turn5_rest"),
          ("b", 10): (6.0, "b_after_flipping"), ("d", 3): (5.0, "d_rest"), ("e", 1): (1.5, "e_back_cached"),
          ("r", 1): (5.2, "r_rest"), ("r", 4): (5.0, "r_after_flipping"), ("r", 5): (1.5, "r_back_cached"),
+         ("t", 1): (5.2, "t_rest_after_the_key"), ("t2", 1): (1.5, "t2_back_cached"),
          ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
          ("w", 2): (2.0, "w_reading"), ("w2", 1): (2.0, "w2_page_of_the_run"), ("w2", 5): (2.0, "w2_page_not_read"),
          ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
@@ -781,14 +795,14 @@ class Notes:
                 self.margins.append(rec)
 
     def mode(self, app: Any) -> None:
-        """The window's modes, noted as they change: reading mode, over the book, a whole-book run on, the window
-        beside it (`live.reads_beside`), TASlation's text size."""
+        """The window's modes, noted as they change: the full screen, over the book, a whole-book run on, the window
+        beside it (`live.reads_beside`), TASlation's text size, the role."""
         from taslation.ui.constants import in_a_run
         from taslation.ui.live import reads_beside
 
         rec = {"t": now_ms(), "reading": bool(getattr(app, "reading", False)),
                "over": bool(getattr(app, "_over_on", False)), "run": in_a_run(app), "beside": reads_beside(app),
-               "text_size": float(app.settings.ui_scale)}
+               "text_size": float(app.settings.ui_scale), "role": str(app.role_var.get())}
         with self.lock:
             last = self.modes[-1] if self.modes else None
             if last is None or any(last[k] != rec[k] for k in rec if k != "t"):
@@ -943,6 +957,69 @@ def status_kind(render: Any, key: str | None) -> tuple[str, str | None, Any]:
     if message is not None:
         return "message:" + str(getattr(message, "code", "?")), None, None
     return "other", None, None
+
+
+def tk_error() -> type[Exception]:
+    """Tk's error class (imported where it is used: the tool's top imports no Tk)."""
+    import tkinter as tk
+
+    return tk.TclError
+
+
+def page_point(app: Any, region: Any) -> tuple[int, int]:
+    """The middle of *region* (image pixels) on the window's page canvas, in the canvas's pixels."""
+    from taslation.ui import area
+
+    x0, y0, x1, y1 = region.bbox
+    x, y = area.to_canvas((x0 + x1) / 2, (y0 + y1) / 2, app.canvas.scale, app.canvas.offset)
+    return int(round(x)), int(round(y))
+
+
+def _user32() -> Any:
+    """user32 of this tool's own (its functions' argument types set here touch no other module's)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32")
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    return user32
+
+
+def root_of(widget: Any) -> int:
+    """The top-level window (Windows' handle) of the Tk widget *widget*."""
+    return int(_user32().GetAncestor(widget.winfo_id(), 2) or 0)  # GA_ROOT
+
+
+def over_facts(window: Any, app: Any) -> dict[str, Any]:
+    """Where TASlation's own window *window* (a dialog) lies against the window *app* on the full screen, as Windows
+    has them, by asking it only (nothing moves): whether the window at the dialog's middle is the dialog (it is above
+    the full screen there), whether the dialog lies within the full screen's rectangle, whether the window owns it,
+    and both sizes."""
+    from ctypes import wintypes
+
+    from taslation.capture import window_rect
+
+    user32 = _user32()
+    out: dict[str, Any] = {}
+    try:
+        own, full = root_of(window), root_of(app)
+        left, top, right, bottom = window_rect(own)
+        f_left, f_top, f_right, f_bottom = window_rect(full)
+        at = int(user32.WindowFromPoint(wintypes.POINT((left + right) // 2, (top + bottom) // 2)) or 0)
+        at_root = int(user32.GetAncestor(at, 2) or 0) if at else 0
+        owner = int(user32.GetWindow(own, 4) or 0)  # GW_OWNER
+        out.update(dialog_on_top_at_its_middle=at_root == own, within_the_full_screen=(
+            left >= f_left and top >= f_top and right <= f_right and bottom <= f_bottom),
+                   owned_by_the_window=owner == full, dialog_size=[right - left, bottom - top],
+                   full_screen_size=[f_right - f_left, f_bottom - f_top])
+    except Exception as e:  # noqa: BLE001 - said by its type
+        out["error"] = type(e).__name__
+    return out
 
 
 class LogTap(logging.Handler):
@@ -1298,6 +1375,9 @@ class Director:
         self.turns_in: Counter[str] = Counter()
         self.segment_of_go = {s.go: s.name for s in segments}
         self.current = ""
+        self.keyed: dict[str, dict[str, Any]] = {}  # scenario t's and t2's page key: how it was pressed, what it handed
+        self.key_for: Segment | None = None  # the scenario whose turn the next key handed to the stand-in releases
+        self._hook_page_keys()
         self.page_rect: tuple[int, int, int, int] | None = None  # the page the stand-in drew last (its canvas's pixels)
         self.band_px = 0  # the height of its band then
         self.last_ocr = 0.0
@@ -1435,7 +1515,7 @@ class Director:
             return
         if self.phase == "settle":
             ready_go = self.waiting_go >= seg.go
-            if seg.name in ("r", "o", "z", "w") and seg.name not in self.entered and ready_go and rested:
+            if seg.name in ("r", "t", "o", "z", "w") and seg.name not in self.entered and ready_go and rested:
                 self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
                 return
             app = self.app
@@ -1455,6 +1535,8 @@ class Director:
                 from taslation.ui.live import reads_beside
 
                 go = ready_go and reads_beside(app)
+            elif seg.name in KEYED:  # the turn released by the page key the window hands on (`page_key`)
+                go = self.keyed_turn(seg, ready_go, rested, now)
             else:
                 go = ready_go and rested and (self.index > 0 or self.first_page_done())
             timed_out = ready_go and (waited > self.args.timeout or (
@@ -1465,6 +1547,7 @@ class Director:
             if go or timed_out:
                 self.released[seg.name] = {"waited_s": round(waited, 1), "timed_out": bool(timed_out and not go),
                                            "t": now_ms()}
+                self.key_for = None
                 sv.write_control(self.standin_dir, seg.go)
                 self.phase, self.phase_at = "running", now
             return
@@ -1494,12 +1577,25 @@ class Director:
 
     def enter(self, name: str) -> None:
         """The mode of scenario *name* entered, as a reader does: r - F11 (`toggle_reading`, the key's own handler);
-        o - over the book (`over_begin`); z - TASlation's text size TEXT_SIZE times the run's (Settings); w - a
-        whole-book run started as the dialog's Start starts it."""
+        t - the toolbar's Translator, then F11's handler; o - over the book (`over_begin`); z - TASlation's text size
+        TEXT_SIZE times the run's (Settings); w - a whole-book run started as the dialog's Start starts it."""
         app = self.app
         self.entered[name] = {"at": time.monotonic()}
         if name == "r":
             app.toggle_reading()
+        elif name == "t":
+            facts = self.entered["t"]
+            facts.update(auto_before=bool(app.auto_var.get()), role_before=str(app.role_var.get()))
+            facts["role_by_its_button"] = self.choose_role("translator")
+
+            def full() -> None:
+                self.shot("t_toolbar_translator_role")
+                app.toggle_reading()  # F11's own handler
+                facts.update(full_screen=bool(app.reading), role_on_it=str(app.role_var.get()),
+                             auto_on_it=bool(app.auto_var.get()), first_line=self.status_facts())
+                app.after(1500, lambda: self.shot("t_full_screen_translator_role"))
+
+            app.after(900, full)
         elif name == "o":
             self.over_begin()
         elif name == "z":
@@ -1513,15 +1609,223 @@ class Director:
         app = self.app
         if seg.name == "r" and app.reading:
             app.toggle_reading()
+        elif seg.name == "t2":
+            self.leave_translator()
         elif seg.name == "o":
             self.over_end()
         elif seg.name == "z":
             app._settings_saved({"ui_scale": self.args.scale})
 
+    # scenario t: the full screen in the Translator role
+    def _hook_page_keys(self) -> None:
+        """The page keys of scenarios t and t2: the key the window hands to the stand-in for a page key pressed on
+        its page (`reading.ReadingMixin._pass_on`; a browser's keys go pressed for real, `press_briefly`) is noted
+        and never sent - it releases the stand-in's turn of the scenario it was pressed for (`key_for`), as a viewer
+        turns its page on the key. Any other key goes to the guard, which refuses it and stops the run."""
+        from taslation.ui import reading as reading_mod
+
+        guarded = reading_mod.press_briefly
+
+        def page_key(hwnd: int, key: Any, *a: Any, **k: Any) -> Any:
+            seg = self.key_for
+            if seg is None or not self.guard.is_viewer(hwnd):
+                return guarded(hwnd, key, *a, **k)
+            self.key_for = None
+            facts = self.keyed.setdefault(seg.name, {})
+            facts["handed_on"] = key if isinstance(key, str) else list(key)
+            facts["handed_on_after_ms"] = round((time.monotonic() - facts.get("at", time.monotonic())) * 1000)
+            sv.write_control(self.standin_dir, seg.go)
+            return True
+
+        reading_mod.press_briefly = page_key
+
+    def keyed_turn(self, seg: Segment, ready_go: bool, rested: bool, now: float) -> bool:
+        """Scenarios t and t2: whether the page key has released the stand-in's turn (`page_key`); before that, at rest
+        on the full screen in the Translator role, t's acts there (`translator_acts`, which end with its key), and
+        t2's key at rest."""
+        facts = self.keyed.get(seg.name)
+        if facts is not None:
+            return "handed_on" in facts  # (the key pressed: released once the window hands it on)
+        if not ready_go:
+            return False
+        app = self.app
+        if seg.name == "t2":
+            if rested:
+                self.press_page_key(seg)
+            return False
+        mode = self.entered.get("t")
+        if mode is None or "acts" in mode:
+            return False
+        on = bool(app.reading) and app.role_var.get() == "translator" and rested and app._editing()
+        if on or now - mode["at"] > ACTS_WAIT_S:
+            mode["acts"] = {"waited_s": round(now - mode["at"], 1)}
+            self.translator_acts(seg)
+        return False
+
+    def translator_acts(self, seg: Segment) -> None:
+        """Scenario t at rest on the full screen in the Translator role, as a person works there: the largest region
+        lettered selected by a click on it (Tk's own press and release on the page canvas) and pictured; the region
+        editor opened by a double click on it, its place over the full screen noted (`over_facts`) and its own window
+        pictured, then closed by its Esc (`close_asked`); the selection let go by Esc (the window's handler); then
+        the next page key (`press_page_key`). Each step notes what came of it, as numbers and names."""
+        app, acts = self.app, self.entered["t"]["acts"]
+        region = self.largest_region()
+        acts["region_found"] = region is not None
+        if region is None or not app._editing():
+            acts["skipped"] = "no region" if region is None else "the translated page not on show"
+            self.press_page_key(seg)
+            return
+        x, y = page_point(app, region)
+        clock = [int(time.monotonic() * 1000) & 0x3FFFFFFF]  # the events' times: clicks far apart, a double close
+
+        def click(gap: int) -> None:
+            clock[0] += gap
+            app.canvas.event_generate("<ButtonPress-1>", x=x, y=y, time=clock[0])
+            app.canvas.event_generate("<ButtonRelease-1>", x=x, y=y, time=clock[0] + 60)
+
+        def select() -> None:
+            click(0)
+            acts["selected_by_a_click"] = app._chosen_region is region
+            acts["clicks_handed_to_the_stand_in"] = self.guard.used.get("post_click", 0)
+            acts["status_after_the_click"] = self.status_facts()
+            app.after(700, pictured)
+
+        def pictured() -> None:
+            self.shot("t_region_selected")
+            app.after(300, edit)
+
+        def edit() -> None:
+            if self.over or not app._editing():
+                acts["editor"] = "the translated page not on show"
+                app.after(300, key)
+                return
+            click(5000)  # (a click of its own, long after the one that selected) ...
+            click(250)  # ... and the second of a double click
+            editor = getattr(app, "_editor", None)
+            acts["editor_by"] = "a double click" if editor is not None and editor.winfo_exists() else None
+            if acts["editor_by"] is None:  # (Tk took the two clicks for two: the double click's own handler)
+                app._on_double(SimpleNamespace(x=x, y=y))
+                acts["editor_by"] = "the double click's handler"
+            app.after(1200, opened)
+
+        def opened() -> None:
+            editor = getattr(app, "_editor", None)
+            acts["editor_open"] = bool(editor is not None and editor.winfo_exists())
+            if acts["editor_open"]:
+                acts["editor_window"] = over_facts(editor, app)
+                self.shot("t_region_editor", window=editor)
+                editor.close_asked()  # its Esc: nothing changed, it closes
+            app.after(700, closed)
+
+        def closed() -> None:
+            editor = getattr(app, "_editor", None)
+            acts["editor_closed"] = editor is None or not editor.winfo_exists()
+            acts["full_screen_after_the_editor"] = bool(app.reading)
+            acts["selected_after_the_editor"] = app._chosen_region is region
+            with contextlib.suppress(KeyError, tk_error()):
+                acts["keys_back_on_the_page"] = app.focus_get() is app.canvas
+            app._on_escape()  # Esc's own handler, a region selected: it lets go of it, the full screen stays
+            acts["esc_let_go"] = app._chosen_region is None
+            acts["full_screen_after_esc"] = bool(app.reading)
+            app.after(700, key)
+
+        def key() -> None:
+            if not self.over:
+                self.press_page_key(seg)
+
+        select()
+
+    def largest_region(self) -> Any:
+        """The largest region on the page on show whose middle lies on the page the full screen draws, a lettered one
+        first; None without one."""
+        app = self.app
+        try:
+            regions = list(app._page_regions())
+        except Exception:  # noqa: BLE001 - no regions to be had
+            return None
+        regions = [r for r in regions if app.canvas.inside(*page_point(app, r))]
+        lettered = [r for r in regions if getattr(r, "status", "") == "translated"] or regions
+        return max(lettered, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]), default=None)
+
+    def press_page_key(self, seg: Segment) -> None:
+        """The window's next or previous page key (`KEYED`, as Page > Page keys... has them) pressed on its page: Tk's
+        key event on the page canvas, whose binding hands it to `forward_key`; where Tk does not deliver it (it
+        delivers keys to the window with the system's keyboard focus, which this tool never moves) the binding's own
+        call. The key the window then hands to the stand-in releases its turn (`page_key`)."""
+        from taslation.ui.constants import FORWARDED_KEYS
+
+        app = self.app
+        pair = app._page_key_pair()
+        meaning = KEYED[seg.name]
+        key = getattr(pair[1], meaning, "") if pair is not None else ""
+        key = key or ("Left" if meaning == "next" else "Right")
+        keysym = next((k for k, v in FORWARDED_KEYS.items() if v == key), key)
+        facts = self.keyed.setdefault(seg.name, {})
+        facts.update(at=time.monotonic(), pressed=key, on_the_full_screen=bool(app.reading),
+                     role=str(app.role_var.get()), auto=bool(app.auto_var.get()))
+        calls: list[str] = []
+
+        def counted(k: str) -> None:
+            calls.append(k)
+            type(app).forward_key(app, k)
+
+        self.key_for = seg
+        app.forward_key = counted  # (only counted: the window's own `forward_key` does the rest)
+        try:
+            app.canvas.event_generate(f"<KeyPress-{keysym}>")
+        finally:
+            del app.forward_key
+        facts["by"] = "a key event on the page" if calls else "the binding's call"
+        if not calls:
+            app.forward_key(key)
+        facts["status_after_the_key"] = self.status_facts()
+
+    def leave_translator(self) -> None:
+        """Scenario t over (after t2): the full screen left by Esc's own handler (pressed again while it only let go
+        of a region), F11's handler where it did not; then the toolbar's Reader again, for the scenarios after it."""
+        app, facts = self.app, self.entered.get("t")
+        if facts is None:
+            return
+        presses = 0
+        while app.reading and presses < 2:
+            app._on_escape()
+            presses += 1
+        facts["esc_presses_to_leave"] = presses if not app.reading else None
+        if app.reading:
+            app.toggle_reading()
+        facts.update(auto_after=bool(app.auto_var.get()), status_after=self.status_facts())
+        facts["reader_by_its_button"] = self.choose_role("reader")
+        facts["role_after"] = str(app.role_var.get())
+
+    def choose_role(self, value: str) -> bool:
+        """The toolbar's role button for *value* invoked, as a click on it does (its command: `_on_role_changed`);
+        False where none was found and the role was set as that command sets it."""
+        app = self.app
+        stack: list[Any] = [app]
+        while stack:
+            widget = stack.pop()
+            with contextlib.suppress(Exception):
+                if (widget.winfo_class() == "TRadiobutton" and str(widget.cget("value")) == value
+                        and str(widget.cget("variable")) == str(app.role_var)):
+                    widget.invoke()
+                    return True
+            stack.extend(widget.winfo_children())
+        app.role_var.set(value)
+        app._on_role_changed()
+        return False
+
+    def status_facts(self) -> dict[str, Any]:
+        """The status line as its kind (`status_kind`, never its text) and its note on the full screen's page: shown
+        or not, for how long (`StatusMixin._note_ms`)."""
+        app = self.app
+        kind = status_kind(getattr(app, "_status_render", None), getattr(app, "_status_key", None))[0]
+        note = str(getattr(app.canvas, "note", "") or "")
+        return {"kind": kind, "note_on_the_page": bool(note), "note_ms": app._note_ms(note) if note else None}
+
     def over_begin(self) -> None:
         """Scenario o: the stand-in's window made to fill its monitor (a viewer's full screen, as `is_fullscreen` tells
         it), View > Over the full-screen viewer turned on; then, as a reader would, the status bar's Move TASlation
-        there (offered while TASlation is on another monitor) and the Reading mode button (F11 over the book is the
+        there (offered while TASlation is on another monitor) and the Full screen button (F11 over the book is the
         viewer's own key). What was offered and done is noted."""
         from taslation.capture import monitor_rect, window_rect
 
@@ -1546,12 +1850,12 @@ class Director:
 
         def read() -> None:
             facts["over_before_reading"] = bool(app._over_on)
-            app.enter_reading()  # the Reading mode button
+            app.enter_reading()  # the Full screen button
 
         app.after(800, move)
 
     def over_end(self) -> None:
-        """Scenario o over: reading mode left by the F11 hot key (this tool's press, `HotKeys`), then the mode turned
+        """Scenario o over: the full screen left by the F11 hot key (this tool's press, `HotKeys`), then the mode turned
         off, TASlation's window back in its place and the stand-in's back to its size (F11's handler where the press
         was not taken: noted)."""
         app, facts = self.app, self.entered.get("o")
@@ -1608,15 +1912,19 @@ class Director:
             self.due.remove((at, label))
             self.shot(label)
 
-    def shot(self, label: str) -> None:
-        """A picture of TASlation's own window (its handle, the client area; never the screen) into shots/."""
+    def shot(self, label: str, window: Any = None) -> None:
+        """A picture of TASlation's own window (its handle, the client area; never the screen) into shots/; with
+        *window*, of that dialog of TASlation's instead (the whole of it, its title bar too)."""
         from taslation.capture import windows
 
         if label in self.taken or self.over:
             return
         self.taken.add(label)
         try:
-            image = windows.capture_window(self.app._own_hwnd(), client_only=True, allow_screen_fallback=False)
+            if window is not None:
+                image = windows.capture_window(root_of(window), client_only=False, allow_screen_fallback=False)
+            else:
+                image = windows.capture_window(self.app._own_hwnd(), client_only=True, allow_screen_fallback=False)
         except Exception as e:  # noqa: BLE001 - said by its type
             self.shots.append({"label": label, "error": type(e).__name__})
             return
@@ -1651,7 +1959,7 @@ class Director:
 def area_facts(app: Any) -> dict[str, Any]:
     """The capture area the window reads by, as numbers: the margins in use, the reader's area for the frame there
     is now (and whether it is the enlarged window's), the page panel found within it, the part of the picture the
-    page view draws (its crop, None outside reading mode) and the picture's size, the viewer's window size."""
+    page view draws (its crop, None off the full screen) and the picture's size, the viewer's window size."""
     from taslation.capture import window_rect
 
     out: dict[str, Any] = {}
@@ -2705,9 +3013,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     resizes = resize_rows(events, offset, notes, turns, rows)
     for item in resizes:
         item["from_s"] = rel(item.pop("from_t"))
-    modes = {"columns": ["t_s", "reading", "over", "run", "beside", "text_size"],
+    modes = {"columns": ["t_s", "reading", "over", "run", "beside", "text_size", "role"],
              "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), int(m["run"]), int(m["beside"]),
-                       m["text_size"]] for m in notes.modes],
+                       m["text_size"], m["role"]] for m in notes.modes],
              "entered": {name: {k: v for k, v in facts.items() if k != "at"}
                          for name, facts in director.entered.items()},
              "hot_keys": [{**{k: v for k, v in h.items() if k != "t"}, "t_s": rel(h["t"])} for h in notes.hotkeys]}
@@ -2777,6 +3085,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                   "log_latency_ms_median": round(statistics.median(lat) - offset, 1) if lat else None},
         "band_top_px": top, "dpr": dpr,
         "released": director.released, "theme": director.theme,
+        "page_keys": {name: {k: v for k, v in facts.items() if k != "at"} for name, facts in director.keyed.items()},
         "segments": table, "turns": rows, "incidents": spells,
         "jobs": {"started": len(started), "on": dict(Counter(j["state"] for j in started)),
                  "not_started": len(jobs) - len(started),
@@ -2979,6 +3288,8 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     modes = run_["modes"]
     print(f"modes entered {modes['entered']}; hot keys pressed "
           f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")
+    if run_.get("page_keys"):
+        print(f"page keys pressed on the window's page: {run_['page_keys']}")
     whole = run_["whole_book_run"]
     if whole["decisions"] or whole["ends"]:
         print(f"whole-book run: decisions {whole['decisions']}; frames got {whole['frames_got']}, not sharp "

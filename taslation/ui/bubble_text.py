@@ -1,8 +1,8 @@
 """A bubble's Japanese and its translation at hand while reading, as text: to look a word up in a dictionary of one's
 own (a pop-up dictionary over the text, or one that watches the clipboard) and to hold a translation against what it
-translates. In reading mode and in the Reader role, in both modes of `Settings.hover_shows`, both ways of
-`Settings.hover_reveal` (with "in_place" this is the one panel there is, opened on request) and whatever
-`Settings.bubble_zoom` says; in the Translator role's normal window too (its page translated), while no press on the
+translates. In the Reader role, in both modes of `Settings.hover_shows`, both ways of `Settings.hover_reveal` (with
+"in_place" this is the one panel there is, opened on request) and whatever `Settings.bubble_zoom` says; in the
+Translator role too (its page translated), while no press on the
 page is under way and no region editor or modal dialog is open (`hover.hover_usable`; the region editor has its
 region's Japanese itself, "Read as:"). Their keys are none of the Translator's (`shortcuts.Keymap.problem` refuses a
 key another action has).
@@ -35,7 +35,7 @@ key another action has).
   asked for (`TranslatorMixin._read_source`: `Pipeline.read_source` in the worker, as the region editor's "Read the
   Japanese" does, the popup's line or the status line saying so meanwhile), kept with the region in memory and never
   written anywhere. Neither text is logged, nor said in the status line.
-* Without a pointer (a touch screen, where a tap goes on to the viewer and nothing hovers): in reading mode and the
+* Without a pointer (a touch screen, where a tap goes on to the viewer and nothing hovers): in the
   Reader role a press held still on a bubble, or a right click on it, pins its popup
   (`zoom.BubbleZoomMixin._hold_press`, `_pin_bubble`); in the Translator role they are the Translator's.
 * Over the full-screen viewer, where the viewer keeps the keys, these keys are hot keys while the pointer is on
@@ -217,8 +217,8 @@ class BubbleTextMixin:
 
     # ------------------------------------------------------------------ the bubble and its Japanese
     def _text_usable(self) -> bool:
-        """Whether the actions work now (`hover.hover_usable`): in reading mode and the Reader role, and in the
-        Translator role's normal window while no press on the page is under way and no region editor or modal dialog
+        """Whether the actions work now (`hover.hover_usable`): in the Reader role, and in the
+        Translator role while no press on the page is under way and no region editor or modal dialog
         is open; else a key of theirs does nothing (the press, the editor or the dialog is the Translator's)."""
         return hover_usable(self)
 

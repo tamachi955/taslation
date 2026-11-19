@@ -412,9 +412,19 @@ def test_a_click_that_is_not_taslations_own_goes_to_the_viewer_in_either_role():
     w._on_release(SimpleNamespace(x=10, y=10))
     assert len(w.clicks) == 2  # the reader's clicks go on as ever
     w.role_var.set("translator")
+    w.canvas = SimpleNamespace(inside=lambda x, y: True)
     w.reading, w._drag_start = True, (10, 10)
     w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 3  # and so do those on the reading window
+    # not the Translator's on the full screen, no translated page on show: TASlation's, and it says what to do
+    assert len(w.clicks) == 2 and w.said == ["Translate a page first: press F5."]
+    w.role_var.set("reader")  # the Reader's there go on as in the window
+    w._drag_start = (10, 10)
+    w._on_release(SimpleNamespace(x=10, y=10))
+    assert len(w.clicks) == 3
+    w.role_var.set("translator")
+    w.editing, w._drag_start = True, (10, 10)
+    w._on_release(SimpleNamespace(x=10, y=10))
+    assert len(w.clicks) == 3  # the translated page on show there: the click is TASlation's
     w.reading, w.editing, w._drag_start = False, True, (10, 10)
     w._on_release(SimpleNamespace(x=10, y=10))
     assert len(w.clicks) == 3  # the translated page on show: the click is TASlation's (its text areas)
@@ -588,7 +598,7 @@ def test_reading_mode_refuses_a_queued_batch():
 
     w = Entering()
     w.enter_reading()
-    assert w.said == ["Reading mode waits for the whole-book run to finish (Stop ends it)."] and len(w.notes) == 1
+    assert w.said == ["Full screen waits for the whole-book run to finish (Stop ends it)."] and len(w.notes) == 1
 
 
 def test_the_batch_dialog_says_why_it_does_not_open_while_busy():
@@ -603,6 +613,28 @@ def test_the_batch_dialog_says_why_it_does_not_open_while_busy():
     w = Busy()
     w.open_batch_dialog()
     assert w.said == ["A job is running: wait for it to end, or press Stop."]
+
+
+def test_the_full_screen_and_a_whole_book_run_exclude_each_other_also_by_the_run_s_key(monkeypatch):
+    from taslation.ui import jobs
+
+    opened = []
+    monkeypatch.setattr(jobs, "BatchDialog", lambda *a, **k: opened.append(a))
+
+    class OnFullScreen:  # the key of Read whole book... pressed there, where the menu is away
+        open_batch_dialog = A.open_batch_dialog
+        reading, busy = True, False
+        said: list[str] = []
+
+        def say(self, key, **values):
+            self.said.append(key)
+
+        def _current_window(self):
+            raise AssertionError("no dialog over the full screen")
+
+    w = OnFullScreen()
+    w.open_batch_dialog()
+    assert w.said == ["A whole-book run starts from the window: leave the full screen first (F11)."] and not opened
 
 
 def test_closing_puts_the_enlarged_window_back_with_no_key_and_no_box(monkeypatch):

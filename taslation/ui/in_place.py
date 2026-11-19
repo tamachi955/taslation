@@ -1,6 +1,6 @@
 """A bubble the pointer rests on shows its other side in its own place (`Settings.hover_reveal` "in_place", `hover`):
-in reading mode, the Reader role and the Translator role's normal window, the bubble itself changes while the pointer
-rests on it and changes back when it leaves - the other way of showing what the panel beside a bubble shows (`zoom`,
+in the Reader role and the Translator role, in the window and on the full screen alike, the bubble itself changes
+while the pointer rests on it and changes back when it leaves - the other way of showing what the panel beside a bubble shows (`zoom`,
 "panel").
 
 * With the translation on the page (`Settings.hover_shows` "original"): the bubble shows the page as the viewer has
@@ -14,7 +14,7 @@ rests on it and changes back when it leaves - the other way of showing what the 
   the panel does not show. While the page is being translated, a box still waiting for its translation shows the
   outline the page filling in gives it (`progress.Filling.outlines`, `hovered_outline`), one lettered already its
   lettering; once the page is done, the bubble under the pointer shows at once (the pointer has rested there).
-* In the Translator role's normal window the page is the translated one, so the bubble shows its original lettering
+* In the Translator role the page is the translated one, so the bubble shows its original lettering
   as with the translation on the page, while the Translator's pointer leaves room for it (`hover.translator_free`,
   `zoom.BubbleZoomMixin._pointer_at_work`: no button down, no handle of the selected region under it, no region editor
   or modal dialog open). The patch lies under everything drawn over the picture, so the regions' frames, numbers,

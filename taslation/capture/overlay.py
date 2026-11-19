@@ -87,7 +87,7 @@ def over_style(ex_style: int, on: bool) -> int:
 
 def over_order(on: bool, topmost: bool) -> int:
     """Where `set_over` puts the window in the order of the windows: topmost while it is over the viewer, else where
-    the reader's Always on top (or reading mode) has it."""
+    the reader's Always on top (or the full screen) has it."""
     return HWND_TOPMOST if on or topmost else HWND_NOTOPMOST
 
 

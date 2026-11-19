@@ -407,8 +407,8 @@ class ViewerMixin:
     def set_area(self, then: Callable[[], None] | None = None) -> None:
         """Set area...: the area dialog over a fresh capture - the reader's own area, else the page found so far -
         with the page panel found inside the rectangle shown dashed (`page_area.panel_inside`: what is read of it);
-        once an area is chosen or cleared (its Clear area: `clear_area`), *then()* (reading mode offered it first: the
-        reading window opens). The area belongs to the frame that is read, so the viewer's window is enlarged first
+        once an area is chosen or cleared (its Clear area: `clear_area`), *then()* (the full screen offered it first: the
+        full screen opens). The area belongs to the frame that is read, so the viewer's window is enlarged first
         (`_enlarge_first`). Not during a run: a run that follows the reader widens its area with the pages it meets,
         within the reader's area it began with, other jobs keep one area; and its waiting for an enlarged window must
         not give way to this."""
@@ -583,7 +583,7 @@ class ViewerMixin:
             self._enlarged = None
             self._keep_enlarged(enlarged, forget=True)  # nothing to put back
             self.say(KEPT_ITS_SIZE)
-            if not self.reading:  # (the reading window shows the line on the page by itself)
+            if not self.reading:  # (the full screen shows the line on the page by itself)
                 self.canvas.set_note(_(KEPT_ITS_SIZE), READING_NOTE_MS)  # "Translating..." takes the status line at once
         if frame is None:
             self._forget_page_area()

@@ -98,11 +98,11 @@ def _guide_keys() -> list[str]:
 
 
 def test_eight_topics_of_about_forty_lines_each_in_every_language():
-    assert [heading for heading, _p in TOPICS] == ["Getting started", "Reading mode", "Reading a whole book", "Page keys",
+    assert [heading for heading, _p in TOPICS] == ["Getting started", "Full screen", "Reading a whole book", "Page keys",
                                                    "The Translator role", "Keys", "When something goes wrong", "Your data"]
     # (+2: the page strip of a run; +2: over a full-screen viewer; +1: a page gone by; +1: the viewer's own full screen
-    # is the person's to switch; +1: Tab, Alt with the arrows and Help > Keys...)
-    assert 36 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 53
+    # is the person's to switch; +1: Tab, Alt with the arrows and Help > Keys...; +1: the full screen in each role)
+    assert 36 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 54
     for key in _guide_keys() + ["How to use...", "How to use TASlation"]:
         for code in FEATURE_LANGUAGES:
             assert CATALOGS[code].get(key, "").strip(), (code, key)
@@ -145,7 +145,12 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
             (catalog["Tools"], catalog["Saved translations..."], catalog["Help"], catalog["About TASlation"]),
         "Green: translated. Orange: not translated, its label says why. Blue: your own rectangle. Red ?: worth a look (Review...).":
             (catalog["Review..."],),
-        "Press F11, or the Reading mode button, to see the page alone on the full screen.": (catalog["Reading mode"],),
+        "Press F11, or the Full screen button, to see the page alone on the full screen, in the role you chose.":
+            (catalog["Full screen"],),
+        "In the Reader role the page keys and clicks on the page go to the viewer, and Auto is on until you leave, so each page you turn is translated.":
+            (catalog["Reader"],),
+        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. Auto stays as you set it. To change the role or the book's name, or to start a whole-book run, leave the full screen first.":
+            (catalog["Translator"],),
         "A bubble stays untranslated: press F5. If it is still empty, choose the Translator role and drag from outside the text to draw a rectangle round it; if an orange box is already there, drag or resize that box instead.":
             (catalog["Translator"],),
         "A name comes out wrong all through the book: in the Translator role, Find and replace... changes it on every page at once.":

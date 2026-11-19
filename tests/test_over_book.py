@@ -33,7 +33,7 @@ def test_the_order_changes_without_activation_move_or_size():
     assert flags & overlay.SWP_NOACTIVATE and flags & overlay.SWP_NOMOVE and flags & overlay.SWP_NOSIZE
     assert flags == 0x0013  # nothing else: no SWP_SHOWWINDOW, no SWP_FRAMECHANGED
     assert overlay.over_order(True, False) == overlay.HWND_TOPMOST
-    assert overlay.over_order(False, True) == overlay.HWND_TOPMOST  # Always on top, or reading mode
+    assert overlay.over_order(False, True) == overlay.HWND_TOPMOST  # Always on top, or the full screen
     assert overlay.over_order(False, False) == overlay.HWND_NOTOPMOST
 
 
@@ -351,7 +351,7 @@ def test_no_mode_for_a_viewer_in_a_window_or_on_another_monitor_or_when_turned_o
     assert window._over_on and not load_ui_flag(window.settings.state_dir, overbook.OVER_OFF_FLAG)
 
 
-def test_the_hot_keys_follow_the_mode_reading_mode_and_who_is_in_front(window, screen):
+def test_the_hot_keys_follow_the_mode_the_full_screen_and_who_is_in_front(window, screen):
     window._over_sync()
     keys = FakeHotKeys.last
     window.reading = True
@@ -440,7 +440,7 @@ def test_a_dialog_with_the_viewer_in_a_window_or_on_another_monitor_is_left_as_e
     assert not window.dialog_windows[0].topmost and screen.given == []
 
 
-def test_reading_mode_keeps_the_window_topmost_when_a_dialog_holds_the_mode(window, screen):
+def test_the_full_screen_keeps_the_window_topmost_when_a_dialog_holds_the_mode(window, screen):
     window.reading = True
     window._over_sync()
     window.dialogs = True
@@ -493,6 +493,17 @@ def test_the_translators_page_takes_the_keys_when_pressed_the_readers_does_not(w
     assert window._over_on
 
 
+def test_on_the_full_screen_the_page_takes_the_keys_as_the_role_has_it(window, screen):
+    window.reading = True  # the full screen keeps the role
+    window._over_sync()
+    window._over_page_press()  # Reader: the press goes on to the viewer, the keys stay there
+    assert window._over_on and screen.given == []
+    window.role_var.set("translator")
+    window._over_sync()
+    window._over_page_press()  # Translator: the page takes them, as in the window
+    assert not window._over_on and window.canvas.focused and screen.given == [100]
+
+
 # ------------------------------------------------------------------ the book full screen on another monitor
 def test_a_book_full_screen_on_another_monitor_is_offered_a_move_and_no_key_is_taken(window, screen):
     screen.viewer_monitor = (1920, 0, 3840, 1080)
@@ -501,7 +512,7 @@ def test_a_book_full_screen_on_another_monitor_is_offered_a_move_and_no_key_is_t
     assert window.move_btn.packed and window.said == [overbook.MOVE_OFFER]  # said once for this viewer ...
     window.reading = True
     window._over_sync()
-    assert not window.move_btn.packed  # (reading mode: no offer, and no key either)
+    assert not window.move_btn.packed  # (the full screen: no offer, and no key either)
     window.reading = False
     window._over_sync()
     assert window.move_btn.packed and window.said == [overbook.MOVE_OFFER]  # ... not again

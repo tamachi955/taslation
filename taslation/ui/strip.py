@@ -520,7 +520,7 @@ class PageStrip(ttk.Frame):
 # (functions of the window, so that the window's other parts and their tests' stand-ins call them whether or not
 # the stand-in has a strip)
 def place_strip(window: Any) -> None:
-    """The strip under the page, over the status line, while it is to show (never in the reading window)."""
+    """The strip under the page, over the status line, while it is to show (never on the full screen)."""
     strip = getattr(window, "page_strip", None)
     if strip is None:
         return

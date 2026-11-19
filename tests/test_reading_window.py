@@ -219,7 +219,7 @@ def test_behind_the_reading_window_only_the_viewers_own_frame_is_taken(hidden_ro
     w.reading = True
     with pytest.raises(CaptureError):
         w._capture(1)
-    message = "This viewer cannot be read behind the reading window; press Esc"
+    message = "This viewer cannot be read behind the full screen; press F11"
     assert asked == [False] and w._viewer_hidden and w.canvas.message == message
     frame[0] = _page()
     assert w._capture(1) is frame[0] and not w._viewer_hidden and w.canvas.message == ""
@@ -432,7 +432,65 @@ def test_translator_mode_selects_moves_resizes_edits_and_drops_regions_like_shap
     w.role_var.set("reader")  # the reader's clicks go to the viewer, nothing is selected
     w.click(100, 80)
     assert w.forwarded == [(100, 80)] and w._chosen_region is None
-    w.role_var.set("translator")
-    w.reading = True  # nor in the reading window
+
+
+class FullScreen(Shapes):
+    """`Shapes` on the full screen: leaving it is recorded."""
+
+    def __init__(self, root, regions):
+        super().__init__(root, regions)
+        self.reading, self.left = True, 0
+
+    def leave_reading(self):
+        self.reading, self.left = False, self.left + 1
+
+    def _fill_on_show(self):  # a page filling in (`_fill`) is the viewer's page
+        return True
+
+
+def test_the_full_screen_keeps_the_translator_s_pointer_and_esc_lets_go_first_then_leaves(hidden_root):
+    a, b = _region((50, 50, 150, 120)), _region((200, 150, 300, 250))
+    w = FullScreen(hidden_root, [a, b])
+    assert w._editing()  # the Translator's, on the full screen as in the window
+    w.click(100, 80)  # a click selects and is not passed on to the viewer
+    assert w._chosen_region is a and w.forwarded == [] and len(w.canvas.find_withtag("chosen")) == 2 + 8 + 3
+    w.click(100, 80, to=(120, 90))  # a drag moves
+    assert w.moved == [(a, (70, 60, 170, 130))]
+    w._grip_box = None
+    w.click(320, 20, to=(390, 80))  # a drag on empty space draws
+    assert w.added == [(320, 20, 390, 80)]
+    w._on_double(SimpleNamespace(x=250, y=200))  # a double-click opens the editor
+    w._on_release(SimpleNamespace(x=250, y=200))
+    assert w._chosen_region is b and w.edited == [b] and w.forwarded == []
+    w._on_escape()  # Esc with a region selected: let go of it, still on the full screen
+    assert w._chosen_region is None and w.reading and w.left == 0
+    w._on_escape()  # ... then it leaves
+    assert not w.reading and w.left == 1
+    w.reading = True
+    w._fill = object()  # the translated page not on show (another page): the click is still not the viewer's ...
+    assert not w._editing()
+    w.statuses.clear()
     w.click(100, 80)
-    assert w.forwarded[-1] == (100, 80) and w._chosen_region is None
+    assert w.forwarded == [] and w._chosen_region is None and w.statuses == ["Translate a page first: press F5."]
+    w.busy = True  # ... and while a page is being translated nothing is said over its progress
+    w.statuses.clear()
+    w.click(100, 80)
+    assert w.forwarded == [] and w.statuses == []
+    w.busy = False
+    w.click(100, 80, to=(160, 120))  # a drag there is nobody's
+    assert w.forwarded == [] and w.added == [(320, 20, 390, 80)]
+    w.reading = False  # in the window the Translator's click on a page not translated goes on, as ever
+    w.click(100, 80)
+    assert w.forwarded == [(100, 80)]
+
+
+def test_the_reader_s_full_screen_passes_clicks_on_and_esc_leaves_at_once(hidden_root):
+    a = _region((50, 50, 150, 120))
+    w = FullScreen(hidden_root, [a])
+    w.role_var.set("reader")
+    assert not w._editing()
+    w.click(100, 80)
+    assert w.forwarded == [(100, 80)] and w._chosen_region is None
+    w._chosen_region = a  # (one left from the Translator role): Esc leaves all the same
+    w._on_escape()
+    assert not w.reading and w.left == 1

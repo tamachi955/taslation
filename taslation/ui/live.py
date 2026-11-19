@@ -150,6 +150,7 @@ from .constants import (
     FOLLOW_WAITS,
     FRAME_GAP_MS,
     FRAME_STEP_MS,
+    FULL_SCREEN_SCAN_WAITS,
     LIVE_CHANGE,
     NO_VIEWER,
     READING_NOTE_MS,
@@ -747,7 +748,7 @@ class LiveViewMixin(BlackViewerMixin):
         reading = self.reading
         self._status_follows_page()  # (a line about the page before goes with it)
         self.canvas.enlarge = reading
-        self.canvas.message = _("This viewer cannot be read behind the reading window; press Esc") if (
+        self.canvas.message = _("This viewer cannot be read behind the full screen; press F11") if (
             reading and self._viewer_hidden) else ""
         # no viewer chosen yet: what to do, in the window's language (the live picture takes its place once one is)
         self.canvas.hint = _(NO_VIEWER) if self.selected is None else ""
@@ -781,7 +782,7 @@ class LiveViewMixin(BlackViewerMixin):
           viewer's latest frame, so a toolbar or the pointer shows as it is now;
         * else the viewer's latest frame as it is (a page not translated yet, a page turned, the viewer's panels).
         Show original leaves the lettering out. With the original on the page and the translation under the
-        pointer (`hover.reverse_on`: `Settings.hover_shows` "translation", in reading mode or the Reader role), the
+        pointer (`hover.reverse_on`: `Settings.hover_shows` "translation", in the Reader role), the
         page being translated and the last translated page show as the viewer does too, without the outlines - but
         for the box under the pointer whose translation has not come, where its bubble shows in its place
         (`in_place.hovered_outline`; the panel beside it says so itself: `zoom`); a whole-book run's page stays as it
@@ -812,7 +813,7 @@ class LiveViewMixin(BlackViewerMixin):
         `_job_line`) goes as soon as the viewer's latest frame (`_live`) is of another page (`_shows_page`: a soft
         picture and its sharp one, the pointer over it, are the same page) - a turn, the viewer's window given another
         size -, and the line of what is on show takes its place (`_normal_status`), with no note of its own on the
-        reading window's page, where the old line's note goes too. Asked whenever the page is drawn (`_redisplay`)."""
+        full screen's page, where the old line's note goes too. Asked whenever the page is drawn (`_redisplay`)."""
         page = getattr(self, "_status_page", None)
         if page is None or self._live is None or self._shows_page(self._live, page):
             return
@@ -964,7 +965,7 @@ class LiveViewMixin(BlackViewerMixin):
     def _show_notes(self) -> None:
         """Under the page: the notes for the reader on it, or nothing."""
         noted = self._noted_regions()
-        if not noted or self.reading:  # the reading window shows the page alone
+        if not noted or self.reading:  # the full screen shows the page alone
             self.notes_label.pack_forget()
             return
         self.notes_var.set(_("Notes for the reader: ") + "   ".join(f"\u2020{i + 1} {r.reader_note}" for i, r in enumerate(noted)))
@@ -985,10 +986,10 @@ class LiveViewMixin(BlackViewerMixin):
         return [r for r in result.regions if r.status != "dropped" and not unsure_art(r, usual)]
 
     def _overlay_items(self) -> list[tuple[tuple[int, int, int, int], str, str]]:
-        """Translator mode: outline every region (green = translated, orange = not, blue = reader-made), with the
-        speaker, a dagger where a note for the reader is, and the reading-order number while an order is being set;
-        not the pieces of the drawing the OCR read unsure (`_page_regions`)."""
-        if self.role_var.get() != "translator" or self.last_result is None or self.reading:
+        """Translator mode, in the window and on the full screen: outline every region (green = translated, orange =
+        not, blue = reader-made), with the speaker, a dagger where a note for the reader is, and the reading-order
+        number while an order is being set; not the pieces of the drawing the OCR read unsure (`_page_regions`)."""
+        if self.role_var.get() != "translator" or self.last_result is None:
             return []
         items = []
         noted = self._noted_regions()
@@ -1034,13 +1035,13 @@ class LiveViewMixin(BlackViewerMixin):
             if whole and not self._name_needed() and self._book_read():
                 self._start_translate(image, thumb=thumb)  # a page of a book read already: no whole-book start
                 return
-            if self.reading:  # no dialog over the reading window, and the scan would turn the pages under the reader
+            if self.reading:  # no dialog over the full screen, and the scan would turn the pages under the reader
                 self._start_translate(image, thumb=thumb, complete=complete)
                 if self._name_needed():  # kept nowhere: its name is asked for on leaving (`_ask_name_after_reading`)
                     self._unkept_reading = getattr(self, "_unkept_reading", 0) + 1
                 if whole and not self._scan_waits_told:
                     self._scan_waits_told = True
-                    self.say("Reading mode translates page by page; the whole-book scan waits until you leave it (Esc).")
+                    self.say(FULL_SCREEN_SCAN_WAITS)
                 return
             if self.selected is None:
                 return
@@ -1318,7 +1319,7 @@ class LiveViewMixin(BlackViewerMixin):
 
     # ------------------------------------------------------------------ the capture
     def _capture(self, hwnd: int) -> Image.Image:
-        """The viewer's frame. Behind the reading window the screen shows this window, so there only a frame the
+        """The viewer's frame. Behind the full screen the screen shows this window, so there only a frame the
         viewer draws itself is taken; a blank one, or none, puts a message on the page instead (CaptureError). In
         the normal window a viewer that draws nothing is copied from the screen instead, unless the screen there
         shows part of TASlation - a picture of itself: then ViewerCovered, and the last good frame stays. A blank
@@ -1344,7 +1345,7 @@ class LiveViewMixin(BlackViewerMixin):
                 image = capture_window(hwnd, allow_screen_fallback=False)
                 _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
                 if _blank(self, image) and self._blank_behind(hwnd):
-                    raise CaptureError("the viewer gives no picture behind the reading window")
+                    raise CaptureError("the viewer gives no picture behind the full screen")
             except CaptureError:
                 self._set_viewer_hidden(True)
                 raise
@@ -1677,7 +1678,7 @@ class LiveViewMixin(BlackViewerMixin):
     def _capture_failed(self, error: CaptureError) -> None:
         if isinstance(error, ViewerCovered):
             self._set_covered(True)
-        elif not self.reading:  # the reading window says so on the page
+        elif not self.reading:  # the full screen says so on the page
             self.say(error.message if error.message.code != "viewer.error" else Message("viewer.gone"))
 
     # ------------------------------------------------------------------ after a page turn
@@ -1870,7 +1871,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._front_as_it_is(f, now)
 
     def _front_as_it_is(self, f: Following, now: float) -> None:
-        """Over the book (`overbook`, reading mode too): who is in front as Windows has it now, whatever the notes
+        """Over the book (`overbook`, the full screen too): who is in front as Windows has it now, whatever the notes
         said. A click on the window there (WS_EX_NOACTIVATE: the Finished reading button, the page strip) gives a
         note that TASlation came to the front while the viewer keeps the foreground, and no note follows, for nothing
         changed: from the notes alone TASlation would stay "in front" and no page turned in the viewer would be
@@ -2260,7 +2261,7 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _starts_book(self, image: Image.Image) -> bool:
         """Whether Auto's `_on_new_page` would do more with *image* than translate it: start the book (the start
-        dialog, the name asked for: `_begin_book`), or in reading mode count it among the pages kept nowhere - asked
+        dialog, the name asked for: `_begin_book`), or on the full screen count it among the pages kept nowhere - asked
         without changing anything."""
         scanned = getattr(self, "_book_scanned", False) and getattr(self, "_scanned_book", "") == \
             self.book_var.get().strip()
@@ -2987,7 +2988,7 @@ class LiveViewMixin(BlackViewerMixin):
             def line() -> str:
                 return _("The viewer turned two pages.")
         self.status(line)
-        if not self.reading:  # (the reading window shows the status line on the page by itself)
+        if not self.reading:  # (the full screen shows the status line on the page by itself)
             self.canvas.set_note(line(), READING_NOTE_MS)
 
     # ------------------------------------------------------------------ the window's own moves, watched (events)

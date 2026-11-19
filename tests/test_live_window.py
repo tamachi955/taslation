@@ -416,6 +416,7 @@ class Said(Window):
     """The window with its own status line (`status`), the reading window's note on the page included."""
 
     status = app_mod.App.status
+    _note_ms = app_mod.App._note_ms
 
 
 def test_a_line_about_a_page_goes_as_soon_as_the_viewer_shows_another(hidden_root, viewer):

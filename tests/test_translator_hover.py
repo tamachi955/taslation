@@ -427,19 +427,24 @@ def test_a_page_filling_in_and_a_whole_book_run_s_page_show_nothing_under_the_po
             assert w.pending() == ["_zoom_due" if reveal == "panel" else "_reveal_due"], (reveal, role)
 
 
-def test_the_reader_role_and_reading_mode_keep_their_pointer(desk):
-    w = desk("panel")
-    w.role_var.set("reader")
-    w._redisplay()
-    assert not w.canvas.find_withtag("overlay")  # (no frames: the Reader's page)
-    w.move(*w.at(150, 200), state=B1)  # the reader's pointer: a button held changes nothing, as ever
-    assert w.pending() == ["_zoom_due"]
-    w._hold_press(w._event(*w.at(150, 200)))  # a press held still pins the panel there
-    assert w.delays("_hold_due") == [HOLD_MS]
-    w.due("_hold_due")
-    assert w._zoom_pinned
-    w._zoom_hide()
-    w.role_var.set("translator")
-    w.reading = True  # reading mode, whatever the role: the reader's pointer
-    w._hold_press(w._event(*w.at(550, 150)))
-    assert w.delays("_hold_due") == [HOLD_MS]
+def test_the_full_screen_keeps_the_pointer_of_the_role_chosen(desk):
+    for reading in (False, True):  # in the window and on the full screen alike
+        w = desk("panel")
+        w.reading = reading
+        w.role_var.set("reader")
+        w._redisplay()
+        assert not w.canvas.find_withtag("overlay"), reading  # (no frames: the Reader's page)
+        w.move(*w.at(150, 200), state=B1)  # the reader's pointer: a button held changes nothing, as ever
+        assert w.pending() == ["_zoom_due"], reading
+        w._hold_press(w._event(*w.at(150, 200)))  # a press held still pins the panel there
+        assert w.delays("_hold_due") == [HOLD_MS], reading
+        w.due("_hold_due")
+        assert w._zoom_pinned, reading
+        w._zoom_hide()
+        w.role_var.set("translator")  # the Translator's: a held press is the start of a drag, never a pin
+        w._redisplay()
+        assert w.canvas.find_withtag("overlay"), reading  # the regions' frames and marks, as in the window
+        w._hold_press(w._event(*w.at(550, 150)))
+        assert w.delays("_hold_due") == [], reading
+        w.move(*w.at(150, 200))  # its hover reveal while the pointer is free
+        assert w.pending() == ["_zoom_due"], reading

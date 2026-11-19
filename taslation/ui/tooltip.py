@@ -90,7 +90,7 @@ class Tooltip:
             self.show()
 
     def _there(self) -> bool:
-        """Whether the control is on the screen (it may have gone meanwhile: a toolbar hidden by reading mode)."""
+        """Whether the control is on the screen (it may have gone meanwhile: a toolbar hidden by the full screen)."""
         try:
             return bool(self.widget.winfo_viewable())
         except tk.TclError:

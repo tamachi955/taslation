@@ -1,5 +1,5 @@
-"""The panel beside a bubble while reading: in reading mode, in the Reader role and in the Translator role's normal
-window, the pointer resting on a translated bubble shows a panel beside it with what the page does not show
+"""The panel beside a bubble while reading: in the Reader role and in the Translator role, in the window and on the
+full screen alike, the pointer resting on a translated bubble shows a panel beside it with what the page does not show
 (`Settings.hover_shows`, `hover`; the Translator's page is the translated one, so there the panel shows the original),
 when that is how a bubble shows its other side (`Settings.hover_reveal` "panel", the default; "in_place" changes the
 bubble itself instead: `in_place`):
@@ -16,7 +16,7 @@ bubble itself instead: `in_place`):
   "long", or lettered on the screen under `Settings.readable_font_size`) and on every bubble with the original on
   the page, after `ZOOM_REST_MS` on any other one, so that a pointer passing over the page opens nothing; with
   `Settings.hover_delay_ms` other than 450, that many milliseconds and 8/3 as many (`hover_delays`; 0: at once). With
-  the translation on the page, not with `Settings.bubble_zoom` off. In the Translator role's normal window, where the
+  the translation on the page, not with `Settings.bubble_zoom` off. In the Translator role, where the
   pointer selects and edits the regions, only while the Translator's pointer leaves room for it: not while a button
   is down or a press on the page is under way (a drag, a move, a resize, a turn, a rectangle drawn), nor with the
   pointer on a handle or the rotate handle of the selected region, nor while the region editor or a modal dialog is
@@ -28,7 +28,7 @@ bubble itself instead: `in_place`):
   the bubble's Japanese (`ZOOM_HINT`, when that action has one). A panel larger than the work area has its text made
   smaller until it fits (`fit_panel`), and is cut to it when even that is not enough.
 * Where: beside the bubble, never over it (so never under the pointer: no flicker), within the page area when it fits
-  there, else within the monitor's work area (`zoom_place`); in the Translator role's normal window clear of the
+  there, else within the monitor's work area (`zoom_place`); in the Translator role clear of the
   selected region's frame, handles and rotate handle too, where a side of the bubble has room for that
   (`_zoom_keep_clear`). One bubble at a time: the pointer on another bubble takes the panel away, and that one's opens
   after the same rest.
@@ -42,7 +42,7 @@ bubble itself instead: `in_place`):
   then leave the bubble for it. It goes on a click on the page, the wheel, Esc, its Close button, the key again, and
   when its page is gone (or the region editor or a modal dialog opens); no other panel opens while it is there. The
   keys of "next_bubble" and "previous_bubble" pin it on the next or the previous bubble without the pointer; in
-  reading mode and the Reader role (`hover.reader_pointer`) so does a press held still on a bubble (`HOLD_MS` within
+  the Reader role (`hover.reader_pointer`) so does a press held still on a bubble (`HOLD_MS` within
   `STILL_PX`, for a touch screen, where there is no hover: `_hold_press`) or a right click on one (Windows makes a
   touch held still a right click while its "press and hold" is on). The release of such a press is TASlation's; a tap
   or a click goes on to the viewer exactly as ever. In the Translator role a press held is the start of a drag and a
@@ -389,11 +389,11 @@ class BubbleZoomMixin:
 
     def _pointer_at_work(self, event: tk.Event) -> bool:
         """Whether the Translator's pointer is at work at this motion on the page, so that no bubble shows its other
-        side: in the Translator role's normal window (`hover.translator_window`) a mouse button held (`buttons_down`:
+        side: in the Translator role (`hover.translator_window`) a mouse button held (`buttons_down`:
         a drag, a move, a resize, a turn, a rectangle drawn, and one Esc called off while the button is still down) or
         the pointer on a handle or the rotate handle of the selected region (`TranslatorMixin._grip_of`), where a
-        press resizes or turns it; inside its frame, where a press moves it, the pointer is free. Never in reading
-        mode or the Reader role."""
+        press resizes or turns it; inside its frame, where a press moves it, the pointer is free. On the full screen as
+        in the window; never in the Reader role."""
         if not translator_window(self):
             return False
         if buttons_down(event):
@@ -423,7 +423,7 @@ class BubbleZoomMixin:
     # ------------------------------------------------------------------ a press held on a bubble (a touch screen)
     def _hold_bubble(self, x: float, y: float) -> Any:
         """The bubble at the canvas point (x, y) whose panel a hold may pin (`text_target`, one left without a
-        translation too), where the pointer is the reader's (reading mode or the Reader role: `hover.reader_pointer`)
+        translation too), where the pointer is the reader's (the Reader role: `hover.reader_pointer`)
         and the translated page on show; else None. The Translator's press selects and edits the regions, a held one
         is the start of a drag and a right click is the Translator's: never there."""
         if self.last_result is None or not reader_pointer(self) or not self._result_on_show():
@@ -501,7 +501,7 @@ class BubbleZoomMixin:
 
     def _zoom_wanted(self) -> bool:
         """Whether the panel may open on a bubble of the translated page now: the page on show the one translated, the
-        panel the way chosen (`Settings.hover_reveal`), the pointer free to show it (reading mode, the Reader role, or
+        panel the way chosen (`Settings.hover_reveal`), the pointer free to show it (the Reader role, or
         the Translator role while its pointer is not at work and no region editor or modal dialog is open:
         `hover.hover_usable`), and - with the translation on the page - the setting `bubble_zoom` on (with the original
         on the page the panel is the way to the translation: `hover.reverse_on`): `hover.reveal_wanted`."""
@@ -522,7 +522,7 @@ class BubbleZoomMixin:
 
     def _panel_wanted(self) -> bool:
         """Whether a panel pinned with a bubble's Japanese may stay (`bubble_text`): the page on show the one
-        translated, in reading mode, the Reader role, or the Translator role while no press on the page is under way
+        translated, in the Reader role, or the Translator role while no press on the page is under way
         and no region editor or modal dialog is open (`hover.hover_usable`), whatever `bubble_zoom` says."""
         if self.last_result is None or not hover_usable(self):
             return False
@@ -672,7 +672,7 @@ class BubbleZoomMixin:
         popup = tk.Toplevel(self)
         popup.withdraw()
         popup.overrideredirect(True)
-        popup.attributes("-topmost", True)  # above the reading window and a window always on top
+        popup.attributes("-topmost", True)  # above the full screen and a window always on top
         popup.configure(bg=colours["edge"], takefocus=0)
         inner = tk.Frame(popup, bg=colours["ground"], padx=10, pady=8)
         inner.pack(padx=1, pady=1)
@@ -764,7 +764,7 @@ class BubbleZoomMixin:
         popup.geometry(f"+{place[0]}+{place[1]}")
 
     def _zoom_keep_clear(self) -> tuple[Box, ...]:
-        """What the panel keeps clear of beside its bubble (screen boxes): in the Translator role's normal window the
+        """What the panel keeps clear of beside its bubble (screen boxes): in the Translator role the
         selected region's frame with its handles and its rotate handle (`TranslatorMixin._frame_of`,
         `area.rotate_handle`, grown by `area.HANDLE`), so that they stay in sight; none elsewhere, nor while nothing
         selected is on the page on show."""

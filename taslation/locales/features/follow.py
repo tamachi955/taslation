@@ -1,6 +1,6 @@
-"""The window's strings for following the viewer and for reading mode's messages: the band shown while the viewer
+"""The window's strings for following the viewer and for the full screen's messages: the band shown while the viewer
 stops drawing behind TASlation, the line while the browser window shows another tab, Set area... offered before
-the reading window, the area set by hand in words, the keys passed on to the viewer by their names, and the line
+the full screen, the area set by hand in words, the keys passed on to the viewer by their names, and the line
 when a key pressed for real made the viewer turn two pages."""
 
 TEXTS: dict[str, dict[str, str]] = {
