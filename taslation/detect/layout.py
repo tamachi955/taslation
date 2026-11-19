@@ -49,6 +49,7 @@ CROP_PAD = 6  # px around a model box when the classical detectors look at its c
 SAME_REGION = 0.5  # IoU with a classical region that makes it the same region, half its text box in the model's
 CONFIRMED = 0.5  # a classical block on the crop is the region's when this share of the text box lies in it
 COVERED = 0.3  # a box this much inside what was read already reads the same lettering
+PAGE_GROUND = 0.9  # a bubble box this share of a page unit is the page's ground, no bubble
 
 TEXT, BUBBLE = "text", "bubble"
 CLASSES = {0: BUBBLE, 1: TEXT, 2: TEXT}  # the model's ids: bubble, text in a bubble, free text
@@ -253,11 +254,19 @@ def _surest(boxes: list[Detection]) -> list[Detection]:
     return kept
 
 
-def model_regions(rgb: np.ndarray, detections: Sequence[Detection]) -> list[TextRegion]:
-    """The regions the model's *detections* (page coordinates) make; the bubbles first."""
+def page_ground(box: Sequence[float], units: Sequence[Sequence[float]]) -> bool:
+    """Whether a bubble's *box* is the ground of one of the page *units* (page boxes): `PAGE_GROUND` of the unit or
+    more. A bubble is never a page: what the model takes for one there is a page's plate (an explanation page's white
+    panel, cut out of a dark ground as a unit of its own), and as a bubble it would swallow every line on it."""
+    return any(_inter(box, u) >= PAGE_GROUND * max(1.0, _area(u)) for u in units)
+
+
+def model_regions(rgb: np.ndarray, detections: Sequence[Detection], units: Sequence[Sequence[float]] = ()) -> list[TextRegion]:
+    """The regions the model's *detections* (page coordinates) make; the bubbles first. A bubble that is the ground
+    of one of the page *units* (`page_ground`) is none: its texts stand alone."""
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     texts = _surest([d for d in detections if d[5] == TEXT and d[4] >= TEXT_SCORE])
-    bubbles = _surest([d for d in detections if d[5] == BUBBLE and d[4] >= BUBBLE_SCORE])
+    bubbles = _surest([d for d in detections if d[5] == BUBBLE and d[4] >= BUBBLE_SCORE and not page_ground(d, units)])
     inside: list[list[Detection]] = [[] for _ in bubbles]
     alone: list[Detection] = []
     straddling: list[tuple[Detection, int]] = []
@@ -421,5 +430,5 @@ def take_shape(r: TextRegion) -> None:
         r.letter_box = lb if lb[2] > lb[0] and lb[3] > lb[1] else r.text_box
 
 
-__all__ = ["BUBBLE_SCORE", "LayoutModel", "SIZE", "Shaper", "TEXT_SCORE", "available", "cover_of", "covered",
-           "model_regions", "take_shape"]
+__all__ = ["BUBBLE_SCORE", "LayoutModel", "PAGE_GROUND", "SIZE", "Shaper", "TEXT_SCORE", "available", "cover_of",
+           "covered", "model_regions", "page_ground", "take_shape"]

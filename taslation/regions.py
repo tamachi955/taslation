@@ -79,6 +79,10 @@ class TextRegion:
     # the translation and how many times the rest's size (`render.emphasis`); found once the translation is final
     # (`Pipeline._locate_large`), taken from the cache with it (`CachedBubble.large`); None = lettered at one size
     large: tuple[int, int, float] | None = None
+    # a paragraph set across that the reading made of what the detection finds in pieces, or within a region that
+    # holds more (`Pipeline._prose`): no detection finds it again, so a page from the cache draws it from its stored
+    # outline where the live page shows those pieces (`CachedBubble.joined`)
+    joined: bool = False
 
     @property
     def reused(self) -> bool:

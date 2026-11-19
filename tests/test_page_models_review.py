@@ -657,8 +657,8 @@ def test_a_model_bubble_loses_the_lettering_its_shape_left_out_but_not_its_outli
 
 def test_an_unclosed_model_region_counts_as_loose_lettering_for_a_title(settings):
     p = Pipeline(settings, translator=None, cache=None)
-    title = read_as(region(100, 100, 300, 600, "bubble", from_model=True, tier=3), "第八話", 90.0)
-    closed = read_as(region(100, 100, 300, 600, "bubble", from_model=True, tier=0), "第八話", 90.0)
+    title = read_as(region(100, 100, 300, 600, "bubble", from_model=True, tier=3), "夜明丸", 90.0)
+    closed = read_as(region(100, 100, 300, 600, "bubble", from_model=True, tier=0), "夜明丸", 90.0)
     p._titles([title], 12.0, None)
     p._titles([closed], 12.0, None)
     assert title.status == "print" and closed.status == "untranslated"

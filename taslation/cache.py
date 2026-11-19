@@ -115,6 +115,10 @@ class CachedBubble:
     # (`locate_large.checked`: inside the text, the ratio over 1 and at most the cap; else dropped). Versions before
     # it ignore the key, as they do every key they do not know. No Japanese, no offset into it
     large: tuple[int, int, float] | None = None
+    # a paragraph set across the reading made of pieces the detection finds apart (`TextRegion.joined`): drawn from its
+    # stored outline where the live page shows those pieces (`taslation.pipeline.Pipeline._apply_cached`); written only
+    # when so, as ``"joined": true``. Versions before it ignore the key (and leave such a paragraph undrawn)
+    joined: bool = False
 
     def to_json(self) -> dict[str, Any]:
         d: dict[str, Any] = {"box": [round(v, 4) for v in self.box], "text": self.text}
@@ -133,6 +137,8 @@ class CachedBubble:
         large = checked(self.text, self.large)
         if large is not None:
             d["large"] = [[large[0], large[1], round(large[2], 3)]]
+        if self.joined:
+            d["joined"] = True
         return d
 
     @classmethod
@@ -152,7 +158,8 @@ class CachedBubble:
         large = checked(text, spans[0]) if isinstance(spans, list) and len(spans) == 1 else None
         return cls(box=box, text=text, poly=poly, flags=flags,  # type: ignore[arg-type]
                    note=str(d.get("note", "") or ""), angle=angle if abs(angle) < 90 else 0.0,
-                   reused=d.get("reused") is True, edited=d.get("edited") is True, large=large)
+                   reused=d.get("reused") is True, edited=d.get("edited") is True, large=large,
+                   joined=d.get("joined") is True)
 
 
 @dataclass
