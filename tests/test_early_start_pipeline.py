@@ -64,6 +64,7 @@ def _state(p: Pipeline) -> dict:
         "touched": sorted(cache.touched), "removed": list(cache.removed), "dirty": cache.dirty, "stamp": cache.stamp,
         "lines": cache.lines.state(), "lines_touched": sorted(map(repr, cache.lines.touched)),
         "last_seq": p.last_seq, "sizes": list(p._book_sizes), "context": [list(page) for page in p._context],
+        "grown": list(p._grown), "grown_cuts": p._grown.cuts,
         "names": p.book_names.held, "tally": (p.line_tally.reused, p.line_tally.asked),
         "shown": len(p.shown_pages), "stage_times": len(p.stage_times), "save_due": p._save_due is not None,
     }
@@ -328,6 +329,44 @@ def test_a_page_kept_for_now_is_put_back_whole_or_kept_for_good_before_anything_
         assert len(_on_disk(settings, book)) == 1
     assert p._kept_open is None and p._held_for is None and p.kept_open_left() is None
     assert p.decide_kept() is None
+
+
+class Growing(DictTranslator):
+    """A translator given earlier pairs that only grow (`grows_context`, as PLaMo is): the pipeline's `_grown`, which
+    its next request starts from."""
+
+    grows_context = True
+
+
+def test_a_page_asked_for_and_taken_back_leaves_nothing_in_the_pairs_that_only_grow(sample_page, sample_page2,
+                                                                                    settings, monkeypatch):
+    monkeypatch.setattr(pipeline_mod, "size_sample", lambda reading: 21.0)
+    cache = CacheStore(settings.cache_dir).open("Grown", "fake")
+    p = Pipeline(settings, ocr=FakeOcr(), translator=Growing(EN_TEXTS), cache=cache)
+    p.process(sample_page2)  # a page before: its pairs held for the next request
+    grown = list(p._grown)
+    assert grown
+    before = _state(p)
+    gate = PageGate(open_for=30.0)  # (a viewer that draws soft first: the confirmation may be taken back)
+    job = Job(p, sample_page, gate)
+    _read_and_waiting(p, job)
+    gate.seen(time.monotonic())
+    assert job.processed.wait(20.0) and job.error is None, job.error
+    assert len(p.translator.calls) == 2 and len(list(p._grown)) > len(grown)  # asked: its pairs added meanwhile
+    assert gate.confirm()
+    job.join()
+    assert job.kept is True and p._kept_open is not None
+    assert gate.take_back()  # the sharp picture came
+    assert p.decide_kept() is False
+    assert _state(p) == before and list(p._grown) == grown  # the pairs as they were, the taken-back page's gone
+
+    # the page read again on the sharp frame starts from the pairs of a session that never saw the page taken back
+    p.process(sample_page)
+    fresh = Pipeline(settings, ocr=FakeOcr(), translator=Growing(EN_TEXTS),
+                     cache=CacheStore(settings.cache_dir).open("Never taken back", "fake"))
+    fresh.process(sample_page2)
+    fresh.process(sample_page)
+    assert p.translator.kwargs[-1]["context"] == fresh.translator.kwargs[-1]["context"] == grown
 
 
 def test_a_page_job_decides_the_page_kept_for_now_before_it_reads(sample_page, sample_page2, settings):

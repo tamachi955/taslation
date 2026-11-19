@@ -1032,7 +1032,8 @@ def _rings_copy(rings: Sequence[Any]) -> list[Any]:
 class Provisional:
     """What a page job on a frame not kept yet (`PageGate`) may change that lasts, as it was before the job: the
     book's cache (its pages, what waits to be saved, the header, the lines kept for reuse), where the book was read
-    last, the book's sizes, the earlier pages' pairs and the names held for the translator, the lines the translator
+    last, the book's sizes, the earlier pages' pairs (the pages' and the pairs that only grow, `GrowingContext`) and
+    the names held for the translator, the lines the translator
     counts as asked for before (a line asked for again is drawn anew: `PlamoTranslator.draws`), the series' lines, the
     session's line tally and stage times, and the pages kept lettered for showing again. `restore` puts it all back
     (the frame changed: nothing of the job lasts, and a line its request asked for is drawn on the sharp frame as if it
@@ -1072,8 +1073,11 @@ class Provisional:
         self.context = copy.copy(pipeline._context)
         self.series_lines = pipeline.series_lines
         self.save_due = pipeline._save_due
+        # (the pairs that only grow, `_grown`, among them: what the translator's next prompt is built from, so that a
+        # line asked again on the sharp frame never follows its own answer on the frame that changed)
         self.held = [(obj, _held_state(obj)) for obj in (pipeline.book_names, pipeline.line_tally, pipeline.stage_times,
-                                                         pipeline.shown_pages, getattr(pipeline, "large_tally", None))
+                                                         pipeline.shown_pages, getattr(pipeline, "large_tally", None),
+                                                         getattr(pipeline, "_grown", None))
                      if obj is not None]
         self.translator = pipeline.translator
         draws = getattr(self.translator, "draws", None)
