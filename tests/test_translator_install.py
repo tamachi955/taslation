@@ -151,6 +151,10 @@ def test_install_ps1_shows_the_same_revision_and_knows_the_refusal_s_exit_code()
     install = (ROOT / "install.ps1").read_text("ascii")
     assert f"as revised on {ti.PLAMO_LICENCE_REVISED}:" in install and "(article 9)" in install
     assert f"$RefusedCode = {ti.REFUSED}" in install
+    # a run stopped at a no ends as a stop that left nothing behind does
+    assert f"$DeclinedCode = {ti.CANCELLED}" in install
+    # its attempts at the translator keep what was downloaded for the next one
+    assert "@('--ollama-exe', $ollamaExe, '--keep-partial')" in install
 
 
 # ---- the install
@@ -282,6 +286,77 @@ def test_a_dropped_connection_still_says_to_check_the_network(tmp_path, hf, olla
     assert _install(tmp_path) == 1
     out = capsys.readouterr().out
     assert "check the network and the disk space" in out and "will not help" not in out
+
+
+class _Drops(_Answer):
+    """An answer whose connection breaks off after its first 1000 bytes."""
+
+    def read(self, n=-1):
+        if self.tell() >= 1000:
+            raise ConnectionResetError("the connection broke off")
+        return super().read(1000)
+
+
+class _Rest(_Answer):
+    """A 206 answer to a request for *data* from *start* on."""
+    status = 206
+
+    def __init__(self, data: bytes, start: int):
+        super().__init__(data[start:])
+        self.headers = {"Content-Length": str(len(data) - start),
+                        "Content-Range": f"bytes {start}-{len(data) - 1}/{len(data)}"}
+
+
+@pytest.mark.parametrize("keep", [True, False], ids=["install.ps1's attempts", "the window"])
+def test_a_broken_off_download_keeps_its_part_only_for_install_ps1_s_next_attempt(tmp_path, hf, ollama, monkeypatch,
+                                                                                    capsys, keep):
+    """install.ps1 tries a failed download again (`--keep-partial`): the part downloaded so far stays, and the next try
+    asks only for the rest (HTTP Range) and installs the whole file; elsewhere (the window) nothing is left behind."""
+    monkeypatch.setattr(setup_models, "RETRIES", 0)
+    url = ti.plamo_url(ti.PLAMO_FILE)
+    answer = setup_models.urllib.request.urlopen
+    ranges: list[str | None] = []
+
+    def urlopen(request, timeout=None):
+        if getattr(request, "full_url", request) != url:
+            return answer(request, timeout)
+        asked = request.headers.get("Range")
+        ranges.append(asked)
+        return _Rest(GGUF, int(asked[6:-1])) if asked else _Drops(GGUF)
+
+    monkeypatch.setattr(setup_models.urllib.request, "urlopen", urlopen)
+    folder = tmp_path / "models" / ti.PLAMO_DIRNAME
+    assert setup_models.install_translator("English", tmp_path / "models", tmp_path / "state", None, None, "install",
+                                           None, keep) == 1
+    out = capsys.readouterr().out
+    parts = list(folder.glob("*.part"))
+    if not keep:
+        assert parts == [] and "Nothing was left behind" in out
+        return
+    assert [p.stat().st_size for p in parts] == [1000] and "What was downloaded is kept" in out
+    assert setup_models.install_translator("English", tmp_path / "models", tmp_path / "state", None, None, "install",
+                                           None, True) == 0
+    assert ranges == [None, "bytes=1000-"]  # the rest only
+    assert ollama.read()["models"] == [PLAMO.ollama_name + ":latest"] and not list(folder.glob("*.part"))
+
+
+def test_a_refused_file_leaves_no_part_even_for_install_ps1(tmp_path, hf, ollama, monkeypatch):
+    folder = tmp_path / "models" / ti.PLAMO_DIRNAME
+    folder.mkdir(parents=True)
+    (folder / (ti.PLAMO_FILE + ".part")).write_bytes(GGUF[:1000])  # (an earlier try's)
+    _refusing(hf, monkeypatch, 404, ti.plamo_url(ti.PLAMO_FILE))
+    assert setup_models.install_translator("English", tmp_path / "models", tmp_path / "state", None, None, "install",
+                                           None, True) == ti.REFUSED
+    assert not list(folder.glob("*.part"))
+
+
+def test_the_keep_partial_switch_reaches_the_install(tmp_path, monkeypatch):
+    seen: list[tuple] = []
+    monkeypatch.setattr(setup_models, "_settings_for_translator", lambda: (tmp_path / "state", None, "English"))
+    monkeypatch.setattr(setup_models, "install_translator", lambda *a, **k: seen.append(a) or 0)
+    assert setup_models.main(["--translator-for", "English", "--brief", "--keep-partial"]) == 0
+    assert setup_models.main(["--translator-for", "English", "--brief"]) == 0
+    assert [a[-1] for a in seen] == [True, False]
 
 
 def test_the_reading_model_refused_ends_the_script_with_the_same_code(tmp_path, monkeypatch, capsys):

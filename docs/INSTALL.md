@@ -28,8 +28,9 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
 2. Double-click `install.cmd`. If a warning appears, go on with "More info" → "Run anyway".
 3. First it asks for the language to translate into (a number or the English name; Enter takes the language shown). This language decides the translation model.
    Next it asks, once only, for your agreement to the terms of use of the three OCR models (about 700 MB in all) (non-commercial only, CC BY-NC-SA 4.0). TASlation cannot read pages without these models,
-   so if you do not agree, it does not install. If the target language is neither Portuguese (Brazil) nor Turkish, it also asks for your agreement to the licence (the PLaMo Community License) of the translation model PLaMo 3 Translate 2B (about 1.8 GB) (those two languages use Qwen3.5 4B, about 3.3 GB, whose licence needs no agreement).
+   so if you do not agree, it does not install. If the target language is neither Portuguese (Brazil) nor Turkish, it also asks for your agreement to the licence (the PLaMo Community License) of the translation model PLaMo 3 Translate 2B (about 1.8 GB), and if you do not agree, it does not install either (those two languages use Qwen3.5 4B, about 3.3 GB, whose licence needs no agreement).
    The main points of PLaMo's licence (as revised on November 9, 2026): free for non-commercial use with no registration, 18 or older or a guardian's consent, the rights needed for what goes in and what comes out are yours to secure, and what you must say when you give a translation to someone or make it public (`docs/THIRD_PARTY.md`; TASlation asks you not to publish translations). If you answer the remaining questions with Enter, this computer gets everything it needs.
+   When Python, Ollama or the translation model is missing and you answer No to the question whether to install it, TASlation could not run or could not translate, so the installation also stops then and there, with nothing installed. Running `install.cmd` again asks again.
    If you answer Y to the questions whether to install Python and Ollama, you also agree to the terms of use shown by winget (Windows' package manager), which installs them (so that winget does not ask you partway through).
    It also asks whether to install the two models that find and erase lettering on the drawing (a layout model, about 170 MB, and an inpainting model, LaMa, about 200 MB).
    On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses both on the GPU by default),
@@ -41,7 +42,8 @@ PyTorch (the component TASlation uses for the OCR and LaMa) is installed as the 
 and as the CPU build (about 0.13 GB) on a computer without one. Whether there is a GPU is found out only by asking `nvidia-smi`, which comes with NVIDIA's driver (no network is used), and you are asked nothing about it.
 The sizes of the downloads are shown during the questions, before any download starts. The GPU build needs NVIDIA driver 528.33 or later (580 or later for the RTX 50 series and the like);
 with an older driver, it says so and installs the CPU build (update the driver and run install.cmd again to get the GPU build). After installing the GPU build, it checks it by computing once on the GPU,
-and if the download failed or it did not run on the GPU, it says so in one line, installs the CPU build and goes on with the installation. AMD and Intel GPUs are not counted as GPUs.
+and if it did not run on the GPU, it says so in one line, installs the CPU build and goes on with the installation. When the GPU build could not be downloaded in three attempts, the installation stops, as for any other download
+(a CPU build already installed stays as it is). AMD and Intel GPUs are not counted as GPUs.
 A GPU build already installed is left as it is. On a computer where a version before this one installed the CPU build, running install.cmd again replaces it with the GPU build (`update.cmd` does not replace it).
 
 Ollama runs only while TASlation uses it. An Ollama you started yourself is left running.
@@ -69,10 +71,13 @@ and tells you to start Ollama from the Start menu or restart the PC (the setting
 `uninstall.cmd` removes each value the installer set if it still has that value. To undo one by hand, search the Start menu for "environment variables",
 open "Edit environment variables for your account", delete the variable and restart Ollama.
 
-When something could not be done, the installer keeps what it did, goes on to the end and lists the warnings there. Its last line then says
-that TASlation cannot translate yet, and what to do. When the publisher's server refused a download or no longer has the file
-(HTTP 401, 403, 404, 410), running it again will not help, so it tells you to update TASlation (download its newest copy and run `update.cmd`)
-or to see the project's issues page.
+When a download fails, it is tried again after 15 seconds, three times in all (it says what failed, which attempt it was and how long it waits).
+When all three fail, the installation stops. When the publisher's server refused a download or no longer has the file
+(HTTP 401, 403, 404, 410), trying again will not help, so it stops at once and tells you to update TASlation (download its newest copy and run `update.cmd`)
+or to see the project's issues page. What a stop means is under "If the installation stops" below.
+
+When the installation gets to its end but TASlation cannot translate yet (the final check found something missing, or Ollama could not be installed because there is no winget),
+its last line says so, and what to do. Any warnings are listed before it.
 
 The network is used only during the installation. Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
 After that, TASlation does not connect to anything outside this computer.
@@ -81,6 +86,23 @@ All the questions come first. Once you have answered them, you can leave the com
 Download progress is shown in percent and MB. If the connection breaks partway, it goes on from where it broke off.
 
 `install.cmd -Yes`, for runs nobody watches, never agrees to a licence by itself. Agreeing beforehand is only for automated checks of the installation: someone who has read both licences sets `TASLATION_AGREE_OCR_LICENCE` and `TASLATION_AGREE_PLAMO_LICENCE` to the exact sentences in install.ps1's help, and setting them is that person's agreement (to install TASlation for yourself, answer the questions).
+A `-Yes` run without that agreement stops too, with nothing installed. A failed download gets the same three attempts.
+
+### If the installation stops
+
+When the installation stops, its last lines say that TASlation is not installed yet (in a folder installed before, that the installation was not finished)
+and what happened. A stopped installation makes no Start-menu shortcut. Its exit code is not 0.
+
+* Stopped after a No to a question (exit code 3): nothing was installed. Running `install.cmd` again asks again.
+* Stopped after a download or an installation failed three times (exit code 1): check the network and the disk space, and run `install.cmd` again.
+  Everything installed and downloaded so far is kept, and it goes on from there. The OCR models, the page models, the fonts and PLaMo's file
+  go on from what was downloaded of them.
+* The publisher's server refused a download or no longer has the file (exit code 5): running it again will not help.
+  Update TASlation, or see the project's issues page.
+* Stopped for any other reason (exit code 1): the `error:` line says what happened and what to do.
+
+When it stops in a folder installed before, the Start-menu shortcut stays only if TASlation starts as it is now (it says so).
+If it does not start, the shortcut is removed, and the installation makes it again when it gets to its end.
 
 ## Updating
 
@@ -90,6 +112,10 @@ Download progress is shown in percent and MB. If the connection breaks partway, 
    If it is the newest `taslation*.zip` in your "Downloads" folder, Enter alone chooses it.
 4. It shows the current version and the new version (with their dates) and asks once to confirm. Then it copies the new files and goes on with the same installation as `install.cmd`
    (if the new version needs anything more, it asks before downloading).
+
+When that installation stops, the new version's files are already copied over the old version's, and the old version is not kept (its last lines say so).
+The Start-menu shortcut stays only if TASlation starts as it is now. Running `update.cmd` again with the same ZIP goes on from there
+(after a No to a question, it asks again).
 
 The installation after an update uses the PyTorch already installed, as it is. When the CPU build is installed although there is an NVIDIA GPU (installed by a version before this one),
 it does not start a download of about 2.6 GB without asking; it says so instead. To get the GPU build, run `install.cmd`.

@@ -66,7 +66,7 @@ What it downloads, and from where:
   * Python packages from PyPI (pypi.org), and PyTorch from download.pytorch.org:
     on a computer with an NVIDIA GPU its GPU build (about 2.6 GB; about 2.0 GB
     for the newest GPUs), tried on the GPU once installed, with the CPU build
-    instead when it does not work there; else its CPU build (about 0.13 GB);
+    instead when it does not run there; else its CPU build (about 0.13 GB);
   * the three OCR models from Hugging Face, about 700 MB, once you have agreed
     to their licence, and the OFL fonts from the google/fonts repository on GitHub (by setup_models.py);
   * the layout and inpainting models from Hugging Face (about 170 and 200 MB),
@@ -81,6 +81,20 @@ What it downloads, and from where:
     with `ollama pull` (about 3.3 GB). Only one of the two is installed;
     TASlation offers the other when you change the language.
 TASlation itself never uses the network after this.
+
+A no to what TASlation cannot work without (the OCR models' licence, PLaMo's,
+installing Python, Ollama or the translation model when they are missing)
+stops the run at once, before anything is installed. A download that fails is
+tried again, three times in all, 15 seconds apart, going on from where it broke
+where it can; one the server refused or no longer has (HTTP 401, 403, 404,
+410) is not, as trying again does not help. A download that still fails stops
+the run. A stopped run makes no Start-menu shortcut, keeps what is installed
+and downloaded so far for the next run, and says so in its last lines (an
+earlier installation's shortcut stays only while that installation starts).
+The exit code: 0 when the run got to its end (its last line says whether
+TASlation can translate yet); 1 when it stopped, a download that failed three
+times among the reasons; 3 when it stopped at an answer, with nothing
+installed; 5 when a server refused a download.
 
 The GPU is what nvidia-smi, which comes with NVIDIA's driver, says of it;
 nothing is fetched to find it, and there is no question about it. AMD and
@@ -107,8 +121,8 @@ offered and answers Y to the questions for Python, Ollama and the Qwen
 translation model (a Y there accepts winget's agreements for Python and Ollama,
 as a person's does). It never answers the question about the layout and
 inpainting models, and by itself never agrees to the OCR models' licence nor
-to PLaMo's, which take a person: without the OCR models the run stops, without
-PLaMo it goes on without a translation model. For automated checks by someone
+to PLaMo's, which take a person: without either the run stops, with nothing
+installed (exit code 3). For automated checks by someone
 who has read and agrees to the licences, each one counts as agreed when its
 variable holds its exact sentence (see the description); setting the variable
 is that person's agreement. Too little disk space also stops it.
@@ -168,6 +182,13 @@ $OllamaFirstRunWaitS = 30  # how long Ollama's app, which its installer starts, 
 # setup_models.py's exit code for a download the server refused or no longer has (translator_install.REFUSED):
 # running install.cmd again does not help then, a newer TASlation that names the current file does
 $RefusedCode = 5
+# The exit code of a run stopped at a person's no (or nobody's yes) to what TASlation cannot work without, with
+# nothing installed: setup_models.py's for a stop that left nothing behind (translator_install.CANCELLED).
+$DeclinedCode = 3
+# A download that fails is tried this many times in all, this many seconds apart (Invoke-Attempts), before the run
+# stops; one the server refused ($RefusedCode) is not tried again.
+$Attempts = 3
+$RetryWaitS = 15
 $TorchCpuIndex = 'https://download.pytorch.org/whl/cpu'
 # The GPU builds of PyTorch, from the same index (NVIDIA's CUDA libraries come inside the wheel), by the compute
 # capability a GPU reaches (nvidia-smi's compute_cap): cu126 runs on every NVIDIA GPU from Maxwell (5.0) to Hopper and
@@ -250,6 +271,8 @@ $script:Warnings = New-Object System.Collections.Generic.List[string]
 $script:NotReady = $null
 $script:LastCommand = $null
 $script:OwnServer = $null  # the ollama serve this run started (Start-OwnOllama), until it is stopped again
+# Whether this folder was installed before this run (its Start-menu shortcut is there): what a stop says of it
+$script:WasInstalled = $false
 
 # ---------------------------------------------------------------- helpers
 function Write-Step([string]$Text) {
@@ -276,16 +299,120 @@ function T([string]$Text) {
 # What a reader need not see; a dry run shows it. A failure shows the command that failed (Stop-Install).
 function Write-Detail([string]$Text) { if ($DryRun) { Write-Host "  detail: $Text" -ForegroundColor DarkGray } }
 function Exit-Install([int]$Code) {
+    Stop-OwnOllama -Quiet  # a stop in the middle of the import leaves no server of the run's own running
     if ($script:ConsoleEncoding) { try { [Console]::OutputEncoding = $script:ConsoleEncoding } catch { } }
     Pop-Location
     exit $Code
 }
+
+# ---------------------------------------------------------------- stops
+# A run that does not get to its end never looks finished: it makes no Start-menu shortcut, its last lines say that
+# TASlation is not installed yet (or that this run over an earlier installation did not finish), what stopped it, that
+# what is installed and downloaded so far is kept for the next run, and where the details are; its exit code is not 0.
+
+# Whether TASlation as it is in this folder starts: the program and the window's modules import, as the Start-menu
+# shortcut would have them, without opening a window.
+function Test-TaslationStarts {
+    if (-not (Test-Path -LiteralPath $VenvPy)) { return $false }
+    return ((Invoke-Captured $VenvPy @('-c', 'import torch, taslation.cli, taslation.ui.app')).Code -eq 0)
+}
+
+# A stopped run over an earlier installation of this folder: its Start-menu shortcut stays while TASlation starts as it
+# is now (update.cmd has copied the new files over the old ones by then), else it is removed, so that the Start menu
+# offers nothing that cannot start; the run that gets to its end makes it again. Nothing for a shortcut to elsewhere.
+function Write-ShortcutState {
+    if ($DryRun -or -not $script:WasInstalled -or (Get-ShortcutTarget) -ine $VenvPyw) { return }
+    if (Test-TaslationStarts) {
+        Write-Host (T 'TASlation starts from the Start menu as it is now, without what this run did not install.')
+        return
+    }
+    try {
+        Remove-Item -LiteralPath $ShortcutPath -Force -ErrorAction Stop
+        Write-Host (T 'TASlation does not start as it is now, so its Start-menu shortcut is removed: the installation makes it again when it gets to its end.')
+    } catch {
+        Write-Detail "the shortcut was not removed: $($_.Exception.Message)"
+        Write-Host (T 'TASlation does not start as it is now: do not start it from the Start menu before the installation gets to its end.')
+    }
+}
+
+# The end of a stopped run, after why it stopped. *Again*: how the next run goes on (or asks again).
+function Write-StopEnd([string]$Again) {
+    Write-Host ''
+    if ($script:WasInstalled -or $FromUpdate) {
+        Write-Host (T 'Installation stopped before it was finished.') -ForegroundColor Yellow
+    } else {
+        Write-Host (T 'Installation stopped: TASlation is not installed yet.') -ForegroundColor Yellow
+    }
+    if ($FromUpdate) {
+        Write-Host (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are not kept.')
+    }
+    Write-ShortcutState
+    Write-Host $Again
+    Write-Host (T 'The details are in docs\INSTALL.md, under "If the installation stops".')
+}
+
+# What the next run of a stopped one does: it keeps what is there and goes on (update.cmd again after an update).
+function Get-GoOnText {
+    if ($FromUpdate) { return (T 'Everything installed and downloaded so far is kept: run update.cmd again with the same ZIP, and it goes on from there.') }
+    return (T 'Everything installed and downloaded so far is kept: run install.cmd again, and it goes on from there.')
+}
+
+# A stop for a reason the run can say (*Text*, which says what to do too when the person must do something first).
 function Stop-Install([string]$Text) {
     Write-Host "  error: $Text" -ForegroundColor Red
     if ($script:LastCommand) { Write-Host "  last command: $($script:LastCommand)" }
-    Write-Host ''
-    Write-Host 'Installation stopped. Fix the above and run install.cmd again; what is done is kept.'
+    Write-StopEnd (Get-GoOnText)
     Exit-Install 1
+}
+
+# A stop at a download the server refused or no longer has (*What*, as New-Failure has it): trying again does not
+# help, a newer TASlation names the current file.
+function Stop-Refused([string]$What) {
+    Write-Host ('  error: ' + ((T '{0}: the publisher''s server refused the download or no longer has the file. Running install.cmd again will not help: update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.') -f $What)) -ForegroundColor Red
+    if ($script:LastCommand) { Write-Host "  last command: $($script:LastCommand)" }
+    Write-StopEnd (T 'Everything installed and downloaded so far is kept: the installation that update.cmd runs goes on from there.')
+    Exit-Install $RefusedCode
+}
+
+# A stop at a person's no (or nobody's yes) to what TASlation cannot work without, before anything was installed:
+# *Why* says what was declined, *Again* that nothing was installed and that a next run asks again.
+function Stop-Declined([string]$Why, [string]$Again) {
+    Write-Host ''
+    Write-Host $Why -ForegroundColor Yellow
+    if ($FromUpdate) {
+        Write-Host (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are not kept.')
+        Write-ShortcutState
+        Write-Host (T 'To finish it, run update.cmd again with the same ZIP: it asks again.')
+    } else {
+        Write-Host $Again
+    }
+    Exit-Install $DeclinedCode
+}
+
+# One failed attempt of a download step: What it was (lower case, for the end of a sentence), Advice (what to do when
+# it still fails), and whether the server Refused it (no attempt more then).
+function New-Failure([string]$What, [string]$Advice = '', [switch]$Refused) {
+    if (-not $Advice) { $Advice = (T 'Check the network and the disk space.') }
+    return [pscustomobject]@{ What = $What; Advice = $Advice; Refused = [bool]$Refused }
+}
+
+function Wait-BeforeRetry([int]$Seconds) { Start-Sleep -Seconds $Seconds }
+
+# A download step (*Step*, called with the attempt's number; it returns $null when it worked, else New-Failure) tried
+# up to $Attempts times, $RetryWaitS seconds apart, each failed attempt said with what failed and the wait; what is
+# downloaded stays for the next attempt, which goes on from there where the download can. A refusal is not tried
+# again: it stops the run at once (Stop-Refused), as does the last failure (Stop-Install), so this returns only when
+# the step worked.
+function Invoke-Attempts([scriptblock]$Step) {
+    for ($attemptNo = 1; ; $attemptNo++) {
+        $script:LastCommand = $null  # the stop's "last command" is this attempt's, when it ran one
+        $failure = & $Step $attemptNo
+        if ($null -eq $failure) { return }
+        if ($failure.Refused) { Stop-Refused $failure.What }
+        if ($attemptNo -ge $Attempts) { Stop-Install ((T '{0}; tried {1} times. {2}') -f $failure.What, $Attempts, $failure.Advice) }
+        Write-Host ('  ' + ((T 'Attempt {0} of {1}: {2}. Trying again in {3} seconds.') -f $attemptNo, $Attempts, $failure.What, $RetryWaitS)) -ForegroundColor Yellow
+        Wait-BeforeRetry $RetryWaitS
+    }
 }
 
 # Asks a yes/no question; -Yes, a dry run and a run without a console answer it without a prompt.
@@ -701,14 +828,18 @@ function Test-TorchCuda {
 }
 
 # PyTorch into the virtual environment as *Plan* says (Get-TorchPlan; not for 'keep'), with pip's own progress on the
-# console. The GPU build comes without pip's cache (it would keep a second copy of 2.6 GB) and is then tried on the GPU
-# (Test-TorchCuda); when it does not download, install or run there, the CPU build takes its place and one line says
-# so: the GPU step never leaves the install broken. Only the CPU build not coming stops the install (the network or
-# the disk), as it always did. Returns the build installed: 'cuda' or 'cpu'.
+# console, each download tried again when it fails (Invoke-Attempts) and the run stopped when it still fails: the
+# network or the disk. The GPU build comes without pip's cache (it would keep a second copy of 2.6 GB) and is then
+# tried on the GPU (Test-TorchCuda); when it installed and does not run there, the CPU build takes its place and one
+# line says so: the GPU step never leaves the install broken. A GPU build that does not download stops the run like
+# any other download (a CPU build there stays as it was). Returns the build installed: 'cuda' or 'cpu'.
 function Install-Torch($Plan) {
     if ($Plan.Build -eq 'cpu') {
-        $code = Invoke-Console $VenvPy @('-m', 'pip', 'install', '--disable-pip-version-check', 'torch', '--index-url', $TorchCpuIndex)
-        if ($code -ne 0) { Stop-Install "the program files did not download (exit code $code). Check the network and the disk space." }
+        Invoke-Attempts {
+            $pipCode = Invoke-Console $VenvPy @('-m', 'pip', 'install', '--disable-pip-version-check', 'torch', '--index-url', $TorchCpuIndex)
+            if ($pipCode -eq 0) { return $null }
+            return (New-Failure ((T 'the program files did not download (exit code {0})') -f $pipCode))
+        }
         return 'cpu'
     }
     Write-Info ((T 'Downloading the GPU build of the program files (about {0:N1} GB).') -f $Plan.Cuda.DownloadGB)
@@ -716,19 +847,29 @@ function Install-Torch($Plan) {
     # A CPU build of the same version or a newer one counts as torch already there unless reinstalled; torch alone
     # (its dependencies are there, and the next step's pip install puts in what it lacks).
     if ($Plan.Action -eq 'replace') { $cudaArgs += @('--force-reinstall', '--no-deps') }
-    $code = Invoke-Console $VenvPy ($cudaArgs + @('torch', '--index-url', $Plan.Cuda.Index))
-    if ($code -eq 0 -and (Test-TorchCuda)) { return 'cuda' }
-    Write-Detail "the GPU build: pip's exit code $code, or no CUDA after it"
+    Invoke-Attempts {
+        param($attemptNo)
+        # (an attempt that stopped half way through unpacking leaves what pip cannot install over: Clear-HalfInstalledTorch)
+        if ($attemptNo -gt 1) { $null = Clear-HalfInstalledTorch }
+        $pipCode = Invoke-Console $VenvPy ($cudaArgs + @('torch', '--index-url', $Plan.Cuda.Index))
+        if ($pipCode -eq 0) { return $null }
+        return (New-Failure ((T 'the GPU build of the program files did not download (exit code {0})') -f $pipCode))
+    }
+    if (Test-TorchCuda) { return 'cuda' }
+    Write-Detail 'the GPU build: no CUDA after its install'
     Write-Warn (T 'The GPU build did not work on this computer, so the program files come in their CPU build instead.')
     $there = (Get-TorchBuild).Kind
-    if ($there -eq 'cpu') { return 'cpu' }  # a replace that did not download: the CPU build is still there
+    if ($there -eq 'cpu') { return 'cpu' }
     $listed = Clear-HalfInstalledTorch
     $cpuArgs = @('-m', 'pip', 'install', '--disable-pip-version-check')
     # A torch pip still sees (the GPU build that does not run here, or one that does not import) counts as torch
     # already there unless reinstalled: torch alone again. With none there, pip brings what torch needs as always.
     if ($there -eq 'cuda' -or $listed) { $cpuArgs += @('--force-reinstall', '--no-deps') }
-    $code = Invoke-Console $VenvPy ($cpuArgs + @('torch', '--index-url', $TorchCpuIndex))
-    if ($code -ne 0) { Stop-Install "the program files did not download (exit code $code). Check the network and the disk space." }
+    Invoke-Attempts {
+        $pipCode = Invoke-Console $VenvPy ($cpuArgs + @('torch', '--index-url', $TorchCpuIndex))
+        if ($pipCode -eq 0) { return $null }
+        return (New-Failure ((T 'the program files did not download (exit code {0})') -f $pipCode))
+    }
     return 'cpu'
 }
 
@@ -1101,6 +1242,7 @@ Write-Host 'TASlation installer' -ForegroundColor Cyan
 # Python puts the current folder first on its path and TASlation reads taslation.toml from it: work in this folder.
 Push-Location -LiteralPath $Root
 Read-InstallerTexts
+$script:WasInstalled = (Test-Path -LiteralPath $VenvPy) -and ((Get-ShortcutTarget) -ieq $VenvPyw)
 Write-Host "  folder: $Root"
 if ($DryRun) { Write-Host '  DRY RUN: nothing is installed, downloaded or changed.' -ForegroundColor DarkYellow }
 Write-Host ('  ' + (T 'The questions come first. After them you can leave it running.'))
@@ -1127,9 +1269,10 @@ $offeredLanguage = Get-TargetLanguage
 $language = Select-TargetLanguage $offeredLanguage
 
 # The OCR models' licence comes before anything is installed: without them TASlation cannot read pages, so a no ends
-# the run here with nothing done. An install from before the three keeps reading with the one it has, so there a no
-# only leaves the other two out. -Yes does not agree: a licence takes a person (an automated check's variable is that
-# person's agreement: Get-LicenceConsent).
+# the run here with nothing done (Stop-Declined). An install from before the three keeps reading with the one it has,
+# so there a no only leaves the other two out. -Yes does not agree: a licence takes a person (an automated check's
+# variable is that person's agreement: Get-LicenceConsent). Every other no after which TASlation could not work
+# (Python, Ollama, the translation model and PLaMo's licence) stops the run the same way, before any download.
 $models = Get-ModelsDir
 $ocrReady = Test-OcrModel $models.Path
 if (-not $ocrReady) {
@@ -1158,10 +1301,7 @@ if (-not $ocrReady) {
             Write-Info (T 'TASlation goes on reading with the one model it has. To agree later, run install.cmd again.')
             $ocrReady = $true
         } else {
-            Write-Host ''
-            Write-Host (T 'Installation stopped: TASlation cannot read pages without the OCR models.') -ForegroundColor Yellow
-            Write-Host (T 'Nothing was installed. To agree later, run install.cmd again.')
-            Exit-Install 1
+            Stop-Declined (T 'Installation stopped: TASlation cannot read pages without the OCR models.') (T 'Nothing was installed. To agree later, run install.cmd again.')
         }
     }
 }
@@ -1222,8 +1362,12 @@ if (Test-Path -LiteralPath $VenvPy) {
         Write-Info ((T 'Python {0} or newer was not found.') -f $MinPython)
         Write-Detail "tried 'py -3', 'python' and $PythonUserExe"
         if ($winget) { Write-Info (T 'It is installed with winget, the package manager of Windows: a Y also accepts the terms winget shows for it.') }
-        $wantPython = $winget -and (Confirm-Choice (T 'Install Python 3.13 now (about 30 MB to download; it stays after an uninstall)?') $true)
-        if (-not $wantPython) { Show-PythonWay; Stop-Install 'Python is missing.' }
+        if (-not $winget) { Show-PythonWay; Stop-Install 'Python is missing.' }
+        $wantPython = Confirm-Choice (T 'Install Python 3.13 now (about 30 MB to download; it stays after an uninstall)?') $true
+        if (-not $wantPython) {
+            Show-PythonWay
+            Stop-Declined (T 'Installation stopped: TASlation cannot run without Python.') (T 'Nothing was installed. To install it later, run install.cmd again: it asks again.')
+        }
         $basePython = [pscustomobject]@{ Command = @($PythonUserExe); Version = [version]'3.13'; Exe = $PythonUserExe }
     } else {
         Write-Ok "Python $($basePython.Version) found"
@@ -1253,13 +1397,19 @@ if (-not $ollamaExe) {
     } else {
         Write-Info (T 'It is installed with winget, the package manager of Windows: a Y also accepts the terms winget shows for it.')
         $wantOllama = Confirm-Choice (T 'Install Ollama now (about 3 GB)?') $true
+        if (-not $wantOllama) {
+            Stop-Declined (T 'Installation stopped: TASlation cannot translate without Ollama.') (T 'Nothing was installed. To install it later, run install.cmd again: it asks again.')
+        }
     }
 }
 if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'qwen') {
     $wantModel = Confirm-Choice ((T 'Download the translation model {0} for {1} now (about 3.3 GB)?') -f $model.Name, $language.Name) $true
+    if (-not $wantModel) {
+        Stop-Declined ((T 'Installation stopped: TASlation cannot translate into {0} without the translation model {1}.') -f $language.Name, $model.Name) (T 'Nothing was installed. To install it later, run install.cmd again: it asks again.')
+    }
 } elseif (($ollamaExe -or $wantOllama) -and -not $modelPresent) {
     # PLaMo's licence takes a person, as the OCR models' does (or an automated check's variable: Get-LicenceConsent); a
-    # no leaves TASlation without a translator for now.
+    # no stops the run as the OCR models' does: TASlation cannot translate without it.
     Write-Host ''
     Write-Info ((T 'TASlation translates into {0} with PLaMo 3 Translate 2B by Preferred Networks (about 1.8 GB).') -f $language.Name)
     Write-Info (T 'Its licence is the PLaMo Community License, as revised on November 9, 2026:')
@@ -1291,8 +1441,8 @@ if (($ollamaExe -or $wantOllama) -and -not $modelPresent -and $model.Kind -eq 'q
     } else {
         $wantModel = Confirm-Choice $plamoQuestion
     }
-    if (-not $wantModel -and -not $DryRun) {
-        Write-Info (T 'PLaMo is left out, and TASlation cannot translate without it. To agree later, run install.cmd again.')
+    if (-not $wantModel) {
+        Stop-Declined ((T 'Installation stopped: TASlation cannot translate into {0} without PLaMo.') -f $language.Name) (T 'Nothing was installed. To agree later, run install.cmd again.')
     }
 }
 # An Ollama that starts with Windows runs from every sign-in, used or not: a person may have TASlation start it only
@@ -1398,12 +1548,13 @@ if ($wantPython) {
         Write-Plan ('winget ' + ($wingetArgs -join ' '))
     } else {
         Write-Info 'Installing Python 3.13.'
-        $code = Invoke-Console $winget.Source $wingetArgs
-        $basePython = Find-BasePython
-        if ($null -eq $basePython) {
-            Write-Info "Python was not found after its install (exit code $code)."
-            Show-PythonWay
-            Stop-Install 'Python is missing.'
+        Invoke-Attempts {
+            param($attemptNo)
+            $wingetCode = Invoke-Console $winget.Source $wingetArgs
+            $script:basePython = Find-BasePython
+            if ($null -ne $script:basePython) { return $null }
+            if ($attemptNo -ge $Attempts) { Show-PythonWay }  # (the other way, before the run stops)
+            return (New-Failure ((T 'Python 3.13 did not install (winget''s exit code {0})') -f $wingetCode))
         }
         Write-Ok "Python $($basePython.Version) installed"
     }
@@ -1447,8 +1598,11 @@ if ($DryRun) {
     # folder: the old one goes first, so that nothing is left half overwritten.
     $r = Invoke-Captured $VenvPy @('-m', 'pip', 'show', '--disable-pip-version-check', 'opencv-python-headless')
     if ($r.Code -eq 0) { $null = Invoke-Console $VenvPy @('-m', 'pip', 'uninstall', '-y', 'opencv-python-headless') }
-    $code = Invoke-Console $VenvPy @('-m', 'pip', 'install', '--disable-pip-version-check', '-e', $spec)
-    if ($code -ne 0) { Stop-Install "TASlation did not install (exit code $code). Check the network and the disk space." }
+    Invoke-Attempts {
+        $pipCode = Invoke-Console $VenvPy @('-m', 'pip', 'install', '--disable-pip-version-check', '-e', $spec)
+        if ($pipCode -eq 0) { return $null }
+        return (New-Failure ((T 'TASlation and its parts did not install (exit code {0})') -f $pipCode))
+    }
     $r = Invoke-Captured $VenvPy @('-c', 'import taslation, os; print(os.path.dirname(taslation.__file__))')
     if ($r.Code -ne 0) { Stop-Install ('TASlation does not import after the install: ' + ($r.Out -join ' ')) }
     Write-Ok 'installed'
@@ -1473,9 +1627,13 @@ if ($pageReady) { $setupArgs += '--skip-page-models' }
 if ($DryRun) {
     Write-Plan ('python ' + ($setupArgs -join ' '))
 } else {
-    $code = Invoke-Console $VenvPy $setupArgs
-    if ($code -eq $RefusedCode) { Stop-Install 'the reading model or the fonts did not download: the server refused them or no longer has the files. Running install.cmd again will not help: update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.' }
-    if ($code -ne 0) { Stop-Install "the reading model or the fonts did not download (exit code $code). Check the network and the disk space." }
+    # (what setup_models.py downloaded stays as .part files, and its next attempt goes on from there)
+    Invoke-Attempts {
+        $setupCode = Invoke-Console $VenvPy $setupArgs
+        if ($setupCode -eq 0) { return $null }
+        if ($setupCode -eq $RefusedCode) { return (New-Failure (T 'the reading model or the fonts did not download') -Refused) }
+        return (New-Failure ((T 'the reading model or the fonts did not download (exit code {0})') -f $setupCode))
+    }
     Write-Ok 'reading model and fonts ready'
 }
 
@@ -1491,14 +1649,15 @@ if ($wantOllama) {
         $ollamaOurs = $true
     } else {
         Write-Info 'Installing Ollama.'
-        $code = Invoke-Console $winget.Source $wingetArgs
-        $ollamaExe = Find-OllamaExe
-        if ($ollamaExe) {
-            Write-Ok 'Ollama installed'
-            Set-OllamaForTaslation $ollamaExe
-            $ollamaOurs = $true
+        Invoke-Attempts {
+            $wingetCode = Invoke-Console $winget.Source $wingetArgs
+            $script:ollamaExe = Find-OllamaExe
+            if ($script:ollamaExe) { return $null }
+            return (New-Failure ((T 'Ollama did not install (winget''s exit code {0})') -f $wingetCode))
         }
-        else { Write-Warn "Ollama was not installed (exit code $code): run install.cmd again." }
+        Write-Ok 'Ollama installed'
+        Set-OllamaForTaslation $ollamaExe
+        $ollamaOurs = $true
     }
 } elseif ($ollamaExe) {
     Write-Ok 'Ollama found'
@@ -1524,34 +1683,32 @@ if ($stopAutostart) {
         }
     }
 }
-# setup_models.py installs it and writes down that TASlation did (so that only it is ever removed again)
+# setup_models.py installs it and writes down that TASlation did (so that only it is ever removed again); with
+# --keep-partial the part of PLaMo's file it downloaded stays after a failure (not after a refusal), and its next
+# attempt, or the next run, goes on from there. A no to the model or its licence stopped the run among the questions,
+# and so did an Ollama that did not install: here the model is wanted wherever Ollama is.
 $translatorArgs = @('-u', $setup, '--translator-for', $language.Name, '--brief')
 if ($model.Kind -eq 'plamo') { $translatorArgs += @('--plamo-agreed', $plamoAgreedWhere) }
+$translatorThere = $false
 if ($modelPresent) {
     Write-Ok "$($model.Shown) is already there"
 } elseif ($wantModel -and $DryRun) {
     Write-Plan ('start ollama serve in a hidden window when nothing answers, then: python ' + ($translatorArgs -join ' ') +
-                ' --ollama-exe OLLAMA, then stop the server it started')
+                ' --ollama-exe OLLAMA --keep-partial, then stop the server it started')
 } elseif ($wantModel -and $ollamaExe) {
-    if (-not (Start-OwnOllama $ollamaExe)) {
-        Write-Warn (T 'Ollama did not start, so the translation model was not installed. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
-        $script:NotReady = (T 'TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or restart the PC), then run install.cmd again.')
-    } else {
-        $installedModels = Get-OllamaModels
-        if ($null -ne $installedModels -and (Test-HasModel $installedModels $model.Name)) {
-            Write-Ok "$($model.Shown) is already there"
-        } else {
-            $code = Invoke-Console $VenvPy ($translatorArgs + @('--ollama-exe', $ollamaExe))
-            if ($code -eq 0) { Write-Ok "$($model.Shown) installed" }
-            elseif ($code -eq $RefusedCode) {  # the file this version names is gone: a newer TASlation names the current one
-                Write-Warn (T 'The translation model was not installed: the publisher''s server refused the download or no longer has the file. Running install.cmd again will not help: update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.')
-                $script:NotReady = (T 'TASlation cannot translate yet: the translation model''s file is not available from its publisher. Update TASlation (download its newest copy and run update.cmd), or see the project''s issues page.')
-            }
-            else { Write-Warn "The translation model was not installed (exit code $code): run install.cmd again." }
+    Invoke-Attempts {
+        if (-not (Start-OwnOllama $ollamaExe)) {
+            return (New-Failure (T 'Ollama did not start, so the translation model could not be installed') (T 'Start Ollama from the Start menu, or restart the PC.'))
         }
+        $listedNow = Get-OllamaModels
+        if ($null -ne $listedNow -and (Test-HasModel $listedNow $model.Name)) { $script:translatorThere = $true; return $null }
+        $setupCode = Invoke-Console $VenvPy ($translatorArgs + @('--ollama-exe', $ollamaExe, '--keep-partial'))
+        if ($setupCode -eq 0) { return $null }
+        # the file this version names is gone: a newer TASlation names the current one
+        if ($setupCode -eq $RefusedCode) { return (New-Failure (T 'the translation model did not install') -Refused) }
+        return (New-Failure ((T 'the translation model did not install (exit code {0})') -f $setupCode))
     }
-} elseif ($ollamaExe -and -not $wantModel) {
-    Write-Info (T 'The translation model was not downloaded. To add it, run install.cmd again.')
+    if ($translatorThere) { Write-Ok "$($model.Shown) is already there" } else { Write-Ok "$($model.Shown) installed" }
 }
 Stop-OwnOllama  # the run leaves Ollama as it found it: a server it started for the import goes again
 Write-Detail "translation model $($model.Name) for $($language.Name) (the language from $($language.Source))"
@@ -1640,8 +1797,10 @@ if ($hasShortcut) {
     }
 }
 
-# The run ends with 0 also when TASlation cannot translate yet (what is done is kept, and the window offers the
-# translation model itself); its last line then says so, after the warnings too.
+# A run that gets here ends with 0, also when TASlation cannot translate yet (what is done is kept: the final check
+# finds something missing, or Ollama could not be installed from here); its last line then says so, after the warnings
+# too. A run that stopped never gets here: a no among the questions, a refused download or one that still failed after
+# its attempts ended it with its own last lines (Stop-Declined, Stop-Refused, Stop-Install).
 $notReady = $script:NotReady
 if (-not $notReady) { $notReady = (T 'TASlation cannot translate yet: run install.cmd again.') }
 Write-Host ''

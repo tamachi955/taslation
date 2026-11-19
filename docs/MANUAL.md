@@ -1088,7 +1088,7 @@ and the application never downloads them. Only `setup_models.py` downloads them.
 (when the server honours HTTP Range; if not, it starts that file again). For the OCR models, the page models
 and the fonts, a failure leaves the partial file (`.part`), and the next run fetches the rest. A file completed this way, too,
 is put in place only after the checksum of the whole file has been checked. PLaMo's files, on a failure or a cancellation, have their partial file deleted too
-(because an installation from the window leaves nothing behind). A file the server refused or no longer has (HTTP 401, 403, 404, 410) is not fetched again,
+(because an installation from the window leaves nothing behind); only `install.cmd`, which tries a failed download 3 times and then stops, keeps it, so that its next attempt or run goes on from there. A file the server refused or no longer has (HTTP 401, 403, 404, 410) is not fetched again,
 and the script ends with exit code 5 (running it again would not help, so it tells you to update TASlation or to see the project's issues page). When winget installs Python and Ollama, your Y to the question is passed on to winget
 as agreement to its terms of use (`--accept-source-agreements --accept-package-agreements`; this is said before the question).
 

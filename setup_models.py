@@ -570,22 +570,24 @@ def _room(needed_gb: float, *folders: Path) -> str | None:
 
 def install_translator(language: str, models_dir: Path, state_dir: Path, url: str | None = None,
                        ollama_exe: str | None = None, agreed: str | None = None,
-                       cancel: threading.Event | None = None) -> int:
+                       cancel: threading.Event | None = None, keep_partial: bool = False) -> int:
     """The translator model translating into *language* needs, installed (`tinstall`): PLaMo after the person agreed
     to its licence (*agreed*: where they did, "install" or "window", or "TASLATION_AGREE_PLAMO_LICENCE" for an
     automated check's install whose variable said so; else asked here), downloaded, checked, imported
     into Ollama, its GGUF then deleted; Qwen3.5 4B pulled. A model that is there already is left as it is. Nothing is
-    left half done: a stopped or failed install removes its download and an import Ollama did not finish. The exit
+    left half done: a stopped or failed install removes its download and an import Ollama did not finish - but with
+    *keep_partial* (install.ps1, which tries a failed download again) a failure that is no refusal keeps the part of
+    PLaMo's file downloaded so far, and the next try goes on from there. The exit
     code: 0 ready, 1 failed, CANCELLED, NO_ROOM, REFUSED (the server refused the file or no longer has it: running
     this again does not help, `refused_text`). Ollama's server is started first when it does not answer, as TASlation
     starts it (an ``ollama`` command that finds none would start Ollama's tray app, and with it Ollama's start with
     Windows), and stopped again at the end (`taslation.ollama_start.held`)."""
     with ollama_start.held(url or Settings.ollama_url, state_dir):
-        return _install_translator(language, models_dir, state_dir, url, ollama_exe, agreed, cancel)
+        return _install_translator(language, models_dir, state_dir, url, ollama_exe, agreed, cancel, keep_partial)
 
 
 def _install_translator(language: str, models_dir: Path, state_dir: Path, url: str | None, ollama_exe: str | None,
-                        agreed: str | None, cancel: threading.Event | None) -> int:
+                        agreed: str | None, cancel: threading.Event | None, keep_partial: bool = False) -> int:
     cancel = cancel or threading.Event()
     needed = model_for_language(language)
     name = tinstall.shown_name(needed)
@@ -653,14 +655,20 @@ def _install_translator(language: str, models_dir: Path, state_dir: Path, url: s
         print("Stopped: nothing was left behind.")
         return tinstall.CANCELLED
     except (OSError, http.client.HTTPException, subprocess.SubprocessError) as e:
-        _undo(exe, url, needed, before, models_dir, state_dir)
         refused = refused_code(e)
+        # a refused file does not come on a next try: its part goes too
+        _undo(exe, url, needed, before, models_dir, state_dir, keep_parts=keep_partial and refused is None)
         if refused is not None:  # the file this version names is gone: a newer TASlation names the current one
             print(refused_text(name, refused))
             _report("error", text=f"HTTP {refused}", refused=refused)
             return tinstall.REFUSED
-        print(f"{name} was not installed: {e}. Nothing was left behind; check the network and the disk space, and "
-              "run this again.")
+        folder = tinstall.plamo_dir(models_dir)
+        if keep_partial and folder.is_dir() and any(folder.glob("*.part")):
+            print(f"{name} was not installed: {e}. What was downloaded is kept, and the next try goes on from there; "
+                  "check the network and the disk space.")
+        else:
+            print(f"{name} was not installed: {e}. Nothing was left behind; check the network and the disk space, and "
+                  "run this again.")
         _report("error", text=str(e))
         return 1
     tinstall.remove_leftovers(models_dir)  # the GGUF: Ollama's copy is the one used
@@ -670,9 +678,11 @@ def _install_translator(language: str, models_dir: Path, state_dir: Path, url: s
     return 0
 
 
-def _undo(exe: str, url: str | None, needed, before: list[str], models_dir: Path, state_dir: Path) -> None:
-    """What a stopped or failed install began, removed: its download, and the model if Ollama has it only now."""
-    tinstall.remove_leftovers(models_dir)
+def _undo(exe: str, url: str | None, needed, before: list[str], models_dir: Path, state_dir: Path,
+          keep_parts: bool = False) -> None:
+    """What a stopped or failed install began, removed: its download (but for its ``.part`` files with *keep_parts*),
+    and the model if Ollama has it only now."""
+    tinstall.remove_leftovers(models_dir, keep_parts=keep_parts)
     now = tinstall.listed(exe, url)
     if now is not None and has_model(now, needed.ollama_name) and not has_model(before, needed.ollama_name):
         tinstall.remove_model(exe, needed.ollama_name, state_dir, url)
@@ -711,6 +721,8 @@ def main(argv: list[str] | None = None) -> int:
                     help=argparse.SUPPRESS)  # install.ps1 or the window: the person agreed to PLaMo's licence there
     ap.add_argument("--progress", action="store_true", help=argparse.SUPPRESS)  # the window: progress lines, cancel
     ap.add_argument("--ollama-exe", help=argparse.SUPPRESS)  # install.ps1: the ollama.exe winget just installed
+    # install.ps1, which tries a failed download again: the part of PLaMo's file downloaded so far stays for that try
+    ap.add_argument("--keep-partial", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     global _brief, _progress
     _brief = args.brief
@@ -726,7 +738,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.translator_for:
         state_dir, url, _language = _settings_for_translator()
         return install_translator(args.translator_for, models_dir, state_dir, url, args.ollama_exe, args.plamo_agreed,
-                                  _watch_for_cancel())
+                                  _watch_for_cancel(), args.keep_partial)
 
     if args.check:
         ok = all([report_dir(model, models_dir) for model in OCR_MODELS])

@@ -94,13 +94,15 @@ def _sandbox(script: Path, tmp: Path) -> None:
     the running processes the ones ``processes.txt`` lists (lines "pid<TAB>program<TAB>start"; Ollama's own run when
     FAKE_OLLAMA_RUNNING is set), the shortcut, the Startup folder and Ollama's model folder are in the temporary folder,
     the Ollama it would ask is nobody, any disk has room and any folder is short enough; the data folder is
-    TASLATION_STATE_DIR or none, this PC's language FAKE_UI_CULTURE."""
+    TASLATION_STATE_DIR or none, this PC's language FAKE_UI_CULTURE; the wait before a download's next attempt is only
+    written down (its seconds, into ``waits.txt``)."""
     menu = tmp / "start menu"
     menu.mkdir(exist_ok=True)
     (tmp / "startup").mkdir(exist_ok=True)
     log = tmp / "user-env.txt"
     processes = tmp / "processes.txt"
     _override(script, SANDBOXED,
+              f"function Wait-BeforeRetry([int]$Seconds) {{ Add-Content -LiteralPath '{tmp / 'waits.txt'}' \"$Seconds\" }}",
               f"$ShortcutPath = '{menu / 'TASlation.lnk'}'",
               f"$StartupFolder = '{tmp / 'startup'}'",
               f"$OllamaStore = '{tmp / 'ollama store'}'",
@@ -226,21 +228,45 @@ def _fake_venv(co: Path, tmp: Path, torch: tuple[str, str | None] | None = None)
     return fake / "pip-calls.txt"
 
 
+def _failing(tmp: Path) -> str:
+    """Python for a stand-in: ``_failing(kind)`` is the exit code its next run of *kind* fails with (`_fail`), else 0."""
+    return ("def _failing(kind):\n"
+            "    import glob, os\n"
+            f"    for name in sorted(glob.glob(os.path.join({str(tmp / 'fails')!r}, kind + '-*'))):\n"
+            "        code = int(open(name).read())\n"
+            "        os.remove(name)\n"
+            "        return code\n"
+            "    return 0\n")
+
+
+def _fail(tmp: Path, kind: str, times: int, code: int = 1) -> None:
+    """The next *times* runs of a stand-in's *kind* fail with *code*: 'reading' (setup_models.py for the reading model
+    and fonts), 'translator' (setup_models.py for the translator), 'program' (pip's install of TASlation), 'torch'
+    (pip's install of torch, `_torch_install`)."""
+    folder = tmp / "fails"
+    folder.mkdir(exist_ok=True)
+    for n in range(times):
+        (folder / f"{kind}-{n}").write_text(str(code))
+
+
 def _whole_install(co: Path, tmp: Path, *, doctor: str = "Result: ready\n", doctor_code: int = 0) -> dict:
     """A run that gets to its end: `_fake_venv` with a pip that agrees, a ``taslation`` whose doctor prints *doctor*
     and ends with *doctor_code*, a ``setup_models.py`` that only says one line and writes its arguments down, and a
-    fake ``ollama``. The result is the environment; a run writes ``fake_modules/pip-calls.txt``."""
+    fake ``ollama``; `_fail` makes the pip and the setup_models.py fail. The result is the environment; a run writes
+    ``fake_modules/pip-calls.txt``."""
     calls = _fake_venv(co, tmp, ("2.14.1+cpu", None))
     (calls.parent / "pip.py").write_text(
-        "import sys\nfrom pathlib import Path\n"
+        "import sys\nfrom pathlib import Path\n" + _failing(tmp) +
         'with open(Path(__file__).with_name("pip-calls.txt"), "a") as f:\n    f.write(" ".join(sys.argv[1:]) + "\\n")\n'
+        'if "-e" in sys.argv:\n    sys.exit(_failing("program"))\n'
         'sys.exit(1 if Path(__file__).with_name("no-pip").exists() else 0)\n')
     (calls.parent / "taslation.py").write_text(
         f"import sys\nif __name__ == '__main__':\n    print({doctor!r})\n    sys.exit({doctor_code})\n")
     (co / "setup_models.py").write_text(
-        "import sys\nfrom pathlib import Path\n"
+        "import sys\nfrom pathlib import Path\n" + _failing(tmp) +
         'with open(Path(__file__).with_name("setup-args.txt"), "a") as f:\n    f.write(" ".join(sys.argv[1:]) + "\\n")\n'
-        'print("Downloading fonts ...")\n')
+        'print("Downloading fonts ...")\n'
+        'sys.exit(_failing("translator" if "--translator-for" in sys.argv else "reading"))\n')
     env = _tools(tmp, ollama=True, gpu=None)
     env["PYTHONPATH"] = str(calls.parent)
     return env
@@ -586,15 +612,17 @@ def test_install_without_a_console_installs_no_python_unasked(tmp_path):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
     r = _run(co / "install.ps1", env=_tools(tmp_path, python=False))
-    assert r.returncode == 1
-    assert "[Y/n] n (no console to ask" in r.stdout and "Python is missing." in r.stdout
+    assert r.returncode == 3  # nobody's yes: stopped with nothing done
+    assert "[Y/n] n (no console to ask" in r.stdout and NO_PYTHON in r.stdout and "[2/7]" not in r.stdout
     assert not (tmp_path / "bin" / "winget-args.txt").exists()
 
 
 def test_install_finds_the_python_winget_just_installed(tmp_path):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
-    r = _run(co / "install.ps1", "-Yes", env=_tools(tmp_path, python=False))
+    env = _tools(tmp_path, python=False)
+    env["TASLATION_AGREE_PLAMO_LICENCE"] = "I agree to the PLaMo Community License"  # (else -Yes stops at PLaMo)
+    r = _run(co / "install.ps1", "-Yes", env=env)
     assert r.returncode == 1  # the fake py ends the run at the virtual environment
     assert "y (-Yes)" in r.stdout
     assert (tmp_path / "bin" / "winget-args.txt").read_text().split() == [
@@ -607,7 +635,7 @@ def test_install_finds_the_python_winget_just_installed(tmp_path):
 def test_a_person_s_yes_accepts_wingets_agreements_so_that_winget_asks_nothing_later(tmp_path):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
-    _answering(co / "install.ps1", {"Install Python 3.13 now": "", "Install Ollama now": "", PLAMO_QUESTION: ""})  # Enter takes it
+    _answering(co / "install.ps1", {"Install Python 3.13 now": "", "Install Ollama now": "", PLAMO_QUESTION: "y"})  # Enter takes it
     r = _run(co / "install.ps1", env=_tools(tmp_path, python=False, gpu=None))
     assert r.returncode == 1  # the fake py ends the run at the virtual environment
     assert (tmp_path / "bin" / "winget-args.txt").read_text().split() == [
@@ -640,6 +668,17 @@ def test_install_finds_python_in_the_user_folder_with_nothing_on_the_path(tmp_pa
 
 LICENCE = "Do you agree to the terms of the OCR models?"
 STOPPED = "TASlation cannot read pages without the OCR models"
+DECLINED = 3  # the exit code of a run stopped at a no, with nothing installed
+NO_PYTHON = "Installation stopped: TASlation cannot run without Python."
+NO_OLLAMA = "Installation stopped: TASlation cannot translate without Ollama."
+NO_PLAMO = "Installation stopped: TASlation cannot translate into English without PLaMo."
+ASKS_AGAIN = "Nothing was installed. To install it later, run install.cmd again: it asks again."
+AGREE_LATER = "Nothing was installed. To agree later, run install.cmd again."
+# the last lines of a run stopped by a failure
+NOT_INSTALLED_YET = "Installation stopped: TASlation is not installed yet."
+NOT_FINISHED = "Installation stopped before it was finished."
+GOES_ON = "Everything installed and downloaded so far is kept: run install.cmd again, and it goes on from there."
+DETAILS = 'The details are in docs\\INSTALL.md, under "If the installation stops".'
 
 
 def _without_the_model(tmp: Path) -> Path:
@@ -650,8 +689,9 @@ def _without_the_model(tmp: Path) -> Path:
 
 
 def _nothing_done(co: Path, r) -> None:
-    assert r.returncode == 1 and STOPPED in r.stdout and "Nothing was installed." in r.stdout
+    assert r.returncode == DECLINED and STOPPED in r.stdout and "Nothing was installed." in r.stdout
     assert not (co / ".venv").exists() and "[2/7]" not in r.stdout
+    assert not (co.parent / "start menu" / "TASlation.lnk").exists() and not (co.parent / "bin" / "winget-args.txt").exists()
 
 
 def test_install_shows_the_terms_and_a_no_stops_it_with_nothing_done(tmp_path):
@@ -665,7 +705,7 @@ def test_install_shows_the_terms_and_a_no_stops_it_with_nothing_done(tmp_path):
 
 def test_install_goes_on_after_a_yes_to_the_licence(tmp_path):
     co = _without_the_model(tmp_path)
-    _answering(co / "install.ps1", {LICENCE: "y", "Install Ollama now": "n"})
+    _answering(co / "install.ps1", {LICENCE: "y", "Install Ollama now": "y", PLAMO_QUESTION: "y"})
     r = _run(co / "install.ps1", env=_tools(tmp_path))
     assert r.returncode == 1 and "could not create" in r.stdout  # the fake py ends the run at the virtual environment
     assert STOPPED not in r.stdout
@@ -715,9 +755,10 @@ def test_the_one_question_names_all_three_models_and_the_download(tmp_path):
 
 def test_a_no_on_an_old_install_leaves_it_reading_with_the_model_it_has(tmp_path):
     co = _old_install(tmp_path)
-    _answering(co / "install.ps1", {LICENCE: "", "Install Ollama now": "n"})
+    _answering(co / "install.ps1", {LICENCE: "", "Install Ollama now": "y", PLAMO_QUESTION: "y"})
     r = _run(co / "install.ps1", env=_tools(tmp_path))
     assert "goes on reading with the one model it has" in r.stdout and STOPPED not in r.stdout
+    assert "[3/7]" in r.stdout  # past the questions (the fake py ends it at the program folder)
 
 
 def test_the_layout_and_inpainting_models_are_asked_about_and_fetched_on_a_yes(tmp_path):
@@ -903,14 +944,17 @@ def _torch_install(co: Path, tmp: Path, ollama_server, *, torch: str = "none", g
     """`_whole_install` on a computer whose nvidia-smi says *gpu*, with *torch* ('none', 'cpu' or 'cuda') in the
     program files and a pip that installs a stand-in torch from the index it is given: the build named by the index
     (cu126 a CUDA 12.6 one), which runs on the GPU unless ``cuda-unusable`` is in fake_modules; ``cuda-pip-fails``
-    there fails a GPU build's install. Everything else pip is asked agrees; its calls go to ``pip-calls.txt``."""
+    there fails a GPU build's install, and `_fail` with 'torch' any build's. Everything else pip is asked agrees; its
+    calls go to ``pip-calls.txt``."""
     env = _whole_install(co, tmp)
     fake = tmp / "fake_modules"
     (fake / "pip.py").write_text(
-        "import sys\nfrom pathlib import Path\n"
+        "import sys\nfrom pathlib import Path\n" + _failing(tmp) +
         "here = Path(__file__).parent\nargs = sys.argv[1:]\n"
         'with open(here / "pip-calls.txt", "a") as f:\n    f.write(" ".join(args) + "\\n")\n'
         'if "torch" in args and "--index-url" in args:\n'
+        '    failed = _failing("torch")\n'
+        '    if failed:\n        sys.exit(failed)\n'
         '    kind = args[args.index("--index-url") + 1].rstrip("/").rsplit("/", 1)[-1]\n'
         '    if kind != "cpu" and (here / "cuda-pip-fails").exists():\n        sys.exit(1)\n'
         '    cuda = None if kind == "cpu" else kind[2:4] + "." + kind[4:]\n'
@@ -985,21 +1029,36 @@ def test_nobody_s_enter_takes_the_page_models_on_a_gpu_either(tmp_path, ollama_s
 
 
 @needs_venv
-@pytest.mark.parametrize("trouble, cpu", [("cuda-pip-fails", CPU_TORCH), ("cuda-unusable", CPU_AGAIN)])
-def test_a_gpu_build_that_fails_or_does_not_run_gives_way_to_the_cpu_build(tmp_path, ollama_server, trouble, cpu):
-    """A GPU build that did not install leaves nothing for the CPU build to replace, so that one comes as it always
-    did; one that installed and does not run is replaced by it, torch alone."""
+def test_a_gpu_build_that_does_not_run_gives_way_to_the_cpu_build(tmp_path, ollama_server):
+    """A GPU build that installed and does not run is replaced by the CPU build, torch alone."""
     co = _fake_checkout(tmp_path)
     env = _torch_install(co, tmp_path, ollama_server)
-    (tmp_path / "fake_modules" / trouble).write_text("")
+    (tmp_path / "fake_modules" / "cuda-unusable").write_text("")
     r = _run(co / "install.ps1", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
-    assert _pip_calls(tmp_path) == [CUDA_TORCH, cpu]
+    assert _pip_calls(tmp_path) == [CUDA_TORCH, CPU_AGAIN]
     assert out.count("warning: " + FELL_BACK) == 1 and out.count(FELL_BACK) == 2  # (said, and listed at the end)
     assert "ok: program files ready" in out and "GPU build" not in out.split(FELL_BACK)[-1].split("warning(s)")[0]
-    assert "TASlation is installed." in out
+    assert "TASlation is installed." in out and "Attempt " not in out
     assert "cpu" in (tmp_path / "fake_modules" / "torch.py").read_text()
+
+
+GPU_FAILED = "the GPU build of the program files did not download (exit code 1)"
+
+
+@needs_venv
+def test_a_gpu_build_that_does_not_download_is_tried_three_times_and_stops_the_install(tmp_path, ollama_server):
+    """A download that still fails stops the run, the GPU build's too: the CPU build would come from the same server,
+    and the person is told to run install.cmd again rather than left with a build they did not get told of."""
+    co = _fake_checkout(tmp_path)
+    env = _torch_install(co, tmp_path, ollama_server)
+    (tmp_path / "fake_modules" / "cuda-pip-fails").write_text("")
+    r = _run(co / "install.ps1", env=env)
+    _stopped(r, tmp_path, GPU_FAILED + "; tried 3 times. Check the network and the disk space.")
+    assert _pip_calls(tmp_path) == [CUDA_TORCH] * 3 and FELL_BACK not in r.stdout
+    assert _attempts_said(r.stdout) == [f"Attempt {n} of 3: {GPU_FAILED}. Trying again in 15 seconds." for n in (1, 2)]
+    assert _waits(tmp_path) == [15, 15] and "[4/7]" not in r.stdout
 
 
 @pytest.mark.parametrize("record, listed, left", [
@@ -1040,13 +1099,17 @@ def test_a_cpu_build_on_a_gpu_is_replaced_and_one_that_does_not_download_stays(t
     assert _pip_calls(tmp_path) == [CUDA_TORCH.replace("--no-cache-dir", "--no-cache-dir --force-reinstall --no-deps")]
     assert "ok: program files ready, GPU build" in r.stdout
 
+    # a GPU build that does not download over an installation that works: the run stops, its CPU build stays as it
+    # was (not fetched again), and the Start menu keeps starting it
     (tmp_path / "fake_modules" / "pip-calls.txt").unlink()
     (tmp_path / "fake_modules" / "torch.py").write_text(_TORCH.format(kind="cpu", cuda=None, usable=False))
     (tmp_path / "fake_modules" / "cuda-pip-fails").write_text("")
+    _starting_taslation(tmp_path)
     r = _run(co / "install.ps1", env=env)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert len(_pip_calls(tmp_path)) == 1 and FELL_BACK in r.stdout  # the CPU build there is kept, not fetched again
-    assert "TASlation is installed." in r.stdout
+    _stopped(r, tmp_path, GPU_FAILED + "; tried 3 times. Check the network and the disk space.", installed=True)
+    assert len(_pip_calls(tmp_path)) == 3 and FELL_BACK not in r.stdout
+    assert "cpu" in (tmp_path / "fake_modules" / "torch.py").read_text()
+    assert (tmp_path / "start menu" / "TASlation.lnk").is_file() and STARTS_AS_IT_IS in r.stdout
 
 
 @needs_venv
@@ -1249,8 +1312,14 @@ def test_python_is_not_installed_after_a_no(tmp_path):
     shutil.rmtree(co / ".venv")
     _answering(co / "install.ps1", {"Install Python 3.13 now": "n"})
     r = _run(co / "install.ps1", env=_tools(tmp_path, python=False))
-    assert r.returncode == 1 and "Python is missing." in r.stdout and "[2/7]" not in r.stdout
+    assert r.returncode == DECLINED and "[2/7]" not in r.stdout
     assert not (tmp_path / "bin" / "winget-args.txt").exists()
+    # the way to install it by hand, then what was declined, that nothing was installed and that a next run asks again
+    lines = [line.strip() for line in r.stdout.splitlines() if line.strip()]
+    assert lines[-4:] == ["Install it from https://www.python.org/downloads/windows/",
+                          "(the 64-bit Windows installer; tick 'Add python.exe to PATH'), then run install.cmd again.",
+                          NO_PYTHON, ASKS_AGAIN]
+    assert "Install Ollama now" not in r.stdout and not (tmp_path / "start menu" / "TASlation.lnk").exists()
 
 
 # ---- a whole install
@@ -1261,9 +1330,6 @@ READER_NEVER_SEES = (".venv", "winget", "ollama pull", "setup_models", "doctor",
 NOT_READY = "TASlation cannot translate yet: run install.cmd again."  # the end's line when it cannot, by default
 OLLAMA_NOT_RUNNING = ("TASlation cannot translate yet: Ollama does not run. Start Ollama from the Start menu (or "
                       "restart the PC), then run install.cmd again.")
-REFUSED_AT_THE_END = ("TASlation cannot translate yet: the translation model's file is not available from its "
-                      "publisher. Update TASlation (download its newest copy and run update.cmd), or see the project's "
-                      "issues page.")
 
 
 def _last_line(out: str) -> str:
@@ -1290,8 +1356,10 @@ def test_a_whole_install_says_nothing_of_its_insides_and_ends_ready(tmp_path, ol
     reading, translator = (co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()
     assert "--brief" in reading and "--skip-ocr" in reading
     assert "--skip-page-models" in reading and "They are left out" in out  # a no goes on without them
-    assert translator.endswith(f"--translator-for English --brief --plamo-agreed install --ollama-exe {tmp_path / 'bin' / 'ollama.cmd'}")
+    assert translator.endswith(f"--translator-for English --brief --plamo-agreed install --ollama-exe "
+                               f"{tmp_path / 'bin' / 'ollama.cmd'} --keep-partial")
     assert "-e" in (tmp_path / "fake_modules" / "pip-calls.txt").read_text()
+    assert "Attempt " not in out and not (tmp_path / "waits.txt").exists()
 
 
 @pytest.mark.skipif(sys.prefix == sys.base_prefix, reason="needs a virtual environment's launcher to copy")
@@ -1309,19 +1377,91 @@ def test_what_is_missing_is_all_the_final_check_shows(tmp_path, ollama_server):
     assert "TASlation is installed." not in out
 
 
+def _lines(out: str) -> list[str]:
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def _declined(r, tmp: Path, why: str, again: str) -> None:
+    """A run stopped at a no: what was declined, that nothing was installed and how to be asked again, last; nothing
+    downloaded, installed or made before it."""
+    assert r.returncode == DECLINED and _lines(r.stdout)[-2:] == [why, again], r.stdout + r.stderr
+    assert "[2/7]" not in r.stdout and "No more questions." not in r.stdout
+    for made in ("fake_modules/pip-calls.txt", "checkout/setup-args.txt", "bin/winget-args.txt", "bin/ollama-args.txt",
+                 "start menu/TASlation.lnk", "waits.txt"):
+        assert not (tmp / made).exists(), made
+
+
+STARTS_AS_IT_IS = "TASlation starts from the Start menu as it is now, without what this run did not install."
+DOES_NOT_START = ("TASlation does not start as it is now, so its Start-menu shortcut is removed: the installation makes "
+                  "it again when it gets to its end.")
+REFUSED_GOES_ON = ("Everything installed and downloaded so far is kept: the installation that update.cmd runs goes on "
+                   "from there.")
+REFUSED_ADVICE = ("the publisher's server refused the download or no longer has the file. Running install.cmd again will "
+                  "not help: update TASlation (download its newest copy and run update.cmd), or see the project's "
+                  "issues page.")
+NETWORK = "Check the network and the disk space."
+
+
+def _stopped(r, tmp: Path, error: str, *, code: int = 1, again: str = GOES_ON, installed: bool = False) -> list[str]:
+    """A run stopped by a failure: *error* said, then its last lines: that TASlation is not installed yet (*installed*:
+    that the run over an earlier installation did not finish, and whether that one starts), that what is there is kept
+    and how the next run goes on (*again*), and where the details are; no shortcut made, and nothing of the end of a
+    run that got there. Its lines."""
+    lines = _lines(r.stdout)
+    assert r.returncode == code, r.stdout + r.stderr
+    assert "error: " + error in lines, r.stdout
+    head = NOT_FINISHED if installed else NOT_INSTALLED_YET
+    assert (lines[-4:-3] if installed else lines[-3:-2]) == [head] and lines[-2:] == [again, DETAILS], lines[-6:]
+    assert lines.index("error: " + error) < lines.index(head)
+    assert "TASlation is installed." not in r.stdout and "[7/7]" not in r.stdout and "cannot translate yet" not in r.stdout
+    if not installed:
+        assert not (tmp / "start menu" / "TASlation.lnk").exists()
+    return lines
+
+
+def _attempts_said(out: str) -> list[str]:
+    return [line for line in _lines(out) if line.startswith("Attempt ")]
+
+
+def _waits(tmp: Path) -> list[int]:
+    path = tmp / "waits.txt"
+    return [int(s) for s in path.read_text().split()] if path.exists() else []
+
+
+def _starting_taslation(tmp: Path) -> None:
+    """`_whole_install`'s stand-in ``taslation`` as a package whose command line and window import, so that a stopped
+    run finds that TASlation starts as it is now (its doctor says ready)."""
+    fake = tmp / "fake_modules"
+    (fake / "taslation.py").unlink(missing_ok=True)
+    (fake / "taslation" / "ui").mkdir(parents=True, exist_ok=True)
+    for name in ("__init__.py", "cli.py", "ui/__init__.py", "ui/app.py"):
+        (fake / "taslation" / name).write_text("")
+    (fake / "taslation" / "__main__.py").write_text("import sys\nprint('Result: ready')\nsys.exit(0)\n")
+
+
 @pytest.mark.skipif(sys.prefix == sys.base_prefix, reason="needs a virtual environment's launcher to copy")
-def test_a_no_to_ollama_ends_not_ready_and_points_at_the_installer(tmp_path):
+def test_a_no_to_ollama_stops_the_install_with_nothing_done(tmp_path):
     co = _fake_checkout(tmp_path)
-    env = _whole_install(co, tmp_path, doctor="Ollama: not installed", doctor_code=1)
+    env = _whole_install(co, tmp_path)
     (tmp_path / "bin" / "ollama.cmd").unlink()
     _answering(co / "install.ps1", {"Install Ollama now": "n"})
     r = _run(co / "install.ps1", env=env)
+    _declined(r, tmp_path, NO_OLLAMA, ASKS_AGAIN)
+    assert "Download the translation model" not in r.stdout and PLAMO_QUESTION not in r.stdout
+
+
+@needs_venv
+def test_without_winget_a_missing_ollama_still_ends_not_ready(tmp_path):
+    """No question, so no no: without winget the run goes on as before and its end says it cannot translate yet."""
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path, doctor="Ollama: not installed", doctor_code=1)
+    (tmp_path / "bin" / "ollama.cmd").unlink()
+    (tmp_path / "bin" / "winget.cmd").unlink()
+    r = _run(co / "install.ps1", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
-    out = r.stdout
-    assert "Ollama is not installed. To add it, run install.cmd again." in out
-    assert NOT_READY in out
-    assert "Download the translation model" not in out and "ollama pull" not in out
-    assert not (tmp_path / "bin" / "winget-args.txt").exists()
+    lines = _lines(r.stdout)
+    assert "Ollama cannot be installed from here." in r.stdout and lines[lines.index(NOT_READY) + 1].startswith("Version:")
+    assert NOT_INSTALLED_YET not in lines and DETAILS not in lines
 
 
 def _setup_ending(co: Path, reading: int, translator: int) -> None:
@@ -1337,60 +1477,261 @@ def _setup_ending(co: Path, reading: int, translator: int) -> None:
 def test_with_warnings_the_last_line_still_says_it_cannot_translate_yet(tmp_path, ollama_server):
     co = _fake_checkout(tmp_path)
     env = _whole_install(co, tmp_path, doctor="Ollama: model missing", doctor_code=1)
-    _ollama_at(co / "install.ps1", ollama_server)  # the model is not there yet
-    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
-    _setup_ending(co, 0, 1)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    (co / "copy").mkdir()  # (a copy one level too deep: a warning)
+    for name in ("install.ps1", "pyproject.toml"):
+        (co / "copy" / name).write_text("")
     r = _run(co / "install.ps1", env=env)
-    assert r.returncode == 0, r.stdout + r.stderr  # what is done is kept: the run ends with 0 all the same
+    assert r.returncode == 0, r.stdout + r.stderr  # it got to its end: what is done is kept, and the end says so
     out = r.stdout
-    assert "  - The translation model was not installed (exit code 1): run install.cmd again." in out
     assert out.index(NOT_READY) < out.index("1 warning(s):") < out.rindex(NOT_READY)
     assert _last_line(out).strip() == NOT_READY and out.count(NOT_READY) == 2
 
 
+# The steps that download, each as a run of `_whole_install` (`_torch_install` for PyTorch) where the step's stand-in
+# fails (`_fail`): what failed, as the run says it.
+FAILING_STEPS = {
+    "reading": "the reading model or the fonts did not download (exit code 1)",
+    "translator": "the translation model did not install (exit code 1)",
+    "program": "TASlation and its parts did not install (exit code 1)",
+    "torch": "the program files did not download (exit code 1)",
+}
+
+
+def _failing_install(co: Path, tmp: Path, ollama_server, step: str, times: int, **whole) -> dict:
+    if step == "torch":
+        env = _torch_install(co, tmp, ollama_server, gpu=None)  # the CPU build: none is there yet
+    else:
+        env = _whole_install(co, tmp, **whole)
+        _ollama_at(co / "install.ps1", ollama_server, *([] if step == "translator" else [MODEL_NAME]))
+    if step == "translator":
+        _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
+    _fail(tmp, step, times)
+    return env
+
+
+def _runs_of(co: Path, tmp: Path, step: str) -> int:
+    """How often the stand-in of *step* ran."""
+    if step in ("reading", "translator"):
+        args = (co / "setup-args.txt").read_text().splitlines()
+        return sum(("--translator-for" in a) == (step == "translator") for a in args)
+    calls = (tmp / "fake_modules" / "pip-calls.txt").read_text().splitlines()
+    return sum((" torch " in f" {c} ") if step == "torch" else (" -e " in f" {c} ") for c in calls)
+
+
 @needs_venv
-def test_a_translation_model_the_server_refuses_says_running_again_will_not_help(tmp_path, ollama_server):
+@pytest.mark.parametrize("step", FAILING_STEPS)
+@pytest.mark.parametrize("times", [1, 2])
+def test_a_download_that_fails_once_or_twice_is_tried_again_and_the_install_gets_to_its_end(tmp_path, ollama_server,
+                                                                                            step, times):
     co = _fake_checkout(tmp_path)
-    env = _whole_install(co, tmp_path, doctor="Ollama: model missing", doctor_code=1)
-    _ollama_at(co / "install.ps1", ollama_server)
-    _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
-    _setup_ending(co, 0, 5)
+    env = _failing_install(co, tmp_path, ollama_server, step, times)
     r = _run(co / "install.ps1", env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
-    assert ("  - The translation model was not installed: the publisher's server refused the download or no longer "
-            "has the file. Running install.cmd again will not help: update TASlation (download its newest copy and run "
-            "update.cmd), or see the project's issues page.") in out
-    assert "exit code 5" not in out and NOT_READY not in out
-    assert _last_line(out).strip() == REFUSED_AT_THE_END
+    assert _attempts_said(out) == [f"Attempt {n} of 3: {FAILING_STEPS[step]}. Trying again in 15 seconds."
+                                   for n in range(1, times + 1)]
+    assert _waits(tmp_path) == [15] * times and _runs_of(co, tmp_path, step) == times + 1
+    assert "TASlation is installed." in out and (tmp_path / "start menu" / "TASlation.lnk").is_file()
+    assert "error:" not in out and "Installation stopped" not in out
 
 
 @needs_venv
-def test_a_reading_model_the_server_refuses_stops_the_install_with_what_to_do(tmp_path, ollama_server):
+@pytest.mark.parametrize("step", FAILING_STEPS)
+@pytest.mark.parametrize("switches", [(), ("-Yes",)], ids=["a person's run", "with -Yes"])
+def test_a_download_that_fails_three_times_stops_the_install_and_says_what_to_do(tmp_path, ollama_server, step,
+                                                                                switches):
     co = _fake_checkout(tmp_path)
-    env = _whole_install(co, tmp_path)
-    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
-    _setup_ending(co, 5, 0)
-    r = _run(co / "install.ps1", env=env)
-    assert r.returncode == 1, r.stdout + r.stderr
-    assert ("error: the reading model or the fonts did not download: the server refused them or no longer has the "
-            "files. Running install.cmd again will not help") in r.stdout
-    assert "Check the network" not in r.stdout and "[6/7]" not in r.stdout
+    env = _failing_install(co, tmp_path, ollama_server, step, 3)
+    if switches:
+        env["TASLATION_AGREE_PLAMO_LICENCE"] = "I agree to the PLaMo Community License"
+    r = _run(co / "install.ps1", *switches, env=env)
+    lines = _stopped(r, tmp_path, f"{FAILING_STEPS[step]}; tried 3 times. {NETWORK}")
+    last = lines[lines.index(f"error: {FAILING_STEPS[step]}; tried 3 times. {NETWORK}") + 1]
+    assert last.startswith("last command: ") and ("--translator-for" in last) == (step == "translator")  # the step's
+    assert _attempts_said(r.stdout) == [f"Attempt {n} of 3: {FAILING_STEPS[step]}. Trying again in 15 seconds."
+                                        for n in (1, 2)]
+    assert _waits(tmp_path) == [15, 15] and _runs_of(co, tmp_path, step) == 3
+    assert "Final check" not in r.stdout
 
 
 @needs_venv
-def test_an_ollama_that_does_not_start_says_so_at_the_import_and_at_the_end(tmp_path):
+@pytest.mark.parametrize("step", ["reading", "translator"])
+def test_a_download_the_server_refuses_stops_at_once_and_says_running_again_will_not_help(tmp_path, ollama_server,
+                                                                                         step):
+    """A refusal (HTTP 401, 403, 404, 410: setup_models.py's exit code 5) is not tried again."""
+    co = _fake_checkout(tmp_path)
+    env = _failing_install(co, tmp_path, ollama_server, step, 0)
+    _fail(tmp_path, step, 3, code=5)  # (it would refuse every time)
+    r = _run(co / "install.ps1", env=env)
+    what = {"reading": "the reading model or the fonts did not download",
+            "translator": "the translation model did not install"}[step]
+    _stopped(r, tmp_path, f"{what}: {REFUSED_ADVICE}", code=5, again=REFUSED_GOES_ON)
+    assert _runs_of(co, tmp_path, step) == 1 and _attempts_said(r.stdout) == [] and _waits(tmp_path) == []
+    assert "exit code 5" not in r.stdout and NETWORK not in r.stdout
+
+
+@needs_venv
+def test_an_ollama_that_does_not_start_is_tried_three_times_and_stops_the_install(tmp_path):
     co = _fake_checkout(tmp_path)
     env = _whole_install(co, tmp_path, doctor="Ollama: not reachable", doctor_code=1)
-    _override(co / "install.ps1", "function Start-OwnOllama([string]$Exe) { return '' }")  # nothing answers
+    _override(co / "install.ps1", "function Start-OwnOllama([string]$Exe) { Write-Host 'Ollama asked'; return '' }")
     _answering(co / "install.ps1", {PLAMO_QUESTION: "y"})
     r = _run(co / "install.ps1", env=env)
-    assert r.returncode == 0, r.stdout + r.stderr
-    out = r.stdout
-    assert ("  - Ollama did not start, so the translation model was not installed. Start Ollama from the Start menu "
-            "(or restart the PC), then run install.cmd again.") in out
-    assert len((co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()) == 1  # the reading part
-    assert _last_line(out).strip() == OLLAMA_NOT_RUNNING
+    what = "Ollama did not start, so the translation model could not be installed"
+    _stopped(r, tmp_path, f"{what}; tried 3 times. Start Ollama from the Start menu, or restart the PC.")
+    assert r.stdout.count("Ollama asked") == 3 and _waits(tmp_path) == [15, 15]
+    assert _runs_of(co, tmp_path, "translator") == 0  # (the reading part ran, the translator never)
+    assert "last command:" not in r.stdout  # (an earlier step's command is not this failure's)
+
+
+def test_the_attempts_are_three_fifteen_seconds_apart():
+    text = (ROOT / "install.ps1").read_text(encoding="ascii")
+    assert "$Attempts = 3" in text and "$RetryWaitS = 15" in text
+    assert "function Wait-BeforeRetry([int]$Seconds) { Start-Sleep -Seconds $Seconds }" in text
+
+
+def _winget_failing(tmp: Path, times: int, then: str) -> Path:
+    """A fake winget that fails its first *times* runs (exit code 1, installing nothing), then runs the lines *then*;
+    each run's arguments go into the returned file."""
+    bin_dir = tmp / "bin"
+    for n in range(times):
+        (bin_dir / f"winget-fail-{n}").write_text("")
+    (bin_dir / "winget.cmd").write_text(
+        '@echo off\necho %*>> "%~dp0winget-args.txt"\n'
+        'for %%f in ("%~dp0winget-fail-*") do (del "%%~f" & exit /b 1)\n' + then)
+    return bin_dir / "winget-args.txt"
+
+
+PYTHON_FAILED = "Python 3.13 did not install (winget's exit code 1)"
+
+
+@pytest.mark.parametrize("times", [2, 3])
+def test_python_that_winget_does_not_install_is_tried_again_and_then_stops_the_install(tmp_path, times):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    env = _tools(tmp_path, python=False)
+    args = _winget_failing(tmp_path, times, 'echo.> "%~dp0py-installed"\n')
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert len(args.read_text().splitlines()) == min(times + 1, 3) and _waits(tmp_path) == [15] * min(times, 2)
+    assert _attempts_said(r.stdout)[:2] == [f"Attempt {n} of 3: {PYTHON_FAILED}. Trying again in 15 seconds." for n in (1, 2)]
+    if times == 2:
+        assert r.returncode == 1 and "ok: Python 3.13.1 installed" in r.stdout and "could not create" in r.stdout
+        return  # (the fake py ends the run at the program folder)
+    lines = _stopped(r, tmp_path, f"{PYTHON_FAILED}; tried 3 times. {NETWORK}")
+    assert "Install it from https://www.python.org/downloads/windows/" in lines  # the other way, said before the stop
+
+
+@needs_venv
+@pytest.mark.parametrize("times", [2, 3])
+def test_ollama_that_winget_does_not_install_is_tried_again_and_then_stops_the_install(tmp_path, ollama_server, times):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    (tmp_path / "bin" / "ollama.cmd").rename(tmp_path / "bin" / "ollama.ready")  # (winget brings it)
+    args = _winget_failing(tmp_path, times, 'copy /y "%~dp0ollama.ready" "%~dp0ollama.cmd" >nul\n')
+    _ollama_at(co / "install.ps1", ollama_server)
+    _answering(co / "install.ps1", {"Install Ollama now": "y", PLAMO_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    failed = "Ollama did not install (winget's exit code 1)"
+    assert _attempts_said(r.stdout) == [f"Attempt {n} of 3: {failed}. Trying again in 15 seconds." for n in (1, 2)]
+    assert len(args.read_text().splitlines()) == 3
+    if times == 2:
+        assert r.returncode == 0 and "ok: Ollama installed" in r.stdout and "TASlation is installed." in r.stdout
+        return
+    _stopped(r, tmp_path, f"{failed}; tried 3 times. {NETWORK}")
+    assert _runs_of(co, tmp_path, "translator") == 0 and not (co / ".ollama-by-install").exists()
+
+
+UPDATE_NOT_FINISHED = ("The update is not finished: the new version's files are already copied over the old version's, "
+                       "which are not kept.")
+UPDATE_GOES_ON = ("Everything installed and downloaded so far is kept: run update.cmd again with the same ZIP, and it "
+                  "goes on from there.")
+
+
+def _installed_before(co: Path, tmp: Path, ollama_server) -> dict:
+    """An installation that got to its end (`_whole_install`, its shortcut made): the environment for a run after it."""
+    env = _whole_install(co, tmp)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0 and (tmp / "start menu" / "TASlation.lnk").is_file(), r.stdout + r.stderr
+    return env
+
+
+@needs_venv
+@pytest.mark.parametrize("starts", [True, False], ids=["it starts as it is", "it does not start"])
+def test_a_stopped_update_says_so_and_keeps_the_shortcut_only_while_taslation_starts(tmp_path, ollama_server, starts):
+    """update.cmd has copied the new files when its install stops: the old version is gone, and the Start menu keeps
+    TASlation only while it starts as it is now."""
+    co = _fake_checkout(tmp_path)
+    env = _installed_before(co, tmp_path, ollama_server)
+    if starts:
+        _starting_taslation(tmp_path)
+    _fail(tmp_path, "program", 3)  # the new version's parts do not download
+    env["TASLATION_UPDATING"] = "1"
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "error: " + f"{FAILING_STEPS['program']}; tried 3 times. {NETWORK}" in _lines(r.stdout)
+    assert _lines(r.stdout)[-5:] == [NOT_FINISHED, UPDATE_NOT_FINISHED, STARTS_AS_IT_IS if starts else DOES_NOT_START,
+                                     UPDATE_GOES_ON, DETAILS]
+    assert (tmp_path / "start menu" / "TASlation.lnk").is_file() == starts
+
+
+@needs_venv
+def test_a_stop_over_an_installation_that_starts_leaves_its_shortcut(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _installed_before(co, tmp_path, ollama_server)
+    _starting_taslation(tmp_path)
+    _fail(tmp_path, "reading", 3)
+    r = _run(co / "install.ps1", env=env)
+    lines = _stopped(r, tmp_path, f"{FAILING_STEPS['reading']}; tried 3 times. {NETWORK}", installed=True)
+    assert lines[-3] == STARTS_AS_IT_IS and (tmp_path / "start menu" / "TASlation.lnk").is_file()
+    assert UPDATE_NOT_FINISHED not in lines
+
+
+@needs_venv
+def test_a_no_in_an_update_says_the_update_is_not_finished_and_asks_again_next_time(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _installed_before(co, tmp_path, ollama_server)
+    _starting_taslation(tmp_path)
+    _Ollama.models = []  # (the new version's translator is not there: PLaMo's question, no console to answer it)
+    (tmp_path / "fake_modules" / "pip-calls.txt").unlink()
+    env["TASLATION_UPDATING"] = "1"
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == DECLINED, r.stdout + r.stderr
+    assert _lines(r.stdout)[-4:] == [NO_PLAMO, UPDATE_NOT_FINISHED, STARTS_AS_IT_IS,
+                                     "To finish it, run update.cmd again with the same ZIP: it asks again."]
+    assert "[2/7]" not in r.stdout and not (tmp_path / "fake_modules" / "pip-calls.txt").exists()
+    assert (tmp_path / "start menu" / "TASlation.lnk").is_file()
+
+
+@needs_venv
+@pytest.mark.parametrize("ending", ["declined", "failed", "refused"])
+def test_the_last_lines_are_in_japanese_on_a_japanese_pc(tmp_path, ollama_server, ending):
+    ja = {english: texts["ja"] for english, texts in _texts().items()}
+    co = _fake_checkout(tmp_path)
+    env = _failing_install(co, tmp_path, ollama_server, "translator", 0)
+    env["FAKE_UI_CULTURE"] = "ja-JP"
+    if ending != "declined":  # (-Yes agrees to PLaMo's licence only through its variable: no question in Japanese)
+        env[PLAMO_CONSENT] = PLAMO_SENTENCE
+        _fail(tmp_path, "translator", 3, code=5 if ending == "refused" else 1)
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    lines = _lines(r.stdout)
+    if ending == "declined":
+        assert r.returncode == DECLINED
+        assert lines[-2:] == [ja["Installation stopped: TASlation cannot translate into {0} without PLaMo."].format("English"),
+                              ja[AGREE_LATER]]
+        return
+    if ending == "failed":
+        what = ja["the translation model did not install (exit code {0})"].format(1)
+        error = ja["{0}; tried {1} times. {2}"].format(what, 3, ja[NETWORK])
+        again = ja[GOES_ON]
+        assert ja["Attempt {0} of {1}: {2}. Trying again in {3} seconds."].format(1, 3, what, 15) in lines
+    else:
+        error = ja["{0}: " + REFUSED_ADVICE].format(ja["the translation model did not install"])
+        again = ja[REFUSED_GOES_ON]
+    assert r.returncode == (5 if ending == "refused" else 1), r.stdout + r.stderr
+    assert "error: " + error in lines and lines[-3:] == [ja[NOT_INSTALLED_YET], again, ja[DETAILS]]
 
 
 @pytest.mark.skipif(sys.prefix == sys.base_prefix, reason="needs a virtual environment's launcher to copy")
@@ -1447,20 +1788,22 @@ def _low_disk(script: Path) -> None:
 
 
 @pytest.mark.parametrize("switches", [(), ("-Yes",)], ids=["no console", "with -Yes"])
-def test_too_little_disk_stops_before_any_download(tmp_path, switches):
+def test_too_little_disk_stops_before_any_download(tmp_path, ollama_server, switches):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
     _low_disk(co / "install.ps1")
-    r = _run(co / "install.ps1", *switches, env=_tools(tmp_path, gpu=None))
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)  # (nothing to agree to: the disk is the question)
+    r = _run(co / "install.ps1", *switches, env=_tools(tmp_path, gpu=None, ollama=True))
     assert r.returncode == 1 and "too little disk space" in r.stdout and "[3/7]" not in r.stdout
     assert not (tmp_path / "bin" / "winget-args.txt").exists()
+    assert _lines(r.stdout)[-3:] == [NOT_INSTALLED_YET, GOES_ON, DETAILS]
 
 
 def test_a_person_may_go_on_with_too_little_disk(tmp_path):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
     _low_disk(co / "install.ps1")
-    _answering(co / "install.ps1", {"Install Ollama now": "", PLAMO_QUESTION: "", "Go on anyway": "y"})
+    _answering(co / "install.ps1", {"Install Ollama now": "", PLAMO_QUESTION: "y", "Go on anyway": "y"})
     r = _run(co / "install.ps1", env=_tools(tmp_path, gpu=None))
     assert "[3/7]" in r.stdout and "could not create" in r.stdout  # the fake py ends it
 
@@ -2079,28 +2422,45 @@ def test_plamo_s_licence_is_shown_and_its_agreement_passed_on(tmp_path):
 
 
 @pytest.mark.parametrize("switches", [(), ("-Yes",)], ids=["no console", "with -Yes"])
-def test_nobody_s_yes_agrees_to_plamo_and_the_install_goes_on(tmp_path, switches):
+def test_nobody_s_yes_agrees_to_plamo_and_the_install_stops(tmp_path, switches):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
     r = _run(co / "install.ps1", *switches, env=_tools(tmp_path, ollama=True, gpu=None))
     out = r.stdout
-    assert PLAMO_QUESTION in out and "PLaMo is left out" in out
-    assert "[3/7]" in out  # (the fake py ends it there)
+    assert PLAMO_QUESTION in out
+    _declined(r, tmp_path, NO_PLAMO, AGREE_LATER)
+    assert not (co / ".venv").exists()
     if switches:
         assert "-Yes does not agree to a licence" in out
 
 
-def test_a_no_to_plamo_installs_no_translator(tmp_path, ollama_server):
-    if sys.prefix == sys.base_prefix:
-        pytest.skip("needs a virtual environment's launcher to copy")
+@needs_venv
+@pytest.mark.parametrize("cmd", [False, True], ids=["a person's no", "install.cmd -Yes"])
+def test_a_no_to_plamo_installs_nothing_and_says_so_last(tmp_path, ollama_server, cmd):
     co = _fake_checkout(tmp_path)
     env = _whole_install(co, tmp_path, doctor="Ollama: model missing", doctor_code=1)
     _ollama_at(co / "install.ps1", ollama_server)
-    _answering(co / "install.ps1", {PLAMO_QUESTION: ""})
+    if cmd:  # (-Yes agrees to no licence; the wrapper passes the exit code on and does not wait)
+        r = _run_cmd(co / "install.cmd", "-Yes", env=env)
+    else:
+        _answering(co / "install.ps1", {PLAMO_QUESTION: ""})  # Enter is no
+        r = _run(co / "install.ps1", env=env)
+        assert PLAMO_QUESTION + " (PLaMo is then downloaded)? [y/N] = " in r.stdout
+    _declined(r, tmp_path, NO_PLAMO, AGREE_LATER)
+
+
+@pytest.mark.parametrize("turkish_says", ["n", "no console"])
+def test_a_no_to_the_qwen_model_stops_the_install_too(tmp_path, turkish_says):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    env = _tools(tmp_path, ollama=True, gpu=None)
+    env["FAKE_UI_CULTURE"] = "tr-TR"  # (the window's Turkish: Qwen)
+    if turkish_says == "n":
+        _answering(co / "install.ps1", {"Download the translation model": "n"})
     r = _run(co / "install.ps1", env=env)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert len((co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()) == 1  # the reading part
-    assert "The translation model was not downloaded" in r.stdout
+    _declined(r, tmp_path,
+              f"Installation stopped: TASlation cannot translate into Turkish without the translation model {QWEN_NAME}.",
+              ASKS_AGAIN)
 
 
 # ---- an automated check's agreement to the licences: with -Yes only, by a variable holding an exact sentence
@@ -2129,14 +2489,24 @@ def test_the_exact_sentence_with_yes_agrees_to_the_ocr_licence_and_says_by_whom(
     env[OCR_CONSENT] = OCR_SENTENCE
     r = _run(co / "install.ps1", "-Yes", env=env)
     out = r.stdout
-    assert r.returncode == 1 and "could not create" in out  # past the licence: the fake py ends the run there
-    assert STOPPED not in out and "[3/7]" in out
+    assert STOPPED not in out
     # the licence as the question shows it, the answer that counts and by whom, with its name and address again
     assert out.index("Their licence is CC BY-NC-SA 4.0:") < out.index("  https://creativecommons.org/licenses/by-nc-sa/4.0/")
     assert out.index("https://creativecommons.org/licenses/by-nc-sa/4.0/") < out.index(LICENCE + " [y/N] y (" + OCR_CONSENT + ")")
     assert "  " + OCR_AGREED in out
-    # that variable is for this licence only: PLaMo's is not agreed to
-    assert PLAMO_ASKED + " " + YES_DOES_NOT_AGREE in out and "PLaMo is left out" in out and PLAMO_AGREED not in out
+    # that variable is for this licence only: PLaMo's is not agreed to, and the run stops there with nothing done
+    assert PLAMO_ASKED + " " + YES_DOES_NOT_AGREE in out and PLAMO_AGREED not in out
+    _declined(r, tmp_path, NO_PLAMO, AGREE_LATER)
+
+
+def test_both_sentences_with_yes_go_past_the_questions(tmp_path):
+    co = _without_the_model(tmp_path)
+    env = _tools(tmp_path, gpu=None)
+    env[OCR_CONSENT] = OCR_SENTENCE
+    env[PLAMO_CONSENT] = PLAMO_SENTENCE
+    r = _run(co / "install.ps1", "-Yes", env=env)
+    assert r.returncode == 1 and "could not create" in r.stdout  # the fake py ends the run there
+    assert "  " + OCR_AGREED in r.stdout and "  " + PLAMO_AGREED in r.stdout and "[3/7]" in r.stdout
 
 
 @pytest.mark.parametrize("value", [OCR_SENTENCE.lower(), OCR_SENTENCE + " ", " " + OCR_SENTENCE, OCR_SENTENCE + ".",
@@ -2197,14 +2567,14 @@ def test_the_exact_sentence_with_yes_agrees_to_plamo_and_the_record_says_where(t
     assert LICENCE not in out and OCR_CONSENT not in out
     assert out.index("https://plamo.preferredai.jp/info/plamo-community-license-ja") < out.index(
         PLAMO_ASKED + " [y/N] y (" + PLAMO_CONSENT + ")") < out.index("  " + PLAMO_AGREED)
-    assert "PLaMo is left out" not in out and "TASlation is installed." in out
+    assert "TASlation is installed." in out
     translator = (co / "setup_models.py").with_name("setup-args.txt").read_text().splitlines()[-1]
     assert translator.endswith(f"--translator-for English --brief --plamo-agreed {PLAMO_CONSENT} "
-                               f"--ollama-exe {tmp_path / 'bin' / 'ollama.cmd'}")
+                               f"--ollama-exe {tmp_path / 'bin' / 'ollama.cmd'} --keep-partial")
 
 
 @pytest.mark.parametrize("value", [PLAMO_SENTENCE.upper(), OCR_SENTENCE, "I agree"], ids=["capitals", "the OCR one", "short"])
-def test_a_wrong_sentence_for_plamo_leaves_it_out_and_says_so(tmp_path, value):
+def test_a_wrong_sentence_for_plamo_stops_the_install_and_says_so(tmp_path, value):
     co = _fake_checkout(tmp_path)
     shutil.rmtree(co / ".venv")
     env = _tools(tmp_path, ollama=True, gpu=None)
@@ -2212,8 +2582,7 @@ def test_a_wrong_sentence_for_plamo_leaves_it_out_and_says_so(tmp_path, value):
     r = _run(co / "install.ps1", "-Yes", env=env)
     out = r.stdout
     assert PLAMO_ASKED + " " + _not_agreed(PLAMO_CONSENT) in out and PLAMO_AGREED not in out
-    assert "PLaMo is left out" in out and "translation model PLaMo 3 Translate 2B (not now)" in out
-    assert "[3/7]" in out  # (the install goes on; the fake py ends it there)
+    _declined(r, tmp_path, NO_PLAMO, AGREE_LATER)
 
 
 def test_each_licence_has_its_own_variable(tmp_path):
@@ -2772,12 +3141,13 @@ def test_on_a_japanese_pc_the_questions_are_in_japanese(tmp_path):
     env["FAKE_UI_CULTURE"] = "ja-JP"
     r = _run(co / "install.ps1", env=env)
     out = r.stdout
-    assert r.returncode == 1 and not (co / ".venv").exists() and "[2/7]" not in out  # Enter is no to the licence
+    assert r.returncode == DECLINED and not (co / ".venv").exists() and "[2/7]" not in out  # Enter is no to the licence
     assert "asked:   " + ja["Translate into which language? A number or a name; Enter: {0}"].format("English") in out
     for english in ("This computer", "The questions come first. After them you can leave it running.",
-                    "TASlation itself is MIT, but it cannot read pages without these models.",
-                    "Installation stopped: TASlation cannot read pages without the OCR models."):
+                    "TASlation itself is MIT, but it cannot read pages without these models."):
         assert ja[english] in out, english
+    assert _lines(out)[-2:] == [ja["Installation stopped: TASlation cannot read pages without the OCR models."],
+                                ja["Nothing was installed. To agree later, run install.cmd again."]]
     assert "asked:   " + ja[LICENCE] + " [y/N]" in out
     assert LICENCE not in out and STOPPED not in out
     assert "manga-ocr-charspot-small" in out and "https://creativecommons.org/licenses/by-nc-sa/4.0/" in out

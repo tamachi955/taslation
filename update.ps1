@@ -22,6 +22,11 @@ copied over, and your data folder (~/.taslation, or TASLATION_STATE_DIR) is not
 touched. The program folder taslation\ is made the same as the new one (a file
 the new version no longer has goes); nothing else is deleted. A ZIP is unpacked
 into a temporary folder, which is removed afterwards.
+When the installation then stops (after a no to a question, or a download that
+failed three times), the new files are already in place and the old version is
+not kept; its last lines say so. Run update.cmd again with the same ZIP, and it
+goes on from there. The Start-menu shortcut stays only if TASlation starts as
+it is; the exit code is install.ps1's (0 when it got to its end).
 This script uses no network: it reads only the ZIP or folder you give it.
 
 .PARAMETER From

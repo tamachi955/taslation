@@ -381,13 +381,14 @@ def plamo_dir(models_dir: Path | str) -> Path:
     return Path(models_dir) / PLAMO_DIRNAME
 
 
-def remove_leftovers(models_dir: Path | str) -> list[Path]:
-    """The GGUF and any ``.part`` of a download in PLaMo's folder, removed (its Modelfile and licence texts stay)."""
+def remove_leftovers(models_dir: Path | str, keep_parts: bool = False) -> list[Path]:
+    """The GGUF and any ``.part`` of a download in PLaMo's folder, removed (its Modelfile and licence texts stay);
+    with *keep_parts* the ``.part`` files stay, for a next try to go on from (install.ps1's attempts)."""
     gone: list[Path] = []
     folder = plamo_dir(models_dir)
     if not folder.is_dir():
         return gone
-    for path in [*folder.glob("*.gguf"), *folder.glob("*.part")]:
+    for path in [*folder.glob("*.gguf"), *([] if keep_parts else folder.glob("*.part"))]:
         try:
             path.unlink()
             gone.append(path)
