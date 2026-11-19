@@ -171,7 +171,7 @@ External program and models (not bundled, not required to install TASlation):
 
 ## Hyphenation patterns (bundled) and line breaking
 
-The typesetter hyphenates seven target languages with Liang's patterns, read by `taslation/render/breaks.py` (an
+The typesetter hyphenates eight target languages with Liang's patterns, read by `taslation/render/breaks.py` (an
 implementation of Liang's algorithm written for TASlation) from the files below. They are verbatim copies, LF line
 endings, of [hyph-utf8](https://github.com/hyphenation/tex-hyphen) at commit `5684c0f51c0b81133db2efbe60a408b4155a3ff5`
 (`hyph-utf8/tex/generic/hyph-utf8/patterns/tex/`), in `taslation/render/hyphenation/`, shipped with the package. Each
@@ -181,6 +181,7 @@ taken; where it offers a choice, TASlation takes the licence named in the table.
 
 | File | Language | Copyright (from its header) | Licence |
 |---|---|---|---|
+| `hyph-en-us.tex` | English (American spelling) | 1990, 2004, 2005 Gerard D.C. Kuiken; it holds D. E. Knuth's `hyphen.tex` patterns and exceptions unchanged | Kuiken's notice in its header (no licence name): copying and distribution, with or without modification, in any medium and without royalty, provided the copyright notice and the notice are kept |
 | `hyph-de-1996.tex` | German (reformed spelling) | 2013-2024 Stephan Hennig, Werner Lemberg, Günter Milde, Sander van Geloven, Georg Pfeiffer, Gisbert W. Selke, Tobias Wendorf, Keno Wehr (Deutschsprachige Trennmustermannschaft) | MIT |
 | `hyph-fr.tex` | French | 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer | MIT |
 | `hyph-es.tex` | Spanish | 1993, 1997, 2001-2019 Javier Bezos, CervanTeX | MIT/X11 |
@@ -189,10 +190,22 @@ taken; where it offers a choice, TASlation takes the licence named in the table.
 | `hyph-pl.tex` | Polish | 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko | MIT (one of the licences the file offers) |
 | `hyph-nl.tex` | Dutch | 1996 Piet Tutelaers | MIT (named in the header, without its text) |
 
+The English file is hyph-utf8's American English file (once `ushyphmax.tex`): Gerard D.C. Kuiken's patterns added to
+the patterns and the exception list of D. E. Knuth's `hyphen.tex`, the Plain TeX hyphenation tables, which it holds
+unchanged (its lines 59 to 4507 and 5002 to 5018, as its comments say). Its header gives Kuiken's notice as its licence:
+copying and distribution of the file, with or without modification, are permitted in any medium without royalty,
+provided the copyright notice and the notice itself are preserved. `hyphen.tex`'s own notice, which the file does not
+repeat, permits unlimited copying and redistribution of that file as long as it is not modified, and modifications
+only in a file not named `hyphen.tex`. Both notices were judged permissive enough to ship the file as published, like
+the others: it is shipped unchanged, under its own name, its header with it. The header asks for at least two letters
+before a hyphen and three after it, as the typesetter does for every language (`HYPHEN_HEAD`, `HYPHEN_EDGE`), and
+names a known fault of the patterns: "democrat" is broken de-mo-c-rat instead of dem-o-crat.
+
 SHA256 of each file as committed:
 
 | File | SHA256 |
 |---|---|
+| `hyph-en-us.tex` | `f4ffcd96c5cbc886bdad23f95dcae8edc3cd3620eae62f7946eceda97c4e68f8` |
 | `hyph-de-1996.tex` | `374ad1ce3263f8a2791ec070ef9b516c532dae64456f3fb656e617e8ae53a9d3` |
 | `hyph-fr.tex` | `526cad6fe8f52fcd3caa3fcaf667cb1740cfc14bca198680e00dc343a84594de` |
 | `hyph-es.tex` | `6a2e5f39a991a23d1cd8a23dbd0f6fe96a9f07561a6695f4f3320f47030e236c` |
@@ -204,8 +217,10 @@ SHA256 of each file as committed:
 Not taken, as their licences are not clearly permissive: Russian (`hyph-ru.tex`, LPPL 1.2 only), Indonesian
 (`hyph-id.tex`, GPL-2), Turkish (`hyph-tr.tex`, LPPL 1). For these, and Ukrainian, TASlation uses simple rules of its
 own instead (`breaks.py`: Russian and Ukrainian by their vowels, the soft and hard signs and й staying with the letter
-before them; Turkish and Indonesian by their syllables). Vietnamese is never hyphenated; English keeps the typesetter's
-own rule. The lists of words a line should not end on, per language, are written for TASlation.
+before them; Turkish and Indonesian by their syllables). Vietnamese is never hyphenated; a target language with neither
+patterns nor a rule here keeps the typesetter's own rule. In English a word that fits nowhere, split as a last resort,
+is split at one of its hyphenation points where one fits. The lists of words a line should not end on, per language,
+are written for TASlation.
 
 Thai has no spaces between its words. Where Windows has its ICU library (`icu.dll` in the system folder, part of
 Windows 10 version 1703 and later), TASlation asks its line-break iterator, through ctypes, where Thai words end; nothing

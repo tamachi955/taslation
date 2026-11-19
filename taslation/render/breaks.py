@@ -13,12 +13,14 @@ dictionary a line may still break inside a word, but only between its syllables.
 
 Hyphenation (`hyphen_points`) follows Liang's algorithm (F. M. Liang, "Word Hy-phen-a-tion by Com-put-er", Stanford,
 1983; written here from that description) with the patterns of the hyph-utf8 project (`PATTERNS`) for the languages
-whose patterns are under a permissive licence; the files in ``hyphenation/`` are kept as published, their headers
-with them (the licences and sources in docs/THIRD_PARTY.md). Elsewhere rules of this module's own: any Cyrillic word
+whose patterns are under a permissive licence (English in its American spelling, German, French, Spanish, Italian,
+Portuguese, Polish, Dutch), each file's list of exceptions too (a word listed there takes a hyphen only where the list
+says, one listed whole never); the files in ``hyphenation/`` are kept as published, their headers with
+them (the licences and sources in docs/THIRD_PARTY.md). Elsewhere rules of this module's own: any Cyrillic word
 (Russian, Ukrainian: the Russian patterns are under the LPPL only) by its vowels, Turkish and Indonesian (their
 patterns are under the LPPL and the GPL) by their syllables, which both languages divide by plain rules; Vietnamese
-not at all, its words being single syllables. English, and a language without a rule here, is left to the
-typesetter's own rule (`typeset.hyphen_points`).
+not at all, its words being single syllables. A language without patterns or a rule here (and no language given) is
+left to the typesetter's own rule (`typeset.hyphen_points`).
 
 `WEAK_WORDS` and `TITLES` list, per language, the short words that lean on the next one (articles, prepositions,
 conjunctions: a line should not end on them) and the titles that go with a name after them; written for this project.
@@ -41,8 +43,10 @@ HERE = Path(__file__).resolve().parent / "hyphenation"
 
 # Other names a target language may be given by (its first word in lower case, as `typeset._language` takes it)
 ALIASES = {
-    "en": "english", "de": "german", "deutsch": "german", "fr": "french", "français": "french", "francais": "french",
-    "es": "spanish", "español": "spanish", "espanol": "spanish", "it": "italian", "italiano": "italian",
+    "en": "english", "en-us": "english", "en_us": "english", "en-gb": "english", "en_gb": "english",
+    "american": "english", "british": "english", "de": "german", "deutsch": "german", "fr": "french",
+    "français": "french", "francais": "french", "es": "spanish", "español": "spanish", "espanol": "spanish",
+    "it": "italian", "italiano": "italian",
     "pt": "portuguese", "pt-br": "portuguese", "português": "portuguese", "portugues": "portuguese",
     "brazilian": "portuguese", "pl": "polish", "polski": "polish", "nl": "dutch", "nederlands": "dutch",
     "ru": "russian", "русский": "russian", "uk": "ukrainian", "українська": "ukrainian", "tr": "turkish",
@@ -63,6 +67,7 @@ def language_key(language: str) -> str:
 
 # language -> (its file in hyphenation/, the fewest letters before a hyphen and after it, as the file asks)
 PATTERNS: dict[str, tuple[str, int, int]] = {
+    "english": ("hyph-en-us.tex", 2, 3),  # Kuiken's notice (copying permitted); Knuth's hyphen.tex inside, unchanged
     "german": ("hyph-de-1996.tex", 2, 2),  # MIT
     "french": ("hyph-fr.tex", 2, 2),  # MIT
     "spanish": ("hyph-es.tex", 2, 2),  # MIT
@@ -243,8 +248,8 @@ def hyphen_points(word: str, language: str, head: int = 2, edge: int = 3) -> tup
     """Where *word* (its letters only) may take a hyphen in *language* (a `language_key`), as offsets into it: by
     *language*'s patterns (`PATTERNS`, `_liang`), a rule of the language (Turkish, Indonesian; none in Vietnamese), or,
     for a Cyrillic word in any language, `_cyrillic`; never nearer the word's start than *head* letters nor its end
-    than *edge*. None where there is no rule here for it (an English word, a Latin word in a language with no rule
-    here, another script): the typesetter's own rule decides."""
+    than *edge* (nor than the pattern file asks). None where there is no rule here for it (a Latin word in no language
+    or in one with no patterns or rule here, another script): the typesetter's own rule decides."""
     script = _script(word)
     if script == "cyrillic":
         return tuple(_cyrillic(word, head, edge))

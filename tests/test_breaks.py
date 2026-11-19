@@ -1,9 +1,10 @@
 """Line breaks by language (`render.breaks`): Thai breaks between its words only (Windows' break iterator where it is
 there, a rule of clusters and syllables everywhere), its spaces kept; each target language's words take a hyphen only
-where its patterns or rules allow (German, French, Spanish, Italian, Portuguese, Polish and Dutch by the bundled
-patterns, Russian and Ukrainian by their vowels, Turkish and Indonesian by their syllables, Vietnamese never); English
-exactly as before; the words a line should not end on, per language; and the pattern files under a permissive licence.
-The samples are ordinary words and sentences written for these tests."""
+where its patterns or rules allow (English, German, French, Spanish, Italian, Portuguese, Polish and Dutch by the
+bundled patterns, Russian and Ukrainian by their vowels, Turkish and Indonesian by their syllables, Vietnamese never;
+English in detail in test_breaks_english.py); no language exactly as before; the words a line should not end on, per
+language; and the pattern files under a permissive licence, as docs/THIRD_PARTY.md lists them. The samples are
+ordinary words and sentences written for these tests."""
 from __future__ import annotations
 
 import re
@@ -64,6 +65,11 @@ def test_some_points_exactly():
     assert hyphen_points("представление", "Russian") == [4, 8, 10]
     assert hyphen_points("kitaplık", "Turkish") == [2, 5] and hyphen_points("İstanbullu", "Turkish") == [2, 5]
     assert hyphen_points("pengetahuan", "Indonesian") == [2, 5, 7]
+    # (as before English took its patterns)
+    assert hyphen_points("malheureusement", "French") == [3, 6, 9, 11]
+    assert hyphen_points("responsabilidad", "Spanish") == [3, 6, 8, 10, 12]
+    assert hyphen_points("assolutamente", "Italian") == [2, 4, 6, 8]
+    assert hyphen_points("Infelizmente", "Portuguese (Brazil)") == [2, 4, 7]
 
 
 def test_the_cyrillic_rule_keeps_signs_and_short_i_with_the_letter_before():
@@ -84,20 +90,29 @@ def test_vietnamese_never_and_capitals_never():
     assert hyphen_points("Kunst", "German") == []  # under eight letters
 
 
-def test_english_and_no_language_keep_their_own_rule():
+def test_no_language_keeps_the_own_rule_and_english_takes_its_patterns():
     for word in ("wonderful", "children", "extraordinarily", "impossible", "unbelievably", "backpacker", "laughter",
                  "Entschuldigung", "complètement", "responsibilities", "congratulations"):
-        assert hyphen_points(word, "English") == hyphen_points(word) == hyphen_points(word, ""), word
-    assert hyphen_points("wonderful", "English") == [3, 6]
-    # a Latin word in a Cyrillic language keeps the English-like rule; a Cyrillic word gets the vowel rule anywhere
+        assert hyphen_points(word) == hyphen_points(word, ""), word
+        assert hyphen_points(word, "English") == list(breaks.hyphen_points(word, "english", 2, 3)), word
+    assert hyphen_points("wonderful") == [3, 6] == hyphen_points("wonderful", "English")
+    assert hyphen_points("unbelievably") == [2, 4, 7, 9]  # the own rule: un-be-lie-va-bly
+    assert hyphen_points("unbelievably", "English") == [2, 4, 8]  # the patterns: un-be-liev-ably
+    # a Latin word in a Cyrillic language keeps the own rule; a Cyrillic word gets the vowel rule anywhere
     assert hyphen_points("wonderful", "Russian") == [3, 6]
     assert hyphen_points("представление") == hyphen_points("представление", "Russian") == [4, 8, 10]
+    assert hyphen_points("представление", "English") == [4, 8, 10]
 
 
 def test_language_names_and_codes():
     assert breaks.language_key("Portuguese (Brazil)") == "portuguese" == breaks.language_key("pt")
     assert breaks.language_key("Deutsch") == "german" and breaks.language_key("") == ""
     assert hyphen_points("Geschwindigkeitsbegrenzung", "de") == hyphen_points("Geschwindigkeitsbegrenzung", "German")
+
+
+# the licence a pattern file's header gives as its text, without a name (the English file's): what it must say
+NOTICE = ("Copying and distribution of this file, with or without modification,", "are permitted in any medium",
+          "provided the copyright notice and this notice are preserved.")
 
 
 def test_the_bundled_patterns_are_permissively_licensed_and_read():
@@ -110,10 +125,31 @@ def test_the_bundled_patterns_are_permissively_licensed_and_read():
                 break
             block.append(line)
         names = [m.group(1).strip() for line in block if (m := re.search(r"name:\s*(.+)", line))]
-        assert any(re.match(r"(MIT|BSD)", n) for n in names), (name, names)
-        assert not any("GPL" in n for n in names), (name, names)
+        text = " ".join(line.lstrip("% ").strip() for line in block if "text:" not in line)
+        permissive = (not names and text.startswith(NOTICE[0]) and all(part in text for part in NOTICE)
+                      and len(text.split()) == 26)  # (and the two words between: nothing else)
+        assert any(re.match(r"(MIT|BSD)", n) for n in names) or permissive, (name, names, text)
+        assert not any("GPL" in n for n in names) and "GPL" not in text, (name, names)
         table, longest, _exceptions = breaks._patterns(language)
         assert len(table) > 100 and longest >= 5, name
+
+
+def test_the_bundled_files_are_those_the_third_party_notes_list():
+    """Every pattern file is in docs/THIRD_PARTY.md with the SHA256 it has as committed (kept as published, LF line
+    ends: a checkout that writes CRLF is read as committed) and is one `PATTERNS` reads; the notes count the languages
+    hyphenated by patterns as many as there are."""
+    import hashlib
+    from pathlib import Path
+
+    notes = (Path(__file__).resolve().parents[1] / "docs" / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    listed = dict(re.findall(r"^\| `(hyph-[\w-]+\.tex)` \| `([0-9a-f]{64})` \|$", notes, re.MULTILINE))
+    files = {p.name: hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+             for p in breaks.HERE.glob("*.tex")}
+    assert files == listed
+    assert set(files) == {name for name, _left, _right in breaks.PATTERNS.values()}
+    counts = {"seven": 7, "eight": 8, "nine": 9}
+    said = re.search(r"The typesetter hyphenates (\w+) target languages with Liang's patterns", notes)
+    assert said and counts.get(said.group(1)) == len(breaks.PATTERNS)
 
 
 def test_hyphenation_reaches_the_rescue_and_the_rectangle():
