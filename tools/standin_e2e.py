@@ -4,7 +4,8 @@ part of a release.
 
     python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,w,x,f,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
-                                [--front viewer|as-is] [--cancel-soft-ms 700]
+                                [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
+                                [--ocr-runs-on auto|cpu|gpu]
 
 What runs, all on this computer:
 
@@ -2754,7 +2755,7 @@ def run(args: argparse.Namespace) -> int:
         raise SystemExit("neither Chrome nor Edge is installed here")
     report["browser"] = found[0]
 
-    url = "http://127.0.0.1:11434"
+    url = args.ollama_url.rstrip("/")
     canned: Canned | None = None
     ps_before: list[str] | None = None
     mode = "canned" if args.canned else "real"
@@ -2852,7 +2853,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     profiles.set_margins(info, area, large=True)
     settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
                         flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
-                        models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url)
+                        models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
+                        ocr_runs_on=args.ocr_runs_on)
     settings.validate()
     errorlog.setup(settings)
     tap = LogTap(notes)
@@ -3344,6 +3346,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
                     help="scenario x: how long the screens of little text stay soft")
     ap.add_argument("--canned", action="store_true", help="the canned translator, not the Ollama on this computer")
+    ap.add_argument("--ollama-url", default="http://127.0.0.1:11434",
+                    help="the Ollama the window asks, on this computer (default: the app's; a second server of the "
+                         "developer's own on another port, set up otherwise, is never started or stopped here)")
+    ap.add_argument("--ocr-runs-on", default="auto", choices=("auto", "cpu", "gpu"),
+                    help="the setting ocr_runs_on of the window (default: the app's, auto)")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
     ap.add_argument("--browser", default="auto", choices=("auto", "chrome", "edge"))

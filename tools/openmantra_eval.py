@@ -40,7 +40,10 @@ Inc.; CC BY-NC 4.0) is fetched by ``fetch_openmantra.py`` into ``~/.taslation/da
 ``--glossary FILE`` gives every series a series sheet (JSON ``{series: {"characters": {ja: rendering}, "terms": {ja:
 rendering}}}``), as the reader would write one: an upper bound for what names and terms held fixed can do. ``--scan
 FILE`` keeps the detection and the OCR of the pages in FILE (made when it is missing, with the dataset's hash and the
-detection settings, read again when they agree): the translation arms then start at once. ``--dump FILE`` writes
+detection settings, read again when they agree): the translation arms then start at once. ``--geometry-scan FILE``
+does the same for the official arm alone and keeps no text: the detection's numbers and every gold line's geometry,
+not the OCR's readings of the regions (so that runs of one setting against another set every line in the same
+place, with nothing of a page's text on disk). ``--dump FILE`` writes
 every line's Japanese, translation and reference to FILE (JSON lines, for a person to look at; never printed).
 
     python tools/openmantra_eval.py                          # all 214 pages (detection and OCR ~10 min, translation ~45)
@@ -906,6 +909,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Ollama's sampling seed (run k uses SEED + k - 1); default none, a fresh draw every time, as the app")
     ap.add_argument("--iou", type=float, default=IOU, help="least overlap for a region to count as a gold box")
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR in this file and reuse them (no image)")
+    ap.add_argument("--geometry-scan", type=Path,
+                    help="as --scan for the official arm alone: the detection's numbers and the lines' geometry, no "
+                         "text and no image (the OCR's readings are not kept)")
     ap.add_argument("--glossary", type=Path, help="a series sheet per series, JSON {series: {characters: {}, terms: {}}}")
     ap.add_argument("--names", type=Path, help="the names to score, JSON {series: {ja: [[reference, ...], [others]]}}")
     ap.add_argument("--dump", type=Path, help="write every line's Japanese, translation and reference here (not printed)")
@@ -916,6 +922,9 @@ def main(argv: list[str] | None = None) -> int:
     arms = ["official", "e2e"] if args.arm == "both" else [args.arm]
     if "e2e" in arms and args.no_ocr:
         raise SystemExit("the end-to-end arm needs the OCR (leave out --no-ocr)")
+    if args.geometry_scan and (args.scan or "e2e" in arms):
+        raise SystemExit("--geometry-scan is for the official arm alone, without --scan")
+    scan_path = args.scan or args.geometry_scan
 
     started = datetime.now()
     t_start = time.monotonic()
@@ -961,12 +970,14 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict[str, Any]] = []
     geos: dict[tuple[str, int], list[Any]] = {}
     e2e: dict[tuple[str, int], list[dict[str, Any]]] = {}
-    key = scan_key(args.root, s, args, pages) if args.scan else None
-    scanned = load_scan(args.scan, key) if args.scan and args.scan.exists() else None
+    key = scan_key(args.root, s, args, pages) if scan_path else None
+    if key is not None and args.geometry_scan:
+        key["text"] = False  # (a file without the end-to-end arm's readings)
+    scanned = load_scan(scan_path, key) if scan_path and scan_path.exists() else None
     if scanned is not None:
         rows, geos, e2e = scanned["rows"], scanned["geos"], scanned["e2e"]
         seconds = {"detection_ocr": scanned["seconds"], "scan_reused": True}
-        print(f"detection and OCR from {args.scan}", flush=True)
+        print(f"detection and OCR from {scan_path}", flush=True)
     else:
         from taslation.pipeline import Pipeline
 
@@ -994,8 +1005,8 @@ def main(argv: list[str] | None = None) -> int:
                   + (f", read as text {row['found']} ({row['found_matched']} matched)" if "found" in row else "")
                   + f"  [{sum(row['seconds'].values()):.1f} s]", flush=True)
         seconds = {"detection_ocr": round(time.monotonic() - t0, 1)}
-        if args.scan:
-            save_scan(args.scan, key, rows, geos, e2e, seconds["detection_ocr"])
+        if scan_path:
+            save_scan(scan_path, key, rows, geos, {} if args.geometry_scan else e2e, seconds["detection_ocr"])
 
     translation: dict[str, Any] = {}
     dump = open(args.dump, "w", encoding="utf-8") if args.dump and not args.no_translate else None
