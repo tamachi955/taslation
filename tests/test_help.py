@@ -149,7 +149,7 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
             (catalog["Full screen"],),
         "In the Reader role the page keys and clicks on the page go to the viewer, and Auto is on until you leave, so each page you turn is translated.":
             (catalog["Reader"],),
-        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. Auto stays as you set it. To change the role or the book's name, or to start a whole-book run, leave the full screen first.":
+        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, or to start a whole-book run, leave the full screen first.":
             (catalog["Translator"],),
         "A bubble stays untranslated: press F5. If it is still empty, choose the Translator role and drag from outside the text to draw a rectangle round it; if an orange box is already there, drag or resize that box instead.":
             (catalog["Translator"],),
