@@ -770,7 +770,8 @@ def test_a_region_lettered_on_its_own_takes_its_panel_along(settings, monkeypatc
     column.panel = (390, 50, 900, 450)
     seen = []
     real = Pipeline._set_text
-    monkeypatch.setattr(Pipeline, "_set_text", lambda self, image, r, *a: seen.append(r.panel) or real(self, image, r, *a))
+    monkeypatch.setattr(Pipeline, "_set_text",
+                        lambda self, image, r, *a, **k: seen.append(r.panel) or real(self, image, r, *a, **k))
     p.letter_region(page, column, "Lorem ipsum dolor sit")
     assert seen == [(390 - 320, 50 - 0, 900 - 320, 450 - 0)]
 
