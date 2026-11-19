@@ -88,7 +88,7 @@ TASlation の最大化を解除し、ビューアが端に少し見えるよう�
 * F5（翻訳）は、ビューアが前面のあいだも TASlation が受け取ります（ブラウザ自身の再読み込みにはなりません）。TASlation のフルスクリーンの中では
   F11 と Esc も TASlation のもので、フルスクリーンを終えます（翻訳者の役割では、Esc はまず選択中の領域の選択を外します）。
   それ以外の F11 と Esc、それにページ送りのキーはビューアのものです（ビューア自身の全画面の切り替えに使えます）。これらのキーを受け取るのはこのモードのあいだ、ビューアか TASlation が前面にあるときだけです。
-* 文字を入力する欄（書名、翻訳先）をクリックしたとき、翻訳者モードでページを押したとき、ダイアログ（本の設定、シリーズシート、
+* 文字を入力する欄（シリーズ、巻、翻訳先）をクリックしたとき、翻訳者モードでページを押したとき、ダイアログ（本の設定、シリーズシート、
   編集など）を開いたときは、そのあいだだけ TASlation が普通のウィンドウに戻ってキー入力を受け取ります。本をクリックするか
   ダイアログを閉じると元に戻ります。
 * 本が別のモニターにあるときは何も変わりません。
@@ -107,7 +107,7 @@ TASlation の最大化を解除し、ビューアが端に少し見えるよう�
   F5、元に戻す、Delete、Tab など翻訳者モードのキーも使え、領域の枠、番号、印もウィンドウと同じに出ます。クリックは表示中のページにかかわらず TASlation のもので、
   ビューアには渡しません（まだ訳していないページをクリックすると F5 を押すよう表示します）。ページ送りのキーはこれまでどおりビューアのページをめくります。「自動」は設定したままです。
   領域の編集やほかのダイアログはフルスクリーンの上に開き、閉じるとフルスクリーンに戻ります。ステータス行は長さに応じて長めに（最長12秒）表示します。
-  役割の切り替え、書名・シリーズ・巻の欄、1冊まるごとの読み取りの開始はツールバーが要るので、フルスクリーンを抜けてから行います（「1冊まるごと読む...」にキーを割り当てていても、フルスクリーンではそう表示します）。
+  役割の切り替え、シリーズ・巻の欄、1冊まるごとの読み取りの開始はツールバーが要るので、フルスクリーンを抜けてから行います（「1冊まるごと読む...」にキーを割り当てていても、フルスクリーンではそう表示します）。
 
 F11 で元のウィンドウに戻ります。Esc でも戻ります（翻訳者の役割では、Esc はまず選択中の領域の選択を外します）。マウスで戻るときは、ポインターを画面の上端まで動かすと右上に薄く「✕ フルスクリーンを終える（F11）」が出るので、
 それをクリックします（ポインターを下ろすと消えます。ほかの場所のクリックはこれまでどおりです）。`taslation gui --full-screen` では、
@@ -458,7 +458,7 @@ Italiano、Nederlands、Polski、Русский、Türkçe、Bahasa Indonesia、
 * **キーボード**: ページ上で Tab を押すと読む順に次の領域を、Shift+Tab で前の領域を選びます（最後の次は最初に戻ります。
   ステータスバーに何番目かが出ます）。Alt+矢印キーで選んだ領域を 1 ピクセル、Alt+Shift+矢印キーで 10 ピクセル動かし、
   キーを放して少したつと1回の移動として保存します（Ctrl+Z で1回で戻せます）。読者のときの Alt+矢印キーは、これまでどおり矢印キーとしてビューアに渡ります。
-  書名や翻訳先の欄で Esc を押すと、ほかには何もせずにページにキー入力が戻ります（実行中の処理を止めることはありません）。
+  シリーズ・巻・翻訳先の欄で Esc を押すと、ほかには何もせずにページにキー入力が戻ります（実行中の処理を止めることはありません）。
 * **書式のコピーと貼り付け**: ワープロの書式のコピーと同じく、選んだ領域で Ctrl+Shift+C を押すとその書式（フォント、サイズ、太字・斜体、
   揃え、行間・字間、傾き、文字列の方向、文字の色と縁取り）を覚え、別の領域を選んで Ctrl+Shift+V を押すとその書式にします
   （Ctrl+Z で1回で戻せます）。種別（台詞・心の声・叫びなど）は翻訳のときにモデルに伝える前提情報なので、書式と一緒には写しません。
@@ -562,10 +562,11 @@ Italiano、Nederlands、Polski、Русский、Türkçe、Bahasa Indonesia、
   編集画面の「もう一度訳す」は前の台詞を文脈にしてその吹き出しを訳し直させます（別案を並べる機能はありません）。
   その訳でも、シリーズ設定と違う綴りの名前や用語を機械的にそろえます。
   前の同じセリフから使い回した訳は、編集画面がそう伝えます（「短いセリフの使い回し」）。「もう一度訳す」で新しい訳が出ます。
-  辞書にない語を含む訳文も要確認にするには、`pyspellchecker` を入れます（`pip install pyspellchecker`。
-  MIT ライセンスで、英語・スペイン語・フランス語・ポルトガル語・ドイツ語・イタリア語・ロシア語・オランダ語の単語リストをディスクに持ちます。
-  シリーズ設定の名前と表記は対象外です）。設定のスペルチェック（`spellcheck`、既定でオン）が有効なのにこのパッケージが入っていないときは、
-  編集画面を最初に開いたときに一度だけそう伝えます（ネットからは何も取得しません）。
+  辞書にない語を含む訳文も要確認にするには、設定のスペルチェック（設定ファイルの `spellcheck = true`。既定でオフ）を使います。
+  その単語リストは任意の追加分で、TASlation はインストールしません。Python パッケージ `pyspellchecker`（MIT ライセンス。英語・スペイン語・フランス語・ポルトガル語・ドイツ語・イタリア語・ロシア語・オランダ語の単語リストをディスクに持ちます）で、
+  これが TASlation の Python に追加されているときだけチェックが働きます。シリーズ設定の名前と表記は対象外です。
+  設定がオンなのに単語リストが入っていないときは、編集画面を最初に開いたときに一度だけそう伝え、設定をオフにする場所
+  （「ツール > 設定...」の「設定ファイルを開く」）も示します。ネットからは何も取得しません。
 * 「元に戻す」（Ctrl+Z）は表示中のページの変更（訳文や注記の編集、領域の移動・大きさの変更・追加・削除（複数の領域をまとめて
   した変更も1回）、保存した書式、種別と文字サイズの設定、
   「このページを除外」、読み順の設定、「訳し直す」）を新しい順に取り消し、
@@ -1019,7 +1020,7 @@ size_emphasis = true         # the part the original letters larger is set large
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
 text_scale = 1.0             # the lettering size (0.5-2.0): 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering"
-spellcheck = true            # flag a word the dictionary does not know (needs `pip install pyspellchecker`, offline word lists)
+spellcheck = false           # flag a word the dictionary does not know; its word lists (the pyspellchecker package) are an optional extra that TASlation does not install
 take_columns_beyond = false  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (a book setting too)
 next_page_key = "Left"       # key that shows the next page in your viewer
 context_mode = true          # batch: read the whole book first, then translate it with the whole story as context

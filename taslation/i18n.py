@@ -86,12 +86,13 @@ JA: dict[str, str] = {
         "このページを訳し直しますか？ 今の訳文は置き換えられます。",
     "Translate a page first (the book needs a name).": "先にページを翻訳してください（書名が必要です）。",
     "Reader mode: keys and clicks on the page go to the viewer.": "読者モード: ページ上のキーとクリックはビューアに渡されます。",
-    "Could not record the rectangle: give the book a name first (the Book field).":
-        "矩形を記録できません: 先に書名を入力してください（「書名」欄）。",
+    "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).":
+        "矩形を記録できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
     "Text rectangle added; reading and translating it...": "文字の矩形を追加しました。読み取って翻訳します...",
-    "Could not keep the translation: give the book a name first (the Book field).":
-        "訳文を保存できません: 先に書名を入力してください（「書名」欄）。",
-    "Give the book a name first (the Book field).": "先に書名を入力してください（「書名」欄）。",
+    "Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).":
+        "訳文を保存できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
+    "Give the book a name first (its series in the Series field, and its volume beside it if it has one).":
+        "先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
     # batch dialog
     "Read the whole book": "1冊まるごと読む",
     "Start": "開始",

@@ -55,7 +55,7 @@ max_font_size = 64
 text_scale = 1.0              # the lettering's size (0.5-2.0; the dialogs offer 80-200 %): 0.9 sets every translation a tenth smaller, 1.2 larger where the page's sizes held it back (never over its bubble or max_font_size); a book can have its own (Book settings... in translator mode)
 line_spacing = 1.12
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
-spellcheck = true            # flag a word the dictionary does not know (pip install pyspellchecker; offline word lists)
+spellcheck = false           # flag a word the dictionary does not know; its word lists (the pyspellchecker package) are an optional extra that TASlation does not install
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering" for review
 uppercase = false
 size_emphasis = true          # the part of a bubble the original letters larger is set larger in the translation too, where it is found there (one or two requests beside the page's for such a bubble; the words never change) and the bubble holds both sizes; false: every translation at one size

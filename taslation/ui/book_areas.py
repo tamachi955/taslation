@@ -45,7 +45,7 @@ AREA_BACK = "The area ignored on all pages is taken back: text is looked for the
 AREA_AGAIN = "The area is ignored on all pages again."
 AREA_IN_A_RUN = "The area was not added: a run is reading the book. Try again once it is done."
 SELECT_FIRST = "Select a region first (click it)."
-NO_BOOK = "Could not record the rectangle: give the book a name first (the Book field)."
+NO_BOOK = "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 SAVE_FAILED = "Could not save the change: {error}"
 OFFER_POLL_MS = 100  # how often the question after a drop looks whether the drop is stored and the window free
 # Book settings' button that keeps the areas listed as the series' areas, its tip, and what it says once they are

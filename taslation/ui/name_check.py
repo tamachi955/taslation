@@ -104,14 +104,14 @@ def _sheet_put(window: Any, book: str, language: str, name: str, rendering: str 
 def _can_change(window: Any, found: Found | None) -> Any:
     """The cache to change, when the window can change it now; else None, and the status line says why."""
     if found is None:
-        window.say("Choose the book in the Book box first.")
+        window.say("Choose the book first (its series in the Series field, and its volume beside it if it has one).")
         return None
     if window.pipeline is None or window.busy or window.batch is not None or window._batching:
         window.say("TASlation is at work on a page. Try again when it is done.")
         return None
     cache = window._book_cache()
     if cache is None:
-        window.say("Choose the book in the Book box first.")
+        window.say("Choose the book first (its series in the Series field, and its volume beside it if it has one).")
     return cache
 
 

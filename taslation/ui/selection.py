@@ -46,7 +46,7 @@ SIZE_SET = "Text size set on {n} region(s). Ctrl+Z takes it back."
 PLACED = "Put at place {place} of {total} in the reading order. Ctrl+Z takes it back."
 PLACED_ALREADY = "The selected region(s) are at that place in the reading order already."
 ORDERING = "Reading order: click the regions in the order they are read, then press Finish order (Esc cancels)."
-NAME_FIRST = "Give the book a name first (the Book field)."
+NAME_FIRST = "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 # the changes on several regions, taken back and made again (`TranslatorMixin._step_through` says them)
 UNDONE = {"drops": "The dropped regions are back.", "kind": "Kind taken back.", "size": "Text size taken back."}
 REDONE = {"drops": "Regions dropped again.", "kind": "Kind set again.", "size": "Text size set again."}
@@ -265,7 +265,7 @@ class SelectionMixin:
                     box = (r.x0 + dx, r.y0 + dy, r.x1 + dx, r.y1 + dy)
                     ok = pipeline.move_region(result, r, box, progress=lambda m: self._post("progress", text=m)) or ok
                 if not ok:
-                    self._post("status", key="Could not record the rectangle: give the book a name first (the Book field).")
+                    self._post("status", key="Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
                 step.settle(pipeline, ok)
                 self._post("result", result=result)
             finally:

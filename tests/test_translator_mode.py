@@ -442,7 +442,7 @@ def test_a_rectangle_not_written_leaves_nothing_behind(window, monkeypatch):
     assert w.said[-1].startswith("Could not save the rectangle:") and w.state() == start and not len(w.history)
     w.pipeline.annotations = None
     w._add_region((10, 10, 60, 60))
-    assert w.said[-1] == "Could not record the rectangle: give the book a name first (the Book field)."
+    assert w.said[-1] == "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 
 
 # ------------------------------------------------------------------ the stores carried back and forth

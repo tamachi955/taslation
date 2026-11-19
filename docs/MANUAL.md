@@ -90,7 +90,7 @@ so the page keys reach the viewer directly as usual, and TASlation follows to th
 * F5 (translate) goes to TASlation even while the viewer is in the foreground (it does not reload the browser). On TASlation's full screen,
   F11 and Esc also belong to TASlation and leave it (in the Translator role Esc first lets go of a selected region).
   Otherwise F11 and Esc, and the page keys, belong to the viewer (you can use them to switch the viewer's own full screen). TASlation takes these keys only in this mode, and only while the viewer or TASlation is in the foreground.
-* When you click a box you type in (Book, To:), press on the page in translator mode, or open a dialog (book settings, the series sheet,
+* When you click a box you type in (Series, Vol., To:), press on the page in translator mode, or open a dialog (book settings, the series sheet,
   editing and so on), TASlation becomes an ordinary window for that time and takes key presses. Click the book
   or close the dialog, and it goes back.
 * When the book is on another monitor, nothing changes.
@@ -109,7 +109,7 @@ It opens on the monitor the window is on, and for a browser window where neither
   F5, Undo, Delete, Tab and the other keys of translator mode work, and the regions' frames, numbers and flags show as in the window. Clicks stay TASlation's whatever the page shows:
   none goes to the viewer (a click on a page that is not translated yet says to press F5), and the page keys still turn the viewer's pages. Auto stays as you set it.
   The region editor and the other dialogs open above the full screen, and closing them brings you back to it. A status line stays longer there, by its length (up to 12 seconds).
-  Changing the role, the Book, Series and Volume fields, and starting a whole-book run need the toolbar: leave the full screen for them (a key you gave "Read whole book..." says so there).
+  Changing the role, the Series and Vol. fields, and starting a whole-book run need the toolbar: leave the full screen for them (a key you gave "Read whole book..." says so there).
 
 F11 takes you back to the window, and so does Esc (in the Translator role Esc first lets go of a selected region). To go back with the mouse, move the pointer to the top edge of the screen: a faint "✕ Leave full screen (F11)" appears at the top right,
 and you click it (it disappears when you move the pointer down; clicks anywhere else go on as before). With `taslation gui --full-screen`,
@@ -460,7 +460,7 @@ and the page can be edited.
 * **Keyboard**: Tab on the page selects the next region in reading order, Shift+Tab the previous one (after the last comes the first again;
   the status bar shows which number it is). Alt+arrow keys move the selected region by 1 pixel, Alt+Shift+arrow keys by 10 pixels,
   and a moment after you let go of the keys, it is saved as one move (Ctrl+Z takes it back in one step). As Reader, Alt+arrow keys go on reaching the viewer as arrow keys, as before.
-  Esc in the Book or To: box gives the keys back to the page and does nothing else (it does not stop a process that is running).
+  Esc in the Series, Vol. or To: box gives the keys back to the page and does nothing else (it does not stop a process that is running).
 * **Copying and pasting formatting**: as with a word processor's format painter, Ctrl+Shift+C on the selected region remembers its formatting (font, size, bold and italic,
   alignment, line and letter spacing, slant, text direction, text colour and outline), and selecting another region and pressing Ctrl+Shift+V gives it that formatting
   (Ctrl+Z takes it back in one step). The kind (speech, thought, shout and so on) is premise information the model is told when it translates, so it is not copied with the formatting.
@@ -563,10 +563,11 @@ and the page can be edited.
   "Ask again" in the editor has the model translate that bubble again, with the lines before it as context (there is no feature that lists alternatives);
   in its answer too, names and terms spelled differently from the series sheet are made consistent mechanically.
   A translation reused from an earlier identical line says so in the editor ("Reusing short lines"); "Ask again" gives a fresh one.
-  To flag translations that contain a word the dictionary does not know as well, install `pyspellchecker` (`pip install pyspellchecker`;
-  MIT licence; it keeps word lists for English, Spanish, French, Portuguese, German, Italian, Russian and Dutch on disk;
-  the series sheet's names and renderings are exempt). When the spellcheck setting (`spellcheck`, on by default) is on but this package is not installed,
-  it says so once, the first time you open the editor (nothing is fetched from the network).
+  Translations that contain a word the dictionary does not know can be flagged as well, with the spellcheck setting (`spellcheck = true` in the settings file; off by default).
+  Its word lists are an optional extra that TASlation does not install: the Python package `pyspellchecker` (MIT licence; word lists for English, Spanish, French, Portuguese, German, Italian, Russian and Dutch, kept on disk),
+  and the check runs only where it has been added to TASlation's Python. The series sheet's names and renderings are exempt.
+  When the setting is on but the word lists are not installed, the editor says so once, the first time you open it, with where to turn the setting off
+  ("Open settings file" in Tools > Settings...). Nothing is fetched from the network.
 * "Undo" (Ctrl+Z) takes back the changes to the page on show, newest first (edits of translations and notes; moving, resizing, adding and removing regions (a change made to several regions at once
   counts as one); saved formatting; setting kinds and text sizes;
   "Skip page"; setting the reading order; "Translate again"),
@@ -1025,7 +1026,7 @@ size_emphasis = true         # the part the original letters larger is set large
 readable_font_size = 11      # a translation set smaller than this is flagged "small" for review (0 = never)
 text_scale = 1.0             # the lettering size (0.5-2.0): 0.9 a tenth smaller, 1.2 larger where the page held it back (a book can have its own)
 enforce_terms = true         # a translation that misses a rendering from the series sheet is flagged "rendering"
-spellcheck = true            # flag a word the dictionary does not know (needs `pip install pyspellchecker`, offline word lists)
+spellcheck = false           # flag a word the dictionary does not know; its word lists (the pyspellchecker package) are an optional extra that TASlation does not install
 take_columns_beyond = false  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (a book setting too)
 next_page_key = "Left"       # key that shows the next page in your viewer
 context_mode = true          # batch: read the whole book first, then translate it with the whole story as context

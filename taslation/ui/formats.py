@@ -36,7 +36,7 @@ NOTHING_COPIED = "Nothing copied yet: select a region and press Ctrl+Shift+C to 
 FORMAT_PASTED = "Formatting pasted on {n} region(s). Ctrl+Z takes it back."
 FORMAT_SAME = "The region already has this formatting."
 SELECT_FIRST = "Select a region first (click it)."
-NO_BOOK = "Could not store the formatting: give the book a name first (the Book field)."
+NO_BOOK = "Could not store the formatting: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 # Page > Paste format on every region of this kind...: the question, its button, and what is said
 KIND_QUESTION = ("Put the copied formatting on every region of the kind {kinds} in this book: {n} region(s) on {pages} "
                  "page(s)? Ctrl+Z takes it back.")

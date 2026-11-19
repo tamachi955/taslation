@@ -574,5 +574,5 @@ def test_a_formatting_edit_is_saved_taken_back_and_made_again(window):
     w.pipeline.annotations = None
     w._edit_region(target, {"text": target.translated_text, "speaker": "", "kind": "", "continues": False, "note": "",
                             "reader_note": "", "style": RegionStyle(size=12)})
-    assert w.said[-1] == "Could not store the formatting: give the book a name first (the Book field)."
+    assert w.said[-1] == "Could not store the formatting: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
     assert target.style == style

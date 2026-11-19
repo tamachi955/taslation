@@ -838,7 +838,7 @@ class JobsMixin:
         starts); the panels it finds come back as ``page_area`` events (`_run_found`)."""
         try:
             if generic_book_name(book):
-                self._post("status", key="Give the book a name first (the Book field).")
+                self._post("status", key="Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
                 self._post("batch_refused", problems=[])
                 return
             self._ollama_back()
@@ -1588,7 +1588,7 @@ class JobsMixin:
             name = kept_name(self, name)  # the one spelling, or an older one the book's files are kept under
             if choice is None or (generic_book_name(name) and not viewerparts.held(name)):
                 self._start_pending, self._start_whole = None, None  # the start that waited asks at the next page
-                self.say("Give the book a name first (the Book field).")
+                self.say("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
                 return
             before = self.book_var.get().strip()
             self._book_named(name)  # (a name held back for the title's is released: the reader's answer stands)

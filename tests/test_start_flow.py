@@ -1402,7 +1402,7 @@ def test_the_openers_ask_for_the_name_first_and_go_on_with_it(flow, monkeypatch)
     flow.open_glossary()
     flow.asked().on_answer(None, "")  # closed: nothing opened, and the status line says why
     assert len(opened) == 2 and flow.book_var.get() == "Yomizuq"
-    assert flow.status_var.get() == "Give the book a name first (the Book field)."
+    assert flow.status_var.get() == "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
     flow.open_glossary()
     flow.asked().on_answer("ok", "yomizuq")  # (the dialog takes no such name; neither does the prompt)
     assert len(opened) == 2 and flow.book_var.get() == "Yomizuq"
@@ -1471,7 +1471,7 @@ def test_a_name_that_names_no_book_reaches_no_store(flow, monkeypatch, tmp_path)
     flow._job_batch(VIEWER.hwnd, "Yomizuq", "m", "English", 0, True, True)
     assert [kind for kind, _data in list(flow._events.queue)] == ["status", "batch_refused"]
     flow.pump()
-    assert not flow._batching and flow.status_var.get() == "Give the book a name first (the Book field)."
+    assert not flow._batching and flow.status_var.get() == "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
     state = tmp_path / "state"
     assert not any(p.is_file() for p in state.rglob("*.json") if p.name != "ui.json")  # nothing kept
 

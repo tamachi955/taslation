@@ -395,11 +395,11 @@ def test_a_tool_never_acts_on_a_page_that_is_not_on_show(tool, monkeypatch):
 def test_skip_and_finish_order_under_a_generic_name_say_so():
     w = Tools(SimpleNamespace(original="page", units=[]), kept=False)
     w.toggle_skip()
-    assert w.said == ["Give the book a name first (the Book field)."] and not w.read
+    assert w.said == ["Give the book a name first (its series in the Series field, and its volume beside it if it has one)."] and not w.read
     w.said.clear()
     w._ordering = ["a region"]
     w.toggle_order()
-    assert w.said == ["Give the book a name first (the Book field)."] and w._ordering is None
+    assert w.said == ["Give the book a name first (its series in the Series field, and its volume beside it if it has one)."] and w._ordering is None
 
 
 def test_a_click_that_is_not_taslations_own_goes_to_the_viewer_in_either_role():

@@ -229,7 +229,9 @@ class Settings:
     size_emphasis: bool = True
     readable_font_size: int = 11  # a translation set smaller than this is flagged "small" for review (0 = never)
     enforce_terms: bool = True  # a translation that misses a rendering from the series sheet is flagged "rendering"
-    spellcheck: bool = True  # flag a translation with a word the dictionary does not know (needs the optional pyspellchecker package)
+    # flag a translation with a word the dictionary does not know; off by default, as its word lists come from the
+    # optional pyspellchecker package, which TASlation does not install (`review.spell_checker`)
+    spellcheck: bool = False
     erase_mode: str = "fill"  # "fill" | "inpaint" | "classic" (the erase of before 2026-10-30, byte for byte)
     # with erase_mode "fill", lettering set on the drawing is inpainted by LaMa (bubbles keep their paper): "auto" (the
     # default) only where torch has a CUDA GPU, and a computer without one erases as with "off"; "lama" always, on the

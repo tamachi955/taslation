@@ -38,6 +38,9 @@ def test_unknown_words_are_found_and_the_sheets_words_are_not():
 
 def test_the_spelling_flag_follows_the_setting_and_the_dictionary(settings):
     g = _sheet()
+    assert settings.spellcheck is False  # off by default: its word lists are an extra TASlation does not install
+    assert flags_for("魔法少女だ", "A magicl girl.", 14, settings, g, checker=FakeChecker()) == ["rendering"]
+    settings.spellcheck = True
     assert flags_for("魔法少女だ", "A magicl girl.", 14, settings, g, checker=FakeChecker()) == ["rendering", "spelling"]
     assert flags_for("魔法少女だ", "A magical girl.", 14, settings, g, checker=FakeChecker()) == []
     settings.spellcheck = False
