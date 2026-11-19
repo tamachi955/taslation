@@ -347,6 +347,41 @@ def test_a_page_of_vertical_lettering_is_left_as_it_was(settings, monkeypatch):
     assert not any(r.joined for r in with_step.regions)
 
 
+@needs_font
+def test_a_caption_read_whole_stays_when_a_paragraph_found_in_it_reads_less(settings, monkeypatch):
+    """Two lines set across read whole as one region: where only its second line is found as a paragraph (on a frame
+    of the test volume, the first ran into the drawing), the region stays as it was read and the line is no region of
+    its own; nothing it held is lost."""
+    im = Image.new("RGB", (600, 1000), (255, 255, 255))
+    drawn = Drawn(im)
+    drawn.write("それなら東の塔へ行こう", 60, 80, 18)
+    drawn.write("鐘はそこにある", 60, 108, 18)
+    whole = "それなら東の塔へ行こう鐘はそこにある"
+    d = ImageDraw.Draw(im)  # a bubble of lettering set down under it: a page of a story, not of titles alone
+    d.ellipse([200, 400, 460, 860], outline=(0, 0, 0), width=3)
+    for col, text in enumerate(("ここで待っていて", "すぐに戻るから")):
+        for k, c in enumerate(text):
+            d.text((342 - 30 * col, 500 + 24 * k), c, font=_font(20), fill=(0, 0, 0))
+            drawn.chars.append((c, d.textbbox((342 - 30 * col, 500 + 24 * k), c, font=_font(20))))
+    pipeline, reader = _pipeline(settings, drawn)
+    res = pipeline.process(drawn.image, translate=False, use_cache=False)
+    assert whole in [r.source_text for r in res.regions if r.status == "untranslated"]
+    real = Pipeline._paragraphs_round
+    looked = []
+
+    def second_line_only(self, gray, a, glyph, dark, bound):
+        out = [(prose.Paragraph(p.lines[-1:], p.rows), ink) for p, ink in real(self, gray, a, glyph, dark, bound)]
+        looked.extend(out)
+        return out
+
+    monkeypatch.setattr(Pipeline, "_paragraphs_round", second_line_only)
+    pipeline, reader = _pipeline(settings, drawn)
+    res = pipeline.process(drawn.image, translate=False, use_cache=False)
+    assert looked  # (the line was found and read)
+    read = [r for r in res.regions if r.status == "untranslated" and r.text_box[0] < 300]
+    assert [r.source_text for r in read] == [whole] and not read[0].joined
+
+
 # ------------------------------------------------------------------ the layout model's plate, the cache
 def test_a_bubble_as_large_as_its_page_unit_is_the_page_s_ground():
     """The model took the owner's plate for a bubble holding the heading's text box: a bubble is never a page, its

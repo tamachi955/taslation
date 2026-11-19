@@ -3397,7 +3397,9 @@ class Pipeline:
         page's ground, `_paragraph_region`) where the regions read so far do not read it already: where the pieces of
         it were read as regions of their own (the classical text blocks cut lines set across into pieces), where it
         lies in a region not read as text (a band the reading of which its Latin title spoilt), or in a loose region
-        that holds more than it (a heading and its subtitle in Latin letters). A region read as text whose text box is
+        that holds more than it (a heading and its subtitle in Latin letters; read as text, such a region gives way
+        only when the paragraphs made in it read `PROSE_HOLDS` of its kana and kanji, else it stays and they go: a line
+        of it that no paragraph found). A region read as text whose text box is
         the paragraph's stays as it is, and so does a closed one (a bubble) that holds it read as text. When the
         paragraph's own region is read as text, it takes their place: they are left out as repeats of it (returned,
         ``repeats`` set) and it joins *regions* where the first of them was; read as anything else, nothing changes.
@@ -3431,8 +3433,17 @@ class Pipeline:
                 elif _box_area(box) > _box_area(found[same][1].on_page(found[same][0].box)):
                     found[same] = (para, ink, glyph, dark, a)  # (the same paragraph found whole)
         replaced: list[TextRegion] = []
+        gone_ids: set[int] = set()  # (by identity: two regions may share a box, and a region's mask is an array)
+        was: dict[int, tuple[str, Any]] = {}
         made: list[tuple[TextRegion, Box]] = []
+        held: list[TextRegion] = []  # loose regions read as text that hold paragraphs made: decided at the end
         taken: list[tuple[Box, float, bool, TextRegion]] = []  # paragraphs of prose read: as they were, or anew
+
+        def replace(r: TextRegion, by: TextRegion) -> None:
+            was.setdefault(id(r), (r.status, r.repeats))
+            r.status, r.repeats = "repeated", by
+            replaced.append(r)
+            gone_ids.add(id(r))
 
         def take(para: prose_lines.Paragraph, ink: prose_lines.Ink, glyph: float, dark: bool, a: TextRegion,
                  beside: bool = False) -> None:
@@ -3440,10 +3451,12 @@ class Pipeline:
             if any(_box_inter(box, q.text_box) >= layout_model.COVERED * max(1, min(_box_area(box), _box_area(q.text_box)))
                    for q in read):
                 return  # read before (a translated region of the page): left as it is
-            near = [r for r in live if r not in replaced]
+            near = [r for r in live if id(r) not in gone_ids]
             pieces = [r for r in near if _box_inter(r.text_box, box) >= self.PROSE_PIECE * max(1, _box_area(r.text_box))]
-            holders = [r for r in near if r not in pieces
+            piece_ids = {id(r) for r in pieces}
+            holders = [r for r in near if id(r) not in piece_ids
                        and _box_inter(r.text_box, box) >= self.PROSE_HOLDS * max(1, _box_area(box))]
+            holder_ids = {id(r) for r in holders}
             around = (*pieces, *holders)
             print_ = [r for r in around if r.status == "print"]
             if print_ and not any(labels_in(r.source_text) for r in print_):
@@ -3458,7 +3471,7 @@ class Pipeline:
                 if len(para.lines) >= 2 and not para.rows:
                     taken.append((box, glyph, dark, a))
                 return  # read as it is
-            if not listed and any(r in holders and not loose(r) for r in as_text):
+            if not listed and any(id(r) in holder_ids and not loose(r) for r in as_text):
                 return  # a bubble's lettering, read as text: the bubble's
             # lines that may be the rows of lettering set down are read only as a contents list's rows: where a reading
             # round them holds a chapter's label or digits (a contents list's page numbers or the numerals of its
@@ -3473,11 +3486,13 @@ class Pipeline:
                 return
             if len(new) == 1 and len(para.lines) >= 2:
                 taken.append((box, glyph, dark, a))
-            gone = [r for r in (*pieces, *holders) if r in pieces or loose(r) or r.status != "untranslated"]
-            at = min((regions.index(r) for r in gone), default=len(regions))
+            text_ids = {id(r) for r in as_text}
+            gone = [*pieces, *(r for r in holders if id(r) not in text_ids)]
+            held.extend(r for r in holders if id(r) in text_ids and not any(r is q for q in held))
+            spots = {id(r) for r in around}
+            at = min((k for k, q in enumerate(regions) if id(q) in spots), default=len(regions))
             for r in gone:
-                r.status, r.repeats = "repeated", max(new, key=lambda n: _box_inter(n.text_box, r.text_box))
-                replaced.append(r)
+                replace(r, max(new, key=lambda n: _box_inter(n.text_box, r.text_box)))
             regions[at:at] = new
             made.extend((n, n.text_box) for n in new)
 
@@ -3488,16 +3503,33 @@ class Pipeline:
             for para, ink, glyph, dark, a in self._prose_beside(gray, taken, [b for _n, b in made], bound):
                 check_cancel(cancel)
                 take(para, ink, glyph, dark, a, beside=True)
+        for hr in held:  # a loose region read as text round paragraphs made: theirs when they read its Japanese
+            if id(hr) in gone_ids:
+                continue
+            inside = [(n, b) for n, b in made if _box_inter(b, hr.text_box) >= self.PROSE_PIECE * max(1, _box_area(b))]
+            words = sum(len(_WORDS_RE.findall(n.source_text)) for n, _b in inside if n.status == "untranslated")
+            if inside and words >= self.PROSE_HOLDS * len(_WORDS_RE.findall(hr.source_text)):
+                replace(hr, max(inside, key=lambda nb: _box_inter(nb[1], hr.text_box))[0])
+                continue
+            # it reads more Japanese than they do (a line of it no paragraph found): it stays as it was read, they go,
+            # and what they took the place of comes back
+            out = {id(n) for n, _b in inside}
+            made[:] = [(n, b) for n, b in made if id(n) not in out]
+            regions[:] = [q for q in regions if id(q) not in out]
+            for r in replaced:
+                if id(r.repeats) in out:
+                    r.status, r.repeats = was[id(r)]
+                    gone_ids.discard(id(r))
+            replaced[:] = [r for r in replaced if id(r) in gone_ids]
         for r in live:  # a region read in two paragraphs' pieces, or not read as text where they are: theirs
-            if r in replaced or not made:
+            if id(r) in gone_ids or not made:
                 continue
             shares = [(_box_inter(r.text_box, b), n) for n, b in made]
             if sum(s for s, _n in shares) >= self.PROSE_PIECE * max(1, _box_area(r.text_box)):
-                r.status, r.repeats = "repeated", max(shares, key=lambda sn: sn[0])[1]
-                replaced.append(r)
+                replace(r, max(shares, key=lambda sn: sn[0])[1])
         if not made:
             return []
-        regions[:] = [r for r in regions if r not in replaced]
+        regions[:] = [r for r in regions if id(r) not in gone_ids]
         if fill is not None:  # (announced again, a window is told again what it was told: `PageFill.announce`)
             fill.announce([n for n, _b in made])
             for r in (*replaced, *(n for n, _b in made)):
@@ -3506,13 +3538,15 @@ class Pipeline:
 
     @classmethod
     def _prose_anchor(cls, r: TextRegion) -> bool:
-        """Whether lettering set across may lie round region *r* (`_prose`): its text box runs across, its reading holds
-        a chapter's label or digits and Latin letters (two or more) beside its Japanese, or it is a reading of
-        `PROSE_LONG` characters or more not taken as text (a plate's, unsure). A column's region read as text, as
-        nearly all of a manga's lettering, is not looked round: no line across lies there, and looking costs readings."""
+        """Whether lettering set across may lie round region *r* (`_prose`): its reading holds a chapter's label or
+        digits and Latin letters (two or more) beside its Japanese, or, read as text, its text box runs across, or, not
+        read as text, it is a reading of `PROSE_LONG` characters or more (a plate's, unsure). A column's region read as
+        text, as nearly all of a manga's lettering, is not looked round: no line across lies there, and looking costs
+        readings; nor is a short unsure or noisy reading that runs across (a drawing's, as a rule)."""
         t = r.source_text
-        return (_across(r.text_box) or labels_in(t) > 0 or len(_DIGIT_RE.findall(t)) + len(_LATIN_RE.findall(t)) >= 2
-                or (r.status != "untranslated" and len(t) >= cls.PROSE_LONG))
+        if labels_in(t) > 0 or len(_DIGIT_RE.findall(t)) + len(_LATIN_RE.findall(t)) >= 2:
+            return True
+        return _across(r.text_box) if r.status == "untranslated" else len(t) >= cls.PROSE_LONG
 
     @classmethod
     def _prose_scales(cls, a: TextRegion, usual: float) -> list[float]:
