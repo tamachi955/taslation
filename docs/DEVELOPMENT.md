@@ -137,7 +137,13 @@ rows' languages.
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
   profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 6
   minutes): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and spinners; e,
-  turning back to cached pages; r, the full screen in the Reader role, entered and left by F11's own handler; o, over the book (the stand-in
+  turning back to cached pages; r, the full screen in the Reader role, entered and left by F11's own handler; t, the
+  full screen in the Translator role (the toolbar's Translator, then F11's handler; at rest a region selected by a
+  click on the page and the region editor opened by a double click - Tk's own pointer events on the page - and closed
+  by its Esc, the selection let go by Esc, the page turned by the window's next page key and, t2, back by its
+  previous one - Tk's key events on the page, the key the window hands to the stand-in noted and never sent, its
+  turn released by it -, the full screen left by Esc and the Reader role chosen again; t and t2 come together); o,
+  over the book (the stand-in
   made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Full screen
   button, the full screen left by the F11 hot key); z, TASlation's text size at 150 %; w, a whole-book run on a short
   stretch, started as the dialog's Start starts it, then Finished reading, with w2, the window beside the run as the

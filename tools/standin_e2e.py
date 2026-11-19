@@ -123,6 +123,7 @@ from ctypes import wintypes
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -178,6 +179,7 @@ ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f",
 PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
 KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
 ACTS_WAIT_S = 90.0  # scenario t: the Translator's acts begin at rest on a translated page, or after this long at most
+FULL_SCREEN_SETTLE_S = 2.0  # ... and once the full screen has had this long to lay the page out at its size
 # the turns whose soft frame and sharp frame drawn quickly are pictured (turns that come to a window at rest), and
 # (scenario, turn) -> (seconds after the turn began, name): the other pictures of a turn
 SOFT_SHOTS = {"a": (1,), "e": (3,), "r": (1,), "t": (1,), "o": (1,), "x": (1,), "f2": (1,)}
@@ -563,6 +565,7 @@ class Notes:
         self.resolves: list[dict[str, Any]] = []  # ... and each look for the page as read at other sizes
         self.decides: list[dict[str, Any]] = []  # each page job kept for now, decided (`Pipeline.decide_kept`): how
         self.on_display: Callable[[dict[str, Any]], None] | None = None
+        self.leaves: list[dict[str, Any]] = []  # each leave of the full screen: when, and the calls that led to it
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
         with self.lock:
@@ -1233,6 +1236,16 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
+    leave_reading = App.leave_reading
+
+    def left(self: Any, *a: Any, **k: Any) -> Any:
+        if getattr(self, "reading", False):  # who left the full screen: the functions' names on the way, no more
+            calls = [f.name for f in traceback.extract_stack(limit=8)[:-1]]
+            with notes.lock:
+                notes.leaves.append({"t": now_ms(), "role": str(self.role_var.get()), "calls": calls[-6:]})
+        return leave_reading(self, *a, **k)
+
+    App.leave_reading = left
 
     def counted(cls: Any, name: str, note: Callable[[str], None]) -> None:
         original = cls.__dict__[name]
@@ -1582,7 +1595,11 @@ class Director:
         app = self.app
         self.entered[name] = {"at": time.monotonic()}
         if name == "r":
+            self.shot("r_toolbar_reader_role")  # (the window as it was: the toolbar's Full screen and the role)
             app.toggle_reading()
+            self.entered["r"].update(full_screen=bool(app.reading), auto_on_it=bool(app.auto_var.get()),
+                                     first_line=self.status_facts())
+            app.after(1500, lambda: self.shot("r_full_screen_reader_role"))
         elif name == "t":
             facts = self.entered["t"]
             facts.update(auto_before=bool(app.auto_var.get()), role_before=str(app.role_var.get()))
@@ -1591,6 +1608,7 @@ class Director:
             def full() -> None:
                 self.shot("t_toolbar_translator_role")
                 app.toggle_reading()  # F11's own handler
+                facts["full_at"] = time.monotonic()  # (the acts wait for the page laid out on it: `keyed_turn`)
                 facts.update(full_screen=bool(app.reading), role_on_it=str(app.role_var.get()),
                              auto_on_it=bool(app.auto_var.get()), first_line=self.status_facts())
                 app.after(1500, lambda: self.shot("t_full_screen_translator_role"))
@@ -1609,6 +1627,9 @@ class Director:
         app = self.app
         if seg.name == "r" and app.reading:
             app.toggle_reading()
+            if "r" in self.entered:
+                self.entered["r"].update(left=not app.reading, auto_after=bool(app.auto_var.get()),
+                                         status_after=self.status_facts())
         elif seg.name == "t2":
             self.leave_translator()
         elif seg.name == "o":
@@ -1656,7 +1677,8 @@ class Director:
         mode = self.entered.get("t")
         if mode is None or "acts" in mode:
             return False
-        on = bool(app.reading) and app.role_var.get() == "translator" and rested and app._editing()
+        on = (bool(app.reading) and app.role_var.get() == "translator" and rested and app._editing()
+              and now - mode.get("full_at", now) >= FULL_SCREEN_SETTLE_S)
         if on or now - mode["at"] > ACTS_WAIT_S:
             mode["acts"] = {"waited_s": round(now - mode["at"], 1)}
             self.translator_acts(seg)
@@ -1675,10 +1697,10 @@ class Director:
             acts["skipped"] = "no region" if region is None else "the translated page not on show"
             self.press_page_key(seg)
             return
-        x, y = page_point(app, region)
         clock = [int(time.monotonic() * 1000) & 0x3FFFFFFF]  # the events' times: clicks far apart, a double close
 
-        def click(gap: int) -> None:
+        def click(gap: int) -> None:  # (at the region's middle where the page is drawn now)
+            x, y = page_point(app, region)
             clock[0] += gap
             app.canvas.event_generate("<ButtonPress-1>", x=x, y=y, time=clock[0])
             app.canvas.event_generate("<ButtonRelease-1>", x=x, y=y, time=clock[0] + 60)
@@ -1694,17 +1716,23 @@ class Director:
             self.shot("t_region_selected")
             app.after(300, edit)
 
-        def edit() -> None:
+        def edit(tries: int = 0) -> None:
             if self.over or not app._editing():
                 acts["editor"] = "the translated page not on show"
                 app.after(300, key)
                 return
+            if app.busy and tries < 40:  # a job at work (the editor opens at rest, as a person's double click does)
+                app.after(500, lambda: edit(tries + 1))
+                return
+            acts["busy_at_the_double_click"] = bool(app.busy)
+            x, y = page_point(app, region)
+            acts["region_under_the_double_click"] = app._region_at(*app.canvas.to_image_coords(x, y)) is region
             click(5000)  # (a click of its own, long after the one that selected) ...
             click(250)  # ... and the second of a double click
             editor = getattr(app, "_editor", None)
             acts["editor_by"] = "a double click" if editor is not None and editor.winfo_exists() else None
-            if acts["editor_by"] is None:  # (Tk took the two clicks for two: the double click's own handler)
-                app._on_double(SimpleNamespace(x=x, y=y))
+            if acts["editor_by"] is None and acts["region_under_the_double_click"]:
+                app._on_double(SimpleNamespace(x=x, y=y))  # (Tk took the two clicks for two: the double's handler)
                 acts["editor_by"] = "the double click's handler"
             app.after(1200, opened)
 
@@ -3013,7 +3041,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     resizes = resize_rows(events, offset, notes, turns, rows)
     for item in resizes:
         item["from_s"] = rel(item.pop("from_t"))
-    modes = {"columns": ["t_s", "reading", "over", "run", "beside", "text_size", "role"],
+    leaves = [{**{k: v for k, v in item.items() if k != "t"}, "t_s": rel(item["t"])} for item in notes.leaves]
+    modes = {"leaves_of_the_full_screen": leaves,
+             "columns": ["t_s", "reading", "over", "run", "beside", "text_size", "role"],
              "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), int(m["run"]), int(m["beside"]),
                        m["text_size"], m["role"]] for m in notes.modes],
              "entered": {name: {k: v for k, v in facts.items() if k != "at"}
@@ -3290,6 +3320,7 @@ def print_table(report: dict[str, Any], path: Path) -> None:
           f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")
     if run_.get("page_keys"):
         print(f"page keys pressed on the window's page: {run_['page_keys']}")
+    print(f"the full screen left: {modes.get('leaves_of_the_full_screen')}")
     whole = run_["whole_book_run"]
     if whole["decisions"] or whole["ends"]:
         print(f"whole-book run: decisions {whole['decisions']}; frames got {whole['frames_got']}, not sharp "

@@ -45,7 +45,7 @@ def test_the_page_knows_every_step_the_script_has():
 
 def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     names = standin_e2e.wanted("all")
-    assert names == ["c", "a", "b", "d", "e", "r", "o", "z", "w", "w2", "x", "f", "f2"]
+    assert names == ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
     count = standin_e2e.pages_needed(names)
     segments, steps = standin_e2e.build_plan(names, count + 6, cancel_first=count, soft_ms=700)
     text = sv.format_script(steps)
@@ -55,6 +55,8 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     turns = {s.name: s.screens for s in segments}
     assert turns["c"] == [(2, True), (4, True), (6, True)]
     assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
+    # t: on the Translator's full screen the next page by the window's page key, t2 back by its previous one
+    assert turns["t"] == [(56, True)] and turns["t2"] == [(54, True)]
     assert turns["w2"][:2] == [(70, True), (68, True)]  # back to pages of the run, which read 64 to 72
     # x: the screens of little text added after the others, soft long and half as sharp, then back where it was
     assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (76, True)]
@@ -63,6 +65,7 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
     assert standin_e2e.wanted("w2") == standin_e2e.wanted("w") == ["w", "w2"]  # a run and the reading beside it
+    assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
         standin_e2e.wanted("a,q")
 
