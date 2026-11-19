@@ -136,11 +136,15 @@ def test_translator_mode_over_a_cached_page_reads_what_the_cache_has_no_bubble_f
     w = Switched(["translated", "unmatched"])
     w._complete_on_show()
     assert w.idle == [w.translate_now]
-    for change in ({"busy": True}, {"batch": object()}, {"reading": True}, {"ready": False}):
+    for change in ({"busy": True}, {"batch": object()}, {"ready": False}):
         w = Switched(["translated", "unmatched"])
         w.__dict__.update(change)
         w._complete_on_show()
         assert w.idle == [], change
+    w = Switched(["translated", "unmatched"])  # the full screen keeps the role: the page is read there too
+    w.reading = True
+    w._complete_on_show()
+    assert w.idle == [w.translate_now]
     w = Switched(["translated", "low-confidence"])  # read already: nothing to do
     w._complete_on_show()
     assert w.idle == []
