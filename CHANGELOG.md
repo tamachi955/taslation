@@ -3,6 +3,23 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.3.0 - 2026-11-19
+
+Lettering
+
+* Where the original letters part of a bubble larger than the rest, that part of the translation is lettered larger
+  too, by the original's ratio and at most twice the size. The words of the translation never change. The rest of the
+  bubble keeps at least four fifths of its size; where both sizes do not fit so, the part is set less larger, then not
+  at all, and a bubble whose part is not found in the translation is lettered at one size as before.
+* The region editor shows the part in larger text, and "Set larger" and "One size" set it on the selected words or
+  clear it. Find and replace keeps the part where it does not touch it.
+* The setting "Set larger what the original sets larger" (on by default, `size_emphasis`) turns it off.
+
+Saved files
+
+* A saved translation keeps the place of its larger part. Versions 0.1.0 and 0.2.0 read these files and letter them
+  at one size.
+
 ## 0.2.0 - 2026-11-19
 
 Reading
