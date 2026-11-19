@@ -1899,6 +1899,13 @@ class Pipeline:
         return is_real_translation(source, output, language) or is_real_translation(source, output, language,
                                                                                      self.check_sheet())
 
+    def _takes_pair(self, source: str, answer: str) -> bool:
+        """Whether a line's answer as the model wrote it is an earlier pair for the requests after it (`grown_pairs`):
+        a real translation, not the bare romanisation a short kana line is asked for again over
+        (`ask_again_romanised`)."""
+        return (bool(answer) and self.real_translation(source, answer)
+                and not (_base.REASK_ROMANISED and _base.bare_romanisation(source, answer)))
+
     def premises(self) -> str:
         """What the model is told before translating: the reader's series sheet as text, carrying the sheet itself
         (`annotations.Premises`: the PLaMo translator takes its glossary from it, the chat prompt the entries the text
@@ -4148,6 +4155,12 @@ class Pipeline:
                     fill.draft(todo[index], text)
 
             extra["on_item"] = on_item
+        # the earlier pairs the page's request computed, as its translator says (a joined run as one pair, the
+        # answers as the model wrote them): what the pairs that only grow take, so that the next page's first prompt
+        # extends this page's last one (`_base.grown_pairs`)
+        computed: list[tuple[str, str]] | None = [] if _base.tells_computed(self.translator) else None
+        if computed is not None:
+            extra["computed"] = computed
         plan = linememo.plan_for(self, texts, meta, todo, serve=bool(reuse), learn=reuse is not None)
 
         def ask() -> tuple[list[str], Message | str, bool]:
@@ -4162,6 +4175,8 @@ class Pipeline:
                 if not worth_asking_again(failure) and not plan.served:
                     return [], failure, True
                 outputs = []  # every line is asked for again below, a few at a time
+                if computed is not None:
+                    computed.clear()  # (none of its answers is taken: the lines asked again come after)
             check_cancel(cancel)
             outputs = plan.fill(outputs)  # (the lines reused in their places)
 
@@ -4225,6 +4240,8 @@ class Pipeline:
                     asked.append((r.source_text, out))
             else:
                 r.status = "untranslated"
+        if computed is not None:  # (the pairs as the request computed them, the lines filled by asking again after)
+            asked = _base.grown_pairs(computed, asked, self._takes_pair)
         # the part of each final translation to set larger where its lettering had one (the words stay as they are;
         # cancelled here, nothing of the page is kept, as in the review)
         self._locate_large(todo, asked if grows_context(self.translator) else pairs, cancel, on_slow)

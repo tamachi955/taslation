@@ -2810,3 +2810,135 @@ not run again), Arabic in a tiny cloud (the one case that still overflows: its m
 Japanese in an oval that now ends on one character and its full stop (the block follows the oval, and nothing in a
 script wrapped by character tells a word from the next), and whether the review list's new reasons help or only add
 to it on real pages.
+
+## What a PLaMo request costs the server (2026-11-20)
+
+Every translation request of the PLaMo translator is one /api/generate with a raw PFML3 prompt: the dataset tag, the
+``context`` (the premises; for some lines a speaker, a hint or the Japanese that follows), the earlier pairs, a
+``glossary`` when the line names one, then the line. Ollama 0.40 runs the model in llama.cpp's server, which keeps the
+tokens of the last request (its prompt and the answer it wrote) and computes again only what the next prompt does not
+repeat of them. How much that is, and what else a request costs, was read from Ollama's own counters
+(``prompt_eval_duration``, ``eval_duration``; ``prompt_eval_count`` is the whole prompt, whatever the server took from
+the request before) and from the server's log, which names the tokens it computed.
+
+**How it was measured.** The development machine (Intel Core i7-9700F, 48 GB, GeForce GTX 1660 Ti 6 GB, Ollama
+0.40.16, PLaMo 3 Translate 2B Q4_K_M, context 8192), a second Ollama server of its own on 127.0.0.1:11435 with the
+variables under test in its environment only (the owner's server and the user's environment untouched),
+`OLLAMA_KV_CACHE_TYPE=q8_0` as this machine has it unless a column says otherwise. The model, by its GGUF: 24 layers,
+21 of them with a sliding window of 2,048 tokens and 3 with full attention; the server keeps the windowed layers'
+cache at 3,072 cells and, to go back in a prompt, keeps "context checkpoints" of them (24 MB each with q8_0, up to 32,
+two made by every request). The probes: invented lines, a history built by asking 40 lines one after another (prompts
+of 1,100 to 2,300 tokens), then three requests of each kind; the prompt's milliseconds, the mean of three.
+
+| request | default (RAM cache 8 GiB) | RAM cache 0 (the Ollama TASlation starts) | f16 KV cache | full-size window cache | full-size window cache, cache reuse |
+|---|---|---|---|---|---|
+| extends the last prompt and answer | 124 | 124 | 141 | 75 | 76 |
+| the same prompt again | 85 | 85 | 101 | 42 | 41 |
+| the last pair's answer otherwise | 127 | 129 | 141 | 75 | 74 |
+| the last pair left out | 125 | 126 | 143 | 53 | 52 |
+| a pair in the middle otherwise | 3,162 | 3,173 | 3,124 | 2,061 | 2,029 |
+| ``context`` otherwise (a line's own) | 4,327 | 4,334 | 4,295 | 4,250 | 4,220 |
+| the request after it | 221 | 4,387 | 235 | 142 | 144 |
+| a ``glossary`` / the request after it | 166 / 232 | 170 / 239 | 186 / 258 | 99 / 147 | 103 / 151 |
+| a request beside (same pairs, another line) / the one after | 110 / 97 | 110 / 100 | 130 / 122 | 58 / 54 | 58 / 55 |
+| a joined run / the request after it, its pairs one by one | 128 / 239 | 130 / 243 | 145 / 255 | 102 / 195 | 102 / 194 |
+| the oldest third of the pairs cut | 3,653 | 3,671 | 3,666 | 3,386 | 122 |
+
+An answer of 7 tokens took 55 to 60 ms in every column (9.4 ms a token with q8_0; prompts of 1,000 tokens and more are
+computed at 400 to 470 tokens a second).
+
+**What the server does.** A request whose prompt extends the last one exactly still goes back to the newest checkpoint
+before the end of what the server holds (four tokens before the last prompt's end) and computes from there, in two
+batches with a checkpoint between them: 28 to 31 tokens, 124 ms, more than an answer of seven tokens. A prompt that
+parts from the last one within its last few pairs (an answer set otherwise, a pair left out, a glossary, a joined
+run's pairs one by one) goes back to the checkpoint before the parting and costs the tokens from there, about 0.1 s
+more. One that parts further back (a pair in the middle, the oldest pairs cut) finds no checkpoint and is computed from
+its start ("forcing full prompt re-processing" in the log), about 2.2 s per 1,000 tokens. A request whose ``context``
+differs is computed from its start, and so is the one after it, unless the prompt cache in RAM gives back the state
+before it: 221 ms then, 4.4 s without (the Ollama TASlation starts gets `LLAMA_ARG_CACHE_RAM=0`: "Ollama's prompt
+cache in RAM" above, decided before the pairs only grew, when no saved prompt matched a later one). A request beside
+the main ones with the same pairs and another line costs its tail, and so does the main request after it. The KV
+cache's precision is not the cost (f16 is slower here). The server's log, at the verbosity Ollama gives it, holds
+counts and no text of a prompt. Every request also logs "Added a BOS token to the prompt as specified by the model
+but the prompt also starts with a BOS token. So now the final prompt starts with 2 BOS tokens": the server adds the
+beginning-of-sequence token that `pfml_prompt` puts first for raw mode (not changed here; what one BOS instead of two
+does to the translations was not measured).
+
+The fixed cost is the checkpoints'. With a full-size cache for the windowed layers (`LLAMA_ARG_SWA_FULL=1`, which
+llama.cpp's server reads and Ollama passes on: "using full-size SWA cache" in its log; 132 MB more GPU memory, 1,981 MB
+in all) the server makes none, an extending request takes 75 ms, and a pair changed in the middle costs the tokens
+from there (2.06 s here) rather than the whole prompt. A cut stays a whole prompt unless the server may also move the
+pairs it holds (`LLAMA_ARG_CACHE_REUSE=64`: 122 ms against 3.4 s), which gives the pairs kept the cache of a prompt that
+still held the ones cut: not what computing them again gives, so the translations would change. TASlation sets
+neither; both are options of the server.
+
+**The OpenMantra pages, request by request.** `tools/prompt_replay.py` with the gold English as the answers (both ways
+of translating, the 1,586 lines, 1,421 requests), what parts each request from the one before:
+
+| reason | page by page, before | after | whole book, before | after |
+|---|---|---|---|---|
+| extends | 1,219 | 1,367 | 1,220 | 1,369 |
+| after a joined run (its pairs one by one) | 145 | 0 | 148 | 0 |
+| the oldest pairs cut | 28 | 25 | 23 | 22 |
+| ``context`` (the Japanese after the line) | 10 | 13 | 11 | 14 |
+| a line asked again (romanised, re-asked) and the request after it | 10 | 7 | 10 | 7 |
+| a glossary | 4 | 4 | 4 | 4 |
+| the first of a series | 5 | 5 | 5 | 5 |
+
+With the model (`--answers live`, four pages of every series, 139 lines, 124 requests, seed 1, the server's own
+counters): before, a request after a joined run took 287 to 292 ms of prompt against 101 ms for one that extends, and
+the prompts took 15.7 s in all page by page; after, 105 ms, 13.6 s.
+
+**The change.** A page's (or a whole-book run's) request hands the caller the pairs as it computed them
+(`PlamoTranslator._computed`, `base.SentPair`, `base.grown_pairs`): a joined run as one pair with a line per bubble,
+and the answer as the model wrote it, unless the page sets it otherwise than by spaces and stray asterisks (a name
+respelt as the series sheet spells it: then the page's line, as before, at the cost of a tail); the next request's
+prompt holds those. Before, a joined run's answer came back as its bubbles' pairs one by one and the next prompt parted
+from the server's there. A request beside the page (where a bubble's larger lettering is in its translation) takes the
+pairs it is given whole instead of the newest 60, which after a page that took them past 60 made it begin otherwise
+and be computed in full. `tools/openmantra_eval.py --seed 1`, the official arm, on the second server (default column
+above), the code before (fa94887) and after:
+
+| | whole book, before | after | page by page, before | after |
+|---|---|---|---|---|
+| chrF | 40.95 | 41.18 | 41.06 | 41.37 |
+| paired difference, 95 % interval | | +0.23 (-0.15 to +0.57) | | +0.31 (-0.03 to +0.78) |
+| lines that end open (340) | 38.16 | 38.50 | 38.06 | 37.89 |
+| untranslated | 0 | 0 | 0 | 0 |
+| flagged | 2.9 % | 2.5 % | 2.5 % | 2.3 % |
+| requests | 1,413 | 1,415 | 1,414 | 1,416 |
+| translation | 396.9 s | 369.4 s | 397.6 s | 374.6 s |
+| prompts / answers (the server's) | 261.0 / 93.1 s | 233.5 / 93.2 s | 263.2 / 92.5 s | 239.9 / 92.6 s |
+| prompts computed again (0.6 s or more) | | 47 (56.2 s) | 55 (67.1 s) | 45 (62.4 s) |
+
+One seed per arm, the same in both; a seed's own noise is about 0.45 chrF, so the difference is none, and the time
+-6.9 % and -5.8 %. The prompts are 3 to 6 % longer in tokens: a joined run is one pair now, so the bound of 60 pairs
+and the newest 20 kept at a cut hold a few more lines than before.
+
+`tools/standin_e2e.py --scenario a` (the real window on the stand-in viewer, the owner's Ollama, nine turns, two runs
+of each): the first lettered bubble 1.40 and 1.41 s after the sharp frame (the median) before, 1.68 and 1.67 s after;
+the finished page 4.75 and 4.75 s, 4.85 and 4.84 s. Turn by turn, the difference is where the cut falls: three
+requests in every run were computed in full (1.25 to 1.65 s of the server's time before, 1.55 to 1.70 s after, the
+pairs kept holding more lines), and after the change they fall on other turns (two turns 1.5 s slower to their first
+bubble, one 1.0 s faster); the other turns took the same time to the 0.1 s.
+
+The same code, whole book, on a server with the full-size window cache (`LLAMA_ARG_SWA_FULL=1`, nothing else
+changed): translation 296.2 s (prompts 161.0 s, answers 93.7 s), chrF 40.99 (-0.18 against the default server, 95 %
+interval -0.69 to +0.39: the same computation in other batches), no line untranslated; the 47 prompts computed again
+still took 56.0 s, the other 1,371 requests 77 ms of prompt each. That is a quarter off the time before the change,
+from an option of the server that TASlation does not set (for the Ollama it starts it could, as it sets
+`LLAMA_ARG_CACHE_RAM`; with no checkpoints a saved prompt is then the cache alone, some 40 MB for 1,700 tokens).
+
+**Left as it is.** The Japanese after a line that goes on (`FOLLOW_OPEN`) or is asked alone (`FOLLOW_ALONE`) is the one
+``context`` that changes from line to line: 13 or 14 requests a run, each computed in full (2 to 4 s), and the request
+after each in full too where the RAM cache is 0. They serve the lines whose sentence goes on (chrF 38.2 against 40.4
+for the rest) and the lines asked again; leaving their neighbours out was not tried, since the 20 or so lines of a run
+it touches would not show a difference within the noise. A speaker the reader gives a line, or a hint, makes that
+line's prompt begin otherwise in the same way. The cut (to the newest 20 once past 60) costs 22 to 28 prompts of about
+700 tokens a run; counting a joined run's lines against the bound, as the bound counted them before, was not tried.
+The format has no place for a line's own reference after the earlier pairs, so none of these can move behind them.
+
+**Not shown here.** A real book's pages, a series sheet (no name is respelt without one, so the page's line never came
+in), the translator role with speakers, a request beside a page in a run (the official arm asks none; the tests show
+its prompt extends the page's last one), a computer without a GPU (where a whole prompt takes 10 to 13 s), and the
+server's options in a run of the app.

@@ -102,7 +102,8 @@ def test_plamo_asks_a_run_as_one_request_and_splits_the_answer_back():
                             on_item=lambda i, t: got.append(i))
     assert out == ["Wait, are you...", "a girl?", "EN:そうだ"] and got == [0, 1, 2]
     assert [s for s, _p in prompts] == ["お前もしかして\n女か?", "そうだ"]
-    assert "<|plamo:msg|>女か?<|plamo:tag|>output" in prompts[1][1]  # both halves are earlier pairs of the next
+    # the run is one earlier pair of the next, as it was asked and answered: the next prompt extends its prompt
+    assert prompts[1][1].startswith(prompts[0][1] + "Wait, are you...\na girl?<|plamo:tag|>input")
 
 
 def test_plamo_asks_each_line_alone_with_the_next_as_context_when_the_answer_does_not_split():

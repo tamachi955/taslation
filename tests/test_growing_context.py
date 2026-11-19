@@ -19,7 +19,8 @@ from taslation import netguard
 from taslation.batch import BatchReader
 from taslation.pipeline import Pipeline, ScannedRegion, ScannedUnit, mask_polygon
 from taslation.regions import PageResult, TextRegion
-from taslation.translate.base import CONTEXT_CUT_TO, CONTEXT_GROWS_TO, GrowingContext, grows_context
+from taslation.translate.base import (CONTEXT_CUT_TO, CONTEXT_GROWS_TO, GrowingContext, SentPair, grown_pairs,
+                                     grows_context)
 from taslation.translate.models import PLAMO
 from taslation.translate.plamo import BOS, PlamoTranslator
 
@@ -60,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._send(200, {"response": "", "done": True})
             return
-        answer = english(prompt.rsplit("<|plamo:msg|>", 2)[-2].split("<|plamo:tag|>")[0])
+        source = prompt.rsplit("<|plamo:msg|>", 2)[-2].split("<|plamo:tag|>")[0]
+        answer = "\n".join(english(part) for part in source.split("\n"))  # (a joined run: a line per bubble)
         server.extends.append(bool(server.kept) and prompt.startswith(server.kept))
         server.prompts.append(prompt)
         server.kept = prompt + answer
@@ -87,10 +89,11 @@ def line(page: int, k: int) -> str:
 
 
 def english(source: str) -> str:
-    """The stand-in model's translation of a line: its numbers in English words' place."""
+    """The stand-in model's translation of a line: its numbers in English words' place (with a stray asterisk, which
+    the pipeline drops from the line as it is set, for a line with a star)."""
     import re
 
-    return "Line " + " ".join(re.findall(r"\d+", source)) + "."
+    return "Line " + " ".join(re.findall(r"\d+", source)) + "." + ("*" if "星" in source else "")
 
 
 def region(source: str, row: int = 0) -> TextRegion:
@@ -302,3 +305,92 @@ def test_a_whole_book_run_with_the_chat_translator_keeps_the_last_40_pairs(setti
 
     reader._translation_pass(_units(8), time.monotonic())
     assert tr.contexts == [0, 14, 28, 40]  # the deque of 40, as before
+
+
+# ------------------------------------------------------------------------------------------------ what the server computed
+def open_regions(page: int, n: int = LINES_A_PAGE) -> list[TextRegion]:
+    """A page whose first line goes on in the second (a joined run, one request), and whose third has a star (its
+    answer comes with a stray asterisk, which the line as set leaves out)."""
+    out = page_regions(page, n)
+    out[0].source_text = f"頁{page}の行0で、"
+    out[2].source_text = f"頁{page}の星2です。"
+    return out
+
+
+def test_a_joined_run_and_an_answer_set_otherwise_leave_the_next_pages_prompt_extending_this_ones(server, settings):
+    """The pairs that only grow hold what the server computed: a joined run as one pair, as it was asked and answered,
+    and an answer as the model wrote it, though the page shows it otherwise (a stray asterisk dropped): every request
+    extends the one before it, the first of each page too."""
+    srv, url = server
+    p = Pipeline(settings, ocr=None, translator=PlamoTranslator(url=url, seed=1))
+    for page in range(3):
+        regions = open_regions(page)
+        assert p._translate_regions(regions, lambda _m: None, unit_box=(0, 0, 400, 300 * LINES_A_PAGE)) == ""
+        assert [r.translated_text for r in regions[:3]] == [f"Line {page} 0.", f"Line {page} 1.", f"Line {page} 2."]
+    assert len(srv.prompts) == 3 * (LINES_A_PAGE - 1)  # (the first two lines of each page in one request)
+    assert srv.extends == [False] + [True] * (len(srv.prompts) - 1)
+    last = srv.prompts[-1]
+    assert "頁2の行0で、\n頁2の行1です。<|plamo:tag|>output" in last and "Line 2 2.*" in last  # as computed
+    pairs = p._grown.take()
+    assert pairs[-LINES_A_PAGE + 1] == ("頁2の行0で、\n頁2の行1です。", "Line 2 0.\nLine 2 1.")
+    assert pairs[-LINES_A_PAGE + 2] == ("頁2の星2です。", "Line 2 2.*")
+    assert all(isinstance(pair, SentPair) for pair in pairs)
+
+
+def test_a_whole_book_run_holds_what_the_server_computed_too(server, settings):
+    srv, url = server
+    settings.chunk_bubbles = 2 * LINES_A_PAGE
+    pipeline = _book_pipeline(settings, PlamoTranslator(url=url, seed=1))
+    reader = BatchReader(pipeline, 0, settings, context_mode=True, book="book")
+    import time
+
+    units = _units(4)
+    for page, unit in enumerate(units):
+        unit.regions[0].source_text = f"頁{page}の行0で、"
+        unit.regions[2].source_text = f"頁{page}の星2です。"
+    reader._translation_pass(units, time.monotonic())
+    assert len(srv.prompts) == 4 * (LINES_A_PAGE - 1)
+    assert srv.extends == [False] + [True] * (len(srv.prompts) - 1)
+
+
+def test_a_request_beside_a_page_that_took_the_pairs_past_their_bound_extends_its_last_prompt(server, settings):
+    """The pairs given to a request beside the page (where a bubble's larger lettering is) are taken whole: after a
+    page whose lines took them past `CONTEXT_GROWS_TO`, its prompt still begins as the page's last prompt and its
+    answer, which the server holds."""
+    srv, url = server
+    tr = PlamoTranslator(url=url, seed=1)
+    before = [(line(0, k), english(line(0, k))) for k in range(CONTEXT_GROWS_TO - 2)]
+    computed: list = []
+    texts = [line(1, k) for k in range(LINES_A_PAGE)]
+    assert tr.translate_page(texts, before, "", computed=computed) == [english(t) for t in texts]
+    assert len(before) + len(computed) > CONTEXT_GROWS_TO
+    tr.translate_aside("頁1の行3", [*before, *computed], "")
+    assert srv.extends == [False] + [True] * LINES_A_PAGE  # the aside too
+    assert line(0, 0) in srv.prompts[-1]  # (the oldest pair kept)
+
+
+def test_grown_pairs_keep_what_was_computed_and_add_a_line_filled_later_at_the_end():
+    def usable(src, dst):
+        return dst != "?"
+
+    computed = [SentPair("一", "One."), SentPair("二で、\n三", "Two,\nthree."), SentPair("四", "?"),
+                SentPair("五で、\n六", "Five, six.")]  # (the last did not split back: not taken)
+    finals = [("一", "One*."), ("二で、", "Two,"), ("三", "three."), ("四", "Four."), ("七", "Seven.")]
+    got = grown_pairs(computed, finals, usable)
+    assert got == [("一", "One."), ("二で、\n三", "Two,\nthree."), ("四", "Four."), ("七", "Seven.")]
+    assert isinstance(got[0], SentPair) and isinstance(got[1], SentPair) and not isinstance(got[2], SentPair)
+    grown = GrowingContext()
+    grown.extend(got)
+    assert isinstance(grown.take()[1], SentPair)  # (kept as computed: never made one line)
+
+
+def test_grown_pairs_hold_a_name_as_the_page_respelt_it_and_the_rest_as_computed():
+    """An answer the page sets otherwise than by its spaces and stray asterisks (a name respelt as the series sheet
+    spells it) is held as the page sets it, a joined run's still a line per bubble; the others as the model wrote
+    them."""
+    computed = [SentPair("一", "Tanaka  came."), SentPair("二で、\n三", "Tanaka said,\nthree*"),
+                SentPair("四", "Four*")]
+    finals = [("一", "Tanaka came."), ("二で、", "Tanakah said,"), ("三", "three"), ("四", "Four")]
+    got = grown_pairs(computed, finals, lambda _s, _d: True)
+    assert got == [("一", "Tanaka  came."), ("二で、\n三", "Tanakah said,\nthree"), ("四", "Four*")]
+    assert all(isinstance(pair, SentPair) for pair in got)

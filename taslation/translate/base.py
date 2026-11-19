@@ -77,14 +77,19 @@ def uses_room(translator: Any) -> bool:
 
 
 # --- earlier pairs that only grow, cut back rarely ------------------------------------------------------------
-# A translator whose server reuses the beginning of a prompt only when the next prompt extends it byte for byte (PLaMo
-# on Ollama: a prompt that differs anywhere, even in its last earlier pair, is computed from its start again) is given
-# earlier pairs that only grow, from request to request and from page to page, and are cut back to the newest
+# A translator whose server reuses the beginning of a prompt only as far as the next prompt repeats it (PLaMo on
+# Ollama, run by llama.cpp's server; measured on 2026-11-20, docs/OFFLINE_VERIFICATION.md, "What a PLaMo request costs
+# the server": a prompt that parts from the last one within its last few pairs costs its tail only, about 0.1 s more,
+# from the snapshots the server keeps of the last requests' ends; one that parts further back, a pair in the middle
+# changed or the oldest ones cut, is computed from its start again, about 2.2 s per 1,000 tokens on a 6 GB GPU) is
+# given earlier pairs that only grow, from request to request and from page to page, and are cut back to the newest
 # `CONTEXT_CUT_TO` only once they pass `CONTEXT_GROWS_TO` (or no longer leave a request room: `GrowingContext.take`).
 # Sliding them by a page at every page made the first request of every page compute its whole prompt again (1,050 ms
 # against 142 ms for the later ones). Measured on OpenMantra (2026-11-16, PLaMo 3 Translate 2B on a 6 GB GPU): the
 # model's time 63.7 -> 49.0 s for 30 pages read one by one, 73.9 -> 57.7 s for the whole book; chrF 41.6 -> 41.2 and
 # 41.8 -> 42.0 (paired differences -0.19 +- 0.34 and -0.59 +- 0.41, a seed's own noise 0.45); no line left untranslated.
+# A joined run of bubbles is one pair since 2026-11-20 (`SentPair`, as its request computed it), so the bounds count it
+# once: the pairs hold a few more lines than they did when these were measured (prompts 3 to 6 % longer on OpenMantra).
 CONTEXT_GROWS_TO = 60
 CONTEXT_CUT_TO = 20
 
@@ -94,6 +99,17 @@ def grows_context(translator: Any) -> bool:
     (``grows_context``, `plamo.PlamoTranslator`). The chat translator, and one that does not say, gets the pairs of the
     last pages or runs as before."""
     return bool(getattr(translator, "grows_context", False))
+
+
+class SentPair(tuple):
+    """An earlier (Japanese, translation) pair as a translator's request computed it (`plamo.PlamoTranslator`): the
+    Japanese as it was sent (a joined run of bubbles as one pair, a line per bubble) and the answer as the model wrote
+    it. Given to the next request as it is (never made one line), so that the prompt holds what the server holds."""
+
+    __slots__ = ()
+
+    def __new__(cls, source: str, answer: str) -> "SentPair":
+        return super().__new__(cls, (str(source), str(answer)))
 
 
 class GrowingContext:
@@ -118,7 +134,7 @@ class GrowingContext:
         return iter(list(self._pairs))
 
     def append(self, pair: tuple[str, str]) -> None:
-        self._pairs.append((str(pair[0]), str(pair[1])))
+        self._pairs.append(pair if isinstance(pair, SentPair) else (str(pair[0]), str(pair[1])))
 
     def extend(self, pairs: Any) -> None:
         for pair in pairs:
@@ -138,6 +154,65 @@ class GrowingContext:
             while self._pairs and fits is not None and not fits(self._pairs):
                 self._pairs = self._pairs[-(len(self._pairs) // 2):] if len(self._pairs) > 1 else []
         return list(self._pairs)
+
+
+def tells_computed(translator: Any) -> bool:
+    """Whether *translator* says which earlier pairs its prompts computed (``computed``, a list its ``translate_page``
+    fills: `plamo.PlamoTranslator`): the pairs its server holds, which the caller's pairs that only grow take
+    (`grown_pairs`)."""
+    return grows_context(translator) and accepts(getattr(translator, "translate_page", None), "computed")
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split()) if "\n" in text else text
+
+
+def _as_set(text: str) -> str:
+    """*text* without what setting a line on the page takes out of an answer: its spaces made one, stray emphasis
+    asterisks (`Pipeline.tighten`)."""
+    return " ".join(str(text).replace("*", "").split())
+
+
+def grown_pairs(computed: Sequence[tuple[str, str]], finals: Sequence[tuple[str, str]],
+                usable: Callable[[str, str], bool]) -> list[tuple[str, str]]:
+    """What the pairs that only grow (`GrowingContext`) take after a request whose translator said what its prompts
+    computed (*computed*, in order: a joined run as one pair, a line per bubble, the answer as the model wrote it),
+    given *finals*, the lines asked as (Japanese, translation as the page sets it), in their order. Each computed pair
+    whose every line *usable*(Japanese, translation) takes (a joined run's answer split back onto its lines,
+    `continuation.split_back`) comes as it is, so that the next request's prompt extends the last one; but where the
+    page sets one of its lines otherwise than by its spaces and stray asterisks (a name respelt as the series sheet
+    spells it, `terms.spelt_right`), with the page's lines in its place (a line per bubble still), so that the lines
+    after it read the sheet's spelling, as before (the next prompt then parts from what the server holds at that
+    pair, which costs its tail only while the pair is recent). Then, at the end, each line of *finals* that none of
+    them holds: a line filled by asking it again, or one whose first answer was not taken."""
+    from collections import Counter, defaultdict, deque
+
+    from .continuation import split_back
+
+    shown_as: dict[str, deque[str]] = defaultdict(deque)  # each line's translations as the page sets them, in order
+    for src, dst in finals:
+        shown_as[_one_line(str(src))].append(str(dst))
+    out: list[tuple[str, str]] = []
+    held: Counter[str] = Counter()
+    for pair in computed:
+        src, dst = str(pair[0]), str(pair[1])
+        parts = src.split("\n")
+        answers = [dst] if len(parts) == 1 else split_back(dst, len(parts))
+        if answers is None or not all(usable(s, " ".join(d.split())) for s, d in zip(parts, answers)):
+            continue
+        shown = [shown_as[s][held[s]] if held[s] < len(shown_as[s]) else None for s in parts]
+        if all(f is not None for f in shown) and any(_as_set(f) != _as_set(d) for f, d in zip(shown, answers)):
+            out.append(SentPair(src, "\n".join(str(f) for f in shown)))  # (as the page sets it)
+        else:
+            out.append(pair if isinstance(pair, SentPair) else SentPair(src, dst))
+        held.update(parts)
+    for src, dst in finals:
+        key = _one_line(str(src))
+        if held[key] > 0:
+            held[key] -= 1
+        else:
+            out.append((str(src), str(dst)))
+    return out
 
 
 def context_fits(translator: Any, notes: str) -> Callable[[Sequence[tuple[str, str]]], bool] | None:

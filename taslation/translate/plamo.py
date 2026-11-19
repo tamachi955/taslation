@@ -21,7 +21,12 @@ What the pipeline hands a translator maps to it like this:
   far -> the earlier pairs, the oldest left out first when the prompt would not fit (`PROMPT_SHARE`). The pipeline and
   the whole-book run give it pairs that only grow, cut back rarely (``grows_context``, `base.GrowingContext`, cut
   earlier when a request would not fit after them: `context_fits`), so that a request's first prompt extends the
-  last prompt of the request before, which Ollama then does not compute again;
+  last prompt of the request before, which Ollama then does not compute again. A line done holds its pair as its
+  request computed it (`_computed`, `base.SentPair`): a joined run one pair, a line per bubble, and the answer as the
+  model wrote it; the request's ``computed`` list hands them to the caller's pairs (`base.grown_pairs`, which puts in
+  the page's own line where the page sets it otherwise than by spaces and stray asterisks: a name respelt as the
+  series sheet spells it). A run split into its lines left the next prompt otherwise than the server held it from
+  there on (measured on 2026-11-20, docs/OFFLINE_VERIFICATION.md, "What a PLaMo request costs the server");
 * the sheet's renderings that a line names (`terms._sheet_hits`: the reader's terms and names, the forms a speaker
   uses, a name with its honorific: what the review flags check a translation against), the parts of the sheet's
   names (`terms.name_words`), and the book's names held so far (`renderings.BookNames`: a name's first rendering, as
@@ -76,7 +81,7 @@ from typing import Any, Callable, Sequence
 
 from ..messages import Cancelled, Message
 from ..ocr import place as ocr_place
-from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, TranslationError
+from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, SentPair, TranslationError
 from .continuation import MAX_JOINED, joined, runs, split_back
 from .models import PLAMO, plamo_code
 from .ollama import KEEP_ALIVE, OllamaTranslator, _ignore
@@ -133,6 +138,13 @@ def one_line(text: Any) -> str:
     line breaks made one space when it has a line break, else as it is."""
     text = str(text)
     return " ".join(text.split()) if "\n" in text else text
+
+
+def earlier_pairs(pairs: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+    """*pairs* as a request's earlier pairs: each line's Japanese made one line (`one_line`), but a pair a request
+    computed (`base.SentPair`: a joined run, a line per bubble) as it is, so that the prompt holds what the server
+    computed."""
+    return [p if isinstance(p, SentPair) else (one_line(p[0]), p[1]) for p in pairs]
 
 
 def pfml_prompt(source: str, target: str, context: str = "", history: Sequence[tuple[str, str]] = (),
@@ -217,6 +229,7 @@ class PlamoTranslator(OllamaTranslator):
         self.history_pairs = history_pairs
         self._asked: dict[str, int] = {}  # line -> how often it was asked for (`_draw`)
         self._asked_lock = threading.Lock()
+        self._wrote = threading.local()  # (the last answer of this thread's request, as the model wrote it: `_written`)
         # the evaluation tools' record of every request (Ollama's statistics): None in the app, a list to fill there
         self.stats_log: list[dict[str, Any]] | None = None
 
@@ -289,8 +302,14 @@ class PlamoTranslator(OllamaTranslator):
                                                     "eval_duration", "total_duration", "done_reason")}
         if self.stats_log is not None:
             self.stats_log.append(dict(self.last_stats))
+        self._wrote.text = clean(raw)
         # each line's spaces made one; the line breaks kept (a joined request answers one line per bubble)
         return "\n".join(" ".join(line.split()) for line in clean(raw).splitlines() if line.strip())
+
+    def _written(self) -> str:
+        """The answer of this thread's last request as the model wrote it (reserved tokens out, trimmed): what the
+        server holds after the prompt, so what an earlier pair of the next prompt holds for that line."""
+        return str(getattr(self._wrote, "text", "") or "")
 
     @staticmethod
     def _hint(facts: dict[str, Any]) -> str:
@@ -320,7 +339,7 @@ class PlamoTranslator(OllamaTranslator):
             target = self.target_code
         except TranslationError:
             target = "en"
-        head = pfml_prompt("", target, self._context(notes), [(one_line(s), d) for s, d in pairs])
+        head = pfml_prompt("", target, self._context(notes), earlier_pairs(pairs))
         return tokens_about(head) + REQUEST_ROOM <= int(self.num_ctx * PROMPT_SHARE)
 
     def _fit(self, source: str, target: str, context: str, history: list[tuple[str, str]],
@@ -349,8 +368,24 @@ class PlamoTranslator(OllamaTranslator):
         max_tokens = max(128, 4 * len(source) + 64)
         prompt = self._fit(source, target, self._context(notes, speaker, following, hint), list(history),
                            glossary_for(notes, source, speaker), max_tokens)
+        self._wrote.text = None
         got = self._generate(prompt, max_tokens, self._draw(source), cancel, on_slow)
+        wrote = getattr(self._wrote, "text", None)
+        self._wrote.text = wrote if isinstance(wrote, str) else got  # (a stand-in for the model keeps none: its answer)
         return got if "\n" in source else " ".join(got.split())
+
+    def _computed(self, history: list[tuple[str, str]], source: str, computed: list[tuple[str, str]] | None) -> None:
+        """The request this thread just made for *source* as an earlier pair of the next one, added to *history* (and
+        to *computed*, a list when given): the Japanese as it was sent (a joined run as one pair, a line per bubble)
+        and the answer as the model wrote it (`_written`), so that the next prompt holds what the server computed and
+        extends this one. None for an answer with nothing in it."""
+        answer = self._written()
+        if not answer:
+            return
+        pair = SentPair(source, answer)
+        history.append(pair)
+        if computed is not None:
+            computed.append(pair)
 
     def warm_up(self, model: str | None = None, keep_alive: Any = None, timeout: float | None = None,
                 cancel: threading.Event | None = None, on_slow: Callable[[float], None] | None = None) -> float:
@@ -387,17 +422,20 @@ class PlamoTranslator(OllamaTranslator):
                        upcoming: Sequence[str] = (), meta: Sequence[dict[str, Any]] | None = None,
                        on_item: Callable[[int, str], None] | None = None,
                        cancel: threading.Event | None = None,
-                       on_slow: Callable[[float], None] | None = None) -> list[str]:
+                       on_slow: Callable[[float], None] | None = None,
+                       computed: list[tuple[str, str]] | None = None) -> list[str]:
         """One translation per text, one request each, in order: each line after the earlier pairs (*context*, then
-        the lines of this request already done). *on_item*(index, translation) gets each as soon as it is there.
-        A run of lines that go on in the next bubble is one request (see the module's docstring); *upcoming* is
-        context for a line asked alone (`_following`). Once *cancel* is set `Cancelled` is raised, between
-        two lines or during one; *on_slow* as for `OllamaTranslator.translate_page`. ``ollama.bad_answer`` when not
-        one line got a translation."""
+        the lines of this request already done, each as its request computed it: `_computed`). *on_item*(index,
+        translation) gets each as soon as it is there. A run of lines that go on in the next bubble is one request
+        (see the module's docstring); *upcoming* is context for a line asked alone (`_following`). *computed*, a list
+        when given, gets the earlier pairs this request added, in order: what the caller's next request starts from
+        after *context*, so that its first prompt extends this request's last one. Once *cancel* is set `Cancelled`
+        is raised, between two lines or during one; *on_slow* as for `OllamaTranslator.translate_page`.
+        ``ollama.bad_answer`` when not one line got a translation."""
         if not texts:
             return []
         self.target_code  # noqa: B018 - a language PLaMo cannot write fails before any request
-        history = [(one_line(src), dst) for src, dst in list(context)[-self.history_pairs:]]
+        history = earlier_pairs(list(context)[-self.history_pairs:])
         lines = [one_line(t) for t in texts]
         facts = [dict((meta[i] or {}) if meta and i < len(meta) else {}) for i in range(len(lines))]
         after = list(lines) + [str(t) for t in upcoming]  # what follows each line: the request's, then upcoming
@@ -406,10 +444,12 @@ class PlamoTranslator(OllamaTranslator):
         def took(i: int, got: str) -> None:
             out[i] = got
             if got:
-                history.append((lines[i], got))
                 learn(notes, [(lines[i], got)])  # the book's names: what this line shows of them
                 if on_item is not None:
                     on_item(i, got)
+
+        def computed_as(source: str) -> None:
+            self._computed(history, source, computed)
 
         for run in runs(facts, len(lines), MAX_JOINED):
             if cancel is not None and cancel.is_set():
@@ -417,17 +457,22 @@ class PlamoTranslator(OllamaTranslator):
             speaker = str(facts[run[0]].get("speaker", "") or "")
             if len(run) > 1 and all(str(facts[k].get("speaker", "") or "") == speaker for k in run):
                 # (no hint: one bubble's hint would be the reference of the run's other bubbles too)
-                parts = split_back(self._line(joined([lines[k] for k in run]), notes, history, speaker, cancel,
-                                              on_slow, self._following(lines, facts, after, run[-1])), len(run))
+                source = joined([lines[k] for k in run])
+                parts = split_back(self._line(source, notes, history, speaker, cancel, on_slow,
+                                              self._following(lines, facts, after, run[-1])), len(run))
                 if parts is not None:
+                    computed_as(source)
                     for k, part in zip(run, parts):
                         took(k, part)
                     continue
             for k in run:  # one bubble at a time: the run's joined answer could not be split back
                 if cancel is not None and cancel.is_set():
                     raise Cancelled()
-                took(k, self._line(lines[k], notes, history, str(facts[k].get("speaker", "") or ""), cancel, on_slow,
-                                   self._following(lines, facts, after, k), self._hint(facts[k])))
+                got = self._line(lines[k], notes, history, str(facts[k].get("speaker", "") or ""), cancel, on_slow,
+                                 self._following(lines, facts, after, k), self._hint(facts[k]))
+                if got:
+                    computed_as(lines[k])
+                took(k, got)
         if not any(out):
             raise TranslationError(Message("ollama.bad_answer", chars=0))
         return out
@@ -438,10 +483,14 @@ class PlamoTranslator(OllamaTranslator):
         """One request beside a page's own (`locate_large`: where a bubble's larger lettering is in its translation):
         *text* translated after the earlier pairs *context* with the premises *notes*, as a line of the page is
         (`_line`, without the Japanese after it), and nothing of it kept - no pair for the next request, no name
-        learnt, no draw counted (a line asked for later is drawn as it would have been). Cancelled as a page is."""
+        learnt, no draw counted (a line asked for later is drawn as it would have been). Cancelled as a page is.
+        *context* is taken whole, as the caller gives it (the pairs the next request starts from, never cut there):
+        cut to the newest `HISTORY_PAIRS`, a request after a page that took the pairs past it began otherwise than
+        the page's last prompt, and the server computed it all again (`_fit` still leaves the oldest out when they
+        would not fit)."""
         target = self.target_code
         source = one_line(text)
-        history = [(one_line(src), dst) for src, dst in list(context)[-self.history_pairs:]]
+        history = earlier_pairs(list(context))
         max_tokens = max(128, 4 * len(source) + 64)
         prompt = self._fit(source, target, self._context(notes), history, glossary_for(notes, source), max_tokens)
         return " ".join(self._generate(prompt, max_tokens, 0, cancel, on_slow).split())

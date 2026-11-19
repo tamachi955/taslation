@@ -2117,7 +2117,12 @@ class BatchReader:
                 ui, i = slots[k]
                 view.line(units[ui], i, texts[k], str(text or ""), str(meta[k].get("speaker", "")))
 
-        told = {"on_item": on_item} if accepts(translator.translate_page, "on_item") else {}
+        told: dict[str, Any] = {"on_item": on_item} if accepts(translator.translate_page, "on_item") else {}
+        # the earlier pairs the run's request computed, as its translator says (a joined run as one pair, the answers
+        # as the model wrote them): what the pairs that only grow take (`_base.grown_pairs`), so that the next run's
+        # first prompt extends this run's last one
+        computed: list[tuple[str, str]] | None = [] if grown and _base.tells_computed(translator) else None
+        asked_with = dict(told, computed=computed) if computed is not None else told
         if self._view is not None:
             self._view.request(units)
         # a short line the book or its series translated before is not sent: it takes that translation (`linememo`)
@@ -2125,7 +2130,7 @@ class BatchReader:
             plan = linememo.plan_for(self.pipeline, texts, meta, run, serve=not self.retranslate)
         try:
             outputs = plan.ask(translator.translate_page, prior, notes_text, upcoming,
-                               meta=meta if any(meta) else None, **call, **told)
+                               meta=meta if any(meta) else None, **call, **asked_with)
         except TranslationError as e:
             p.answering = 0
             error = message_of(e)
@@ -2143,6 +2148,7 @@ class BatchReader:
                 self._leave_for_reading(units)
                 return
             outputs = []  # the page unit's lines are asked for again, a few at a time
+            computed = None  # (none of its answers is taken: the lines asked again come after)
         outputs = plan.fill(outputs)  # (the lines reused in their places)
         if outputs and _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: once more, with neighbours
             outputs = plan.served_back(ask_again_romanised(  # (a reused line was looked at when first answered)
@@ -2156,13 +2162,20 @@ class BatchReader:
         def usable(k: int, text: str) -> bool:
             return bool(text) and self.pipeline.real_translation(texts[k], text)
 
-        def settle(lines: list[int], replies: Sequence[str], context: list[tuple[str, str]]) -> None:
+        def takes(src: str, answer: str) -> bool:  # (an answer as the model wrote it, as an earlier pair:
+            # `Pipeline._takes_pair`)
+            return (bool(answer) and self.pipeline.real_translation(src, answer)
+                    and not (_base.REASK_ROMANISED and _base.bare_romanisation(src, answer)))
+
+        def settle(lines: list[int], replies: Sequence[str], context: list[tuple[str, str]],
+                   log: Sequence[tuple[str, str]] | None = None) -> None:
             """The *replies* of *lines* (indices into the run) spelt as the series sheet spells, checked and
-            tightened; the real translations kept for their page units, with their flags, and carried on as context.
-            A reused line was held to the sheet already (`linememo.held_to`); the memo keeps the rest as spelt here.
-            Then each final translation whose Japanese lettering set a part larger gets the part of it to set larger
-            (`Pipeline.large_part`: requests beside the run's, after the pairs the next run starts from, never cut
-            here; stopped by Stop as the run's are)."""
+            tightened; the real translations kept for their page units, with their flags, and carried on as context
+            (with *log*, the pairs the request computed, as `_base.grown_pairs` takes them, the lines it does not
+            hold after them). A reused line was held to the sheet already (`linememo.held_to`); the memo keeps the
+            rest as spelt here. Then each final translation whose Japanese lettering set a part larger gets the part
+            of it to set larger (`Pipeline.large_part`: requests beside the run's, after the pairs the next run
+            starts from, never cut here; stopped by Stop as the run's are)."""
             entries: list[dict[str, Any]] = []
             for k in lines:
                 ui, i = slots[k]
@@ -2174,6 +2187,7 @@ class BatchReader:
                                 "confidence": r.ocr_confidence, "direction": direction_of(r)})
             tightened = self.pipeline.tighten(entries)
             flagged = self.pipeline.review(entries, tightened)
+            finals: list[tuple[str, str]] = []
             for k, r_out, fl in zip(lines, tightened, flagged):
                 ui, i = slots[k]
                 r = units[ui].japanese()[i]
@@ -2183,7 +2197,8 @@ class BatchReader:
                     if not grown or (k not in plan.served and k not in plan.copies):
                         # (a line reused without a request is not in the request's history, so not in pairs that
                         # only grow either: the next run's prompt extends this run's last one)
-                        recent.append((r.source_text, r_out))
+                        finals.append((r.source_text, r_out))
+            recent.extend(finals if log is None else _base.grown_pairs(log, finals, takes))
             mixed = [k for k in lines if units[slots[k][0]].japanese()[slots[k][1]].size_mix is not None
                      and slots[k][1] in per_unit[slots[k][0]]]
             if not mixed or not getattr(self.pipeline.settings, "size_emphasis", True):
@@ -2215,7 +2230,7 @@ class BatchReader:
                     self._units_final([units[ui]])
             return left
 
-        settle(list(range(len(texts))), outputs, prior)
+        settle(list(range(len(texts))), outputs, prior, computed)
         p.answering = 0  # (what it answered is stored now: `checked`)
         incomplete = commit(list(range(len(units))))
         if not incomplete or self._stop.is_set():
