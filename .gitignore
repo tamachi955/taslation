@@ -16,3 +16,5 @@ taslation.toml
 .cache-ram-by-install
 .ollama-by-install
 .ollama-autostart-by-install
+# the earlier version an update kept for update.cmd -Back
+.previous/

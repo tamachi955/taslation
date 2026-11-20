@@ -10,7 +10,8 @@ from a PowerShell window:
     powershell -ExecutionPolicy Bypass -File uninstall.ps1
 
 It first lists what goes and asks once (default: no). Then it deletes:
-  * .venv and models\ in this folder;
+  * .venv and models\ in this folder, and .previous (the earlier version an
+    update kept for update.cmd -Back);
   * the Start-menu shortcut "TASlation", only when it points into this folder;
   * your data folder ~/.taslation (or TASLATION_STATE_DIR), only after your Y:
     it holds the translation caches (the translations your reading made;
@@ -60,6 +61,7 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 $Venv = Join-Path $Root '.venv'
 $Models = Join-Path $Root 'models'
+$Previous = Join-Path $Root '.previous'  # the earlier version an update kept (update.ps1 -Back)
 $KvMarker = Join-Path $Root '.kv-cache-by-install'
 $CacheRamMarker = Join-Path $Root '.cache-ram-by-install'
 # what install.ps1 changed about Ollama's start with Windows (each lists what it removed, one line each)
@@ -506,6 +508,7 @@ Write-Host ''
 Write-Info 'This removes:'
 Write-Info '  - the program files (.venv in this folder)'
 Write-Info '  - the reading model and fonts (models in this folder)'
+if (Test-Path -LiteralPath $Previous) { Write-Info '  - the earlier version an update kept (.previous in this folder)' }
 Write-Info '  - the Start-menu shortcut'
 Write-Info 'Your translations, notes and Ollama stay, unless you say otherwise after this.'
 if ($DryRun) {
@@ -524,6 +527,7 @@ $leftServer = Get-ServerRecord (Get-StateDir)
 Write-Step 'Virtual environment and models in this folder'
 Remove-Target 'the virtual environment' $Venv
 Remove-Target 'the OCR model and fonts' $Models
+if (Test-Path -LiteralPath $Previous) { Remove-Target 'the earlier version an update kept' $Previous }
 foreach ($name in @('TASLATION_MODELS_DIR', 'SELFTRANS_MODELS_DIR')) {
     $v = [Environment]::GetEnvironmentVariable($name)
     if ($v) { $script:Left.Add("models in $v (set by $name; delete by hand if you want)") }
