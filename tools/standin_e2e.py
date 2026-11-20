@@ -1895,8 +1895,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     from taslation import backlog as backlog_mod
 
     catch_page, backlog_step = backlog_mod.Backlog.catch, backlog_mod.Backlog.step
-    if args.k_history:  # (the internal switch: the pairs behind the reader in story order or not; else as the app)
-        backlog_mod.HISTORY = args.k_history
 
     def caught(self: Any, screen: Any, image: Any, work: Any, *a: Any, **k: Any) -> Any:  # a page turned past
         # (--k-backlog off: nothing is caught - the same turns timed as before there was a backlog)
@@ -2375,7 +2373,8 @@ class Director:
             return
         if self.phase == "settle":
             ready_go = self.waiting_go >= seg.go
-            if seg.name in ("r", "t", "o", "z", "w") and seg.name not in self.entered and ready_go and rested:
+            if (seg.name in ("r", "t", "o", "z", "w") and seg.name not in self.entered and ready_go and rested
+                    and not (seg.name == "w" and self.args.k_narrow and not self.resized())):
                 self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
                 return
             app = self.app
@@ -2506,8 +2505,9 @@ class Director:
             if hwnd and self.guard.is_viewer(hwnd):
                 self.notes.act(seg.name, "narrow window")
                 place_own(hwnd, self.narrow_rect)
-        elif seg.name in K_PACES and self.args.k_narrow and seg is next(x for x in self.segments
-                                                                            if x.name in K_PACES):
+        elif (seg.name in K_PACES and self.args.k_narrow and seg is next(x for x in self.segments
+                                                                             if x.name in K_PACES)
+              or seg.name == "w" and self.args.k_narrow):  # (the whole-book run in the narrow window: single pages)
             self.resize_from = len(self.events)
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
@@ -3969,9 +3969,8 @@ def run(args: argparse.Namespace) -> int:
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
-              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow),
-              "history": args.k_history, "backlog": args.k_backlog == "on",
-              "read_ms": args.k_read_ms}  # (history None: the app's, below)
+              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "backlog": args.k_backlog == "on",
+              "read_ms": args.k_read_ms}
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
@@ -4014,10 +4013,6 @@ def run(args: argparse.Namespace) -> int:
 
     if not Path(taslation.__file__).resolve().is_relative_to(ROOT):
         raise SystemExit(f"taslation comes from {taslation.__file__}, not from {ROOT}: set PYTHONPATH")
-    if k_plan["history"] is None:
-        from taslation.backlog import HISTORY
-
-        k_plan["history"] = HISTORY
     if args.start_ollama:
         from taslation import ollama_start
 
@@ -4935,13 +4930,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "a GPU, whose page on show takes longer)")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
-    ap.add_argument("--k-history", default=None, choices=("story", "work"),
-                    help="the backlog's history (`backlog.HISTORY`, default as the app has it): the pages before in "
-                         "the story, or the order of work")
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
-                    help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
+                    help="scenarios k and w: in the narrow window (single pages), the stand-in placed at NARROW_SIZE "
+                         "first")
     ap.add_argument("--side-indicator", default=None, choices=("column", "rail", "off"),
                     help="the setting side_indicator of the window (default: the app's, column); not off: the "
                          "indicator beside the page is looked at from the window as the events come (`SideCheck`), "
