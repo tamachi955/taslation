@@ -351,11 +351,11 @@ def hwnd_of_first(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
 GUARDED = {
     "capture_window": ("ours", first_arg), "enlarge_window": ("ours", first_arg), "move_window": ("ours", first_arg),
     "unminimise_window": ("ours", first_arg), "raise_window": ("ours", first_arg), "ask_repaint": ("ours", first_arg),
-    "bring_to_front": ("ours", first_arg), "give_foreground": ("ours", first_arg),
+    "give_foreground": ("ours", first_arg),
     "restore_window": ("ours", hwnd_of_first), "lower_window": ("ours", hwnd_of_first),
     "press_key": ("viewer", first_arg), "press_briefly": ("viewer", first_arg), "post_key": ("viewer", first_arg),
     "post_click": ("viewer", first_arg),
-    "click_screen": ("never", first_arg), "capture_screen_rect": ("never", first_arg),
+    "capture_screen_rect": ("never", first_arg),
 }
 
 

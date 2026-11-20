@@ -32,7 +32,7 @@ from taslation.ui.constants import VIEWER_BLACK, VIEWER_LOADING
 
 HWND = 1
 BLACK = Image.new("RGB", (640, 480), (0, 0, 0))
-SENDERS = ("press_briefly", "press_key", "post_key", "post_click", "with_foreground", "click_screen")
+SENDERS = ("press_briefly", "press_key", "post_key", "post_click", "with_foreground")
 
 
 def spinner(size=(640, 480)) -> Image.Image:

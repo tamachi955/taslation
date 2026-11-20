@@ -56,9 +56,9 @@ def _book(settings, name="Book"):
 
 @pytest.fixture
 def no_keys(monkeypatch):
-    """Whatever would reach a window of another program: a key, a click, a mouse move."""
+    """Whatever would reach a window of another program: a key or a click."""
     sent: list[str] = []
-    for name in ("post_key", "post_click", "_send_key", "_send_mouse"):
+    for name in ("post_key", "post_click", "_send_key"):
         monkeypatch.setattr(capture_windows, name, lambda *a, name=name, **k: sent.append(name))
     return sent
 

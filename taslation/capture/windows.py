@@ -477,7 +477,6 @@ if IS_WINDOWS:
     INPUT_KEYBOARD = 1
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP = 0x0002
-    VK_MENU = 0x12
 
     VK_CODES = KEY_CODES  # the key names TASlation knows (`pagekeys.KEY_NAMES`), also where no key can be pressed
     EXTENDED_KEYS = {0x25, 0x26, 0x27, 0x28, 0x21, 0x22, 0x24, 0x23, 0x2D, 0x2E}
@@ -892,8 +891,6 @@ def capture_window(hwnd: int, client_only: bool = True, allow_screen_fallback: b
 WM_KEYDOWN, WM_KEYUP = 0x0100, 0x0101
 WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202
 MK_LBUTTON = 0x0001
-INPUT_MOUSE = 0
-MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_ABSOLUTE = 0x0001, 0x0002, 0x0004, 0x8000
 INPUT_CHILD_CLASSES = ("Chrome_RenderWidgetHostHWND",)
 CAPTION_CHILD_CLASS = "InputNonClientPointerSource"  # WinUI's child over the title bar it draws (`caption_rows`)
 KEY_CHILD_CLASS = "InputSiteWindowClass"  # WinUI's child that takes the keyboard (`key_target`)
@@ -971,25 +968,6 @@ def post_click(hwnd: int, x: int, y: int) -> None:
     user32.PostMessageW(target, WM_LBUTTONUP, 0, lparam)
 
 
-def _send_mouse(flags: int, x: int = 0, y: int = 0) -> None:
-    inp = INPUT()
-    inp.type = INPUT_MOUSE
-    inp.mi.dx, inp.mi.dy, inp.mi.dwFlags = x, y, flags
-    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-
-
-def click_screen(x: int, y: int) -> None:
-    """Real left click at screen coordinates (the window under the cursor gets it)."""
-    _require_windows()
-    sw, sh = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-    ax, ay = int(x * 65535 / max(1, sw - 1)), int(y * 65535 / max(1, sh - 1))
-    _send_mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, ax, ay)
-    time.sleep(0.03)
-    _send_mouse(MOUSEEVENTF_LEFTDOWN)
-    time.sleep(0.03)
-    _send_mouse(MOUSEEVENTF_LEFTUP)
-
-
 # --- page turning -------------------------------------------------------------
 
 def _send_key(vk: int, up: bool) -> None:
@@ -1018,29 +996,6 @@ def key_code(name: str) -> int:
     raise CaptureError(Message("viewer.unknown_key", key=name))
 
 
-def bring_to_front(hwnd: int, timeout: float = 1.0) -> bool:
-    """Give the window *hwnd* the foreground, with an ALT tap of its own when Windows refuses: for a developer's own
-    scripts only. The window never uses it: the ALT tap would be a key the person did not press
-    (`give_foreground` hands the foreground over without one)."""
-    _require_windows()
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-    deadline = time.monotonic() + timeout
-    attempt = 0
-    while time.monotonic() < deadline:
-        if user32.GetForegroundWindow() == hwnd:
-            return True
-        if attempt > 0:
-            # Windows only lets the foreground process hand over the foreground; a
-            # synthetic ALT tap satisfies that rule and is otherwise harmless.
-            _send_key(VK_MENU, up=False)
-            _send_key(VK_MENU, up=True)
-        user32.SetForegroundWindow(hwnd)
-        attempt += 1
-        time.sleep(0.05)
-    return user32.GetForegroundWindow() == hwnd
-
-
 def press_key(hwnd: int, key: str = "Left") -> bool:
     """Press *key* once in *hwnd*, which must have the foreground (`press_briefly` hands it over; nothing here forces it):
     only ever a key the person pressed, passed on at the person's own pace. False, and nothing pressed, for a window
@@ -1057,8 +1012,8 @@ def press_key(hwnd: int, key: str = "Left") -> bool:
 
 def give_foreground(hwnd: int) -> bool:
     """Give the foreground to *hwnd*, a window of this program that is on the screen, from whichever window has it
-    (the viewer, after a page-turn key). No key is pressed for it (`bring_to_front`'s ALT tap would reach the
-    viewer: Chrome takes a lone ALT for its menu, and the next page-turn key would go there): for a moment this
+    (the viewer, after a page-turn key). No key is pressed for it (an ALT tap, the usual way to be let through,
+    would reach the viewer: Chrome takes a lone ALT for its menu, and the next page-turn key would go there): for a moment this
     thread shares its input with the foreground window's, which is what lets Windows hand the foreground over.
     Returns whether *hwnd* has it now; a minimised or hidden window is left as it is."""
     _require_windows()

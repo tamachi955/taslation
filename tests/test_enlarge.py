@@ -267,7 +267,7 @@ def desk(monkeypatch):
 
     from taslation.capture import windows as windows_mod
 
-    for name in ("press_key", "press_briefly", "post_key", "post_click", "click_screen", "bring_to_front"):
+    for name in ("press_key", "press_briefly", "post_key", "post_click"):
         monkeypatch.setattr(windows_mod, name, never)
     d = SimpleNamespace(rect={7: SMALL, 8: (0, 0, 500, 500)}, shown={7: True, 8: True}, enlarged=[], restored=[],
                         large_after={})

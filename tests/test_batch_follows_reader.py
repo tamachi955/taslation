@@ -28,9 +28,9 @@ from taslation.ui.jobs import JobsMixin
 from taslation.ui.live import LiveViewMixin
 from taslation.ui.status import StatusMixin
 
-KEY_FUNCTIONS = ("press_key", "press_briefly", "post_key", "post_click", "click_screen", "raise_window",
-                 "lower_window", "bring_to_front", "give_foreground", "full_screen_window", "full_screen_again",
-                 "enlarge_window", "restore_window", "with_foreground")
+KEY_FUNCTIONS = ("press_key", "press_briefly", "post_key", "post_click", "raise_window", "lower_window",
+                 "give_foreground", "full_screen_window", "full_screen_again", "enlarge_window", "restore_window",
+                 "with_foreground")
 
 
 def page(i: int) -> Image.Image:
