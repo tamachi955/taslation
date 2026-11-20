@@ -24,7 +24,7 @@ from taslation.messages import Cancelled
 from taslation.pageimages import Packed, unpack
 from taslation.pipeline import PageGate, Pipeline, keeps_answered, turn_away
 from taslation.translate import DictTranslator
-from taslation.translate.base import GrowingContext, StoryContext
+from taslation.translate.base import GrowingContext
 
 
 class Turning(DictTranslator):
@@ -794,106 +794,15 @@ def test_a_page_seen_again_keeps_its_number_and_a_page_that_went_by_merges_into_
                                          "state": "merged", "into": 1, "reading": True})
 
 
-# ------------------------------------------------------------------ the history in story order
-def test_story_context_is_growing_context_while_pages_come_in_order():
-    import random
-
-    rnd = random.Random(5)
-    for trial in range(60):
-        g, s = GrowingContext(), StoryContext()
-        fits = (lambda pairs: sum(len(a) + len(b) for a, b in pairs) < 900) if trial % 2 else None
-        for page in range(30):
-            assert g.take(fits) == s.take(fits) and g.peek(fits) == s.peek(fits)
-            pairs = [(f"j{page}_{i}" * rnd.randint(1, 4), f"t{i}") for i in range(rnd.randint(0, 9))]
-            s.place(page if trial % 3 == 0 else None)
-            g.extend(pairs)
-            s.extend(pairs)
-            assert list(g) == list(s)
-        assert g.cuts == s.cuts
-
-
-def test_a_request_behind_the_reader_gets_the_pages_before_it_in_the_story():
-    s = StoryContext()
-    for page in (1, 2, 5, 6):  # (the reader: pages 1 and 2, then 5 and 6 - pages 3 and 4 turned past)
-        s.place(page)
-        s.extend([(f"ja{page}", f"en{page}")])
-    s.place(3)
-    assert s.take() == [("ja1", "en1"), ("ja2", "en2")]
-    s.extend([("ja3", "en3")])
-    s.place(4)
-    assert s.take() == [("ja1", "en1"), ("ja2", "en2"), ("ja3", "en3")]  # (extends the request before it)
-    s.place(7)
-    assert [p[0] for p in s.take()] == ["ja1", "ja2", "ja3", "ja5", "ja6"]
-
-
-def test_a_cut_behind_the_reader_keeps_the_pages_after_it():
-    s = StoryContext(grows_to=5, cut_to=2)
-    for page in range(1, 7):
-        s.place(page)
-        s.extend([(f"ja{page}", "x")])
-    s.place(3)
-    s.extend([("ja3b", "x"), ("ja3c", "x"), ("ja3d", "x")])
-    assert [p[0] for p in s.take()] == ["ja3c", "ja3d"] and s.cuts == 1  # (6 up to it: cut to the newest 2)
-    s.place(None)
-    assert [p[0] for p in s.peek()] == ["ja3c", "ja3d", "ja4", "ja5", "ja6"]  # (the pages after it kept)
-
-
-def test_a_request_that_parts_from_the_last_gets_the_common_beginning_and_little_more():
-    s = StoryContext()
-    s.place(1)
-    s.extend([(f"a{i}", "x") for i in range(3)])
-    s.place(9)
-    s.extend([(f"r{i}", "x") for i in range(20)])
-    s.take()  # (the reader's request: a0..a2, r0..r19)
-    s.place(2)
-    s.switch_to = 2
-    assert s.switches()  # (behind the reader: the server's pairs of the reader's page are left)
-    assert [p[0] for p in s.peek()] == ["a0", "a1", "a2"]  # (a beginning of the last: nothing left out)
-    s.extend([(f"b{i}", "x") for i in range(10)])
-    s.place(1.5)
-    s.extend([("c", "x")])
-    s.place(2)
-    assert s.switches()
-    got = [p[0] for p in s.take()]
-    assert got == ["a0", "a1", "a2", "b8", "b9"]  # (the common beginning and the newest 2 of the rest)
-    s.extend([("b10", "x")])
-    assert not s.switches()  # (the next request behind the reader grows the one before it)
-    assert [p[0] for p in s.take()] == ["a0", "a1", "a2", "b8", "b9", "b10"]
-    s.switch_to = None
-    s.place(9)
-    assert len(s.take()) == 3 + 1 + 11 + 20  # (the reader's own request: every pair before its page, in order)
-
-
-def test_a_page_jobs_snapshot_of_the_story_is_not_changed_by_what_comes_after():
-    from taslation.pipeline import _held_state, _put_back
-
-    s = StoryContext()
-    s.place(1)
-    s.extend([("a", "x")])
-    held = _held_state(s)
-    s.extend([("b", "x")])
-    s.place(4)
-    _put_back(s, held)
-    assert list(s) == [("a", "x")] and s.at == 1
-
-
-def test_the_history_is_in_the_order_of_work_unless_story_is_chosen(settings, sample_page, monkeypatch):
-    # ("work" since scenario k: a page finished behind the reader in story order made the reader's next request be
-    # computed again from the middle of its history)
-    assert backlog_mod.HISTORY == "work"
-    for history, placed in (("work", None), ("story", 1)):
-        monkeypatch.setattr(backlog_mod, "HISTORY", history)
-        b = Backlog(_events()[1])
-        p = _pipeline(settings, Turning(EN_TEXTS, answer=1), book=f"Behind, {history}")
-        seen: list = []
-        place = p._grown.place
-        monkeypatch.setattr(p._grown, "place", lambda at, _place=place: (seen.append(at), _place(at))[1])
-        _job(p, b, sample_page, _confirmed())
-        assert seen == [placed], (history, seen)  # (the page on show)
-        p.translator = DictTranslator(EN_TEXTS)
-        assert _drain(p, b) == ["made", "translate"], history
-        # (its rest behind the reader: placed at its page in the story and back, or appended in the order of work)
-        assert seen == ([placed] if history == "work" else [placed, 1, 1]), (history, seen)
+# ------------------------------------------------------------------ the history
+def test_the_history_is_the_order_of_work_the_pairs_of_one_growing_context(settings, sample_page):
+    # (a history in story order was measured and taken out: docs/OFFLINE_VERIFICATION.md)
+    b = Backlog(_events()[1])
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), book="Behind, in the order of work")
+    assert type(p._grown) is GrowingContext and not hasattr(backlog_mod, "HISTORY")
+    _job(p, b, sample_page, _confirmed())
+    p.translator = DictTranslator(EN_TEXTS)
+    assert _drain(p, b) == ["made", "translate"]
 
 
 # ------------------------------------------------------------------ the six guarantees (design, section 2)

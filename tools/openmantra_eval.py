@@ -643,8 +643,9 @@ def translate_series_book(settings: Settings, translator: Any, series: str, page
 
 def behind_order(count: int, behind: int) -> list[tuple[int, bool]]:
     """The order of work of *count* pages read as a reader who flips *behind* pages past at a time and reads the page
-    after them does, the pages turned past then translated behind the reader in story order (`backlog`): blocks of
-    *behind* + 1 pages, the last of each first; (page index, behind the reader). 0: the pages in order."""
+    after them does, the pages turned past then translated behind the reader (`backlog`: with nothing after the page
+    on show, the smallest sight first - story order): blocks of *behind* + 1 pages, the last of each first; (page
+    index, behind the reader). 0: the pages in order."""
     if behind <= 0:
         return [(i, False) for i in range(count)]
     order: list[tuple[int, bool]] = []
@@ -658,28 +659,22 @@ def behind_order(count: int, behind: int) -> list[tuple[int, bool]]:
 def translate_series_page(settings: Settings, translator: Any, series: str, pages: list[openmantra.Page],
                           geos: list[list[Any]], stats: _Stats, log: Any,
                           items: list[list[dict[str, Any]]] | None = None,
-                          sheet: Any = None, between: Any = None, behind: int = 0,
-                          history: str = "story") -> list[dict[int, tuple[str, list[str]]]]:
+                          sheet: Any = None, between: Any = None, behind: int = 0
+                          ) -> list[dict[int, tuple[str, list[str]]]]:
     """One series translated as live reading does it (`Pipeline._translate_regions`, page by page, the last pages
     as context); per page, item index -> (translation, flags). *between*(pipeline), when given, after every page: what
     the window does while the reader reads (``--warm``: `Pipeline.warm_soon`). *behind* (``--behind``): the pages in
-    the order of work of a reader who flips that many pages past at a time (`behind_order`), each request given the
-    pairs of the pages before it in the story (*history* "story": `StoryContext.place`, those behind the reader with
-    `backlog.SWITCH_PAIRS`, as the backlog asks) or every pair so far in the order of work ("work")."""
-    from taslation.backlog import SWITCH_PAIRS
+    the order of work of a reader who flips that many pages past at a time (`behind_order`), each request given every
+    pair so far in the order of work, as the app gives them."""
     from taslation.regions import TextRegion
 
     if items is None:
         items = [gold_items(page, geo) for page, geo in zip(pages, geos)]
     pipeline = _eval_pipeline(settings, translator, sheet)
-    story = pipeline._grown
     outs: dict[int, dict[int, tuple[str, list[str]]]] = {}
     t0 = time.monotonic()
-    for index, back in behind_order(len(pages), behind):
+    for index, _back in behind_order(len(pages), behind):
         page, page_items = pages[index], items[index]
-        if behind and history == "story" and hasattr(story, "place"):
-            story.place(index)
-            story.switch_to = SWITCH_PAIRS if back else None
         regions = []
         for it in page_items:
             bbox, mask, text_box, letter_box, kind = it["geo"]
@@ -695,9 +690,6 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
         outs[index] = {k: (r.translated_text, list(r.flags)) for k, r in enumerate(regions) if r.status == "translated"}
         if between is not None:
             between(pipeline)
-    if hasattr(story, "place"):
-        story.place(None)
-        story.switch_to = None
     log(f"  {series}: {len(pages)} pages in {time.monotonic() - t0:.0f} s")
     return [outs[i] for i in range(len(pages))]
 
@@ -707,8 +699,7 @@ def translate_all(settings: Settings, translator: Any, groups: dict[str, list[op
                   stats: _Stats, log: Any, arm: str = "official",
                   e2e: dict[tuple[str, int], list[dict[str, Any]]] | None = None,
                   sheets: dict[str, Any] | None = None, names: dict[str, dict[str, Any]] | None = None,
-                  dump: Any = None, run: int = 1, warm: bool = False, behind: int = 0,
-                  history: str = "story") -> list[dict[str, Any]]:
+                  dump: Any = None, run: int = 1, warm: bool = False, behind: int = 0) -> list[dict[str, Any]]:
     """One run of the translation over every series in the *arm* "official" (the rows' ``lines``) or "e2e" (their
     ``e2e_lines``, from *e2e*: the regions of each page, `e2e_items`): copies of *rows* with their scored lines.
     *sheets*: a series sheet per series; *names*: the names of each series (`load_names`); *dump*: a file every
@@ -725,7 +716,7 @@ def translate_all(settings: Settings, translator: Any, groups: dict[str, list[op
 
         extra["between"] = warmed
     if behind and mode == "page":
-        extra.update(behind=behind, history=history)
+        extra.update(behind=behind)
     for name, group in groups.items():
         group = [p for p in group if (p.series, p.index) in by_row]
         g = [geos[(p.series, p.index)] for p in group]
@@ -968,9 +959,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--behind", type=int, default=0,
                     help="page mode: the pages in the order of work of a reader who flips N pages past at a time and "
                          "reads the page after them, those turned past translated behind the reader (`backlog`)")
-    ap.add_argument("--history", choices=("story", "work"), default=None,
-                    help="with --behind: each request given the pairs of the pages before it in the story, or every "
-                         "pair so far in the order of work (default: as the app, `backlog.HISTORY`)")
     ap.add_argument("--iou", type=float, default=IOU, help="least overlap for a region to count as a gold box")
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR in this file and reuse them (no image)")
     ap.add_argument("--geometry-scan", type=Path,
@@ -981,10 +969,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dump", type=Path, help="write every line's Japanese, translation and reference here (not printed)")
     ap.add_argument("--out", type=Path, help="results file (default: <root>/results/<date>-<time>.json)")
     args = ap.parse_args(argv)
-    if args.history is None:
-        from taslation.backlog import HISTORY
-
-        args.history = HISTORY
     if args.runs < 1:
         raise SystemExit("--runs must be 1 or more")
     arms = ["official", "e2e"] if args.arm == "both" else [args.arm]
@@ -1142,7 +1126,7 @@ def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Pat
             translation = {"model": model_name, "translator": type(tr).__name__, "ollama": tr.version(),
                            "mode": args.mode, "geometry": args.geometry, "target": args.target, "seed": args.seed,
                            "runs": args.runs, "arms": arms, "sheets": sorted(sheets), "warm": args.warm,
-                           "behind": args.behind, "history": args.history if args.behind else None}
+                           "behind": args.behind}
             if started_server is not None:
                 translation["server_started"] = started_server
             t0 = time.monotonic()
@@ -1161,8 +1145,7 @@ def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Pat
                     t_run = time.monotonic()
                     first_request = len(tr.stats_log)
                     run_rows = translate_all(s, tr, groups, rows, geos, args.mode, stats, log, arm, e2e, sheets, names,
-                                             dump, k + 1, warm=args.warm, behind=args.behind,
-                                             history=args.history)
+                                             dump, k + 1, warm=args.warm, behind=args.behind)
                     speed = speed_of(tr.stats_log[first_request:])
                     speed["ps"] = _loaded(tr, model_name)
                     speed["s_per_page"] = round((time.monotonic() - t_run) / max(1, len(rows)), 2)

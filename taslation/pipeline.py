@@ -132,8 +132,8 @@ from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat,
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
 from .translate import base as _base
-from .translate.base import (GrowingContext, StoryContext, accepts, ask_again_romanised, ask_for_missing, context_fits,
-                             grows_context, uses_room, worth_asking_again)
+from .translate.base import (GrowingContext, accepts, ask_again_romanised, ask_for_missing, context_fits, grows_context,
+                             uses_room, worth_asking_again)
 from .translate.continuation import facts_of
 from .translate.renderings import BookNames, NamedPremises
 from .messages import Cancelled, Message, message_of
@@ -1537,7 +1537,7 @@ class Pipeline:
         self._context: deque[list[tuple[str, str]]] = deque(maxlen=max(0, settings.context_pages))
         # the same pages' pairs for a translator that `grows_context` (PLaMo): they only grow, cut back rarely, so that
         # the first request of a page extends the last prompt of the page before (`context_pairs`)
-        self._grown = StoryContext()  # (in story order: `backlog`; pages in order, a GrowingContext)
+        self._grown = GrowingContext()
         # the beginning of the next page's first request computed while the reader reads (`warm_soon`): its thread,
         # what ends it, and what the last one did (for the tools)
         self._warm_lock = threading.Lock()

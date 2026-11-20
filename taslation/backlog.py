@@ -46,10 +46,10 @@ two regions (between the detectors too), a translation between two line requests
 its connection closed -, and the lines answered by then are stored as a page turned away from stores them (the
 sequence's host `keeps_answered`: `translate.sequence`). A turn waits for no more than the step under way.
 
-History: ``HISTORY`` "work" (the default, the rule before there was a backlog): the pairs in the order the requests
-were made, so that every request extends the one before; "story" (the internal switch, measured and not the default):
-a request behind the reader gets the pairs of the nearest translated pages before it in the story
-(`translate.base.StoryContext`, keyed by `Screen.sight`).
+History: every request of the backlog's, as every request of the page on show, gets the pairs in the order the
+requests were made (the translator's `GrowingContext`), so that each extends the one before. (A history in story order,
+each request given the pairs of the pages before it in the story, was measured in the stand-in's scenario k and on
+OpenMantra and taken out: no better translation, more of the server's time - docs/OFFLINE_VERIFICATION.md.)
 
 Events to the window (through *post*, the window's ``_post``), outside a whole-book run, each with ``reading=True``:
 
@@ -64,7 +64,8 @@ Events to the window (through *post*, the window's ``_post``), outside a whole-b
 * ``page_on_show`` {seq, reading}: the screen on show changed (None: none of the book's).
 * ``backlog`` {pages, lines, paused, dropped, reading}: the backlog's totals changed - the pages caught and not done
   yet, the lines still to translate of those read, whether it is paused, and the screens that went by too fast to be
-  caught (`missed`, not caught or done since).
+  caught (`missed`, not caught or done since); *dropped* True (pages and lines 0) when the backlog was dropped, told
+  before anything else of it, the screens then numbered from 1 again. Empty totals are not told before anything was.
 """
 
 from __future__ import annotations
@@ -89,17 +90,7 @@ SHOWN_AT_LEAST_MS = 150  # a frame dropped before its confirmation that was on s
 # (`ui.live.LEFT_PAGE_MS`: the time after which the window takes another frame for another page)
 MERGE_WITHIN = 2  # a page that went by is the next screen confirmed when their fingerprints are this many times
 # ``fingerprint_max_distance`` apart at most (a soft picture of the page, drawn first, and its sharp one)
-HISTORY = "work"  # "work": every request gets the pairs in the order the requests were made (the rule before there was
-# a backlog); "story": a request behind the reader gets the pairs of the pages before it in the story. "work" since the
-# stand-in's scenario k (2026-11-20): with "story" a page turned away from while its job ran, finished behind the reader,
-# put its pairs into the middle of the reader's history, and the reader's next request was computed again from there
-# (the first prompt of two of the 30 pages read back took 2.6 and 2.1 s, against 0.17 and 0.07 s with "work"; after
-# the flips at 1 s a page, the first bubble came 441 ms later (median) than on the same turns with nothing caught,
-# 188 ms with "work"); with "work" every
-# request extended the one before (docs/OFFLINE_VERIFICATION.md)
 HOLD_S = 0.0  # a step of the backlog that asks the model waits until the reader has stayed this long on a finished page
-SWITCH_HOLD_S = 2.0  # (story history) a request whose pairs part from the server's waits this long on a finished page
-SWITCH_PAIRS = 8  # ... and gets this many of the pairs that part at most: some 0.5 s of the server's time
 
 
 def reading_event(window: Any, kind: str, data: dict[str, Any]) -> None:
@@ -351,7 +342,6 @@ class Backlog:
         self.frame_waits: list[float] = []
         self.lends: dict[str, int] = {}  # (what `lend` said, how many times: the scenario's measurement)
         self.finished_at = float("-inf")  # (when the page on show was last done: `HOLD_S`)
-        self.hold_until = float("-inf")  # (a request that would part from the server's pairs waits until then)
         self.fatal: Any = None  # (a failure every later request repeats: the backlog waits for a page job)
         # (page jobs turned past whose confirmation is kept for now, `Pipeline.decide_kept`: caught once sealed)
         self.pending: list[tuple["Tracking", Any]] = []
@@ -706,8 +696,7 @@ class Backlog:
         nxt = self._next()
         if nxt is None:
             return
-        now = time.monotonic()
-        if nxt[0] == "translate" and (now - self.finished_at < HOLD_S or now < self.hold_until):
+        if nxt[0] == "translate" and time.monotonic() - self.finished_at < HOLD_S:
             return
         self.step_queued = True
         window._jobs.put(lambda: self._run(window))
@@ -831,12 +820,8 @@ class Backlog:
     def _translate(self, pipeline: Any, entry: Entry, stop: Preempt, settings: Any) -> str:
         """What is still to translate of *entry*'s units (held to the cache first: `Pipeline.resync`) asked for, as a
         whole-book run asks for a run of units (`translate.sequence.translate_units`), stopped between line requests,
-        what was answered by then stored. Its requests get the pairs in the order of work (``HISTORY`` "work"), or
-        with "story" those of the pages before it in the story (`StoryContext.place`): then one whose pairs part from
-        the last request's waits until the reader has stayed SWITCH_HOLD_S on a page done (`hold_until`: the warming
-        of the reader's next page comes meanwhile), and gets at most SWITCH_PAIRS of what parts
-        (`StoryContext.switch_to`)."""
-        from .translate.base import GrowingContext, context_fits, grows_context
+        what was answered by then stored. Its requests get the pairs in the order of work, as the page on show's do."""
+        from .translate.base import GrowingContext, grows_context
 
         units = [pipeline.resync(u) for u in entry.units or []]
         todo = [u for u in units if u.japanese()]
@@ -849,34 +834,18 @@ class Backlog:
         notes = pipeline.premises()
         context = getattr(pipeline, "_context", None)
         on = bool(getattr(context, "maxlen", 0))
-        story = getattr(pipeline, "_grown", None)
-        storied = HISTORY == "story" and hasattr(story, "place")
-        grown = on and grows_context(translator) and isinstance(story, GrowingContext)
-        before = getattr(story, "at", None)
-        if storied:
-            story.place(entry.screen.sight)
-        try:
-            if storied and grown and story.switches(context_fits(translator, notes)):
-                wait = self.finished_at + SWITCH_HOLD_S - time.monotonic()
-                if wait > 0:
-                    self.hold_until = time.monotonic() + wait
-                    return "held"
-            self.tell(entry.screen, "translate", "working")
-            host = _Host(pipeline, stop, threading.Lock())
-            if grown:
-                recent: Any = story
-            else:
-                recent = _Recording(pipeline.context_pairs() if on else (),
-                                    maxlen=max(0, int(getattr(s, "context_pairs", 40))))
-            if storied and grown:
-                story.switch_to = SWITCH_PAIRS
-            host._translate_units(todo, recent, notes, [], language)
-            if isinstance(recent, _Recording) and on and context is not None and recent.added:
-                context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)
-        finally:
-            if storied:
-                story.switch_to = None
-                story.place(before)  # (the reader's page again)
+        grown_pairs = getattr(pipeline, "_grown", None)
+        grown = on and grows_context(translator) and isinstance(grown_pairs, GrowingContext)
+        self.tell(entry.screen, "translate", "working")
+        host = _Host(pipeline, stop, threading.Lock())
+        if grown:
+            recent: Any = grown_pairs
+        else:
+            recent = _Recording(pipeline.context_pairs() if on else (),
+                                maxlen=max(0, int(getattr(s, "context_pairs", 40))))
+        host._translate_units(todo, recent, notes, [], language)
+        if isinstance(recent, _Recording) and on and context is not None and recent.added:
+            context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)
         if host._fatal is not None:
             with self._lock:
                 self.fatal = host._fatal
@@ -930,37 +899,21 @@ class Tracking:
 
     def attach(self, work: Any) -> None:
         """*work* (`PageWork`) tells this as the job goes. A job without one (no gate: a page taken as settled, one
-        from the cache) has its screen found here, before it is read (the history placed at it)."""
+        from the cache) has its screen found and told when it ends (`finished`)."""
         if work is not None:
             work.on_units = self.on_units
             work.on_read = self.on_read
-            return
-        place = getattr(getattr(self.pipeline, "_grown", None), "place", None)
-        if place is None or HISTORY != "story" or self.image is None:
-            return
-        try:
-            import numpy as np
-
-            units = self.pipeline.units_of(np.asarray(self.image.convert("RGB")))
-        except Exception:  # noqa: BLE001 - placed at the end
-            return
-        if units:
-            self.screen = self.backlog.screen_for(units, self._within())
-            place(self.screen.sight)
 
     def on_units(self, work: Any) -> None:
-        """(the worker, in `process`) The capture's page units are known: its screen found (the history placed at it),
-        its entry held while it is on show - what the backlog read of the page given to the job in place of a reading
-        (`Backlog.lend`) -; told to the window once the gate is confirmed (at once when it is)."""
+        """(the worker, in `process`) The capture's page units are known: its screen found, its entry held while it is
+        on show - what the backlog read of the page given to the job in place of a reading (`Backlog.lend`) -; told to
+        the window once the gate is confirmed (at once when it is)."""
         units = list(work.units or [])
         if not units:
             self.backlog.show(None)
             return
         screen = self.backlog.screen_for(units, self._within())
         self.screen = screen
-        place = getattr(getattr(self.pipeline, "_grown", None), "place", None)
-        if place is not None:
-            place(screen.sight if HISTORY == "story" else None)
         self.backlog.hold(screen)
         self.reuse = self.backlog.lend(screen, work, self.pipeline, self._within())
         on_kept = getattr(self.gate, "on_kept", None)
@@ -1185,5 +1138,4 @@ def holds_warming(window: Any) -> bool:
     """Whether the warming of the next page's first request waits (`ui.jobs._warm_when_idle`): the backlog has work
     it may do now (the warming comes once it is done, and after each page of it)."""
     backlog = backlog_of(window, make=False)
-    return (backlog is not None and backlog.has_work() and not backlog.paused and backlog.fatal is None
-            and time.monotonic() >= backlog.hold_until)
+    return backlog is not None and backlog.has_work() and not backlog.paused and backlog.fatal is None
