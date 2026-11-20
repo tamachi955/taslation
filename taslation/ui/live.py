@@ -142,7 +142,7 @@ from ..messages import Message
 from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
 from ..pipeline import PageGate, turn_away
 from ..regions import PageResult
-from . import area, hover, in_place
+from . import area, hover, in_place, side
 from .constants import (
     BLANK_SPREAD,
     BROWSER_MINIMISED,
@@ -756,6 +756,7 @@ class LiveViewMixin(BlackViewerMixin):
         in_place.refresh(self)  # (a bubble showing its other side in its place: drawn with the page, or gone)
         image, overlay, outlines = self._picture()
         self.canvas.overlay, self.canvas.outlines = overlay, outlines
+        self.canvas.brackets = side.on_picture(self, image)  # (the updated mark: the bubbles changed since last seen)
         # what the canvas may draw cheaply, leaving the very picture of a full draw (`ImageCanvas.set_image`): a new
         # frame of the viewer's, and the page filling in, lettered in place in the boxes noted since it was drawn
         moved, self._live_moved = getattr(self, "_live_moved", False), False

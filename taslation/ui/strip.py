@@ -591,7 +591,11 @@ def end_follow(window: Any, redisplay: bool = True) -> bool:
 
 
 def new_run(window: Any) -> None:
-    """A run starts: the strip starts empty (it shows with the run's first page)."""
+    """A run starts: the strip starts empty (it shows with the run's first page), and the indicator beside the page
+    forgets the screens of normal reading (`side`: it is away during the run)."""
+    from . import side
+
+    side.clear(window)
     model = getattr(window, "_strip_model", None)
     if model is None:
         return
@@ -765,6 +769,11 @@ class StripMixin:
             self.page_strip.show_page(seq)
 
     def _on_page_stage(self, data: dict[str, Any]) -> None:
+        if getattr(self, "_side", None) is not None and not in_a_run(self):  # normal reading: the indicator's
+            from . import side
+
+            side.on_stage(self, data)
+            return
         model = self._strip_model
         new = model.update(data.get("seq"), data.get("fingerprint", ""), data.get("thumb"), data.get("stage"),
                            data.get("state"))

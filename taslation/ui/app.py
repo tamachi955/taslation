@@ -127,6 +127,8 @@ from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
 from . import area, ime, shortcuts, theme, updates
 from .. import devices
+from . import side
+from .side import SideMixin
 from .status import StatusMixin
 from .strip import StripMixin, close_warning, release_run_images
 from .tooltip import tip, tip_menu
@@ -192,7 +194,7 @@ def first_target(state_dir: Path, configured: str, window_language: str, first_s
 
 
 class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, ReplaceMixin, FormatMixin, SelectionMixin,
-          ViewerMixin, StripMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, tk.Tk):
+          ViewerMixin, StripMixin, SideMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, tk.Tk):
     """The reader window. Its state is made here (`__init__`), and its widgets (`_build_ui`, again after a language
     switch); the small dialogs open from here. What it does comes from the mixins: the status line and the busy badge
     (`status`), the capture, the live picture and Auto (`live`), the worker, its events and the requests (`jobs`),
@@ -650,6 +652,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         bar.bind("<Configure>", lambda _e: self._wrap_status())
         self._sync_guard()
         self._build_page_strip()  # a whole-book run's pages, under the page (`strip`)
+        self._build_side()  # the pages turned past, beside the page, and the Reader's status slot (`side`)
 
     def _build_menus(self) -> None:
         """The menu bar: what is used seldom, one place each; what is used all the time is on the toolbar, and
@@ -996,6 +999,14 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         if self._help is not None and self._help.winfo_exists():
             self._help.render(self._help.wrapped_at, again=True)
 
+    def _handle_event(self, kind: str, data: dict[str, Any]) -> None:
+        """A worker's event (`JobsMixin._handle_event`), and then as the indicator beside the page and the Reader's
+        status slot take it (`side.before`, `side.after`: the engine's ``page_on_show`` and ``backlog``, a page that
+        failed or had nothing to read; they never raise)."""
+        noted = side.before(self, kind, data)
+        JobsMixin._handle_event(self, kind, data)
+        side.after(self, kind, data, noted)
+
     def _settings_saved(self, changed: dict[str, Any]) -> None:
         """The Settings dialog saved *changed*: set on the settings the window and its pipeline share, and shown at
         once - the window on top, the text size, then (on the worker, before the page is translated again) the page
@@ -1015,6 +1026,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             apply_num_gpu(self, changed["ollama_num_gpu"])
         if "theme" in changed:  # the window and its dialogs take the new colours at once
             self._colours_again()
+        if "side_indicator" in changed:  # the indicator beside the page in its new form, the page with its room
+            self._side_setting_changed()
         if set(changed) & PAGE_SETTINGS:
             self._jobs.put(self._job_settings_changed)
             if self.last_result is not None and not self.busy and self.batch is None:

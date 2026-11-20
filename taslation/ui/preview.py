@@ -35,6 +35,12 @@ HANDLE_EDGE_WIDTH = 2  # a handle's dark edge, in pixels
 BADGE_TAG = "order-badge"
 ORDER_FONT = ("TkDefaultFont", 9, "bold")
 ORDER_EDGE = "#c8c8c8"  # the badge's outline: light, so that it shows on the dark canvas and tells it from a label
+# the corner brackets on a bubble whose words changed since its page was seen: the updated mark's reddish purple
+# (`side_view.UPDATED`), corners only, so that they are not taken for the frames of a page filling in
+BRACKET_COLOUR = "#cc79a7"
+# the Reader's slot on the full screen goes into the exit margin when it is this wide, else over the page's corner
+SLOT_MARGIN = 150
+SLOT_WARN = "#e69f00"  # its round "!" (`status_slot.WARN`)
 
 
 Box = tuple[int, int, int, int]
@@ -176,6 +182,17 @@ class ImageCanvas(tk.Canvas):
         self._moved_at: float | None = None  # when a frame of a moving picture was drawn last (time.monotonic)
         self._fine_job: str | None = None  # the picture drawn quickly: drawn again as ever then
         self._fit_key: tuple | None = None  # what the picture drawn last was fitted from (None: drawn quickly)
+        # the indicator beside the page (`side`): the canvas pixels kept clear left and right of a picture of a size
+        # on a canvas of a size (None: none), called after every drawing (`on_drawn`), the busy badge shown only while
+        # `badge_allowed` says so (the Reader role has a status slot instead: `status_slot`), the slot itself on the
+        # full screen (`set_slot`), and the corner brackets on the bubbles of the page on show whose words changed
+        # since it was seen (image pixels: `set_brackets`)
+        self.side_room_of: Callable[[tuple[int, int], tuple[int, int]], tuple[int, int]] | None = None
+        self.on_drawn: Callable[[], None] | None = None
+        self.badge_allowed: Callable[[], bool] | None = None
+        self.slot: tuple[str, bool] = ("", False)
+        self.slot_side = "left"  # the page's exit side, where the slot goes
+        self.brackets: list[Box] = []
         self.bind("<Configure>", self._on_configure)
 
     def set_image(self, image: Image.Image | None) -> None:
@@ -365,7 +382,9 @@ class ImageCanvas(tk.Canvas):
 
     def set_busy(self, line: Callable[[], str] | None) -> None:
         """The busy badge in the top right corner, its text asked of *line* at every turn of the spinner (the page
-        stays in view, and the badge reads over any page); None removes it."""
+        stays in view, and the badge reads over any page); None removes it, and so does `badge_allowed` saying no."""
+        if line is not None and self.badge_allowed is not None and not self.badge_allowed():
+            line = None
         self.band = line
         self.badge = line is not None
         if self._spin_job is not None:
@@ -419,6 +438,9 @@ class ImageCanvas(tk.Canvas):
         self._draw_banner()
         self._draw_busy()
         self._draw_note()
+        self._draw_slot()
+        if self.on_drawn is not None:
+            self.on_drawn()
 
     def _refine(self) -> None:
         """The picture drawn quickly a while ago, and no frame since: drawn again as ever."""
@@ -430,7 +452,9 @@ class ImageCanvas(tk.Canvas):
         assert self._image is not None
         box = self.shown_box()
         part = self._image if box == (0, 0, self._image.width, self._image.height) else self._image.crop(box)
-        size, (x, y) = area.fit(part.size, (w, h), self.inset, self.enlarge)
+        room = self._side_room(part.size, (w, h))
+        size, (x, y) = area.fit(part.size, (w - room[0] - room[1], h), self.inset, self.enlarge)
+        x += room[0]
         quick = quick and size != part.size
         shown = part if size == part.size else part.resize(size, Image.BILINEAR if quick else Image.LANCZOS)
         self.scale = shown.width / part.width
@@ -439,9 +463,19 @@ class ImageCanvas(tk.Canvas):
         self._shown = (x, y, x + shown.width, y + shown.height)
         self.create_image(x, y, anchor="nw", image=self._photo, tags="picture")
         self._fit = (box, part.size, shown.size, (int(x), int(y)))
-        self._fit_key = None if quick else (box, (w, h), self.inset, self.enlarge)
+        self._fit_key = None if quick else (box, (w, h), self.inset, self.enlarge, room)
         self._draw_over_picture()
         return quick
+
+    def _side_room(self, part: tuple[int, int], size: tuple[int, int]) -> tuple[int, int]:
+        """The canvas pixels kept clear left and right of a picture of *part* (`side_room_of`; none without it)."""
+        if self.side_room_of is None:
+            return (0, 0)
+        try:
+            left, right = self.side_room_of(part, size)
+        except Exception:  # noqa: BLE001 - the picture drawn as without the indicator
+            return (0, 0)
+        return (max(0, int(left)), max(0, int(right)))
 
     def _draw_changed(self, changed: list[Box]) -> bool:
         """The picture on show changed in place in the boxes *changed* (image pixels): when it would be drawn as it
@@ -452,7 +486,9 @@ class ImageCanvas(tk.Canvas):
         if image is None or key is None or self._fit is None or self._photo is None or self.message:
             return False
         w, h = self.winfo_width(), self.winfo_height()
-        if w < 2 or h < 2 or key != (self.shown_box(), (w, h), self.inset, self.enlarge):
+        box = self.shown_box()
+        room = self._side_room((box[2] - box[0], box[3] - box[1]), (w, h))
+        if w < 2 or h < 2 or key != (box, (w, h), self.inset, self.enlarge, room):
             return False
         x, y = self._fit[3]
         for box in changed:
@@ -469,6 +505,9 @@ class ImageCanvas(tk.Canvas):
         self._draw_banner()
         self._draw_busy()
         self._draw_note()
+        self._draw_slot()
+        if self.on_drawn is not None:
+            self.on_drawn()
         return True
 
     def _draw_over_picture(self) -> None:
@@ -490,8 +529,76 @@ class ImageCanvas(tk.Canvas):
             cx1, cy1 = self.from_image_coords(bx1, by1)
             self.edged_rectangle(cx0, cy0, cx1, cy1, colour, ("outline", "outline-dashed" if dashed else "outline-solid"),
                                  dash=(6, 4) if dashed else "", edge_tags=("outline-edge",))
+        self._draw_brackets()
         if self.on_redraw is not None:
             self.on_redraw()
+
+    def set_brackets(self, boxes: list[Box]) -> None:
+        """The corner brackets on *boxes* (image pixels) now, nothing else drawn again."""
+        self.brackets = list(boxes)
+        self._draw_brackets()
+
+    def _draw_brackets(self) -> None:
+        """The bubbles whose words changed since the page was seen: a bracket at each of their corners, in the
+        updated mark's colour over a dark stroke - corners only, unlike the whole frames of a page filling in."""
+        self.delete("brackets")
+        if not self.brackets or self._fit is None:
+            return
+        for bx0, by0, bx1, by1 in self.brackets:
+            x0, y0 = self.from_image_coords(bx0, by0)
+            x1, y1 = self.from_image_coords(bx1, by1)
+            x0, y0, x1, y1 = x0 - 4, y0 - 4, x1 + 4, y1 + 4
+            arm = max(6, min(16, (x1 - x0) // 4, (y1 - y0) // 4))
+            for cx, cy, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x0, y1, 1, -1), (x1, y1, -1, -1)):
+                points = (cx + dx * arm, cy, cx, cy, cx, cy + dy * arm)
+                self.create_line(*points, fill=EDGE, width=3 + EDGE_EXTRA, capstyle="projecting",
+                                 joinstyle="miter", tags=("brackets", "brackets-edge"))
+                self.create_line(*points, fill=BRACKET_COLOUR, width=3, capstyle="projecting", joinstyle="miter",
+                                 tags=("brackets",))
+
+    def set_slot(self, text: str, warn: bool = False) -> None:
+        """The Reader's status slot on the full screen (`status_slot`): *text* at the bottom of the page's exit-side
+        margin ("": none), with an orange round "!" when *warn*."""
+        if self.slot == (text, warn):
+            return
+        self.slot = (text, warn)
+        self._draw_slot()
+
+    def _draw_slot(self) -> None:
+        self.delete("slot")
+        text, warn = self.slot
+        if not text:
+            return
+        w, h = self._extent()
+        side = getattr(self, "slot_side", "left")
+        shown = self._shown
+        margin = (shown[0] if side == "left" else w - shown[2]) if shown is not None else w
+        pad, gap = 10, 12
+        if margin >= SLOT_MARGIN:  # in the margin, at its bottom
+            width = int(margin - 2 * gap)
+            x = gap if side == "left" else w - gap
+        else:  # over the bottom corner of the page on that side
+            width = max(160, min(320, w // 3))
+            edge = shown[0] if shown is not None and side == "left" else shown[2] if shown is not None else 0
+            x = (edge + gap) if side == "left" else ((edge if shown is not None else w) - gap)
+        anchor = "sw" if side == "left" else "se"
+        mark = 18 if warn else 0
+        item = self.create_text(x + (pad + mark if side == "left" else -pad), h - gap - 6,
+                                text=self._lines(text, NOTE_FONT, max(80, width - 2 * pad - mark)), anchor=anchor,
+                                fill="#ffffff", font=NOTE_FONT, justify="left", tags=("slot", "slot-text"))
+        tx0, ty0, tx1, ty1 = self.bbox(item)
+        if side == "left":
+            box = (x, ty0 - 6, tx1 + pad, ty1 + 6)
+        else:
+            box = (tx0 - pad - mark, ty0 - 6, x, ty1 + 6)
+        rounded_box(self, *box, 8, fill=DARK, outline=BADGE_EDGE, width=1, tags=("slot", "slot-box"))
+        if warn:
+            cx, cy = box[0] + pad + 7, (ty0 + ty1) / 2
+            self.create_oval(cx - 7, cy - 7, cx + 7, cy + 7, fill=SLOT_WARN, outline="#000000",
+                             tags=("slot", "slot-warn"))
+            self.create_text(cx, cy, text="!", fill="#000000", font=BADGE_FONT, tags=("slot", "slot-warn"))
+        self.tag_raise("slot-text")
+        self.tag_raise("slot-warn")
 
     def _lines(self, text: str, font: tuple, width: int) -> str:
         """*text* broken into lines of at most *width* pixels in *font* (`wrap_line`: Tk itself would break only at

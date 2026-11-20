@@ -305,6 +305,9 @@ class Settings:
     # ... and how that bubble shows the other side (`ui.hover`): "panel" (a panel beside it, both in sight at once) or
     # "in_place" (the bubble itself, the original lettering or what was read, erased and set); also the View menu
     hover_reveal: str = "panel"
+    # the pages turned past in normal reading, beside the page on its exit side (`ui.side`): "column" (thumbnails with
+    # how far each is, where the margin has room, a narrow bar elsewhere), "rail" (the narrow bar only) or "off"
+    side_indicator: str = "column"
     # the text of the panel beside a bubble (`ui.zoom.panel_text_px`): 0, automatic (twice readable_font_size, at least
     # 1.25 times the bubble's lettering on the screen, 16-44 px); else this many points, which follow ui_scale and the
     # monitor's scaling as the window's text does, at most a share of the work area's height (PANEL_FONT_RANGE)
@@ -425,6 +428,8 @@ class Settings:
             raise ConfigError("hover_reveal must be 'panel' or 'in_place'")
         if self.update_check not in ("off", "daily"):
             raise ConfigError("update_check must be 'off' or 'daily'")
+        if self.side_indicator not in ("column", "rail", "off"):
+            raise ConfigError("side_indicator must be 'column', 'rail' or 'off'")
         size = self.panel_font_size
         if (not isinstance(size, int) or isinstance(size, bool)
                 or (size != 0 and not PANEL_FONT_RANGE[0] <= size <= PANEL_FONT_RANGE[1])):
