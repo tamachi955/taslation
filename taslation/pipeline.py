@@ -132,7 +132,7 @@ from .render.typeset import QUARTER_TURNS, UNCAPPED_KINDS, Lettered, TextFormat,
 from .render.vertical import layout_stacked, stacked_room
 from .translate import TranslationError, Translator
 from .translate import base as _base
-from .translate.base import (GrowingContext, accepts, ask_again_romanised, ask_for_missing, context_fits,
+from .translate.base import (GrowingContext, StoryContext, accepts, ask_again_romanised, ask_for_missing, context_fits,
                              grows_context, uses_room, worth_asking_again)
 from .translate.continuation import facts_of
 from .translate.renderings import BookNames, NamedPremises
@@ -915,13 +915,21 @@ class PageGate:
     and - *open_for* seconds after the confirmation, the window's choice for a viewer seen to draw soft first - once
     it is done (`Provisional.keep`, `Pipeline.decide_kept`)."""
 
-    def __init__(self, open_for: float = 0.0) -> None:
+    def __init__(self, open_for: float = 0.0, soft: bool = False) -> None:
         self._cond = threading.Condition()
         self._state = "pending"  # "pending", "confirmed", "dropped"
         self._seen = float("-inf")  # the last moment the window knew the frame on show (`seen`)
         self._sealed = False  # what the job stored lasts for good: no confirmation is taken back (`seal`)
         self.open_for = max(0.0, open_for)
         self.open_until = float("-inf")  # the confirmation plus *open_for* (`confirm`)
+        # the frame looked soft on a viewer seen to draw a page soft first (`ui.live`'s early start of a page low in
+        # detail): what its job keeps lasts as ever, but a page turned past on it never goes on being read
+        # (`backlog`)
+        self.soft = bool(soft)
+        self.shown_since = time.monotonic()  # (when the job was started on the frame)
+        self.gone_at: float | None = None  # (when it was dropped: how long the frame was on show, `backlog`)
+        self.gone_by = ""  # (who dropped it: "window" - its frame changed, the follow ended -, "worker", "taken back")
+        self._kept_calls: list[Callable[[], None]] = []  # (`on_kept`)
 
     @property
     def state(self) -> str:
@@ -931,28 +939,54 @@ class PageGate:
     def confirmed(self) -> bool:
         return self._state == "confirmed"
 
-    def _decide(self, state: str) -> bool:
+    @property
+    def sealed(self) -> bool:
+        """Whether the confirmation lasts for good (`seal`: the worker made what the job stored last; no `take_back`
+        from now on)."""
+        return self._sealed and self._state == "confirmed"
+
+    def _decide(self, state: str, by: str = "") -> bool:
         with self._cond:
             if self._state == "pending":
                 self._state = state
+                if state == "dropped":
+                    self.gone_at, self.gone_by = time.monotonic(), by
                 self._cond.notify_all()
             return self._state == state
 
     def confirm(self) -> bool:
         """(the window) The frame stayed as it is: the job keeps what it stores. False when the job gave the page up
-        first (nothing of it was kept)."""
+        first (nothing of it was kept). What waits for the confirmation (`on_kept`) is called then, on this thread."""
         with self._cond:  # (a re-entrant lock: `_decide` takes it again)
             if self._state == "pending":
                 self.open_until = time.monotonic() + self.open_for
-            return self._decide("confirmed")
+            kept = self._decide("confirmed")
+            calls, self._kept_calls = (self._kept_calls, []) if kept else ([], self._kept_calls)
+        for call in calls:
+            try:
+                call()
+            except Exception:  # noqa: BLE001 - a listener never stops the confirmation
+                logging.getLogger(__name__).exception("a listener of a page's confirmation failed")
+        return kept
+
+    def on_kept(self, call: Callable[[], None]) -> None:
+        """*call*() once the frame is confirmed (`confirm`, on the window's thread; at once, here, when it is already):
+        never when it is dropped. Quick, and never raises into the window (`backlog`: the page's first events)."""
+        with self._cond:
+            if self._state == "pending":
+                self._kept_calls.append(call)
+                return
+            kept = self._state == "confirmed"
+        if kept:
+            call()
 
     def drop(self) -> None:
         """(the window) The frame changed, or is followed no further: nothing the job did lasts."""
-        self._decide("dropped")
+        self._decide("dropped", "window")
 
     def close(self) -> bool:
         """(the worker) The job gives up waiting: whether the gate was confirmed before that (and not taken back)."""
-        self._decide("dropped")
+        self._decide("dropped", "worker")
         return self.confirmed
 
     def take_back(self) -> bool:
@@ -962,6 +996,8 @@ class PageGate:
         with self._cond:
             if self._sealed and self._state == "confirmed":
                 return False
+            if self._state != "dropped":
+                self.gone_at, self.gone_by = time.monotonic(), "taken back"
             self._state = "dropped"
             self._cond.notify_all()
             return True
@@ -1198,6 +1234,30 @@ class PageWork:
         self.replaced: list[CachedPage] = []
         self.provisional = Provisional(pipeline, gate) if gate is not None else None
         self.kept: bool | None = None if self.provisional is not None else True
+        # how far `process` came with the page, for a page the reader turns past (`backlog`): the capture's page units,
+        # those it reads (no cache entry, or one this reading completes: by index), and those read in full - their
+        # regions read, ordered and given their rooms, no cache entry before - with those regions (by index)
+        self.units: list[fp.PageUnit] = []
+        self.needs: set[int] = set()
+        self.read: dict[int, tuple[fp.PageUnit, list[TextRegion]]] = {}
+        # (the window's: called on the worker as the capture's units are known, before anything is asked of the model,
+        # and once every unit it reads is read; never raise)
+        self.on_units: Callable[["PageWork"], None] | None = None
+        self.on_read: Callable[["PageWork"], None] | None = None
+
+    def told(self, call: Callable[["PageWork"], None] | None) -> None:
+        """*call*(self), when there is one (`on_units`, `on_read`); a failure of it is logged, never raised."""
+        if call is None:
+            return
+        try:
+            call(self)
+        except Exception:  # noqa: BLE001 - the window's listener never stops the page
+            logging.getLogger(__name__).exception("a listener of a page job failed")
+
+    @property
+    def read_all(self) -> bool:
+        """Whether every page unit the reading reads was read in full (`read`)."""
+        return self.needs <= set(self.read)
 
     @property
     def waits(self) -> bool:
@@ -1463,12 +1523,15 @@ class Pipeline:
         self._context: deque[list[tuple[str, str]]] = deque(maxlen=max(0, settings.context_pages))
         # the same pages' pairs for a translator that `grows_context` (PLaMo): they only grow, cut back rarely, so that
         # the first request of a page extends the last prompt of the page before (`context_pairs`)
-        self._grown = GrowingContext()
+        self._grown = StoryContext()  # (in story order: `backlog`; pages in order, a GrowingContext)
         # the beginning of the next page's first request computed while the reader reads (`warm_soon`): its thread,
         # what ends it, and what the last one did (for the tools)
         self._warm_lock = threading.Lock()
         self._warm_thread: threading.Thread | None = None
         self._warm_stop: threading.Event | None = None
+        # the step of work behind the reader under way (`backlog`): `stop_warm` stops it as it stops the warming
+        self.behind_stop: threading.Event | None = None
+        self.behind_paused = False  # (the model let go before a release: the backlog waits for the next page job)
         self.warm_facts: dict[str, Any] | None = None
         self.book_names = BookNames()  # the book's names and the renderings they keep (memory only, `premises`)
         self.last_seq: int | None = None
@@ -2011,6 +2074,11 @@ class Pipeline:
             stop, thread = self._warm_stop, self._warm_thread
         if stop is not None:
             stop.set()
+        behind = self.behind_stop
+        if behind is not None:
+            behind.set()  # (and the step of work behind the reader under way: `backlog`)
+        if wait:
+            self.behind_paused = True  # (the model is let go: nothing behind the reader loads it again for now)
         if wait and thread is not None and thread is not threading.current_thread():
             thread.join(WARM_JOIN_S)
 
@@ -2097,6 +2165,10 @@ class Pipeline:
         result.fingerprints = [u.fingerprint for u in units]
         result.units = list(units)
         timer.lap("fingerprint")
+        on_show: PageWork | None = getattr(_ON_SHOW, "work", None) if getattr(_ON_SHOW, "window", False) else None
+        if on_show is not None:  # (the window's page job: what it reads, as it goes, for a page turned past)
+            on_show.units = list(units)
+            on_show.told(on_show.on_units)
         if not units:
             result.notes.append("no page content found in the capture")
             result.timings = timer.timings
@@ -2175,6 +2247,9 @@ class Pipeline:
         # a page on show in the window that is read to be translated: the model loads while it is read (`LoadAhead`)
         reads = any((page is None and unit_regions) or (page is not None and completes(page))
                     for _unit, unit_regions, page in plans)
+        if on_show is not None:
+            on_show.needs = {unit.index for unit, unit_regions, page in plans
+                             if (page is None and unit_regions) or (page is not None and completes(page))}
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
         ahead = (LoadAhead(self, cancel, work.gate if work is not None else None)
                  if getattr(_ON_SHOW, "window", False) and cancel is not None and translate
@@ -2199,6 +2274,10 @@ class Pipeline:
                     self._order_read(rgb, unit.box, unit_regions)
                     self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (each translation's room: its part)
                     timer.lap("ocr")
+                    if on_show is not None:
+                        on_show.read[unit.index] = (unit, unit_regions)
+                        if on_show.read_all:
+                            on_show.told(on_show.on_read)
                     if translate:
                         beside = self._read_beside(rgb, plans, n, fill, cancel)
                         try:
@@ -2334,7 +2413,8 @@ class Pipeline:
     def scan(self, image: Image.Image, *, skip_cached: bool = True, progress: ProgressFn | None = None,
              fresh: bool = False, cancel: threading.Event | None = None,
              events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True,
-             later: list[Callable[[], Any]] | None = None) -> PageScan:
+             later: list[Callable[[], Any]] | None = None,
+             behind: bool = False) -> PageScan:
         """Detect and read a page; keep text and geometry only (the image is not retained). Once *cancel* is set,
         `Cancelled` is raised between regions.
 
@@ -2361,6 +2441,9 @@ class Pipeline:
         the cache is rendered without one), with the shape a model region takes (`take_shape`, as `_apply_cached`
         gives it), of those read as Japanese and those the reader made "erase only", in reading order (`erase_page`
         erases them ahead).
+
+        With *behind* (a page the reader turned past, read from its capture: `backlog`), *cancel* stops it between
+        the detectors too, as it stops a page on show.
         """
         s = self.settings
         report = progress or (lambda _msg: None)
@@ -2371,7 +2454,15 @@ class Pipeline:
         if not units:
             return scan
         report(Message("pipeline.stage_finding"))
-        regions = self._annotate(rgb, self._detect(rgb), units)
+        if behind and cancel is not None:
+            check_cancel(cancel)
+            _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel  # (`_detect`: stopped between detectors)
+            try:
+                regions = self._annotate(rgb, self._detect(rgb), units)
+            finally:
+                _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
+        else:
+            regions = self._annotate(rgb, self._detect(rgb), units)
         owners = self._owners(rgb, regions, units)
         before = _units_before(rgb, s.margins)
         when_kept: Callable[[Callable[[], Any]], Any] = (later.append if later is not None
@@ -2406,17 +2497,7 @@ class Pipeline:
             for gone in left_out or []:
                 stands_for.setdefault(id(gone.repeats), []).append(gone.bbox)
             self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (the room hint: its own part of a room)
-            scanned = [ScannedRegion(bbox=r.bbox, text_box=r.letter_box or r.text_box, poly=mask_polygon(r.mask),
-                                     source_text=r.source_text, status=r.status, order=r.order,
-                                     kind=r.kind, ocr_confidence=r.ocr_confidence, pieces=r.pieces,
-                                     speaker=r.speaker, tag=r.tag, continues=r.continues, remark=r.remark,
-                                     room=translation_room(room_mask(r), r.letter_box or r.text_box, r.source_text,
-                                                           self.settings, r.kind, r.x0, r.y0, self.suggested_font,
-                                                           direction_of(r))
-                                     if r.status == "untranslated" else 0,
-                                     aliases=tuple(stands_for.get(id(r), ())), angle=r.angle,
-                                     size_mix=r.size_mix if r.status == "untranslated" else None, joined=r.joined)
-                       for r in unit_regions]
+            scanned = self._scanned_regions(unit_regions, stands_for)
             if fill is not None:
                 for r, kept in zip(unit_regions, scanned):
                     fill.link(kept, r)
@@ -2444,20 +2525,9 @@ class Pipeline:
                 scan.units.append(su)
                 continue
             japanese = [r for r in scanned if r.is_japanese]
-            matched: set[int] = set()
-            scores = bubble_scores([[unit.normalize(b) for b in (r.bbox, *r.aliases)] for r in japanese],
-                                   [cb.box for cb in page.bubbles], s.match_min_iou)
-            for j, cb in enumerate(page.bubbles):
-                best_i, best_iou = -1, 0.0
-                for i, r in enumerate(japanese):
-                    if i in matched:
-                        continue
-                    score = scores[i][j]
-                    if score > best_iou:
-                        best_i, best_iou = i, score
-                if best_i >= 0 and best_iou > 0:
-                    matched.add(best_i)
-                    su.kept.append(cb)
+            matched = self._matched_bubbles(unit.normalize, japanese, page.bubbles)
+            su.kept.extend(cb for _i, cb in matched)
+            matched_at = {i for i, _cb in matched}
             answered = {id(cb) for cb in su.kept}
             left = [cb for cb in page.bubbles if id(cb) not in answered]
             held = self._bubbles_held(unit, left, scanned)
@@ -2465,13 +2535,92 @@ class Pipeline:
             held.extend(self._kept_in_areas(units, unit, [cb for cb in left if id(cb) not in held_ids]))
             su.kept.extend(held)
             su.dropped = len(left) - len(held)
-            su.regions = [r for i, r in enumerate(japanese) if i not in matched]
+            su.regions = [r for i, r in enumerate(japanese) if i not in matched_at]
             su.cached = not su.regions
             if su.cached and (su.dropped or page.incomplete):  # prune now; nothing to translate
                 when_kept(lambda print_=page.fingerprint, aspect=unit.aspect, kept=list(su.kept):
                           self._save_page(print_, aspect, kept))
             scan.units.append(su)
         return scan
+
+    def _scanned_regions(self, regions: Sequence[TextRegion],
+                         stands_for: dict[int, list[Box]] | None = None) -> list[ScannedRegion]:
+        """*regions* of a page unit read, ordered and given their rooms (`share_rooms`), as `scan` keeps them: text
+        and geometry, the room of each Japanese one measured (`translation_room`). *stands_for*: by a region's id,
+        the boxes of the regions it was read in place of (`ScannedRegion.aliases`)."""
+        stands_for = stands_for or {}
+        return [ScannedRegion(bbox=r.bbox, text_box=r.letter_box or r.text_box, poly=mask_polygon(r.mask),
+                              source_text=r.source_text, status=r.status, order=r.order,
+                              kind=r.kind, ocr_confidence=r.ocr_confidence, pieces=r.pieces,
+                              speaker=r.speaker, tag=r.tag, continues=r.continues, remark=r.remark,
+                              room=translation_room(room_mask(r), r.letter_box or r.text_box, r.source_text,
+                                                    self.settings, r.kind, r.x0, r.y0, self.suggested_font,
+                                                    direction_of(r))
+                              if r.status == "untranslated" else 0,
+                              aliases=tuple(stands_for.get(id(r), ())), angle=r.angle,
+                              size_mix=r.size_mix if r.status == "untranslated" else None, joined=r.joined)
+                for r in regions]
+
+    def _matched_bubbles(self, normalize: Callable[[Box], Any], japanese: Sequence[ScannedRegion],
+                         bubbles: Sequence[CachedBubble]) -> list[tuple[int, CachedBubble]]:
+        """The cached *bubbles* that a region of *japanese* corresponds to (`bubble_scores`: by its box and the boxes
+        it was read in place of, *normalize*d to its page unit), each with that region's index: every bubble takes
+        the best region no bubble before it took, as `scan` matches a cached page."""
+        matched: list[tuple[int, CachedBubble]] = []
+        taken: set[int] = set()
+        scores = bubble_scores([[normalize(b) for b in (r.bbox, *r.aliases)] for r in japanese],
+                               [cb.box for cb in bubbles], self.settings.match_min_iou)
+        for j, cb in enumerate(bubbles):
+            best_i, best_iou = -1, 0.0
+            for i, _r in enumerate(japanese):
+                if i in taken:
+                    continue
+                score = scores[i][j]
+                if score > best_iou:
+                    best_i, best_iou = i, score
+            if best_i >= 0 and best_iou > 0:
+                taken.add(best_i)
+                matched.append((best_i, cb))
+        return matched
+
+    def scanned_of(self, unit: fp.PageUnit, regions: Sequence[TextRegion]) -> ScannedUnit:
+        """(`backlog`: a page the reader turned past once `process` had read it) The page unit *unit* whose *regions*
+        `process` read in full - read, ordered, their rooms shared - as `scan` gives a unit, held to the cache as it
+        is now (`resync`): what is still to translate of it. Text and geometry only, nothing of the picture; a region
+        translated by then counts as Japanese and is matched to its cached bubble like any other."""
+        scanned = self._scanned_regions(regions)
+        for kept, r in zip(scanned, regions):
+            if r.status == "translated" and r.source_text:
+                kept.status = "untranslated"  # (its bubble, stored, is matched to it: `resync`)
+                kept.size_mix = r.size_mix
+        su = ScannedUnit(index=unit.index, box=unit.box, fingerprint=unit.fingerprint, aspect=unit.aspect,
+                         regions=[r for r in scanned if r.is_japanese])
+        return self.resync(su)
+
+    def resync(self, unit: ScannedUnit) -> ScannedUnit:
+        """*unit* (a page unit read ahead) held to the cache as it is now, as `scan` holds a cached page: the cached
+        page it is (`BookCache.lookup`, within ``fingerprint_max_distance``) - every bubble of it kept - and its
+        Japanese regions no bubble corresponds to (`_matched_bubbles`), which are what is still to translate; all its
+        Japanese regions and nothing kept when the cache has no such page. So a translation stored meanwhile - the
+        page shown again and completed - is never asked for again, nor overwritten by the unit's store
+        (`commit_unit` stores what is kept and what is new). *unit* itself, changed."""
+        japanese = [r for r in unit.regions if r.is_japanese]
+        hit = (self.cache.lookup(unit.fingerprint, unit.aspect, self.settings.fingerprint_max_distance, self.last_seq)
+               if self.cache is not None else None)
+        if hit is None:
+            unit.kept, unit.stored_fingerprint, unit.regions = [], "", japanese
+        else:
+            page = hit[0]
+            at = {i for i, _cb in self._matched_bubbles(unit.normalize, japanese, page.bubbles)}
+            unit.kept, unit.stored_fingerprint = list(page.bubbles), page.fingerprint
+            unit.regions = [r for i, r in enumerate(japanese) if i not in at]
+        unit.cached = not unit.regions
+        return unit
+
+    def behind_allowed(self) -> bool:
+        """Whether work behind the reader (`backlog`) may run now: no page job's changes held for its frame
+        (`Provisional`), none kept for now (`decide_kept`) - what `warm_soon` waits for too."""
+        return self._provisional is None and self._kept_open is None and self._held_for is None
 
     def _kept_in_areas(self, units: Sequence[fp.PageUnit], unit: fp.PageUnit,
                        bubbles: Sequence[CachedBubble]) -> list[CachedBubble]:

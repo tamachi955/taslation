@@ -22,7 +22,7 @@ from collections import deque
 from typing import Any, Sequence
 
 from .. import linememo
-from ..messages import Message, message_of
+from ..messages import Cancelled, Message, message_of
 from ..pipeline import ScannedUnit, cancel_args, direction_of
 from ..regions import region_meta
 from ..terms import spelt_right
@@ -108,10 +108,12 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
     sheet = host.pipeline.check_sheet()
     grown = isinstance(recent, GrowingContext)
     answered: set[int] = set()  # the lines of this run the request under way has answered
+    got: dict[int, str] = {}  # (what they were answered with, for a host that keeps them when stopped)
 
     def on_item(k: int, text: str) -> None:
         host._model_loaded()  # (the model answers: it is loaded)
         host._answered(answered, k, len(texts))
+        got[k] = str(text or "")
         view = host._view
         if view is not None and 0 <= k < len(texts):  # (on show as it comes: `translation_view`)
             ui, i = slots[k]
@@ -128,9 +130,15 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
     # a short line the book or its series translated before is not sent: it takes that translation (`linememo`)
     with host._storing:  # (the cache's lines: a page being read may look the cache up meanwhile)
         plan = linememo.plan_for(host.pipeline, texts, meta, run, serve=not host.retranslate)
+    keeps = bool(getattr(host, "keeps_answered", False))  # (a host that keeps what was answered when stopped)
+    stopped_with: dict[int, str] | None = None  # (the lines answered when it was stopped: `kept_when_stopped`)
     try:
         outputs = plan.ask(translator.translate_page, prior, notes_text, upcoming,
                            meta=meta if any(meta) else None, **call, **asked_with)
+    except Cancelled:
+        if not keeps:
+            raise
+        stopped_with, outputs = dict(got), []
     except TranslationError as e:
         p.answering = 0
         error = message_of(e)
@@ -149,11 +157,18 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
             return
         outputs = []  # the page unit's lines are asked for again, a few at a time
         computed = None  # (none of its answers is taken: the lines asked again come after)
-    outputs = plan.fill(outputs)  # (the lines reused in their places)
-    if outputs and _base.REASK_ROMANISED:  # a short kana line answered with its romaji alone: once more, with neighbours
-        outputs = plan.served_back(ask_again_romanised(  # (a reused line was looked at when first answered)
-            translator, texts, plan.unserved(outputs), context=prior, notes=notes_text, upcoming=upcoming,
-            meta=meta, call_args=call, cancel=host._stop)[0])
+    if stopped_with is None:
+        outputs = plan.fill(outputs)  # (the lines reused in their places)
+    if stopped_with is None and outputs and _base.REASK_ROMANISED:  # a short kana line answered with its romaji
+        # alone: once more, with neighbours (a reused line was looked at when first answered)
+        try:
+            outputs = plan.served_back(ask_again_romanised(
+                translator, texts, plan.unserved(outputs), context=prior, notes=notes_text, upcoming=upcoming,
+                meta=meta, call_args=call, cancel=host._stop)[0])
+        except Cancelled:
+            if not keeps:
+                raise
+            stopped_with = {k: out for k, out in enumerate(outputs) if out}
     per_unit: list[dict[int, str]] = [{} for _ in units]
     per_unit_flags: list[dict[int, list[str]]] = [{} for _ in units]
     per_unit_large: list[dict[int, tuple[int, int, float]]] = [{} for _ in units]  # the parts set larger
@@ -230,7 +245,37 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
                 host._units_final([units[ui]])
         return left
 
-    settle(list(range(len(texts))), outputs, prior, computed)
+    def kept_when_stopped(answers: dict[int, str] | None) -> None:
+        """(a host that `keeps_answered`, stopped: the backlog's step, a new page on show) What was answered by then
+        stored as a page the reader turned away from keeps it (`Pipeline._keep_answered`), its units marked
+        incomplete (`commit`): the *answers* (by line) set as the run sets them - spelt to the sheet, checked,
+        tightened, carried on as context as the request computed them - but a line whose lettering set a part larger
+        (that part would be one more request) and one answered with its bare romanisation (asked again with its
+        neighbours); with None (stopped while the parts set larger were asked for), the lines settled by then, but
+        those whose part did not come."""
+        if answers is None:
+            for k, (ui, i) in enumerate(slots):
+                if units[ui].japanese()[i].size_mix is not None and i not in per_unit_large[ui]:
+                    per_unit[ui].pop(i, None)
+        else:
+            lines = [k for k in sorted(answers) if 0 <= k < len(texts) and usable(k, answers[k])
+                     and units[slots[k][0]].japanese()[slots[k][1]].size_mix is None
+                     and (k in plan.served
+                          or not (_base.REASK_ROMANISED and _base.bare_romanisation(texts[k], answers[k])))]
+            if lines:
+                settle(lines, [answers.get(k, "") for k in range(len(texts))], prior, computed)
+        if any(per_unit):
+            commit(list(range(len(units))))
+
+    if stopped_with is not None:
+        kept_when_stopped(stopped_with)
+        raise Cancelled()
+    try:
+        settle(list(range(len(texts))), outputs, prior, computed)
+    except Cancelled:  # (a part set larger asked for: the lines settled kept without it)
+        if keeps:
+            kept_when_stopped(None)
+        raise
     p.answering = 0  # (what it answered is stored now: `checked`)
     incomplete = commit(list(range(len(units))))
     if not incomplete or host._stop.is_set():

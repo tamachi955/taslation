@@ -170,6 +170,125 @@ class GrowingContext:
         return pairs, False
 
 
+class StoryContext(GrowingContext):
+    """`GrowingContext` in story order: each pair is kept with its page's place in the story (`place`: a page's key,
+    the order its screen was first seen in, `backlog.Screen.sight`), and a request at a page gets the pairs since the
+    last cut of the pages up to it, in story order (a page's pairs in their own order) - the nearest translated pages
+    before it, whichever were translated first. With nothing placed (None) a pair joins the last page and a request
+    gets them all, so that pages that come in order are exactly what `GrowingContext` gives: what is added stays, and a
+    request's prompt extends the one before it.
+
+    A cut (past *grows_to* pairs, or *fits* says no) keeps the newest *cut_to* pairs of the request's own pages and
+    every pair of the pages after it. With *switch_to* set (a request behind the reader, `backlog`), a request whose
+    pairs part from the last request's after a common beginning gets that beginning and the newest *switch_to* of the
+    rest at most, kept for that request alone: what the server recomputes for it stays small; the next such request,
+    whose pairs grow those of that one, gets what that one was given and what came since (its prompt extends the one
+    the server holds). The pairs are never changed in place (a page job's `Provisional` holds a shallow copy)."""
+
+    def __init__(self, grows_to: int = CONTEXT_GROWS_TO, cut_to: int = CONTEXT_CUT_TO):
+        super().__init__(grows_to, cut_to)
+        self._held: list[tuple[float, int, tuple[str, str]]] = []  # (page key, order added, pair) since the last cut
+        self._added = 0
+        self.at: float | None = None  # the page placed: where pairs go and what a request starts from
+        self.last: list[tuple[str, str]] = []  # the pairs the last request was given (`take`)
+        self._last_full: list[tuple[str, str]] = []  # ... and its pairs before *switch_to* left some out
+        self.switch_to: int | None = None
+
+    def place(self, key: float | None) -> None:
+        """The page requests are made for from now on (None: after every page so far)."""
+        self.at = None if key is None else float(key)
+
+    def _key(self) -> float:
+        if self.at is not None:
+            return self.at
+        return max((k for k, _n, _p in self._held), default=0.0)
+
+    def append(self, pair: tuple[str, str]) -> None:
+        self.extend([pair])
+
+    def extend(self, pairs: Any) -> None:
+        key = self._key()
+        added: list[tuple[float, int, tuple[str, str]]] = []
+        for pair in pairs:
+            added.append((key, self._added, pair if isinstance(pair, SentPair) else (str(pair[0]), str(pair[1]))))
+            self._added += 1
+        if added:
+            self._held = self._held + added  # (a new list: never changed in place)
+
+    def clear(self) -> None:
+        self._held = []
+        self.last = []
+        self._last_full = []
+
+    def _entries(self) -> list[tuple[float, int, tuple[str, str]]]:
+        """The pairs since the last cut of the pages up to the one placed, in story order."""
+        at = self.at
+        return sorted((e for e in self._held if at is None or e[0] <= at), key=lambda e: (e[0], e[1]))
+
+    def __len__(self) -> int:
+        return len(self._entries())
+
+    def __iter__(self) -> Any:
+        return iter([e[2] for e in self._entries()])
+
+    def _cut(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None
+             ) -> tuple[list[tuple[float, int, tuple[str, str]]], bool]:
+        entries = self._entries()
+        if not entries:
+            return [], False
+        pairs = [e[2] for e in entries]
+        if len(pairs) > self.grows_to or (fits is not None and not fits(pairs)):
+            entries = entries[-self.cut_to:] if self.cut_to else []
+            while entries and fits is not None and not fits([e[2] for e in entries]):
+                entries = entries[-(len(entries) // 2):] if len(entries) > 1 else []
+            return entries, True
+        return entries, False
+
+    def _switched(self, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """(*switch_to* set) *pairs* with what parts from the last request's beyond *switch_to* left out (see the
+        class's docstring)."""
+        limit = self.switch_to
+        last = self.last
+        if limit is None or not last or pairs[:len(last)] == last:
+            return pairs  # (it extends the last one)
+        full = self._last_full
+        if full != last and pairs[:len(full)] == full:
+            return last + pairs[len(full):]  # (it grows a request that left pairs out: what that one was given, grown)
+        common = 0
+        for a, b in zip(pairs, last):
+            if a != b:
+                break
+            common += 1
+        if len(pairs) - common <= limit:
+            return pairs  # (it parts from the last one by little)
+        return pairs[:common] + (pairs[-limit:] if limit else [])
+
+    def switches(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> bool:
+        """Whether the next request at the page placed, *switch_to* set, would not extend the last request's pairs
+        (what the server holds): it parts from them, or stops short of them - the server's pairs of the page after it
+        are left for its own, and the next request there computes them again."""
+        pairs = [e[2] for e in self._cut(fits)[0]]
+        last, full = self.last, self._last_full
+        if not last or pairs[:len(last)] == last:
+            return False
+        return not (full != last and pairs[:len(full)] == full)
+
+    def take(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> list[tuple[str, str]]:
+        entries, cut = self._cut(fits)
+        if cut:
+            at = self.at
+            ahead = [e for e in self._held if at is not None and e[0] > at]
+            self._held = entries + ahead
+            self.cuts += 1
+        full = [e[2] for e in entries]
+        pairs = self._switched(full)
+        self.last, self._last_full = list(pairs), full
+        return list(pairs)
+
+    def peek(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> list[tuple[str, str]]:
+        return self._switched([e[2] for e in self._cut(fits)[0]])
+
+
 def tells_computed(translator: Any) -> bool:
     """Whether *translator* says which earlier pairs its prompts computed (``computed``, a list its ``translate_page``
     fills: `plamo.PlamoTranslator`): the pairs its server holds, which the caller's pairs that only grow take

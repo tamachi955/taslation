@@ -2342,6 +2342,7 @@ class LiveViewMixin(BlackViewerMixin):
             return False
         f = self._following
         gate = PageGate(TAKE_BACK_MS / 1000 if self._draws_soft_first() else 0.0)
+        gate.soft = soft  # (a frame that looked soft: never caught behind the reader, `backlog`)
         look = getattr(self, "_look_now", None)
         early = Early(op, gate, image, thumb, self._auto_last, self._auto_candidate, f.taken, f.retake,
                       look if look is not None and look.image is image else None)
