@@ -109,6 +109,8 @@ BLUE = (58, 128, 232)
 CAP_BG = (236, 236, 238)
 CAP_EDGE = (120, 122, 128)
 
+HEADER_LABEL = (205, 207, 212)  # a column header's label (its note is DIM)
+HEADER_SEP = " - "  # between a header's bold label and its lighter note
 LEFT_HEADER = "YOUR VIEWER - the book stays here, untouched"
 RIGHT_HEADER = "TASLATION - reads that window and shows the translation"
 CAP_PRESSED = "key pressed in TASlation"
@@ -2331,8 +2333,23 @@ class Layout:
         self.key_h = round(70 * s)
         self.viewer_h = round(self.H * 0.46)
 
-    def header(self, text: str, width: float) -> tuple[int, list[str]]:
-        return fit_text(text, self.header_px[0], self.header_px[1], True, width, 2)
+    def header(self, text: str, width: float) -> tuple[int, str, str]:
+        """A column's header on one line within *width*: its size (the largest from the first of `header_px` down
+        to the second; the smallest where none fits), its label (bold) and its note (lighter, after " - ")."""
+        label, _sep, note = text.partition(HEADER_SEP)
+        size = self.header_px[0]
+        while size > self.header_px[1] and self.header_width(label, note, size) > width:
+            size -= 1
+        return size, label, note
+
+    @staticmethod
+    def header_width(label: str, note: str, size: int) -> float:
+        width = pv.text_width(label, pv.font(size, True))
+        return width + (pv.text_width(HEADER_SEP + note, pv.font(size)) if note else 0.0)
+
+    def header_fits(self, text: str, width: float) -> bool:
+        size, label, note = self.header(text, width)
+        return self.header_width(label, note, size) <= width
 
     def title_width(self) -> float:
         return self.col - self.circle - round(8 * self.s)
@@ -2433,8 +2450,17 @@ class Painter:
                 placed[1] + (sy - top) * placed[3] / max(1.0, bottom - top))
 
     def header_height(self, width: float) -> int:
-        size, lines = self.layout.header(RIGHT_HEADER, width)
-        return len(lines) * round(size * 1.3) + round(6 * self.layout.s)
+        size = self.layout.header(RIGHT_HEADER, width)[0]
+        return round(size * 1.3) + round(6 * self.layout.s)
+
+    def header(self, d: Any, x: float, y: float, text: str, width: float) -> int:
+        """Draws a column's header on one line at (x, y), its label bold and its note lighter; the y under it."""
+        size, label, note = self.layout.header(text, width)
+        bold = pv.font(size, True)
+        d.text((x, y), label, fill=HEADER_LABEL, font=bold)
+        if note:
+            d.text((x + pv.text_width(label, bold), y), HEADER_SEP + note, fill=DIM, font=pv.font(size))
+        return round(y + size * 1.3)
 
     # a frame
     def draw(self, part: Part, key: tuple[Any, ...]) -> Image.Image:
@@ -2452,12 +2478,7 @@ class Painter:
         d = ImageDraw.Draw(img)
         # the left column: the viewer
         x0, y0, x1, _y1 = lay.left
-        size, lines = lay.header(LEFT_HEADER, lay.col)
-        y = y0
-        for line in lines:
-            d.text((x0, y), line, fill=DIM, font=pv.font(size, True))
-            y += round(size * 1.3)
-        y += round(4 * s)
+        y = self.header(d, x0, y0, LEFT_HEADER, lay.col) + round(4 * s)
         strip = round(16 * s)
         d.rectangle((x0, y, x1, y + strip), fill=PANEL)
         d.text((x0 + round(5 * s), y + strip / 2), dv.VIEWER_TITLE, fill=DIM, font=pv.font(lay.small_px[1]),
@@ -2490,11 +2511,7 @@ class Painter:
             self.key_cap(d, cap)
         # the right: TASlation's window
         rx0, ry0, rx1, _ry1 = lay.right
-        size, lines = lay.header(RIGHT_HEADER, rx1 - rx0)
-        y = ry0
-        for line in lines:
-            d.text((rx0, y), line, fill=DIM, font=pv.font(size, True))
-            y += round(size * 1.3)
+        self.header(d, rx0, ry0, RIGHT_HEADER, rx1 - rx0)
         placed = self.place(frame, box)
         if frame is not None and placed is not None:
             px, py, pw, ph = placed

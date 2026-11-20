@@ -56,9 +56,12 @@ def test_every_step_fits_the_left_column_at_960x540():
         (tsize, tlines), (dsize, dlines) = layout.step(title, description)
         assert len(tlines) <= 2 and len(dlines) <= 5, scene.id
         assert tsize >= layout.title_px[1] and dsize >= layout.desc_px[1]
-    for header in (iv.LEFT_HEADER,):
-        assert len(layout.header(header, layout.col)[1]) <= 2
-    assert len(layout.header(iv.RIGHT_HEADER, layout.right[2] - layout.right[0])[1]) == 1
+    for header, width in ((iv.LEFT_HEADER, layout.col), (iv.RIGHT_HEADER, layout.right[2] - layout.right[0])):
+        size, label, note = layout.header(header, width)
+        assert layout.header_fits(header, width), header  # (one line: a bold label and a lighter note)
+        assert size >= layout.header_px[1] and label and note and f"{label}{iv.HEADER_SEP}{note}" == header
+    assert layout.header(iv.LEFT_HEADER, 200)[0] < layout.header(iv.LEFT_HEADER, 400)[0]  # (smaller where narrower)
+    assert not layout.header_fits(iv.LEFT_HEADER, 100)
     assert len(layout.cap_lines()[1]) == 1
 
 
