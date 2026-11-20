@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import standin_e2e  # noqa: E402
 import standin_viewer as sv  # noqa: E402
+from test_side_indicator import Window, no_way_to_the_viewer  # noqa: E402,F401 - the window, and its fixture
 
 
 # ---------------------------------------------------------------------------------------------------- the script
@@ -758,3 +759,69 @@ def test_the_view_is_the_one_the_stand_in_says_once_its_window_is_in_place():
     view = standin_e2e.placed_view(browser, ready, 2, seconds=0.5, quiet=0.1)
     assert view["vh"] == "990" and view["w"] == "2847" and view["count"] == "70" and view["ev"] == "ready"
 
+
+
+# ---------------------------------------------------------------------------------------------------- the indicator
+@pytest.mark.parametrize("setting", ["column", "rail"])
+def test_the_indicator_is_looked_at_as_told_and_a_wrong_one_is_found(setting, hidden_root, no_way_to_the_viewer):
+    """`SideCheck` on the indicator's own window (`test_side_indicator.Window`) fed by the real backlog: what it was
+    told agrees with what it holds and draws, a screen that went by is drawn as such, the screen on show outlined; a
+    stage the model holds that was never told is found, and so is a drop that left anything."""
+    from fake_side import fingerprint, page
+
+    from taslation.backlog import backlog_of
+
+    w = Window(hidden_root, setting=setting, size=(1560, 900))
+    hidden_root.update()
+    errors: list = []
+    check = standin_e2e.SideCheck(SimpleNamespace(error=lambda *a: errors.append(a)))
+    handle = w._handle_event
+
+    def handled(kind, data):  # (as the tool's hook on `App._handle_event`, the later look made at once below)
+        reading = kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading"))
+        if reading:
+            check.told_event(w, kind, data)
+        out = handle(kind, data)
+        if reading and kind == "backlog" and data.get("dropped") is True:
+            check.drop_looked(w)
+        return out
+
+    w._handle_event = handled
+    b = backlog_of(w)
+
+    def unit(n):
+        return SimpleNamespace(fingerprint=fingerprint(n), aspect=0.7)
+
+    try:
+        s1 = b.screen_for([unit(1)], 4)
+        w.show(page(1))
+        b.tell(s1, "read", "done", page(1))
+        b.tell(s1, "translate", "working", page(1))
+        b.show(s1)
+        b.totals()
+        gone = b.screen_for([unit(2)], 4)  # went by too fast
+        gone.missed = True
+        b.tell(gone, "read", "missed")
+        s3 = b.screen_for([unit(3)], 4)
+        w.show(page(3))
+        b.tell(s3, "read", "working", page(3))
+        b.show(s3)
+        b.totals()
+        w.pump()
+        check.check(w)
+        assert errors == [] and check.checks == 1
+        assert check.wrong == {}, check.examples
+        assert check.on_show_drawn == check.on_show_checked == 1
+        assert check.missed_told == check.missed_drawn == {(2, fingerprint(2))}
+        assert check.layouts == {setting: 1}
+        w._side.model.screens[1].stages["translate"] = "failed"  # (never told: the model and its drawing are wrong)
+        check.check(w)
+        assert check.wrong["stages"] == 1
+        assert check.wrong["bar" if setting == "column" else "rail_mark"] >= 1
+        b.drop("another book")
+        w.pump()
+        assert len(check.drops) == 1 and "drop_not_cleared" not in check.wrong
+        assert check.drops[0]["screens_left"] == 0 and check.drops[0]["drawn_left"] == 0
+    finally:
+        b.close()
+        w.destroy()
