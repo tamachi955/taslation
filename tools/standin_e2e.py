@@ -97,9 +97,11 @@ it); the jobs on a soft frame whose frame was confirmed, those of them whose con
 ran, after them), and the jobs on a frame that was not the sharp one with a page unit or a kept line of theirs in the
 cache the window left (must be none where the sharp frame of their page came: each told with its page, how late the
 window captured that sharp frame and why); which capture gave the stand-in's frames (Windows.Graphics.Capture, or
-PrintWindow where it gave none: ``capture_route``); the jobs cancelled, per scenario (d, the
-flashes and spinners: none; a job whose page went on at a new size of the stand-in is not one cancelled with its page
-on show, ``resized_away``); overlays left on a page the stand-in had left; that no profile in the scratch state keeps
+PrintWindow where it gave none: ``capture_route``); each frame the window judged soft or sharp (`_looks_soft`: the
+page's own sharp picture's verdict and the viewer's pictures') against what the stand-in drew; the jobs cancelled,
+per scenario (d, the flashes and spinners: none; a job whose page went on at a new size of the stand-in is not one
+cancelled with its page on show, ``resized_away``); overlays left on a page the stand-in had left; that no profile in
+the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
 stand-in rested on; the window's modes as they changed (reading, over the book, a run, beside it, the text size) and
@@ -650,6 +652,7 @@ class Notes:
         self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
         self.status_lines: list[dict[str, Any]] = []  # the status line's kind and the page it speaks of, from when
         self.long_captures: list[tuple[float, float]] = []  # (when, ms): the captures that took over LONG_CAPTURE_MS
+        self.soft_looks: list[dict[str, Any]] = []  # each frame the window judged soft or sharp (`soft_look`)
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
         self.modes: list[dict[str, Any]] = []  # reading, over the book, a run, beside it, text size, as changed
         self.hotkeys: list[dict[str, Any]] = []  # the hot keys the window held, as they changed, and the presses
@@ -1031,6 +1034,14 @@ class Notes:
         with self.lock:
             self.run_ends.append({"t": now_ms(), "code": str(getattr(ended, "code", type(ended).__name__)),
                                   "pages": getattr(progress, "pages", None)})
+
+    def soft_look(self, image: Any, own: Any, viewer: Any, soft: bool) -> None:
+        """The window judged *image* soft or not (`_looks_soft`): its page's own sharp picture's verdict (*own*: True
+        sharp, False soft, None no picture of it kept, "-" not asked), the viewer's pictures of all pages' (*viewer*,
+        `looks_sharp`: True sharp, "-" not asked), the window's (*soft*), and what the stand-in drew there."""
+        rec = {"t": now_ms(), **self.code(self.shown(image)), "own": own, "viewer": viewer, "soft": soft}
+        with self.lock:
+            self.soft_looks.append(rec)
 
     def captured(self, image: Any) -> None:
         shown = self.shown(image)
@@ -1883,6 +1894,27 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     App._start_translate, App._job_translate, App._handle_event = started, worked, handled
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
     App._batch_done = run_done
+    looks_soft, judge, viewer_sharp = App._looks_soft, batch_mod.SharpSeen.judge, live.looks_sharp
+    asked: dict[str, Any] = {}
+
+    def judged(self: Any, *a: Any, **k: Any) -> Any:  # the page's own sharp picture's verdict, as `_looks_soft` asks it
+        out = judge(self, *a, **k)
+        asked["own"] = out
+        return out
+
+    def by_viewer(*a: Any, **k: Any) -> Any:  # ... and the viewer's pictures of all pages'
+        out = viewer_sharp(*a, **k)
+        asked["viewer"] = out
+        return out
+
+    def soft_look(self: Any, image: Any) -> Any:  # each judgement of a frame: both verdicts, the window's, the truth
+        asked.clear()
+        out = looks_soft(self, image)
+        if asked:
+            notes.soft_look(image, asked.get("own", "-"), asked.get("viewer", "-"), bool(out))
+        return out
+
+    App._looks_soft, batch_mod.SharpSeen.judge, live.looks_sharp = soft_look, judged, by_viewer
     decided, stored = batch_mod.BatchReader._decided, pageimages.PageImages.frame
     marked = pageimages.PageImages.read
 
@@ -3190,6 +3222,21 @@ def old_page_times(displays: list[dict[str, Any]], scr: tuple[int, bool], lo: fl
     return round(page_end - lo), round(lettering_end - lo)
 
 
+def soft_looks_summary(looks: list[dict[str, Any]], rel: Callable[[float], float]) -> dict[str, Any]:
+    """The window's judgements of frames as soft or sharp (`Notes.soft_look`), against what the stand-in drew: how
+    many, by the two verdicts it is made of (the page's own sharp picture's, the viewer's pictures of all pages'),
+    and each one that missed - a soft frame taken for sharp, a sharp one for soft."""
+    def name(v: Any) -> str:
+        return {True: "sharp", False: "soft", None: "none"}.get(v, str(v))
+
+    by = Counter(f"{r['state']}: own {name(r['own'])}, viewer {name(r['viewer'])} -> {'soft' if r['soft'] else 'sharp'}"
+                 for r in looks)
+    missed = [{"t_s": rel(r["t"]), "page": r["page"], "spread": r["spread"], "drawn": r["state"],
+               "own": name(r["own"]), "viewer": name(r["viewer"]), "taken_for": "soft" if r["soft"] else "sharp"}
+              for r in looks if r["state"] in ("soft", "sharp") and (r["state"] == "soft") != r["soft"]]
+    return {"judged": len(looks), "by": dict(sorted(by.items())), "missed": len(missed), "missed_list": missed[:40]}
+
+
 def lettered_unsettled_ms(displays: list[dict[str, Any]], scr: tuple[int, bool], sharp: float | None,
                           hi: float) -> int:
     """How long, after the stand-in drew *scr* sharp and before it turned on, the window showed lettering read from
@@ -4448,6 +4495,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "old_lettering_after_a_turn": old_lettering,
         "old_page_after_a_turn": old_page,
         "lettering_on_a_soft_frame": lettered_soft,
+        "soft_looks": soft_looks_summary(notes.soft_looks, rel),
         "cancels": {"all": len(cancels), "by_segment": dict(Counter(str(c["segment"]) for c in cancels)),
                     "page_still_on_show": false_cancels, "list": cancels},
         "lettered_unsettled_ms": {"total": sum(r["lettered_unsettled_ms"] for r in rows),
