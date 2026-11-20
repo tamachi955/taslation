@@ -20,7 +20,10 @@ same: `NEWER`, `UP_TO_DATE`, `COULD_NOT_ASK`.
 ``download`` gets that version's ZIP (`ZIP_URL`, about 4.6 MB) into DIR as ``taslation-X.Y.Z.zip``: first as a
 ``.part`` file, tried `ATTEMPTS` times `RETRY_WAIT_S` seconds apart as the installer's downloads are, going on from
 where it broke off where the server allows (HTTP Range), not tried again when the server refuses it (401, 403, 404,
-410). Its progress, in percent and MB, goes to stderr; the path of the ZIP, once it is whole, to stdout.
+410). Once the file has come, every entry of it is read back (`whole_zip`): a file that does not open as a ZIP or has
+an entry that does not read back whole - two builds of GitHub's archive joined by a download taken up again, a body cut
+short with no length said - counts as a broken download, thrown away and asked for whole on the next try, within the
+same tries. Its progress, in percent and MB, goes to stderr; the path of the ZIP, once it is whole, to stdout.
 
 What a request is: one HTTPS GET of one of the two fixed addresses, with a fixed User-Agent (`USER_AGENT`: no version,
 no system, no Python), no query string, no cookie, no credential, no proxy, nothing about the person, the computer or
@@ -83,6 +86,13 @@ class AskError(Exception):
 
 class Refused(AskError):
     """The server refused the file or does not have it (`REFUSED_HTTP`): trying again does not help."""
+
+
+class Broken(AskError):
+    """What came is no whole ZIP (`whole_zip`): thrown away, and the file asked for whole on the next try."""
+
+
+BROKEN_ZIP = "What came from GitHub is no whole ZIP file."
 
 
 class TooLarge(AskError):
@@ -447,10 +457,22 @@ def download_once(url: str, place: Place, part: Path, progress: Progress) -> Non
     raise AskError("The download could not be taken up again.")
 
 
+def whole_zip(path: Path) -> bool:
+    """Whether *path* opens as a ZIP and every entry in it reads back whole (`zipfile.ZipFile.testzip`: each entry's
+    CRC). A download taken up again where it broke off can join two different builds of GitHub's archive into one file
+    that still ends like a ZIP; this finds it."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return z.testzip() is None
+    except Exception:  # noqa: BLE001 - BadZipFile, zlib.error, EOFError, NotImplementedError, OSError: not whole
+        return False
+
+
 def download(version: str, folder: Path, place: Place, attempts: int = ATTEMPTS, wait_s: float = RETRY_WAIT_S,
              progress: Progress | None = None) -> Path:
     """The ZIP of *version* in *folder* (``taslation-X.Y.Z.zip``), tried *attempts* times *wait_s* apart; AskError
-    when it still does not come."""
+    when it still does not come. A file that came but is no whole ZIP (`whole_zip`) counts as a broken download: it
+    is thrown away and asked for whole on the next try."""
     if version_of(version) is None:
         raise AskError("A version must be given as X.Y.Z.")
     folder = Path(folder)
@@ -465,6 +487,8 @@ def download(version: str, folder: Path, place: Place, attempts: int = ATTEMPTS,
         try:
             download_once(url, place, part, progress)
             progress.end()
+            if not whole_zip(part):
+                raise Broken(BROKEN_ZIP)
             break
         except (Refused, TooLarge):
             progress.end()
@@ -473,14 +497,18 @@ def download(version: str, folder: Path, place: Place, attempts: int = ATTEMPTS,
             raise
         except Exception as e:  # noqa: BLE001 - the network or the disk: said, tried again
             progress.end()
+            if isinstance(e, Broken):  # (nothing of it is taken up again: the next try asks for the file whole)
+                try:
+                    part.unlink(missing_ok=True)
+                except OSError:
+                    pass
             sentence = failure_sentence(e, writing=True)
             if attempt >= attempts:
+                if isinstance(e, Broken):
+                    raise AskError(f"The ZIP from GitHub did not come whole in {attempts} tries.") from None
                 raise AskError(f"{sentence} Tried {attempts} times.") from None
             say(f"  Attempt {attempt} of {attempts}: {sentence} Trying again in {wait_s:g} seconds.")
             time.sleep(wait_s)
-    if not zipfile.is_zipfile(part):
-        part.unlink()
-        raise AskError("What came from GitHub is no ZIP file.")
     part.replace(target)
     return target
 

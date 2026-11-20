@@ -454,9 +454,94 @@ def test_a_refused_download_is_not_tried_again(tmp_path, server):
 
 def test_what_is_no_zip_is_thrown_away(tmp_path, server):
     s = server({zip_path("0.9.0"): body(b"<html>not a zip</html>")})
-    with pytest.raises(cu.AskError, match="no ZIP"):
+    with pytest.raises(cu.AskError, match=r"^The ZIP from GitHub did not come whole in 3 tries\.$"):
         cu.download("0.9.0", tmp_path, cu.Place(s.base), wait_s=0, progress=cu.Progress(io.StringIO()))
-    assert list(tmp_path.iterdir()) == []
+    assert list(tmp_path.iterdir()) == [] and len(s.seen) == 3
+
+
+def a_build(fill: int, size: int = 300_000) -> bytes:
+    """A ZIP as GitHub builds its archive, compressed: another *fill* is another build of it."""
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("taslation-0.9.0/pyproject.toml", 'version = "0.9.0"\n')
+        z.writestr("taslation-0.9.0/filler.bin", bytes((i * fill + i // 7) % 256 for i in range(size)))
+    return data.getvalue()
+
+
+def ranges_of(s: Server) -> list[str | None]:
+    return [dict(r["headers"]).get("Range") for r in s.seen]
+
+
+def test_a_second_half_of_another_build_is_thrown_away_and_the_file_asked_for_whole(tmp_path, server, capsys):
+    first, second = a_build(3), a_build(5)
+    cut = len(first) // 2
+    joined = first[:cut] + second[cut:]
+    assert zipfile.is_zipfile(io.BytesIO(joined))  # (it still ends like a ZIP ...)
+    assert not cu.whole_zip(_written(tmp_path / "joined.zip", joined))  # (... but is not one)
+    (tmp_path / "joined.zip").unlink()
+
+    def builds(h):
+        asked = h.headers.get("Range")
+        if len(s.seen) == 1:  # the first build, broken off half way
+            h.send_response(200)
+            h.send_header("Content-Length", str(len(first)))
+            h.end_headers()
+            h.wfile.write(first[:cut])
+            h.wfile.flush()
+            h.close_connection = True
+            h.connection.shutdown(socket.SHUT_RDWR)
+        elif asked:  # taken up again, from another build: a 206 with the right Content-Range
+            start = int(asked.split("=")[1].rstrip("-"))
+            h.send_response(206)
+            h.send_header("Content-Range", f"bytes {start}-{len(second) - 1}/{len(second)}")
+            h.send_header("Content-Length", str(len(second) - start))
+            h.end_headers()
+            h.wfile.write(second[start:])
+        else:
+            body(second)(h)
+    s = server({zip_path("0.9.0"): builds})
+    target = cu.download("0.9.0", tmp_path, cu.Place(s.base), wait_s=0, progress=cu.Progress(io.StringIO()))
+    assert target.read_bytes() == second and cu.whole_zip(target)
+    assert ranges_of(s) == [None, f"bytes={cut}-", None]  # (the third asks for it whole)
+    said = capsys.readouterr().err
+    assert "Attempt 2 of 3: What came from GitHub is no whole ZIP file. Trying again in 0 seconds." in said
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["taslation-0.9.0.zip"]
+
+
+def test_a_body_cut_short_without_its_length_counts_as_broken_and_after_three_tries_it_says_so(tmp_path, server,
+                                                                                              monkeypatch, capsys):
+    data = a_build(3)
+    s = server({zip_path("0.9.0"): body(data[: len(data) * 2 // 3], length=False)})
+    monkeypatch.setattr(cu.time, "sleep", lambda _s: None)
+    code = cu.main(["--base", s.base, "download", "--version", "0.9.0", "--to", str(tmp_path)])
+    assert code == cu.NOT_DOWNLOADED and list(tmp_path.iterdir()) == []
+    assert ranges_of(s) == [None, None, None]  # (a broken file is never taken up again)
+    out = capsys.readouterr()
+    assert out.out == ""
+    lines = [line.strip() for line in out.err.splitlines() if line.strip().startswith(("Attempt", "Not downloaded"))]
+    assert lines == ["Attempt 1 of 3: What came from GitHub is no whole ZIP file. Trying again in 15 seconds.",
+                     "Attempt 2 of 3: What came from GitHub is no whole ZIP file. Trying again in 15 seconds.",
+                     "Not downloaded: The ZIP from GitHub did not come whole in 3 tries."]
+
+
+def test_a_whole_zip_after_a_bad_first_try(tmp_path, server, capsys):
+    good = a_zip()
+    bad = bytearray(good)
+    bad[len(bad) // 2] ^= 0xFF  # (a stored entry's byte changed: the file ends like a ZIP, its CRC is wrong)
+    assert zipfile.is_zipfile(io.BytesIO(bytes(bad)))
+
+    def once_bad(h):
+        body(bytes(bad) if len(s.seen) == 1 else good)(h)
+    s = server({zip_path("0.9.0"): once_bad})
+    target = cu.download("0.9.0", tmp_path, cu.Place(s.base), wait_s=0, progress=cu.Progress(io.StringIO()))
+    assert target.read_bytes() == good and ranges_of(s) == [None, None]
+    assert "Attempt 1 of 3: What came from GitHub is no whole ZIP file. Trying again in 0 seconds." in \
+        capsys.readouterr().err
+
+
+def _written(path: Path, data: bytes) -> Path:
+    path.write_bytes(data)
+    return path
 
 
 def test_an_oversized_zip_stops_at_once(tmp_path, server, monkeypatch):

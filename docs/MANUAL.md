@@ -1194,7 +1194,7 @@ The downloader (`setup_models.py`, which the window and the command line run as 
 The third is `check_update.py`, the program that looks for a new version: the window runs it as a process of its own when you choose Help → "Check for updates..." and, when you turned on the look at the start, once a day;
 `update.cmd` runs it when it is asked to look for and download a new version. It runs without the guard too, and the TASlation package never imports it.
 It asks GitHub's three hosts only: raw.githubusercontent.com for `CHANGELOG.md`, and github.com for that version's ZIP, with an HTTPS GET
-(the ZIP is tried up to three times when a download breaks off); github.com sends the ZIP on to codeload.github.com. Sent on to any other address, it stops without asking there.
+(the ZIP is tried up to three times when a download breaks off or what came is not a whole ZIP, every entry of it read back: a broken one is downloaded whole again); github.com sends the ZIP on to codeload.github.com. Sent on to any other address, it stops without asking there.
 Besides the plain headers HTTP needs, it sends only a fixed User-Agent (`TASlation-update-check`): no query string, no cookie, not the installed version, nothing about this computer or your books.
 GitHub sees the IP address and the time, as any site you open does. It uses no proxy.
 The window's own process connects nowhere for it, so what `taslation audit` lists of TASlation's own connections is the same with it.
