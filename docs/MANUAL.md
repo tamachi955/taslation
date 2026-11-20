@@ -239,7 +239,7 @@ and if it cannot tell, the name last given with the same viewer is filled in ("L
 Even after you resize the viewer's window, the book is recognised from its pages the next time you open it (if the two pages of a spread are both close to different pages of the same book, it is taken to be that book). Old caches are matched the way pages were cut out at the time, so they still work as they are.
 
 The same dialog also asks, with the note above, whether to read the whole book first. Enter chooses "Page by page instead" (so that the heavier way does not start without you choosing it). The answer is remembered per book (ui.json in the state folder). For a book you answered "page by page", it does not ask again, and the status line shows how to read it whole. For a book you answered "Start", it asks again next time, and then Enter is "Start" (the run is always your decision). Closing the dialog means "Not now": until you close TASlation, that book is translated page by page and not asked about again (nothing is remembered). Only if you close it while the book has no name yet does it ask again on the next page, since nothing can be kept without a name. If you do read the whole book, turn the pages at your own pace, in the viewer or with the page keys in the TASlation window. TASlation only reads the pages that are turned; it never turns a page itself.
-When you have read to the end, press "Finished reading" in the banner, and everything is translated together with the whole story in view (about 1 hour for 190 pages on a mid-range GPU; the time the reading takes is simply the time you spend reading). While the translation runs, you can read on in the viewer: a page it has translated already shows translated in TASlation's window (drawn from the cache; nothing is asked of the model), and a page it has not come to yet shows as it is, with a line that says so. The banner above the page shows the number of pages read and waiting,
+When you have read to the end, press "Finished reading" in the banner, and everything is translated together with the whole story in view (reading and translating 190 pages takes about 15 to 20 minutes with a 6 GB GPU and about 35 minutes to an hour without one, estimated from the measurements in "Requirements" in docs/INSTALL.md; the time you spend turning the pages is not included). While the translation runs, you can read on in the viewer: a page it has translated already shows translated in TASlation's window (drawn from the cache; nothing is asked of the model), and a page it has not come to yet shows as it is, with a line that says so. The banner above the page shows the number of pages read and waiting,
 the time a page takes to read, the translation's progress (how many lines of how many) with its bar, and the time left, with a "Stop" button. The translation's progress also shows as a green bar on TASlation's taskbar button (yellow while the reading is held up and waiting). During the reading, "Auto" is off (the reading reads the pages you turn;
 the first time, the status line says so); when it is over, Auto is on again, and from then on every page is shown at once.
 When the translation has finished, or has stopped on a problem, and TASlation is not in front, TASlation's taskbar button flashes to tell you
@@ -265,7 +265,7 @@ Both modes use the same cache.
 The default is page by page. To read the whole book, press "Read whole book..." in the toolbar. The most pages read in one run is `batch_max_pages` in the settings file.
 `--no-context` is available only on the command line. The batch dialog, too, shows the note about stores' terms of use, above "Start".
 
-Translating one page alone means translating without knowing who is speaking, what came before and what comes next. "Batch: Read whole book..."
+Translating one page alone means translating without knowing who is speaking, what came before and what comes next. "Read whole book..."
 reads the pages you turn and translates them all together once you have finished reading, in two stages. During the reading, no request at all is made to the model.
 
 1. **Reading**: starting from the page shown when you press "Start", each time you turn a page the new page is taken in and its bubbles are read (OCR). TASlation sends no keys to the viewer.
@@ -807,8 +807,8 @@ translations are deleted. The "System" page of "Settings" shows how many lines t
 
 The target language is chosen in the "To:" box (or with `--language`, or the setting `target_language`).
 The cache and the series sheet are saved per language, and the lettering switches to a font for that script. The model that translates is decided by the target language
-(see "Choosing the model"). The quality depends on how good the model is in that language. When tried with Qwen3.5 4B,
-Spanish, Chinese and Korean were good, and Arabic was visibly worse.
+(see "Choosing the model"). The quality depends on how good the model is in that language. Only translation into English has been measured (see "Choosing the model");
+the models used now have not been measured in the other target languages.
 Hindi and Bengali are shaped with HarfBuzz (the `uharfbuzz` package that install.cmd installs): conjuncts, vowel signs
 and the reph are set as the font forms them. Where that package is missing, their letters are drawn one by one, and
 the banner above the page says so (run install.cmd again). Everything else is set correctly too, including Arabic and
@@ -1101,7 +1101,7 @@ as agreement to its terms of use (`--accept-source-agreements --accept-package-a
 If an earlier installation has only manga-ocr-charspot-small, TASlation works with that model alone. The status line says so in one line,
 and it is not an error. Running `install.cmd` installs the other two.
 
-The OCR runs on the CPU, and the three models share the `ocr_threads` setting. When the CPU is busy with
+On the CPU, the OCR models share the `ocr_threads` setting. When the CPU is busy with
 other work, setting `ocr_threads` to half the number of cores can make it faster.
 With an NVIDIA GPU, `ocr_runs_on` (`"auto"` by default) puts manga-ocr-charspot-small and manga-ocr-nar-small on the GPU, but only when it has room for them at TASlation's peak:
 the translation model whole in video memory, LaMa and the layout model when they are used (LaMa needs more on a screen taller than 1440 pixels, where the lettering is larger in pixels), PyTorch's own memory, and what other programs hold now, with 1 GB left over.
@@ -1119,8 +1119,8 @@ and when Ollama is not running or the model is not installed it does nothing (th
 With the setting off, and for the `taslation` commands, the model is loaded when a line that needs translating comes up
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
 `ollama_keep_alive` ("5m" by default) after the last request (or after the load at start), then is released automatically; with `ollama_keep_alive = "0"` nothing is loaded at start. While you read on through untranslated pages, each request
-extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while pages are being read,
-but when the reading is over and it moves on to the notes and the translation. When the window closes, and at the end of a run of a `taslation` command, it is released at once.
+extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while you are still turning pages,
+but after you press "Finished reading", when the translation begins (which can be while the pages still waiting are read). When the window closes, and at the end of a run of a `taslation` command, it is released at once.
 At the end of a run in the window (a stop or a failure included) it stays, as after a page translated one by one, when Auto goes back on, so the next untranslated page you turn to does not wait for its load; when Auto stays off, it is released at once.
 While you read a page and nothing is being translated, the window has Ollama compute the beginning of the next page's first request (the series sheet and the earlier lines that request starts from) when Ollama does not hold it already, as after the earlier lines were cut back to the newest: the next untranslated page you turn to does not wait for it (a second or so).
 It sends what that request would send and keeps nothing of the answer, so the requests are what they are without it; as when Ollama computes a request from another starting point, the model can word a line slightly otherwise (on a test set about one line in ten, with about the same score). It shows nothing, is done only while the model is loaded wholly on the graphics card, stops as soon as you turn, and is not done during a whole-book run.
@@ -1175,35 +1175,52 @@ Paste it when you report a problem. It sends nothing anywhere. On the screen sho
 
 ## Checking for yourself that it works offline
 
-1. Check that `taslation doctor` prints
-   `Network guard: ON (loopback:11434 only ...)`.
+What the guard covers is TASlation's own process: the window and every `taslation` command. Before anything heavy is loaded, it makes every connection and every name lookup fail
+unless it goes to this computer (loopback) on Ollama's port (11434 by default), and it tells the libraries that load models to stay offline.
+It does not cover other programs. Ollama, which does the translating, is a program of its own: TASlation starts its server when it is not running (`ollama serve`, which TASlation stops again when it no longer uses it), and asks it, on 127.0.0.1, to load and release the translation model
+and to translate the lines TASlation sends (`/api/generate`, `/api/chat`, `/api/ps`, `/api/tags`, `/api/version`); through the `ollama` command it lists the models
+and removes one no longer needed when you agree (`ollama list`, `ollama rm`); and the downloader asks it to fetch or import a translation model
+(`ollama pull`, `ollama create`). What else Ollama does is not under TASlation's control.
+The downloader (`setup_models.py`, which the window and the command line run as a separate process when you agree to download a model) and the installer (`install.cmd`, which `update.cmd` also runs) run without the guard: they download.
+
+With an installation made with `install.cmd`, TASlation's program is `.venv\Scripts\taslation.exe` in the folder that holds `install.cmd`; it is not on PATH.
+Open PowerShell in that folder (with the folder open in File Explorer, type `powershell` in the address bar and press Enter), then:
+
+1. `.\.venv\Scripts\taslation.exe doctor` prints, among its lines,
+   `Network guard: ON (loopback:11434 only; 0 attempt(s) blocked)`.
    In the window, "Copy details" in "Help > About TASlation" copies the same state, as a line `Offline guard: on; ...`. The status bar shows something
    only when the guard has blocked an attempt to connect (it then stays until you close the window).
-2. `taslation audit tests/fixtures/sample_page.png --translator echo`
-   runs the whole detection and OCR process and shows every network connection the process made. With the echo translator the list is empty;
-   with Ollama, only `127.0.0.1:11434` is shown (the warm-up request that loads the model, and the page's request).
-3. The test suite has a test
-   that checks that a raw socket from inside the process cannot reach an outside address (`tests/test_netguard.py`).
-4. Turn off Wi-Fi or unplug the cable, and use it as usual. Ollama goes on answering, and the OCR models
-   are loaded from `models/`.
+2. `.\.venv\Scripts\taslation.exe audit tests\fixtures\sample_page.png --translator echo`
+   runs detection and OCR on a sample page that comes with TASlation, with a stand-in translator that sends nothing, and lists every network connection the process made.
+   Under `--- network audit ---` it says `allowed calls: none (no network call at all)` and `blocked attempts: none`.
+   Its last part, `--- saved files (at rest) ---`, counts the saved files with text of a book in the data folder and ends with `plain files with text of a book: none` when every one is protected; it changes nothing.
+3. The same command without `--translator echo` translates the page with Ollama (starting it when it is not running, and stopping it at the end):
+   the allowed calls listed are lookups of and connections to `127.0.0.1` on port `11434` only (for the request that loads the model, and the page's requests).
+4. Turn off Wi-Fi or unplug the cable, and use it as usual. Ollama goes on answering, and the OCR models and the page models
+   are loaded from `models\`.
+
+From a source checkout with the development tools (`pip install -e .[dev]`), the tests check the guard and the protection of the saved files:
+`python -m pytest tests/test_netguard.py -q` (name lookups, direct connections, UDP and a loopback port other than Ollama's are refused, and a subprocess using the raw socket module is stopped by the audit hook)
+and `python -m pytest tests/test_protect.py -q` (with Windows' data protection, in a temporary folder).
 
 `docs/OFFLINE_VERIFICATION.md` records the procedure and the results of the checks made during development.
 
 ## How it works
 
 See `docs/ARCHITECTURE.md` for the details. In outline: a page on the screen is identified by a 320-bit perceptual page fingerprint (one page at a time for a spread; the fingerprint is taken over the inked area on that page's paper, and in a viewer with a dark background, the page's large bright part and what lines up with it are taken as paper; any text in the area is treated as belonging to the page above, below or beside it),
-and if it is in the cache, the saved translations are laid over the live page. If not, it detects the bubbles with OpenCV, runs the OCR,
+and if it is in the cache, the saved translations are laid over the live page. If not, it detects the text (with the layout model and OpenCV's classical detection where the inpainting runs, with OpenCV alone elsewhere), runs the OCR,
 translates with the Ollama model (with the series sheet and the pages just before as context; PLaMo one line at a time, Qwen once per page), erases and letters, and saves the translations in the cache.
 A batch does the same for a whole book, in the two stages described above. The window's icon is drawn by `tools/make_icon.py`
 with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change the drawing.
 
 ## Limitations
 
-* Detection is classical image processing. It covers closed bubbles and boxes (bright and dark alike; dark bubbles, and light lettering on dark parts, are lettered in white)
+* Where the inpainting runs (by default, a computer with an NVIDIA GPU that PyTorch can use with CUDA and both page models installed; "Layout model:" and "Inpainting:" in "Settings"), the layout model finds the lettering first and the classical image processing adds what it missed; elsewhere detection is classical image processing alone.
+  The classical detection covers closed bubbles and boxes (bright and dark alike; dark bubbles, and light lettering on dark parts, are lettered in white)
   and dialogue and sound effects written straight on the page. For text written straight on the page, only the letters and the bright background around them are erased; the drawing next to them, fine lines and halftone dots included, is kept,
   and the translation is set in the space that is freed. When the drawing is close, the translation gets smaller, and small bits of drawing mistaken for parts of letters are erased with them.
-  Text that runs into busy drawing of the same darkness is missed. With `translate_sfx = false`,
-  hand-drawn sound effects are left as drawn. Why no neural-network detector is bundled is explained in `docs/THIRD_PARTY.md`.
+  Text that runs into busy drawing of the same darkness is missed by the classical detection. With `translate_sfx = false`,
+  hand-drawn sound effects are left as drawn. The layout model, its licence and what its card says of its training data are in `docs/THIRD_PARTY.md`.
 * Bubbles that touch or overlap and form one white area are cut apart where they narrow, or where the outline turns sharply inward from both sides, and each is translated on its own.
   This also holds when the two texts sit offset from each other, as long as they are set further apart than the lines within each.
   A single bubble with two sets of columns stays one region (`split_joined_bubbles`, which can also be changed in the book's settings).
