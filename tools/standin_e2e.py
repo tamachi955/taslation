@@ -577,6 +577,8 @@ class Notes:
         self.spans_off: list[tuple[str, float, float, str, Any]] = []  # (spans while no page job ran)
         self.cuts: list[dict[str, Any]] = []
         self.server_resets: list[dict[str, Any]] = []
+        self.warms: list[dict[str, Any]] = []  # each step of the warming while the reader reads (no job's request)
+        self.warm_calls: list[dict[str, Any]] = []  # each warming begun (`PlamoTranslator.warm_prefix`): what it did
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
 
@@ -1560,6 +1562,37 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return data
 
     ollama_mod.OllamaTranslator._request = plain
+    warm_step = getattr(plamo_mod.PlamoTranslator, "_warm_step", None)
+    if warm_step is not None:
+        def warmed(self: Any, prompt: str, _step: Callable[..., Any] = warm_step) -> Any:
+            # a step of the warming while the reader reads (`PlamoTranslator.warm_prefix`): its own record, no job's,
+            # told against what the server holds as any request is, and what it holds after it
+            rec: dict[str, Any] = {"t": now_ms(), "kind": "warm", "side": "warm", "job": None,
+                                   "n": -1 - len(notes.warms), "end_t": None, "outcome": None}
+            got: Any = None
+            try:
+                got = _step(self, prompt)
+                return got
+            finally:
+                rec["end_t"], rec["outcome"] = now_ms(), "ok" if got is not None else "failed"
+                server.asked(rec, prompt, "")
+                if isinstance(got, dict):
+                    rec["prompt_n"], rec["prompt_ms"] = got.get("prompt_n"), round(float(got.get("prompt_ms") or 0), 1)
+                with notes.lock:
+                    notes.warms.append(rec)
+
+        plamo_mod.PlamoTranslator._warm_step = warmed
+        prefix = plamo_mod.PlamoTranslator.warm_prefix
+
+        def warming(self: Any, *a: Any, _prefix: Callable[..., Any] = prefix, **k: Any) -> Any:
+            t = now_ms()
+            facts = _prefix(self, *a, **k)  # (what a warming did: its steps, or why it did nothing)
+            with notes.lock:
+                notes.warm_calls.append({"t": t, "end_t": now_ms(), "why": str(facts.get("why")),
+                                         "steps": facts.get("steps"), "left": facts.get("left")})
+            return facts
+
+        plamo_mod.PlamoTranslator.warm_prefix = warming
     stages(notes, server)
     for name in ("_cancel_page", "_early_drop"):  # a running page job cancelled by the live view: when
         if not hasattr(App, name):
@@ -3074,6 +3107,26 @@ def stage_split(rows: list[dict[str, Any]], turns: list[dict[str, Any]], notes: 
                                                                        "first_request")}}
                           for r in rows if r["segment"] == "c"]
     out["between_jobs"] = dict(Counter(s[0] for s in notes.spans_off))
+    # the warming while the reader reads: its steps, and what of them a page job met - a step under way when the job
+    # began, its end after the job's first request went out (that request waited at the server for it)
+    steps = notes.warms
+    met = []
+    for job in started:
+        first = min((r["t"] for r in notes.requests if r["job"] == job["id"]), default=None)
+        under = [w for w in steps if w["t"] <= job["t"] < (w["end_t"] or w["t"])]
+        if under:
+            met.append({"job": job["id"], "step_left_ms": round(max((w["end_t"] or 0) - job["t"] for w in under)),
+                        "first_request_waited_ms": round(max(0.0, max((w["end_t"] or 0) for w in under) - first))
+                        if first is not None else None})
+    out["warm"] = {"steps": len(steps), "failed": sum(1 for w in steps if w["outcome"] != "ok"),
+                   "ms": tail([(w["end_t"] or w["t"]) - w["t"] for w in steps]),
+                   "prompt_ms": round(sum(w.get("prompt_ms") or 0 for w in steps)),
+                   "why": dict(Counter(str(w.get("why")) for w in steps)),
+                   "met_by_jobs": met,
+                   "first_request_waited": sum(1 for m in met if (m["first_request_waited_ms"] or 0) > 0),
+                   "warmings": len(notes.warm_calls),
+                   "warmings_did": dict(Counter(c["why"] or ("warmed" if c["steps"] else "nothing")
+                                                for c in notes.warm_calls))}
     return out
 
 

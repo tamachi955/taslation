@@ -873,6 +873,7 @@ class PageDraft:
         return hit[1]
 
 
+WARM_JOIN_S = 2.0  # how long a release waits for the warming's step under way (`Pipeline.stop_warm`; 0.25 s as a rule)
 GATE_STEP_S = 0.01  # how often a page job waiting at its gate looks at its cancel (`PageGate.wait`, `on_show`)
 GATE_LIMIT_S = 15.0  # a frame neither seen on show, kept nor dropped within this is taken as never kept (a guard: the
 # window looks at the frame of every gate it opens within tens of ms; a page job never waits for nothing)
@@ -1429,6 +1430,12 @@ class Pipeline:
         # the same pages' pairs for a translator that `grows_context` (PLaMo): they only grow, cut back rarely, so that
         # the first request of a page extends the last prompt of the page before (`context_pairs`)
         self._grown = GrowingContext()
+        # the beginning of the next page's first request computed while the reader reads (`warm_soon`): its thread,
+        # what ends it, and what the last one did (for the tools)
+        self._warm_lock = threading.Lock()
+        self._warm_thread: threading.Thread | None = None
+        self._warm_stop: threading.Event | None = None
+        self.warm_facts: dict[str, Any] | None = None
         self.book_names = BookNames()  # the book's names and the renderings they keep (memory only, `premises`)
         self.last_seq: int | None = None
         # the lines its book reuses with its series' other volumes, when the window or the command line read them for
@@ -1608,8 +1615,9 @@ class Pipeline:
             translator.before_load = self.release_before_load
 
     def release_translator(self) -> None:
-        """The translator's model leaves memory now (`OllamaTranslator.release`), for a translator that has one. Never
-        raises: the work it follows is done."""
+        """The translator's model leaves memory now (`OllamaTranslator.release`), for a translator that has one, a
+        warming under way ended first (`stop_warm`). Never raises: the work it follows is done."""
+        self.stop_warm(wait=True)
         release = getattr(self.translator, "release", None)
         if release is not None:
             try:
@@ -1932,6 +1940,46 @@ class Pipeline:
             pairs.extend(page)
         return pairs[-40:]
 
+    def warm_soon(self) -> bool:
+        """(the window, while nothing of it runs: no page job, no request waiting, no whole-book run) The beginning of
+        the next page's first request - the premises and the pairs `context_pairs` will give it, as they are now
+        (`GrowingContext.peek`: cut back where it will cut them) - computed by the server on a thread of its own
+        while the reader reads (`PlamoTranslator.warm_prefix`, which does nothing when the server holds it already),
+        so that the page the reader turns to next does not wait for it. Nothing of the book is read for it, nothing
+        is kept and nothing is shown: the next request is what it is without it. Not while a page job's changes are
+        held (`Provisional`), and one at a time. Whether a warming started; `stop_warm` ends it."""
+        warm = getattr(self.translator, "warm_prefix", None)
+        if warm is None or not grows_context(self.translator):
+            return False
+        if self._provisional is not None or self._kept_open is not None or self._held_for is not None:
+            return False
+        with self._warm_lock:
+            if self._warm_thread is not None and self._warm_thread.is_alive():
+                return False
+            notes = self.premises()
+            pairs = self._grown.peek(context_fits(self.translator, notes))
+            stop = threading.Event()
+            text = str(notes)  # (taken here, while nothing changes the book's names)
+
+            def run() -> None:
+                self.warm_facts = warm(text, pairs, stop)
+
+            thread = threading.Thread(target=run, name="taslation-warm", daemon=True)
+            self._warm_stop, self._warm_thread = stop, thread
+            thread.start()
+        return True
+
+    def stop_warm(self, wait: bool = False) -> None:
+        """The warming under way (`warm_soon`) sends no more steps; with *wait* (before the model is let go, the
+        window's close), until its step under way is answered (`WARM_JOIN_S` at most), so that nothing loads the model
+        again after a release. A page job never waits for it: its request comes after its page is read."""
+        with self._warm_lock:
+            stop, thread = self._warm_stop, self._warm_thread
+        if stop is not None:
+            stop.set()
+        if wait and thread is not None and thread is not threading.current_thread():
+            thread.join(WARM_JOIN_S)
+
     @property
     def font_path(self) -> str | None:
         """Font used for Latin text (informational)."""
@@ -1998,6 +2046,7 @@ class Pipeline:
         (`linememo`, with the cache and ``reuse_lines``); *reuse* False ("Translate again") asks the model for every
         line, and keeps its answers for the lines to come. *timed* False: the page's stage times are not counted in
         `stage_times` (a page lettered ahead of its next showing, `keep_shown`)."""
+        self.stop_warm()  # (a page: the warming while the reader read sends no more steps; never waited for)
         s = self.settings
         timer = _Timer()
         report = progress or (lambda _msg: None)

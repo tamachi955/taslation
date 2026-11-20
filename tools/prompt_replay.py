@@ -25,7 +25,11 @@ element that differs):
 * ``pair changed``: an earlier pair inside the history differs (a line filled by asking again, put in its place);
 * ``re-ask``, ``romanised``, ``aside``: a request beside the main ones (`ask_for_missing`, `ask_again_romanised`,
   `PlamoTranslator.translate_aside`), with a history of its own; and ``after re-ask`` (and so on): a main request that
-  would have extended the main request before it, had the request beside it not come in between.
+  would have extended the main request before it, had the request beside it not come in between;
+* ``warm`` (``--warm``, page mode): a step of the warming the window does while the reader reads
+  (`Pipeline.warm_soon`, `PlamoTranslator.warm_prefix`), done here after every page; it is never one of the main
+  requests, and ``main_prompts`` says whether those are the very same with it and without it (their number and a
+  digest of their prompts in their order; with ``--answers gold`` they must be).
 
 Tokens are reckoned as the translator reckons them (`plamo.tokens_about`, high); two estimates are given of what the
 server computes: ``tail`` (it keeps the common beginning and computes the rest) and ``whole`` (a prompt that
@@ -40,11 +44,13 @@ printed anywhere: the prompts and answers stay in memory, the last two at a time
     python tools/prompt_replay.py                                  # both modes, every series, gold answers
     python tools/prompt_replay.py --mode page --series balloon_dream
     python tools/prompt_replay.py --answers live --pages 4 --seed 1 --url http://127.0.0.1:11435 --out live.json
+    python tools/prompt_replay.py --mode page --warm                # the warming between pages: the same prompts?
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import threading
@@ -64,7 +70,7 @@ from taslation import netguard  # noqa: E402
 from taslation.config import Settings  # noqa: E402
 from taslation.translate import plamo as pl  # noqa: E402
 
-SIDE_KINDS = ("re-ask", "romanised", "aside")
+SIDE_KINDS = ("re-ask", "romanised", "aside", "warm")
 
 
 # ------------------------------------------------------------------------------------------- a prompt's parts
@@ -205,6 +211,8 @@ class Recorder(pl.PlamoTranslator):
             self.on_request(Asked(kind, shape, raw, self.page_of(first), ctx))
             if hasattr(self, "_wrote"):
                 self._wrote.text = pl.clean(raw)  # (as `PlamoTranslator._generate` keeps it)
+            if hasattr(self, "_held_now"):
+                self._held_now(prompt + raw, prompt)  # (what the server would hold: what a warming looks at)
             return "\n".join(" ".join(line.split()) for line in pl.clean(raw).splitlines() if line.strip())
         seen: dict[str, Any] = {}
         request, stream = self._request, self._stream
@@ -231,6 +239,22 @@ class Recorder(pl.PlamoTranslator):
         stats = {k: (seen.get("data") or {}).get(k) for k in ("prompt_eval_count", "prompt_eval_duration",
                                                               "eval_count", "eval_duration", "total_duration")}
         self.on_request(Asked(kind, shape, str(seen.get("raw", "")), self.page_of(first), ctx, stats))
+        return got
+
+    def gpu_share(self, model: Any = None) -> Any:
+        return 1.0 if self.answer is not None else super().gpu_share(model)  # (a stand-in: the model "on the GPU")
+
+    def _warm_step(self, prompt: str) -> dict[str, Any]:
+        """A step of the warming (`PlamoTranslator.warm_prefix`) recorded as a ``warm`` request: answered by nobody
+        with a stand-in (the server would hold its prompt), else sent as the app sends it."""
+        if self.answer is not None:
+            self._held_now(prompt)
+            self.on_request(Asked("warm", shape_of(prompt), "", None, {}))
+            return {"ms": 0.0, "prompt_n": None}
+        got = super()._warm_step(prompt)
+        stats = {"prompt_eval_count": got.get("prompt_n"), "prompt_eval_duration": (got.get("prompt_ms") or 0) * 1e6,
+                 "eval_count": got.get("answer_n"), "eval_duration": None, "total_duration": None}
+        self.on_request(Asked("warm", shape_of(prompt), "", None, {}, stats))
         return got
 
 
@@ -324,6 +348,8 @@ class Tally:
         self.last_page: tuple[str, int] | None = None
         self.book: str | None = None
         self.lock = threading.Lock()
+        self.main_n = 0  # the main requests (no warming step), and a digest of their prompts in their order
+        self.main_digest = hashlib.sha256()
 
     def new_book(self, name: str) -> None:
         """A series begins: its first request is the first of a book (the server holds another book's prompt)."""
@@ -352,6 +378,9 @@ class Tally:
             new_tail = pl.tokens_about(a.shape.prompt[p:]) if prev is not None else tokens
             new_whole = new_tail if extends else tokens
             self.rows.append(Row(a.kind, reason, detail, first_of_page, tokens, new_tail, new_whole, dict(a.stats)))
+            if a.kind != "warm":
+                self.main_n += 1
+                self.main_digest.update(a.shape.prompt.encode("utf-8") + b"\0")
             self.prev = a
             if main:
                 self.prev_main = a
@@ -396,7 +425,16 @@ def summarise(rows: list[Row]) -> dict[str, Any]:
             s["prompt_ms"] = round(s["prompt_ms"], 1)
             s["eval_ms"] = round(s["eval_ms"], 1)
         out["server"] = dict(server)
-        out["server_rows"] = [{"reason": r.reason, "kind": r.kind, "tokens": r.tokens, "new_tail": r.new_tail,
+        # the first request of each page (none beside it): what a turn's first line waits for the prompt
+        firsts = sorted((r.stats.get("prompt_eval_duration") or 0) / 1e6 for r in live
+                        if r.first_of_page and r.kind not in SIDE_KINDS)
+        if firsts:
+            out["first_of_page_prompt_ms"] = {"n": len(firsts), "sum": round(sum(firsts)),
+                                              "median": round(firsts[len(firsts) // 2], 1), "max": round(firsts[-1]),
+                                              "over_500": sum(1 for v in firsts if v > 500),
+                                              "slowest": [round(v) for v in firsts[-8:]]}
+        out["server_rows"] = [{"reason": r.reason, "kind": r.kind, "first_of_page": r.first_of_page,
+                               "tokens": r.tokens, "new_tail": r.new_tail,
                                "new_whole": r.new_whole, **{k: r.stats.get(k) for k in
                                                             ("prompt_eval_count", "prompt_eval_duration",
                                                              "eval_count", "eval_duration", "total_duration")}}
@@ -427,8 +465,10 @@ def report(name: str, s: dict[str, Any]) -> str:
 
 # ---------------------------------------------------------------------------------------------- the runs
 def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Page]], answers: str, url: str,
-             seed: int | None, lines_most: int, sheets: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Every series through *mode*'s path with a `Recorder`; the tally's summary."""
+             seed: int | None, lines_most: int, sheets: dict[str, Any] | None = None,
+             warm: bool = False) -> dict[str, Any]:
+    """Every series through *mode*'s path with a `Recorder`; the tally's summary. *warm* (page mode): after every
+    page, the warming the window does while the reader reads (`Pipeline.warm_soon`, waited for)."""
     import taslation.batch as batch_mod
     import taslation.pipeline as pipe_mod
 
@@ -455,6 +495,13 @@ def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Pa
     if answers == "live":
         ev._keep_stats(rec)
     translate = ev.translate_series_book if mode == "book" else ev.translate_series_page
+    extra: dict[str, Any] = {}
+    if warm and mode == "page":
+        def warmed(pipeline: Any) -> None:
+            if pipeline.warm_soon() and pipeline._warm_thread is not None:
+                pipeline._warm_thread.join()
+
+        extra["between"] = warmed
     stats = ev._Stats()
     t0 = time.monotonic()
     done = 0
@@ -464,9 +511,10 @@ def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Pa
         tally.new_book(name)
         rec._asked.clear()  # (each series drawn as a book of its own)
         geos = [[None] * len(p.bubbles) for p in pages]
-        translate(settings, rec, name, pages, geos, stats, lambda _m: None, None, (sheets or {}).get(name))
+        translate(settings, rec, name, pages, geos, stats, lambda _m: None, None, (sheets or {}).get(name), **extra)
         done += sum(1 for p in pages for b in p.bubbles if ev.ja_line(b))
     out = summarise(tally.rows)
+    out["main_prompts"] = {"requests": tally.main_n, "digest": tally.main_digest.hexdigest()[:16]}
     out["seconds"] = round(time.monotonic() - t0, 1)
     out["lines"] = done
     out["requests_failed"] = stats.requests_failed
@@ -493,6 +541,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lines", type=int, default=0, help="stop after the series that reach about N lines")
     ap.add_argument("--glossary", type=Path, help="a series sheet per series, as openmantra_eval.py takes it")
     ap.add_argument("--out", type=Path, help="the numbers as JSON")
+    ap.add_argument("--warm", action="store_true", help="page mode: the warming between pages (`Pipeline.warm_soon`)")
+    ap.add_argument("--start-ollama", type=int, metavar="PORT",
+                    help="--answers live from the Ollama TASlation's own starter starts on this spare port, stopped at "
+                         "the end (as `openmantra_eval.py --start-ollama`); --url is left out")
     args = ap.parse_args(argv)
     pages = openmantra.load(args.root, args.series)
     groups = openmantra.by_series(pages)
@@ -501,14 +553,33 @@ def main(argv: list[str] | None = None) -> int:
     s = Settings()
     s.ollama_url = args.url
     s.validate()  # (loopback only)
+    if args.start_ollama:
+        ev.start_own_ollama(s, args.start_ollama)  # (its port the only one besides: `netguard`)
+        args.url = s.ollama_url
+        try:
+            return _run(args, s, groups)
+        finally:
+            from taslation import ollama_start
+
+            ollama_start.finish_all()  # (the server it started stopped)
     netguard.install(allowed_ports={s.ollama_port})
+    return _run(args, s, groups)
+
+
+def _run(args: argparse.Namespace, s: Settings, groups: dict[str, list[openmantra.Page]]) -> int:
     sheets = ev.load_glossary(args.glossary, s.target_language)
-    results: dict[str, Any] = {"tool": "prompt_replay", "answers": args.answers, "series": list(groups),
+    results: dict[str, Any] = {"tool": "prompt_replay", "answers": args.answers, "warm": args.warm,
+                               "series": list(groups),
                                "pages": sum(len(v) for v in groups.values()), "sheets": sorted(sheets), "modes": {}}
     for mode in (("page", "book") if args.mode == "both" else (args.mode,)):
-        got = run_mode(mode, s, groups, args.answers, args.url, args.seed, args.lines, sheets)
+        got = run_mode(mode, s, groups, args.answers, args.url, args.seed, args.lines, sheets, warm=args.warm)
         results["modes"][mode] = got
         print(report(f"{mode} mode", got), flush=True)
+        print(f"  main requests {got['main_prompts']['requests']}, their prompts' digest "
+              f"{got['main_prompts']['digest']}", flush=True)
+        if got.get("first_of_page_prompt_ms"):
+            print(f"  a page's first request, the server's prompt time (ms): {got['first_of_page_prompt_ms']}",
+                  flush=True)
         print(f"  ({got['lines']} lines, {got['seconds']} s, {got['requests_failed']} requests failed, "
               f"{got['pages_incomplete']} pages incomplete)\n", flush=True)
     if args.out:

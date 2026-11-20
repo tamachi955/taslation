@@ -1120,6 +1120,8 @@ With the setting off, and for the `taslation` commands, the model is loaded when
 extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while pages are being read,
 but when the reading is over and it moves on to the notes and the translation. When the window closes, and at the end of a run of a `taslation` command, it is released at once.
 At the end of a run in the window (a stop or a failure included) it stays, as after a page translated one by one, when Auto goes back on, so the next untranslated page you turn to does not wait for its load; when Auto stays off, it is released at once.
+While you read a page and nothing is being translated, the window has Ollama compute the beginning of the next page's first request (the series sheet and the earlier lines that request starts from) when Ollama does not hold it already, as after the earlier lines were cut back to the newest: the next untranslated page you turn to does not wait for it (a second or so).
+It sends what that request would send and keeps nothing of the answer, so the translations are what they are without it; it shows nothing, is done only while the model is loaded wholly on the graphics card, stops as soon as you turn, and is not done during a whole-book run.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
 To free the GPU memory at once for a game or another program, use "Tools > Release the model now". It releases the translation model TASlation loaded or used this session

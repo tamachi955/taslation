@@ -146,14 +146,28 @@ class GrowingContext:
     def take(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> list[tuple[str, str]]:
         """The pairs a request starts from (a copy), cut back first when they passed `grows_to` or *fits*(pairs) says
         a request would not fit after them; a cut halves them on from `cut_to` while *fits* still says no."""
-        if not self._pairs:
-            return []
-        if len(self._pairs) > self.grows_to or (fits is not None and not fits(self._pairs)):
-            self._pairs = self._pairs[-self.cut_to:] if self.cut_to else []
+        pairs, cut = self._taken(fits)
+        if cut:
+            self._pairs = pairs
             self.cuts += 1
-            while self._pairs and fits is not None and not fits(self._pairs):
-                self._pairs = self._pairs[-(len(self._pairs) // 2):] if len(self._pairs) > 1 else []
-        return list(self._pairs)
+        return list(pairs)
+
+    def peek(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None = None) -> list[tuple[str, str]]:
+        """What `take` would give now (cut back as it would cut them), changing nothing: the pairs the next request
+        starts from while nothing is added meanwhile (`plamo.PlamoTranslator.warm_prefix`)."""
+        return list(self._taken(fits)[0])
+
+    def _taken(self, fits: Callable[[Sequence[tuple[str, str]]], bool] | None) -> tuple[list[tuple[str, str]], bool]:
+        """(the pairs `take` gives, whether it cuts them back to give them)"""
+        pairs = list(self._pairs)
+        if not pairs:
+            return [], False
+        if len(pairs) > self.grows_to or (fits is not None and not fits(pairs)):
+            pairs = pairs[-self.cut_to:] if self.cut_to else []
+            while pairs and fits is not None and not fits(pairs):
+                pairs = pairs[-(len(pairs) // 2):] if len(pairs) > 1 else []
+            return pairs, True
+        return pairs, False
 
 
 def tells_computed(translator: Any) -> bool:

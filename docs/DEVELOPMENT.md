@@ -106,7 +106,10 @@ rows' languages.
   where and why it parts from it (the context block, a joined run, a pair changed or gone, the glossary, a cut, a
   request beside the page, a line asked again), with the tokens that then have to be computed again, numbers only.
   A stand-in model answers with the gold English (no Ollama, about 30 s); `--answers live --url` asks a server of
-  the developer's own instead and adds Ollama's own counters per reason.
+  the developer's own instead and adds Ollama's own counters per reason (`--start-ollama PORT`: the server
+  TASlation's own starter starts on a spare port, stopped at the end). `--warm` (page mode) does after every page
+  what the window does while the reader reads (`Pipeline.warm_soon`) and says whether the page requests' prompts
+  are the very same with it and without it (their number and a digest of them in their order).
 * `tools/make_icon.py` draws the window's icon with Pillow alone.
 * `tools/strip_demo.py` runs the page strip in the real window with a made-up whole-book run (`tests/fake_strip.FakeRun`)
   and measures the Tk loop's lateness and the strip's memory; no viewer is chosen and no other window is touched.

@@ -186,6 +186,10 @@ def next_job(window: Any) -> Callable[[], None]:
             job = window._jobs.get() if left is None else window._jobs.get(timeout=left)
         except queue.Empty:
             job = None
+        pipeline = getattr(window, "pipeline", None)  # (made by the first job)
+        stop = getattr(pipeline, "stop_warm", None)
+        if job is not None and stop is not None:
+            stop()  # (the warming while the reader read sends nothing more; the job does not wait for it)
         if hasattr(pipeline, "decide_kept"):
             pipeline.decide_kept()
         if job is not None:
@@ -894,6 +898,21 @@ class JobsMixin:
         is queued, and `_batch_done` changes them only after this job has posted its end."""
         return bool(getattr(self, "_resume_auto", False) or getattr(self, "_auto_before_batch", None))
 
+    def _warm_when_idle(self) -> None:
+        """(the Tk thread, the worker's job done) While nothing of the window's runs - no page job, no job or request
+        waiting, no whole-book run - the beginning of the next page's first request is computed while the reader
+        reads (`Pipeline.warm_soon`, when the server does not hold it: after the pairs were cut back, a load, a
+        request with a context of its own). The next page stops it (`_start_translate`, `Pipeline.process`, and the
+        worker before any job: `next_job`), and never waits for it."""
+        pipeline = self.pipeline
+        if (pipeline is None or not self.ready or self.busy or self.batch is not None
+                or getattr(self, "_batching", False) or getattr(self, "_queued", None) is not None
+                or not self._jobs.empty()):
+            return
+        warm = getattr(pipeline, "warm_soon", None)
+        if warm is not None:
+            warm()
+
     # ------------------------------------------------------------------ events
     def _poll_events(self) -> None:
         """The worker's events handled on the Tk thread: every EVENTS_BUSY_MS while a job runs (a page from the cache
@@ -1217,6 +1236,7 @@ class JobsMixin:
                 self._queued = None
                 self._hide_busy()
                 self._show_progress(self.busy)
+            self._warm_when_idle()
 
     def _batch_page(self, frame: Image.Image) -> None:
         """The run has come to the page *frame*: on the page area at once, in place of the page before; it fills in
@@ -2165,6 +2185,9 @@ class JobsMixin:
         `_job_translate`. A page the live view starts before its frame has settled hands its gate over in
         ``_early_gate`` (`ui.live`'s early start: `pipeline.PageGate`), taken here; ``_page_gate`` is the job's."""
         gate, self._early_gate = getattr(self, "_early_gate", None), None
+        stop = getattr(self.pipeline, "stop_warm", None)
+        if stop is not None:
+            stop()  # (a page to read: the warming while the reader read sends nothing more)
         if is_black(image, self.settings.margins):
             self.say(VIEWER_BLACK if getattr(getattr(self, "_black_watch", None), "told", False)
                      else VIEWER_LOADING)

@@ -644,9 +644,10 @@ def translate_series_book(settings: Settings, translator: Any, series: str, page
 def translate_series_page(settings: Settings, translator: Any, series: str, pages: list[openmantra.Page],
                           geos: list[list[Any]], stats: _Stats, log: Any,
                           items: list[list[dict[str, Any]]] | None = None,
-                          sheet: Any = None) -> list[dict[int, tuple[str, list[str]]]]:
+                          sheet: Any = None, between: Any = None) -> list[dict[int, tuple[str, list[str]]]]:
     """One series translated as live reading does it (`Pipeline._translate_regions`, page by page, the last pages
-    as context); per page, item index -> (translation, flags)."""
+    as context); per page, item index -> (translation, flags). *between*(pipeline), when given, after every page: what
+    the window does while the reader reads (``--warm``: `Pipeline.warm_soon`)."""
     from taslation.regions import TextRegion
 
     if items is None:
@@ -668,6 +669,8 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
         if any(r.status != "translated" for r in regions):
             stats.left_incomplete += 1
         out.append({k: (r.translated_text, list(r.flags)) for k, r in enumerate(regions) if r.status == "translated"})
+        if between is not None:
+            between(pipeline)
     log(f"  {series}: {len(pages)} pages in {time.monotonic() - t0:.0f} s")
     return out
 

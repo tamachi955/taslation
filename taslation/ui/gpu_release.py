@@ -98,6 +98,9 @@ def release_models(window: Any) -> tuple[list[str], bool, bool]:
             wait()
         except Exception:  # noqa: BLE001 - what it loaded goes after keep_alive, as after a page
             pass
+    stop = getattr(getattr(window, "pipeline", None), "stop_warm", None)
+    if stop is not None:
+        stop(wait=True)  # (the warming while the reader read: nothing loads the model after the release)
     names: list[str] = []
     for translator in translators(window):
         try:

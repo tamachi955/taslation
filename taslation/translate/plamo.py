@@ -116,6 +116,22 @@ ASKED_KEPT = 4096  # how many lines `_draw` remembers having been asked for (the
 # -0.37 to +0.81, the model's time per page 2.29 -> 4.54 s) and the next two lines as every line's (7 times as slow)
 FOLLOW_OPEN = 1
 FOLLOW_ALONE = 2
+# The beginning the next page's first request will start with (the premises and the earlier pairs: `warm_prefix`) is
+# computed while the reader reads when the server does not hold this many tokens of it (reckoned high), about half a
+# second of the development machine's GPU; less is not worth a request
+WARM_LEAST = 256
+# ... in steps of this many tokens at most (reckoned high), each a request of its own that extends the one before: once
+# a server has a prompt it computes it to its end, a request cancelled or dropped meanwhile too (measured 2026-11-20 on
+# Ollama 0.40.16: a turn would have waited up to 4.9 s), so the reader's turn stops the warming between two steps and
+# waits for none (a step takes 0.25 s or so there, while the page is found and read before its first request)
+WARM_STEP = 128
+WARM_STEP_MOST_S = 0.6  # a step that took longer (a slower machine): the warming stops after it
+# ... and what the server may hold is reckoned from this many of the translator's last prompts (`_held_now`): the
+# server keeps earlier prompts in RAM (``LLAMA_ARG_CACHE_RAM``, `ollama_start`) and computes a request from the one it
+# shares most with; a warming where it held the beginning in one of them made the turn after it slower. A server that
+# keeps none (its settings unknown) is warmed less often than it could be, never more
+HELD_KEPT = 16
+WARM_TIMEOUT = 10.0  # seconds a warming step may take at most
 _RESERVED = re.compile(r"<\|plamo:[a-z_]+\|>")
 _NOTE_LINE = re.compile(r"^- (.+?) = (.+?)(?: \(.*\))?$")
 
@@ -147,12 +163,62 @@ def earlier_pairs(pairs: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     return [p if isinstance(p, SentPair) else (one_line(p[0]), p[1]) for p in pairs]
 
 
+def pfml_ends(target: str, context: str = "", history: Sequence[tuple[str, str]] = (),
+              source_lang: str = SOURCE_LANG) -> list[str]:
+    """The beginning every `pfml_prompt` with this *context* and *history* shares, as it stands at the end of the
+    ``context`` element (the dataset tag alone without one) and then at the end of each earlier pair kept: each one
+    the one before it and more, the last one the whole beginning, the line's glossary and the line itself after it
+    (the same parts `pfml_prompt` puts first)."""
+    parts = [BOS, TAG, "dataset", MSG, "translation"]
+    if clean(context):
+        parts += [TAG, "context", MSG, clean(context)]
+    ends = ["".join(parts)]
+    for src, dst in history:
+        src, dst = clean(src), clean(dst)
+        if src and dst:
+            ends.append(ends[-1] + "".join([TAG, "input", KEY, "lang", VAL, source_lang, MSG, src,
+                                            TAG, "output", KEY, "lang", VAL, target, MSG, dst]))
+    return ends
+
+
+def common_length(a: str, b: str) -> int:
+    """How many characters *a* and *b* share from their start."""
+    n = min(len(a), len(b))
+    lo, step = 0, 1024
+    while lo < n:  # (in blocks, then character by character)
+        hi = min(n, lo + step)
+        if a[lo:hi] == b[lo:hi]:
+            lo = hi
+            continue
+        while lo < hi and a[lo] == b[lo]:
+            lo += 1
+        return lo
+    return lo
+
+
+def warm_steps(ends: Sequence[str], held: int, step: int = WARM_STEP) -> list[str]:
+    """The prompts a warming sends, in order, so that the server holds the last of *ends* (`pfml_ends`) when it holds
+    its first *held* characters now: each one ends where an element ends, extends the one before it, and adds about
+    *step* tokens (reckoned high) at most - more only where a single element is longer (the premises, a long pair)."""
+    out: list[str] = []
+    at = held
+    for i, end in enumerate(ends):
+        if len(end) <= at:
+            continue
+        nxt = ends[i + 1] if i + 1 < len(ends) else None
+        if nxt is not None and tokens_about(nxt[at:]) <= step:
+            continue  # (the next end still fits in this step)
+        out.append(end)
+        at = len(end)
+    return out
+
+
 def pfml_prompt(source: str, target: str, context: str = "", history: Sequence[tuple[str, str]] = (),
                 glossary: Sequence[tuple[str, str]] = (), source_lang: str = SOURCE_LANG) -> str:
     """The PFML3 prompt the model's chat template builds for these inputs, with the beginning-of-sequence token first
     (Ollama's raw mode does not add it): *source* to translate into the language *target* (PLaMo's code, "en"), the
     reference *context*, the earlier (source, translation) pairs *history* and the (source, rendering) pairs of the
-    *glossary*. A pair with an empty side is left out."""
+    *glossary*. A pair with an empty side is left out. It begins with the last of `pfml_ends`."""
     parts = [BOS, TAG, "dataset", MSG, "translation"]
     if clean(context):
         parts += [TAG, "context", MSG, clean(context)]
@@ -232,6 +298,14 @@ class PlamoTranslator(OllamaTranslator):
         self._wrote = threading.local()  # (the last answer of this thread's request, as the model wrote it: `_written`)
         # the evaluation tools' record of every request (Ollama's statistics): None in the app, a list to fill there
         self.stats_log: list[dict[str, Any]] | None = None
+        # what the server may hold of this translator's requests, as far as it can tell (`_held_now`): the prompts of
+        # the last HELD_KEPT of them that did not extend the one before, each with the answer the server wrote (a
+        # request cancelled: its prompt, which the server computes to its end); none after a load or a request that
+        # failed. What a warming looks at (`warm_prefix`), in memory only, never written
+        self._holds: list[tuple[str, str]] = []  # (prompt, prompt and answer), the newest last
+        self._holds_lock = threading.Lock()
+        self._warm_halt: threading.Event | None = None  # what ends the warming under way: any request sets it
+        self.warm_log: list[dict[str, Any]] | None = None  # (the tools' record of each warming step, as `stats_log`)
 
     # --- the language ------------------------------------------------------------------------------------------
     @property
@@ -281,6 +355,9 @@ class PlamoTranslator(OllamaTranslator):
                   on_slow: Callable[[float], None] | None = None) -> str:
         """The model's answer to the raw *prompt*, at most *max_tokens* tokens, reserved tokens taken out. Streamed
         when there is a *cancel* or an *on_slow* to serve (as `OllamaTranslator._chat` does)."""
+        halt = self._warm_halt
+        if halt is not None:
+            halt.set()  # (a request: a warming under way sends no more steps, `warm_prefix`)
         self.ensure_loaded(cancel, on_slow)
         self._used.add(self.model)
         payload: dict[str, Any] = {"model": self.model, "prompt": prompt, "raw": True,
@@ -295,8 +372,13 @@ class PlamoTranslator(OllamaTranslator):
                     data = self._request("/api/generate", {**payload, "stream": False})
                     raw = str(data.get("response") or "")
         except TranslationError:
+            self._held_now(None)
             self._unsure()  # (the next request asks Ollama whether the model is loaded)
             raise
+        except BaseException:
+            self._held_now(prompt, prompt)  # (cancelled: the server computes a prompt it has to its end, WARM_STEP)
+            raise
+        self._held_now(prompt + raw, prompt)
         self._answered(self.model)
         self.last_stats = {k: data.get(k) for k in ("prompt_eval_count", "eval_count", "prompt_eval_duration",
                                                     "eval_duration", "total_duration", "done_reason")}
@@ -387,6 +469,111 @@ class PlamoTranslator(OllamaTranslator):
         if computed is not None:
             computed.append(pair)
 
+    # --- computed while the reader reads ----------------------------------------------------------------------
+    def _held_now(self, state: str | None, prompt: str | None = None) -> None:
+        """What the server may hold after a request of this translator (`_holds`): *state* (the request's *prompt*, or
+        all of *state* when not given, and what the server wrote after it) beside what it held before - in place of
+        the last one when *prompt* extends it (the server's prompt grew) -, HELD_KEPT at most, the oldest going first
+        (as Ollama keeps a few earlier prompts in memory and computes a request from the one it shares most with); None:
+        nothing (a load, a request that failed)."""
+        with self._holds_lock:
+            if state is None:
+                self._holds = []
+                return
+            prompt = state if prompt is None else prompt
+            held = self._holds
+            if held and prompt.startswith(held[-1][0]):
+                held.pop()
+            held.append((prompt, state))
+            del held[:-HELD_KEPT]
+
+    def held_of(self, prompt: str) -> int:
+        """How much of the start of *prompt* (characters) the server holds, as far as `_holds` tells: the most any of
+        what it may hold shares with it."""
+        with self._holds_lock:
+            held = list(self._holds)
+        return max((common_length(prompt, state) for _p, state in held), default=0)
+
+    def warm_prefix(self, notes: str, pairs: Sequence[tuple[str, str]],
+                    stop: threading.Event | None = None) -> dict[str, Any]:
+        """(while the reader reads: no page job, no whole-book run) The beginning the next page's first request will
+        start with - the premises *notes* and the earlier *pairs* that request will be given (`GrowingContext.peek`) -
+        computed by the server now, when it does not hold `WARM_LEAST` tokens of it or more in any of what it may hold
+        (`held_of`: after the pairs were cut back, or a load): that request then extends it, as it extends the last
+        request when nothing came between. A warming where the server holds it would only take its place, and one
+        stopped after a step would leave the server a short beginning that the next request extends rather than the
+        longer one it held (measured: a turn's first request computed in full, 1.2 to 3.3 s). Its prompt and its answer are what they are without it: the warming sends
+        what any request sends, asks for one token and keeps nothing of it, and draws nothing (`_draw`). In steps
+        (`warm_steps`): *stop* set ends it before the next step, and the step under way, which the server computes to
+        its end whatever is done, is never waited for by anything but the warming. Only for a model Ollama holds
+        wholly on the GPU (nothing is loaded for it, and none is warmed on the processor) and a ``keep_alive`` that
+        keeps it after a request. What it did, for the tools: why it did nothing (``why``), or its steps; never
+        raises."""
+        from .ollama import FULL_GPU_SHARE, unloads_at_once
+
+        facts: dict[str, Any] = {"why": "", "steps": 0, "tokens": 0, "left": 0, "ms": 0.0}
+        stop = stop if stop is not None else threading.Event()
+        self._warm_halt = stop  # (a request of this translator's sets it: `_generate`)
+        try:
+            if unloads_at_once(self.keep_alive):
+                facts["why"] = "keep_alive"
+                return facts
+            target = self.target_code
+            ends = pfml_ends(target, self._context(notes), earlier_pairs(list(pairs)[-self.history_pairs:]))
+            held = self.held_of(ends[-1])
+            facts["left"] = tokens_about(ends[-1][held:])
+            if facts["left"] < WARM_LEAST:
+                facts["why"] = "held"
+                return facts
+            if self._loading.locked():
+                facts["why"] = "loading"
+                return facts
+            share = self.gpu_share()  # (/api/ps: nothing is loaded for a warming)
+            if share is None or share < FULL_GPU_SHARE:
+                facts["why"] = "not loaded" if share is None else "not on the GPU"
+                return facts
+            for prompt in warm_steps(ends, held):
+                if stop.is_set():
+                    facts["why"] = "stopped"
+                    break
+                took = self._warm_step(prompt)
+                facts["steps"] += 1
+                facts["tokens"] += int(took.get("prompt_n") or 0)
+                facts["ms"] += float(took.get("ms") or 0.0)
+                if self.warm_log is not None:
+                    self.warm_log.append(dict(took))
+                if float(took.get("ms") or 0.0) > WARM_STEP_MOST_S * 1000.0:
+                    facts["why"] = "slow"
+                    break
+        except Exception as e:  # noqa: BLE001 - a warming that fails costs the next request its prompt, no more
+            self._held_now(None)
+            facts["why"] = f"failed: {type(e).__name__}"
+        return facts
+
+    def _warm_step(self, prompt: str) -> dict[str, Any]:
+        """One step of `warm_prefix`: *prompt* to /api/generate as a request sends it (the same options, so that the
+        model is never loaded again for it), one token asked for and nothing kept but what the server holds now. On
+        this thread's own connection, never sent again (a server gone is left to the next request, which starts it).
+        Ollama's counts of it and its time."""
+        import time
+
+        options = self._options(1)
+        payload = {"model": self.model, "prompt": prompt, "raw": True, "stream": False, "options": options,
+                   "keep_alive": self.keep_alive}
+        t0 = time.monotonic()
+        try:
+            with ocr_place.translating():  # (as any request: the OCR reads on the CPU while the server computes)
+                data = self._request_once("/api/generate", payload, WARM_TIMEOUT)
+        except BaseException:
+            self._held_now(None)
+            self._unsure()
+            raise
+        self._held_now(prompt + str(data.get("response") or ""), prompt)
+        self._answered(self.model)
+        return {"ms": (time.monotonic() - t0) * 1000.0, "prompt_n": data.get("prompt_eval_count"),
+                "prompt_ms": float(data.get("prompt_eval_duration") or 0) / 1e6,
+                "answer_n": data.get("eval_count")}
+
     def warm_up(self, model: str | None = None, keep_alive: Any = None, timeout: float | None = None,
                 cancel: threading.Event | None = None, on_slow: Callable[[float], None] | None = None) -> float:
         """*model* (default: this translator's) loaded in Ollama now: an empty prompt to /api/generate, which loads it
@@ -399,6 +586,7 @@ class PlamoTranslator(OllamaTranslator):
         payload: dict[str, Any] = {"model": model or self.model, "prompt": "", "options": options,
                                    "keep_alive": self.keep_alive if keep_alive is None else keep_alive_value(keep_alive)}
         self._used.add(payload["model"])
+        self._held_now(None)  # (a load: the server holds no prompt of this translator's)
         limit = timeout or min(self.timeout, WARM_UP_TIMEOUT)
         start = time.monotonic()
         with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
@@ -415,6 +603,7 @@ class PlamoTranslator(OllamaTranslator):
         model's template, which wants a message)."""
         from .ollama import RELEASE_TIMEOUT
 
+        self._held_now(None)
         self._request_once("/api/generate", {"model": name, "keep_alive": 0, "stream": False}, RELEASE_TIMEOUT)
 
     # --- the translator's interface ----------------------------------------------------------------------------

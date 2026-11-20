@@ -70,6 +70,7 @@ class Window(BlackViewerMixin):
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     _handle_event = app_mod.App._handle_event
+    _warm_when_idle = app_mod.App._warm_when_idle
     _on_page_event = app_mod.App._on_page_event
     _flush_fill = app_mod.App._flush_fill
     _go_busy = app_mod.App._go_busy
