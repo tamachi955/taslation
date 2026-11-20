@@ -1,6 +1,8 @@
 """The README's introduction tool (tools/intro_video.py) without a window, a model or a manga page: the scenes'
-table (ids, order, what this checkout has, texts that fit a 960x540 frame), the scenes picked and numbered as the GIF
-is made, the cards' facts against the code's constants and with nothing that compares or boasts, the version on the
+table (ids, order, what this checkout has, texts that fit a 960x540 frame, headers on one line), the scenes picked and
+numbered as the GIF is made, every card line and step following sentences that still stand word for word in README.md,
+docs/MANUAL.md or docs/THIRD_PARTY.md (or marked as the tool's own words), the cards' facts against the code's
+constants and with nothing that compares or boasts, the version on the
 title card and the credit on every frame with a page, the 9 MB limit, a GIF of made-up frames and one of a recording
 (deleted once the GIF is written), no page text in a recording's facts, and the guard that refuses another
 program's window."""
@@ -63,6 +65,68 @@ def test_every_step_fits_the_left_column_at_960x540():
     assert layout.header(iv.LEFT_HEADER, 200)[0] < layout.header(iv.LEFT_HEADER, 400)[0]  # (smaller where narrower)
     assert not layout.header_fits(iv.LEFT_HEADER, 100)
     assert len(layout.cap_lines()[1]) == 1
+
+
+def test_the_page_turn_is_named_on_the_fly_translation_with_no_timing_figures():
+    title, description = iv.step_texts(iv.scene_of("next_page"), iv.code_facts())
+    assert title == "On-the-fly translation"
+    assert description.startswith("When you turn a page, its bubbles are replaced by their translations there and "
+                                  "then, in reading order.")
+    assert description.endswith(" Press the page key in TASlation; it is passed on to your viewer.")
+    assert not any(ch.isdigit() for ch in description) and "second" not in description
+
+
+# ---------------------------------------------------------------------------------------------------- what follows what
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def every_line():
+    """(where, follows, own) of each card line and each step's description."""
+    for kind, (_heading, lines) in iv.CARDS.items():
+        for line in lines:
+            yield f"card {kind}: {line.text[:50]}", line.follows, line.own
+    for scene in iv.SCENES:
+        yield f"step {scene.id}", scene.follows, scene.own
+
+
+def test_every_card_line_and_step_follows_a_document_or_is_marked_the_tools_own():
+    for where, follows, own in every_line():
+        assert follows or own.strip(), where
+        assert all(isinstance(cite, iv.Cite) and cite.doc in iv.DOCS and cite.quote.strip() for cite in follows), where
+    owns = {where for where, _follows, own in every_line() if own}
+    assert owns == {"card title: Recorded with version {version}", "step language"}
+
+
+def documents() -> dict[str, str]:
+    return {doc: flat((ROOT / doc).read_text(encoding="utf-8")) for doc in iv.DOCS}
+
+
+def stale_lines(facts: dict, docs: dict[str, str]) -> list[str]:
+    """The lines with a quote that does not stand in its document, once *facts* are put in."""
+    stale = []
+    for where, follows, _own in every_line():
+        for cite in follows:
+            quote = iv.filled(cite.quote, facts)
+            assert quote is not None, (where, cite.quote)  # (a fact the code does not have)
+            if flat(quote) not in docs[cite.doc]:
+                stale.append(f"{where}: {cite.doc} no longer says {quote!r}")
+    return stale
+
+
+def test_every_quote_still_stands_in_its_document_word_for_word():
+    stale = stale_lines(iv.code_facts(), documents())
+    assert not stale, "\n".join(stale)
+
+
+def test_a_changed_sentence_or_a_changed_figure_makes_its_line_stale():
+    facts, docs = iv.code_facts(), documents()
+    changed = dict(docs, **{iv.README: docs[iv.README].replace("| Network | Used only while installing |",
+                                                               "| Network | Used only when installing and updating |")})
+    assert [s.split(":")[0] for s in stale_lines(facts, changed)] == ["card privacy"]
+    assert "The network is used only while installing." in stale_lines(facts, changed)[0]
+    other = dict(facts, plamo_gb="9.9")  # (the code's figure no longer what the README says)
+    assert {s.split(":")[0] for s in stale_lines(other, docs)} == {"card models"}
 
 
 def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypatch):

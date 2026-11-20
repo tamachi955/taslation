@@ -143,11 +143,38 @@ def whole_book_present() -> bool:
     return has_module("taslation.batch") and has_module("taslation.ui.dialogs.batch")
 
 
+README, MANUAL, THIRD_PARTY = "README.md", "docs/MANUAL.md", "docs/THIRD_PARTY.md"
+DOCS = (README, MANUAL, THIRD_PARTY)  # the documents a line of the recording may follow
+
+
+@dataclass(frozen=True)
+class Cite:
+    """A sentence of a document that a line of the recording follows (or several sentences, or a table's cells):
+    *doc* is the document's path from the checkout's root, and *quote* stands in it word for word once the facts of
+    `code_facts` are put in ({name}, as in the lines), a run of white space reading as one space. The tool's tests
+    check that every quote still stands, so a line cannot go stale silently when its document changes."""
+
+    doc: str
+    quote: str
+
+
+def cites(doc: str, *quotes: str) -> tuple[Cite, ...]:
+    """*quotes* of the document *doc*, as `Cite`s."""
+    return tuple(Cite(doc, quote) for quote in quotes)
+
+
+EDITING_TOOLS = ("**Tools for editing a translation**: add, move, resize and turn the regions that are read; rewrite a "
+                 "translation; choose its font, bold and italic; keep a list of names and terms (the series sheet); "
+                 "find and replace.")  # (README.md, Features)
+
+
 @dataclass(frozen=True)
 class Scene:
     """A step of the introduction: its id, its title and description (no number: numbers are given at render
     time; {name} is a fact of `code_facts`), its share of the GIF in seconds, the role the window is in for it
-    ("reader", "translator" or "" for either), and whether this checkout has what it shows."""
+    ("reader", "translator" or "" for either), whether this checkout has what it shows, and what its description
+    follows: the sentences of the documents it says (`follows`) and, for the tool's own words, what they say and
+    where that comes from (`own`; a description has one or the other, or both)."""
 
     id: str
     title: str
@@ -155,57 +182,87 @@ class Scene:
     budget_s: float
     role: str = "reader"
     present: Callable[[], bool] = always
+    follows: tuple[Cite, ...] = ()
+    own: str = ""
 
 
 SCENES: tuple[Scene, ...] = (
-    # README.md: "its bubbles are replaced by their translations there and then, in reading order"
     Scene("viewer", "Choose your viewer",
-          "Open the Viewer list and pick the window that shows your book. Its page is translated there and then, "
-          "bubble by bubble, in reading order.", 12.0),
-    # README.md: "A page key you press in TASlation is passed on to the viewer."
-    Scene("next_page", "Turn the page",
-          "Press the page key in TASlation. It is passed on to your viewer, and the new page is translated as it "
-          "shows.", 8.0),
-    # docs/MANUAL.md: "resting the pointer on a bubble shows that bubble's \"other side\"" / "A small window beside it
-    # shows an enlargement of the original bubble and the translation at a readable size."
+          "Choose your viewer's window in the Viewer list. Its page fills in while you look at it.", 12.0,
+          follows=cites(MANUAL, "Choose the viewer's window in the \"Viewer\" list.",
+                        "An untranslated page fills in while you look at it.")),
+    Scene("next_page", "On-the-fly translation",
+          "When you turn a page, its bubbles are replaced by their translations there and then, in reading order. "
+          "Press the page key in TASlation; it is passed on to your viewer.", 8.0,
+          follows=cites(README, "**On-the-fly translation**: when you turn a page, its bubbles are replaced by their "
+                                "translations there and then, in reading order (from the top right).",
+                        "A page key you press in TASlation is passed on to the viewer.")),
     Scene("original", "See the original",
           "Rest the pointer on a bubble: a small window beside it shows the original bubble and the translation.",
-          6.0),
-    # docs/MANUAL.md, "Pages you turn past": "While you read, TASlation goes on reading and translating the pages you
-    # have turned past. How far it is shows in the margin"
+          6.0,
+          follows=cites(MANUAL, "In the window and on the full screen, in either role, resting the pointer on a bubble "
+                                "shows that bubble's \"other side\" (how the Translator role differs is under \"In the "
+                                "Translator role\" below).",
+                        "| Translation | Panel | A small window beside it shows an enlargement of the original bubble "
+                        "and the translation at a readable size. |")),
     Scene("turned_past", "Pages you turn past",
           "Turn on before a page is done: the pages you turned past go on being translated, and the margin shows how "
-          "far it is. Turn back, and they are there.", 13.0, present=backlog_present),
-    # README.md: "{languages} languages to translate into"; ui.app `_target_picked`: "with Auto on, the page on show
-    # follows it"
+          "far it is. Turn back, and they are there.", 13.0, present=backlog_present,
+          follows=cites(MANUAL, "While you read, TASlation goes on reading and translating the pages you have turned "
+                                "past.",
+                        "How far it is shows in the margin on the side the page turns to (the left in a book read "
+                        "right to left, the right in a book read left to right), in both roles, in the window and on "
+                        "the full screen.",
+                        "A page whose translations are all in the cache is shown from the cache as soon as the new "
+                        "picture arrives, without an untranslated picture in between.")),
     Scene("language", "Another language",
-          "Choose another language under To: - one of {languages}. The page on show follows it.", 8.0),
-    # README.md: "keep a list of names and terms (the series sheet)"; the strip's "Translate again": "Replace this
-    # page's kept translations with new ones."
+          "Choose another language in the To: box - one of {languages}. The page on show follows it.", 8.0,
+          follows=cites(MANUAL, "The target language is chosen in the \"To:\" box (or with `--language`, or the "
+                                "setting `target_language`).",
+                        "Translations can be into any of the {languages} languages of the \"To:\" box."),
+          own="\"The page on show follows it\": what the window does when the To: box changes (ui.app, "
+              "_target_picked)"),
     Scene("sheet", "The series sheet",
           "In the Translator role, keep the series' names and terms in its sheet. Translate again translates the page "
-          "with them.", 10.0, role="translator"),
-    # docs/MANUAL.md: the region editor; ui.translator `_open_editor`: "What the editor shows is lettered on the page
-    # behind it a moment after each change"
+          "with them.", 10.0, role="translator",
+          follows=cites(README, EDITING_TOOLS)
+          + cites(MANUAL, "Everything except the typefaces is told to the model before it translates.",
+                  "\"Skip page\" marks a page with nothing to translate, such as an advertisement or the viewer's own "
+                  "panel, and \"Translate again\" (not using the cache) translates the page again with the current "
+                  "premises.")),
     Scene("edit", "Rewrite a translation",
           "Double-click a bubble and rewrite its translation. The page follows what you type.", 9.0,
-          role="translator"),
-    # README.md: "add, move, resize and turn the regions that are read"
+          role="translator",
+          follows=cites(README, EDITING_TOOLS)
+          + cites(MANUAL, "**Editing a region**: opens with a double-click (or Enter while a region is selected).",
+                  "After a change, the page behind is lettered again a moment later.")),
     Scene("region", "Move or resize a region",
-          "Drag a region to move it, or a handle of its frame to resize it.", 6.0, role="translator"),
-    # README.md: "Ctrl+Z takes back a change to a page or to this book's translations."
-    Scene("undo", "Undo", "Undo (Ctrl+Z) takes back a change to the page.", 4.0, role="translator"),
-    # docs/MANUAL.md: "Draw a rectangle around text that was not detected, and it is read, translated"
+          "Drag a region to move it, or a handle of its frame to resize it.", 6.0, role="translator",
+          follows=cites(README, EDITING_TOOLS)
+          + cites(MANUAL, "Like shapes in office software, a region is selected with a click, moved by dragging, and "
+                          "resized with its handles, and it is read again only when the new frame covers a larger "
+                          "area.")),
+    Scene("undo", "Undo", "Undo (Ctrl+Z) takes back a change to the page.", 4.0, role="translator",
+          follows=cites(README, "Ctrl+Z takes back a change to a page or to this book's translations.")),
     Scene("add_region", "Add a region",
           "Text that was not found: draw a rectangle around it, and it is read and translated.", 8.0,
-          role="translator"),
-    # the Full screen button's tip: "Show the page alone on the full screen, in the role you chose. F11 leaves it"
+          role="translator",
+          follows=cites(MANUAL, "Draw a rectangle around text that was not detected, and it is read, translated and "
+                                "added to the page (later readings and batches use it too).")),
     Scene("full_screen", "Full screen",
-          "Show the page alone on the full screen, in the role you chose. F11 leaves it.", 6.0, role="translator"),
-    # the Read whole book... button's tip: "Read the pages you turn, then translate the whole book."
+          "Full screen (F11) shows the page alone on the whole screen, in the role you chose. F11 takes you back to "
+          "the window.", 6.0, role="translator",
+          follows=cites(MANUAL, "\"Full screen\" (the toolbar button, or F11) shows the page alone on the whole "
+                                "screen, in the role you chose.",
+                        "F11 takes you back to the window, and so does Esc (in the Translator role Esc first lets go "
+                        "of a selected region).")),
     Scene("whole_book", "The whole book",
-          "Read whole book... reads the pages you turn, then translates them all. Turn back, and every page is there "
-          "at once.", 14.0, present=whole_book_present),
+          "Read whole book... reads the pages you turn, then translates them all together. Turn back, and every page "
+          "is shown at once.", 14.0, present=whole_book_present,
+          follows=cites(MANUAL, "\"Read whole book...\" reads the pages you turn and translates them all together "
+                                "once you have finished reading, in two stages.",
+                        "Once you have read the whole book with the whole-book reading, every page is shown at once, "
+                        "which makes reading comfortable.")),
 )
 SCENE_IDS = tuple(s.id for s in SCENES)
 
@@ -258,86 +315,117 @@ def code_facts() -> dict[str, Any]:
             "lama_licence": str(LAMA_MODEL.licence), "countries": len(jurisdictions.JURISDICTIONS)}
 
 
-# card id -> (heading, lines); a line is (text, style): style "title", "lead", "body", "small", "step" (numbered) or
-# "bullet". {name} is a fact of `code_facts`; a line whose fact is missing is left out.
-CARDS: dict[str, tuple[str, list[tuple[str, str]]]] = {
-    "title": ("", [
-        ("TASlation", "title"),
-        # README.md: "A tool for reading your own manga on your own computer, translating as you read"
-        ("A tool for reading your own manga on your own computer, translating as you read", "lead"),
-        # README.md: "The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is
-        # showing, translates it on this computer, and shows the translation laid over the page."
-        ("The window reads the manga page your viewer is showing, translates it on this computer, and shows the "
-         "translation laid over the page.", "body"),
-        # taslation.__version__
-        ("Recorded with version {version}", "small"),
-    ]),
-    "how": ("How a page is translated", [
-        # README.md: "TASlation captures the viewer's window as the screen shows it"
-        ("TASlation captures your viewer's window as the screen shows it.", "step"),
-        # README.md: "the text is read by three OCR models, and where their readings differ, the one closest to the
-        # other two is taken."
-        ("The text is read by {ocr_word} OCR models; where their readings differ, the one closest to the other two "
-         "is taken.", "step"),
-        # README.md: "The translation is made by PLaMo 3 Translate 2B, a model built for translation, which is given
-        # the pages before as context and your list of names and terms."
-        ("{plamo} translates, given the pages before as context and your list of names and terms.", "step"),
-        # README.md: "a white bubble is filled with the colour of its paper; under lettering on the drawing, the
-        # inpainting model LaMa fills the drawing in"
-        ("The lettering is erased: a white bubble is filled with the colour of its paper; on the drawing, LaMa fills "
-         "the drawing in.", "step"),
-        # docs/MANUAL.md: "Each bubble is lettered as soon as its translation is ready."
-        ("Each bubble is lettered as soon as its translation is ready, in reading order.", "step"),
-    ]),
-    "models": ("The models", [
-        # README.md: "The weights of the three OCR models are under CC BY-NC-SA 4.0, and each person agrees to them
-        # and fetches them when installing."
-        ("The weights of the {ocr_word} OCR models are under CC BY-NC-SA 4.0, and each person agrees to them and "
-         "fetches them when installing.", "bullet"),
-        # README.md: "the inpainting model LaMa fills the drawing in"; docs/THIRD_PARTY.md: AnimeMangaInpainting, MIT
-        ("Under lettering on the drawing, the inpainting model LaMa fills the drawing in ({lama_licence}).", "bullet"),
-        # README.md: "translation uses PLaMo 3 Translate 2B by Preferred Networks (PLaMo Community License" /
-        # "(the translation model, about 1.8 GB, included)"
-        ("Translation uses {plamo} by Preferred Networks (PLaMo Community License), about {plamo_gb} GB.", "bullet"),
-        # README.md: "Portuguese (Brazil) and Turkish use Qwen3.5 4B (Apache-2.0)." / "another translation model
-        # (about 3.3 GB)"
-        ("{qwen_languages} use {qwen} (Apache-2.0), about {qwen_gb} GB.", "bullet"),
-        # README.md: "20 languages to translate into ... and 17 languages for the window itself."
-        ("{languages} languages to translate into, and {ui_languages} languages for the window itself.", "bullet"),
-        # README.md: "Built with PLaMo"
-        ("Built with PLaMo", "small"),
-    ]),
-    "privacy": ("On your own computer", [
-        # README.md: "the reading and the translating happen on this computer, and no page and no translation is sent
-        # outside."
-        ("The reading and the translating happen on this computer, and no page and no translation is sent outside.",
-         "bullet"),
-        # README.md: "No model is trained further."
-        ("No model is trained further.", "bullet"),
-        # README.md, Requirements: "Network | Used only while installing"
-        ("The network is used only while installing.", "bullet"),
-        # README.md, "What it does not do": "saving page images", "operating the viewer by itself", "getting round
-        # capture protection", "sharing over a network"
-        ("It has none of these: saving page images, operating the viewer by itself, getting round capture "
-         "protection, sharing over a network.", "bullet"),
-    ]),
-    "before": ("Before you use it", [
-        # README.md: "In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and
-        # translating it for that use (Article 47-6)"
-        ("In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating it "
-         "for that use (Article 47-6).", "bullet"),
-        # README.md: "docs/LEGAL.md sums up what 30 countries allow."
-        ("docs/LEGAL.md sums up what {countries} countries allow.", "bullet"),
-        # docs/MANUAL.md: "A store's terms of use are a contract between you and the store." ... "so check them"
-        ("A store's terms of use are a contract between you and the store, so check them.", "bullet"),
-        # README.md, Free: "It is free, with no advertising, no donations and no paid version."
-        ("It is free, with no advertising, no donations and no paid version.", "bullet"),
-        # README.md, Requirements: "Windows 10 / 11 (64-bit)"; "an NVIDIA GPU with 6 GB of memory is enough. It runs
-        # without a GPU too"
-        ("Windows 10 / 11 (64-bit). An NVIDIA GPU with 6 GB of memory is enough; it runs without one too.", "bullet"),
-        # README.md: the project's address
-        (pv.PROJECT, "small"),
-    ]),
+@dataclass(frozen=True)
+class Line:
+    """A line of a card: its text ({name} is a fact of `code_facts`; a line whose fact is missing is left out), its
+    style ("title", "lead", "body", "small", "step" (numbered) or "bullet"), and what it follows: the sentences of
+    the documents it says (`follows`) or, for the tool's own words, what they say and where that comes from
+    (`own`)."""
+
+    text: str
+    style: str
+    follows: tuple[Cite, ...] = ()
+    own: str = ""
+
+
+JAPAN_LAW = ("In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating "
+             "it for that use (Article 47-6); [docs/LEGAL.md](docs/LEGAL.md) sums up what {countries} countries "
+             "allow.")  # (README.md, the first paragraph)
+ERASING = ("Lettering is erased in two ways (a white bubble is filled with the colour of its paper; under lettering on "
+           "the drawing, the inpainting model LaMa fills the drawing in).")  # (README.md, Features)
+BUILT_WITH = ("Built with PLaMo: translation uses {plamo} by Preferred Networks (PLaMo Community License, revised "
+              "November 9, 2026).")  # (README.md, Licence)
+
+# card id -> (heading, lines)
+CARDS: dict[str, tuple[str, tuple[Line, ...]]] = {
+    "title": ("", (
+        Line("TASlation", "title", cites(README, "# TASlation")),
+        Line("A tool for reading your own manga on your own computer, translating as you read", "lead",
+             cites(README, "**A tool for reading your own manga on your own computer, translating as you read**")),
+        Line("The window reads the manga page your viewer is showing, translates it on this computer, and shows the "
+             "translation laid over the page.", "body",
+             cites(README, "The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is "
+                           "showing, translates it on this computer, and shows the translation laid over the page.")),
+        Line("Recorded with version {version}", "small",
+             own="the version of the checkout the recording was made with (taslation.__version__)"),
+    )),
+    "how": ("How a page is translated", (
+        Line("TASlation captures your viewer's window as the screen shows it.", "step",
+             cites(README, "**Any viewer**: TASlation captures the viewer's window as the screen shows it and lays the "
+                           "translation over that picture.")),
+        Line("The text is read by {ocr_word} OCR models; where their readings differ, the one closest to the other "
+             "two is taken.", "step",
+             cites(README, "**Accurate translation**: the text is read by {ocr_word} OCR models, and where their "
+                           "readings differ, the one closest to the other two is taken.")),
+        Line("{plamo} translates, given the pages before as context and your list of names and terms.", "step",
+             cites(README, "The translation is made by {plamo}, a model built for translation, which is given the pages "
+                           "before as context and your list of names and terms.")),
+        Line("The lettering is erased: a white bubble is filled with the colour of its paper; on the drawing, LaMa "
+             "fills the drawing in.", "step", cites(README, ERASING)),
+        Line("Each bubble is lettered as soon as its translation is ready, in reading order.", "step",
+             cites(MANUAL, "The bubbles found are marked with frames (dashed; solid once read; gone once they turn out "
+                           "not to be text), and they are translated in the order the page's bubbles are read, each "
+                           "with the lines before it as context.",
+                   "Each bubble is lettered as soon as its translation is ready.")),
+    )),
+    "models": ("The models", (
+        Line("The weights of the {ocr_word} OCR models are under CC BY-NC-SA 4.0, and each person agrees to them and "
+             "fetches them when installing.", "bullet",
+             cites(README, "The weights of the {ocr_word} OCR models are under CC BY-NC-SA 4.0, and each person agrees "
+                           "to them and fetches them when installing.")),
+        Line("Under lettering on the drawing, the inpainting model LaMa fills the drawing in ({lama_licence}).",
+             "bullet",
+             cites(README, ERASING)
+             + cites(THIRD_PARTY, "| {lama_licence} | Big LaMa ([advimman/lama](https://github.com/advimman/lama), "
+                                  "Apache-2.0) fine-tuned on manga and anime.")),
+        Line("Translation uses {plamo} by Preferred Networks (PLaMo Community License), about {plamo_gb} GB.",
+             "bullet",
+             cites(README, BUILT_WITH,
+                   "| Free disk space | About 7.5 GB (the translation model, about {plamo_gb} GB, included). On a "
+                   "computer with an NVIDIA GPU, about 3.7 GB more |")),
+        Line("{qwen_languages} use {qwen} (Apache-2.0), about {qwen_gb} GB.", "bullet",
+             cites(README, "{qwen_languages} use {qwen} (Apache-2.0).",
+                   "Translating into Portuguese (Brazil) or Turkish uses another translation model (about {qwen_gb} "
+                   "GB), and then about 9.0 GB of free disk space is needed.")),
+        Line("{languages} languages to translate into, and {ui_languages} languages for the window itself.", "bullet",
+             cites(README, "**Many languages**: {languages} languages to translate into (English, Spanish, Portuguese "
+                           "(Brazil), French, German, Italian, Russian, Polish, Dutch, Turkish, Indonesian, "
+                           "Vietnamese, Thai, Chinese (Simplified), Chinese (Traditional), Korean, Arabic, Hebrew, "
+                           "Hindi, Bengali), and {ui_languages} languages for the window itself.")),
+        Line("Built with PLaMo", "small", cites(README, BUILT_WITH)),
+    )),
+    "privacy": ("On your own computer", (
+        Line("The reading and the translating happen on this computer, and no page and no translation is sent "
+             "outside.", "bullet",
+             cites(README, "**Fully local**: the reading and the translating happen on this computer, and no page and "
+                           "no translation is sent outside.")),
+        Line("No model is trained further.", "bullet", cites(README, "No model is trained further.")),
+        Line("The network is used only while installing.", "bullet",
+             cites(README, "| Network | Used only while installing |")),
+        Line("It has none of these: saving page images, operating the viewer by itself, getting round capture "
+             "protection, sharing over a network.", "bullet",
+             cites(README, "For that reason it has none of these:\n\n* saving page images\n* operating the viewer by "
+                           "itself\n* getting round capture protection\n* sharing over a network")),
+    )),
+    "before": ("Before you use it", (
+        Line("In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating "
+             "it for that use (Article 47-6).", "bullet", cites(README, JAPAN_LAW)),
+        Line("docs/LEGAL.md sums up what {countries} countries allow.", "bullet", cites(README, JAPAN_LAW)),
+        Line("A store's terms of use are a contract between you and the store, so check them.", "bullet",
+             cites(MANUAL, "A store's terms of use are a contract between you and the store.",
+                   "That does not settle what your store's terms allow, so check them and use this mode knowing "
+                   "that.")),
+        Line("It is free, with no advertising, no donations and no paid version.", "bullet",
+             cites(README, "It is free, with no advertising, no donations and no paid version.")),
+        Line("Windows 10 / 11 (64-bit). An NVIDIA GPU with 6 GB of memory is enough; it runs without one too.",
+             "bullet",
+             cites(README, "| OS | Windows 10 / 11 (64-bit) |",
+                   "**Runs on a modest computer**: an NVIDIA GPU with 6 GB of memory is enough.",
+                   "It runs without a GPU too, and translating then takes about 4 times as long.")),
+        Line(pv.PROJECT, "small",
+             cites(README, "[Download the ZIP](https://" + pv.PROJECT + "/archive/refs/heads/main.zip) and extract all "
+                           "of it.")),
+    )),
 }
 CARD_ORDER = ("how", "models", "privacy", "before")
 HOW_CAPTIONS = ("Your viewer", "Filling in", "Translated")  # the "how" card's three pictures
@@ -354,7 +442,7 @@ def filled(text: str, facts: dict[str, Any]) -> str | None:
 def card_lines(kind: str, facts: dict[str, Any]) -> tuple[str, list[tuple[str, str]]]:
     """The card *kind*'s heading and its lines with the facts put in (a line whose fact is missing left out)."""
     heading, lines = CARDS[kind]
-    out = [(t, style) for t, style in ((filled(text, facts), style) for text, style in lines) if t is not None]
+    out = [(t, line.style) for t, line in ((filled(line.text, facts), line) for line in lines) if t is not None]
     return heading, out
 
 
