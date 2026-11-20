@@ -1017,6 +1017,12 @@ Where they run now, and why, is in the OCR row above. Once saved, it applies fro
 Last, "Translator's window cache" (`ollama_window_cache`) decides whether the Ollama TASlation starts keeps the cache of the translation model's whole window:
 "On, unless the OCR then leaves the GPU" (the default), "Off" or "Always on" (see below). It applies from the next start of Ollama; the translation's row above
 says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it, and why).
+Under it, the box "Look for a new version once a day when TASlation starts" (`update_check`: `"off"`, the default, or `"daily"`; the installer asks once) makes TASlation, at a start a day or more after the last look,
+30 seconds or more after the window is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for one small file.
+A newer version is named in the Help menu's "Check for updates..." item and in one line at the bottom of the window (no dialog). When it could not ask, it says nothing. It applies from the next start.
+Help → "Check for updates..." asks when you choose it, whether the box is on or off. It shows this version and the new one with their dates and what changed; "Update now" closes TASlation,
+and `update.cmd` downloads the new version, updates and starts TASlation again (docs/INSTALL.md, "Updating"). The same box is in that window too.
+The time of the last look and the newest version it found are kept in `update-check.json` in the state folder (nothing else is written there). In a git clone there is no look at the start.
 
 The settings file `taslation.toml` is looked for in this order: the one given with `--config`, `./taslation.toml` in the folder it was run from, and `taslation.toml` in the state folder (`~/.taslation`,
 or the place in the environment variable `TASLATION_STATE_DIR`); the first one found is read (with none, the defaults apply).
@@ -1060,6 +1066,7 @@ hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_pl
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
 panel_font_size = 0          # the panel's text in points (6-72, following ui_scale and the monitor); 0: automatic
 hover_delay_ms = 450         # the wait before a bubble under the pointer shows its other side (0-3000; 0: at once)
+update_check = "off"         # "daily": at the start, look for a new version at most once a day (check_update.py asks GitHub); "off": only Help > Check for updates...
 ```
 
 The size of the window's text can be changed with `ui_scale` (1.0 follows Windows' scaling; 0.5 to 3.0).
@@ -1184,6 +1191,13 @@ and to translate the lines TASlation sends (`/api/generate`, `/api/chat`, `/api/
 and removes one no longer needed when you agree (`ollama list`, `ollama rm`); and the downloader asks it to fetch or import a translation model
 (`ollama pull`, `ollama create`). What else Ollama does is not under TASlation's control.
 The downloader (`setup_models.py`, which the window and the command line run as a separate process when you agree to download a model) and the installer (`install.cmd`, which `update.cmd` also runs) run without the guard: they download.
+The third is `check_update.py`, the program that looks for a new version: the window runs it as a process of its own when you choose Help → "Check for updates..." and, when you turned on the look at the start, once a day;
+`update.cmd` runs it when it is asked to look for and download a new version. It runs without the guard too, and the TASlation package never imports it.
+It asks GitHub's three hosts only: raw.githubusercontent.com for `CHANGELOG.md`, and github.com for that version's ZIP, with an HTTPS GET
+(the ZIP is tried up to three times when a download breaks off); github.com sends the ZIP on to codeload.github.com. Sent on to any other address, it stops without asking there.
+Besides the plain headers HTTP needs, it sends only a fixed User-Agent (`TASlation-update-check`): no query string, no cookie, not the installed version, nothing about this computer or your books.
+GitHub sees the IP address and the time, as any site you open does. It uses no proxy.
+The window's own process connects nowhere for it, so what `taslation audit` lists of TASlation's own connections is the same with it.
 
 With an installation made with `install.cmd`, TASlation's program is `.venv\Scripts\taslation.exe` in the folder that holds `install.cmd`; it is not on PATH.
 Open PowerShell in that folder (with the folder open in File Explorer, type `powershell` in the address bar and press Enter), then:

@@ -14,7 +14,8 @@ Each time you turn a page, TASlation makes a temporary copy of what the viewer d
 translates the text with a model on your own computer (an adaptation of the work), and shows the result over the same page, to you alone. So that it does not translate a page twice,
 it saves the translations, the positions of the bubbles and the page fingerprint in the cache. It saves no page image. With the translations it keeps the book's name, what the book's colophon says of it, and your corrections and notes, in files on your computer
 (docs/MANUAL.md, "The translation cache and backups", and Help > How to use... > Your data list all of it). While you read, it sends nothing anywhere but to the translation program on your computer;
-the network is used only by the installer and when you agree to download a translation model.
+the network is used only when you install or update TASlation, when you agree to download a translation model, and, only if you turn it on or ask for it in the Help menu, to look for a new version
+(then a program of its own, `check_update.py`, asks GitHub for one small file and sends nothing about you or your books).
 
 The capture is temporary. In Japan, since Article 2 requires a tangible reproduction, it may be considered not to be a reproduction at all,
 and in any case it is within the reproduction incidental to computer processing that Article 47-4 allows. In the EU and the UK,

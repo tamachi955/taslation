@@ -3231,7 +3231,7 @@ def test_the_question_about_new_versions_is_asked_once_and_its_answer_kept(tmp_p
     assert r.returncode == 0, r.stdout + r.stderr
     out = r.stdout
     assert f"asked:   {UPDATE_QUESTION} [y/N] = y" in out
-    for line in ("at most once a day", "asks github.com for one small file", "Nothing about you or your books is sent",
+    for line in ("at most once a day", "asks GitHub for one small file", "Nothing about you or your books is sent",
                  "GitHub sees your IP address and the time"):
         assert line in out, line
     assert out.index("asked:   " + LANGUAGE_QUESTION) < out.index("asked:   " + UPDATE_QUESTION) < out.index("[2/7]")

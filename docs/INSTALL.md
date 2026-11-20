@@ -106,7 +106,8 @@ When the installation gets to its end but TASlation cannot translate yet (the fi
 its last line says so, and what to do. Any warnings are listed before it.
 
 The network is used during the installation: Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
-After that, TASlation connects to nothing outside this computer, except to download a translation model when you agree to it (the window offers this when the language you translate into needs a model that is not installed).
+After that, TASlation connects to nothing outside this computer, except to download a translation model when you agree to it (the window offers this when the language you translate into needs a model that is not installed),
+and to look for a new version only if you turn that on or choose Help → "Check for updates..." (then `check_update.py`, a program of its own, asks GitHub; see "Updating" below).
 
 All the questions come first. Once you have answered them, you can leave the computer. Depending on your connection, it takes about 15 to 60 minutes.
 Download progress is shown in percent and MB. If the connection breaks partway, it goes on from where it broke off.
@@ -132,27 +133,60 @@ If it does not start, the shortcut is removed, and the installation makes it aga
 
 ## Updating
 
+The easiest way is Help → "Check for updates..." in TASlation's window. Only when you choose it, a program of its own, `check_update.py`, asks GitHub (raw.githubusercontent.com) for one small file (`CHANGELOG.md`).
+Nothing about you, this computer, the installed version or your books is sent; GitHub sees your IP address and the time, as any site you open does.
+It shows this version and the new one with their dates, and what changed. "Update now" closes TASlation, and `update.cmd` runs in a window of its own:
+it downloads the new version's ZIP (about 5 MB) from GitHub, keeps the files it replaces or deletes in the folder `.previous`, copies the new files,
+goes on with the same installation as `install.cmd` (if the new version needs anything more, it asks before downloading), and starts TASlation again once that has got to its end.
+The window of `update.cmd` stays open so that you can read what it did (Enter closes it). "Update now" during a whole-book run asks what closing asks.
+When `update.cmd` cannot be started, the window says so and TASlation stays open.
+
+When you install, the installer asks once whether TASlation should look for a new version when it starts (the default is No). With Yes, it asks at most once a day,
+30 seconds or more after the window is ready and while no page is read or translated. A newer version is named in the Help menu's item (as "Check for updates... (0.9.0 is available)")
+and in one line at the bottom of the window: no dialog, and nothing over the page in full screen. When it could not ask, it says nothing.
+Nothing is downloaded or installed without asking you. Tools → "Settings..." → System, or the box in the "Check for updates..." window, changes it later
+(`update_check` in `taslation.toml`). In a git clone there is no look at the start, and "Check for updates..." only says to update it with git.
+
+A double-click on `update.cmd` first asks whether to look on GitHub for the newest version (the default is No). With Yes, it shows the versions and what changed, asks once to confirm,
+downloads it and updates. With No, it asks for a ZIP you downloaded yourself, as below.
+
+TASlation 0.8.1 and earlier have no "Check for updates...", and their `update.cmd` cannot download. Update such a version once with a ZIP you downloaded yourself, as below;
+from then on "Update now" works.
+
+### Updating with a ZIP you downloaded yourself
+
 1. Download the new ZIP ("Code" → "Download ZIP" on GitHub) and close TASlation.
-2. Double-click `update.cmd` in the TASlation folder.
+2. Double-click `update.cmd` in the TASlation folder and answer its question about GitHub with Enter (No).
 3. When it asks where the new ZIP is, drag the ZIP file (or the extracted folder) onto the window and press Enter.
    If it is the newest `taslation*.zip` in your "Downloads" folder, Enter alone chooses it.
 4. It shows the current version and the new version (with their dates) and asks once to confirm. Then it copies the new files and goes on with the same installation as `install.cmd`
    (if the new version needs anything more, it asks before downloading).
 
-When that installation stops, the new version's files are already copied over the old version's, and the old version is not kept (its last lines say so).
+When that installation stops, the new version's files are already copied over the old version's, and the old version's files are kept in the folder `.previous` (its last lines say so).
 The Start-menu shortcut stays only if TASlation starts as it is now. Running `update.cmd` again with the same ZIP goes on from there
-(after a No to a question, it asks again).
+(a ZIP that "Update now" downloaded is kept then, and its place is said; after a No to a question, it asks again).
 
 The installation after an update uses the PyTorch already installed, as it is. When the CPU build is installed although there is an NVIDIA GPU (installed by a version before this one),
 it does not start a download of about 2.6 GB without asking; it says so instead. To get the GPU build, run `install.cmd`.
 The installation after an update also makes the Ollama settings above (so an Ollama that was there before gets `LLAMA_ARG_CACHE_RAM` too, on a computer installed with a version before this one).
 
 `taslation.toml`, `.venv`, `models` and the data folder (`~/.taslation`) stay as they are. The program folder `taslation\` gets the same contents as the new version
-(files that are not in the new version are deleted); no other file is deleted. `update.cmd` itself uses no network and reads only the ZIP or folder you give it.
+(files that are not in the new version are deleted); no other file is deleted.
+`update.cmd` uses the network only when it is asked to look for and download a new version ("Update now", a Yes to its first question, `-Download`):
+then `check_update.py` asks raw.githubusercontent.com for `CHANGELOG.md` and downloads that version's ZIP from github.com (GitHub sends it on to codeload.github.com).
+Given a ZIP or a folder, it uses no network and reads only what it was given.
 You can also check the current version and its date under Help → "About TASlation".
 
 To copy by hand, close TASlation, copy the **contents** of the `taslation-main` folder in the ZIP into the folder that holds `install.cmd`
 (do not copy the folder itself; when asked, choose "Replace"), and run `install.cmd`.
+
+### Going back to the earlier version
+
+`update.cmd` keeps the program files it replaces or deletes in the folder `.previous` in the TASlation folder, with a note of their version and of the files the update added.
+It keeps only the version just before: the next update replaces it, and an update to the same version leaves it as it is.
+To go back, close TASlation and run `update.cmd -Back` in a Command Prompt (the end of an update prints the line to use).
+It puts the kept files back and deletes the files the update added. What the newer version's installation put into `.venv` stays; if TASlation does not start, run `install.cmd`.
+`uninstall.cmd` removes `.previous` too. In a git clone, `update.cmd` neither updates nor goes back, and says to use git.
 
 ## Uninstalling
 

@@ -1011,6 +1011,12 @@ Ollama の要求の `num_gpu` オプションとして送ります。保存す�
 最後の「翻訳モデルのウィンドウキャッシュ」（`ollama_window_cache`）で、TASlation が起動する Ollama が翻訳モデルのウィンドウ全体のキャッシュを持つかどうかを決めます。
 「OCR が GPU に残るなら使う」（既定）、「使わない」、「常に使う」の3つです（後述）。次に Ollama が起動したときから適用され、いま動いている Ollama が使っているかどうかは、
 上の翻訳の行に出ます（「TASlation が起動（ウィンドウキャッシュあり）」、または「なし」とその理由）。
+その下のチェックボックス「TASlation の起動時に、1 日 1 回まで新しいバージョンを確認する」（`update_check`。既定はオフの `"off"`、オンは `"daily"`。インストーラーが1回だけ尋ねます）をオンにすると、
+起動のたびに、前の確認から1日以上たっていれば、ウィンドウの準備ができて 30 秒以上たち、ページを読んだり翻訳したりしていないときに、別のプログラム `check_update.py` が GitHub に小さなファイルを1つ問い合わせます。
+新しいバージョンがあれば、ヘルプメニューの「更新を確認...」の項目と、ウィンドウの下の1行に出ます（ダイアログは出しません）。問い合わせられなかったときは何も表示しません。次の起動から適用されます。
+ヘルプ →「更新を確認...」は、オンでもオフでも、選んだときに問い合わせます。今のバージョンと新しいバージョンを日付つきで、変更点とともに表示し、「今すぐ更新」で TASlation を閉じて
+`update.cmd` が新しい版をダウンロードして更新し、TASlation をもう一度起動します（docs/INSTALL.ja.md の「更新」）。その画面にも同じチェックボックスがあります。
+最後に確認した時刻と、そのとき見つかった最新のバージョンは、状態フォルダの `update-check.json` に残します（ほかには何も書きません）。git のクローンでは、起動時の確認はしません。
 
 設定ファイル `taslation.toml` は、`--config` で指定したもの、実行したフォルダの `./taslation.toml`、状態フォルダ（`~/.taslation`、
 または環境変数 `TASLATION_STATE_DIR` の場所）の `taslation.toml` の順に探し、最初に見つかったものを読みます（どれもなければ既定値）。
@@ -1054,6 +1060,7 @@ hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_pl
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
 panel_font_size = 0          # the panel's text in points (6-72, following ui_scale and the monitor); 0: automatic
 hover_delay_ms = 450         # the wait before a bubble under the pointer shows its other side (0-3000; 0: at once)
+update_check = "off"         # "daily": at the start, look for a new version at most once a day (check_update.py asks GitHub); "off": only Help > Check for updates...
 ```
 
 ウィンドウの文字の大きさは `ui_scale` で変えられます（1.0 が Windows の拡大率どおり。0.5〜3.0）。
@@ -1178,6 +1185,13 @@ TASlation で「Fake Viewer」というタイトルのウィンドウを選ぶ�
 あなたが同意したときには要らなくなったモデルを削除します（`ollama list`、`ollama rm`）。ダウンローダーは、翻訳モデルの取得や取り込みを頼みます
 （`ollama pull`、`ollama create`）。Ollama がそのほかに何をするかは、TASlation の管理の外です。
 ダウンローダー（`setup_models.py`。モデルのダウンロードに同意したとき、ウィンドウとコマンドラインが別のプロセスとして実行します）とインストーラー（`install.cmd`。`update.cmd` も実行します）は、ダウンロードをするので、保護なしで動きます。
+3つ目は、新しいバージョンを確認するプログラム `check_update.py` です。あなたがヘルプ →「更新を確認...」を選んだときと、起動時の確認をオンにしたときに、ウィンドウが別のプロセスとして実行し、
+`update.cmd` も、新しい版を探してダウンロードするよう求められたときに実行します。これも保護なしで動き、TASlation のパッケージからは読み込まれません。
+問い合わせるのは GitHub の3つのホストだけです。raw.githubusercontent.com には `CHANGELOG.md` を、github.com にはその版の ZIP を HTTPS の GET で求め
+（ZIP は、途中で切れたときに3回まで試します）、github.com は ZIP を codeload.github.com へ回します。ほかのアドレスへ回されたときは、そこへは問い合わせずに止まります。
+HTTP に要る決まりのヘッダーのほかに送るのは、決まった User-Agent（`TASlation-update-check`）だけで、問い合わせの文字列、Cookie、入っているバージョン、このパソコンや本のことは送りません。
+GitHub に見えるのは、どのサイトを開いたときとも同じく、IP アドレスと時刻です。プロキシは使いません。
+ウィンドウのプロセス自体はどこにも接続しないので、`taslation audit` が示す TASlation 自身の通信は、これがあっても変わりません。
 
 `install.cmd` でインストールした場合、TASlation のプログラムは `install.cmd` のあるフォルダの `.venv\Scripts\taslation.exe` です。PATH には入っていません。
 そのフォルダで PowerShell を開き（エクスプローラーでそのフォルダを開いたまま、アドレスバーに `powershell` と入力して Enter）、次を実行します。

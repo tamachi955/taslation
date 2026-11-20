@@ -90,7 +90,7 @@ class UpdateDialog(tk.Toplevel):
             self.choice_box = ttk.Checkbutton(frm, text=_("Look for a new version once a day when TASlation starts"),
                                               variable=self.choice_var, command=self._keep_choice)
             self.choice_box.pack(anchor="w")
-            self.choice_note.configure(text=in_lines(_("It asks github.com for one small file, the list of changes, at most once a day and never while a page is read; nothing about you or your books is sent."), self.text_width))
+            self.choice_note.configure(text=in_lines(_("It asks GitHub for one small file, the list of changes, at most once a day and never while a page is read; nothing about you or your books is sent."), self.text_width))
             self.choice_note.pack(anchor="w", pady=(2, 0))
         self.btns = ttk.Frame(frm)
         self.btns.pack(fill="x", pady=(14, 0))

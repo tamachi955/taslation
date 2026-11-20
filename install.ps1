@@ -1314,7 +1314,7 @@ if (@('off', 'daily') -contains $updateSet) {
     $updateAsked = $true
     Write-Host ''
     Write-Info (T 'TASlation can look for a new version when it starts, at most once a day.')
-    Write-Info (T 'It then asks github.com for one small file. Nothing about you or your books is sent;')
+    Write-Info (T 'It then asks GitHub for one small file. Nothing about you or your books is sent;')
     Write-Info (T 'GitHub sees your IP address and the time, as any site you open does.')
     Write-Info (T 'Tools > Settings... can change this later; Help > Check for updates... asks only when you choose it.')
     $wantCheck = Confirm-Choice (T 'Look for a new version when TASlation starts?') -PersonOnly

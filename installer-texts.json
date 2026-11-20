@@ -6,7 +6,7 @@
   "\"{0}\" is not a language TASlation knows. Type its number or its English name.": {"ja": "「{0}」は TASlation の知らない言語です。番号か英語の名前を入力してください。"},
   "Going on with {0}; the window can change it later.": {"ja": "{0} で進めます。あとでウィンドウで変えられます。"},
   "TASlation can look for a new version when it starts, at most once a day.": {"ja": "TASlation は起動時に新しいバージョンがないか確認できます（1 日に 1 回まで）。"},
-  "It then asks github.com for one small file. Nothing about you or your books is sent;": {"ja": "そのとき github.com に小さなファイルを 1 つ求めます。あなたや本についての情報は何も送りません。"},
+  "It then asks GitHub for one small file. Nothing about you or your books is sent;": {"ja": "そのとき GitHub に小さなファイルを 1 つ求めます。あなたや本についての情報は何も送りません。"},
   "GitHub sees your IP address and the time, as any site you open does.": {"ja": "GitHub には、ほかのサイトを開いたときと同じく、IP アドレスと時刻が伝わります。"},
   "Tools > Settings... can change this later; Help > Check for updates... asks only when you choose it.": {"ja": "あとで「ツール」>「設定...」で変えられます。「ヘルプ」>「更新を確認...」は、選んだときだけ確認します。"},
   "Look for a new version when TASlation starts?": {"ja": "TASlation の起動時に新しいバージョンを確認しますか?"},
