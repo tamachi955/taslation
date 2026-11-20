@@ -59,6 +59,7 @@ SLOT_ROOM = 44  # on the full screen the column stops this far above the bottom:
 # ------------------------------------------------------------------ the rail's measures
 RAIL_W, RAIL_W_FULL = 6, 8
 MARKS_W = 6  # the column of the updated diamonds and the notch, outside the rail
+FRAME = 1  # the screen on show's outline goes round its mark, outside the rail (its state still seen inside)
 RAIL_GAP = 10  # the rail stays this far from the page, where the margin has room ...
 RAIL_GAP_LEAST = 2  # ... and at least this far in the room kept for it
 RAIL_ROOM = 24  # an exit margin under this many px: the picture is drawn RESERVE px clear of that side
@@ -103,6 +104,14 @@ class Screen:
         if translate in ("done", "skipped") or read == "skipped":
             return "done"
         return "waiting"
+
+    def state(self, stage: str) -> str:
+        """A stage's state as its bar shows it: the translation of a screen that went by too fast is not caught either
+        (nothing waits for it until the person turns back to it)."""
+        state = self.stages[stage]
+        if stage == "translate" and state == "waiting" and self.stages["read"] == "missed":
+            return "missed"
+        return state
 
 
 @dataclass
@@ -469,13 +478,13 @@ def side_layout(setting: str, active: bool, canvas: tuple[int, int], shown: Box 
     if margin < rail + MARKS_W + RAIL_GAP_LEAST or y1 - y0 < 4 * RAIL_PAGE_PX:
         return SideLayout()
     gap = max(RAIL_GAP_LEAST, min(RAIL_GAP, margin - rail - MARKS_W))
-    if side == "left":
+    if side == "left":  # (the box takes in the on-show outline's `FRAME` on the page's side: gap > FRAME always)
         rail_x = edge - gap - rail
         marks_x = rail_x - MARKS_W
-        box = (marks_x, y0, edge - gap, y1)
+        box = (marks_x, y0, edge - gap + FRAME, y1)
         return SideLayout("rail", side, box, rail_x - box[0], rail, marks_x - box[0])
     rail_x = edge + gap
     marks_x = rail_x + rail
-    box = (rail_x, y0, marks_x + MARKS_W, y1)
-    return SideLayout("rail", side, box, 0, rail, rail)
+    box = (rail_x - FRAME, y0, marks_x + MARKS_W, y1)
+    return SideLayout("rail", side, box, FRAME, rail, FRAME + rail)
 

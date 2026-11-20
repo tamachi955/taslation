@@ -25,9 +25,9 @@ from taslation.ui.preview import ImageCanvas
 from taslation.ui.progress import Filling
 from taslation.ui.seen import Seen, read_time
 from taslation.ui.side import SideMixin
-from taslation.ui.side_model import (COLUMN_NEEDS, COLUMN_W, RAIL_ROOM, RAIL_W, RAIL_W_FULL, RESERVE, BacklogPace,
-                                     SideModel, natural_margin, rail_marks, room_kept, screen_tip, side_layout,
-                                     summary_lines)
+from taslation.ui.side_model import (CELL_H, COLUMN_NEEDS, COLUMN_W, FRAME, RAIL_ROOM, RAIL_W, RAIL_W_FULL, RESERVE,
+                                     BacklogPace, SideModel, natural_margin, rail_marks, room_kept, screen_tip,
+                                     side_layout, summary_lines)
 from taslation.ui.strip import StripMixin
 
 SPREAD, SINGLE = (1200, 860), (600, 860)
@@ -72,7 +72,10 @@ def test_the_rail_is_narrow_beside_the_page_and_wider_on_the_full_screen():
     assert window.rail_w == RAIL_W == 6 and full.rail_w == RAIL_W_FULL == 8
     for layout in (window, full):
         x0, y0, x1, y1 = layout.box
-        assert x1 <= shown[0] - 10 and (y0, y1) == (20, 880)  # 10 px from the page, as tall as the page
+        assert x0 + layout.rail_x + layout.rail_w == shown[0] - 10  # the rail 10 px from the page ...
+        assert x1 == shown[0] - 10 + FRAME and (y0, y1) == (20, 880)  # ... its on-show outline too; as tall as the page
+    right = side_layout("rail", True, (720, 900), shown, False, full=False)
+    assert right.box[0] + right.rail_x == shown[2] + 10 and right.box[0] == shown[2] + 10 - FRAME
 
 
 def test_a_margin_too_narrow_for_the_rail_is_widened_on_the_exit_side_only_and_never_by_the_screens():
@@ -134,6 +137,8 @@ def test_marks_come_from_the_stage_events_in_any_order():
     marks = {seq: model.screens[seq].mark for seq in model.order}
     assert [marks[s] for s in (1, 6, 7, 8, 9, 10, 11, 12)] == ["done", "done", "working", "waiting", "waiting",
                                                                "missed", "missed", "working"]
+    assert model.screens[10].state("translate") == "missed"  # its T bar: nothing waits for it either
+    assert model.screens[8].state("translate") == "waiting"
     reversed_model = model_from(reversed(events))  # the latest event of a stage wins, whatever the order
     assert set(reversed_model.order) == set(model.order)
     model.update(9, stage="erase", state="working")  # normal reading has no erase: nothing changes
@@ -407,6 +412,31 @@ def test_the_column_shows_beside_a_spread_with_a_cell_a_screen(window):
     w._side.model.screens[2].updated = True
     view.redraw_marks()
     assert any(view.type(i) == "polygon" for i in view.find_withtag("s2") if "marks" in view.gettags(i))
+
+
+def in_view(view, seq):
+    index = view.model.order.index(seq)
+    top, height = view.canvasy(0), view.layout.box[3] - view.layout.box[1]
+    return top <= index * CELL_H and (index + 1) * CELL_H <= top + height
+
+
+def test_the_screen_on_show_is_in_view_from_the_first_placing_on_and_as_the_person_turns(window):
+    w = window(size=(1560, 900))
+    story(w.post, pages=40, on_show=40, waiting_from=38)
+    w.show(page(40))  # (the column placed for the first time after the events came)
+    view = w._side.view
+    assert view.layout.kind == "column" and in_view(view, 40)
+    w.post("page_on_show", {"seq": 3})  # turned back
+    assert in_view(view, 3)
+    w.post("page_on_show", {"seq": 4})  # in view already: the column does not move
+    top = view.canvasy(0)
+    assert in_view(view, 4) and view.canvasy(0) == top
+    w.post("page_on_show", {"seq": 39})
+    w.update()
+    assert in_view(view, 39)
+    top = view.canvasy(0)
+    view._wheel(SimpleNamespace(delta=120))  # the wheel scrolls the column, half a cell a notch
+    assert view.canvasy(0) == top - CELL_H // 2
 
 
 def test_the_page_keeps_its_size_while_screens_come_and_the_rail_shows_where_the_margin_is_narrow(window):
