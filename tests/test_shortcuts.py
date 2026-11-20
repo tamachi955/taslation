@@ -270,7 +270,7 @@ def test_the_menus_name_the_entries_they_hold_whatever_else_a_menu_has(hidden_ro
     w = tk.Toplevel(hidden_root)
     w.withdraw()
     for name in ("set_area", "open_page_keys", "open_caches", "review_names", "open_settings", "_redisplay", "_apply_on_top",
-                 "toggle_over", "_on_ui_language", "open_help", "open_keys", "open_notice", "open_about"):
+                 "toggle_over", "_on_ui_language", "open_help", "open_keys", "open_notice", "open_updates", "open_about"):
         setattr(w, name, lambda *a: None)
     w.original_var, w.top_var, w.over_var, w.order_numbers_var = (tk.BooleanVar(w) for _ in range(4))
     w.ui_lang_var = tk.StringVar(w)

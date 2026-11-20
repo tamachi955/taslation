@@ -19,7 +19,8 @@ fail loudly instead of leaking silently:
 
 Files, pipes and the GUI are untouched. Every runtime entry point (GUI and
 CLI) installs the guard before importing anything heavy. ``setup_models.py``
-is the only script that intentionally does *not* install it.
+and ``check_update.py`` (each run as a process of its own, never imported by
+the package) are the only scripts that intentionally do *not* install it.
 """
 
 from __future__ import annotations

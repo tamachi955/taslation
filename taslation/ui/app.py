@@ -125,7 +125,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import area, ime, shortcuts, theme
+from . import area, ime, shortcuts, theme, updates
 from .. import devices
 from .status import StatusMixin
 from .strip import StripMixin, close_warning, release_run_images
@@ -260,6 +260,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.translator: Any = None
         self.ready = False
         self.busy = False
+        updates.setup(self)  # a newer version an earlier look found, for the Help menu (no request)
         self.batch: BatchReader | None = None
         self.windows: list[WindowInfo] = []
         self.selected: WindowInfo | None = None
@@ -751,6 +752,9 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         keyed(help_menu, "keys_help")
         help_menu.add_command(label=_("Legal notice..."), command=self.open_notice)
         help_menu.add_separator()
+        # asks GitHub only when chosen; names a newer version a look found (`updates.menu_label`)
+        help_menu.add_command(label=updates.menu_label(self), command=self.open_updates)
+        self._update_entry = (help_menu, int(help_menu.index("end")))
         help_menu.add_command(label=_("About TASlation"), command=self.open_about)
         menubar.add_cascade(label=_("Help"), menu=help_menu)
         tip_menu(self, page, _("Mark the part of the viewer's window that shows the page."),
@@ -765,7 +769,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
                  _("Over a viewer in full screen, stay on top without taking its keys: you turn the pages there."),
                  _(ORDER_NUMBERS_TIP))
         tip_menu(self, help_menu, _("How to use TASlation, topic by topic."), _("Every key TASlation knows, in one list."),
-                 _("Read the legal notice again."), _("The version, the licence and where your data is kept."))
+                 _("Read the legal notice again."), _("Ask GitHub whether a newer version is out."),
+                 _("The version, the licence and where your data is kept."))
         self.menubar = menubar
         self.config(menu=menubar)
 
@@ -1051,6 +1056,13 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
 
         AboutDialog(self, Path(self.settings.state_dir))
 
+    def open_updates(self) -> None:
+        """Help > Check for updates...: asks GitHub for the newest version now, in a process of its own
+        (`dialogs.updates.UpdateDialog`); its Update now closes the window for update.cmd (`updates.update_now`)."""
+        from .dialogs.updates import UpdateDialog
+
+        UpdateDialog(self, self, on_update=lambda version: updates.update_now(self, version))
+
     def _close_allowed(self) -> bool:
         """At closing: with pages read and not translated yet (a run reading them, or what a stopped run left) or
         pages of the run not finished, whether to close all the same (`strip.close_warning` says what is lost; what is
@@ -1069,13 +1081,15 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         release_run_images(self)  # (the window closes: the pictures go now)
         return True
 
-    def _on_close(self) -> None:
+    def _on_close(self, asked: bool = False) -> None:
         """The window closes. A page started on a frame not confirmed yet is given up before anything is saved
         (`end_page_job`; what it changed goes back, `Pipeline.drop_unconfirmed`, after the steps between, which give
         its worker the time to put it back itself): neither the stage times nor the cache written at the close hold
-        anything of it (`Pipeline.to_save`)."""
-        if not self._close_allowed():  # pages of a run not finished: their pictures would be lost
+        anything of it (`Pipeline.to_save`). *asked*: what closing would lose was asked already, and the run's
+        pictures let go (Update now: `updates.update_now`)."""
+        if not asked and not self._close_allowed():  # pages of a run not finished: their pictures would be lost
             return
+        updates.stop(self)  # a look for a new version under way ends with the window
         end_page_job(self)
         if self.batch is not None:
             self.batch.stop()

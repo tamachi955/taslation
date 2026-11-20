@@ -72,7 +72,7 @@ class Bars(tk.Toplevel):
     open_lines_to_review = _noop
     _redisplay = _apply_on_top = open_glossary = open_caches = review_names = _rescan_windows = _noop
     _on_window_selected = open_notice = _on_ui_language = toggle_over = _noop
-    open_about = open_help = open_keys = _noop
+    open_about = open_help = open_keys = open_updates = _noop
     open_settings = _noop
 
     def build(self, code: str) -> app_mod.FlowBar:
@@ -169,7 +169,8 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
                                          "Under the pointer: a panel beside the bubble",
                                          "Under the pointer: the bubble itself", "Always on top",
                                          "Over the full-screen viewer", "Reading-order numbers"]
-    assert _menu_labels(menus["Help"]) == ["How to use...", "Keys...", "Legal notice...", "About TASlation"]
+    assert _menu_labels(menus["Help"]) == ["How to use...", "Keys...", "Legal notice...", "Check for updates...",
+                                           "About TASlation"]
     shown = [text for _kind, text in _texts(w.toolbar)]
     assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Full screen (F11)", "Reader", "Translator",
                                     "Read whole book...", "Stop (Esc)"])

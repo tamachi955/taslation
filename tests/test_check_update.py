@@ -229,6 +229,7 @@ def test_a_newer_version_with_the_changes_between(tmp_path, server):
     answer = answer_of(run(scratch(tmp_path, "0.8.1"), "--base", s.base, "check"))
     assert answer["result"] == "newer" and answer["newer"] is True
     assert (answer["installed"], answer["newest"], answer["date"]) == ("0.8.1", "0.9.0", "2026-11-25")
+    assert answer["installed_date"] == "2026-11-20"  # the installed version's entry in the same changelog
     assert answer["changes"].startswith("0.9.0 - 2026-11-25\nUpdates")
     assert "0.8.2 - 2026-11-22" in answer["changes"] and "What 0.8.1 brought" not in answer["changes"]
     assert answer["reason"] == ""

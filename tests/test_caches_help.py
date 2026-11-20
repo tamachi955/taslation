@@ -458,8 +458,8 @@ for _name in ("translate_now", "set_area", "clear_area", "open_page_keys",
               "open_batch_dialog", "stop_batch", "open_glossary", "open_caches", "_on_role_changed",
               "toggle_order", "toggle_skip", "retranslate_page",
               "open_book_settings", "open_review", "open_find_replace", "undo_edit", "redo_edit", "_redisplay", "_apply_on_top",
-              "_on_ui_language", "open_help", "open_keys", "open_notice", "open_about", "toggle_over", "review_names",
-              "open_settings"):
+              "_on_ui_language", "open_help", "open_keys", "open_notice", "open_updates", "open_about", "toggle_over",
+              "review_names", "open_settings"):
     setattr(Menus, _name, _recorder(_name))
 
 
@@ -489,11 +489,13 @@ def test_the_help_menu_comes_after_language_and_alone_has_the_notice(hidden_root
     assert list(menus)[-2:] == [_("Language"), _("Help")]
     help_menu = menus[_("Help")]
     assert _entries(help_menu) == [("command", _("How to use...")), ("command", _("Keys...")),
-                                   ("command", _("Legal notice...")), ("separator", ""), ("command", _("About TASlation"))]
+                                   ("command", _("Legal notice...")), ("separator", ""),
+                                   ("command", _("Check for updates...")), ("command", _("About TASlation"))]
     assert str(help_menu.entrycget(0, "accelerator")) == "F1"
     assert str(help_menu.entrycget(1, "accelerator")) == key_text("Shift-F1")  # Umschalt+F1 in German
     assert _invoke(w, help_menu, _("Keys...")) == "open_keys"
     assert _invoke(w, help_menu, _("Legal notice...")) == "open_notice"
+    assert _invoke(w, help_menu, _("Check for updates...")) == "open_updates"
     assert all(_("Legal notice...") != label
                for name in (_("Language"), _("View")) for _kind, label in _entries(menus[name]))
     assert ("separator", "") not in _entries(menus[_("Language")]) + _entries(menus[_("View")])

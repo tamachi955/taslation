@@ -73,7 +73,7 @@ from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from ..pipeline import turn_away
-from . import area, name_check
+from . import area, name_check, updates
 from .attention import tell_run_ended
 from .banner import ScanState, blocking, busy_title, group_digits
 from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, FULL_SCREEN_NO_RUN, QUEUE_RANK, READING_NOTE_MS, READY,
@@ -1077,6 +1077,7 @@ class JobsMixin:
             self._run_queued()
             if getattr(self, "_find", None) is not None:
                 self._refresh_find()
+            updates.on_ready(self)  # the look for a new version, for who turned it on: later, while nothing is read
         elif kind == "result":
             gate = data.get("gate")
             if gate is not None and getattr(gate, "state", "confirmed") == "pending":

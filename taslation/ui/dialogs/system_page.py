@@ -17,7 +17,9 @@ with its line (`ocr_runs_on`, from the next page); where they are now and why is
 (`devices.ocr_device`). Last, the window cache of the Ollama TASlation starts (``ollama_window_cache``,
 `WINDOW_CACHE_CHOICES`: on unless the OCR then leaves the GPU, off, always on), a list with its line
 (`window_cache`, from Ollama's next start); what the server running now got is in the translator's row above
-(`devices.window_cache_text`)."""
+(`devices.window_cache_text`). Then whether the window looks for a new version when it starts (``update_check``,
+"daily" or "off": `ui.updates`), a checkbox with its line on what is asked of whom (`update_check`, from the next
+start)."""
 
 from __future__ import annotations
 
@@ -59,6 +61,13 @@ WINDOW_CACHE_TEXT = ("The Ollama TASlation starts keeps the cache of the transla
                      "quarter faster, for about 130 MB more GPU memory (220 MB on a GPU of more than 6 GB). The "
                      "default leaves it off where those MB would move two of the OCR readers to the processor. Not for "
                      "an Ollama you run yourself. From the next start of Ollama.")
+# whether the window looks for a new version at its start (``update_check``, `taslation.ui.updates`); the 16
+# languages: `locales/features/updates.py`
+UPDATE_CHECK_LABEL = "Look for a new version once a day when TASlation starts"
+UPDATE_CHECK_TEXT = ("A program of its own, check_update.py, then asks GitHub for one small file, at most once a day and "
+                     "never while a page is read. Nothing about you or your books is sent; GitHub sees your IP address "
+                     "and the time, as any site you open does. A newer version is named in the Help menu. Off: only "
+                     "Help > Check for updates... asks, when you choose it. From the next start.")
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -160,7 +169,18 @@ class SystemPage(ttk.Frame):
                          foreground=theme.colour("note"))
         line.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(WINDOW_CACHE_TEXT), name, box)
+        self.update_check = tk.BooleanVar(self, value=str(getattr(settings, "update_check", "off")) == "daily")
+        check = ttk.Checkbutton(layers, text=_(UPDATE_CHECK_LABEL), variable=self.update_check)
+        check.grid(row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        line = ttk.Label(layers, text=in_lines(_(UPDATE_CHECK_TEXT), width), justify="left",
+                         foreground=theme.colour("note"))
+        line.grid(row=9, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(UPDATE_CHECK_TEXT), check)
         self.looked = False
+
+    def update_check_value(self) -> str:
+        """What the checkbox says, as ``update_check`` keeps it ("daily" or "off")."""
+        return "daily" if self.update_check.get() else "off"
 
     def ocr_runs_on_value(self) -> str:
         """Where the OCR list says the readers run, as ``ocr_runs_on`` keeps it ("auto", "cpu", "gpu")."""

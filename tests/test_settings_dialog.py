@@ -264,6 +264,18 @@ def test_the_dialog_in_japanese(hidden_root, in_force):
     assert d.erase.get() == "いつも使う（CPU でも）"
 
 
+def test_the_look_for_a_new_version_is_off_until_its_box_is_ticked_and_saved(hidden_root, in_force):
+    got = []
+    d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
+    assert d.values()["update_check"] == "off" and not d.system.update_check.get()
+    d.system.update_check.set(True)
+    assert d.save() is True and got == [{"update_check": "daily"}]
+    loaded = Settings.from_toml(in_force.config_path)
+    assert loaded.update_check == "daily"
+    again = dlg.SettingsDialog(hidden_root, loaded)
+    assert again.system.update_check.get() and again.changed() == {}
+
+
 @pytest.mark.parametrize("value", ["off", "auto", "lama"])
 def test_the_inpainting_s_three_choices_come_back_as_they_were_saved(hidden_root, in_force, value):
     got = []

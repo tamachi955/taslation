@@ -12,7 +12,8 @@ this computer. Standard library only; nothing of TASlation is imported.
 ``check`` asks for one file, the project's CHANGELOG.md on GitHub (`CHANGELOG_URL`). The newest version is its first
 ``## X.Y.Z - YYYY-MM-DD`` heading; the installed one is the ``version`` line of the pyproject.toml beside this file, as
 update.ps1 reads it. It prints one line of JSON: ``result`` ("newer", "up to date" or "could not ask"), ``installed``,
-``newest``, ``date``, ``newer``, ``changes`` (the changelog's entries newer than the installed version, as plain text,
+``installed_date`` (its entry's date in the changelog, "" when it has none), ``newest``, ``date`` (the newest one's),
+``newer``, ``changes`` (the changelog's entries newer than the installed version, as plain text,
 at most `CHANGES_CAP` characters) and ``reason`` (one plain sentence when it could not ask). Its exit code says the
 same: `NEWER`, `UP_TO_DATE`, `COULD_NOT_ASK`.
 
@@ -160,8 +161,10 @@ def verdict(changelog: str, installed: str) -> dict:
         raise AskError("The newest version could not be read from GitHub's answer.")
     newest, date, _body = found[0]
     newer = version_of(newest) > version_of(installed)  # (both are X.Y.Z here)
-    return {"result": "newer" if newer else "up to date", "installed": installed, "newest": newest, "date": date,
-            "newer": newer, "changes": changes_between(changelog, installed) if newer else "", "reason": ""}
+    installed_date = next((day for version, day, _text in found if version == installed), "")
+    return {"result": "newer" if newer else "up to date", "installed": installed, "installed_date": installed_date,
+            "newest": newest, "date": date, "newer": newer,
+            "changes": changes_between(changelog, installed) if newer else "", "reason": ""}
 
 
 # ---------------------------------------------------------------- where a request may go
@@ -348,8 +351,8 @@ def check(place: Place, root: Path = ROOT) -> dict:
         installed = installed_version(root)
         return verdict(fetch_changelog(place), installed)
     except Exception as e:  # noqa: BLE001 - every failure is one sentence, never a stack
-        return {"result": "could not ask", "installed": installed, "newest": "", "date": "", "newer": False,
-                "changes": "", "reason": failure_sentence(e)}
+        return {"result": "could not ask", "installed": installed, "installed_date": "", "newest": "", "date": "",
+                "newer": False, "changes": "", "reason": failure_sentence(e)}
 
 
 # ---------------------------------------------------------------- download
