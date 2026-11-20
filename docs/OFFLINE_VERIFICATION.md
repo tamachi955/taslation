@@ -1,12 +1,30 @@
 # Offline verification
 
-TASlation must work with the network unplugged and must never talk to
-anything but the local Ollama server. This document records how that is
-enforced, how to check it yourself, and the results of the verification run
+This is the developer's log of measurements and decisions, kept with the
+source. Its entries are dated and stay as they were written; a later entry
+records what changed. It also records practices of the development that the
+program does not do: screens of a book the developer owns were saved on the
+developer's computer to measure against, by a developer's tool that turned
+the viewer's pages (`tools/dev_snapshots.py`, from "Text blocks and the
+drawing around them (2026-10-28)" on),
+and on 2026-10-29 cut-out pieces of those screens were transcribed and judged
+by a cloud model, with the owner's permission ("A cloud model as the judge,
+and a gold set (2026-10-29)"). The program keeps no page image, turns no
+page and sends nothing to a cloud service; what it keeps and when it uses
+the network are in docs/MANUAL.md and in its legal notice.
+
+The sections below begin with how the program's own process is kept off the
+network, how to check it yourself, and the results of the verification run
 made on 2026-10-24 on the machine the project was built on (Windows 11,
 Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
 
-## How "nothing leaves the machine" is enforced
+## How the program's own process is kept off the network
+
+What follows holds for TASlation's own process (the window and the
+`taslation` commands). Ollama is a program of its own, which TASlation starts
+when it is not running and asks to load, release and run the translation
+model on 127.0.0.1; what else Ollama does is not under TASlation's control.
+The installer and `setup_models.py`, which download, run without the guard.
 
 1. **Socket allowlist in the process** (`taslation/netguard.py`). Installed by
    every entry point before any heavy import. It patches
@@ -19,16 +37,24 @@ Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
    `HF_DATASETS_OFFLINE`, `HF_HUB_DISABLE_TELEMETRY`, `DO_NOT_TRACK` are set;
    `HTTP(S)_PROXY` variables are removed; `NO_PROXY=*`.
 3. **Models by local path**: the OCR models are read from their folders under
-   `models/` with `safetensors`; no Hugging Face library is installed. Sections below that name manga-ocr, `ocr_device` or
-   `transformers` are the record of the OCR before 2026-11-01; see "The OCR
-   model (2026-11-01)".
+   `models/` with `safetensors`. `transformers` (and with it `huggingface_hub`)
+   is installed, for the layout model, which it reads from its local folder
+   only (`local_files_only=True`, `trust_remote_code=False`,
+   `taslation/detect/layout.py`); LaMa is read with torch from its local file.
+   Sections below that name manga-ocr, `ocr_device` or `transformers` for the
+   OCR are the record of the OCR before 2026-11-01; see "The OCR model
+   (2026-11-01)".
 4. **Loopback-only Ollama client** (`taslation/translate/ollama.py`): rejects
    any URL whose host is not loopback, and uses a `urllib` opener with proxies
    disabled.
-5. **Separate download scripts**: `setup_models.py` is the only code a user
-   runs that uses the network; the developer tool `tools/fetch_openmantra.py`
-   (one download of a sample dataset, see "OpenMantra as the sample dataset
-   (2026-10-30)") is the other. The application imports neither.
+5. **Separate download scripts**: the code a user runs that uses the network
+   is the installer (`install.cmd` / `install.ps1`, also run by `update.cmd`)
+   and `setup_models.py`, which the installer runs and which the window and
+   the command line run as a separate process when the person agrees to
+   download a translation model; the developer tool
+   `tools/fetch_openmantra.py` (one download of a sample dataset, see
+   "OpenMantra as the sample dataset (2026-10-30)") is the other. The
+   application imports neither.
 6. **No image persistence**: there is no code path that writes a captured or
    translated page to disk. The on-disk cache (`~/.taslation/cache/*.json`)
    holds translated text, normalised bubble geometry and 320-bit page
@@ -43,21 +69,32 @@ Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
 
 ## Check it yourself
 
-```bash
-taslation doctor                                   # guard status, model, font, Ollama
-taslation audit tests/fixtures/sample_page.png --translator echo   # full pipeline + list of network calls
-taslation audit tests/fixtures/sample_page.png     # same, with Ollama: only 127.0.0.1:11434 appears
-python -m pytest tests/test_netguard.py -q          # guard tests incl. a raw-socket subprocess
-taslation cache protect                            # saved files: protected, plain, opened here (counts only)
-python -m pytest tests/test_protect.py -q           # the protection, with real DPAPI in a temporary folder
+After an installation with `install.cmd`, the program is
+`.venv\Scripts\taslation.exe` in the folder that holds `install.cmd` (it is
+not on PATH, and pytest is not installed). In PowerShell, in that folder:
+
+```powershell
+.\.venv\Scripts\taslation.exe doctor          # guard status, models, font, Ollama
+.\.venv\Scripts\taslation.exe audit tests\fixtures\sample_page.png --translator echo   # detection and OCR + every network call: none
+.\.venv\Scripts\taslation.exe audit tests\fixtures\sample_page.png   # the same with Ollama: only 127.0.0.1, port 11434
+.\.venv\Scripts\taslation.exe cache protect    # saved files: protected, plain, opened here (counts only)
 ```
 
 The audit's last part, `--- saved files (at rest) ---`, counts the files with
 text of a book in the state folder and ends with "plain files with text of a
 book: none" when every one is protected; it changes nothing.
 
-Then disconnect (Wi-Fi off / cable out) and use the GUI normally. Ollama keeps
-answering on loopback; the OCR model loads from disk.
+Then disconnect (Wi-Fi off / cable out) and use the window normally. Ollama
+keeps answering on loopback; the models load from disk.
+
+In a source checkout with the development tools (`pip install -e .[dev]`),
+the same commands are `taslation ...`, and the tests check the guard and the
+protection:
+
+```bash
+python -m pytest tests/test_netguard.py -q          # guard tests incl. a raw-socket subprocess
+python -m pytest tests/test_protect.py -q           # the protection, with real DPAPI in a temporary folder
+```
 
 ## Results of the verification run (2026-10-24)
 
