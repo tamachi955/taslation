@@ -45,6 +45,8 @@ With `early_start = false` in `taslation.toml`, a page is read only once its pic
 A page turned while another is being translated shows at once as the viewer draws it, with nothing of the other page's translation over it;
 that translation is stopped only once the new picture has stayed the same for a moment (0.15 seconds; a black flash or a loading indicator stops
 nothing, and back on that page, its translation shows again), and the new page is read then.
+The bubbles the stopped page had translated by then stay in the cache, the page marked as not finished (only when its picture had stayed the same for 0.8 seconds, as above):
+back on it, they are lettered at once and only the rest is read and translated. A page stopped with "Stop" or Esc keeps nothing, as before.
 
 An untranslated page fills in while you look at it. The bubbles found are marked with frames (dashed; solid once read; gone once they turn out not to be text),
 and they are translated in the order the page's bubbles are read, each with the lines before it as context. Each bubble is lettered as soon as its translation is ready. At the end,

@@ -416,13 +416,15 @@ def ask_again_romanised(translator: Any, texts: Sequence[str], outputs: Sequence
                         context: Sequence[tuple[str, str]] = (), notes: str = "", upcoming: Sequence[str] = (),
                         meta: Sequence[dict[str, Any]] | None = None, call_args: dict[str, Any] | None = None,
                         cancel: threading.Event | None = None, before: int = REASK_BEFORE,
-                        after: int = REASK_AFTER) -> tuple[list[str], int, int]:
+                        after: int = REASK_AFTER,
+                        on_answer: Callable[[int, str], None] | None = None) -> tuple[list[str], int, int]:
     """The lines of *texts* answered with their bare romanisation (`bare_romanisation`) asked for once more, each
     alone, with its neighbours: the lines before it with their translations (after *context*), at most *before*, as
     the earlier pairs, and the lines after it (then *upcoming*), at most *after*, as what follows. The new answer is
     taken when it is something else (a translation that reads: not empty); otherwise, or when the request fails,
-    the first answer stays. Returns (the translations, how many lines were asked again, how many are still bare
-    romanisations). Once *cancel* is set `Cancelled` is raised before the next request."""
+    the first answer stays. *on_answer*(index, translation) is told each line's final translation once its request
+    is over. Returns (the translations, how many lines were asked again, how many are still bare romanisations).
+    Once *cancel* is set `Cancelled` is raised before the next request."""
     out = [str(o or "").strip() for o in list(outputs)[:len(texts)]] + [""] * max(0, len(texts) - len(outputs))
     todo = [i for i, (t, o) in enumerate(zip(texts, out)) if o and bare_romanisation(t, o)]
     for i in todo:
@@ -435,9 +437,11 @@ def ask_again_romanised(translator: Any, texts: Sequence[str], outputs: Sequence
             got = translator.translate_page([texts[i]], earlier[-before:] if before > 0 else [], notes,
                                             later[:max(0, after)], meta=facts, **dict(call_args or {}))
         except TranslationError:
-            continue
+            got = None
         text = str((got[0] if got else "") or "").strip()
         if text and text != texts[i] and not bare_romanisation(texts[i], text):
             out[i] = text
+        if on_answer is not None:
+            on_answer(i, out[i])
     left = sum(1 for t, o in zip(texts, out) if o and bare_romanisation(t, o))
     return out, len(todo), left

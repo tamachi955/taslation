@@ -148,6 +148,19 @@ def check_cancel(cancel: threading.Event | None) -> None:
         raise Cancelled()
 
 
+def turn_away(cancel: threading.Event) -> None:
+    """*cancel* set for a page the reader turned away from (the window: the viewer shows another page): the lines its
+    request answered by then are kept, the page marked as lacking the rest (`keeps_answered`), so that its next reading
+    asks only for the rest; Stop's cancel (set alone) keeps nothing of the page."""
+    cancel.keeps_answered = True  # type: ignore[attr-defined]
+    cancel.set()
+
+
+def keeps_answered(cancel: threading.Event | None) -> bool:
+    """Whether *cancel* was set by `turn_away`."""
+    return cancel is not None and bool(getattr(cancel, "keeps_answered", False))
+
+
 class _NoAnswer(Exception):
     """A request beside a page's failed (`Pipeline.large_part`): the look ends with nothing found."""
 
@@ -1170,7 +1183,8 @@ class Provisional:
 
 class PageWork:
     """A page job on show in the window (`Pipeline.page_on_show`): the page units it stored anew (``stored``: their
-    fingerprints and aspects, what the window forgets when the page comes again sharper) and, while its frame is not
+    fingerprints and aspects, what the window forgets when the page comes again sharper; ``replaced``: the entries of
+    them it added to, as they were, which the window puts back then) and, while its frame is not
     kept (*gate*), what goes back should it never be (`Provisional`) - one confirmed before the job began too, for its
     confirmation may be taken back while the job runs (`PageGate.take_back`). ``kept``: None while that is not
     decided, then whether what the job did lasts."""
@@ -1178,6 +1192,9 @@ class PageWork:
     def __init__(self, pipeline: "Pipeline", gate: PageGate | None):
         self.gate = gate
         self.stored: list[tuple[str, float]] = []
+        # (the cached pages a reading added to, as they were before it - `Pipeline._complete_page` -: what a sharper
+        # picture of the page puts back once it has dropped what ``stored`` names)
+        self.replaced: list[CachedPage] = []
         self.provisional = Provisional(pipeline, gate) if gate is not None else None
         self.kept: bool | None = None if self.provisional is not None else True
 
@@ -2040,7 +2057,9 @@ class Pipeline:
         raised: between the detectors, between regions while reading (and before the other readers read one), while
         the rooms are measured, before and during the request to the model, before and while rendering; a page
         cancelled before its translation came back leaves nothing in the cache, and one whose translation came back
-        is stored whole before it stops. *on_slow*(seconds) is called
+        is stored whole before it stops - but for a page the reader turned away from (`turn_away`): the lines answered
+        by then are stored, the page marked `CachedPage.incomplete`, so that its next reading reads and asks only for
+        the rest (`_complete_page`). *on_slow*(seconds) is called
         (once per request) when the model has said nothing for a while, with a translator that can tell (it takes
         an ``on_slow`` argument). A short line translated before in the book or its series is given that translation
         (`linememo`, with the cache and ``reuse_lines``); *reuse* False ("Translate again") asks the model for every
@@ -2123,8 +2142,16 @@ class Pipeline:
             plans.append((unit, unit_regions, page))
         check_cancel(cancel)
         if fill is not None:
+            # (a cached page marked as lacking some, which this reading completes - one the reader turned away from
+            # before its end among them -: the translations it holds are lettered at once, beside the regions still
+            # to read, which fill in after)
+            held = [r for _unit, unit_regions, page in plans if page is not None and page.incomplete and completes(page)
+                    for r in unit_regions if r.status == "translated" and r.translated_text]
             fill.announce([r for _unit, unit_regions, page in plans for r in unit_regions
-                           if page is None or (completes(page) and r.status == "unmatched")])
+                           if page is None or (completes(page) and r.status == "unmatched")] + held)
+            for r in held:
+                fill.read(r)
+                fill.draft(r, r.translated_text)
 
         out = rgb.copy()
         all_regions: list[TextRegion] = []
@@ -2157,8 +2184,16 @@ class Pipeline:
                     timer.lap("ocr")
                     if translate:
                         beside = self._read_beside(rgb, plans, n, fill, cancel)
-                        err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
-                                                      reuse=reuse if use_cache else None)
+                        try:
+                            err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
+                                                          reuse=reuse if use_cache else None)
+                        except Cancelled:
+                            # (the reader turned away: the lines answered by then are kept, the unit marked as lacking
+                            # the rest, `_keep_answered`; nothing with Stop, nor from a frame never kept: `Provisional`)
+                            if (keeps_answered(cancel) and use_cache and self.cache is not None
+                                    and self._cacheable(unit_regions)):
+                                self._store_regions(unit, unit_regions)
+                            raise
                         timer.lap("translate")
                         if err:
                             result.error = err
@@ -2732,9 +2767,9 @@ class Pipeline:
                        report: ProgressFn, fill: PageFill | None = None, cancel: threading.Event | None = None,
                        on_slow: SlowFn | None = None, reuse: bool = True) -> str:
         """Translator mode, and a page marked `CachedPage.incomplete`: read and translate the live regions a cached
-        page has no bubble for, and add what the model gave, also when it failed for the others. The mark goes once
-        no text is left without a translation, and comes when one is; a reading that added nothing to a marked page
-        leaves it as it was. *reuse* False ("Translate again" of a page whose corrected lines stayed,
+        page has no bubble for, and add what the model gave, also when it failed for the others, or when the reader
+        turned away meanwhile (`turn_away`: what was answered by then). The mark goes once no text is left without a
+        translation, and comes when one is; a reading that added nothing to a marked page leaves it as it was. *reuse* False ("Translate again" of a page whose corrected lines stayed,
         `forget_page`'s *keep_edited*): every line asked of the model (`linememo`). Returns "" or the Message of what
         went wrong."""
         todo = [r for r in regions if r.status == "unmatched"]
@@ -2747,11 +2782,23 @@ class Pipeline:
             regions[:] = [r for r in regions if r.status != "repeated"]
             self._order_read(rgb, unit.box, regions)  # what was read now, in its place among the translations
             todo = [r for r in regions if any(r is t for t in todo)]
-            err = self._translate_regions(todo, report, fill, cancel, on_slow, unit.box, reuse=reuse)
+            try:
+                err = self._translate_regions(todo, report, fill, cancel, on_slow, unit.box, reuse=reuse)
+            except Cancelled:
+                if keeps_answered(cancel):  # (the reader turned away: the lines answered by then are added)
+                    self._add_completed(unit, page, todo)
+                raise
+        self._add_completed(unit, page, todo)
+        return err
+
+    def _add_completed(self, unit: fp.PageUnit, page: CachedPage, todo: list[TextRegion]) -> None:
+        """`_complete_page`'s translations of *todo* added to the cached *page*, its mark set while one lacks a
+        translation; nothing when nothing changes. The page job on show is told (`PageWork`): the unit among those it
+        stored, and the entry as it was, which a sharper picture of the page puts back."""
         new = [r for r in todo if r.status == "translated"]
         lacking = any(r.status in ("untranslated", "ocr-unavailable") for r in todo)
         if self.cache is None or (not new and lacking == page.incomplete):
-            return err
+            return
         bubbles = list(page.bubbles)  # (the cached page itself is never changed: its entry is replaced, `_save_page`,
         # so that a page job whose frame is never confirmed leaves it as it was, `Provisional`)
         for r in new:
@@ -2761,8 +2808,11 @@ class Pipeline:
                                         note=r.reader_note, angle=r.angle,
                                         large=locate_large.checked(r.translated_text, r.large), joined=r.joined))
             r.from_cache = not page.incomplete  # (a marked page's are new to the reader, and to a run's count)
+        work: PageWork | None = getattr(_ON_SHOW, "work", None)
+        if work is not None:
+            work.stored.append((page.fingerprint, page.aspect))
+            work.replaced.append(copy.deepcopy(page))
         self._save_page(page.fingerprint, page.aspect, bubbles, lacking)
-        return err
 
     # ------------------------------------------------------------------ translator mode
     def rerender(self, result: PageResult) -> None:
@@ -4161,7 +4211,8 @@ class Pipeline:
         hands it over (when it can, `takes_items`), and the final ones (some respelt, some changed by `tighten`) are
         settled on the page afterwards. Only these fresh translations are respelt: a page's translations from the
         cache are never changed here. With *cancel*, `Cancelled` before the request, during it (a translator that
-        takes ``cancel``) and after it. A short line the book or its series translated before is not sent: it takes
+        takes ``cancel``) and after it; once the reader turned away from the page (`turn_away`), the lines answered
+        by then are set first, as the page done whole would have set them (`_keep_answered`). A short line the book or its series translated before is not sent: it takes
         that translation, held to the series sheet as it is now (`linememo.plan_for`), and what the model answers is
         kept, respelt, for the lines to come; *reuse* False asks every line and keeps the answers ("Translate again"),
         None neither reuses nor keeps. Once the translations are final, one whose Japanese lettering set a part larger
@@ -4198,9 +4249,19 @@ class Pipeline:
         call: dict[str, Any] = cancel_args(self.translator.translate_page, cancel, on_slow)
         extra = dict(call)
         on_item: Callable[[int, str], None] | None = None
+        # the lines the model answered so far (as handed over, by index into *todo*): kept should the reader turn away
+        # from the page before its end (`turn_away`, `_keep_answered`)
+        answered: dict[int, str] = {}
+        settled: set[int] = set()  # (those of them asked again for a bare romanisation: final as they are)
+
+        def reasked(index: int, text: str) -> None:
+            answered[index] = text
+            settled.add(index)
+
         if fill is not None and takes_items(self.translator):
             def on_item(index: int, text: str) -> None:
                 if 0 <= index < len(todo):
+                    answered[index] = text
                     fill.draft(todo[index], text)
 
             extra["on_item"] = on_item
@@ -4243,7 +4304,7 @@ class Pipeline:
                 # neighbours (a reused line was looked at when first answered)
                 outputs = plan.served_back(ask_again_romanised(
                     self.translator, texts, plan.unserved(outputs), context=self.context_pairs(),
-                    notes=self.premises(), meta=meta, call_args=call, cancel=cancel)[0])
+                    notes=self.premises(), meta=meta, call_args=call, cancel=cancel, on_answer=reasked)[0])
             return outputs, failure, False
 
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
@@ -4254,16 +4315,27 @@ class Pipeline:
             raise Cancelled()
         if later and fill is not None and DRAFTS_BESIDE:
             fill.beside(measure_rooms)  # (while the model writes; before the drafts, which may cut a mask back)
+        def keep(cancelled: BaseException) -> None:
+            """(the page cancelled) What was answered by then kept, when the reader turned away (`turn_away`)."""
+            if isinstance(cancelled, Cancelled) and keeps_answered(cancel) and computed is not None:
+                self._keep_answered(todo, texts, meta, plan, answered, computed, settled)
+
         try:
             outputs, failure, stop = ask()
-        except BaseException:
+        except BaseException as e:
             if fill is not None:
                 fill.wait(drop=True)  # (nothing of the page is lettered after it stopped)
+            keep(e)
             raise
-        if fill is not None:
-            fill.wait()  # the drafts lettered, and the rooms measured beside them: the regions as they are kept
-        if not measured[0]:
-            measure_rooms()
+        answered.update({i: out for i, out in enumerate(outputs) if out})  # (every line, should it be cancelled below)
+        try:
+            if fill is not None:
+                fill.wait()  # the drafts lettered, and the rooms measured beside them: the regions as they are kept
+            if not measured[0]:
+                measure_rooms()
+        except BaseException as e:
+            keep(e)
+            raise
         if stop:
             return failure
         sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are; a reused
@@ -4275,7 +4347,11 @@ class Pipeline:
                     "direction": direction_of(r)}
                    for r, out in zip(todo, outputs)]
         outputs = self.tighten(entries)
-        flags = self.review(entries, outputs, cancel=cancel)  # (stopped there, nothing of the page is kept)
+        try:
+            flags = self.review(entries, outputs, cancel=cancel)  # (stopped there, nothing of the page is kept ...)
+        except BaseException as e:
+            keep(e)  # (... but what was answered, when the reader turned away)
+            raise
         pairs: list[tuple[str, str]] = []
         asked: list[tuple[str, str]] = []  # (the lines the model was asked: what its request's history holds of them)
         sent = set(plan.asked)
@@ -4292,8 +4368,12 @@ class Pipeline:
         if computed is not None:  # (the pairs as the request computed them, the lines filled by asking again after)
             asked = _base.grown_pairs(computed, asked, self._takes_pair)
         # the part of each final translation to set larger where its lettering had one (the words stay as they are;
-        # cancelled here, nothing of the page is kept, as in the review)
-        self._locate_large(todo, asked if grows_context(self.translator) else pairs, cancel, on_slow)
+        # cancelled here, nothing of the page is kept, as in the review, but what `keep` keeps)
+        try:
+            self._locate_large(todo, asked if grows_context(self.translator) else pairs, cancel, on_slow)
+        except BaseException as e:
+            keep(e)
+            raise
         plan.learn_regions(todo)  # (kept for the lines to come; saved with the page)
         if pairs and self._context.maxlen:
             self._context.append(pairs)
@@ -4305,6 +4385,64 @@ class Pipeline:
         if failure and any(r.status != "translated" for r in todo):
             return failure  # the request failed and asking again did not make up for it all
         return ""
+
+    def _keep_answered(self, todo: list[TextRegion], texts: list[str], meta: list[dict[str, Any]], plan: Any,
+                       answered: dict[int, str], computed: list[tuple[str, str]],
+                       settled: set[int] | frozenset[int] = frozenset()) -> list[TextRegion]:
+        """(`_translate_regions`, the reader turned away from the page: `turn_away`; a translator that hands its lines
+        over one by one and says what its prompts computed: PLaMo) The lines of *todo* the model answered by then
+        (*answered*, by index; the lines reused from the book, *plan*'s, among them) set as the page done whole sets
+        them: spelt as the series sheet spells, tightened and reviewed (never cancelled: a few milliseconds), kept for
+        the lines to come, and the history grown with them as the request computed them (*computed*), so that it
+        holds what was translated and the next prompt extends the last one. Left untranslated, and asked again when
+        the page comes again: a line not answered, one whose answer is no translation or its bare romanisation (asked
+        again with its neighbours on a page done whole) not yet asked again (*settled*: those asked again, whose answer
+        is final as it is), and one whose lettering set a part larger (that part is asked for beside the page, once
+        its lines are final). The regions kept."""
+        sheet = self.check_sheet()
+        at: list[int] = []
+        for i in sorted(answered):
+            r, text = todo[i], answered[i]
+            if r.size_mix is not None or not text or not self.real_translation(texts[i], text):
+                continue
+            if (i not in plan.served and i not in settled and _base.REASK_ROMANISED
+                    and _base.bare_romanisation(texts[i], text)):
+                continue
+            at.append(i)
+        kept: list[TextRegion] = []
+        pairs: list[tuple[str, str]] = []
+        asked: list[tuple[str, str]] = []
+        if at:
+            outs = [answered[i] if i in plan.served else spelt_right(sheet, texts[i], answered[i],
+                                                                     str(meta[i].get("speaker", "")))
+                    for i in at]
+            entries = [{"ja": todo[i].source_text, "text": out, "mask": todo[i].mask, "kind": todo[i].kind,
+                        "anchor": todo[i].letter_box or todo[i].text_box, "x0": todo[i].x0, "y0": todo[i].y0,
+                        "meta": region_meta(todo[i]), "confidence": todo[i].ocr_confidence,
+                        "direction": direction_of(todo[i])}
+                       for i, out in zip(at, outs)]
+            outs = self.tighten(entries)
+            flags = self.review(entries, outs)
+            sent = set(plan.asked)
+            for i, out, fl in zip(at, outs, flags):
+                r = todo[i]
+                if out and self.real_translation(r.source_text, out):
+                    r.translated_text, r.status, r.flags, r.large = out, "translated", list(fl), None
+                    kept.append(r)
+                    pairs.append((r.source_text, out))
+                    if i in sent:
+                        asked.append((r.source_text, out))
+        for r in todo:
+            if not any(r is k for k in kept):
+                r.status = "untranslated"
+        if not kept:
+            return []
+        asked = _base.grown_pairs(computed, asked, self._takes_pair)
+        plan.learn_regions(todo)  # (the kept ones: saved with the page)
+        if self._context.maxlen:
+            self._context.append(pairs)
+            self._grown.extend(asked)
+        return kept
 
     def review(self, entries: list[dict[str, Any]], texts: Sequence[str], *,
                cancel: threading.Event | None = None) -> list[list[str]]:

@@ -72,6 +72,7 @@ from ..messages import Cancelled, Message, message_of
 from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
+from ..pipeline import turn_away
 from . import area, name_check
 from .attention import tell_run_ended
 from .banner import ScanState, blocking, busy_title, group_digits
@@ -741,9 +742,10 @@ class JobsMixin:
                                                    events=lambda kind, data: self._post(kind, **data), cancel=cancel,
                                                    on_slow=lambda seconds: self._post("slow", seconds=seconds),
                                                    **({"reuse": False} if again is not None else {}))  # (again: all)
-            except Cancelled:  # Stop, or a new page: nothing of this page reached the cache
+            except Cancelled:  # Stop, or a new page: nothing of this page reached the cache (but what a new page keeps)
                 self._post("page_cancelled", gate=gate, discarded=getattr(work, "kept", True) is False,
-                           stored=list(getattr(work, "stored", None) or ()))
+                           stored=list(getattr(work, "stored", None) or ()),
+                           replaced=list(getattr(work, "replaced", None) or ()))
                 return
             if held and not [r for r in result.translated if not r.from_cache]:  # nothing translated anew (a corrected
                 # line that stayed is no new translation)
@@ -752,7 +754,8 @@ class JobsMixin:
                 result = self.pipeline.process(image, translate=False)  # the page as it is kept: nothing was replaced
                 result.error = error
             held = []
-            self._post("result", result=result, gate=gate, stored=list(getattr(work, "stored", None) or ()))
+            self._post("result", result=result, gate=gate, stored=list(getattr(work, "stored", None) or ()),
+                       replaced=list(getattr(work, "replaced", None) or ()))
             if work is not None and getattr(work, "waits", False) and not work.settle(cancel):
                 # (shown, and never confirmed: nothing of it lasts)
                 self._post("page_cancelled", gate=gate, discarded=True, result=result, stored=[])
@@ -2268,7 +2271,7 @@ class JobsMixin:
         if self._turned_from_job(image, thumb):
             self._auto_candidate = thumb  # settled: Auto takes it once the job is gone
             self._cancel_why = "page"
-            cancel.set()
+            turn_away(cancel)  # (what its request answered by then is kept: `pipeline.turn_away`)
             self._sync_stop()
             self._queue("auto")
 

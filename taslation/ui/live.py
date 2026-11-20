@@ -140,7 +140,7 @@ from ..detect.page_area import (  # noqa: F401 - panel_inside, TIGHT_PX: as the 
 from ..i18n import _
 from ..messages import Message
 from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
-from ..pipeline import PageGate
+from ..pipeline import PageGate, turn_away
 from ..regions import PageResult
 from . import area, hover, in_place
 from .constants import (
@@ -2042,7 +2042,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return "same"
             if not self.ready or self.busy or self.batch is not None or self._batching:
                 f.taken = None
-                self._cancel_page()  # the page being read is not on show any more
+                self._cancel_page(turned=True)  # the page being read is not on show any more
                 self._queue("auto")
                 return "queued"
             self._auto_last, self._auto_candidate = thumb, None
@@ -2133,7 +2133,8 @@ class LiveViewMixin(BlackViewerMixin):
         where the window can cancel it (`_cancel_page`: nothing of it reaches the cache), else waited for (`_queue`).
         The page units that job stored anew (as it said, done or stopped after its storing: `_page_stored`) are
         dropped first, so that their bubbles are read again from the sharp picture (nothing older goes: a page unit
-        that was in the cache keeps its translations and is only drawn again on the sharp picture). A job that said
+        that was in the cache keeps its translations and is only drawn again on the sharp picture; one the job added
+        to, a page that lacked some, is put back as it was). A job that said
         nothing of it (none but a stand-in's) is judged by its page: dropped when none of it came from the cache. A
         job started early whose confirmation `_retake` took back leaves nothing at all (no page unit, no line kept for
         reuse, no line drawn by its requests: `pipeline.Provisional`), so nothing is dropped here."""
@@ -2160,6 +2161,8 @@ class LiveViewMixin(BlackViewerMixin):
                 units = [SimpleNamespace(fingerprint=fingerprint, aspect=aspect) for fingerprint, aspect in stored[1]]
                 try:
                     self.pipeline.forget_page(SimpleNamespace(units=units))
+                    if len(stored) > 2 and stored[2]:  # (an entry the job added to: as it was before the job)
+                        self.pipeline.restore_pages(stored[2])
                 except Exception:  # noqa: BLE001 - the cache stays as it was; the page is drawn again from it
                     pass
         elif (soft is not None and result is not None and result.cache_misses and not result.cache_hits
@@ -2176,14 +2179,18 @@ class LiveViewMixin(BlackViewerMixin):
         else:
             self._start_translate(image, thumb=thumb)
 
-    def _cancel_page(self) -> bool:
+    def _cancel_page(self, turned: bool = False) -> bool:
         """The page translation that runs, cancelled where the window can cancel it (a page job with its own cancel
         event, `_page_cancel`, as Stop cancels it: nothing of it reaches the cache, and no line says it was
-        stopped); False when it cannot be (then it is done first, and the page waits for it)."""
+        stopped); False when it cannot be (then it is done first, and the page waits for it). *turned*: the viewer
+        shows another page - the lines answered by then are kept, the page marked as lacking the rest
+        (`pipeline.turn_away`), so that coming back to it asks only for the rest."""
         cancel = getattr(self, "_page_cancel", None)
         if cancel is None or cancel.is_set() or self.batch is not None:
             return False
         self._cancel_why = "page"
+        if turned:
+            turn_away(cancel)
         cancel.set()
         sync = getattr(self, "_sync_stop", None)
         if sync is not None:
@@ -2401,7 +2408,8 @@ class LiveViewMixin(BlackViewerMixin):
             return
         frame = getattr(self, "_job_frame", None)
         stored = [] if data.get("discarded") else list(data.get("stored") or ())
-        self._stored_by = (frame, stored) if frame is not None else None
+        replaced = [] if data.get("discarded") else list(data.get("replaced") or ())
+        self._stored_by = (frame, stored, replaced) if frame is not None else None
 
     # ------------------------------------------------------------------ beside a whole-book run that translates
     def _watch_beside(self) -> None:
@@ -2804,7 +2812,7 @@ class LiveViewMixin(BlackViewerMixin):
             if (op.over_job or op.redo) and self._waits_for_worker(op, now):
                 if op.over_job and not op.redo:  # the viewer has left the page the running job reads: it goes ...
                     f.taken = None
-                    self._cancel_page()
+                    self._cancel_page(turned=True)
                 op.redo = True  # ... and this frame is started early, a gate of its own, once the worker is free
                 self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
                 return

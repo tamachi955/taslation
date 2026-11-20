@@ -176,16 +176,20 @@ def test_reading_a_marked_page_translates_what_is_missing_once_and_clears_the_ma
     assert all(r.from_cache for r in third.translated)
 
 
-def test_a_window_is_told_of_the_missing_line_alone(sample_page, settings):
+def test_a_window_is_shown_the_held_lines_at_once_and_reads_the_missing_line_alone(sample_page, settings):
     never = JA_TEXTS[0]
     tr = Unreliable(EN_TEXTS, never=[never])
     pipeline = _pipeline(settings, tr)
     pipeline.process(sample_page)
+    held = sorted(b.text for b in pipeline.cache.pages[0].bubbles)
     tr.never.clear()
     events: list[tuple[str, dict]] = []
     pipeline.process(sample_page, events=lambda kind, data: events.append((kind, data)))
-    assert [len(data["boxes"]) for kind, data in events if kind == "regions"] == [1]
-    assert [data["text"] for kind, data in events if kind == "translated"] == [EN_TEXTS[never]]
+    assert [len(data["boxes"]) for kind, data in events if kind == "regions"] == [6]
+    reads = [data["status"] for kind, data in events if kind == "read"]
+    assert reads.count("untranslated") == 1 and reads.count("translated") == 5  # the missing line alone is read
+    lettered = [data["text"] for kind, data in events if kind == "translated"]
+    assert sorted(lettered[:5]) == held and lettered[5:] == [EN_TEXTS[never]]  # the held ones first, at once
     assert [kind for kind, _data in events][-1] == "page"
 
 
