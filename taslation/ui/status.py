@@ -16,7 +16,7 @@ from ..messages import FOLLOW_UPS, JOINER, Message
 from ..pipeline import summary as page_summary
 from ..regions import PageResult
 from ..render.shaping import letter_by_letter
-from . import taskbar, trouble
+from . import status_slot, taskbar, trouble
 from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, band_fraction, band_text,
                      blocking, busy_title, is_notice)
 from .constants import NOTE_MS_PER_CHAR, READER_AFTER_RUN, READING_NOTE_MS, READY, TRANSLATOR_NOTE_MAX_MS, in_a_run
@@ -329,7 +329,9 @@ class StatusMixin:
             self._hide_busy()
 
     def _flush_busy(self, now: float | None = None) -> None:
-        """A job has run for `BUSY_SIGNS_S`: the title and the bar say so (asked from the event pump)."""
+        """A job has run for `BUSY_SIGNS_S`: the title and the bar say so (asked from the event pump). The Reader's
+        status slot is looked at here too (`status_slot.tick`)."""
+        status_slot.tick(self, now)
         if not self.busy or self._busy_signs:
             return
         # a hair of tolerance: a monotonic timestamp plus 0.3 minus the timestamp can round below 0.3
