@@ -2275,6 +2275,18 @@ class LiveViewMixin(BlackViewerMixin):
             early.look = look  # (captured again, the viewer having drawn no frame since)
         early.gate.seen(look.until)
 
+    def _mark_stayed(self, now: float, thumb: np.ndarray | None = None) -> None:
+        """(the recheck) A page confirmed while the frames still changed (``PageGate.settled`` False, `_step`) that a
+        look KEEP_SETTLES times settle_ms after its confirmation still finds on show - no new frame since, or the same
+        picture (*thumb*) - stayed after all: its page is caught behind the reader once turned past (`backlog`)."""
+        taken = self._following.taken
+        gate = taken.gate if taken is not None else None
+        by = getattr(gate, "settled_by", None)
+        if gate is None or getattr(gate, "settled", True) or by is None or now < by:
+            return
+        if thumb is None or not frames_differ(taken.thumb, thumb):
+            gate.settled = True
+
     def _recheck_after(self, op: Operation, now: float) -> None:
         """A page started early, confirmed as *op* settled (`_early_confirm`): looked at once more RECHECK_MS later -
         with the viewer's frames counted, at each new frame until then, so that a sharper frame or another page that
@@ -2763,6 +2775,7 @@ class LiveViewMixin(BlackViewerMixin):
             count = self._frame_count()
             if count is not None and count == op.seq:  # no new frame since the last look: nothing to capture ...
                 if op.phase == "recheck":
+                    self._mark_stayed(now)
                     if self._completion(op, now):
                         return
                     if op.fast_until is not None and now < op.fast_until:
@@ -2840,9 +2853,12 @@ class LiveViewMixin(BlackViewerMixin):
                 return
             early = self._early_of(op)
             if early is not None:
-                # (frames that kept changing for SETTLE_TRIES looks confirm the frame there is: it did not stay, and
-                # its page is never caught once turned past, `backlog`)
+                # (frames that kept changing for SETTLE_TRIES looks confirm the frame there is: it has not stayed, and
+                # its page is caught once turned past only if a look the fixed time from now still sees it - the
+                # recheck, below -, `backlog`)
                 early.gate.settled = not moving
+                if moving:
+                    early.gate.settled_by = now + KEEP_SETTLES * settle_s
                 if self._early_confirm(op, now):
                     return  # (the page started on its first frame goes on: kept, and asks the model now)
             if op.over_job and not op.redo and self.busy and self._on_job_page(image):
@@ -2875,6 +2891,7 @@ class LiveViewMixin(BlackViewerMixin):
         taken = f.taken  # "recheck"
         if taken is None:
             return
+        self._mark_stayed(now, thumb)
         if frames_differ(taken.thumb, thumb):  # another page meanwhile: followed until it settles
             # (while the page taken is being translated, its job goes on until this frame has stayed as it is for
             # LEFT_PAGE_MS, as for a turn `_look_over_job` sees: it cancels it then - before, it did at once, and a

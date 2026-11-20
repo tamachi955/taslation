@@ -8,10 +8,11 @@ stayed as it is for KEEP_SETTLES times settle_ms counted from the look (`ui.live
 `pipeline.PageGate` confirmed - and whose confirmation lasts for good (`PageGate.sealed`: the time a viewer that draws a
 page soft first may still take it back is over). On such a viewer a frame that looked soft (`PageGate.soft`) is never
 caught; nor is a frame confirmed while the frames still changed (``PageGate.settled`` False: the window confirms the
-frame there is once the frames have kept changing for its SETTLE_TRIES looks, pages flipped through without a stop),
-nor a page whose job had no gate (a page the window took as settled), nor one over the caps. A page that is
-not caught is as it was before there was a backlog: the lines answered by then stay stored, and the page is read and
-asked for the rest when the viewer shows it again (`Pipeline._complete_page`).
+frame there is once the frames have kept changing for its SETTLE_TRIES looks, pages flipped through without a stop)
+unless a look of the window's KEEP_SETTLES times settle_ms after then still saw it (``PageGate.settled_by``: the recheck
+RECHECK_MS after the confirmation), nor a page whose job had no gate (a page the window took as settled), nor one over the caps. A
+page that is not caught is as it was before there was a backlog: the lines answered by then stay stored, and the page
+is read and asked for the rest when the viewer shows it again (`Pipeline._complete_page`).
 
 What is kept of a page caught, in memory only and never written anywhere: when the job had read every page unit it
 reads (`PageWork.read_all`), the text and geometry of what is still to translate (`Pipeline.scanned_of`, a
