@@ -222,6 +222,28 @@ def pump_soon(window: Any) -> None:
     window._events_job = window.after(EVENTS_BUSY_MS, window._poll_events)
 
 
+def prepare_layout_code(settings: Any) -> threading.Thread | None:
+    """At the window's start, while the OCR model loads: the layout model's code imported on a thread of its own when
+    *settings* use the model (`pipeline.layout_wanted`; `layout.prepare`: nothing is loaded, no GPU memory taken), so
+    that a page turned as the window becomes ready does not wait for that import in its detection, where no cancel
+    reaches it: 4.4 s of the 5.2 s such a page waited on the stand-in viewer, its first bubble 7.1 s after the turn, and
+    a frame dropped meanwhile kept the worker from the next one as long. The weights still load where they did (the
+    first page that needs the model, or the warm-up once Ollama's load is over: `_load_at_start`). The thread."""
+    def run() -> None:
+        try:
+            from ..detect import layout
+            from ..pipeline import layout_wanted
+
+            if layout_wanted(settings):
+                layout.prepare()
+        except Exception:  # noqa: BLE001 - only a matter of speed: the first page imports it
+            pass
+
+    thread = threading.Thread(target=run, name="taslation-layout-code", daemon=True)
+    thread.start()
+    return thread
+
+
 def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]]:
     """The OCR model of *settings* loaded in a thread of its own, and one crop read by each of its readers
     (`first_reads`); what is returned waits for that, and gives the readers (None when they did not load) and what
@@ -422,6 +444,7 @@ class JobsMixin:
 
         s = self.settings
         readers = load_readers(s)
+        prepare_layout_code(s)  # (beside the OCR model's load: the CPU's work alone)
         self._ollama = OllamaStarter(s.ollama_url,
                                      lambda: self._post("status", key="Starting the translation program..."),
                                      state_dir=s.state_dir, own=own_models(s), settings=s)

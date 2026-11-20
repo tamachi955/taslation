@@ -1939,6 +1939,9 @@ class LiveViewMixin(BlackViewerMixin):
             return
         if f.op is not None and f.op.over_job:
             return  # (a page seen while a job ran, followed until it settles: its follow takes it, not two looks)
+        if f.op is not None and f.op.phase == "settle" and f.op.turned_at is None and self._early_on() and not beside:
+            self._settle_now(f.op)  # (its frame is its follow's to take: started early on it now, a gate of its own)
+            return
         try:
             image = self._capture(win.hwnd)
         except CaptureError as e:
@@ -1964,6 +1967,22 @@ class LiveViewMixin(BlackViewerMixin):
         else:
             self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
                                last_detail=_detail(self, image, self._area_box(image)), image=image)
+
+    def _settle_now(self, op: Operation) -> None:
+        """A look (the models ready, a job gone: `_run_queued`) while *op* follows a frame until it settles: the frame
+        is left to *op*, stepped at once, and - no page started early on it yet - started early on the frame there is
+        (`Operation.redo`: a gate of its own, kept once the frame has stayed KEEP_SETTLES times settle_ms from the look
+        that saw it first). Before, the look took the frame as settled whenever it matched the follow's last capture -
+        tens of ms old when the models became ready just after a turn - and the page job on a soft frame then started
+        with no gate."""
+        if self._early_of(op) is None:
+            op.redo = True
+        if op.job is not None:
+            try:
+                self.after_cancel(op.job)
+            except tk.TclError:
+                pass
+        self._next_step(op, 0)
 
     def _look_over_job(self, win: Any) -> None:
         """A look while a page job runs with Auto on (follow = "events"): at each new frame of the viewer in front

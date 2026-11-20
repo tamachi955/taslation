@@ -7,10 +7,13 @@ loads after it; the window's close ends it. And the setting's row on the Setting
 stand-in Ollama for PLaMo: the machine's own Ollama is never asked anything."""
 from __future__ import annotations
 
+import importlib.machinery
 import json
 import queue
+import sys
 import threading
 import time
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -243,6 +246,89 @@ def test_a_page_that_needs_the_model_meanwhile_waits_for_that_load_and_says_so(w
     assert got == [["A line."]] and _loads(server) == 1  # one load for both
     assert w.model_lines() == ["ollama.loading", "ollama.loaded"]  # the page said the load as its own
     assert "warm page models" in server.log
+
+
+class _SlowLayoutCode(types.ModuleType):
+    """``transformers`` as the layout model sees it, its code slow to import (CODE_S): which thread imported it, when,
+    and the loads of its weights (no file is read, nothing goes to a GPU)."""
+
+    CODE_S = 0.4
+
+    def __init__(self, log: list):
+        super().__init__("transformers")
+        self.__spec__ = importlib.machinery.ModuleSpec("transformers", None)
+        self.log, self.imported_by = log, []
+        self.utils = types.ModuleType("transformers.utils")
+        self.utils.logging = SimpleNamespace(disable_progress_bar=lambda: None)
+
+    def __getattr__(self, name):
+        if name != "RTDetrV2ForObjectDetection":
+            raise AttributeError(name)
+        time.sleep(self.CODE_S)
+        self.imported_by.append(threading.current_thread().name)
+        self.log.append("layout code")
+        log = self.log
+
+        class Net:
+            @classmethod
+            def from_pretrained(cls, *a, **k):
+                log.append("layout weights")
+                return cls()
+
+            def eval(self):
+                return self
+
+            def to(self, device):
+                return self
+
+        self.RTDetrV2ForObjectDetection = Net  # (imported: found at once from now on)
+        return Net
+
+
+@pytest.fixture
+def layout_code(monkeypatch, tmp_path):
+    """The layout model installed (its two files, empty) and its code slow to import (`_SlowLayoutCode`)."""
+    from taslation.config import LAYOUT_MODEL
+
+    pytest.importorskip("torch")  # (the layout model's load imports it: imported here, before anything is timed)
+    folder = tmp_path / "models" / LAYOUT_MODEL.dirname
+    folder.mkdir(parents=True)
+    for name in LAYOUT_MODEL.missing(tmp_path / "models"):
+        (folder / name).write_bytes(b"")
+    code = _SlowLayoutCode([])
+    monkeypatch.setitem(sys.modules, "transformers", code)
+    monkeypatch.setitem(sys.modules, "transformers.utils", code.utils)
+    return code
+
+
+@pytest.mark.page_models
+def test_the_layout_models_code_is_imported_while_the_ocr_model_loads_not_in_the_first_page(window, layout_code):
+    """A page turned as the window became ready waited 5.2 s in its detection on the stand-in viewer - 4.4 s of it
+    the import of the layout model's code, where no cancel reaches the job - and its first bubble came 7.1 s after the
+    turn; a frame dropped meanwhile kept the worker from the next one as long. The start imports that code beside the
+    OCR model's load: the first page loads the weights alone."""
+    from taslation.detect import layout
+
+    w = window(detect_model="on")
+    w._job_init()  # (ready: posted)
+    assert "ready" in [k for k, _d in w.events()]
+    began = time.monotonic()
+    layout.LayoutModel(w.settings.models_dir)._load("cpu")  # the first page's detection loads the model
+    waited = time.monotonic() - began
+    assert layout_code.imported_by == ["taslation-layout-code"]  # imported once, by the start's own thread ...
+    log = layout_code.log
+    assert log.index("layout code") < log.index("layout weights")  # ... before the page's load read the weights
+    assert waited < _SlowLayoutCode.CODE_S  # the page did not wait for the import (at most for what was left of it)
+
+
+@pytest.mark.page_models
+def test_no_layout_code_is_imported_at_the_start_when_the_model_is_not_used(window, layout_code):
+    w = window(detect_model="off")
+    w._job_init()
+    for thread in threading.enumerate():
+        if thread.name == "taslation-layout-code":
+            thread.join(5.0)
+    assert layout_code.imported_by == []
 
 
 def test_with_the_setting_off_the_start_is_as_before_and_the_first_line_loads_the_model(window):

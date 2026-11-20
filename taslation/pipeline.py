@@ -1386,6 +1386,16 @@ class _Either:
         return self.a.is_set() or self.b.is_set()
 
 
+def layout_wanted(settings: Settings) -> bool:
+    """Whether *settings* use the layout model (`Pipeline._build_models`' rule, asked before there is a pipeline: the
+    window's start imports its code ahead, `ui.jobs.prepare_layout_code`): installed, and detect_model "on", or "auto"
+    with the erase on the art (``erase_mode`` "fill", `artwork.available`). Nothing is loaded for it."""
+    s = settings
+    if s.detect_model not in ("on", "auto") or not layout_model.available(s.models_dir):
+        return False
+    return s.detect_model == "on" or (s.erase_mode == "fill" and artwork.available(s.models_dir, s.art_erase))
+
+
 class Pipeline:
     def __init__(
         self,

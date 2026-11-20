@@ -62,6 +62,33 @@ def available(models_dir: Path) -> bool:
     return not LAYOUT_MODEL.missing(models_dir) and importlib.util.find_spec("transformers") is not None
 
 
+_CODE_LOCK = threading.Lock()  # (one import of the model's code at a time: the start's ahead, a page's load)
+
+
+def _model_class() -> Any:
+    """The model's class, its code imported once (``transformers``' RT-DETR v2): 4.4 s of the 5.2 s a first load
+    takes on the development machine - the weights 0.5 s, the move to the GPU 0.1 s, the first run 0.4 s -, all of it
+    work for the CPU alone."""
+    with _CODE_LOCK:
+        from transformers import RTDetrV2ForObjectDetection
+
+        return RTDetrV2ForObjectDetection
+
+
+def prepare() -> bool:
+    """The model's code imported ahead (`_model_class`), on the calling thread: nothing is loaded and no GPU memory
+    taken, so it may run beside anything, Ollama's load too. The window's start does it on a thread of its own while
+    the OCR model loads (`ui.jobs.prepare_layout_code`), so that the first page that needs the model pays for its
+    weights and its first run alone (about 1 s): before, a page turned as the window became ready waited 5.2 s in its
+    detection, where no cancel reaches it, and the page after it as long. Never raises: whether it worked."""
+    try:
+        _model_class()
+    except Exception as e:  # noqa: BLE001 - the first page imports it, and says what is wrong
+        LOG.info("the layout model's code could not be imported ahead (%s)", type(e).__name__)
+        return False
+    return True
+
+
 class LayoutModel:
     """The model in *models_dir*, loaded on first use."""
 
@@ -86,15 +113,15 @@ class LayoutModel:
 
     def _load(self, device: str = "") -> None:
         import torch
-        from transformers import RTDetrV2ForObjectDetection
+
+        model_class = _model_class()  # (imported ahead at the window's start: `prepare`)
         from transformers.utils import logging as hf_logging
 
         hf_logging.disable_progress_bar()  # (a window has no console for it)
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._device = device  # (what a failed load has to free)
-        self._net = RTDetrV2ForObjectDetection.from_pretrained(str(self.folder), local_files_only=True,
-                                                               use_safetensors=True,
-                                                               trust_remote_code=False).eval().to(device)
+        self._net = model_class.from_pretrained(str(self.folder), local_files_only=True, use_safetensors=True,
+                                                trust_remote_code=False).eval().to(device)
         self._device = device
 
     def _forward(self, rgb: np.ndarray) -> list[Detection]:
