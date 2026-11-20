@@ -680,20 +680,28 @@ def translate_all(settings: Settings, translator: Any, groups: dict[str, list[op
                   stats: _Stats, log: Any, arm: str = "official",
                   e2e: dict[tuple[str, int], list[dict[str, Any]]] | None = None,
                   sheets: dict[str, Any] | None = None, names: dict[str, dict[str, Any]] | None = None,
-                  dump: Any = None, run: int = 1) -> list[dict[str, Any]]:
+                  dump: Any = None, run: int = 1, warm: bool = False) -> list[dict[str, Any]]:
     """One run of the translation over every series in the *arm* "official" (the rows' ``lines``) or "e2e" (their
     ``e2e_lines``, from *e2e*: the regions of each page, `e2e_items`): copies of *rows* with their scored lines.
     *sheets*: a series sheet per series; *names*: the names of each series (`load_names`); *dump*: a file every
-    line's text goes to (``--dump``)."""
+    line's text goes to (``--dump``); *warm* (page mode): after every page, the warming the window does while the
+    reader reads (`Pipeline.warm_soon`, waited for)."""
     out_rows = [dict(r) for r in rows]
     by_row = {(r["series"], r["page"]): r for r in out_rows}
     translate = translate_series_book if mode == "book" else translate_series_page
+    extra: dict[str, Any] = {}
+    if warm and mode == "page":
+        def warmed(pipeline: Any) -> None:
+            if pipeline.warm_soon() and pipeline._warm_thread is not None:
+                pipeline._warm_thread.join()
+
+        extra["between"] = warmed
     for name, group in groups.items():
         group = [p for p in group if (p.series, p.index) in by_row]
         g = [geos[(p.series, p.index)] for p in group]
         items = ([gold_items(p, geo) for p, geo in zip(group, g)] if arm == "official"
                  else [(e2e or {}).get((p.series, p.index), []) for p in group])
-        outs = translate(settings, translator, name, group, g, stats, log, items, (sheets or {}).get(name))
+        outs = translate(settings, translator, name, group, g, stats, log, items, (sheets or {}).get(name), **extra)
         series_names = (names or {}).get(name)
         for page, page_items, out in zip(group, items, outs):
             row = by_row[(page.series, page.index)]
@@ -924,6 +932,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs", type=int, default=1, help="translate every series N times (default 1); each run is kept")
     ap.add_argument("--seed", type=int,
                     help="Ollama's sampling seed (run k uses SEED + k - 1); default none, a fresh draw every time, as the app")
+    ap.add_argument("--warm", action="store_true",
+                    help="page mode: after every page, the warming the window does while the reader reads "
+                         "(`Pipeline.warm_soon`, waited for)")
     ap.add_argument("--iou", type=float, default=IOU, help="least overlap for a region to count as a gold box")
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR in this file and reuse them (no image)")
     ap.add_argument("--geometry-scan", type=Path,
@@ -1090,7 +1101,7 @@ def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Pat
         else:
             translation = {"model": model_name, "translator": type(tr).__name__, "ollama": tr.version(),
                            "mode": args.mode, "geometry": args.geometry, "target": args.target, "seed": args.seed,
-                           "runs": args.runs, "arms": arms, "sheets": sorted(sheets)}
+                           "runs": args.runs, "arms": arms, "sheets": sorted(sheets), "warm": args.warm}
             if started_server is not None:
                 translation["server_started"] = started_server
             t0 = time.monotonic()
@@ -1109,7 +1120,7 @@ def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Pat
                     t_run = time.monotonic()
                     first_request = len(tr.stats_log)
                     run_rows = translate_all(s, tr, groups, rows, geos, args.mode, stats, log, arm, e2e, sheets, names,
-                                             dump, k + 1)
+                                             dump, k + 1, warm=args.warm)
                     speed = speed_of(tr.stats_log[first_request:])
                     speed["ps"] = _loaded(tr, model_name)
                     speed["s_per_page"] = round((time.monotonic() - t_run) / max(1, len(rows)), 2)

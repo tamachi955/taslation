@@ -3091,3 +3091,151 @@ of it read together. After them: each look asked the server about to be started 
 takes about 2 s to refuse, so the start of Ollama took 10.3 s in the benchmark instead of 4.4 s with "off"; the
 start's looks no longer ask (the same choice; 6.5 s, of which about 2 s are torch's import in a process that had not
 loaded it). The times above are of the translation and of the turns, after the start.
+
+## Where a page's time goes in the window (2026-11-20)
+
+**How it was measured.** The development machine (Intel Core i7-9700F, 48 GB, GeForce GTX 1660 Ti 6 GB, Ollama
+0.40.16, PLaMo 3 Translate 2B Q4_K_M), the window on the stand-in viewer: `tools/standin_e2e.py --scenario c,a,e,w,x
+--start-ollama 11436 --seed 1`, with `--ocr-runs-on gpu` and with `auto`, two runs of each, one after the other. The
+server is the one TASlation starts (the full-size window cache, `LLAMA_ARG_CACHE_RAM=256`, q8_0), on a spare port,
+stopped at the end of each run; the owner's Ollama on 11434 had no model loaded before or after any run. The scenarios:
+turns while the window starts and the model loads (c), slow reading (a: nine turns 6 to 8 s apart, the same waits in
+every run), turning back (e: three turns back and two on, 3 s apart), a whole-book run, then reading beside it and
+after it (w, w2), and requests cancelled in flight (x). A turn counts when the page stays 2 s or more (31 or 32 a run);
+the first bubble and the finished page are timed from the stand-in's sharp frame. The tool records each page job's
+stages, the requests computed in full and why, the cuts of the earlier pairs, the pages come back to and the page after
+a run (`fd1fb87`).
+
+**The split.** The slow reading's pages that the model translated, 0.6.1 (21e454c), the median of each stage:
+
+| stage | OCR on the GPU (14 turns), ms | "auto" (12 turns), ms |
+|---|---|---|
+| the sharp frame to the job's start (the look, the frame's gate) | about 290 | about 290 |
+| page fingerprint | 52 | 52 |
+| detection | 180 | 174 |
+| OCR | 564 | 1,104 |
+| the first request (its prompt / its answer) | 114 (68 / 31) | 109 (69 / 30) |
+| its answer to the lettered bubble | 90 | 84 |
+| **the first lettered bubble** | **1,305** | **1,828** |
+| the page's requests (prompts / answers) | 2,089 (978 / 1,031) | 2,329 (1,104 / 1,010) |
+| the spread's second page read, between its requests | 324 | 1,024 |
+| rendering | 401 | 364 |
+| **the page finished** | **4,467** | **5,113** |
+
+Up to the first bubble the OCR is the largest part (43 % on the GPU; 60 % with "auto", where on this card two of the
+readers read on the processor); the model's first request is a tenth of a second. Three things made a turn slower than
+this: after a whole-book run the model had been released, so the next untranslated page waited for its load (first
+bubble 4.1 to 4.4 s, the page finished in 11.9 to 12.9 s); a first request computed in full, one or two a run (3.4 to
+4.1 s after a run, the load included; 1.1 s where the earlier pairs were cut back to the newest 20); and a page left
+before its end and come back to, whose request's lines were all asked again (11 requests, 1.2 to 1.7 s).
+
+**Three changes**, one commit each, kept because the runs after it (the same scenarios and seed) show the gain:
+
+* `45893f7`: after a whole-book run in the window the model stays loaded when Auto goes back on, as after a page
+  translated one by one (`ollama_keep_alive`, "5m"); with Auto off it is released at once, and the `taslation`
+  commands release it at their end, as before. It was released at the end of `BatchReader.run` (the model "is not
+  needed again until a page is"), which a whole-book run in the window shares with the commands. Nothing else is held:
+  the GPU budget of the OCR readers' placing rule already counts the model loaded (`place`), and a run's model is the
+  one a page loads.
+* `a0ef427`: while the reader reads and nothing is translated, the window has the server compute the beginning of the
+  next page's first request (the premises and the pairs it will be given) when the server may hold none of it - after
+  a cut, a request beside the page's, a cancelled one: `PlamoTranslator.warm_prefix`, from `Pipeline.warm_soon`. What
+  the server may hold is the translator's last 16 prompts, each grown in place (a cancelled one's too: the server
+  finishes a prompt it was sent), none after a load; when one covers that beginning nothing is sent. Otherwise steps of
+  at most 128 tokens (about 0.2 s each), each extending the one before and ending on an element, with the very options
+  a line sends and one token asked for; nothing is drawn or kept. Any request, the next page and a release stop it
+  between two steps; only for a model held wholly on the GPU; never during a whole-book run or while a job runs.
+* `c16311b`: a page the reader turns away from (the window's cancel then: `pipeline.turn_away`; Stop and Esc keep
+  nothing, as before) keeps the lines answered by then, set as a page done whole sets them, the earlier pairs grown with
+  them as the request computed them, and the page is stored marked incomplete: coming back to it, they are lettered at
+  once and only the rest is read and asked for (`_keep_answered`, `_add_completed`). A frame never confirmed keeps
+  nothing (`Provisional`), a sharper picture of the page puts back the entry as it was (`PageWork.replaced`), and a
+  marked page is never shown from memory as if whole.
+
+| code | OCR | first lettered bubble, ms (median / p90 / slowest) | page finished, ms (median / p90 / slowest) | finished before the next turn | first requests computed in full (ms) | the page come back to: requests (asked again, ms) | the first page after a run: first bubble / finished, ms | requests |
+|---|---|---|---|---|---|---|---|---|
+| 0.6.1 | GPU | 1,130 / 2,256 / 4,353 | 2,634 / 8,495 / 12,868 | 19 of 32 | 2 of 13: 4,094, 1,139 | 11 (11, 1,295) | 4,300 / 12,868 | 238 |
+| 0.6.1 | GPU | 1,084 / 2,279 / 4,357 | 2,631 / 8,442 / 12,693 | 19 of 32 | 2 of 13: 4,069, 1,119 | 11 (11, 1,303) | 4,357 / 12,693 | 238 |
+| 0.6.1 | auto | 1,465 / 3,265 / 6,614 | 2,324 / 11,770 / 12,060 | 16 of 32 | 2 of 12: 3,421, 1,131 | 11 (11, 1,653) | 4,372 / 12,060 | 223 |
+| 0.6.1 | auto | 1,504 / 3,115 / 6,655 | 2,119 / 11,763 / 11,854 | 16 of 32 | 1 of 12: 3,420 | 11 (11, 1,249) | 4,095 / 11,854 | 222 |
+| model kept after a run | GPU | 1,150 / 1,705 / 4,360 | 2,604 / 6,544 / 8,519 | 19 of 31 | 1 of 14: 1,144 | 11 (11, 1,289) | 1,530 / - | 244 |
+| model kept after a run | GPU | 1,084 / 1,717 / 4,266 | 2,682 / 6,625 / 8,429 | 19 of 32 | 1 of 14: 1,120 | 11 (11, 1,337) | 1,530 / - | 244 |
+| model kept after a run | auto | 1,431 / 3,050 / 6,632 | 2,503 / 7,149 / 11,849 | 17 of 32 | 1 of 12: 1,215 | 11 (11, 1,206) | 2,915 / 5,610 | 230 |
+| model kept after a run | auto | 1,452 / 2,843 / 6,486 | 2,388 / 7,277 / 11,568 | 16 of 31 | 1 of 12: 1,121 | 11 (11, 1,685) | 2,752 / 5,482 | 231 |
+| and warming | GPU | 1,103 / 1,701 / 4,331 | 2,631 / 6,597 / 8,487 | 19 of 31 | 1 of 14: 1,005 | 11 (11, 1,295) | 1,583 / - | 244 |
+| and warming | GPU | 1,153 / 1,828 / 4,253 | 2,646 / 6,668 / 8,413 | 19 of 32 | 1 of 14: 741 | 11 (11, 1,314) | 1,644 / - | 243 |
+| and warming | auto | 1,550 / 3,322 / 6,671 | 1,714 / 6,169 / 12,319 | 16 of 32 | 0 of 10 | none | 2,677 / 5,354 | 213 |
+| and warming | auto | 1,474 / 2,933 / 6,681 | 1,828 / 7,244 / 11,919 | 17 of 31 | 0 of 12 | 11 (11, 1,232) | 2,783 / 5,621 | 228 |
+| and the lines kept | GPU | 1,139 / 1,877 / 4,538 | 2,082 / 5,455 / 8,711 | 22 of 31 | 0 of 14 | none | 1,326 / 2,465 | 223 |
+| and the lines kept | GPU | 1,075 / 1,873 / 4,110 | 2,054 / 5,469 / 8,286 | 22 of 32 | 0 of 14 | none | 1,326 / 2,459 | 222 |
+| and the lines kept | auto | 1,468 / 3,205 / 6,617 | 1,802 / 6,575 / 11,862 | 18 of 32 | 1 of 12: 1,160 | 2 (2, 762) | 2,820 / 5,497 | 210 |
+| and the lines kept | auto | 1,473 / 3,142 / 6,817 | 1,830 / 6,211 / 12,066 | 18 of 32 | 1 of 12: 1,160 | 2 (2, 767) | 2,787 / 5,558 | 210 |
+
+The slowest first bubble is in every run the first page after the window's start, while the OCR models load. "-": the
+page was still filling at the next turn.
+
+*The model kept after a run.* The first page after it: the first bubble 1.53 s (GPU) and 2.75 to 2.92 s ("auto")
+instead of 4.10 to 4.37 s, the page finished in 5.5 to 5.6 s ("auto") instead of 11.9 to 12.1 s; the first request
+computed in full there (3.4 to 4.1 s) is gone, the one at a cut (1.1 to 1.2 s) stays; the p90 of a finished page 6.5 to
+7.3 s instead of 8.4 to 11.8 s.
+
+*Warming.* With "auto", no first request was computed in full any more (one before, 1.1 to 1.2 s); with the GPU the one
+left, after a run, came shorter (1,005 and 741 ms against 1,120 and 1,144: a warming the turn stopped after one or two
+steps). The turn to the first page of the cancelled-in-flight scenario ("auto"): the first bubble 1,595 and 1,597 ms
+instead of 2,706 and 2,678, the page finished in 1,846 and 1,828 ms instead of 2,961 and 2,926, its first request 126
+and 109 ms instead of 1,263 and 1,170. Each run warmed 34 to 37 times, 33 to 35 of them sending nothing (the server
+held the beginning), in 20 or 21 steps of 190 ms (median); no first request waited for a step. The OCR stage (median /
+p90 of the rested turns) stayed where it was: GPU 284 / 806 and 297 / 803 ms against 286 / 787 and 289 / 791, "auto"
+358 / 1,949 and 440 / 1,927 against 422 / 2,050 and 430 / 1,896; on the two turns where a step was in flight as the
+reader turned, the detection took 250 and 324 ms instead of 172 to 180 (the card shared with the step). A first version
+that took the server's state after a cancelled request as unknown warmed what the server held already and so kept its
+prompt cache in RAM from giving back the state the next page needed: two first requests a run computed in full (1.2 to
+3.3 s); mended before the commit. `tools/prompt_replay.py --mode page` with the gold answers, with and without
+`--warm`: the 1,421 requests' prompts are the same (one digest), and the first requests of a page that parted from
+the server's state at a cut fell from 25 to 0. With the model's own answers (`--answers live --start-ollama 11436`,
+seed 1) the 369 first requests of a page took 30.4 s of the server's prompt time instead of 61.5 s (0.5 s or more: 2
+instead of 28). The answers are not all the very same, though: the warming has the server compute the same beginnings
+in other batches, and with the same seed an answer can come out otherwise (the first one on page 10 of the first
+series), and the prompts after it with it. `tools/openmantra_eval.py --mode page --warm` (the official arm, seed 1,
+against the same without `--warm`): chrF 41.12 against 41.22, -0.09 [-0.47, +0.23], 162 of the 1,586 lines scored
+otherwise, none untranslated, flagged 2.5 % against 2.6 %: the same kind of change as the full-size window cache's
+above (a request computed on another cache), within what one seed to the next varies.
+
+*The lines kept.* The page come back to (in the turning back, a spread whose second page was left before its end in the
+slow reading): 2 requests instead of 11 (the line whose request was under way at the turn, and its asking again for a
+bare romanisation: 762 and 767 ms instead of 1,232 to 1,314), and the page finished at the first return (1,828 and
+1,868 ms), where before it was still filling at the next turn 2.7 s later and was finished only at the second return
+(2,459 to 2,646 ms). With the GPU the page was even finished before it was left (5,455 and 5,469 ms of the 5.9 s): the
+lines kept of a page left earlier (page 8) moved the cut back to the newest 20 pairs onto page 20's first request,
+which the warming had computed before it, from the middle of page 20's request (1.1 s). With the GPU they also moved a cut
+onto the first request of page 14, which a warming stopped by the turn had computed in part (that prompt 385 ms): the
+first bubble 1,945 and 1,878 ms instead of 1,600 and 1,514, the page finished in 5,356 and 5,227 ms instead of 6,597
+and 6,668. With "auto" they moved a cut onto the first request of page 22, turned to straight from page 20 with no
+time to warm: that turn's first bubble 3,634 and 3,678 ms instead of 2,425 and 2,489. A cut costs the same wherever it
+falls; whether it falls before a page's first
+bubble depends on how many lines the pairs hold, which is now what was translated. Over the runs: pages finished before
+the next turn 22 instead of 19 (GPU) and 18 instead of 16 or 17 ("auto"), requests 222 and 223 instead of 243 and 244,
+and 210 instead of 213 and 228, requests computed in full 3 instead of 6 (GPU) and 5 as before ("auto"). In every run:
+soft frames left in the cache 0, results kept from a frame other than the sharp one 0, stale lettering 0.
+
+**The benchmark.** `tools/openmantra_eval.py --seed 1`, the official arm, whole book, on the server TASlation starts
+(`--start-ollama 11436`), one geometry scan for both, 0.6.1 against the three changes:
+
+| code | chrF | paired difference, 95 % interval | lines with the same chrF | untranslated | flagged | detection F1 | translation |
+|---|---|---|---|---|---|---|---|
+| 0.6.1 | 40.99 | | | 0 | 2.65 % | 97.19 | 295.9 s |
+| the three changes | 40.99 | +0.00 [+0.00, +0.00] | 1,586 of 1,586 | 0 | 2.65 % | 97.19 | 294.4 s |
+
+A whole-book run asks the same requests as before (no warming in a run, no page turned away from), and the shared code
+(the request, the asking again of a bare romanisation) translates every line as it did.
+
+**Not built.** Warming at the window's start: until the first page is recognised neither the book nor its series sheet
+is known, so neither is the beginning of the first request; without a sheet it is the dataset tag and 25 tokens, about
+0.07 s. A cut inside a spread's request (its second page's lines after the cut) cannot be computed ahead without
+changing the prompts.
+
+**Found on the way.** In one run of a first version of the lines kept (which did not keep a line asked again for a bare
+romanisation before the turn), the window's process started 1.4 s later than in the other runs and was ready at 7.74 s instead of 4.8 s, 40 ms
+after the stand-in turned to the third page; the job on that page's soft frame then waited at its gate until
+`GATE_LIMIT_S` (15 s) took the frame as never kept, and the page's first bubble came 21.6 s after its sharp frame. Not
+looked into further; the run is not in the table above.

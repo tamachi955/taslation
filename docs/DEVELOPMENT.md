@@ -76,7 +76,9 @@ python tools/compare_runs.py a.json b.json
 A fixed seed makes a run repeatable, but any setting that changes a prompt (a different detector changes the
 geometry and so the room hints) still draws a different series, so several seeds are still the better measure. With
 only five series the series bootstrap is coarse, and `--geometry gold` keeps detection changes out of a translation
-comparison altogether.
+comparison altogether. `--mode page --warm` translates with the warming the window does between pages
+(`Pipeline.warm_soon`): the prompts stay the same, but the server computes their beginnings in other batches, so a
+fixed seed can still draw some answers otherwise.
 
 ## A setting in the Settings dialog
 
