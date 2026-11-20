@@ -1,6 +1,6 @@
 """DEVELOPER TOOL, NOT PART OF THE APPLICATION: score the OCR of a book against a gold transcription.
 
-A gold file (``ocr_gold.json`` in the book's snapshot folder, see ``dev_snapshots.py``) holds, for every text
+A gold file (``ocr_gold.json`` in the book's snapshot folder, see ``dev_frames.py``) holds, for every text
 region of the saved screens, the lettering as a person transcribed it from the pixels: box, kind, text ("" for a
 region that holds no text) and flags. This tool runs the pipeline's own OCR path over the saved screens, matches
 its regions to the gold items by position, and prints character error rates and counts: nothing of the book's
@@ -10,7 +10,7 @@ text. Night batches can run it after any change to detection or the OCR.
     python tools/ocr_gold.py info --book "<title> 1巻"    # what the gold file holds
     python tools/ocr_gold.py score --book "<title> 1巻" --position-free   # and by text, whatever the box
 
-The gold file is text of a real book: it stays with the snapshots on this machine (``dev_snapshots.py wipe``
+The gold file is text of a real book: it stays with the snapshots on this machine (``dev_frames.py wipe``
 removes the folder) and is never shared. Nothing goes over the network.
 """
 
@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from dev_snapshots import book_dir, screens  # noqa: E402
+from dev_frames import book_dir, screens  # noqa: E402
 from taslation import netguard  # noqa: E402
 from taslation.config import Settings  # noqa: E402
 

@@ -6,7 +6,7 @@ time taken: numbers only. No image is ever written, and nothing of a page's cont
     python tools/page_area.py bench                              # timing on a synthetic 1920x1080 reader capture
     python tools/page_area.py files a.png b.jpg ...              # image files (synthetic or your own captures)
     python tools/page_area.py window --title "<tab> - Google Chrome"    # one capture of a viewer window (Windows)
-    python tools/page_area.py snapshots --book "<title> 1巻"      # the screens dev_snapshots.py saved
+    python tools/page_area.py snapshots --book "<title> 1巻"      # the screens a developer keeps (dev_frames.py)
 
 ``--debug`` adds what was measured (frame levels, viewport, boxes and side states in the 640 px working copy).
 ``snapshots`` also prints the union of the boxes over all screens: the area the app would keep if it follows the
@@ -117,7 +117,7 @@ def _window(args: argparse.Namespace) -> int:
 
 
 def _snapshots(args: argparse.Namespace) -> int:
-    from dev_snapshots import screens
+    from dev_frames import screens
 
     union: list[int] | None = None
     found = missing = 0
@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--title", required=True, help="text in the viewer window's title (`taslation windows` lists them)")
     p.add_argument("--debug", action="store_true")
     p.set_defaults(func=_window)
-    p = sub.add_parser("snapshots", help="run on the screens saved by dev_snapshots.py")
+    p = sub.add_parser("snapshots", help="run on the screens a developer keeps (dev_frames.py)")
     p.add_argument("--book", required=True)
     p.add_argument("--debug", action="store_true")
     p.set_defaults(func=_snapshots)

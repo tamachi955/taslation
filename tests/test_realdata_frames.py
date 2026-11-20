@@ -1,5 +1,5 @@
 """Page units (`fingerprint.analyze`) on real captures of a reader, kept on the developer's machine in
-``~/.taslation/dev-snapshots`` (tools/dev_snapshots.py): never shipped, never copied - the tests read the files in
+``~/.taslation/dev-snapshots`` (tools/dev_frames.py reads them): never shipped, never copied - the tests read the files in
 place and skip unless TASLATION_REALDATA=1 and the files are there. Nothing of a page is printed: the assertions
 compare boxes, counts and shares of pixels.
 

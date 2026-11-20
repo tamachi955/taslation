@@ -21,9 +21,10 @@ release, and are the only code in the repository allowed to write page images to
 
 ## Snapshots of a book's screens
 
-`python tools/dev_snapshots.py` saves the viewer's screens of a book under `~/.taslation/dev-snapshots/<book>/`, so
-that detection and typesetting can be tuned without turning pages in the viewer at every experiment. Nothing is
-saved unless the script runs; `python tools/dev_snapshots.py wipe --all` deletes every snapshot. The snapshots stay
+A developer may keep screens of a book they own under `~/.taslation/dev-snapshots/<book>/` (PNG files and a
+`manifest.json`), so that detection and typesetting can be tuned without turning pages in the viewer at every
+experiment. Nothing in the repository saves them: `tools/dev_frames.py` reads them for the other scripts and the
+gated tests, lists them, and `python tools/dev_frames.py wipe --all` deletes every snapshot. The snapshots stay
 on the development machine: they are pages of a book the developer owns, and they are never copied anywhere,
 committed or attached to a report. A frame that exposes a bug is kept beside a `.json` of the expected facts and read
 by a gated test (`tests/test_realdata_frames.py`, run with `TASLATION_REALDATA=1`).

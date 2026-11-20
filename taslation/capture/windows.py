@@ -1019,8 +1019,8 @@ def key_code(name: str) -> int:
 
 
 def bring_to_front(hwnd: int, timeout: float = 1.0) -> bool:
-    """Give the window *hwnd* the foreground, with an ALT tap of its own when Windows refuses: for the developer's tools
-    only (tools/dev_snapshots.py). The window never uses it: the ALT tap would be a key the person did not press
+    """Give the window *hwnd* the foreground, with an ALT tap of its own when Windows refuses: for a developer's own
+    scripts only. The window never uses it: the ALT tap would be a key the person did not press
     (`give_foreground` hands the foreground over without one)."""
     _require_windows()
     if user32.IsIconic(hwnd):

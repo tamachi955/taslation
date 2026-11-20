@@ -1,5 +1,5 @@
 """The layout and inpainting models on real pages: a volume kept on the developer's machine in
-``~/.taslation/dev-snapshots`` (tools/dev_snapshots.py) and the OpenMantra pages in ``~/.taslation/datasets``. Never shipped,
+``~/.taslation/dev-snapshots`` (tools/dev_frames.py reads them) and the OpenMantra pages in ``~/.taslation/datasets``. Never shipped,
 never copied: the tests read the files in place and skip unless TASLATION_REALDATA=1, the files and the models are there.
 Nothing of a page is printed: the assertions compare counts."""
 
@@ -33,7 +33,7 @@ volume = pytest.mark.skipif(not GOLD, reason="no gold volume in dev-snapshots, n
 
 @pytest.fixture(scope="module")
 def read_volume():
-    from dev_snapshots import screens
+    from dev_frames import screens
     from taslation.ocr import Readers
 
     # (art_erase "lama": both models on any computer, "auto" being "only where torch has a CUDA GPU")

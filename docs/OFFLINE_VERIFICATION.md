@@ -6,7 +6,9 @@ records what changed. It also records practices of the development that the
 program does not do: screens of a book the developer owns were saved on the
 developer's computer to measure against, by a developer's tool that turned
 the viewer's pages (`tools/dev_snapshots.py`, from "Text blocks and the
-drawing around them (2026-10-28)" on),
+drawing around them (2026-10-28)" on; the tool was taken out of the
+repository after version 0.7.0, and `tools/dev_frames.py` only reads what
+was saved),
 and on 2026-10-29 cut-out pieces of those screens were transcribed and judged
 by a cloud model, with the owner's permission ("A cloud model as the judge,
 and a gold set (2026-10-29)"). The program keeps no page image, turns no
