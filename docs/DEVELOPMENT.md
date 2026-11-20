@@ -123,6 +123,17 @@ rows' languages.
   by a longer script that is not in the repository: the real window beside an image viewer the script opened on the
   sample pages, with translator mode's actions sent to TASlation's own widgets (the pointer is drawn in afterwards),
   followed by cards of facts. Both recordings hold CC BY-NC 4.0 material.
+* `tools/intro_video.py` records the README's introduction again from the code its checkout holds (a dev tool, never
+  part of a release). `record --out FILE` runs the real window in English beside a stand-in viewer of its own (a Tk
+  window of a child process showing OpenMantra pages, turned only by the page key the window passes on to it), with
+  the real OCR and PLaMo through an Ollama that TASlation's own starter starts on a spare port (`--start-ollama`, 11438
+  by default; 11434 to 11437 refused) and stops at the end. Its scenes come from a table (`record --list`, `--scenes`),
+  each acted on the window's own Tk widgets with no system-wide input (the pointer is drawn in afterwards); it uses
+  `tools/demo_video.py`'s guard and a scratch state folder, touches no other window, and keeps no page text in the
+  recording. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
+  cards whose figures come from the code's constants - refuses one over 9 MB (`--allow-large`), and deletes the
+  recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
+  4.0 material.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory (`--ahead`: erased ahead first, as a whole-book run leaves them).
 * `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
