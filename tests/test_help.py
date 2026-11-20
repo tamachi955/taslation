@@ -141,8 +141,10 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
             (catalog["Read whole book..."], catalog["Start"]),
         "Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.":
             (catalog["Page"], catalog["Page keys..."]),
-        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings and an error log with no text of a book are kept too, in the folder named in Help > About TASlation.":
+        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings, an error log with no text of a book and the time of the last look for a new version, with the newest version found, are kept too, in the folder named in Help > About TASlation.":
             (catalog["Tools"], catalog["Saved translations..."], catalog["Help"], catalog["About TASlation"]),
+        "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only when you install or update TASlation, when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed, and, only if you turn it on or choose Help > Check for updates..., to look for a new version: then check_update.py, a program of its own, asks GitHub for one small file.":
+            (catalog["Help"], catalog["Check for updates..."]),
         "Green: translated. Orange: not translated, its label says why. Blue: your own rectangle. Red ?: worth a look (Review...).":
             (catalog["Review..."],),
         "Press F11, or the Full screen button, to see the page alone on the full screen, in the role you chose.":
