@@ -35,6 +35,7 @@ from PIL import Image
 
 from .. import bookname, jurisdictions, notice, protect, viewerparts
 from ..annotations import AnnotationStore, GlossaryStore
+from ..backlog import backlog_of
 from ..batch import BatchReader, keep_awake, release_awake
 from ..cache import CacheStore, viewer_key_from_title
 from ..capture import WindowInfo
@@ -1000,9 +1001,10 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._help.render(self._help.wrapped_at, again=True)
 
     def _handle_event(self, kind: str, data: dict[str, Any]) -> None:
-        """A worker's event (`JobsMixin._handle_event`), and then as the indicator beside the page and the Reader's
-        status slot take it (`side.before`, `side.after`: the engine's ``page_on_show`` and ``backlog``, a page that
-        failed or had nothing to read; they never raise)."""
+        """A worker's event (`JobsMixin._handle_event`: normal reading's own go to the indicator beside the page,
+        `SideMixin._on_reading_<kind>`), and then as the Reader's status slot and the updated mark take it
+        (`side.before`, `side.after`: a page that failed or had nothing to read, the cache's words changed; they never
+        raise)."""
         noted = side.before(self, kind, data)
         JobsMixin._handle_event(self, kind, data)
         side.after(self, kind, data, noted)
@@ -1106,6 +1108,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         end_page_job(self)
         if self.batch is not None:
             self.batch.stop()
+        close_backlog(self)
         self._release_model()
         self._target_chosen()
         self._restore_enlarged()
@@ -1138,6 +1141,17 @@ def end_page_job(window: Any) -> None:
     cancel = getattr(window, "_page_cancel", None)
     if cancel is not None:
         cancel.set()
+
+
+def close_backlog(window: Any) -> None:
+    """The window closes: the pages turned past it holds go, and the backlog's thread is let go (`Backlog.close`);
+    pages stored stay stored. Never in the way of the close."""
+    try:
+        backlog = backlog_of(window, make=False)
+        if backlog is not None:
+            backlog.close()
+    except Exception:  # noqa: BLE001 - the window closes whatever happens here
+        pass
 
 
 def last_save(pipeline: Any, window: tk.Misc | None = None) -> None:

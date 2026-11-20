@@ -769,11 +769,8 @@ class StripMixin:
             self.page_strip.show_page(seq)
 
     def _on_page_stage(self, data: dict[str, Any]) -> None:
-        if getattr(self, "_side", None) is not None and not in_a_run(self):  # normal reading: the indicator's
-            from . import side
-
-            side.on_stage(self, data)
-            return
+        """A whole-book run's ``page_stage`` (normal reading's carry ``reading`` and go to the indicator beside the
+        page: `side.SideMixin._on_reading_page_stage`)."""
         model = self._strip_model
         new = model.update(data.get("seq"), data.get("fingerprint", ""), data.get("thumb"), data.get("stage"),
                            data.get("state"))
