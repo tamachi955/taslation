@@ -3329,6 +3329,26 @@ to 3.09 s and 3.73 to 3.92 s on the GPU (three of each); the import thread at be
 meanwhile) and "auto"'s came about 0.4 s later; the page on show then letters 1.6 to 2.1 s (GPU) and 2.5 to 3.0 s
 ("auto") sooner all the same.
 
+*Recorded again for a video, the same day.* `tools/promo_video.py record --turn-at-ready` and `--from-start`
+(`--start-ollama 11436 --ocr-runs-on gpu --layout spread`, 0.7.0 through `--package`), three runs a side, nothing of
+the window held back: the turn came 0.09 to 0.17 s after the window's own "ready", which came 4.5 to 4.8 s after the
+window appeared.
+
+| | 0.7.0 | 0.8.0 |
+|---|---|---|
+| a turn as the window becomes ready: the first bubble, from the stand-in's draw of the page | 8.37, 8.55, 8.42 s | 6.18, 6.29, 6.46 s |
+| the same, from the sharp frame | 8.04, 8.23, 8.09 s | 5.85, 5.96, 6.14 s |
+| the same: the last bubble | 11.39, 11.61, 11.58 s | 9.28, 9.42, 9.49 s |
+| the page on show at the start: the first bubble, from the window's appearance | 14.09, 13.41, 13.43 s | 12.07, 12.19, 11.32 s |
+| the same: the last bubble | 17.58, 16.71, 16.76 s | 15.50, 15.97, 14.69 s |
+
+The gain is 2.1 s here (25 % of the time to the first bubble), not the 4.5 s of the trace above. Why the two differ
+is not established. In these recordings the Ollama that TASlation started was still loading the translation model as
+the turn came, and both versions waited for it; the trace's turn came later in the start. The page on show at the
+start is 1.5 to 2 s slower here on both sides than in the table above, perhaps for the recorder's own load (about
+14 pictures a second); that is not established either. What a person who turns at once will see is nearer to this
+table.
+
 *The same wait at other moments.* The import is paid once in a process, now at the start. The weights (0.65 s, no
 cancel there either) load again on the first page after anything that lets the page models go, which happens before
 every load of the translation model: after the keep-alive ran out, "Release the model now", Auto off after a

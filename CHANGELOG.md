@@ -9,9 +9,10 @@ Speed and memory
 
 * The page on show when you start TASlation, and a page you turn to just as the window becomes ready, get their first
   bubble sooner: the code of the model that finds the bubbles now loads while the Japanese reader loads, not when the
-  first page needs it. On the test computer the first page's first bubble comes 1.6 to 3.0 seconds sooner, and a page
-  turned to right at the start after 2.6 seconds instead of 7.1. With the OCR on "auto" the window says it is ready
-  about 0.4 seconds later.
+  first page needs it. On the test computer the first page's first bubble comes 1.3 to 3.0 seconds sooner, and a page
+  turned to right as the window becomes ready after 6.3 seconds instead of 8.4 (recorded with TASlation starting
+  Ollama itself; in a trace with the turn forced 40 ms after "ready", 2.6 seconds instead of 7.1). With the OCR on
+  "auto" the window says it is ready about 0.4 seconds later.
 * On a viewer that draws a page blurred first, TASlation no longer starts reading the blurred picture: it waits for
   the sharp one (a page with little on it no longer than it always waited). On those turns the first bubble comes
   about 0.1 to 0.2 seconds sooner.
