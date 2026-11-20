@@ -730,6 +730,26 @@ def test_a_page_the_window_saw_sharp_is_judged_by_its_own_sharp_picture(setup):
     assert not w._looks_soft(_page(8, size=(600, 720)))  # another size: as before
 
 
+def test_the_pages_own_picture_only_adds_soft_frames(setup):
+    """A page's own sharp picture as the window kept it may pass a frame the viewer's pictures of all pages call soft
+    (the picture kept was itself little crisper than the soft one: scenario t of the stand-in, the page then lettered
+    on its soft picture from the cache): such a frame stays soft. The page's own picture only finds soft frames the
+    viewer's pictures pass."""
+    w = setup.make(owner="viewer")
+    for seed in range(1, 6):  # the viewer draws soft first, its pictures of these pages what all are judged by
+        w._drew_soft(_page(seed, soft=3), _page(seed))
+    size = (540, 720)
+    frame = _page(8, soft=3, size=size)
+    w._drew_soft(_page(8, soft=4, size=size), _page(8, soft=3, size=size))  # its "sharp" picture: as soft
+    f = w._following
+    crisp = live._crisp(w, frame, w._area_box(frame))
+    units = live._units(w, frame, w._margins_of(frame))
+    assert f.sharp_pages.judge(units[0].fingerprint, frame.size, crisp, 36) is True  # its own page passes it
+    assert not batch.looks_sharp(crisp, f.soft, f.sharp)  # the viewer's pictures do not
+    assert w._looks_soft(frame)
+    assert not w._looks_soft(_page(8, size=size))  # its sharp picture: sharp by both
+
+
 def test_a_frames_thumbnail_from_its_pixels_is_the_batchs_own():
     """The live view takes a frame's pixels out of the picture once (`live.FrameFacts`) and makes its thumbnail from
     them (`live.thumbnail_of`): the very values `batch.thumbnail` gives, which the whole-book run and the pages kept
