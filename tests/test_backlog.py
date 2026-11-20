@@ -347,18 +347,59 @@ def _entry(b: Backlog, sight: int, kind: str) -> Entry:
     return e
 
 
-def test_reads_come_first_in_the_order_of_first_sight_then_translations_in_story_order():
+def _done_with(b: Backlog, what: str, e: Entry) -> None:
+    """*e* as the step *what* leaves it: read (or made) - its units to translate -, or translated - gone."""
+    if what in ("read", "make"):
+        e.frame = e.raw = e.regions = None
+        e.units = []
+    else:
+        b.entries.remove(e)
+
+
+def test_the_page_nearest_the_reader_ahead_of_it_comes_first_with_all_it_needs_before_the_next():
     b = Backlog(lambda kind, **data: None)
-    t3, t1 = _entry(b, 3, "units"), _entry(b, 1, "units")
-    r5, r2 = _entry(b, 5, "frame"), _entry(b, 2, "frame")
-    m4 = _entry(b, 4, "regions")
+    for sight, kind in ((1, "units"), (2, "frame"), (5, "frame"), (6, "regions"), (8, "units")):
+        _entry(b, sight, kind)
+    b.screens = [e.screen for e in b.entries]
+    here = Screen(4, "f" * 80, 0.7, seq=4)  # (the page on show: none of the backlog's entries)
+    b.screens.append(here)
+    b.show(here)
     order = []
-    for _ in range(5):
+    while b.entries:
         what, e = b._next()
         order.append((what, e.screen.sight))
+        _done_with(b, what, e)
+    # (ahead of the reader first, each page read then translated before the next; then from the smallest of all)
+    assert order == [("read", 5), ("translate", 5), ("make", 6), ("translate", 6), ("translate", 8),
+                     ("translate", 1), ("read", 2), ("translate", 2)]
+
+
+def test_the_choice_is_made_again_at_every_step_where_the_reader_is_now():
+    b = Backlog(lambda kind, **data: None)
+    entries = {sight: _entry(b, sight, "frame") for sight in (2, 3, 7, 8)}
+    b.screens = [e.screen for e in b.entries]
+    on_show = {sight: Screen(sight, f"{sight:080x}", 0.7) for sight in (1, 6)}
+    b.screens.extend(on_show.values())
+    b.show(on_show[1])
+    what, e = b._next()
+    assert (what, e.screen.sight) == ("read", 2)
+    _done_with(b, what, e)
+    b.show(on_show[6])  # (the reader turned to page 6 meanwhile: page 7 is the likeliest next)
+    assert b._next()[1] is entries[7]
+    b.show(None)  # (none of the book's on show: where the reader was last)
+    assert b._next()[1] is entries[7]
+    for e in (entries[7], entries[8]):
         b.entries.remove(e)
-    assert order == [("read", 2), ("read", 5), ("make", 4), ("translate", 1), ("translate", 3)]
-    assert {id(x) for x in (t3, t1, r5, r2, m4)}
+    assert b._next()[1] is entries[2]  # (nothing past the reader: the smallest of all)
+
+
+def test_a_frame_read_by_the_backlog_says_how_long_it_was_held(settings, sample_page):
+    b = Backlog(lambda kind, **data: None)
+    p = _reading_job(settings, b, sample_page, "Waited")
+    _packed(b)
+    assert _drain(p, b) == ["read", "translate"]
+    assert len(b.frame_waits) == 1 and 0 < b.frame_waits[0] < 30 and b.last_frame_wait == b.frame_waits[0]
+    assert b.bytes_held == 0
 
 
 def test_the_window_queues_a_step_only_when_it_is_idle_and_nothing_is_held(settings):
@@ -472,6 +513,82 @@ def test_another_book_a_run_and_another_viewer_window_drop_it_stop_auto_and_a_re
     assert not b.entries and p.cache.pages  # (what is stored stays)
 
 
+def test_a_drop_tells_the_window_at_once_and_the_numbering_starts_at_1_again(settings, sample_page):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    _job(p, b, sample_page, _confirmed())
+    assert b.screens[0].seq == 1 and b.entries
+    told = len(posted)
+    b.drop("another book")
+    after = posted[told:]
+    assert after[0] == ("backlog", {"pages": 0, "lines": 0, "paused": False, "dropped": True, "reading": True})
+    assert after[-1] == ("backlog", {"pages": 0, "lines": 0, "paused": False, "dropped": 0, "reading": True})
+    assert ("page_on_show", {"seq": None, "reading": True}) in after  # (between the two)
+    assert sum(1 for k, d in after if k == "backlog" and d["dropped"] is True) == 1
+    told = len(posted)
+    b.drop("again")  # (nothing there: nothing told)
+    assert posted[told:] == []
+    _job(p, b, sample_page, _confirmed())
+    assert b.screens[0].seq == 1 and _stages(posted[told:])[0] == ("read", "working")
+
+
+def test_nothing_is_told_of_a_screen_dropped_and_none_is_caught(settings, sample_page):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    _job(p, b, sample_page, _confirmed())
+    old = b.entries[0]
+    b.drop("another book")
+    told = len(posted)
+    b.tell(old.screen, "translate", "done")  # (a step of the backlog that ended after the drop)
+    b._finish(old, "translate", "done")
+    b.show(old.screen)
+    b.totals()
+    assert posted[told:] == []
+    assert not b.catch(old.screen, sample_page, None, p, 7) and not b.entries
+
+
+def test_a_step_under_way_at_a_drop_tells_nothing_of_its_page(settings, sample_page):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    _job(p, b, sample_page, _confirmed())
+    assert b.step(p) == "made"
+    p.translator = Blocking(EN_TEXTS)
+    out: list[str] = []
+    thread = threading.Thread(target=lambda: out.append(b.step(p)), daemon=True)
+    thread.start()
+    assert p.translator.waiting.wait(10)
+    b.drop("another book")
+    told = len(posted)
+    p.stop_warm()
+    thread.join(5)
+    assert out == ["stopped"] and not [d for k, d in posted[told:] if k == "page_stage"]
+
+
+class Stopped(DictTranslator):
+    """Answers the first line, then Stop (or the window's close): the page's cancel set, no turn."""
+
+    def translate_page(self, texts, context=(), notes="", upcoming=(), meta=None, on_item=None, cancel=None,
+                       on_slow=None):
+        self.calls.append(list(texts))
+        if on_item is not None and texts:
+            on_item(0, self.mapping.get(texts[0], ""))
+        cancel.set()
+        raise Cancelled()
+
+
+def test_a_page_job_stopped_without_a_turn_leaves_its_page_waiting_never_skipped(settings, sample_page):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Stopped(EN_TEXTS))
+    _job(p, b, sample_page, _confirmed())
+    stages = _stages(posted)
+    assert stages[-1] == ("translate", "waiting") and ("translate", "skipped") not in stages
+    assert not b.entries  # (not caught: Stop ends the page where it is; it is read or asked when shown again)
+
+
 def test_a_whole_book_run_and_another_book_drop_it_in_the_window():
     source = inspect.getsource(__import__("taslation.ui.jobs", fromlist=["x"]))
     assert 'drop_backlog(self, "a whole-book run")' in source and 'drop_backlog(self, "another book")' in source
@@ -487,6 +604,164 @@ def test_no_tracking_in_a_whole_book_run_nor_for_translate_again(settings, sampl
     window.batch = None
     assert tracking_for(window, sample_page, None, again=object()) is None
     assert tracking_for(window, sample_page, None) is not None
+
+
+# ------------------------------------------------------------------ what was read behind the reader, taken again
+def _watch_detect(p: Pipeline, monkeypatch) -> list:
+    detected: list = []
+    real = p._detect
+    monkeypatch.setattr(p, "_detect", lambda rgb: (detected.append(1), real(rgb))[1])
+    return detected
+
+
+def _job_events(p: Pipeline, b: Backlog, image, gate):
+    """`_job`, with the page's fill events kept (kind, data) in the order they came."""
+    seen: list = []
+    real = p.process
+
+    def process(image, **k):
+        k["events"] = lambda kind, data: seen.append((kind, data))
+        return real(image, **k)
+
+    p.process = process
+    try:
+        return (*_job(p, b, image, gate), seen)
+    finally:
+        del p.process
+
+
+def test_a_page_shown_again_takes_what_its_job_had_read_and_reads_nothing(settings, sample_page, monkeypatch):
+    posted, post = _events()
+    b = Backlog(post)
+    ocr = FakeOcr()
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=2), "Lent", ocr=ocr)
+    _job(p, b, sample_page, _confirmed())
+    entry = b.entries[0]
+    assert entry.read and entry.size == sample_page.size and entry.sig and entry.kept_bytes > 0
+    assert all(r.status != "translated" for _u, rs in entry.read.values() for r in rs)  # (as read: copies)
+    stored = {cb.text for cb in p.cache.pages[0].bubbles}
+    calls, detected = ocr.calls, _watch_detect(p, monkeypatch)
+    p.translator = DictTranslator(EN_TEXTS)
+    tracking, work, result, fill = _job_events(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "reused" and not detected and ocr.calls == calls  # (nothing found or read on the frame)
+    page = p.cache.pages[0]
+    asked = [t for call in p.translator.calls for t in call]
+    assert not page.incomplete and len(asked) == len(page.bubbles) - len(stored)  # (only the rest asked)
+    lettered = [d["text"] for k, d in fill if k == "translated" and d.get("text")]
+    assert stored <= set(lettered)  # (the lines stored lettered at once, before what is asked)
+    first_asked = next(i for i, (k, d) in enumerate(fill) if k == "translated" and d.get("text") not in stored)
+    assert all(k != "regions" for k, _d in fill[first_asked:])
+    assert result.translated and not result.error and result.image.size == sample_page.size
+    assert not b.entries and b.bytes_held == 0 and b.lends == {"none": 1, "reused": 1}  # (the first: nothing held)
+
+
+def test_a_page_the_backlog_read_from_its_frame_is_not_read_again_when_shown(settings, sample_page, monkeypatch):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _reading_job(settings, b, sample_page, "LentFrame")
+    _packed(b)
+    assert b.step(p) == "read"  # (its read; its translation not yet)
+    entry = b.entries[0]
+    assert entry.read and entry.units and entry.frame is None and entry.found is None and b.frame_bytes == 0
+    calls, detected = p.ocr.calls, _watch_detect(p, monkeypatch)
+    tracking, work, result = _job(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "reused" and not detected and p.ocr.calls == calls
+    assert not p.cache.pages[0].incomplete and result.translated and not b.entries
+
+
+def test_a_page_turned_to_while_the_backlog_translates_it_shows_what_was_answered_and_asks_the_rest(
+        settings, sample_page, monkeypatch):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Turned to")
+    _job(p, b, sample_page, _confirmed())
+    assert b.step(p) == "made"
+    p.translator = Blocking(EN_TEXTS)
+    out: list[str] = []
+    thread = threading.Thread(target=lambda: out.append(b.step(p)), daemon=True)
+    thread.start()
+    assert p.translator.waiting.wait(10)
+    p.stop_warm()  # (the page turned to: its job comes)
+    thread.join(5)
+    assert out == ["stopped"]
+    stored = {cb.text for cb in p.cache.pages[0].bubbles}
+    detected = _watch_detect(p, monkeypatch)
+    p.translator = DictTranslator(EN_TEXTS)
+    tracking, work, result = _job(p, b, sample_page, _confirmed())
+    asked = [t for call in p.translator.calls for t in call]
+    assert tracking.reuse == "reused" and not detected
+    assert len(asked) == len(p.cache.pages[0].bubbles) - len(stored) and not p.cache.pages[0].incomplete
+
+
+class StopAt(FakeOcr):
+    """Reads *n* regions, then the backlog's step is stopped (a page to read: `Pipeline.stop_warm`)."""
+
+    def __init__(self, pipeline_of, n=1):
+        super().__init__()
+        self.pipeline_of, self.n, self.armed = pipeline_of, n, False
+
+    def read(self, image):
+        text = super().read(image)
+        if self.armed and self.calls >= self.n:
+            self.armed = False
+            self.pipeline_of().stop_warm()
+        return text
+
+
+def test_a_read_stopped_by_a_turn_to_its_page_leaves_its_detection_to_the_page_job(settings, sample_page,
+                                                                                   monkeypatch):
+    posted, post = _events()
+    b = Backlog(post)
+    holder: dict = {}
+    p = _reading_job(settings, b, sample_page, "Half read")
+    ocr = StopAt(lambda: holder["p"], n=p.ocr.calls + 1)
+    p.ocr = ocr
+    holder["p"] = p
+    _packed(b)
+    ocr.calls = p.ocr.calls = 0
+    ocr.n, ocr.armed = 1, True
+    assert b.step(p) == "stopped"
+    entry = b.entries[0]
+    assert entry.found and entry.frame is not None and entry.read == {} and b.wait_stats()["n"] == 1
+    detected = _watch_detect(p, monkeypatch)
+    tracking, work, result = _job(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "partial" and not detected  # (its detection taken, the rest read)
+    assert result.translated and not p.cache.pages[0].incomplete and not b.entries and b.bytes_held == 0
+
+
+def test_a_page_shown_again_is_read_as_ever_at_another_size_or_once_a_setting_changed(settings, sample_page,
+                                                                                      monkeypatch):
+    for change, why in (("size", "size"), ("setting", "settings"), ("units", "units")):
+        b = Backlog(_events()[1])
+        p = _pipeline(settings, Turning(EN_TEXTS, answer=1), f"Again {change}")
+        _job(p, b, sample_page, _confirmed())
+        image = sample_page
+        if change == "size":
+            w, h = sample_page.size
+            image = sample_page.crop((0, 0, w, h - 2))  # (the page, two pixel rows fewer: another capture size)
+            b.entries[0].size = (w, h)
+        elif change == "setting":
+            p._base_settings.white_threshold -= 1
+        else:
+            b.entries[0].page_units[0].box = (1, 1, 2, 2)
+        detected = _watch_detect(p, monkeypatch)
+        p.translator = DictTranslator(EN_TEXTS)
+        tracking, _work, result = _job(p, b, image, _confirmed())
+        assert tracking.reuse == why and detected, change  # (read as ever)
+    b = Backlog(_events()[1])
+    p = _reading_job(settings, b, sample_page, "Still a frame")
+    tracking, _work, _result = _job(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "frame"
+    tracking, _work, _result = _job(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "none"  # (done: nothing held for it)
+
+
+def test_the_regions_kept_count_against_the_cap(settings, sample_page, monkeypatch):
+    b = Backlog(_events()[1])
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Kept capped")
+    monkeypatch.setattr(backlog_mod, "FRAME_CAP_MB", 1e-6)
+    _job(p, b, sample_page, _confirmed())
+    assert not b.entries  # (its regions as read would pass the cap: not caught, as a frame over it is not)
 
 
 # ------------------------------------------------------------------ the events and the window
