@@ -3468,3 +3468,81 @@ on its own; nothing is batched. What else would shorten the OCR's share, and wha
 **Every scenario at the end.** `tools/standin_e2e.py --scenario all --start-ollama 11436 --seed 1` ("auto") on
 `586424e`: exit 0; in every segment stale lettering 0, results from a soft frame 0, wasted requests 0; soft frames
 left in the cache 0, results kept from a frame not the sharp one 0.
+
+## The reading order: a region under another, and art across a gutter (2026-11-20)
+
+**How it was measured.** On the OpenMantra pages, the annotation's order of a page's text taken as the truth, on
+`4bebb97` and with the two commits: `tools/reading_order_eval.py --no-pipeline` (the gold boxes as regions, the panels
+found from them), and the pipeline's own regions before reading (the tool's default, the classical detector; and the
+layout model, `--detect-model auto`), scored on the regions that match a gold box. A page is wholly right when no pair
+of its boxes is out of order; the first box right and the boxes out of place (a page's boxes less its longest run in
+the true order) were scored on the same sequences by a script of the tool's functions. The order after the OCR, as the
+translator gets it (the window's settings: the layout model and the three readers on the GPU), from the scans of the
+two benchmark runs below (`--scan`, in a scratch folder: per page the matched regions read as text in the order handed
+over); which change moved a page there, from the same pipeline on those pages with one change taken out. The finder
+alone: the fastest of five calls on each of the 214 pages, two runs of each code, one after the other. Numbers only.
+
+**A region under another (`9c789d9`).** Inside a panel, and on a page without panels, the rows' order stays, but a
+region under another - the two overlap side to side by more than half the narrower one's width, and its centre is
+lower - comes after it, also where a tall region beside them put the two in one row and the lower one is further
+right, which right first would read first (`bubbles._over`, `_in_rows`): each time, the first region in the rows' order
+with none over it still to come.
+
+**Art across a gutter (`2aa7238`).** A part of a page with no cut, level or slanted, is looked at once more with level
+gutter lines that art may cover for up to a fifth of their length in place of 4 % (`RELAXED_FOREIGN`: a figure that
+breaks the frames across the gutter, effect lines over it), where the run of such lines has a frame along both sides:
+ink within 3 work-scale pixels beyond both of its edges along half of it (`panels.relaxed_cuts`). Measured so first,
+the pass broke one page (boureisougi p36): two panels side by side over a strip with no frame, whose top a bubble
+hanging under the right panel kept with them; the cut between the two ran on past both frames into the strip, and the
+strip's bubble went with the right panel, before the left one's. Now the run must also have ink beyond one edge or the
+other near both of its ends. That test acts on this one page and costs none of the pages the pass puts right; with the
+gold boxes as the lettering the pass cuts 8 times, on 7 of the 214 pages. Not built: frame lines counted as gutter in
+that pass (7 pages better and 2 worse in the study, but the finder's precision 61 %, and the panel box limits the room
+of lettering on the art), a pairwise "right first" rule, columns first inside a panel; the order of the panels, right
+first within a row and the row chaining (without it 12 pages fewer right) are as they were.
+
+| regions | pages | wholly right | first box right | boxes out of place | pairs out of order |
+|---|---|---|---|---|---|
+| gold boxes, panels found: `4bebb97` | 199 | 160 (80.4 %) | 196 | 48 | 88 |
+| the same, a region under another alone | 199 | 162 | 196 | 46 | 85 |
+| the same, art across a gutter alone (without the test at the ends) | 199 | 164 (163) | 196 | 42 (43) | 78 (79) |
+| the same, both | 199 | 165 (82.9 %) | 196 | 41 | 76 |
+| the pipeline's regions before reading, classical detector | 193 | 160 (82.9 %) -> 163 (84.5 %) | 189 -> 189 | 42 -> 38 | 78 -> 71 |
+| the same, the layout model | 197 | 161 (81.7 %) -> 165 (83.8 %) | 194 -> 195 | 46 -> 40 | 87 -> 78 |
+| after the OCR, as the translator gets them | 193 | 159 (82.4 %) -> 163 (84.5 %) | 190 -> 190 | 44 -> 38 | 87 -> 78 |
+
+Per series, pages wholly right (gold boxes / after the OCR): tojime_no_siora 37 -> 40 of 43 / 36 -> 39 of 42,
+boureisougi 12 -> 13 of 31 / 13 -> 14 of 31, balloon_dream 30 -> 31 of 36 / 30 of 34, rasetugari 49 of 50 / 47 of 48,
+tencho_isoro 32 of 39 / 33 of 38. Pages put right on the gold boxes: by the first change tojime_no_siora p4 and p8, by
+the second tojime_no_siora p2 and p8, balloon_dream p4 and boureisougi p11; none worse. After the OCR six pages changed,
+none for the worse: tojime_no_siora p4 and p18 right and boureisougi p12 better by the first change, tojime_no_siora p2
+and boureisougi p11 right and boureisougi p21 better by the second. Before reading, with the layout model, one page went
+wrong (tencho_isoro p25): a candidate that matches no gold box, a box across two bubbles, stood over a third bubble's
+region, which then came after the bubble beside it; the OCR leaves that candidate out, and after the OCR the page is
+right as before.
+
+The finder against the gold panels: 1057 to 1082 panels found, 821 to 839 paired, recall 76.8 to 78.5 %, precision 77.7
+to 77.5 %; its time 9.9 and 10.4 ms a page (mean; median 6.5 and 6.8) to 11.4 and 11.3 (median 7.7 and 7.4); the order
+of a page's regions 0.04 to 0.06 ms. The panels the window finds once the page is read (from the lettering of the
+regions read as text alone; the same pipeline, the second pass on and off in one run): the panel box changes for 31 of
+the 1,590 regions, on 6 pages, 3 of whose order changes; 25 of the 31 are the layout model's lettering on the art, whose
+room `_art_room` grows up to its panel's edge, and that room changes for 3 of them at most (every glyph counted large),
+smaller now, ending at the frame found. Not lettered and looked at.
+
+**The benchmark.** `tools/openmantra_eval.py --seed 1 --start-ollama 11437` (TASlation's own server, KV cache q8_0,
+full window), once on each code: every number the same, and the same 11,218 tokens generated in 1,418 requests.
+Detection F1 97.2 % (P 96.0, R 98.5), 1,590 regions read as text, 1,526 matched; CER 1.9 % (corpus) on the gold boxes,
+1.4 % on the matched regions; chrF 41.0, 1,586 of 1,586 lines translated, 2.6 % flagged. (On the Ollama already
+running on the machine, with its own settings, the same command gave 41.2 and 2.5 % on `4bebb97`: the server
+differs, not the code.) The official arm translates the gold
+text in the gold order, each line set in its matched region's box, mask, text box and lettering box, so neither the
+order nor the panel box reaches it; the order the window hands the translator is the row "after the OCR" above.
+
+*Tests.* `tests/test_detect.py`: a region under another and a little further right, put in one row by a tall one
+beside them, comes after it, mirrored for left-to-right books and inside a panel, while one that overlaps it by less
+than half the narrower width keeps right first. `tests/test_panels.py`: a figure across the gutter between a tall
+panel and two stacked ones is cut there and the order follows the panels, art over more than a fifth of the gutter is
+not; a pale band between two figures with no frame is not cut, the same band with a frame along both edges is; a gutter
+that runs on past both frames into a strip with no frame is not cut, the same gutter where the panels end with their
+frames is. All five fail on `4bebb97`. `test_lettering_on_a_gutter_does_not_hide_it` now draws lettering over more than
+a fifth of the gutter's lines: what it covered before, about 4 %, the second pass now cuts through.
