@@ -3647,3 +3647,157 @@ The window on the stand-in viewer (`tools/standin_e2e.py --scenario all --start-
 this line's tool: c, a, b, d, e, r, t, t2, o, z, w, w2, x, f, f2) ran to its end in 334.5 s with no request
 without an answer, no warning or error in the log, nothing refused by the guard and only the stand-in chosen; the
 server it started was stopped at the end.
+
+## Pages turned past go on being read (2026-11-20)
+
+**What changed.** In normal reading, a page the reader turned past while its job was still at work goes on being read
+and translated from the capture that job read, in memory, while nothing of the page on show runs
+(`taslation/backlog.py`). A page is caught only through its job's gate: confirmed (its frame stayed 0.8 s from the
+window's look), not a frame that looked soft on a viewer seen to draw pages soft first, its take-back time over, and
+not confirmed while the frames still changed unless a look 0.8 s later still found it on show. What is kept: the read
+text and geometry when the job had read the whole screen, else the frame, packed without loss until the backlog's own
+read has read it (at most 256 MB of frames and 1000 page units). The page on show always comes first; a step behind
+the reader stops at the next job (between two regions of a read, between two line requests of a translation, the
+request in flight cancelled) and the lines answered by then are stored. Auto off, Stop and "Release the model now"
+pause it; another book, another viewer window and a whole-book run drop it. Nothing is drawn yet: the window is told
+by events (`page_stage`, `page_on_show`, `backlog`) that the progress display will draw.
+
+**How it was measured.** The development machine of the sections above, a second Ollama server of the tool's own on
+127.0.0.1:11435 (the owner's server untouched), the stand-in viewer with the OpenMantra pages, `--seed 1`, the OCR
+readers placed by "auto" (on this 6 GB card they read on the processor beside the loaded model: every OCR read of
+these runs was on the processor). Scenario k (`tools/standin_e2e.py --scenario k --k-read 10`): at each of three paces
+20 pages flipped past (0.5, 1 and 2 s a page), then a jump back to the first of them and 10 of them read at 8 s a page.
+Five configurations: the stand-in drawing each page soft first (its own soft time) or sharp at once, in the wide window
+(spreads) and in the narrow one (single pages); and the soft wide one with nothing caught (`--k-backlog off`), the
+baseline of the same turns. A run takes 6 to 7 minutes; none overlapped another program's run.
+
+**What is caught.** "Stayed" is the stand-in's own log of how long each flipped page's sharp frame was on show.
+
+| configuration | pace | stayed 0.8 s or more | caught | finished while on show | caught or finished = stayed |
+|---|---|---|---|---|---|
+| soft first, wide | 0.5 s | 0 | 0 | 0 | 20 of 20 |
+| | 1 s | 4 | 2 | 0 | 18 of 20 |
+| | 2 s | 20 | 19 | 1 | 20 of 20 |
+| sharp at once, wide | 0.5 s | 0 | 0 | 0 | 20 of 20 |
+| | 1 s | 20 | 20 | 0 | 20 of 20 |
+| | 2 s | 20 | 19 | 1 | 20 of 20 |
+| soft first, narrow | 0.5 s | 0 | 0 | 0 | 20 of 20 |
+| | 1 s | 3 | 1 | 1 | 19 of 20 |
+| | 2 s | 20 | 18 | 2 | 20 of 20 |
+| sharp at once, narrow | 0.5 s | 0 | 0 | 0 | 20 of 20 |
+| | 1 s | 20 | 16 | 3 | 19 of 20 |
+| | 2 s | 20 | 15 | 5 | 20 of 20 |
+
+The pages of the soft runs that disagree all stayed 800 to 830 ms by the stand-in's log: the window counts the 0.8 s
+from its first look at the frame, which comes 60 to 130 ms after the stand-in drew it (with soft first the sharp frame
+is seen later still), so such a page had stayed 680 to 760 ms from the look. The one page of the narrow sharp run
+that disagrees (the same page in three runs, on show 994 to 1,006 ms) is low in detail: the run's first segments had
+the stand-in draw soft first, the window had learnt that this viewer does, and it took the page's sharp frame for a
+soft one (`_looks_soft`), started it once it had stayed settle_ms, with a gate marked soft (the tool records the gate:
+`soft_gate`) - and such a page is never caught. The same pace alone (`--scenario k1`, other pages) caught 19 and finished 1 of 20, 20 of 20. The
+first run of the soft wide configuration, before `5a44a2c`, caught 2 pages at 0.5 s a page and 4 at 1 s a page that
+had been on show 0.16 to 0.77 s: the live view confirms the frame there is once the frames have kept changing for
+SETTLE_TRIES looks; since `5a44a2c` such a page is not caught (since `37e24b7`, unless a look 0.8 s after that
+confirmation still finds it on show), and no run caught one.
+
+*What every run kept to.* In every run and at every pace: results kept from a frame not confirmed or soft 0 (the
+tool's `kept_from_unsettled_frames`), stale lettering 0, frames held after their read 0, bytes held at the end 0,
+thumbnails at most 96 px high and with a screen's first event only, peak frames held at most 24.8 MB (the cap is
+256 MB), no error logged. Two things the tool counts were seen once each, in the narrow soft run, both from the window
+as it was before: a page job whose frame changed before its confirmation had shown two bubbles and was discarded
+(nothing kept), and a page the backlog had translated was drawn from the cache on its soft picture for 644 ms when
+read back (`_take_at_once` did not find that picture soft); with the backlog more pages come back from the cache, so
+this shows more often.
+
+**The page on show while a backlog exists.** The 30 pages read back of the soft wide configuration, turn for turn
+against the same turns with nothing caught (ms from the stand-in's sharp frame to the first lettered bubble):
+
+| history | median | p90 | slowest | first requests computed in full | paired difference, median / mean |
+|---|---|---|---|---|---|
+| nothing caught | 2,052 | 3,462 | 4,107 | 3 | |
+| story order | 2,141 | 3,083 | 5,043 | 4 | -22 / -53 |
+| order of work | 2,002 | 2,968 | 3,611 | 1 | -66 / -170 |
+
+By pace (median / p90): 0.5 s 2,337 / 3,755 with nothing caught, 2,514 / 2,901 story, 2,281 / 2,968 work; 1 s 2,096 /
+3,462, 2,537 / 3,373, 2,284 / 2,970; 2 s 913 / 2,265, 667 / 1,993, 866 / 2,063. (Pages flipped past at 2 s had their
+first lines answered and stored before the turn, so their first bubble comes from the cache at once in every column.)
+The slow reading of scenario a in the same setting, for reference: 2,837 / 3,235. Ten turns a pace is few: the 188 ms
+of the order of work at 1 s a page (median) is within what one turn moves.
+
+What a turn waits for: a step under way stops at the next job, its request in flight cancelled; the worker was free 3
+to 277 ms after the stop (max per pace and run), and the page's next request waited at the server 2 to 557 ms (max).
+Background requests computed in full: 0 to 9 per pace and run (of 9 to 108), page requests in full 0 to 11 (of 38 to
+167), as with nothing caught (5 to 7).
+
+**History: story order or order of work.** With story order (`backlog.HISTORY` "story"), a page the reader turned away
+from while its job ran and that the backlog then finished behind the reader put its pairs into the middle of the
+reader's history: the reader's next request was computed again from there. On two of the 30 pages read back its first
+prompt took 2.6 and 2.1 s (0.17 and 0.07 s in order of work; "context block" by `prompt_replay.why`), and after the
+flips at 1 s a page the first bubble came 441 ms later (median) than on the same turns with nothing caught, 188 ms in
+order of work. Pages caught ahead of the reader (flipped past, then read back) extend the reader's history in either
+order. OpenMantra, `tools/openmantra_eval.py --mode page --behind 4` (a reader who flips four pages past at a time and
+reads the page after them, the pages behind translated after it):
+
+| arm | chrF | flagged | translated | requests computed again (their prompt time) | prompt time in all | translation time |
+|---|---|---|---|---|---|---|
+| page mode, in order (official) | 41.22 | 2.6 % | 1586 of 1586 | 43 (52.4 s) | 159.9 s | 293.5 s |
+| behind, story order | 40.82 | 2.6 % | 1586 of 1586 | 49 (76.6 s) | 189.8 s | 322.8 s |
+| behind, order of work | 40.90 | 3.0 % | 1586 of 1586 | 47 (70.8 s) | 177.8 s | 312.7 s |
+
+(One run each, seed 1. The official book mode on the same code: F1 97.2, CER 1.9 %, chrF 40.99, 1586 of 1586, 2.6 %
+flagged, 294.8 s - as on `4bebb97`.) Story order gives the pages behind the reader no better translation here (-0.08
+chrF against the order of work, within what one run moves) and costs the server more. The order of work is the default
+(`backlog.HISTORY` "work"); story order stays the internal switch.
+
+**How long the backlog takes.** From the jump back until the backlog held nothing, while the reader read on at 8 s a
+page (the page on show first). The whole-book run of scenario w on the same code took 36.2 s for its 5 screens in the
+wide window, 7.2 s a screen; set beside it, the backlog's screens at most:
+
+| configuration | pace | screens held at most | until empty | its own steps | the whole-book run for as many |
+|---|---|---|---|---|---|
+| soft first, wide | 1 s | 6 | 94.8 s | 23.2 s | 43.4 s |
+| | 2 s | 19 | 115.7 s | 64.7 s | 137.6 s |
+| sharp at once, wide | 1 s | 20 | 123.1 s | 55.9 s | 144.8 s |
+| | 2 s | 19 | 103.5 s | 57.8 s | 137.6 s |
+| soft first, wide, order of work | 1 s | 5 | 91.3 s | 22.8 s | 36.2 s |
+| | 2 s | 20 | 119.6 s | 67.4 s | 144.8 s |
+| soft first, narrow | 2 s | 18 | 45.6 s | 31.9 s | |
+| sharp at once, narrow | 1 s | 16 | 43.6 s | 31.4 s | |
+| | 2 s | 15 | 45.3 s | 33.2 s | |
+
+With 15 to 20 screens caught the backlog was empty after 0.75 to 0.85 times what the whole-book run would take for as
+many (wide; the narrow window's single pages 2.5 to 3.0 s each, the whole-book run not measured there), the reader's
+ten pages read on meanwhile. With few caught (5 or 6 screens, after the flips at 1 s a page with soft first) it took
+2.2 and 2.5 times as long: the reader's own pages come first, and in the wide window a page read back took most of
+its 8 s (none of them came from the cache: the backlog reads the pages it holds in the order they were first seen and
+translates them after, so the reader read them before it got to them). The backlog's own steps took 0.39 to 0.63
+times the whole-book run's time in every wide run.
+
+**A computer without a GPU.** `CUDA_VISIBLE_DEVICES=-1` with `--ocr-runs-on cpu` hides the GPU from TASlation's own
+models but not from Ollama: in that run the model was in video memory. With `--ollama-num-gpu 0` as well (the setting
+`ollama_num_gpu = 0`) everything ran on the processor (the System page: detect, OCR, translation and erase on the
+CPU). Scenario k2 with 6 pages flipped past at 2 s and 3 read back at 30 s a page (`--k-turns 6 --k-read 3
+--k-read-ms 30000 --k-soft off`): 6 of 6 caught, the pages on show finished in 11.2 to 31.6 s, the first bubble of a
+page read back 0.58 to 2.68 s (median 0.74 s), the backlog empty 152.9 s after the jump back (its own steps 80.9 s,
+13.5 s a page), nothing stale, no error. A request took 0.84 s (median), 1.7 s (p90) and 9.8 s at most for a page,
+0.98 / 2.0 / 9.2 s for the backlog; the slowest two were history cuts, computed in full (8.5 and 8.6 s of prompt).
+One step was stopped by a turn: the worker was free 249 ms after, and the page's next request waited 29 ms at the
+server. Whether a turn could wait for a stopped request's prompt on the processor was measured on its own
+(a server of its own, the model on the processor, filler text): a short request sent as the client of a 500- or
+900-token prompt (5.8 s and 12.2 s alone) went away 0.5 or 1.5 s into it took 235 to 265 ms, the same as alone (237
+and 256 ms): Ollama stops a prompt whose client has gone. So a turn waits for one region's read or the cancel of one
+request, a quarter of a second here, not for a step; the steps stay as they are on a computer without a GPU, and the
+backlog works there too, never while the page on show is worked on.
+
+**Every scenario at the end.** `--scenario all` on the final code (332 s, the order of work): every segment with 0
+wasted requests, 0 stale lettering, 0 lettered on a soft frame, 0 soft frames confirmed or left in the cache, no
+error; 60 requests behind the reader; the whole-book run finished its 5 pages; old lettering after a turn at most 379
+ms (2 of 28 turns with no job over 250 ms; 1 of 11 with a job running).
+
+*Tests.* `tests/test_backlog.py` (35): what is caught and what is not (a soft frame, a frame confirmed while the frames
+still changed, a frame that changed before its confirmation, a moment, no gate, the caps), what is kept (the read
+units, or the frame packed until read, then dropped), the order of the work, a step stopped by the next page with its
+answers stored, a page job that ends otherwise giving back what was held for its page, the drops and pauses, the
+events and their handlers, the history (order of work by default, story order on the switch), and the six guarantees
+of the design, one test each. `tests/test_early_start.py`: frames that keep changing confirm the frame there is, which
+is told as having stayed only when a look 0.8 s later still finds it.

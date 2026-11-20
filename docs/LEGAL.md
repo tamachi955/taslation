@@ -43,8 +43,10 @@ What follows is about you and each e-book store.
 * **E-book stores' terms of use**: the terms of use of the large e-book stores are a contract between the reader and the store. Some of them forbid,
   even for private use, copying or translating the content, or limit its use to the store's own software. Breaking the terms is not a crime,
   but your account may be suspended and you may lose your library of purchased books.
-* **You are the one who turns the pages**: TASlation does not turn pages itself. Even when translating the whole book, it reads only the pages you turned;
-  the premise is that you read on by yourself, just as readers in Japan do. That does not, however, settle that there is no problem under a store's terms.
+* **You are the one who turns the pages**: TASlation does not turn pages itself. It reads only what the viewer shows, captured while it shows it.
+  A page the viewer showed long enough to be confirmed (0.8 seconds) may go on being read and translated from that capture after you turn on.
+  A translation is shown only over the viewer's own page, when the viewer shows that page again.
+  The premise is that you read on by yourself, just as readers in Japan do. That does not, however, settle that there is no problem under a store's terms.
   Terms differ from store to store, so check them yourself.
   
 This is a matter separate from copyright law; under copyright law, private copying and translation are allowed (in Japan, Articles 30 and 47-6 below).
@@ -135,7 +137,7 @@ The sources for each country's laws and cases are in [docs/LEGAL_SOURCES.md](LEG
 ## What is left out on purpose
 
 * **Sending anything over the network**: It never sends information outside to translate. Everything is done locally.
-* **Saving page images**: Captured pages, cut-out images and translated pages exist only in memory. There is no "Save image" button and no export command. The page images kept in memory while a whole book is translated are used only to show the page being worked on, as its progress, and to show a page you open in the viewer sooner.
+* **Saving page images**: Captured pages, cut-out images and translated pages exist only in memory. There is no "Save image" button and no export command. The page images kept in memory while a whole book is translated are used only to show the page being worked on, as its progress, and to show a page you open in the viewer sooner. The capture of a page you turned past stays in memory only until its lettering is read (at most 256 MB), and is never shown or saved. What shows how far it is is a thumbnail at most 96 pixels high, too small to read, which also exists only in memory.
 * **Saving the Japanese original**: The cache holds the *translations*, the positions of the bubbles and a 320-bit page fingerprint. The Japanese text is never written to disk. The cache, series-sheet and notes files are saved protected with Windows' own data protection (DPAPI), and only your Windows user on this computer can open them. The window's settings files (ui.json and the like) keep the names of the books you read last, unprotected.
 * **Making the book readable without the viewer**: What the cache holds can be shown only over the real page shown in the viewer, and only when the fingerprints match. The same goes for a whole book translated at once: the pages in memory cannot be paged through and read inside TASlation. Clicking a thumbnail in the page strip below only tells you to open that page in the viewer. It does not let you read without the viewer, because that causes problems, for example where payment depends on what is viewed.
 * **Breaking the viewer's capture protection**: It uses only Windows' ordinary window capture. A window the viewer has made uncapturable shows up black, and TASlation leaves it so. It decrypts nothing, and never touches DRM, file formats or network protocols.
