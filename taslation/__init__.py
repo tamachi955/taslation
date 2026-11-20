@@ -2,9 +2,10 @@
 
 Everything happens on this machine: window capture, text detection, OCR,
 translation (through a local Ollama server) and rendering. Page images only
-ever live in memory; the only thing written to disk is a text-only cache of
-your translations keyed by page fingerprints. See ``taslation.netguard`` for
-how the "nothing leaves the machine" rule is enforced at the socket layer.
+ever live in memory; what is written to disk is text (the translations keyed
+by page fingerprints and what docs/MANUAL.md lists beside them). See
+``taslation.netguard`` for how this program's own network calls are refused
+while it reads.
 """
 
 __version__ = "0.7.0"

@@ -6,7 +6,7 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 
 **A tool for reading your own manga on your own computer, translating as you read**
 
-The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is showing, translates it on this computer, and shows the translation laid over the page. It is a tool that assists a lawful act: translating, to read it, a document you bought for yourself.
+The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is showing, translates it on this computer, and shows the translation laid over the page. In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating it for that use (Article 47-6); [docs/LEGAL.md](docs/LEGAL.md) sums up what 30 countries allow.
 
 ![The TASlation introduction: beside the viewer, a page is translated, corrected, and a whole book is translated](docs/media/taslation-intro.gif)
 
@@ -20,7 +20,7 @@ The pages in the recording are from the [OpenMantra dataset](https://github.com/
 * **Any viewer**: TASlation captures the viewer's window as the screen shows it and lays the translation over that picture. A page key you press in TASlation is passed on to the viewer. It works with every viewer that a screenshot can be taken of.
 * **Fully local**: the reading and the translating happen on this computer, and no page and no translation is sent outside. No model is trained further.
 * **Free**: the author makes no profit from this program. It is free, with no advertising, no donations and no paid version.
-* **Tools for editing a translation**: add, move, resize and turn the regions that are read; rewrite a translation; choose its font, bold and italic; keep a list of names and terms (the series sheet); find and replace. Ctrl+Z takes any change back.
+* **Tools for editing a translation**: add, move, resize and turn the regions that are read; rewrite a translation; choose its font, bold and italic; keep a list of names and terms (the series sheet); find and replace. Ctrl+Z takes back a change to a page or to this book's translations.
 * **Runs on a modest computer**: an NVIDIA GPU with 6 GB of memory is enough. It runs without a GPU too, and translating then takes about 4 times as long.
 
 ## What it does not do

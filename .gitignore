@@ -12,8 +12,6 @@ models/
 taslation.toml
 *.stcache
 *.before-import.*.json
-.claude/launch.json
-.claude/worktrees/
 .kv-cache-by-install
 .cache-ram-by-install
 .ollama-by-install
