@@ -26,8 +26,8 @@ from typing import Callable
 
 from PIL import ImageTk
 
-from .side_model import (BAR_GAP_X, BAR_H, BAR_ROW, BAR_W, CELL_H, LETTER_W, MARKS_W, NOTCH_W, PAD, SideLayout,
-                         SideModel, bar_line, rail_marks, rail_y, run_tip, screen_tip, summary_lines)
+from .side_model import (BAR_GAP_X, BAR_H, BAR_ROW, BAR_W, CELL_H, FRAME, LETTER_W, MARKS_W, NOTCH_W, PAD,
+                         SideLayout, SideModel, bar_line, rail_marks, rail_y, run_tip, screen_tip, summary_lines)
 from .strip import (ANIM_MS, CHOSEN, DONE, EDGE, FAILED, SKIPPED, STRIPE_STEP, STRIPE_W, TEXT, THUMB_BOX, WORKING,
                     CanvasTip, stage_letter)
 
@@ -38,10 +38,10 @@ DIAMOND = 6  # half the updated diamond's width
 ROWS = ("read", "translate")
 
 
-def diamond(canvas: tk.Canvas, cx: float, cy: float, r: float, tags: tuple[str, ...]) -> None:
-    """The updated mark: a diamond *r* px from its middle to each point, edged dark (seen on a page and on the
-    ground)."""
-    canvas.create_polygon(cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy, fill=UPDATED, outline=DARK, width=1,
+def diamond(canvas: tk.Canvas, cx: float, cy: float, r: float, tags: tuple[str, ...], edge: str = DARK) -> None:
+    """The updated mark: a diamond *r* px from its middle to each point, edged dark by default (seen on a
+    thumbnail's page)."""
+    canvas.create_polygon(cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy, fill=UPDATED, outline=edge, width=1,
                           tags=tags)
 
 
@@ -51,13 +51,13 @@ class SideView(tk.Canvas):
 
     def __init__(self, master: tk.Misc, model: SideModel, on_pick: Callable[[int], None], ground: str = "#202020",
                  now: Callable[[], float] = time.monotonic):
-        super().__init__(master, bg=ground, highlightthickness=0, borderwidth=0, takefocus=0,
-                         yscrollincrement=CELL_H // 2)
+        super().__init__(master, bg=ground, highlightthickness=0, borderwidth=0, takefocus=0)
         self.model, self.on_pick, self.now = model, on_pick, now
         self.layout = SideLayout()
         self._photos: dict[int, ImageTk.PhotoImage] = {}
         self._phase = 0
         self._anim_job: str | None = None
+        self._view_job: str | None = None
         self._marks: list = []  # the rail's marks as drawn last
         self._font = tkfont.Font(self, family=tkfont.nametofont("TkDefaultFont").cget("family"), size=8)
         self.bind("<ButtonRelease-1>", self._clicked)
@@ -85,6 +85,9 @@ class SideView(tk.Canvas):
             x0, y0, x1, y1 = layout.box
             self.place(x=x0, y=y0, width=x1 - x0, height=y1 - y0)
             self.redraw()
+            self.keep_in_view()
+            if self._view_job is None:  # (once more when the new size has been applied)
+                self._view_job = self.after_idle(self._view_later)
 
     def _size(self) -> tuple[int, int]:
         x0, y0, x1, y1 = self.layout.box
@@ -143,14 +146,27 @@ class SideView(tk.Canvas):
         if self.layout.kind != "column":
             return
         self.redraw_marks()
-        if seq is None or seq not in self.model.screens:
+        self.keep_in_view()
+
+    def keep_in_view(self) -> None:
+        """The column scrolled so that the screen on show is in view, in its middle where the column can be (not
+        moved when it is in view already); reckoned from the layout's height, so right after a placing too."""
+        seq = self.model.on_show
+        if self.layout.kind != "column" or seq is None or seq not in self.model.screens:
             return
         index = self.model.order.index(seq)
         total = max(1, len(self.model.order) * CELL_H)
-        first, last = self.yview()
-        top, bottom = index * CELL_H / total, (index + 1) * CELL_H / total
-        if top < first or bottom > last:
-            self.yview_moveto(max(0.0, top - (last - first) / 2 + CELL_H / total / 2))
+        _width, height = self._size()
+        first = self.canvasy(0)
+        top, bottom = index * CELL_H, (index + 1) * CELL_H
+        if top >= first and bottom <= first + height:
+            return
+        want = min(max(0, top + CELL_H // 2 - height // 2), max(0, total - height))
+        self.yview_moveto(want / total)
+
+    def _view_later(self) -> None:
+        self._view_job = None
+        self.keep_in_view()
 
     def redraw_marks(self) -> None:
         """The marks that follow the screen on show and the updated ones: every cell's outline, notch and diamond."""
@@ -208,7 +224,7 @@ class SideView(tk.Canvas):
         nx, ny, _a, _b = parts["number"]
         self.create_text(nx, ny, text=str(seq), fill=TEXT, font=self._font, tags=(tag,))
         for stage in ROWS:
-            self._draw_bar(parts[stage], stage, screen.stages[stage], tag)
+            self._draw_bar(parts[stage], stage, screen.state(stage), tag)
         self._draw_cell_marks(index, seq)
 
     def _thumb_box(self, index: int, seq: int) -> tuple[int, int, int, int]:
@@ -283,8 +299,8 @@ class SideView(tk.Canvas):
         for m in marks:
             self._draw_rail_mark(rx, rw, m)
         for m in marks:
-            if m.on_show:
-                self.create_rectangle(rx, m.y0, rx + rw - 1, max(m.y0 + 2, m.y1 - 1), outline=CHOSEN, width=2,
+            if m.on_show:  # round the mark, outside the rail: its own state stays in sight inside
+                self.create_rectangle(rx - FRAME, m.y0 - FRAME, rx + rw, max(m.y0 + 2, m.y1), outline=CHOSEN, width=1,
                                       tags=("rail", "on-show"))
         notch_at = rail_y(marks, self.model.on_show) if self.model.on_show is not None else None
         toward_rail = layout.side == "left"  # (the marks' column is outside the rail: the rail on its right)
@@ -293,9 +309,9 @@ class SideView(tk.Canvas):
             if not screen.updated or seq == self.model.on_show:
                 continue
             y = rail_y(marks, seq)
-            if y is not None:
+            if y is not None:  # (on the ground beside the rail: no dark edge, so that all of its few px are seen)
                 diamond(self, mx + MARKS_W / 2, min(max(y, MARKS_W / 2), height - MARKS_W / 2), MARKS_W / 2,
-                        ("rail", "updated"))
+                        ("rail", "updated"), edge=UPDATED)
         if notch_at is not None:
             y = min(max(notch_at, 5), height - 5)
             if toward_rail:
@@ -351,12 +367,13 @@ class SideView(tk.Canvas):
         self._sync_animation()
 
     def destroy(self) -> None:
-        if self._anim_job is not None:
-            try:
-                self.after_cancel(self._anim_job)
-            except tk.TclError:
-                pass
-            self._anim_job = None
+        for job in (self._anim_job, self._view_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except tk.TclError:
+                    pass
+        self._anim_job = self._view_job = None
         super().destroy()
 
     # ---------------------------------------------------------------- the pointer
@@ -398,7 +415,7 @@ class SideView(tk.Canvas):
             line = run_tip(mark.seqs[0], mark.seqs[-1], mark.mark) if mark is not None else ""
             return line + ("\n" + screen_tip(self.model, seq) if mark is not None and len(mark.seqs) == 1 else "") \
                 + "\n\n" + summary
-        return bar_line(part, self.model.screens[seq].stages[part])
+        return bar_line(part, self.model.screens[seq].state(part))
 
     def _clicked(self, event: tk.Event) -> None:
         seq, _part = self.at(event.x, event.y)
@@ -406,5 +423,9 @@ class SideView(tk.Canvas):
             self.on_pick(seq)
 
     def _wheel(self, event: tk.Event) -> None:
+        """Half a cell a notch (no scroll increment is set: Tk would round the column's place to it, and the last
+        screen kept in view would lose its bottom)."""
         if self.layout.kind == "column":
-            self.yview_scroll(-1 if event.delta > 0 else 1, "units")
+            total = max(1, len(self.model.order) * CELL_H)
+            step = CELL_H // 2 * (-1 if event.delta > 0 else 1)
+            self.yview_moveto(max(0.0, self.canvasy(0) + step) / total)

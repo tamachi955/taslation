@@ -165,6 +165,14 @@ def side_main(args) -> int:
         app.pipeline.rtl = rtl
         app._side.slot = type(app._side.slot)()
 
+    def busy(frame, progress):  # a job on the page on show, as `StatusMixin._go_busy` starts one
+        app._go_busy()
+        app._busy_shown, app._job_frame, app._fill, app._progress = True, frame, None, progress
+
+    def idle():  # the job done, as the window ends one
+        app.busy, app._job_frame = False, None
+        app._set_busy(False)
+
     def scene(name, wait=700):
         def deco(fn):
             steps.append((name, fn, wait))
@@ -197,10 +205,9 @@ def side_main(args) -> int:
             app._side.model.screens[seq].updated = True
         app._side.view.redraw_marks()
 
-    @scene("05-window-tight-single-rail-kept-clear")
-    def _():
-        size(650, 1000)
-        show(fake_side.page(6))
+    @scene("05-window-narrow-spread-rail-kept-clear")
+    def _():  # (a spread fills the narrow window's width: its exit side is kept clear for the rail)
+        show(fake_side.page(6, True))
 
     @scene("06-window-200-pages-column", wait=1500)
     def _():
@@ -228,13 +235,11 @@ def side_main(args) -> int:
         story(post, pages=6, on_show=6, waiting_from=5)
         frame = fake_side.scribbled(fake_side.page(6), fake_side.bubble_boxes(6))
         show(frame)
-        app.busy, app._busy_shown, app._busy_since = True, True, time.monotonic()
-        app._job_frame, app._fill = frame, None
-        app._progress = Message("pipeline.stage_reading", total=3)
+        busy(frame, Message("pipeline.stage_reading", total=3))
 
     @scene("10-reader-slot-error", wait=600)
     def _():
-        app.busy, app._busy_shown, app._job_frame = False, False, None
+        idle()
         failed = result(6, ["", "", ""], error="made-up failure")
         show(failed.original, failed)
 
@@ -289,14 +294,12 @@ def side_main(args) -> int:
         story(post, pages=12, on_show=12, missed=(10, 11), working=(7,), waiting_from=8)
         frame = fake_side.page(12)
         show(frame)
-        app.busy, app._busy_shown, app._busy_since = True, True, time.monotonic()
-        app._job_frame, app._fill = frame, None
-        app._progress = Message("pipeline.stage_translating", bubbles=3)
+        busy(frame, Message("pipeline.stage_translating", bubbles=3))
 
     if args.full:
         @scene("17-full-screen-single-column", wait=1300)
         def _():
-            app.busy, app._busy_shown, app._job_frame = False, False, None
+            idle()
             settings.theme = "light"
             app._colours_again()
             size(900, 900)
@@ -319,13 +322,11 @@ def side_main(args) -> int:
             settings.side_indicator = "rail"
             frame = fake_side.page(12)
             show(frame)
-            app.busy, app._busy_shown, app._busy_since = True, True, time.monotonic()
-            app._job_frame, app._fill = frame, None
-            app._progress = Message("pipeline.stage_reading", total=3)
+            busy(frame, Message("pipeline.stage_reading", total=3))
 
         @scene("20-full-screen-error-slot", wait=700)
         def _():
-            app.busy, app._busy_shown, app._job_frame = False, False, None
+            idle()
             settings.side_indicator = "column"
             failed = result(12, ["", "", ""], error="made-up failure")
             show(failed.original, failed)
