@@ -968,9 +968,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--behind", type=int, default=0,
                     help="page mode: the pages in the order of work of a reader who flips N pages past at a time and "
                          "reads the page after them, those turned past translated behind the reader (`backlog`)")
-    ap.add_argument("--history", choices=("story", "work"), default="story",
-                    help="with --behind: each request given the pairs of the pages before it in the story (default), "
-                         "or every pair so far in the order of work")
+    ap.add_argument("--history", choices=("story", "work"), default=None,
+                    help="with --behind: each request given the pairs of the pages before it in the story, or every "
+                         "pair so far in the order of work (default: as the app, `backlog.HISTORY`)")
     ap.add_argument("--iou", type=float, default=IOU, help="least overlap for a region to count as a gold box")
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR in this file and reuse them (no image)")
     ap.add_argument("--geometry-scan", type=Path,
@@ -981,6 +981,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dump", type=Path, help="write every line's Japanese, translation and reference here (not printed)")
     ap.add_argument("--out", type=Path, help="results file (default: <root>/results/<date>-<time>.json)")
     args = ap.parse_args(argv)
+    if args.history is None:
+        from taslation.backlog import HISTORY
+
+        args.history = HISTORY
     if args.runs < 1:
         raise SystemExit("--runs must be 1 or more")
     arms = ["official", "e2e"] if args.arm == "both" else [args.arm]
