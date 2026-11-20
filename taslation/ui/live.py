@@ -465,7 +465,7 @@ class Following:
     unseen: bool = True  # the viewer chosen has no picture on the page yet: it is looked at whoever is in front
     # a viewer that has drawn a page soft first (`_drew_soft`): its window, and the `batch.crispness` of the soft
     # pictures it drew and of their sharp ones, what its frames are judged by (`_looks_soft`), and those sharp
-    # pictures' by their pages, what a frame of such a page is judged by first
+    # pictures' by their pages, by which a frame of such a page may be found soft as well
     soft_of: int | None = None
     soft: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
     sharp: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
@@ -2146,9 +2146,11 @@ class LiveViewMixin(BlackViewerMixin):
     def _looks_soft(self, image: Image.Image) -> bool:
         """Whether *image*, a frame of the viewer chosen, is a soft picture of its page by what that viewer has drawn:
         it has drawn a page soft first (`_drew_soft`), and the frame is less crisp than PAGE_SHARP_SHARE of the sharp
-        picture it drew of that very page (`batch.SharpSeen`), or, no such picture seen, its `crispness` is not nearer
-        that of its sharp pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its
-        frames). Never so for a viewer not seen to draw a page soft first: it pays nothing."""
+        picture it drew of that very page (`batch.SharpSeen`), or its `crispness` is not nearer that of its sharp
+        pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its frames). The page's
+        own picture only adds soft frames to those the viewer's pictures find: a soft picture as crisp as
+        PAGE_SHARP_SHARE of its page's sharp one stays soft when they call it so. Never so for a viewer not seen to
+        draw a page soft first: it pays nothing."""
         if not self._draws_soft_first():
             return False
         f = self._following
@@ -2156,9 +2158,8 @@ class LiveViewMixin(BlackViewerMixin):
         units = _units(self, image, self._margins_of(image))
         if units:
             distance = getattr(self.settings, "fingerprint_max_distance", Settings.fingerprint_max_distance)
-            own = f.sharp_pages.judge(units[0].fingerprint, image.size, crisp, distance)
-            if own is not None:
-                return not own
+            if f.sharp_pages.judge(units[0].fingerprint, image.size, crisp, distance) is False:
+                return True
         return not looks_sharp(crisp, f.soft, f.sharp)
 
     def _draws_soft_first(self) -> bool:

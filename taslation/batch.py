@@ -547,9 +547,9 @@ def looks_sharp(crisp: float, soft: Sequence[float], sharp: Sequence[float]) -> 
 class SharpSeen:
     """The `crispness` of the sharp pictures a viewer drew of pages it drew soft first (the live view's,
     `ui.live._drew_soft`), by the fingerprint of the picture's first page unit and the picture's size: a frame of one
-    of those pages is judged by its own page's sharp picture (`judge`), before the viewer's pictures of all pages
-    (`looks_sharp`) - the soft picture of a page with much fine detail can be as crisp as the sharp picture of a page
-    with little. The newest SHARP_SEEN_KEPT pages, in memory only."""
+    of those pages less crisp than its own page's sharp picture (`judge`) is soft, besides those the viewer's pictures
+    of all pages find soft (`looks_sharp`) - the soft picture of a page with much fine detail can be as crisp as the
+    sharp picture of a page with little. The newest SHARP_SEEN_KEPT pages, in memory only."""
 
     def __init__(self, kept: int = SHARP_SEEN_KEPT) -> None:
         self._pages: deque[tuple[str, tuple[int, int], float]] = deque(maxlen=kept)
