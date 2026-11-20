@@ -3,6 +3,20 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.7.0 - 2026-11-20
+
+Speed and memory
+
+* After a whole-book run in the window, the translation model stays loaded when Auto goes back on, so the next
+  untranslated page does not wait for the model to load again: its first bubble comes after about 1.5 seconds instead
+  of 4.3 on the test computer. With Auto off it is released at once, as before.
+* A page you turn away from before it is finished keeps the bubbles translated by then. Coming back, they show at
+  once and only the rest is translated (2 requests instead of 11 on the test pages). Stop and Esc keep nothing, as
+  before.
+* While you read a page, the window has Ollama prepare the beginning of the next page's first request where Ollama
+  does not hold it, so that request does not take a second or more. Nothing is read ahead, and a page turn never
+  waits for it. The requests are the same; the model may word about one line in ten otherwise, at the same score.
+
 ## 0.6.1 - 2026-11-20
 
 Other
