@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -304,6 +305,29 @@ def test_the_gifs_images_are_read_back_with_their_times_and_bytes(tmp_path):
     found = iv.gif_frames(data)
     assert [delay for delay, _size in found] == [100, 250, 400]
     assert sum(size for _delay, size in found) < len(data)
+
+
+def test_a_frame_stores_only_what_changed_and_reads_back_whole(tmp_path):
+    palette = Image.new("RGB", (4, 1))
+    for x, colour in enumerate(((10, 10, 10), (200, 30, 30), (30, 200, 30), (240, 240, 240))):
+        palette.putpixel((x, 0), colour)
+    palette = palette.quantize(colors=4)
+    base = Image.new("RGB", (60, 40), (240, 240, 240))
+    frames = [base.copy() for _ in range(3)]
+    frames[1].paste((200, 30, 30), (5, 5, 15, 15))  # (a bubble lettered)
+    frames[2].paste((200, 30, 30), (5, 5, 15, 15))
+    frames[2].paste((30, 200, 30), (40, 25, 50, 35))  # (the pointer elsewhere)
+    paletted = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f in frames]
+    stored = list(iv.changes_only(iter(paletted)))
+    assert np.array_equal(np.asarray(stored[0]), np.asarray(paletted[0]))
+    assert (np.asarray(stored[2]) != iv.TRANSPARENT).sum() == 100  # (the 10x10 that changed, nothing else)
+    path = tmp_path / "changes.gif"
+    stored[0].save(path, save_all=True, append_images=stored[1:], duration=[100, 100, 100], loop=0, optimize=False,
+                   disposal=1, transparency=iv.TRANSPARENT)
+    with Image.open(path) as gif:
+        for k, expected in enumerate(frames):
+            gif.seek(k)
+            assert np.array_equal(np.asarray(gif.convert("RGB")), np.asarray(expected)), k
 
 
 def write_recording(path: Path, source: iv.MemorySource) -> None:

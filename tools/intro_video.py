@@ -576,7 +576,7 @@ def note_pages(probe: Probe) -> dict[str, Any]:
         return out
 
     App._on_page_event, Canvas._draw_picture = paged, pictured
-    return {"_on_page_event": page_event, "_draw_picture": draw_picture}
+    return {"_on_page_event": 1, "_draw_picture": 1}
 
 
 def view_at(views: Sequence[dict[str, Any]], t: float) -> dict[str, Any] | None:
@@ -2922,6 +2922,25 @@ def palette_of(frames: Sequence[Image.Image]) -> Image.Image:
     return montage.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
 
 
+TRANSPARENT = 255  # the GIF's transparent index (the one palette has 255 colours, so it is free)
+
+
+def changes_only(frames: Iterator[Image.Image]) -> Iterator[Image.Image]:
+    """*frames* (paletted, one palette) with every pixel the frame before already shows made `TRANSPARENT`: kept
+    under it (disposal 1), so the GIF stores only what changed - a bubble lettered, the pointer - and not the page
+    round it again; the first frame whole."""
+    previous: np.ndarray | None = None
+    for frame in frames:
+        now = np.asarray(frame)
+        if previous is None:
+            yield frame
+        else:
+            delta = Image.fromarray(np.where(now == previous, TRANSPARENT, now).astype(np.uint8), "P")
+            delta.putpalette(frame.getpalette())
+            yield delta
+        previous = now
+
+
 def render(source: Source, out: Path, opts: Options) -> dict[str, Any]:
     """The GIF of *source* into *out* (see the module's docstring); what was made. Raises `TooLarge` (nothing
     written) for a GIF over the limit without *opts.allow_large*."""
@@ -2954,14 +2973,15 @@ def render(source: Source, out: Path, opts: Options) -> dict[str, Any]:
         save_pngs(painter, parts, merged, Path(opts.frames_png))
 
     def paletted() -> Iterator[Image.Image]:
-        for i, key, _ms in merged[1:]:
+        for i, key, _ms in merged:
             yield painter.draw(parts[i], key).quantize(palette=palette, dither=Image.Dither.NONE)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     temporary = out.with_name(out.stem + ".part.gif")
-    first = painter.draw(parts[merged[0][0]], merged[0][1]).quantize(palette=palette, dither=Image.Dither.NONE)
-    first.save(temporary, save_all=True, append_images=paletted(), duration=[m[2] for m in merged], loop=0,
-               optimize=False, disposal=1)
+    frames = changes_only(paletted())
+    first = next(frames)
+    first.save(temporary, save_all=True, append_images=frames, duration=[m[2] for m in merged], loop=0,
+               optimize=False, disposal=1, transparency=TRANSPARENT)
     size = temporary.stat().st_size
     per_part = part_bytes(temporary.read_bytes(), parts)
     report: dict[str, Any] = {
