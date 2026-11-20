@@ -1242,7 +1242,18 @@ class PageWork:
         # regions read, ordered and given their rooms, no cache entry before - with those regions (by index)
         self.units: list[fp.PageUnit] = []
         self.needs: set[int] = set()
+        # (with a listener, ``on_units``: copies of the regions as read, before the translation changes them - what a
+        # page turned past keeps, `backlog`)
         self.read: dict[int, tuple[fp.PageUnit, list[TextRegion]]] = {}
+        self.size: tuple[int, int] = (0, 0)  # (the capture's pixel size)
+        # what the backlog read of the page before, the page on show again (`backlog.Backlog.lend`, set by
+        # ``on_units``): by unit index, copies of its regions as read - read, ordered, their rooms shared - that this
+        # job takes in place of a reading of the frame (``lent``: the same regions as kept, never changed: what this
+        # job keeps of them in ``read``); ``found``: the detection of a read the backlog stopped half-way, the units
+        # it had not read read from it
+        self.reuse: dict[int, list[TextRegion]] = {}
+        self.lent: dict[int, list[TextRegion]] = {}
+        self.found: list[TextRegion] | None = None
         # (the window's: called on the worker as the capture's units are known, before anything is asked of the model,
         # and once every unit it reads is read; never raise)
         self.on_units: Callable[["PageWork"], None] | None = None
@@ -2169,9 +2180,17 @@ class Pipeline:
         result.units = list(units)
         timer.lap("fingerprint")
         on_show: PageWork | None = getattr(_ON_SHOW, "work", None) if getattr(_ON_SHOW, "window", False) else None
-        if on_show is not None:  # (the window's page job: what it reads, as it goes, for a page turned past)
+        if on_show is not None:  # (the window's page job: what it reads, as it goes, for a page turned past; what the
+            # backlog read of it before, `reuse`)
             on_show.units = list(units)
+            on_show.size = (int(rgb.shape[1]), int(rgb.shape[0]))
             on_show.told(on_show.on_units)
+        # the page units the backlog read before, as it read them (`PageWork.reuse`): taken in place of a reading of
+        # this frame - nothing found or read on it, the lettering alone goes over it
+        lend = on_show is not None and use_cache and translate
+        reused: dict[int, list[TextRegion]] = dict(on_show.reuse) if lend and on_show is not None else {}
+        found = on_show.found if lend and on_show is not None else None
+        keeps = on_show is not None and on_show.on_units is not None  # (copies of what is read: `PageWork.read`)
         if not units:
             result.notes.append("no page content found in the capture")
             result.timings = timer.timings
@@ -2197,12 +2216,17 @@ class Pipeline:
                 return result
         check_cancel(cancel)
         report(Message("pipeline.stage_finding"))
-        # (`_detect`: a page on show, its units known, and what cancels it: looked at between the detectors)
-        _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel
-        try:
-            regions = self._annotate(rgb, self._detect(rgb), units)
-        finally:
-            _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
+        if reused and all(u.index in reused for u in units):
+            regions: list[TextRegion] = []  # (every unit as the backlog read it)
+        elif found is not None:
+            regions = found  # (the detection of the backlog's read stopped half-way, its regions as found)
+        else:
+            # (`_detect`: a page on show, its units known, and what cancels it: looked at between the detectors)
+            _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel
+            try:
+                regions = self._annotate(rgb, self._detect(rgb), units)
+            finally:
+                _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
         timer.lap("detect")
         check_cancel(cancel)
 
@@ -2217,11 +2241,27 @@ class Pipeline:
 
         plans: list[tuple[fp.PageUnit, list[TextRegion], CachedPage | None]] = []
         for unit in units:
+            page: CachedPage | None = None
+            if unit.index in reused:  # read behind the reader: its regions as read, held to the cache as it is now
+                unit_regions = reused[unit.index]
+                for r in unit_regions:
+                    r.unit = unit.index
+                cached = self._lookup(unit, before) if self.cache is not None else None
+                if cached is not None:
+                    page, distance = cached
+                    self.last_seq = page.seq
+                    unit_regions = self._apply_read(unit, page, unit_regions, rgb, self._areas_of(units, unit),
+                                                    completes(page))
+                    result.cache_hits += 1
+                    result.notes.append(f"unit {unit.index}: cache hit (seq {page.seq}, distance {distance}), read before")
+                else:
+                    result.cache_misses += 1
+                plans.append((unit, unit_regions, page))
+                continue
             unit_regions = [r for r in regions if owners[id(r)] is unit]
             unit_regions = apply_order_hints(order_on_page(rgb, unit.box, unit_regions, self.rtl))
             for r in unit_regions:
                 r.unit = unit.index
-            page: CachedPage | None = None
             cached = self._lookup(unit, before) if use_cache and self.cache is not None else None
             if cached is not None:
                 page, distance = cached
@@ -2236,11 +2276,17 @@ class Pipeline:
         if fill is not None:
             # (a cached page marked as lacking some, which this reading completes - one the reader turned away from
             # before its end among them -: the translations it holds are lettered at once, beside the regions still
-            # to read, which fill in after)
-            held = [r for _unit, unit_regions, page in plans if page is not None and page.incomplete and completes(page)
+            # to read, which fill in after; a unit read behind the reader is told read at once, its translations held
+            # lettered at once too)
+            held = [r for unit, unit_regions, page in plans
+                    if page is not None and (unit.index in reused or (page.incomplete and completes(page)))
                     for r in unit_regions if r.status == "translated" and r.translated_text]
-            fill.announce([r for _unit, unit_regions, page in plans for r in unit_regions
-                           if page is None or (completes(page) and r.status == "unmatched")] + held)
+            done = [r for unit, unit_regions, page in plans if unit.index in reused and (page is None or completes(page))
+                    for r in unit_regions if r.status not in ("translated", "unmatched")]
+            fill.announce([r for unit, unit_regions, page in plans if unit.index not in reused for r in unit_regions
+                           if page is None or (completes(page) and r.status == "unmatched")] + done + held)
+            for r in done:
+                fill.read(r)
             for r in held:
                 fill.read(r)
                 fill.draft(r, r.translated_text)
@@ -2261,6 +2307,22 @@ class Pipeline:
         beside: ReadBeside | None = None  # the next unit of a spread, read while this one is translated
         try:
             for n, (unit, unit_regions, page) in enumerate(plans):
+                if unit.index in reused:  # read behind the reader: nothing read here, the rest of it asked for
+                    if on_show is not None:
+                        lent = on_show.lent.get(unit.index)
+                        on_show.read[unit.index] = (unit, lent if lent is not None else copy.deepcopy(unit_regions))
+                        if on_show.read_all:
+                            on_show.told(on_show.on_read)
+                    asks = translate and (page is None or completes(page))
+                    if asks and n + 1 < len(plans) and plans[n + 1][0].index not in reused:
+                        beside = self._read_beside(rgb, plans, n, fill, cancel)
+                    if asks:
+                        err = self._translate_read(unit, unit_regions, page, report, fill, cancel, on_slow, reuse)
+                        timer.lap("translate")
+                        if err:
+                            result.error = err
+                    all_regions.extend(unit_regions)
+                    continue
                 if page is not None:
                     if completes(page):
                         err = self._complete_page(rgb, unit, page, unit_regions, report, fill, cancel, on_slow,
@@ -2277,12 +2339,13 @@ class Pipeline:
                     self._order_read(rgb, unit.box, unit_regions)
                     self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (each translation's room: its part)
                     timer.lap("ocr")
-                    if on_show is not None:
-                        on_show.read[unit.index] = (unit, unit_regions)
+                    if on_show is not None:  # (as read: copies, with a listener - the translation changes them)
+                        on_show.read[unit.index] = (unit, copy.deepcopy(unit_regions) if keeps else unit_regions)
                         if on_show.read_all:
                             on_show.told(on_show.on_read)
                     if translate:
-                        beside = self._read_beside(rgb, plans, n, fill, cancel)
+                        if not (n + 1 < len(plans) and plans[n + 1][0].index in reused):
+                            beside = self._read_beside(rgb, plans, n, fill, cancel)
                         try:
                             err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
                                                           reuse=reuse if use_cache else None)
@@ -2417,7 +2480,7 @@ class Pipeline:
              fresh: bool = False, cancel: threading.Event | None = None,
              events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True,
              later: list[Callable[[], Any]] | None = None,
-             behind: bool = False) -> PageScan:
+             behind: bool = False, keep: Any = None) -> PageScan:
         """Detect and read a page; keep text and geometry only (the image is not retained). Once *cancel* is set,
         `Cancelled` is raised between regions.
 
@@ -2446,7 +2509,11 @@ class Pipeline:
         erases them ahead).
 
         With *behind* (a page the reader turned past, read from its capture: `backlog`), *cancel* stops it between
-        the detectors too, as it stops a page on show.
+        the detectors too, as it stops a page on show. *keep* (an object, `backlog`) is told the reading as it goes,
+        for a page job that takes it in place of a reading of its own (`PageWork.reuse`): ``units`` (the page units),
+        ``found`` (copies of the regions as detected, before the reading changes them) and ``read`` (by unit index,
+        the unit and its regions once read, ordered and given their rooms, as `process` reads them) - so far, when it
+        is stopped.
         """
         s = self.settings
         report = progress or (lambda _msg: None)
@@ -2466,6 +2533,8 @@ class Pipeline:
                 _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
         else:
             regions = self._annotate(rgb, self._detect(rgb), units)
+        if keep is not None:
+            keep.units, keep.found = list(units), copy.deepcopy(regions)
         owners = self._owners(rgb, regions, units)
         before = _units_before(rgb, s.margins)
         when_kept: Callable[[Callable[[], Any]], Any] = (later.append if later is not None
@@ -2500,6 +2569,8 @@ class Pipeline:
             for gone in left_out or []:
                 stands_for.setdefault(id(gone.repeats), []).append(gone.bbox)
             self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (the room hint: its own part of a room)
+            if keep is not None:
+                keep.read[unit.index] = (unit, unit_regions)  # (read: nothing below changes them)
             scanned = self._scanned_regions(unit_regions, stands_for)
             if fill is not None:
                 for r, kept in zip(unit_regions, scanned):
@@ -2970,6 +3041,61 @@ class Pipeline:
                 raise
         self._add_completed(unit, page, todo)
         return err
+
+    def _apply_read(self, unit: fp.PageUnit, page: CachedPage, read: list[TextRegion], rgb: np.ndarray,
+                    areas: Sequence[BookArea], completes: bool) -> list[TextRegion]:
+        """(a page unit the backlog read, `PageWork.reuse`) The regions *read* behind the reader held to the cached
+        *page* as a live page's are (`_apply_cached`): a region a cached bubble corresponds to takes its translation;
+        with *completes* (a page marked as lacking some, translator mode) the others keep what their reading said -
+        those read as Japanese are what is still to translate -, else they stay unmatched as on a cached page."""
+        status = {id(r): r.status for r in read}
+        regions = self._apply_cached(unit, page, read, rgb, areas)
+        if completes:
+            for r in regions:
+                if r.status == "unmatched" and id(r) in status:
+                    r.status = status[id(r)]
+            self._erase_only(regions)
+            self._order_read(rgb, unit.box, regions)
+        return regions
+
+    def _translate_read(self, unit: fp.PageUnit, regions: list[TextRegion], page: CachedPage | None,
+                        report: ProgressFn, fill: PageFill | None, cancel: threading.Event | None,
+                        on_slow: SlowFn | None, reuse: bool) -> str:
+        """(a page unit the backlog read, `PageWork.reuse`) What is still to translate of its *regions* asked for and
+        stored as a page read on show stores it: added to the cached *page* (`_add_completed`), or the unit stored
+        (`_store_regions`); the lines answered by then kept when the reader turns away. "" or what went wrong."""
+        todo = [r for r in regions if r.status == "untranslated"]
+
+        def store() -> None:
+            if self.cache is None:
+                return
+            if page is not None:
+                self._add_completed(unit, page, todo)
+            elif self._cacheable(regions):
+                self._store_regions(unit, regions)
+
+        try:
+            err = self._translate_regions(regions, report, fill, cancel, on_slow, unit.box, reuse=reuse)
+        except Cancelled:
+            if keeps_answered(cancel):  # (the reader turned away: what was answered by then, `_keep_answered`)
+                store()
+            raise
+        store()
+        return err
+
+    def read_signature(self, units: Sequence[fp.PageUnit]) -> bytes:
+        """What a reading of a capture whose page units are *units* depends on besides its pixels: the settings in
+        force, the reader's annotations of each unit (the areas ignored on every page that apply to it among them),
+        the reading direction, which detectors and which OCR read (`backlog`: a page read behind the reader is taken
+        as read only while this is the same)."""
+        s = self.settings
+        notes = [(self.annotations.lookup(u.fingerprint, u.aspect, s.fingerprint_max_distance)
+                  if self.annotations is not None else None, self._areas_of(units, u)) for u in units]
+        layout = self.layout
+        ocr = self.ocr
+        return signature(s, notes, self.rtl, layout is not None and not getattr(layout, "failed", False),
+                         self._detector_given is None, type(ocr).__name__ if ocr is not None else None,
+                         getattr(ocr, "name", None))
 
     def _add_completed(self, unit: fp.PageUnit, page: CachedPage, todo: list[TextRegion]) -> None:
         """`_complete_page`'s translations of *todo* added to the cached *page*, its mark set while one lacks a

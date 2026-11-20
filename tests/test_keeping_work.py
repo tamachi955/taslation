@@ -289,7 +289,13 @@ def test_a_failed_save_is_said(settings, sample_page, sample_page2, monkeypatch)
     assert p.save_error == "No space left on device" and p.pages_not_saved and cache.dirty
     said = [data for kind, data in w.posted if kind == "status"]
     assert len(said) == 1 and said[0]["values"] == {"error": "No space left on device"}
-    assert w.kinds()[-3:] == ["result", "status", "translate_done"]
+    own = [kind for kind, data in w.posted if not data.get("reading")]
+    assert own[-3:] == ["result", "status", "translate_done"]
+    # (beside them, normal reading's: the page told as it goes, `backlog.Tracking` - its end after the result)
+    reading = [(kind, data.get("stage"), data.get("state")) for kind, data in w.posted if data.get("reading")]
+    assert reading == [("page_stage", "read", "working"), ("page_on_show", None, None), ("page_stage", "read", "done"),
+                       ("page_stage", "translate", "working"), ("page_stage", "translate", "done")]
+    assert w.kinds().index("result") < w.kinds().index("page_stage", w.kinds().index("result"))  # (done: after it)
     # closing the window: one more try, and a warning when it fails too
     warned: list[str] = []
     monkeypatch.setattr(caches, "tell", lambda _parent, text, **_k: warned.append(text))
