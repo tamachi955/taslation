@@ -3,6 +3,16 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.8.1 - 2026-11-20
+
+Reading
+
+* The reading order is right on more pages. A speech bubble under another in the same panel is read after it, even
+  where a tall bubble beside them used to pull it forward; and two panels whose gutter is crossed by a figure or by
+  effect lines are now told apart. On the public sample pages the order the translator gets is wholly right on 163
+  of 193 pages instead of 159, and no page got worse. The order decides which lines the translator sees before a
+  line, and the order in which the bubbles of a page fill in.
+
 ## 0.8.0 - 2026-11-20
 
 Speed and memory
