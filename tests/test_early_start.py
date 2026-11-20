@@ -484,6 +484,42 @@ def test_pages_flipped_faster_than_a_page_is_read_ask_nothing_and_keep_nothing(f
         assert [j.name for j in worker.jobs] == ["1", "p4"]  # nothing started before p4 settled
 
 
+def _flipped(follow, count, stay):
+    """Pages flipped 100 ms apart, *count* of them, the last one on show *stay* s, then a page that stays: the window,
+    its worker and the name of each flipped page's frame by when it came."""
+    w, worker = follow.make()
+    pages = [(0.1 * i, f"f{i}", _page(60 + i)) for i in range(count)]
+    turned = follow.show(*pages, (0.1 * (count - 1) + stay, "after", _page(59)), run=0.1 * count + stay + 2.0)
+    return w, worker, {f"f{i}": turned + 0.1 * i for i in range(count)}, turned + 0.1 * (count - 1) + stay
+
+
+def test_frames_that_keep_changing_confirm_the_frame_there_is_and_say_whether_it_stayed(hidden_root, monkeypatch,
+                                                                                       tmp_path):
+    # (frames that keep changing for SETTLE_TRIES looks: the frame there is confirmed at once, ``settled`` False; told
+    # True as the window first sees another page if it stayed twice settle_ms from that look - a page flipped past
+    # then is caught behind the reader, `backlog`)
+    from taslation.ui.constants import SETTLE_TRIES
+
+    count = int(SETTLE_TRIES * 0.4 / 0.1) + 6  # flipped past for 4.5 s
+    with monkeypatch.context() as patched:
+        _w, worker, came, _left = _flipped(_environment(hidden_root, patched, tmp_path / "a.json"), count, 0.1)
+        hatch = [j for j in worker.jobs if j.gate is not None and j.gate.settled_by is not None]
+        assert hatch, [(j.name, j.gate and j.gate.confirmed_at) for j in worker.jobs]
+        for job in hatch:  # each left 100 ms after it came: not settled
+            assert job.gate.confirmed_at is not None and job.gate.settled is False, job.name
+        first = hatch[0].name
+    stop = int(first[1:]) + 1  # the same flips, stopped at the first frame confirmed so: it stays 1.2 s ...
+    with monkeypatch.context() as patched:
+        _w, worker, came, left = _flipped(_environment(hidden_root, patched, tmp_path / "b.json"), stop, 1.2)
+        job = worker.one(first)
+        assert job.gate.settled_by is not None and job.gate.settled is True  # ... and is told as having stayed
+        assert job.gate.settled_by <= left
+    with monkeypatch.context() as patched:  # ... and one that stays 0.5 s is not
+        _w, worker, came, left = _flipped(_environment(hidden_root, patched, tmp_path / "c.json"), stop, 0.5)
+        job = worker.one(first)
+        assert job.gate.settled_by is not None and job.gate.settled is False
+
+
 def test_pages_flipped_through_each_soft_first_keep_the_last_page_alone(follow):
     w, worker = follow.make()
     frames = []

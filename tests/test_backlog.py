@@ -219,12 +219,18 @@ def test_a_frame_confirmed_while_the_frames_still_changed_is_never_caught(settin
     gate.settled = False
     _job(p, b, sample_page, gate)
     assert not b.entries and not b.pending
+    gate = _confirmed()  # ... but one a look still found on show the fixed time after (`ui.live._mark_stayed`) is
+    gate.settled_by, gate.settled = time.monotonic(), True
+    _job(p, b, sample_page, gate)
+    assert len(b.entries) == 1
 
 
 def test_the_window_says_whether_the_frame_it_confirms_had_stayed():
+    # (tests/test_early_start.py has the window's side: frames that keep changing, then one that stays or not)
     source = inspect.getsource(__import__("taslation.ui.live", fromlist=["x"]))
     at = source.index("early.gate.settled = not moving")
     assert at < source.index("if self._early_confirm(op, now):", at)
+    assert source.count("self._mark_stayed(now") == 2
 
 
 def test_a_page_job_without_a_gate_is_not_caught(settings, sample_page):

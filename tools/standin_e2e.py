@@ -1599,7 +1599,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     from taslation import backlog as backlog_mod
 
     catch_page, backlog_step = backlog_mod.Backlog.catch, backlog_mod.Backlog.step
-    backlog_mod.HISTORY = args.k_history  # (the internal switch: the pairs behind the reader in story order or not)
+    if args.k_history:  # (the internal switch: the pairs behind the reader in story order or not; else as the app)
+        backlog_mod.HISTORY = args.k_history
 
     def caught(self: Any, screen: Any, image: Any, work: Any, *a: Any, **k: Any) -> Any:  # a page turned past
         # (--k-backlog off: nothing is caught - the same turns timed as before there was a backlog)
@@ -3614,9 +3615,11 @@ def run(args: argparse.Namespace) -> int:
             names.remove("x")
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
+    from taslation import backlog as backlog_mod
+
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
-              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "history": args.k_history,
-              "backlog": args.k_backlog == "on"}
+              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow),
+              "history": args.k_history or backlog_mod.HISTORY, "backlog": args.k_backlog == "on"}
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
@@ -4126,11 +4129,17 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
         upto = turns[index[-1] + 1]["soft_t"] if index[-1] + 1 < len(turns) else float("inf")
         back = next((i for i in range(1, len(mine)) if mine[i][0]["why"] == "jump"), len(mine))
         flips, reads = mine[1:back], mine[back:]
-        flip_rows = []
+        flip_rows: list[dict[str, Any]] = []
+        reads_t = reads[0][0]["soft_t"] if reads else float("inf")
         for turn, row in flips:
-            seq = next((r["seq"] for r in shows if turn["soft_t"] <= r["t"] < turn["next_t"] + 400 and r["seq"]),
-                       None)
-            caught = seq is not None and any(c["caught"] and c["seq"] == seq and c["t"] >= turn["soft_t"]
+            # (a screen is told on show once confirmed, which can come just after the next turn: the page before
+            # claims it first)
+            before = flip_rows[-1]["seq"] if flip_rows else None
+            seq = next((r["seq"] for r in shows if turn["soft_t"] <= r["t"] < turn["next_t"] + 400 and r["seq"]
+                        and r["seq"] != before), None)
+            # (caught once turned past: before the screen is on show again, when it is read back)
+            again = next((r["t"] for r in shows if r["seq"] == seq and r["t"] >= reads_t), float("inf"))
+            caught = seq is not None and any(c["caught"] and c["seq"] == seq and turn["soft_t"] <= c["t"] < again
                                              for c in catches)
             # (... or its page finished while it was on show: nothing left to catch)
             done = seq is not None and not caught and any(
@@ -4474,8 +4483,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--k-read", type=int, default=0, help="scenario k: the pages read back after (default: all)")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
-    ap.add_argument("--k-history", default="story", choices=("story", "work"),
-                    help="the backlog's history (`backlog.HISTORY`): the pages before in the story, or the order of work")
+    ap.add_argument("--k-history", default=None, choices=("story", "work"),
+                    help="the backlog's history (`backlog.HISTORY`, default as the app has it): the pages before in "
+                         "the story, or the order of work")
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
