@@ -2246,6 +2246,7 @@ class Pipeline:
                 unit_regions = reused[unit.index]
                 for r in unit_regions:
                     r.unit = unit.index
+                self._take_corrections(unit, unit_regions)  # (a misreading corrected since it was read)
                 cached = self._lookup(unit, before) if self.cache is not None else None
                 if cached is not None:
                     page, distance = cached
