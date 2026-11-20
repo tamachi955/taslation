@@ -72,7 +72,8 @@ from ..messages import Cancelled, Message, message_of
 from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
-from ..pipeline import turn_away
+from ..backlog import drop_backlog, holds_warming, pause_backlog, reading_event, tick as backlog_tick, tracking_for
+from ..pipeline import keeps_answered, turn_away
 from . import area, name_check, updates
 from .attention import tell_run_ended
 from .banner import ScanState, blocking, busy_title, group_digits
@@ -722,6 +723,8 @@ class JobsMixin:
             self.pipeline.glossary, self.pipeline.glossary_text = None, ""
             return True
         current = self.pipeline.cache
+        if current is not None and current.book != book:
+            drop_backlog(self, "another book")
         release = getattr(self.pipeline, "release_page_images", None)
         if current is not None and current.book != book and getattr(self, "batch", None) is None and release:
             release()  # another book: the last run's page pictures go
@@ -770,8 +773,10 @@ class JobsMixin:
                 flush()
 
         work: Any = None
+        tracking: Any = None
         try:
             self._use_model(model, language)
+            tracking = tracking_for(self, image, gate, again, replace_edited)  # (normal reading: `backlog`)
             if not self._ensure_cache(book, model, language):
                 if gate is not None:
                     gate.close()  # (nothing read: the window takes the page as ever once its frame settles)
@@ -785,12 +790,16 @@ class JobsMixin:
             try:
                 with (on_show(gate) if gate is not None and on_show is not None
                       else hold() if hold is not None else nullcontext()) as work:
+                    if tracking is not None:
+                        tracking.attach(work)
                     result = self.pipeline.process(image, progress=lambda m: self._post("progress", text=m),
                                                    complete=complete,
                                                    events=lambda kind, data: self._post(kind, **data), cancel=cancel,
                                                    on_slow=lambda seconds: self._post("slow", seconds=seconds),
                                                    **({"reuse": False} if again is not None else {}))  # (again: all)
             except Cancelled:  # Stop, or a new page: nothing of this page reached the cache (but what a new page keeps)
+                if tracking is not None:  # (turned past: caught by the backlog, or not)
+                    tracking.cancelled(keeps_answered(cancel), work)
                 self._post("page_cancelled", gate=gate, discarded=getattr(work, "kept", True) is False,
                            stored=list(getattr(work, "stored", None) or ()),
                            replaced=list(getattr(work, "replaced", None) or ()))
@@ -806,8 +815,12 @@ class JobsMixin:
                        replaced=list(getattr(work, "replaced", None) or ()))
             if work is not None and getattr(work, "waits", False) and not work.settle(cancel):
                 # (shown, and never confirmed: nothing of it lasts)
+                if tracking is not None:
+                    tracking.cancelled(False, work)
                 self._post("page_cancelled", gate=gate, discarded=True, result=result, stored=[])
                 return
+            if tracking is not None:
+                tracking.finished(result)
             saved()  # (shown first, then saved: before anything else of this job, or another job)
             self._say_failed_save()
             self._look_for_colophon(image, result, book, model, language)
@@ -820,6 +833,8 @@ class JobsMixin:
         finally:
             if held:
                 self.pipeline.restore_pages(held)
+            if tracking is not None:
+                tracking.over()  # (a failure too: what the backlog held for the page goes back to it)
             saved()  # (a save held back is never left to another job)
             self._post("translate_done")
 
@@ -960,6 +975,8 @@ class JobsMixin:
                 or getattr(self, "_batching", False) or getattr(self, "_queued", None) is not None
                 or not self._jobs.empty()):
             return
+        if holds_warming(self):
+            return  # (the pages turned past first: `backlog`; the warming after them)
         warm = getattr(pipeline, "warm_soon", None)
         if warm is not None:
             warm()
@@ -979,7 +996,7 @@ class JobsMixin:
             pass
         finally:
             for step in (self._flush_fill, self._flush_busy, self._watch_page, self._watch_trouble,
-                         self._watch_set_aside):
+                         self._watch_set_aside, lambda: backlog_tick(self)):
                 try:
                     step()
                 except Exception:  # noqa: BLE001 - never stop the event pump
@@ -1242,6 +1259,8 @@ class JobsMixin:
                 self.say("The translation program is running again.")
             else:
                 self.say(failed)
+        elif kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading")):
+            reading_event(self, kind, data)  # (normal reading's screens: never the run's page strip, `backlog`)
         elif kind == "page_stage":  # a page of the run, how far each of its stages is: the page strip
             self._on_page_stage(data)
             waits = getattr(self, "_beside_stage", None)  # (the viewer's page beside the run, waiting for it)
@@ -2078,6 +2097,7 @@ class JobsMixin:
                 self._batch_stop_asked = True  # the batch's reader is not made yet: it stops at once
             self.say("Stopping the whole-book run...")
             return
+        pause_backlog(self, "stop")  # (the pages turned past wait for the next page)
         cancel = self._page_cancel
         if cancel is not None and not cancel.is_set():
             self._cancel_why = "stop"
@@ -2370,6 +2390,7 @@ class JobsMixin:
         if show_minimised(self, win):
             self.status(lambda: _(VIEWER_RESTORED).format(title=win.title))
         self._go_busy()
+        drop_backlog(self, "a whole-book run")
         self._batching = True
         self._batch_stop_asked = False
         self._auto_before_batch = bool(self.auto_var.get())
