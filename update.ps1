@@ -117,6 +117,7 @@ $PreviousNote = Join-Path $Previous 'previous-version.txt'
 $IsClone = Test-Path -LiteralPath (Join-Path $Root '.git')
 $WaitForS = 60  # how long -WaitFor waits for TASlation to close
 $StartWatchS = 10  # how long a TASlation started again is watched for an end at once
+$UpdateVariables = @('TASLATION_UPDATING', 'TASLATION_UPDATE_PAUSE')  # the update's own: not given to that TASlation
 $Downloads = Join-Path $env:USERPROFILE 'Downloads'
 $script:Temp = $null
 $script:DownloadDir = $null
@@ -473,12 +474,21 @@ function Start-Taslation {
         Write-Host '  TASlation could not be started: .venv\Scripts\pythonw.exe is not there.' -ForegroundColor Red
         return $false
     }
+    # started without the update's own variables (install.ps1's TASLATION_UPDATING, update.cmd's pause), as its
+    # Start-menu shortcut starts it; this window keeps them for its own end
+    $own = @{}
+    foreach ($name in $UpdateVariables) {
+        $own[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
     try {
         $p = Start-Process -FilePath $VenvPyw -ArgumentList '-m taslation gui' -WorkingDirectory $Root -PassThru
         $null = $p.Handle
     } catch {
         Write-Host "  TASlation could not be started: $($_.Exception.Message)" -ForegroundColor Red
         return $false
+    } finally {
+        foreach ($name in $UpdateVariables) { [Environment]::SetEnvironmentVariable($name, $own[$name], 'Process') }
     }
     if ($p.WaitForExit($StartWatchS * 1000) -and $p.ExitCode -ne 0) {
         Write-Host "  TASlation did not start: it ended at once (exit code $($p.ExitCode))." -ForegroundColor Red
