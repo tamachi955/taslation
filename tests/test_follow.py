@@ -732,8 +732,8 @@ def test_a_page_the_window_saw_sharp_is_judged_by_its_own_sharp_picture(setup):
 
 def test_the_pages_own_picture_only_adds_soft_frames(setup):
     """A page's own sharp picture as the window kept it may pass a frame the viewer's pictures of all pages call soft
-    (the picture kept was itself little crisper than the soft one: scenario t of the stand-in, the page then lettered
-    on its soft picture from the cache): such a frame stays soft. The page's own picture only finds soft frames the
+    (the picture kept may itself be little crisper than the soft one, and what the cache held of the page would then
+    be lettered on its soft picture): such a frame stays soft. The page's own picture only finds soft frames the
     viewer's pictures pass."""
     w = setup.make(owner="viewer")
     for seed in range(1, 6):  # the viewer draws soft first, its pictures of these pages what all are judged by
