@@ -835,7 +835,10 @@ class JobsMixin:
         not there. *at_once*: the pages an earlier run read are translated now (`translate_readings`): the run takes
         the page on show and goes on to the translation (`BatchReader.finish` with *partial*). *page_area*: the capture
         area the run starts from and widens with the pages it takes (`_run_area`, taken on the Tk thread as it
-        starts); the panels it finds come back as ``page_area`` events (`_run_found`)."""
+        starts); the panels it finds come back as ``page_area`` events (`_run_found`). The translation model stays
+        loaded at the run's end, however it ends, when Auto goes back on (`_reads_on_after_run`): the page the reader
+        turns to next does not wait for its load, and it goes after ``ollama_keep_alive`` as after a page read alone;
+        with Auto staying off it is released at once, as a run from the command line releases it."""
         try:
             if generic_book_name(book):
                 self._post("status", key="Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
@@ -864,7 +867,7 @@ class JobsMixin:
                                  query=self.window_query, own_windows=own_windows, preflight=problems,
                                  show=lambda kind, data: self._post(kind, **data),
                                  readings=self._left_readings(book, model, language), keep_readings=True,
-                                 page_area=page_area)
+                                 page_area=page_area, release_at_end=False)
         except Exception as e:  # noqa: BLE001 - said in the status line; nothing was scanned
             self._post("status", key="Could not start the batch: {error}", values={"error": f"{type(e).__name__}: {e}"})
             self._post("batch_refused", problems=[])
@@ -878,8 +881,18 @@ class JobsMixin:
             reader.run()
         finally:
             self.batch = None
+            release = getattr(self.pipeline, "release_translator", None)  # (a stand-in pipeline may have none)
+            if release is not None and not self._reads_on_after_run():
+                release()  # nothing reads on: the GPU memory back at once
             self._readings = ((book, model, language), reader.left) if reader.left is not None else None
             self._post("batch_done", progress=reader.progress)
+
+    def _reads_on_after_run(self) -> bool:
+        """(the worker, as the run ends) Whether Auto goes back on once the window has the run's end (`_batch_done`:
+        it was on before the run, or the run is a book's start in whole-book mode), so that the reader reads on from
+        the viewer and the next page untranslated needs the model. Both are set on the Tk thread before the run's job
+        is queued, and `_batch_done` changes them only after this job has posted its end."""
+        return bool(getattr(self, "_resume_auto", False) or getattr(self, "_auto_before_batch", None))
 
     # ------------------------------------------------------------------ events
     def _poll_events(self) -> None:

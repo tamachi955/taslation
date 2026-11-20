@@ -422,6 +422,21 @@ def test_a_batch_on_a_keep_for_good_setting_leaves_the_model(ollama, sample_page
     assert ollama.loaded == {MODEL} and _unloads(ollama) == []
 
 
+@pytest.mark.parametrize("context_mode", [True, False])
+def test_a_run_whose_caller_keeps_the_model_leaves_it_loaded(ollama, sample_page, sample_page2, settings,
+                                                            monkeypatch, context_mode):
+    """`release_at_end` False (the window's run, which decides itself: `jobs._job_batch`): the run ends with the model
+    as its last request left it, for the ``keep_alive`` of that request; a later release lets it go as ever."""
+    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
+    ollama.answer = _english
+    reader, _said = _batch(ollama, settings, context_mode=context_mode, release_at_end=False)
+    assert read_book(reader).pages == 3
+    assert ollama.loads == 1 and ollama.loaded == {MODEL} and _unloads(ollama) == []
+    assert ollama.requests[-1]["keep_alive"] == "5m"
+    reader.pipeline.release_translator()
+    assert ollama.loaded == set() and len(_unloads(ollama)) == 1
+
+
 # ---------------------------------------------------------------------------- the window
 class Window:
     """The parts of the App that say a load and release the model."""

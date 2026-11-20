@@ -1118,7 +1118,8 @@ With the setting off, and for the `taslation` commands, the model is loaded when
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
 `ollama_keep_alive` ("5m" by default) after the last request (or after the load at start), then is released automatically; with `ollama_keep_alive = "0"` nothing is loaded at start. While you read on through untranslated pages, each request
 extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while pages are being read,
-but when the reading is over and it moves on to the notes and the translation. At the end of a run (a stop or a failure included) and when the window closes, it is released at once.
+but when the reading is over and it moves on to the notes and the translation. When the window closes, and at the end of a run of a `taslation` command, it is released at once.
+At the end of a run in the window (a stop or a failure included) it stays, as after a page translated one by one, when Auto goes back on, so the next untranslated page you turn to does not wait for its load; when Auto stays off, it is released at once.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
 To free the GPU memory at once for a game or another program, use "Tools > Release the model now". It releases the translation model TASlation loaded or used this session

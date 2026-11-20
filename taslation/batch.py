@@ -853,8 +853,11 @@ class BatchReader:
                  replace_corrections: bool = False,
                  preflight: Sequence[Message] | None = None, show: EventFn | None = None,
                  readings: Readings | None = None, keep_readings: bool = False,
-                 page_area: JoinedArea | None = None):
+                 page_area: JoinedArea | None = None, release_at_end: bool = True):
         self.pipeline = pipeline
+        # the run's end lets the translation model go (`Pipeline.release_translator`); False: the caller decides (the
+        # window keeps it for the pages read on to when Auto goes back on, as after a page: `jobs._job_batch`)
+        self.release_at_end = release_at_end
         self.readings = None if retranslate else readings  # what an earlier run of this book left (`Readings`)
         self.keep_readings = keep_readings  # the caller keeps `left` for its next run (a window that stays open)
         self.left: Readings | None = readings  # what this run leaves: set at its end (`_leave_readings`)
@@ -1942,7 +1945,7 @@ class BatchReader:
             release_awake()
             self.lock.release()
             release = getattr(self.pipeline, "release_translator", None)  # (a stand-in pipeline may have none)
-            if release is not None:
+            if release is not None and self.release_at_end:
                 release()  # the model is not needed again until a page is
             self.pipeline.save_annotations()  # the sequence of pages seen
             if self.pipeline.save_error:  # whatever else ended the run: this is what the reader must hear

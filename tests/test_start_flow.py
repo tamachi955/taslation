@@ -165,6 +165,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _start_translate = A._start_translate
     _job_translate = A._job_translate
     _job_batch = A._job_batch
+    _reads_on_after_run = A._reads_on_after_run
     _use_model = A._use_model
     _loaded_line = A._loaded_line
     _tell_protection = A._tell_protection
@@ -701,6 +702,42 @@ def test_the_scan_checks_the_setup_again_and_does_not_start_with_a_problem(flow,
     assert flow.setup_banner.texts()[0].startswith("The part that reads Japanese is missing") and flow._band is None
     assert flow.setup_banner.texts()[1].startswith("The whole book is not read yet")
     assert flow.status_var.get().startswith("The whole book is not read yet")
+
+
+@pytest.mark.parametrize("auto_before, resume, released", [(True, False, False), (False, True, False),
+                                                           (False, False, True), (None, False, True)])
+def test_the_run_s_end_keeps_the_model_while_auto_goes_back_on(flow, monkeypatch, auto_before, resume, released):
+    """The window's run never lets the translation model go itself (`release_at_end` False): at its end the window
+    keeps it loaded when Auto goes back on (it was on before the run, or the run is a book's start in whole-book mode),
+    so the next untranslated page the reader turns to does not wait for its load, and lets it go at once when Auto
+    stays off - before the run's end is posted, as the run's own release came before it, and however the run ends."""
+    _no_problems(monkeypatch)
+    made: list[dict] = []
+
+    class Reader:
+        left = None
+
+        def __init__(self, *_a, **k):
+            made.append(k)
+            self.progress = SimpleNamespace(summary=None)
+
+        def run(self):
+            raise Cancelled()  # (a stop or a failure ends it the same way)
+
+    monkeypatch.setattr(jobs, "BatchReader", Reader)
+    flow._use_model = lambda model, language: None
+    order: list[str] = []
+    flow.pipeline = SimpleNamespace(release_translator=lambda: order.append("released"))
+    posted = flow._post
+    flow._post = lambda kind, **data: (order.append(kind), posted(kind, **data))
+    flow._batching = flow.busy = True
+    flow._batch_stop_asked, flow.window_query = False, ""
+    flow._auto_before_batch, flow._resume_auto = auto_before, resume
+    with pytest.raises(Cancelled):
+        flow._job_batch(VIEWER.hwnd, "Book", "m", "English", 0, True)
+    assert len(made) == 1 and made[0]["release_at_end"] is False
+    assert order[-2:] == (["released", "batch_done"] if released else ["health", "batch_done"])
+    assert order.count("released") == (1 if released else 0)
 
 
 # ------------------------------------------------------------------ a book's files that cannot be opened now
