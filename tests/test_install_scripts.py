@@ -304,17 +304,20 @@ def _ollama_at(script: Path, server, *models: str) -> None:
 
 PAGE_MODELS_QUESTION = "Download these two models?"
 LANGUAGE_QUESTION = "Translate into which language?"
+UPDATE_QUESTION = "Look for a new version when TASlation starts?"
 
 
 def _answering(script: Path, answers: dict[str, str]) -> None:
     """Gives this temporary copy of a script a console: a question holding a key of ``answers`` gets its value and is
-    printed as ``asked: <question> = <answer>``, any other question fails the run (the language is answered with
-    Enter, the layout and inpainting models' question with no, unless they are given). Only the copy changes."""
+    printed as ``asked: <question> = <answer>``, any other question fails the run (the language and whether to look
+    for a new version at the start are answered with Enter, the layout and inpainting models' question with no,
+    unless they are given). Only the copy changes."""
     line = "$Interactive = (-not [Console]::IsInputRedirected) -and [Environment]::UserInteractive"
     text = script.read_bytes().decode("ascii")
     assert text.count(line) == 1
+    defaults = {LANGUAGE_QUESTION: "", UPDATE_QUESTION: "", PAGE_MODELS_QUESTION: "n"}
     rules = "".join(f"if ($Prompt.Contains('{question}')) {{ Write-Host \"asked: $Prompt = {answer}\"; return '{answer}' }}; "
-                    for question, answer in {LANGUAGE_QUESTION: "", PAGE_MODELS_QUESTION: "n", **answers}.items())
+                    for question, answer in {**defaults, **answers}.items())
     console = f"$Interactive = $true\r\nfunction Read-Host([string]$Prompt) {{ {rules}throw \"unexpected: $Prompt\" }}"
     script.write_bytes(text.replace(line, console).encode("ascii"))
 
@@ -3191,3 +3194,152 @@ def test_the_models_of_a_stopped_ollama_are_read_from_both_manifest_folders(tmp_
     r = subprocess.run([RUN_SHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
                        capture_output=True, encoding="utf-8", errors="replace", timeout=60, stdin=subprocess.DEVNULL)
     assert sorted(r.stdout.split()) == ["example.org/a/b:c", "made-here:latest", "older:4b", "someone/theirs:q4"], r
+
+
+# ---- whether TASlation may look for a new version at its start
+
+
+def _settings_keeper(tmp: Path) -> Path:
+    """`_whole_install`'s fake ``taslation`` as a package whose doctor says ready and whose ``config.write_settings``
+    only writes down the file and the values it was given (the real one: `test_the_answer_is_kept_as_the_settings_
+    dialog_keeps_a_setting`). The settings file of the sandbox's data folder (Get-StateDir's 'no state')."""
+    fake = tmp / "fake_modules"
+    (fake / "taslation.py").unlink()
+    package = fake / "taslation"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "__main__.py").write_text("import sys\nprint('Result: ready')\nsys.exit(0)\n")
+    (package / "config.py").write_text(
+        "from pathlib import Path\n"
+        "def write_settings(path, values):\n"
+        "    Path(path).parent.mkdir(parents=True, exist_ok=True)\n"
+        "    with open(path, 'a', encoding='utf-8') as f:\n"
+        "        for key, value in values.items():\n"
+        "            f.write(f'{key} = \"{value}\"\\n')\n")
+    return tmp / "no state" / "taslation.toml"
+
+
+@needs_venv
+def test_the_question_about_new_versions_is_asked_once_and_its_answer_kept(tmp_path, ollama_server):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    settings = _settings_keeper(tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    plain = (co / "install.ps1").read_bytes()
+    _answering(co / "install.ps1", {UPDATE_QUESTION: "y"})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = r.stdout
+    assert f"asked:   {UPDATE_QUESTION} [y/N] = y" in out
+    for line in ("at most once a day", "asks github.com for one small file", "Nothing about you or your books is sent",
+                 "GitHub sees your IP address and the time"):
+        assert line in out, line
+    assert out.index("asked:   " + LANGUAGE_QUESTION) < out.index("asked:   " + UPDATE_QUESTION) < out.index("[2/7]")
+    assert settings.read_text("utf-8") == 'update_check = "daily"\n'
+    assert f'ok: update_check = "daily" kept in {settings}' in out and "TASlation is installed." in out
+    # the next run, an update's too, finds the answer and asks nothing about it
+    (co / "install.ps1").write_bytes(plain)
+    r = _run(co / "install.ps1", env={**env, "TASLATION_UPDATING": "1"})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert UPDATE_QUESTION not in r.stdout and settings.read_text("utf-8") == 'update_check = "daily"\n'
+
+
+@needs_venv
+@pytest.mark.parametrize("answer", ["", "n", "nope"])
+def test_enter_and_anything_but_yes_keep_it_off(tmp_path, ollama_server, answer):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    settings = _settings_keeper(tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    _answering(co / "install.ps1", {UPDATE_QUESTION: answer})
+    r = _run(co / "install.ps1", env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert settings.read_text("utf-8") == 'update_check = "off"\n'
+
+
+@needs_venv
+@pytest.mark.parametrize("switches", [(), ("-Yes",)], ids=["no console", "with -Yes"])
+def test_nobody_s_answer_about_new_versions_is_kept_and_nothing_is_written(tmp_path, ollama_server, switches):
+    co = _fake_checkout(tmp_path)
+    env = _whole_install(co, tmp_path)
+    settings = _settings_keeper(tmp_path)
+    _ollama_at(co / "install.ps1", ollama_server, MODEL_NAME)
+    r = _run(co / "install.ps1", *switches, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    answer = "n (-Yes does not answer this: only a person does)" if switches else "n (no console to ask)"
+    assert f"{UPDATE_QUESTION} [y/N] {answer}" in r.stdout
+    assert not settings.exists() and "update_check" not in r.stdout
+
+
+@pytest.mark.parametrize("where", ["this folder", "the data folder"])
+def test_an_answer_in_taslation_toml_is_not_asked_again(tmp_path, where):
+    co = _fake_checkout(tmp_path)
+    state = tmp_path / "state"
+    folder = co if where == "this folder" else state
+    folder.mkdir(exist_ok=True)
+    (folder / "taslation.toml").write_text('# mine\nupdate_check = "off"  # asked once\n', "utf-8")
+    shutil.rmtree(co / ".venv")
+    r = _run(co / "install.ps1", "-DryRun", env=_tools(tmp_path, python=False) | {"TASLATION_STATE_DIR": str(state)})
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert UPDATE_QUESTION not in r.stdout
+    assert f"update_check is set already (off in {folder / 'taslation.toml'}); not asked" in r.stdout
+    assert (folder / "taslation.toml").read_text("utf-8") == '# mine\nupdate_check = "off"  # asked once\n'
+
+
+def test_a_dry_run_asks_nothing_about_it_and_says_where_an_answer_would_go(tmp_path):
+    co = _fake_checkout(tmp_path)
+    shutil.rmtree(co / ".venv")
+    r = _run(co / "install.ps1", "-DryRun", env=_tools(tmp_path, python=False))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"{UPDATE_QUESTION} [y/N] (dry run: would ask; counted as n)" in r.stdout
+    assert ("dry run, would: keep a person's answer about looking for a new version in "
+            f"{tmp_path / 'no state' / 'taslation.toml'} (update_check)") in r.stdout
+
+
+def test_the_answer_is_kept_as_the_settings_dialog_keeps_a_setting(tmp_path):
+    """Save-UpdateCheck with this checkout's taslation.config: a new file made from the example (every setting a note),
+    the answer its one setting; an existing file keeps its other lines and notes."""
+    new = tmp_path / "state" / "taslation.toml"
+    old = tmp_path / "taslation.toml"
+    old.write_text("# my notes\nmin_font_size = 10  # mine\n", "utf-8")
+    command = (_functions("Save-UpdateCheck", "Invoke-Captured") + f"$VenvPy = '{sys.executable}'; "
+               f"Save-UpdateCheck '{new}' 'daily'; Save-UpdateCheck '{old}' 'off'; Save-UpdateCheck '{old}' 'weekly'")
+    r = subprocess.run([RUN_SHELL, "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True,
+                       text=True, timeout=120, stdin=subprocess.DEVNULL, cwd=str(ROOT),
+                       env=_env(tmp_path, TASLATION_STATE_DIR=str(tmp_path / "elsewhere")))
+    assert r.stdout.split() == ["True", "True", "False"], r.stdout + r.stderr  # (a value the setting has not: refused)
+    active = [line for line in new.read_text("utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    assert len(active) == 1 and active[0].startswith('update_check = "daily"  ')  # (the example's note kept)
+    assert old.read_text("utf-8") == '# my notes\nmin_font_size = 10  # mine\nupdate_check = "off"\n'
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_install_s_stop_in_an_update_says_where_the_old_version_is(tmp_path):
+    def says(previous: bool) -> str:
+        folder = tmp_path / ("with" if previous else "without")
+        folder.mkdir()
+        if previous:
+            (folder / ".previous").mkdir()
+            (folder / ".previous" / "previous-version.txt").write_text("version: 0.8.1\n", "utf-8")
+        command = (_functions("Get-UpdateNotFinished", "T") + f"$Root = '{folder}'; $script:Texts = $null; "
+                   "$script:TextLanguage = ''; Get-UpdateNotFinished")
+        r = _ps(RUN_SHELL, command)
+        assert r.returncode == 0, r.stderr
+        return r.stdout.strip()
+
+    assert says(True).endswith("which are kept in the folder .previous.")
+    assert says(False).endswith("which are not kept.")
+
+
+def test_uninstall_removes_the_earlier_version_an_update_kept(tmp_path):
+    co = _fake_checkout(tmp_path)
+    (co / ".previous" / "files" / "taslation").mkdir(parents=True)
+    (co / ".previous" / "files" / "taslation" / "__init__.py").write_text("old\n")
+    (co / ".previous" / "previous-version.txt").write_text("version: 0.8.1\n")
+    _answering(co / "uninstall.ps1", {REMOVE: "y", "This cannot be undone": ""})
+    r = _run(co / "uninstall.ps1", env=_hide_ollama(_env(tmp_path), tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (co / ".previous").exists() and not (co / ".venv").exists()
+    out = r.stdout
+    assert out.index("the earlier version an update kept (.previous in this folder)") < out.index("asked: ")
+    assert f"deleted the earlier version an update kept ({co / '.previous'}" in out

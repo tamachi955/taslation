@@ -343,12 +343,20 @@ function Write-StopEnd([string]$Again) {
     } else {
         Write-Host (T 'Installation stopped: TASlation is not installed yet.') -ForegroundColor Yellow
     }
-    if ($FromUpdate) {
-        Write-Host (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are not kept.')
-    }
+    if ($FromUpdate) { Write-Host (Get-UpdateNotFinished) }
     Write-ShortcutState
     Write-Host $Again
     Write-Host (T 'The details are in docs\INSTALL.md, under "If the installation stops".')
+}
+
+# What a stopped run in an update says of it: the old version's files are in .previous when update.ps1 kept them there
+# (its last lines then say how to go back: update.cmd -Back), else they are not kept (the update.ps1 of 0.8.1 and
+# earlier keeps none).
+function Get-UpdateNotFinished {
+    if (Test-Path -LiteralPath (Join-Path $Root '.previous\previous-version.txt')) {
+        return (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are kept in the folder .previous.')
+    }
+    return (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are not kept.')
 }
 
 # What the next run of a stopped one does: it keeps what is there and goes on (update.cmd again after an update).
@@ -380,7 +388,7 @@ function Stop-Declined([string]$Why, [string]$Again) {
     Write-Host ''
     Write-Host $Why -ForegroundColor Yellow
     if ($FromUpdate) {
-        Write-Host (T 'The update is not finished: the new version''s files are already copied over the old version''s, which are not kept.')
+        Write-Host (Get-UpdateNotFinished)
         Write-ShortcutState
         Write-Host (T 'To finish it, run update.cmd again with the same ZIP: it asks again.')
     } else {
@@ -652,6 +660,32 @@ function Save-TargetLanguage([string]$StateDir, [string]$Language) {
     if ($StateDir -match '[\\/]$' -and $StateDir -notmatch '^[A-Za-z]:\\$') { $StateDir = $StateDir.TrimEnd([char[]]'\/') }
     $code = 'import sys; from taslation.i18n import save_ui_entry; save_ui_entry(sys.argv[1], ''translation'', ''language'', sys.argv[2])'
     $r = Invoke-Captured $VenvPy @('-c', $code, $StateDir, $Language)
+    return ($r.Code -eq 0)
+}
+
+# The taslation.toml TASlation reads its settings from (taslation.config.settings_file: this folder's, else the data
+# folder's, made when the answer below is kept): where the answer about looking for a new version is.
+function Get-SettingsFile {
+    $here = Join-Path $Root 'taslation.toml'
+    if (Test-Path -LiteralPath $here) { return $here }
+    return (Join-Path (Get-StateDir) 'taslation.toml')
+}
+
+# update_check as that file sets it ('off' or 'daily'); $null while nobody has answered the question.
+function Get-UpdateCheck {
+    $file = Get-SettingsFile
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    foreach ($line in Get-Content -LiteralPath $file -Encoding UTF8) {
+        if ($line -match '^\s*update_check\s*=\s*["'']([^"'']*)["'']') { return $Matches[1] }
+    }
+    return $null
+}
+
+# The answer kept in *File* as the Settings dialog keeps a setting (taslation.config.write_settings: the file's notes
+# and other lines stay; a new file is made from taslation.toml.example). Whether it was kept.
+function Save-UpdateCheck([string]$File, [string]$Value) {
+    $code = 'import sys; from taslation.config import write_settings; write_settings(sys.argv[1], {''update_check'': sys.argv[2]})'
+    $r = Invoke-Captured $VenvPy @('-c', $code, $File, $Value)
     return ($r.Code -eq 0)
 }
 
@@ -1268,6 +1302,28 @@ foreach ($name in (Find-NestedCopies)) {
 $offeredLanguage = Get-TargetLanguage
 $language = Select-TargetLanguage $offeredLanguage
 
+# Whether TASlation may look for a new version when it starts (update_check): asked once per installation, the answer
+# kept in taslation.toml after step 4, and a file that has one already is not asked again. Enter is no, and -Yes does
+# not answer it: only a person does, and a run without one keeps nothing (the window's default is off).
+$updateAnswer = $null
+$updateAsked = $false
+$updateSet = Get-UpdateCheck
+if (@('off', 'daily') -contains $updateSet) {
+    Write-Detail "update_check is set already ($updateSet in $(Get-SettingsFile)); not asked"
+} else {
+    $updateAsked = $true
+    Write-Host ''
+    Write-Info (T 'TASlation can look for a new version when it starts, at most once a day.')
+    Write-Info (T 'It then asks github.com for one small file. Nothing about you or your books is sent;')
+    Write-Info (T 'GitHub sees your IP address and the time, as any site you open does.')
+    Write-Info (T 'Tools > Settings... can change this later; Help > Check for updates... asks only when you choose it.')
+    $wantCheck = Confirm-Choice (T 'Look for a new version when TASlation starts?') -PersonOnly
+    if ($Interactive -and -not $Yes -and -not $DryRun) {
+        $updateAnswer = 'off'
+        if ($wantCheck) { $updateAnswer = 'daily' }
+    }
+}
+
 # The OCR models' licence comes before anything is installed: without them TASlation cannot read pages, so a no ends
 # the run here with nothing done (Stop-Declined). An install from before the three keeps reading with the one it has,
 # so there a no only leaves the other two out. -Yes does not agree: a licence takes a person (an automated check's
@@ -1615,6 +1671,18 @@ if ($language.Name -ne $offeredLanguage.Name) {
         Write-Ok "the window will translate into $($language.Name)"
     } else {
         Write-Warn "The window could not be told the language $($language.Name): choose it in its To: box."
+    }
+}
+# the answer about looking for a new version at the start, kept where TASlation reads its settings
+if ($DryRun -and $updateAsked) {
+    Write-Plan "keep a person's answer about looking for a new version in $(Get-SettingsFile) (update_check)"
+} elseif ($updateAnswer) {
+    # (not a warning: TASlation works without it, the window's default is off, and the next run asks again)
+    $settingsFile = Get-SettingsFile
+    if (Save-UpdateCheck $settingsFile $updateAnswer) {
+        Write-Ok "update_check = `"$updateAnswer`" kept in $settingsFile"
+    } else {
+        Write-Info (T 'The answer about looking for a new version could not be kept in taslation.toml: Tools > Settings... can set it.')
     }
 }
 

@@ -316,6 +316,10 @@ class Settings:
     flash_when_done: bool = True  # a whole-book run that ends while TASlation is not in front flashes its taskbar button
     sound_when_done: bool = False  # ... and plays the system's default sound (`ui.attention`)
     follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
+    # whether the window looks for a new version when it starts (`ui.updates`): "off" (the default: only Help > Check
+    # for updates... asks, when it is chosen) or "daily" (at most once a day, by check_update.py in a process of its
+    # own, which asks GitHub for one small file; the window's own process stays offline). install.ps1 asks once.
+    update_check: str = "off"
     debug: bool = False
 
     # --- where these came from (never keys of the file: `INTERNAL_FIELDS`) ---
@@ -419,6 +423,8 @@ class Settings:
             raise ConfigError("hover_shows must be 'original' or 'translation'")
         if self.hover_reveal not in ("panel", "in_place"):
             raise ConfigError("hover_reveal must be 'panel' or 'in_place'")
+        if self.update_check not in ("off", "daily"):
+            raise ConfigError("update_check must be 'off' or 'daily'")
         size = self.panel_font_size
         if (not isinstance(size, int) or isinstance(size, bool)
                 or (size != 0 and not PANEL_FONT_RANGE[0] <= size <= PANEL_FONT_RANGE[1])):
