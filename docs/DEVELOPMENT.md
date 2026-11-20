@@ -133,7 +133,9 @@ rows' languages.
   recording. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
   cards whose figures come from the code's constants - refuses one over 9 MB (`--allow-large`), and deletes the
   recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
-  4.0 material.
+  4.0 material. Each card line and step names the sentences of README.md, docs/MANUAL.md or docs/THIRD_PARTY.md it
+  follows, or is marked as the tool's own words; `tests/test_intro_video.py` fails when one of those sentences no
+  longer stands word for word, so change the line with the document.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory (`--ahead`: erased ahead first, as a whole-book run leaves them).
 * `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
