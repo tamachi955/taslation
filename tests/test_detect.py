@@ -127,3 +127,24 @@ def test_reading_order_is_right_to_left_then_down():
     ordered = order_regions([bottom, top_left, top_right])
     assert ordered == [top_right, top_left, bottom]
     assert [r.order for r in ordered] == [0, 1, 2]
+
+
+def test_a_region_under_another_comes_after_it_also_in_one_row():
+    """A tall region on the left puts all three in one row; the lower right one, under the upper one and a little
+    further right, still comes after it, and the tall one keeps its place after both."""
+    tall = _region(100, 100, 160, 500)
+    upper = _region(400, 100, 500, 200)
+    lower = _region(420, 300, 520, 400)  # centre further right than upper's
+    assert order_regions([lower, tall, upper]) == [upper, lower, tall]
+    mirrored = [_region(640 - r.x1, r.y0, 640 - r.x0, r.y1) for r in (tall, upper, lower)]
+    assert order_regions(list(reversed(mirrored)), rtl=False) == [mirrored[1], mirrored[2], mirrored[0]]
+
+
+def test_a_region_under_another_comes_after_it_inside_its_panel():
+    """The same inside a panel. In the other panel a lower region overlaps the upper one side to side by less than half
+    the narrower one's width: it is beside it, not under it, and keeps the rows' order (right first)."""
+    left_panel, right_panel = (0, 0, 300, 900), (300, 0, 640, 900)
+    tall, upper, lower = _region(320, 100, 380, 500), _region(500, 100, 600, 200), _region(520, 300, 620, 400)
+    tall_left, high, low_right = _region(20, 100, 60, 500), _region(100, 100, 200, 200), _region(170, 250, 290, 350)
+    ordered = order_regions([low_right, lower, high, tall, tall_left, upper], panels=[left_panel, right_panel])
+    assert ordered == [upper, lower, tall, low_right, high, tall_left]
