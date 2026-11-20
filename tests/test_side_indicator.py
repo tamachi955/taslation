@@ -6,6 +6,7 @@ the updated mark and its brackets on a fake clock, the slot's three cases, and t
 
 from __future__ import annotations
 
+import queue
 import tkinter as tk
 from types import SimpleNamespace
 
@@ -16,10 +17,12 @@ from fake_strip import thumb
 from taslation.capture import windows as capture_windows
 from taslation.config import ConfigError, Settings
 from taslation.messages import Message
+from taslation.ui import app as app_mod
 from taslation.ui import reading as reading_mod
 from taslation.ui import side as side_mod
 from taslation.ui import status_slot
 from taslation.ui import translator as translator_mod
+from taslation.ui.jobs import JobsMixin
 from taslation.ui.live import LiveViewMixin
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.progress import Filling
@@ -208,10 +211,11 @@ def test_the_summary_says_done_backlog_time_missed_and_updated_only_when_there_i
     assert not any(line.startswith("About") for line in summary_lines(model, now + 10))  # under 15 s
     model.set_backlog(2, 10, False, 0, now + 20)  # fourteen lines in 16 s
     assert "About 1 min more." in summary_lines(model, now + 20)
-    model.set_backlog(2, 10, True, 3, now + 21)
+    model.set_backlog(2, 10, True, 3, now + 21)  # the engine counts 3 gone by (one more than the indicator holds)
     lines = summary_lines(model, now + 21)
     assert "Paused for now: the pages behind wait." in lines and not any(line.startswith("About") for line in lines)
-    assert "3 left out to save memory: turn back to them in the viewer to have them read." in lines
+    assert [line for line in lines if "too fast" in line] == [
+        "3 turned too fast to catch: turn back to them in the viewer to have them read."]  # one count, said once
     empty = SideModel()
     assert summary_lines(empty, 0.0) == ["Done: 0 of 0 page(s) seen."]
 
@@ -312,11 +316,15 @@ def no_way_to_the_viewer(monkeypatch):
 
 
 class Window(SideMixin, StripMixin, tk.Frame):
-    """The window's parts the indicator lives with: the page area, the strip, the status bar."""
+    """The window's parts the indicator lives with: the page area, the strip, the status bar, and the window's own
+    event handler (`App._handle_event`, through `JobsMixin._handle_event`: normal reading's events to the indicator,
+    a run's ``page_stage`` to the strip) with its event queue (`_post`, `pump`)."""
 
     _picture = LiveViewMixin._picture
     _result_on_show = LiveViewMixin._result_on_show
     _fill_on_show = LiveViewMixin._fill_on_show
+    _handle_event = app_mod.App._handle_event
+    _post = JobsMixin._post
 
     def __init__(self, master, rtl=True, setting="column", size=(1000, 900)):
         tk.Frame.__init__(self, master, width=size[0], height=size[1] + 30)
@@ -343,8 +351,19 @@ class Window(SideMixin, StripMixin, tk.Frame):
         self.status_label = tk.Label(self.status_bar, text="")
         self.status_label.pack(side="left")
         self.said: list = []
+        self._events: queue.Queue = queue.Queue()
         self._build_page_strip()
         self._build_side()
+
+    def pump(self):
+        """The events queued handled, as the window's event pump does (`JobsMixin._poll_events`)."""
+        while True:
+            try:
+                kind, data = self._events.get_nowait()
+            except queue.Empty:
+                break
+            self._handle_event(kind, data)
+        self.update()
 
     def status(self, text):
         self.said.append(text() if callable(text) else text)
@@ -374,9 +393,12 @@ class Window(SideMixin, StripMixin, tk.Frame):
         self.canvas.set_image(image)
 
     def post(self, kind, data):
+        """An event handled at once: the engine's three by the window's own handler, the others (a result, an error)
+        as the indicator and the slot take them around it."""
+        if kind in ("page_stage", "page_on_show", "backlog"):
+            self._handle_event(kind, data)
+            return
         noted = side_mod.before(self, kind, data)
-        if kind == "page_stage":
-            self._on_page_stage(data)
         side_mod.after(self, kind, data, noted)
 
     def show(self, image, on_show=None):
@@ -502,8 +524,10 @@ def test_in_a_run_the_strip_takes_the_events_and_the_indicator_is_away(window):
     w = window(size=(1560, 900))
     story(w.post, pages=4, on_show=4)
     w._batching = True
-    stage(w.post, 9, read="working", with_thumb=True)
+    stage(w.post, 9, read="working", with_thumb=True, reading=False)  # the run's own: no ``reading``
     assert 9 in w._strip_model.pages and 9 not in w._side.model.screens
+    stage(w.post, 3, translate="done")  # normal reading's, told late (a step that ended after the drop): not taken
+    assert 3 not in w._strip_model.pages and w._side.model.screens[3].stages["translate"] == "waiting"
     w.show(page(4))
     assert not w._side.view.shown and w.canvas._shown[0] == (1560 - 600) // 2  # nothing kept clear in a run
 
@@ -516,15 +540,18 @@ def test_the_updated_mark_and_the_brackets_through_the_window(window, monkeypatc
     first = result(4, ["Who's there?", "", "Wait!"])
     w.show(first.original, first)
     assert 4 in w._side.seen.shown
-    w.post("page_on_show", {"seq": 5})
-    other = result(5, ["A", "B", "C"])
-    w.show(other.original, other)
+    other = result(5, ["A", "B", "C"])  # turned to page 5, as the engine tells it: the frame first, ...
+    w.show(other.original)
+    w.post("page_on_show", {"seq": 5, "reading": True})  # ... the screen once the frame is confirmed, ...
+    w.show(other.original, other)  # ... then its lettering
     w.cache.put(4, ["Who is there?", "Look.", "Wait!"])  # the work behind finished page 4
     stage(w.post, 4, translate="done")
     w.update()  # (the cache is looked at once the events are in)
     assert w._side.model.screens[4].updated
-    w.post("page_on_show", {"seq": 4})
     again = result(4, ["Who is there?", "Look.", "Wait!"])
+    w.show(again.original)  # back on page 4
+    assert not w.canvas.brackets  # (the screen not told yet: page 5's watch ends, nothing is page 4's yet)
+    w.post("page_on_show", {"seq": 4, "reading": True})
     w.show(again.original, again)
     boxes = bubble_boxes(4)
     assert sorted(w.canvas.brackets) == sorted(boxes[:2]) and w.canvas.find_withtag("brackets")

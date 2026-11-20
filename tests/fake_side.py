@@ -1,5 +1,6 @@
 """Made-up pages and events for the indicator beside the page (`ui.side`): the engine's ``page_stage``,
-``page_on_show`` and ``backlog`` events as normal reading sends them, a page or a spread drawn here (grey paper, white
+``page_on_show`` and ``backlog`` events as normal reading sends them (with ``reading`` True, in the shapes
+`taslation.backlog` gives them), a page or a spread drawn here (grey paper, white
 ovals as bubbles, its number) with made-up English lettering for its "translation" and scribbles for its "original",
 and a cache stand-in holding made-up words. No book's page, nothing read from disk, nothing written."""
 
@@ -80,9 +81,12 @@ def result(seq: int, texts: list[str], spread: bool = False, error: str = "") ->
 
 
 def stage(post: Post, seq: int, read: str | None = None, translate: str | None = None, spread: bool = False,
-          with_thumb: bool = False) -> None:
-    """The ``page_stage`` events for screen *seq*: its reading stage *read*, its translation stage *translate*."""
+          with_thumb: bool = False, reading: bool = True) -> None:
+    """The ``page_stage`` events for screen *seq*: its reading stage *read*, its translation stage *translate*; as
+    normal reading tells them (``reading`` True, `taslation.backlog`), or with *reading* False as a whole-book run's."""
     first: dict[str, Any] = {"seq": seq, "fingerprint": fingerprint(seq)}
+    if reading:
+        first["reading"] = True
     if with_thumb:
         first["thumb"] = thumb(scribbled(page(seq, spread), bubble_boxes(seq, spread)))
     if read is not None:
@@ -111,9 +115,10 @@ def story(post: Post, pages: int = 12, on_show: int | None = None, spread: bool 
             stage(post, seq, read="done", translate="done", with_thumb=True, spread=spread)
         else:
             stage(post, seq, read="done", translate="waiting", with_thumb=True, spread=spread)
-    post("page_on_show", {"seq": on_show})
+    post("page_on_show", {"seq": on_show, "reading": True})
     left = [s for s in range(waiting_from, pages + 1) if s not in missed]
-    post("backlog", {"pages": len(left), "lines": 6 * len(left), "paused": False, "dropped": 0})
+    post("backlog", {"pages": len(left), "lines": 6 * len(left), "paused": False, "dropped": len(missed),
+                     "reading": True})
 
 
 class Cache:

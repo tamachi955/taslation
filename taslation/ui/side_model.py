@@ -91,9 +91,10 @@ class Screen:
 
     @property
     def mark(self) -> str:
-        """The screen's mark: "missed" (it went by before it could be caught), "working" (a stage under way, or the
-        translation begun - some lines answered and kept - and not finished), "failed", "done" (translated, or with
-        nothing to translate), "waiting" (caught, its work to come)."""
+        """The screen's mark: "missed" (it went by before it could be caught; or it was on show, turned past and not
+        caught - its read done, its translation "missed": it is read when shown again), "working" (a stage under way,
+        or the translation begun - some lines answered and kept - and not finished), "failed", "done" (translated, or
+        with nothing to translate), "waiting" (caught, its work to come)."""
         read, translate = self.stages["read"], self.stages["translate"]
         if read == "missed":
             return "missed"
@@ -103,6 +104,8 @@ class Screen:
             return "failed"
         if translate in ("done", "skipped") or read == "skipped":
             return "done"
+        if translate == "missed":
+            return "missed"
         return "waiting"
 
     def state(self, stage: str) -> str:
@@ -116,8 +119,9 @@ class Screen:
 
 @dataclass
 class Backlog:
-    """The backlog's totals as the engine last told them (``backlog``): the screens still to work on, their lines,
-    whether the work is paused (Auto off, the model released), and how many screens were left out to save memory."""
+    """The backlog's totals as the engine last told them (``backlog``): the screens caught and not done yet, the lines
+    still to translate of those read, whether the work is paused (Auto off, Stop, the model released), and how many
+    screens went by too fast to be caught (or were not caught: over the caps), not caught or done since."""
 
     pages: int = 0
     lines: int = 0
@@ -269,8 +273,8 @@ def duration(seconds: float) -> str:
 def summary_lines(model: SideModel, now: float) -> list[str]:
     """The hover text of the indicator as a whole, a line each, in the window's language: done of the screens seen;
     the backlog (screens and lines to go, about how long once that can be trusted, paused); the screens that went by
-    too fast to catch, those left out to save memory, and those updated since the person saw them - each only when
-    there is one."""
+    too fast to catch (the engine's count, ``dropped``, or those the indicator has so marked, whichever is more), and
+    those updated since the person saw them - each only when there is one."""
     counts = model.counts()
     seen = len(model)
     lines = [_("Done: {done} of {seen} page(s) seen.").format(done=counts["done"], seen=seen)]
@@ -283,12 +287,10 @@ def summary_lines(model: SideModel, now: float) -> list[str]:
             lines.append(_("About {time} more.").format(time=duration(left)))
     if backlog.paused and backlog.pages > 0:
         lines.append(_("Paused for now: the pages behind wait."))
-    if counts["missed"]:
+    missed = max(counts["missed"], backlog.dropped)  # (one count told two ways: never said twice)
+    if missed:
         lines.append(_("{n} turned too fast to catch: turn back to them in the viewer to have them read.").format(
-            n=counts["missed"]))
-    if backlog.dropped:
-        lines.append(_("{n} left out to save memory: turn back to them in the viewer to have them read.").format(
-            n=backlog.dropped))
+            n=missed))
     if counts["updated"]:
         lines.append(_("{n} updated since you saw them.").format(n=counts["updated"]))
     return lines

@@ -1,12 +1,16 @@
 """The indicator beside the page in the window (a part of `app.App`): the screens turned past in normal reading and how
-far the work on each is, from the engine's events, outside a whole-book run only (that run keeps its strip under the
-page, `strip`):
+far the work on each is, from the engine's events (`backlog`, each with ``reading`` True, by one way only:
+`backlog.reading_event` from `JobsMixin._handle_event` to the ``_on_reading_<kind>`` handlers here), outside a
+whole-book run only (that run keeps its strip under the page, `strip`, and its own ``page_stage`` has no ``reading``):
 
-* ``page_stage`` {seq, fingerprint, stage "read" or "translate", state[, thumb]} - a screen and one of its stages
-  (`side_model.SideModel.update`; the thumbnail, at most 96 px tall, with its first event, kept in memory only);
-* ``page_on_show`` {seq} - the screen the viewer shows (None: none of the book's): outlined, kept in view;
+* ``page_stage`` {seq, fingerprint, stage "read" or "translate", state[, thumb][, into]} - a screen and one of its
+  stages (`side_model.SideModel.update`; the thumbnail, at most 96 px tall, with its first event - none for a page
+  that only went by -, kept in memory only; read "merged" {into}: a page that went by was the screen *into*);
+* ``page_on_show`` {seq} - the screen the viewer shows (None: one not told yet, or none of the book's): outlined,
+  kept in view;
 * ``backlog`` {pages, lines, paused, dropped} - the work still to do on the screens behind; *dropped* the screens
-  left out to save memory, or True: the window's screens are another book's now, and everything goes.
+  that went by too fast, not caught or done since, or True: the backlog was dropped (another book, another viewer
+  window, a whole-book run) - everything goes, and the screens are numbered from 1 again.
 
 `SideView` draws it in the exit-side margin of the page area (`side_model.side_layout`), the picture kept clear of
 that side where the margin is too narrow even for the rail (`side_model.room_kept`, through
@@ -18,10 +22,11 @@ It also keeps what the person saw lettered on each screen (`seen.Seen`, memory o
 diamond on a screen whose words changed since, and, when it comes on show again, corner brackets on its changed
 bubbles for their read time (`on_picture`, from `LiveViewMixin._redisplay`); and the Reader's status slot
 (`status_slot`). The window's other parts reach all this through the few functions here (`before`, `after`,
-`on_picture`, `on_stage`, `clear`), which do nothing on a window without the indicator (`_build_side` makes it)."""
+`on_picture`, `clear`), which do nothing on a window without the indicator (`_build_side` makes it)."""
 
 from __future__ import annotations
 
+import logging
 import time
 import tkinter as tk
 from collections import Counter
@@ -34,10 +39,13 @@ from .seen import Seen, words
 from .side_model import SETTINGS, SideLayout, SideModel, room_kept, screen_tip, side_layout
 from .side_view import SideView
 
+LOG = logging.getLogger(__name__)
 HOVER_MS = 450  # the pointer resting this long on a bracketed bubble counts as reading it
 # on the right of the page the indicator starts this far down: the busy badge's place, the full screen's close button's
 TOP_CLEAR = 48
-CACHE_EVENTS = ("names_applied", "find", "result", "translate_done", "renamed", "page_stored")
+# the window's events after which the book's cache may hold other words (a translation stage of normal reading moving
+# looks too: `on_stage`)
+CACHE_EVENTS = ("names_applied", "find", "result", "translate_done", "renamed")
 
 
 @dataclass
@@ -54,6 +62,7 @@ class SideState:
     hover_box: tuple[int, int, int, int] | None = None
     read_job: str | None = None
     marks_job: str | None = None
+    shown_frame: Any = None  # the viewer's frame when the screen on show was told (`on_show`)
     now: Any = time.monotonic
 
 
@@ -119,6 +128,7 @@ def clear(window: Any) -> None:
     st.model.clear()
     st.seen.clear()
     st.cached.clear()
+    st.shown_frame = None
     if st.view is not None:
         try:
             st.view.redraw()
@@ -131,10 +141,11 @@ def clear(window: Any) -> None:
 
 # ------------------------------------------------------------------ the engine's events
 def on_stage(window: Any, data: dict[str, Any]) -> None:
-    """``page_stage`` outside a run: the screen's cell (a new one at its place), the cache's words looked at again
-    once a translation stage moved."""
+    """``page_stage`` of normal reading: the screen's cell (a new one at its place), the cache's words looked at again
+    once a translation stage moved. None during a whole-book run: the backlog was dropped as it started, and what it
+    still tells then is of the screens dropped (a step that ends after the drop)."""
     st = state(window)
-    if st is None:
+    if st is None or in_a_run(window):
         return
     model = st.model
     within = _within(window)
@@ -158,17 +169,40 @@ def on_stage(window: Any, data: dict[str, Any]) -> None:
 
 
 def on_show(window: Any, data: dict[str, Any]) -> None:
+    """``page_on_show``: the screen on show outlined and kept in view (None: a screen not told yet, or none of the
+    book's). The engine tells it once the frame is confirmed, after the page area showed that frame - and a page from
+    the cache, lettered then - so the viewer's frame now is the screen's (`shown_frame`: until the viewer shows
+    another, what the page area shows is that screen's), and what it shows lettered is looked at now."""
     st = state(window)
     if st is None or not st.model.show(data.get("seq")):
         return
+    st.shown_frame = getattr(window, "_live", None) if st.model.on_show is not None else None
     if st.view is not None:
         try:
             st.view.show(st.model.on_show)
         except tk.TclError:
             pass
+    look_now(window)
+
+
+def look_now(window: Any) -> None:
+    """What the page area shows of the screen on show looked at without drawing the page again (`on_picture`), its
+    brackets drawn or taken away."""
+    canvas = getattr(window, "canvas", None)
+    if canvas is None:
+        return
+    boxes = on_picture(window, getattr(canvas, "_image", None))
+    if boxes != list(getattr(canvas, "brackets", None) or []):
+        try:
+            canvas.set_brackets(boxes)
+        except tk.TclError:
+            pass
 
 
 def on_backlog(window: Any, data: dict[str, Any]) -> None:
+    """``backlog``: its totals (*dropped*: the screens that went by too fast, not caught or done since); *dropped*
+    True - the backlog was dropped (another book, another viewer window, a whole-book run): everything goes, and the
+    screens are numbered from 1 again."""
     st = state(window)
     if st is None:
         return
@@ -188,16 +222,14 @@ def before(window: Any, kind: str, data: dict[str, Any]) -> Any:
 
 
 def after(window: Any, kind: str, data: dict[str, Any], noted: Any) -> None:
-    """An event the window has handled, as the indicator and the slot take it."""
+    """An event the window has handled, as the slot and the updated mark take it: a page job's error, a result, an
+    event after which the cache's words may have changed. (Normal reading's own events come by one way only, the
+    ``_on_reading_<kind>`` handlers.)"""
     st = state(window)
     if st is None:
         return
     try:
-        if kind == "page_on_show":
-            on_show(window, data)
-        elif kind == "backlog":
-            on_backlog(window, data)
-        elif kind == "error" and noted is not None:
+        if kind == "error" and noted is not None:
             st.slot.error_frame, st.slot.error_at = noted, time.monotonic()
         elif kind == "result":
             result = data.get("result")
@@ -264,6 +296,19 @@ def _same_screen(window: Any, seq: int, fingerprints: tuple[str, ...]) -> bool:
         return screen.fingerprint in fingerprints
 
 
+def turned_away(window: Any, st: SideState) -> bool:
+    """Whether the viewer's frame now is of another page than the frame on show when the screen on show was told
+    (`shown_frame`; `LiveViewMixin._shows_page`: a soft picture and its sharp one are the same page). A screen is told
+    on show only once its frame is confirmed: until then, what the page area shows is not the screen told last."""
+    frame, live = st.shown_frame, getattr(window, "_live", None)
+    if frame is None or live is None or live is frame:
+        return False
+    try:
+        return not window._shows_page(live, frame)
+    except Exception:  # noqa: BLE001 - not known: taken as the same page
+        return False
+
+
 def on_picture(window: Any, image: Any) -> list[tuple[int, int, int, int]]:
     """The page area is drawn again (`LiveViewMixin._redisplay`): what the person sees lettered on the screen on show
     taken in (`Seen.look`), its diamond set or gone, and the brackets to draw on its changed bubbles (image pixels;
@@ -273,6 +318,8 @@ def on_picture(window: Any, image: Any) -> list[tuple[int, int, int, int]]:
         return []
     try:
         seq = st.model.on_show
+        if seq is not None and turned_away(window, st):
+            seq = None  # (the viewer shows another frame: the next screen is not told yet - a watch of this one ends)
         got = shown_words(window) if seq is not None and image is not None else None
         if got is not None and not _same_screen(window, seq, got[2]):
             got = None
@@ -450,6 +497,13 @@ def mark_from_cache(window: Any) -> None:
 
 
 # ------------------------------------------------------------------ the window's part
+def _quietly(handler: Any, window: Any, data: Any) -> None:
+    try:
+        handler(window, data if isinstance(data, dict) else {})
+    except Exception as e:  # noqa: BLE001 - the indicator never stops the event pump
+        LOG.debug("side: an event of normal reading not taken (%s)", type(e).__name__)  # (its kind only)
+
+
 class SideMixin:
     """The indicator in the window. A part of `app.App` (no `__init__`): `_build_side` makes its widgets, again after
     a language switch, keeping what it knows."""
@@ -469,6 +523,17 @@ class SideMixin:
         self.canvas.bind("<Motion>", lambda e: hover_moved(self, e), add="+")
         self.canvas.bind("<Leave>", lambda _e: hover_left(self), add="+")
         st.slot_label = status_slot.SlotLabel(self.status_bar)
+
+    # the engine's events of normal reading (``reading`` True), the one way they come: `backlog.reading_event`, from
+    # `JobsMixin._handle_event`; never raising into the event pump
+    def _on_reading_page_stage(self, data: dict[str, Any]) -> None:
+        _quietly(on_stage, self, data)
+
+    def _on_reading_page_on_show(self, data: dict[str, Any]) -> None:
+        _quietly(on_show, self, data)
+
+    def _on_reading_backlog(self, data: dict[str, Any]) -> None:
+        _quietly(on_backlog, self, data)
 
     def _pick_screen(self, seq: int) -> None:
         """A click on a screen of the indicator: the status line says how to read it - in the viewer, where
