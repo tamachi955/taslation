@@ -344,6 +344,11 @@ SOFT_SHARE = 0.27
 PAGES_LEARNT = 5
 CRISP_SPAN = 4  # px: `crispness` sets the steps between neighbouring pixels against the steps over this many
 CRISP_KEPT = 50  # the crispness of so many soft and sharp pictures of the run is what a picture is judged by
+# a page whose sharp picture the live view has seen is judged by that picture (`SharpSeen`): a frame of it less crisp
+# than PAGE_SHARP_SHARE of it is soft (a soft picture measures 0.3-0.6 of its sharp one, the same picture again the
+# same); the newest SHARP_SEEN_KEPT such pages are kept, in memory
+PAGE_SHARP_SHARE = 0.85
+SHARP_SEEN_KEPT = 256
 # LaMa waits for this long without a new frame: a reader turning on takes 0.5-1.5 s a page (`settle_ms` 400 of it),
 # one reading a page looks at it for 5 s and more, and LaMa takes about 0.6 s a screen, a region at a time: the GPU
 # works while the reader reads and leaves the viewer alone while the pages are turned
@@ -537,6 +542,33 @@ def looks_sharp(crisp: float, soft: Sequence[float], sharp: Sequence[float]) -> 
         return False
     lo, hi = float(np.median(soft)), float(np.median(sharp))
     return hi > lo and crisp >= (lo * hi) ** 0.5
+
+
+class SharpSeen:
+    """The `crispness` of the sharp pictures a viewer drew of pages it drew soft first (the live view's,
+    `ui.live._drew_soft`), by the fingerprint of the picture's first page unit and the picture's size: a frame of one
+    of those pages is judged by its own page's sharp picture (`judge`), before the viewer's pictures of all pages
+    (`looks_sharp`) - the soft picture of a page with much fine detail can be as crisp as the sharp picture of a page
+    with little. The newest SHARP_SEEN_KEPT pages, in memory only."""
+
+    def __init__(self, kept: int = SHARP_SEEN_KEPT) -> None:
+        self._pages: deque[tuple[str, tuple[int, int], float]] = deque(maxlen=kept)
+
+    def note(self, key: str, size: tuple[int, int], crisp: float) -> None:
+        self._pages.appendleft((key, (int(size[0]), int(size[1])), float(crisp)))
+
+    def judge(self, key: str, size: tuple[int, int], crisp: float, distance: int) -> bool | None:
+        """Whether a picture of *size* whose first page unit's fingerprint is *key* and whose crispness is *crisp* is
+        sharp, by the sharp picture seen last of that page (`fingerprint.hamming` within *distance*, at that size):
+        at least PAGE_SHARP_SHARE as crisp. None when no picture of the page is kept."""
+        size = (int(size[0]), int(size[1]))
+        for seen, at, sharp in self._pages:  # (the newest first)
+            if at == size and fingerprint.hamming(seen, key) <= distance:
+                return crisp >= sharp * PAGE_SHARP_SHARE
+        return None
+
+    def clear(self) -> None:
+        self._pages.clear()
 
 
 TAKE, MISSED, SHARPER_TAKEN = "take", "missed", "sharper"  # what `PageWatch` decides

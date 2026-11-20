@@ -712,6 +712,24 @@ def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_
     assert not w._looks_soft(_page(10, soft=3))  # another viewer: judged by nothing it has not drawn
 
 
+def test_a_page_the_window_saw_sharp_is_judged_by_its_own_sharp_picture(setup):
+    """The soft picture of a page with much fine detail, part of it drawn sharp already, is as crisp as the viewer's
+    sharp pictures of other pages: by those alone it would be taken for sharp, and what the cache holds of it
+    lettered on it. Once the window has seen that page's own sharp picture (`batch.SharpSeen`, kept as the page came
+    sharper) such a frame of it is soft, the sharp one is not; a page not seen sharp is judged as before."""
+    w = setup.make(owner="viewer")
+    w._drew_soft(_page(7, soft=3), _page(7))  # the viewer draws soft first (as `_retake` and the settle learn it)
+    size = (540, 720)  # (single pages: the soft picture's page unit is the sharp one's)
+    sharp = _page(8, size=size)
+    part = _page(8, soft=3, size=size)
+    part.paste(sharp.crop((0, 0, size[0], 216)), (0, 0))  # its top drawn sharp already
+    assert not w._looks_soft(part)  # by the viewer's pictures of the other pages: sharp
+    w._drew_soft(_page(8, soft=3, size=size), sharp)  # the page seen soft, then sharp
+    assert w._looks_soft(part) and not w._looks_soft(sharp)
+    assert not w._looks_soft(_page(9, size=size)) and w._looks_soft(_page(9, soft=3, size=size))  # not seen: as before
+    assert not w._looks_soft(_page(8, size=(600, 720)))  # another size: as before
+
+
 def test_a_frames_thumbnail_from_its_pixels_is_the_batchs_own():
     """The live view takes a frame's pixels out of the picture once (`live.FrameFacts`) and makes its thumbnail from
     them (`live.thumbnail_of`): the very values `batch.thumbnail` gives, which the whole-book run and the pages kept

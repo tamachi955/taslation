@@ -98,8 +98,10 @@ from PIL import Image
 
 from .. import fingerprint as fp
 from .. import recovery
-from ..batch import CRISP_KEPT, crispness, detail, frames_differ, looks_sharp, lower_priority, sharper, thumbnail
+from ..batch import (CRISP_KEPT, SharpSeen, crispness, detail, frames_differ, looks_sharp, lower_priority, sharper,
+                     thumbnail)
 from ..capture.windows import BROWSER_CLASSES, covered_by_opaque, window_class
+from ..config import Settings
 from ..capture import (
     IS_WINDOWS,
     CaptureError,
@@ -462,10 +464,12 @@ class Following:
     retake: Taken | None = None  # such a sharper frame, read once the job on the softer one is done
     unseen: bool = True  # the viewer chosen has no picture on the page yet: it is looked at whoever is in front
     # a viewer that has drawn a page soft first (`_drew_soft`): its window, and the `batch.crispness` of the soft
-    # pictures it drew and of their sharp ones, what its frames are judged by (`_looks_soft`)
+    # pictures it drew and of their sharp ones, what its frames are judged by (`_looks_soft`), and those sharp
+    # pictures' by their pages, what a frame of such a page is judged by first
     soft_of: int | None = None
     soft: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
     sharp: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
+    sharp_pages: SharpSeen = field(default_factory=SharpSeen)
 
 
 @dataclass
@@ -2121,7 +2125,8 @@ class LiveViewMixin(BlackViewerMixin):
     def _drew_soft(self, soft: Image.Image, sharp: Image.Image) -> None:
         """The viewer chosen has drawn a page soft first: *soft*, then its sharp picture *sharp* (`batch.sharper`). The
         `crispness` of both is kept with the viewer's window, CRISP_KEPT of each at most - what its frames are judged
-        by (`_looks_soft`); a window chosen anew starts afresh, as a whole-book run does (`batch.PageWatch`)."""
+        by (`_looks_soft`), and the sharp one's with its page (`batch.SharpSeen`); a window chosen anew starts afresh,
+        as a whole-book run does (`batch.PageWatch`)."""
         win = self.selected
         if win is None:
             return
@@ -2130,18 +2135,31 @@ class LiveViewMixin(BlackViewerMixin):
             f.soft_of = win.hwnd
             f.soft.clear()
             f.sharp.clear()
+            f.sharp_pages.clear()
         f.soft.append(_crisp(self, soft, self._area_box(soft)))
-        f.sharp.append(_crisp(self, sharp, self._area_box(sharp)))
+        crisp = _crisp(self, sharp, self._area_box(sharp))
+        f.sharp.append(crisp)
+        units = _units(self, sharp, self._margins_of(sharp))
+        if units:
+            f.sharp_pages.note(units[0].fingerprint, sharp.size, crisp)
 
     def _looks_soft(self, image: Image.Image) -> bool:
         """Whether *image*, a frame of the viewer chosen, is a soft picture of its page by what that viewer has drawn:
-        it has drawn a page soft first (`_drew_soft`), and the frame's `crispness` is not nearer that of its sharp
-        pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its frames). Never so for
-        a viewer not seen to draw a page soft first: it pays nothing."""
+        it has drawn a page soft first (`_drew_soft`), and the frame is less crisp than PAGE_SHARP_SHARE of the sharp
+        picture it drew of that very page (`batch.SharpSeen`), or, no such picture seen, its `crispness` is not nearer
+        that of its sharp pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its
+        frames). Never so for a viewer not seen to draw a page soft first: it pays nothing."""
         if not self._draws_soft_first():
             return False
         f = self._following
-        return not looks_sharp(_crisp(self, image, self._area_box(image)), f.soft, f.sharp)
+        crisp = _crisp(self, image, self._area_box(image))
+        units = _units(self, image, self._margins_of(image))
+        if units:
+            distance = getattr(self.settings, "fingerprint_max_distance", Settings.fingerprint_max_distance)
+            own = f.sharp_pages.judge(units[0].fingerprint, image.size, crisp, distance)
+            if own is not None:
+                return not own
+        return not looks_sharp(crisp, f.soft, f.sharp)
 
     def _draws_soft_first(self) -> bool:
         """Whether the viewer chosen has drawn a page soft first (`_drew_soft`)."""
