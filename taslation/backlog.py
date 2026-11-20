@@ -129,7 +129,7 @@ class Preempt:
 @dataclass(eq=False)
 class Screen:
     """A screen of normal reading (one page or a two-page spread: what is captured and cached as one), as the
-    window is told of it. *sight*: its place in the order of first sight (the story order: the history's key); *seq*:
+    window is told of it. *sight*: its place in the order of first sight (what the order of work goes by); *seq*:
     its number as told (0 until it is told, then 1, 2, ... in the order they are told)."""
 
     sight: int

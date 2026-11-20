@@ -644,7 +644,7 @@ def translate_series_book(settings: Settings, translator: Any, series: str, page
 def behind_order(count: int, behind: int) -> list[tuple[int, bool]]:
     """The order of work of *count* pages read as a reader who flips *behind* pages past at a time and reads the page
     after them does, the pages turned past then translated behind the reader (`backlog`: with nothing after the page
-    on show, the smallest sight first - story order): blocks of *behind* + 1 pages, the last of each first; (page
+    on show, the smallest sight first): blocks of *behind* + 1 pages, the last of each first; (page
     index, behind the reader). 0: the pages in order."""
     if behind <= 0:
         return [(i, False) for i in range(count)]

@@ -1,7 +1,7 @@
 """Work behind the reader (`taslation.backlog`): a page the reader turned past once its frame was confirmed goes on
 being read and translated from that capture, in memory, while nothing of the page on show runs; what is caught and
 what not, what is kept, the order of the work, a step stopped by the next page with what it answered kept, the drops
-and pauses, the events, the history in story order, and the six guarantees of the design (each a test of its own).
+and pauses, the events, the history (the order of work), and the six guarantees of the design (each a test of its own).
 Invented lines only (`helpers`)."""
 from __future__ import annotations
 
