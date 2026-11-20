@@ -35,7 +35,7 @@ class BatchDialog(tk.Toplevel):
         frm.pack(fill="both", expand=True)
         head = ttk.Frame(frm)
         head.pack(fill="x")
-        explain_button(head, _("Turn the pages at your own pace, in the viewer or with the page keys in TASlation's window.\nTASlation never turns a page by itself: it reads each page you turn, with no translation yet.\nWhen you reach the end, press Finished reading. Then TASlation translates the whole book at once,\nwith the whole story and your series sheet; the viewer is not needed from then on, and the pages\ncan be read when it is done. Only translated text and bubble positions are written to disk.")).pack(
+        explain_button(head, _("Turn the pages at your own pace, in the viewer or with the page keys in TASlation's window.\nTASlation never turns a page by itself: it reads each page you turn, with no translation yet.\nWhen you reach the end, press Finished reading. Then TASlation translates the whole book at once,\nwith the whole story and your series sheet; the viewer is not needed from then on, and the pages\ncan be read when it is done. No page image is written to disk; Help > How to use... > Your data lists what is kept.")).pack(
             side="right", padx=(12, 0))
         label = ttk.Label(head, justify="left")
         label.configure(text=break_lines(_("Viewer: {title}").format(title=win.title), TERMS_WRAP - 60, label))

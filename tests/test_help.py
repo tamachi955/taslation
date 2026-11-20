@@ -141,7 +141,7 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
             (catalog["Read whole book..."], catalog["Start"]),
         "Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.":
             (catalog["Page"], catalog["Page keys..."]),
-        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks and viewer settings are kept too, in the folder named in Help > About TASlation.":
+        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings and an error log with no text of a book are kept too, in the folder named in Help > About TASlation.":
             (catalog["Tools"], catalog["Saved translations..."], catalog["Help"], catalog["About TASlation"]),
         "Green: translated. Orange: not translated, its label says why. Blue: your own rectangle. Red ?: worth a look (Review...).":
             (catalog["Review..."],),
@@ -678,7 +678,7 @@ def test_the_batch_dialog_keeps_what_to_do_and_the_stores_terms_in_view(hidden_r
     d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path), on_start=lambda options: None)
     d.withdraw()
     explanation = next(iter(_explained(d)))
-    assert explanation.startswith("Turn the pages at your own pace") and "Only translated text" in explanation
+    assert explanation.startswith("Turn the pages at your own pace") and "No page image is written to disk" in explanation
     labels = _labels(d)
     assert "Open the book at the first page you want translated, then press Start and turn the pages." in labels
     assert not any("never turns a page" in text for text in labels)
