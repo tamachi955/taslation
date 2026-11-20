@@ -34,9 +34,10 @@ two regions (between the detectors too), a translation between two line requests
 was sent -, and the lines answered by then are stored as a page turned away from stores them (the sequence's host
 `keeps_answered`: `translate.sequence`). A turn waits for no more than the step under way.
 
-History: a request behind the reader gets the pairs of the nearest translated pages before it in the story
-(`translate.base.StoryContext`, keyed by `Screen.sight`) when ``HISTORY`` is "story"; with "work" (the fallback, the
-rule before there was a backlog) the pairs in the order the requests were made.
+History: ``HISTORY`` "work" (the default, the rule before there was a backlog): the pairs in the order the requests
+were made, so that every request extends the one before; "story" (the internal switch, measured and not the default):
+a request behind the reader gets the pairs of the nearest translated pages before it in the story
+(`translate.base.StoryContext`, keyed by `Screen.sight`).
 
 Events to the window (through *post*, the window's ``_post``), outside a whole-book run, each with ``reading=True``:
 
@@ -76,8 +77,14 @@ SHOWN_AT_LEAST_MS = 150  # a frame dropped before its confirmation that was on s
 # (`ui.live.LEFT_PAGE_MS`: the time after which the window takes another frame for another page)
 MERGE_WITHIN = 2  # a page that went by is the next screen confirmed when their fingerprints are this many times
 # ``fingerprint_max_distance`` apart at most (a soft picture of the page, drawn first, and its sharp one)
-HISTORY = "story"  # "story": a request behind the reader gets the pairs of the pages before it in the story; "work":
-# in the order the requests were made (the rule before there was a backlog)
+HISTORY = "work"  # "work": every request gets the pairs in the order the requests were made (the rule before there was
+# a backlog); "story": a request behind the reader gets the pairs of the pages before it in the story. "work" since the
+# stand-in's scenario k (2026-11-20): with "story" a page turned away from while its job ran, finished behind the reader,
+# put its pairs into the middle of the reader's history, and the reader's next request was computed again from there
+# (the first prompt of two of the 30 pages read back took 2.6 and 2.1 s, against 0.17 and 0.07 s with "work"; after
+# the flips at 1 s a page, the first bubble came 441 ms later (median) than on the same turns with nothing caught,
+# 188 ms with "work"); with "work" every
+# request extended the one before (docs/OFFLINE_VERIFICATION.md)
 HOLD_S = 0.0  # a step of the backlog that asks the model waits until the reader has stayed this long on a finished page
 SWITCH_HOLD_S = 2.0  # (story history) a request whose pairs part from the server's waits this long on a finished page
 SWITCH_PAIRS = 8  # ... and gets this many of the pairs that part at most: some 0.5 s of the server's time
@@ -634,10 +641,11 @@ class Backlog:
     def _translate(self, pipeline: Any, entry: Entry, stop: Preempt, settings: Any) -> str:
         """What is still to translate of *entry*'s units (held to the cache first: `Pipeline.resync`) asked for, as a
         whole-book run asks for a run of units (`translate.sequence.translate_units`), stopped between line requests,
-        what was answered by then stored. Its requests get the pairs of the pages before it in the story
-        (`StoryContext.place`, ``HISTORY`` "story"); one whose pairs part from the last request's waits until the
-        reader has stayed SWITCH_HOLD_S on a page done (`hold_until`: the warming of the reader's next page comes
-        meanwhile), and gets at most SWITCH_PAIRS of what parts (`StoryContext.switch_to`)."""
+        what was answered by then stored. Its requests get the pairs in the order of work (``HISTORY`` "work"), or
+        with "story" those of the pages before it in the story (`StoryContext.place`): then one whose pairs part from
+        the last request's waits until the reader has stayed SWITCH_HOLD_S on a page done (`hold_until`: the warming
+        of the reader's next page comes meanwhile), and gets at most SWITCH_PAIRS of what parts
+        (`StoryContext.switch_to`)."""
         from .translate.base import GrowingContext, context_fits, grows_context
 
         units = [pipeline.resync(u) for u in entry.units or []]

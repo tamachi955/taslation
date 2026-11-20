@@ -602,6 +602,25 @@ def test_a_page_jobs_snapshot_of_the_story_is_not_changed_by_what_comes_after():
     assert list(s) == [("a", "x")] and s.at == 1
 
 
+def test_the_history_is_in_the_order_of_work_unless_story_is_chosen(settings, sample_page, monkeypatch):
+    # ("work" since scenario k: a page finished behind the reader in story order made the reader's next request be
+    # computed again from the middle of its history)
+    assert backlog_mod.HISTORY == "work"
+    for history, placed in (("work", None), ("story", 1)):
+        monkeypatch.setattr(backlog_mod, "HISTORY", history)
+        b = Backlog(_events()[1])
+        p = _pipeline(settings, Turning(EN_TEXTS, answer=1), book=f"Behind, {history}")
+        seen: list = []
+        place = p._grown.place
+        monkeypatch.setattr(p._grown, "place", lambda at, _place=place: (seen.append(at), _place(at))[1])
+        _job(p, b, sample_page, _confirmed())
+        assert seen == [placed], (history, seen)  # (the page on show)
+        p.translator = DictTranslator(EN_TEXTS)
+        assert _drain(p, b) == ["made", "translate"], history
+        # (its rest behind the reader: placed at its page in the story and back, or appended in the order of work)
+        assert seen == ([placed] if history == "work" else [placed, 1, 1]), (history, seen)
+
+
 # ------------------------------------------------------------------ the six guarantees (design, section 2)
 def test_guarantee_1_only_the_capture_the_job_read_is_ever_read_and_nothing_is_captured(settings, sample_page,
                                                                                         monkeypatch):

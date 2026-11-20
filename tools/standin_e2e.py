@@ -256,14 +256,16 @@ def wanted(text: str) -> list[str]:
     return [n for n in [*ORDER, *K_PACES] if n in asked]
 
 
-def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool) -> list[str]:
+def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool,
+            read_ms: int = K_READ_MS) -> list[str]:
     """Scenario k's steps at the pace of *name* (`K_PACES`): to page *fresh* (one no scenario before turned to) and a
-    rest there, *turns* pages flipped past, back to the first of them, and *read* of them read at K_READ_MS a page;
-    without *soft*, every page drawn sharp at once (the stand-in's soft time and blur off, and back after)."""
+    rest there, *turns* pages flipped past, back to the first of them, and *read* of them read at *read_ms* a page
+    (K_READ_MS); without *soft*, every page drawn sharp at once (the stand-in's soft time and blur off, and back
+    after)."""
     pace = K_PACES[name]
     pre, post = ([], []) if soft else (["t0", "b1"], ["t", "b"])
-    steps = [*pre, f"j{fresh}", f"w{K_READ_MS}", *(["n", f"w{pace}"] * turns), f"j{fresh + width}", f"w{K_READ_MS}"]
-    steps += ["n", f"w{K_READ_MS}"] * max(0, read - 1)
+    steps = [*pre, f"j{fresh}", f"w{read_ms}", *(["n", f"w{pace}"] * turns), f"j{fresh + width}", f"w{read_ms}"]
+    steps += ["n", f"w{read_ms}"] * max(0, read - 1)
     return [*steps, *post]
 
 
@@ -319,7 +321,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
             fresh = farthest + width
             fresh = fresh - fresh % 2 if spread else fresh
             steps = k_steps(name, fresh, width, int(k.get("turns", 20)), int(k.get("read", 20)),
-                            bool(k.get("soft", True)))
+                            bool(k.get("soft", True)), int(k.get("read_ms") or K_READ_MS))
         else:
             steps = SCENARIOS[name][1]
         if wait_done is not None and name in HOLD_SCENARIOS:
@@ -749,6 +751,13 @@ class Notes:
                     until = getattr(gate, "open_until", None)
                     if until is not None and math.isfinite(until):
                         job["open_until_t"] = job["over_t"] + (until - time.monotonic()) * 1000
+                        job["confirmed_t"] = job["open_until_t"] - (job["open_for"] or 0) * 1000
+                    # (confirmed while the frames still changed: ``settled_by`` set; stayed after all: ``settled``;
+                    # a frame the window took for a soft one: ``soft``)
+                    job["settled"] = getattr(gate, "settled", None)
+                    job["soft_gate"] = getattr(gate, "soft", None)
+                    by = getattr(gate, "settled_by", None)
+                    job["settled_by_t"] = job["over_t"] + (by - time.monotonic()) * 1000 if by is not None else None
             self.current = None
 
     def gates_at_end(self) -> None:
@@ -3615,11 +3624,10 @@ def run(args: argparse.Namespace) -> int:
             names.remove("x")
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
-    from taslation import backlog as backlog_mod
-
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
               "soft": args.k_soft == "on", "narrow": bool(args.k_narrow),
-              "history": args.k_history or backlog_mod.HISTORY, "backlog": args.k_backlog == "on"}
+              "history": args.k_history, "backlog": args.k_backlog == "on",
+              "read_ms": args.k_read_ms}  # (history None: the app's, below)
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
@@ -3662,6 +3670,10 @@ def run(args: argparse.Namespace) -> int:
 
     if not Path(taslation.__file__).resolve().is_relative_to(ROOT):
         raise SystemExit(f"taslation comes from {taslation.__file__}, not from {ROOT}: set PYTHONPATH")
+    if k_plan["history"] is None:
+        from taslation.backlog import HISTORY
+
+        k_plan["history"] = HISTORY
     if args.start_ollama:
         from taslation import ollama_start
 
@@ -3762,7 +3774,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
                         flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
-                        ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache)
+                        ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
+                        ollama_num_gpu=args.ollama_num_gpu)
     settings.validate()
     errorlog.setup(settings)
     tap = LogTap(notes)
@@ -3868,7 +3881,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                  "result_boxes": j.get("result_boxes"),
                  "cache_hits": j.get("cache_hits"), "cache_misses": j.get("cache_misses"),
                  "stored": j.get("stored"), "stored_at_cancel": j.get("stored_at_cancel"),
-                 "cancelled_s": rel(j["cancelled_t"]), "discarded": j["discarded"], "done_s": rel(j["done_t"])}
+                 "cancelled_s": rel(j["cancelled_t"]), "discarded": j["discarded"], "done_s": rel(j["done_t"]),
+                 "confirmed_s": rel(j.get("confirmed_t")), "settled": j.get("settled"), "soft_gate": j.get("soft_gate"),
+                 "settled_by_s": rel(j.get("settled_by_t"))}
                 for j in started]
     kept_soft = [j for j in job_list if j["frame"] != "sharp" and j["discarded"] is not True
                  and (j["gate_end"] == "confirmed" or not j["gate"]) and (j["stored"] or j["stored_at_cancel"])]
@@ -4457,6 +4472,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "developer's own on another port, set up otherwise, is never started or stopped here)")
     ap.add_argument("--ocr-runs-on", default="auto", choices=("auto", "cpu", "gpu"),
                     help="the setting ocr_runs_on of the window (default: the app's, auto)")
+    ap.add_argument("--ollama-num-gpu", default="",
+                    help="the setting ollama_num_gpu of the window (default: empty, the server decides; 0: the model "
+                         "on the processor only - with CUDA_VISIBLE_DEVICES=-1 and --ocr-runs-on cpu, a computer "
+                         "without a GPU)")
     ap.add_argument("--start-ollama", type=int, metavar="PORT",
                     help="the window's own starter starts Ollama on this loopback port, where nothing answers (instead "
                          "of --ollama-url), with the environment it chooses; stopped at the end")
@@ -4481,6 +4500,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "the scenarios are as written")
     ap.add_argument("--k-turns", type=int, default=20, help="scenario k: the pages flipped past at each pace")
     ap.add_argument("--k-read", type=int, default=0, help="scenario k: the pages read back after (default: all)")
+    ap.add_argument("--k-read-ms", type=int, default=K_READ_MS,
+                    help=f"scenario k: ms a page read back stays (default {K_READ_MS}; longer for a computer without "
+                         "a GPU, whose page on show takes longer)")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
     ap.add_argument("--k-history", default=None, choices=("story", "work"),
