@@ -4582,7 +4582,8 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
         for b in bg:
             if b["did"] != "stopped" or b.get("sight") is None:
                 continue
-            nxt = next((j for j in notes.jobs if j["started"] and j["t"] >= b["t"] - 50), None)
+            # (the job that stopped it: the first one started after the step began - a step begins with no job on)
+            nxt = next((j for j in notes.jobs if j["started"] and j["t"] >= b["began"]), None)
             if nxt is not None and nxt.get("sight") == b["sight"]:
                 same_page_waits.append(b.get("waited_ms"))
                 row = next((r for _t, r in reads if nxt["id"] in r["job_ids"]), None)
@@ -4648,6 +4649,14 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
     if not paces:
         return {}
     return {"paces": paces, "events": dict(Counter(r["kind"] for r in readings)),
+            "step_list": {"columns": ["began_s", "t_s", "did", "on", "sight", "here", "waited_ms", "frame_wait_ms",
+                                      "next_job", "next_job_sight"],
+                          "rows": [[rel(b["began"]), rel(b["t"]), b["did"], b.get("on"), b.get("sight"), b.get("here"),
+                                    b.get("waited_ms"), b.get("frame_wait_ms"),
+                                    *((lambda j: [j["id"], j.get("sight")] if j else [None, None])(
+                                        next((j for j in notes.jobs if j["started"] and j["t"] >= b["began"]), None)
+                                        if b["did"] == "stopped" else None))]
+                                   for b in steps]},
             "event_list": {"columns": ["t_s", "kind", "seq", "stage", "state", "pages", "thumb"],
                            "rows": [[rel(r["t"]), r["kind"], r["seq"], r["stage"], r["state"], r["pages"],
                                      r["thumb"]] for r in readings]},
