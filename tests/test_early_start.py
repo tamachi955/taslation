@@ -23,10 +23,11 @@ from taslation import recovery
 from taslation.pipeline import PageGate
 from taslation.regions import PageResult
 from taslation.ui import jobs, live
-from taslation.ui.constants import FOLLOW_STEP_MS, FRAME_STEP_MS
+from taslation.ui.constants import FOLLOW_STEP_MS, FRAME_GAP_MS, FRAME_STEP_MS
 from taslation.ui.live import KEEP_SETTLES, LEFT_PAGE_MS
 
 KEEP_S = KEEP_SETTLES * 0.4  # what a page started early stores lasts once its frame stayed this long (settle_ms 400)
+FRAME_GAP_S = FRAME_GAP_MS / 1000  # (the viewer in front, frames counted: a new frame is captured this soon at most)
 
 STEP_MS = 10  # the worker's stand-in looks at its job so often
 READ_S, ASK_S, CANCEL_S = 0.3, 0.5, 0.03  # a page read (detection and OCR), the model's answer, a cancel taking hold
@@ -334,14 +335,124 @@ def test_a_sharp_frame_that_comes_while_the_soft_frames_request_runs_cancels_it_
 
 def test_soft_pictures_drawn_longer_than_settle_ms_are_never_kept(follow):
     """The browser-type stand-in viewer draws its soft picture up to 400-420 ms on the screen: settle_ms itself
-    confirmed some of those soft frames; twice settle_ms confirms none. Their requests go out and are cancelled."""
+    confirmed some of those soft frames; twice settle_ms confirms none. The first one's request goes out and is
+    cancelled; once the viewer has been seen to draw a page soft first, a soft picture is started only once it has
+    stayed settle_ms (`_early_start`), and the sharp one comes before its request."""
     w, worker = follow.make()
-    for k in range(4):
-        follow.show((0.0, f"p{k} soft", _page(70 + k, soft=3)), (0.42, f"p{k}", _page(70 + k)))
+    turns = [follow.show((0.0, f"p{k} soft", _page(70 + k, soft=3)), (0.42, f"p{k}", _page(70 + k)))
+             for k in range(4)]
     soft = [j for j in worker.jobs if j.name.endswith("soft")]
     assert len(soft) == 4 and all(j.gate.confirmed_at is None and j.stored is None and j.discarded for j in soft)
-    assert all(j.asked is not None and j.how == "cancelled" for j in soft)  # (asked, and cancelled)
+    assert soft[0].asked is not None and soft[0].how == "cancelled"  # (asked, and cancelled)
+    for job, turned in zip(soft[1:], turns[1:]):
+        # held until it has stayed settle_ms from its first look (FRAME_GAP_MS at most after it came), then dropped
+        assert 0.4 <= job.start - turned <= 0.4 + FRAME_GAP_S + 0.016 and job.asked is None
     assert worker.kept == ["1", "p0", "p1", "p2", "p3"]
+
+
+# ------------------------------------------------------------------ a viewer seen to draw a page soft first
+def _soft_first(follow, sharp_s=0.25, **make):
+    """The window and its worker (`follow.make` with *make*), the viewer seen to draw a page soft first (page 4: soft,
+    sharp *sharp_s* later)."""
+    w, worker = follow.make(**make)
+    follow.show((0.0, "4 soft", _page(4, soft=3)), (sharp_s, "4", _page(4)))
+    assert w._draws_soft_first() and worker.kept == ["1", "4"]
+    return w, worker
+
+
+@pytest.mark.parametrize("soft_s", [0.15, 0.3, 0.38])
+def test_on_a_viewer_that_draws_soft_first_the_soft_frame_starts_nothing_and_the_sharp_one_at_once(follow, soft_s):
+    """The stand-in viewer: on a slow-reading turn the soft frame's job was dropped 0.2-0.4 s after it began, and the
+    sharp frame's job began 240-340 ms after the sharp frame was drawn (130 ms on a turn with no soft job). Now the
+    soft frame is not started; the sharp frame is, at its first look."""
+    w, worker = _soft_first(follow)
+    turned = follow.show((0.0, "5 soft", _page(5, soft=3)), (soft_s, "5", _page(5)))
+    assert worker.of("5 soft") == []  # nothing read from the soft frame
+    job = worker.one("5")
+    assert job.gate is not None and job.start - (turned + soft_s) <= 0.016  # at the sharp frame's first look
+    assert _after(job.gate.confirmed_at - (turned + soft_s), KEEP_S) and job.how == "done"
+    assert worker.kept == ["1", "4", "5"] and w.last_result is job.result
+
+
+def test_a_page_low_in_detail_starts_no_later_than_the_settle_path(follow):
+    """A frame that looks soft and stays as it is (a page with little on it, nothing sharper to come) is started once
+    it has stayed settle_ms - when the settle path takes a page -, with a gate, and kept KEEP_SETTLES times settle_ms
+    after its first look."""
+    w, worker = _soft_first(follow)
+    turned = follow.show((0.0, "6 plain", _page(6, soft=3)))
+    job = worker.one("6 plain")
+    # settle_ms after its first look (FRAME_GAP_MS at most after it came)
+    assert job.gate is not None and 0.4 <= job.start - turned <= 0.4 + FRAME_GAP_S + 0.016
+    assert _after(job.gate.confirmed_at - turned, KEEP_S) and job.how == "done"
+    assert worker.kept == ["1", "4", "6 plain"]
+
+
+def _over_a_job(follow, *frames):
+    """On a viewer seen to draw a page soft first, page 2 shown and its job asking the model for 1.5 s; one second
+    after page 2 came, *frames* - (delay, name, picture) from then -. Page 2's job, and when the first frame came."""
+    w, worker = _soft_first(follow, ask_s=1.5)
+    turned = follow.show((0.0, "2", _page(2)), *[(1.0 + d, name, pic) for d, name, pic in frames], run=0.3 + 1.0)
+    two = worker.one("2")
+    assert two.asked is not None and two.shown is None  # (asking still as the next page comes)
+    follow.clock.run(3.0)
+    return w, worker, two, turned + 1.0
+
+
+def test_a_soft_frame_of_a_page_turned_to_while_a_job_runs_starts_nothing_and_the_sharp_one_at_once(follow):
+    """The page turned to while the job of the page before runs (`Operation.over_job`): that job is cancelled once the
+    soft frame has stayed LEFT_PAGE_MS, as before; the soft frame, which used to be started as soon as the worker was
+    free of it, is not, and the sharp frame is started at its first look."""
+    w, worker, two, turned = _over_a_job(follow, (0.0, "3 soft", _page(3, soft=3)), (0.3, "3", _page(3)))
+    assert two.how == "cancelled" and LEFT_PAGE_MS / 1000 <= two.cancel_seen - turned <= LEFT_PAGE_MS / 1000 + 0.05
+    assert worker.of("3 soft") == []
+    job = worker.one("3")
+    assert job.gate is not None and job.start - (turned + 0.3) <= 0.016 and job.how == "done"
+    assert worker.kept == ["1", "4", "3"]
+
+
+def test_a_page_low_in_detail_turned_to_while_a_job_runs_starts_no_later_than_the_settle_path(follow):
+    """The same with a frame that looks soft and stays: started once it has stayed settle_ms after its first look,
+    with a gate, and kept."""
+    w, worker, two, turned = _over_a_job(follow, (0.0, "3 plain", _page(3, soft=3)))
+    assert two.how == "cancelled"
+    job = worker.one("3 plain")
+    assert job.gate is not None and 0.4 <= job.start - turned <= 0.4 + FRAME_GAP_S + 0.016
+    assert job.how == "done" and worker.kept == ["1", "4", "3 plain"]
+
+
+def test_a_soft_frame_not_counted_is_looked_at_every_step(hidden_root, monkeypatch, tmp_path):
+    """The viewer's frames not counted: a soft frame not started is looked at every FOLLOW_STEP_MS (not settle_ms), so
+    that the sharp one is started within a step of coming."""
+    env = _environment(hidden_root, monkeypatch, tmp_path / "profiles.json", counted=False)
+    w, worker = _soft_first(env, sharp_s=1.0)  # (frames not counted: a frame is seen at the next poll)
+    looks = len(env.viewer.captures)
+    turned = env.show((0.0, "5 soft", _page(5, soft=3)), run=0.3)
+    while not [t for t in env.viewer.captures[looks:] if t >= turned]:
+        env.clock.run(0.01)  # (until the poll sees the soft frame)
+    first = env.viewer.captures[-1]
+    sharp, sharp_at = _page(5), first + 0.3  # the sharp frame comes 0.3 s after the soft one was seen
+    env.names[id(sharp)] = "5"
+    env.viewer.frames.append((sharp_at, sharp))
+    env.clock.run(0.29)
+    held = [t for t in env.viewer.captures[looks:] if first <= t < sharp_at]
+    assert worker.of("5 soft") == [] and len(held) >= 3  # seen, not started ...
+    assert np.diff(held).max() <= FOLLOW_STEP_MS / 1000 + 1e-6  # ... and looked at every FOLLOW_STEP_MS
+    env.clock.run(3.0)
+    job = worker.one("5")
+    assert job.start - sharp_at <= FOLLOW_STEP_MS / 1000 + 0.016 and worker.kept[-1] == "5"
+
+
+def test_a_viewer_never_seen_to_draw_soft_first_starts_every_frame_at_once_as_before(follow):
+    """Nothing changes for a viewer that never drew a page soft first: a frame is started at its first look, whatever
+    its crispness (no crispness is even measured)."""
+    w, worker = follow.make()
+    measured = []
+    looks_soft = w._looks_soft
+    w._looks_soft = lambda image: measured.append(image) or looks_soft(image)
+    turned = follow.show((0.0, "7 plain", _page(7, soft=3)))
+    job = worker.one("7 plain")
+    assert job.start - turned <= 0.016 and not w._draws_soft_first() and worker.kept == ["1", "7 plain"]
+    assert all(not looks_soft(i) for i in measured)  # (asked, and said no at once: no viewer seen to draw soft)
 
 
 def test_frames_of_an_animation_ask_nothing_and_keep_nothing(follow):

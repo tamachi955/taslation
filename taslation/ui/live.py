@@ -422,6 +422,7 @@ class Operation:
     looked_at: float = 0.0  # "change" with frames counted: when the frame was last captured
     redo: bool = False  # "settle": the page started early was dropped; started again once the worker is free
     over_job: bool = False  # "settle": begun while a page job runs, on a frame of another page (`_look_over_job`)
+    held_soft: bool = False  # "settle": its frame looks soft (a viewer that draws soft first): not started early on it
     keys: tuple[str, ...] = ()  # "change": the posted keys awaited, the first one's own wait for all (`_held_keys`)
 
 
@@ -2240,7 +2241,7 @@ class LiveViewMixin(BlackViewerMixin):
         started early on its frame (or to be started again once the worker is free, `Operation.redo`), whose job waits
         before its first request for a look that finds its frame on show (`_frame_seen`), and is dropped by the first
         that finds another."""
-        return self._early_on() and op.turned_at is None and (op.redo or self._early_of(op) is not None)
+        return self._early_on() and op.turned_at is None and (op.redo or op.held_soft or self._early_of(op) is not None)
 
     def _waits_for_worker(self, op: Operation, now: float) -> bool:
         """Whether *op*'s frame, to be started early once the worker is free (`Operation.redo`; a frame of another
@@ -2320,12 +2321,24 @@ class LiveViewMixin(BlackViewerMixin):
             return False
         return not self._all_cached(image)
 
-    def _early_start(self, op: Operation, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray) -> bool:
+    def _early_start(self, op: Operation, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray,
+                     soft: bool = False) -> bool:
         """early_start: *op*'s frame started as the page at once (`_take`), before it settles, with a gate
         (`pipeline.PageGate`): the job reads the page and may show it; it asks the model once a look after it asked
         has found its frame on show still (`_frame_seen`), and keeps nothing until the frame is confirmed
-        (`_early_confirm`); a frame that changes before that drops it (`_early_drop`). Whether it was started so."""
+        (`_early_confirm`); a frame that changes before that drops it (`_early_drop`). Whether it was started so.
+
+        On a viewer seen to draw a page soft first, a frame that looks soft (`_looks_soft`) is not started (unless
+        *soft*): its job would be dropped as the sharp picture comes 0.15-0.45 s later, and the sharp frame's job
+        waited for it to end - on the stand-in viewer it began 290-300 ms (median) after the sharp frame was drawn,
+        120-160 ms with the soft frame not started (its own detection and OCR as long either way). The page starts on
+        the sharp frame as it comes, or - a page that is low in detail, the frame staying as it is - once the frame has
+        stayed settle_ms (`_step`: the settle path's time, with a gate; a page turned to while a job ran too)."""
+        op.held_soft = False  # (of the frame looked at last)
         if not self._early_allowed(op, image, thumb):
+            return False
+        if not soft and self._looks_soft(image):
+            op.held_soft = True
             return False
         f = self._following
         gate = PageGate(TAKE_BACK_MS / 1000 if self._draws_soft_first() else 0.0)
@@ -2833,6 +2846,16 @@ class LiveViewMixin(BlackViewerMixin):
                     f.taken = None
                     self._cancel_page(turned=True)
                 op.redo = True  # ... and this frame is started early, a gate of its own, once the worker is free
+                self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
+                return
+            if op.held_soft and now - op.last_at < self.settings.settle_ms / 1000:
+                # (a soft frame of a page turned to while a job ran - that job cancelled once the frame had stayed
+                # LEFT_PAGE_MS -: it waits for the sharp frame as long as the settle path would, no longer)
+                self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
+                return
+            if op.held_soft and self._early_start(op, image, thumb, frame_detail, soft=True):
+                # (a frame that looked soft and stayed settle_ms - a page low in detail -: started now, the settle
+                # path's time, with a gate, kept once it has stayed KEEP_SETTLES times settle_ms)
                 self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
                 return
             took = self._take(image, thumb, frame_detail, operation=op.operation)
