@@ -35,7 +35,7 @@ from ...i18n import _
 from ...translate.ollama import NUM_GPU_MOST, num_gpu_value
 from .. import theme
 from ..tooltip import tip
-from .caches import in_lines
+from .caches import box_chars, in_lines
 
 NUM_GPU_LABEL = "Translation model's layers on the GPU:"
 NUM_GPU_TEXT = ("Empty: Ollama decides (the fastest). 0: the processor only, which leaves the GPU free and translates "
@@ -150,7 +150,7 @@ class SystemPage(ttk.Frame):
         self.ocr_runs_on = tk.StringVar(self, value=next((_(label) for value, label in OCR_RUNS_ON_CHOICES
                                                           if value == now), shown[0]))
         box = ttk.Combobox(layers, textvariable=self.ocr_runs_on, values=shown, state="readonly",
-                           width=max(len(s) for s in shown) + 2)
+                           width=box_chars(shown))
         box.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
         line = ttk.Label(layers, text=in_lines(_(OCR_RUNS_ON_TEXT), width), justify="left",
                          foreground=theme.colour("note"))
@@ -163,7 +163,7 @@ class SystemPage(ttk.Frame):
         self.window_cache = tk.StringVar(self, value=next((_(label) for value, label in WINDOW_CACHE_CHOICES
                                                            if value == now), shown[0]))
         box = ttk.Combobox(layers, textvariable=self.window_cache, values=shown, state="readonly",
-                           width=max(len(s) for s in shown) + 2)
+                           width=box_chars(shown))
         box.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
         line = ttk.Label(layers, text=in_lines(_(WINDOW_CACHE_TEXT), width), justify="left",
                          foreground=theme.colour("note"))

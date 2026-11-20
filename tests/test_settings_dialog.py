@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import tkinter as tk
+import tkinter.font as tkfont
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +17,8 @@ import pytest
 from taslation import cli
 from taslation.config import (NEW_FILE_HEADER, ConfigError, Settings, create_settings_file, edit_settings_text,
                               new_settings_text, setting_names, settings_file, toml_value, write_settings)
-from taslation.i18n import _, set_language
+from taslation.devices import StageDevice
+from taslation.i18n import UI_LANGUAGES, _, set_language
 from taslation.pipeline import Pipeline
 from taslation.render import artwork
 from taslation.ui import app as app_mod
@@ -346,6 +348,93 @@ def test_the_inpainting_row_says_when_this_computer_has_no_gpu(hidden_root, in_f
     d.erase.set(_("Only with a GPU"))
     assert not d.gpu_line_shown() and d.gpu_label.winfo_manager() == ""
     assert dlg.SettingsDialog(hidden_root, in_force).gpu_label.winfo_manager() == ""
+
+
+# ------------------------------------------------------------------ on a low screen
+LOW = (0, 0, 1366, 728)  # the work area of a 1366 x 768 screen with its taskbar
+FRAME = (8, 31)  # a window frame's border and its title bar with the top border
+
+
+@pytest.fixture
+def screen(monkeypatch):
+    """The work area the dialog lands on: *area[0]* (left, top, right, bottom), a low one at first."""
+    area = [LOW]
+    monkeypatch.setattr(dlg, "work_area", lambda widget, x=None, y=None: area[0])
+    monkeypatch.setattr(dlg, "frame_extents", lambda: FRAME)
+    return area
+
+
+def _outer_height(d) -> int:
+    d.update_idletasks()
+    return d.winfo_reqheight() + FRAME[1] + FRAME[0]
+
+
+def _shown_rows():
+    return [StageDevice("detect", "gpu", "The layout model and the classical detectors", "NVIDIA Test GPU"),
+            StageDevice("ocr", "both", "The OCR readers", "NVIDIA Test GPU", share=0.6),
+            StageDevice("translate", "", "Ollama: qwen3.5:4b", why="Not loaded now: Ollama loads it for the first line"),
+            StageDevice("erase", "cpu", "The paper fill")]
+
+
+@pytest.mark.parametrize("code", sorted(UI_LANGUAGES))
+def test_on_a_low_screen_the_pages_scroll_and_the_dialog_with_its_buttons_stays_on_it(hidden_root, in_force, screen,
+                                                                                       code):
+    set_language(code)
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    assert d.state() == "withdrawn"  # (out of sight: the tests' root is not on the screen)
+    assert _outer_height(d) <= LOW[3]
+    for page in (d.general_tab, d.system_tab):  # the content whole, the canvas showing part of it
+        height = page.content.winfo_reqheight()
+        assert page.scrolls() and page.canvas.winfo_reqheight() < height
+        assert d.tk.splitlist(page.canvas.cget("scrollregion"))[3] == str(height)
+    d.system.look = _shown_rows  # the System page with its rows, as when it is shown
+    d.system.refresh(wait=True)
+    assert len(d.system.shown_rows) == 4 and _outer_height(d) <= LOW[3]
+    d._say(" ".join(["A message that takes several lines."] * 8), error=True)
+    assert str(d.message_var.get()).count("\n") >= 3 and _outer_height(d) <= LOW[3]
+    font = tkfont.nametofont("TkDefaultFont")  # every box of choices shows its longest choice whole
+    zero = font.measure("0")
+    boxes = [w for page in d.scrolled_pages() for w in _all(page.content) if w.winfo_class() == "TCombobox"]
+    assert len(boxes) >= 7
+    for box in boxes:
+        longest = max(font.measure(str(v)) for v in d.tk.splitlist(box.cget("values")))
+        assert longest <= int(box.cget("width")) * zero, (code, d.tk.splitlist(box.cget("values")))
+
+
+def test_on_a_screen_with_room_nothing_scrolls(hidden_root, in_force, screen):
+    screen[0] = (0, 0, 1920, 2400)
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    for page in d.scrolled_pages():
+        assert not page.scrolls() and page.canvas.winfo_reqheight() == page.content.winfo_reqheight()
+    general = d.general_tab.content.winfo_reqheight()
+    assert d.pages.winfo_reqheight() > general and _outer_height(d) > LOW[3]  # (taller than a low screen has room for)
+
+
+def test_the_wheel_scrolls_the_page_in_front_but_not_over_a_box_that_takes_it(hidden_root, in_force, screen):
+    d = dlg.SettingsDialog(hidden_root, in_force)
+    d.update_idletasks()
+    canvas = d.general_tab.canvas
+    label = next(w for w in _all(d.general_tab.content) if w.winfo_class() == "TLabel")
+    box = next(w for w in _all(d.general_tab.content) if w.winfo_class() == "TCombobox")
+    d._wheel(SimpleNamespace(widget=box, delta=-120))
+    assert canvas.yview()[0] == 0.0  # (the box changes its own choice)
+    d._wheel(SimpleNamespace(widget=label, delta=-120))
+    down = canvas.yview()[0]
+    assert down > 0.0
+    d._wheel(SimpleNamespace(widget=label, delta=120))
+    assert canvas.yview()[0] == 0.0
+    d.pages.select(d.keys_tab)  # the Shortcuts page does not scroll: the wheel leaves it alone
+    d._wheel(SimpleNamespace(widget=d.keys, delta=-120))
+    assert d.keys_tab.canvas.yview()[0] == 0.0 and not d.keys_tab.scrolls()
+
+
+def _all(widget):
+    found, stack = [], [widget]
+    while stack:
+        w = stack.pop(0)
+        found.append(w)
+        stack.extend(w.winfo_children())
+    return found
 
 
 # ------------------------------------------------------------------ the window

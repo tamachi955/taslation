@@ -21,7 +21,8 @@ what each stage of a page runs on and the seconds a page there (`system_page.Sys
 shown), how many of the translation model's layers Ollama puts on the GPU (``ollama_num_gpu``), whether the window
 loads that model at its start (``load_model_at_start``), where the OCR readers run (``ocr_runs_on``), the window
 cache of the Ollama TASlation starts (``ollama_window_cache``) and whether the window looks for a new version at its
-start (``update_check``), saved with the others.
+start (``update_check``), saved with the others. Each page scrolls where the whole dialog would be taller than the
+screen leaves room for (`ScrolledPage`), so that Save and Close stay on the screen.
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
 `Settings` has the key, written and applied like the others. A whole number is one line in `NUMBER_ROWS` (a
@@ -58,12 +59,12 @@ from ...config import (
 from ...i18n import _, load_ui_table, save_ui_entry
 from ...render import artwork
 from .. import theme
-from ..layout import place_window
+from ..layout import frame_extents, place_window, work_area
 from ..scaling import UI_SCALES, clamp_scale
 from ..shortcuts import Keymap
 from ..shortcuts import current as keys_in_force
 from ..tooltip import tip
-from .caches import in_lines
+from .caches import box_chars, in_lines
 from .shortcuts_page import ShortcutsPage
 from .system_page import SystemPage
 from .start import terms_note
@@ -193,6 +194,7 @@ THEME_TIP = ("The window's colours: light, dark, or as Windows has them for apps
              "settings). The page keeps its own. While Windows' high contrast is on, the window takes Windows' colours.")
 CONTRAST_TEXT = "Windows' high contrast is on: the window takes Windows' colours."
 TEXT_CHARS = 58  # the dialog's sentences are broken at so many "0" widths of its font: as many words at any scale
+PAGE_LEAST = 160  # the least height a page keeps on a screen too low for the rest of the dialog (pixels)
 IGNORED_TABLE, IGNORED_ENTRY = "settings", "ignored"  # where ui.json keeps the unknown keys named last
 PAGE_MODELS_TEXT = ("Two optional models: a layout model (comic-text-and-bubble-detector, tagged Apache-2.0) that "
                     "finds lettering on the drawing that the usual detection misses, and an inpainting model (LaMa, "
@@ -257,18 +259,81 @@ def open_in_editor(path: Path) -> None:
     subprocess.Popen([opener, str(path)])
 
 
+class ScrolledPage(ttk.Frame):
+    """A page of the dialog's notebook: its content (`hold`, made with ``canvas`` as its master so that the canvas
+    cuts it off) as tall as it is, or as tall as ``limit`` with a bar at the side for the rest (`fit`, again whenever
+    the content's size changes). `SettingsDialog._fit` sets the limit from the screen's height."""
+
+    def __init__(self, master: tk.Misc):
+        super().__init__(master)
+        background = ttk.Style(self).lookup("TFrame", "background") or self.winfo_toplevel().cget("background")
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, background=background,
+                                yscrollincrement=tkfont.nametofont("TkDefaultFont").metrics("linespace"))
+        self.bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.bar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.limit: int | None = None
+        self.content: tk.Misc | None = None
+
+    def hold(self, content: tk.Misc) -> None:
+        self.content = content
+        self.canvas.create_window(0, 0, window=content, anchor="nw")
+        content.bind("<Configure>", lambda _e: self.fit(), add="+")
+        self.fit()
+
+    def scrolls(self) -> bool:
+        """Whether part of the content is out of sight (the bar shows)."""
+        return bool(self.bar.winfo_manager())
+
+    def fit(self) -> None:
+        if self.content is None:
+            return
+        try:
+            width, height = self.content.winfo_reqwidth(), self.content.winfo_reqheight()
+            shown = height if self.limit is None else min(height, self.limit)
+            self.canvas.configure(width=width, height=shown, scrollregion=(0, 0, width, height))
+            if shown < height:
+                if not self.scrolls():
+                    self.bar.pack(side="right", fill="y")
+            elif self.scrolls():
+                self.bar.pack_forget()
+                self.canvas.yview_moveto(0)
+        except tk.TclError:
+            pass
+
+    def show(self, widget: tk.Misc) -> None:
+        """*widget* (in the content, on the screen) scrolled into sight with a line of room around it, as when the
+        keyboard goes to it."""
+        if self.content is None or not self.scrolls():
+            return
+        try:
+            room = int(self.canvas.winfo_fpixels(self.canvas.cget("yscrollincrement")))
+            top = widget.winfo_rooty() - self.content.winfo_rooty() - room
+            bottom = top + widget.winfo_height() + 2 * room
+            seen, height = int(self.canvas.canvasy(0)), max(1, self.content.winfo_reqheight())
+            if top < seen:
+                self.canvas.yview_moveto(max(0, top) / height)
+            elif bottom > seen + self.canvas.winfo_height():
+                self.canvas.yview_moveto((bottom - self.canvas.winfo_height()) / height)
+        except tk.TclError:
+            pass
+
+
 class SettingsDialog(tk.Toplevel):
     """The settings of `KEYS` for *settings* (the window's own object: what is saved is set on it by *on_saved*, the
     changed settings by name) on the General page, the window's keys over *keymap* (the one in force when None) on
     the Shortcuts page (saved, they go to *on_keys*), where the stages run on the System page (*pipeline* gives the
     window's pipeline, for its translator and its seconds a page), the file the settings are written to
     (`config.settings_file`) in a read-only line, Open settings file, Save and Close. ``message`` holds what the last Save or Open said. Not
-    modal: the window goes on behind it."""
+    modal: the window goes on behind it. Where the whole dialog would be taller than the screen's work area under
+    the window, the pages scroll (`ScrolledPage`, `_fit`), so that the buttons stay on the screen."""
 
     def __init__(self, master: tk.Misc, settings: Settings, on_saved: Callable[[dict[str, Any]], None] | None = None,
                  keymap: Keymap | None = None, on_keys: Callable[[Keymap], None] | None = None,
                  pipeline: Callable[[], Any] | None = None):
         super().__init__(master)
+        self.withdraw()  # measured and placed before it first shows
+        self._room = self._others = 0  # (`_fit`)
         self.settings = settings
         self.on_saved = on_saved
         self.on_keys = on_keys
@@ -282,8 +347,9 @@ class SettingsDialog(tk.Toplevel):
         frm.pack(fill="both", expand=True)
         self.pages = ttk.Notebook(frm)
         self.pages.pack(fill="both", expand=True)
-        general = ttk.Frame(self.pages, padding=8)
-        self.pages.add(general, text=_("General"))
+        self.general_tab, self.keys_tab, self.system_tab = (ScrolledPage(self.pages) for _i in range(3))
+        general = ttk.Frame(self.general_tab.canvas, padding=8)
+        self.pages.add(self.general_tab, text=_("General"))
 
         letters = ttk.LabelFrame(general, text=_("Lettering"), padding=8)
         letters.pack(fill="x")
@@ -336,7 +402,7 @@ class SettingsDialog(tk.Toplevel):
         self.colours_var = tk.StringVar(self, value=self._shown(THEME_CHOICES, getattr(settings, "theme", "system")))
         shown = [_(label) for _value, label in THEME_CHOICES]
         box = ttk.Combobox(window, textvariable=self.colours_var, values=shown, state="readonly",
-                           width=max(-(-tkfont.nametofont("TkDefaultFont").measure(s) // zero) for s in shown) + 2)
+                           width=box_chars(shown))
         box.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
         tip(_(THEME_TIP), name, box)
         if theme.high_contrast():  # the choice waits while Windows' high contrast is on (`theme.effective`)
@@ -369,9 +435,7 @@ class SettingsDialog(tk.Toplevel):
                                                     ("Inpainting:", self.erase, ERASE_CHOICES)), start=1):
             ttk.Label(models, text=_(word)).grid(row=row, column=0, sticky="w", pady=(4, 0))
             shown = [_(label) for _value, label in choices]
-            # (wide enough for the longest choice in the window's language: a box's width counts "0"s of its font)
-            box = ttk.Combobox(models, textvariable=var, values=shown, state="readonly",
-                               width=max(-(-tkfont.nametofont("TkDefaultFont").measure(s) // zero) for s in shown) + 2)
+            box = ttk.Combobox(models, textvariable=var, values=shown, state="readonly", width=box_chars(shown))
             box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
         self.gpu_label = ttk.Label(models, text=in_lines(_(NO_GPU_TEXT), self.text_width), justify="left")
         self.gpu_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -383,10 +447,14 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(models, text=in_lines(self.models_line, self.text_width), justify="left").grid(
             row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        self.keys = ShortcutsPage(self.pages, keymap if keymap is not None else keys_in_force(), self._say, self.text_width)
-        self.pages.add(self.keys, text=_("Shortcuts"))
-        self.system = SystemPage(self.pages, settings, self.text_width, pipeline=pipeline)
-        self.pages.add(self.system, text=_("System"))
+        self.general_tab.hold(general)
+        self.keys = ShortcutsPage(self.keys_tab.canvas, keymap if keymap is not None else keys_in_force(), self._say,
+                                  self.text_width)
+        self.keys_tab.hold(self.keys)
+        self.pages.add(self.keys_tab, text=_("Shortcuts"))
+        self.system = SystemPage(self.system_tab.canvas, settings, self.text_width, pipeline=pipeline)
+        self.system_tab.hold(self.system)
+        self.pages.add(self.system_tab, text=_("System"))
         self.pages.bind("<<NotebookTabChanged>>", self._page_shown)
 
         where = ttk.Frame(frm)
@@ -409,14 +477,73 @@ class SettingsDialog(tk.Toplevel):
         self.save_btn = ttk.Button(btns, text=_("Save"), command=self.save, default="active")
         self.save_btn.pack(side="right", padx=(0, 6))
         self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<MouseWheel>", self._wheel, add="+")
+        self.bind("<FocusIn>", self._focus_shown, add="+")
         self._show_terms()
+        self._fit(master)
         place_window(self, master)
+        if master.winfo_viewable():  # (a window not on the screen, as the tests' root: it stays out of sight)
+            self.deiconify()
+
+    # ------------------------------------------------------------------ the pages' height
+    def _fit(self, master: tk.Misc) -> None:
+        """How tall the pages may be (`ScrolledPage.limit`): what the work area of the monitor under *master* (where
+        `place_window` puts the dialog, or the primary one) leaves once the title bar, the border and the rest of the
+        dialog are counted. The message line is counted as it is (`_limit_pages`, again whenever it changes)."""
+        try:
+            self.update_idletasks()
+            if master.winfo_viewable():
+                _left, top, _right, bottom = work_area(self, master.winfo_rootx() + master.winfo_width() // 2,
+                                                       master.winfo_rooty() + master.winfo_height() // 2)
+            else:
+                _left, top, _right, bottom = work_area(self)
+            border, caption = frame_extents()
+            self._room = bottom - top - caption - border
+            tallest = max(page.canvas.winfo_reqheight() for page in self.scrolled_pages())
+            self._others = self.winfo_reqheight() - tallest - self.message_label.winfo_reqheight()
+        except tk.TclError:
+            return
+        self._limit_pages()
+
+    def _limit_pages(self) -> None:
+        if not self._room:
+            return
+        limit = max(PAGE_LEAST, self._room - self._others - self.message_label.winfo_reqheight())
+        for page in self.scrolled_pages():
+            page.limit = limit
+            page.fit()
+
+    def scrolled_pages(self) -> tuple[ScrolledPage, ...]:
+        return self.general_tab, self.keys_tab, self.system_tab
+
+    def _wheel(self, event: tk.Event) -> None:
+        """The mouse wheel anywhere over the dialog scrolls the page in front where it scrolls; not over a box, a list
+        or a bar, which take the wheel themselves."""
+        widget = event.widget
+        try:
+            if isinstance(widget, tk.Misc) and widget.bind_class(widget.winfo_class(), "<MouseWheel>"):
+                return
+            page = self.nametowidget(self.pages.select())
+        except (tk.TclError, KeyError):
+            return
+        if isinstance(page, ScrolledPage) and page.scrolls() and event.delta:
+            steps = max(1, abs(int(event.delta)) // 40)  # (three lines a notch, as Windows has it)
+            page.canvas.yview_scroll(-steps if event.delta > 0 else steps, "units")
+
+    def _focus_shown(self, event: tk.Event) -> None:
+        """A field the keyboard goes to on a page that scrolls is scrolled into sight."""
+        widget = event.widget
+        if not isinstance(widget, tk.Misc):
+            return
+        for page in self.scrolled_pages():
+            if page.content is not None and str(widget).startswith(str(page.content) + "."):
+                page.show(widget)
 
     # ------------------------------------------------------------------ the fields
     def _page_shown(self, _event: Any = None) -> None:
         """A page came to the front: the System page looks the first time."""
         try:
-            if self.pages.select() == str(self.system):
+            if self.pages.select() == str(self.system_tab):
                 self.system.shown()
         except tk.TclError:
             pass
@@ -436,7 +563,7 @@ class SettingsDialog(tk.Toplevel):
                 var = tk.StringVar(self, value=self._shown(spec.choices, value))
                 shown = [_(label) for _value, label in spec.choices]
                 box = ttk.Combobox(frame, textvariable=var, values=shown, state="readonly",
-                                   width=max(len(s) for s in shown) + 2)
+                                   width=box_chars(shown))
                 box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
                 widgets: tuple[tk.Misc, ...] = (name, box)
             else:
@@ -535,6 +662,7 @@ class SettingsDialog(tk.Toplevel):
     def _say(self, text: str, error: bool = False) -> None:
         self.message_var.set(in_lines(text, self.text_width) if text else "")
         self.message_label.configure(foreground=theme.colour("error") if error else "")
+        self._limit_pages()  # (a longer message: the pages give it room, so that the buttons stay on the screen)
 
     # ------------------------------------------------------------------ Save and Open
     def save(self) -> bool:

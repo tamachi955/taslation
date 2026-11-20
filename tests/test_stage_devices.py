@@ -366,7 +366,7 @@ def test_the_settings_dialog_has_a_system_page_that_looks_when_chosen(hidden_roo
         translator=window_translator, ocr=window_ocr, stage_times=StageTimes()))
     assert [d.pages.tab(t, "text") for t in d.pages.tabs()] == ["General", "Shortcuts", "System"]
     assert not d.system.looked
-    d.pages.select(d.system)
+    d.pages.select(d.system_tab)
     hidden_root.update()
     assert d.system.looked
     d.system._thread.join(5)

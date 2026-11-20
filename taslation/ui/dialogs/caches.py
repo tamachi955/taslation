@@ -59,6 +59,14 @@ def in_lines(text: str, width: int, font: str = "TkDefaultFont") -> str:
     return "\n".join(line.rstrip(" ") for paragraph in text.split("\n") for line in wrap_line(paragraph, width, measure))
 
 
+def box_chars(texts: Sequence[str], font: str = "TkDefaultFont") -> int:
+    """The width of a box of choices (Tk counts it in "0"s of *font*) that shows the longest of *texts* whole, in
+    any language: a count of characters is too narrow for Chinese, Japanese, Korean or Thai."""
+    measure = tkfont.nametofont(font).measure
+    zero = max(1, measure("0"))
+    return max((-(-measure(text) // zero) for text in texts), default=1) + 2
+
+
 def shown_time(stamp: Any) -> str:
     """A time as the lists show it: local time, YYYY-MM-DD HH:MM. TASlation writes its times in local time without a
     zone (``2026-10-30T14:05:09``), so those are only cut short; one with a zone is turned into this computer's. What
