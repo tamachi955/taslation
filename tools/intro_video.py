@@ -494,11 +494,101 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Any
     import taslation.capture.windows as windows
 
     done = pv.install(guard, viewer_info, hotkeys, probe)
+    if not PROMO_NOTES_PAGES:  # (an older promo tool: the page's jobs and the canvas noted here)
+        done.update(note_pages(probe))
     closed = windows.post_key
     original = getattr(closed, "__wrapped__", closed)
     allow, target = guard_table()["post_key"]
     done["post_key_to_the_stand_in"] = dv.replace_everywhere(closed, guard.wrap("post_key", original, allow, target))
     return done
+
+
+PROMO_NOTES_PAGES = hasattr(pv.Probe, "page_event") and hasattr(pv.Probe, "view")  # (the promo tool hooks them)
+
+
+class Probe(pv.Probe):
+    """`promo_video.Probe`, with what this tool reads on any checkout: each page job of the window (``fills``) and
+    each region lettered (``letters``: its job, index and box, whether it was lettered - never a text), and how the
+    page canvas showed its picture (``views``: scale, offset, where the canvas is, each time that changed). A newer
+    promo tool notes the same itself, and its install hooks these methods; an older one has `note_pages` do it."""
+
+    def __init__(self, notes: Any):
+        super().__init__(notes)
+        self.fills: list[dict[str, Any]] = []
+        self.letters: list[dict[str, Any]] = []
+        self.views: list[dict[str, Any]] = []
+        self._view: dict[str, Any] | None = None
+
+    def page_event(self, app: Any, kind: str, data: dict[str, Any]) -> None:
+        try:
+            fill = getattr(app, "_fill", None)
+            if fill is None:
+                return
+            n = getattr(fill, "_intro_n", None)
+            if n is None:
+                if kind != "regions":
+                    return
+                n = fill._intro_n = len(self.fills) + 1  # (on the job itself: a later job never takes its number)
+                self.fills.append({"t": pv.now_ms(), "n": n, "boxes": len(fill.boxes)})
+            if kind != "translated":
+                return
+            i = int(data["index"])
+            if 0 <= i < len(fill.boxes):
+                self.letters.append({"t": pv.now_ms(), "n": n, "i": i,
+                                     "box": [round(float(v), 1) for v in fill.boxes[i]], "on": bool(data.get("text"))})
+        except Exception as e:  # noqa: BLE001 - noted, never in the window's way
+            self.error("page event", e)
+
+    def view(self, canvas: Any) -> None:
+        try:
+            top = canvas.winfo_toplevel()
+            image = getattr(canvas, "_image", None)
+            if image is None or getattr(top, "canvas", None) is not canvas:
+                return
+            ox, oy = getattr(canvas, "offset", (0.0, 0.0))
+            now = {"scale": round(float(canvas.scale), 6), "offset": [round(float(ox), 2), round(float(oy), 2)],
+                   "origin": [int(canvas.winfo_rootx() - top.winfo_rootx()),
+                              int(canvas.winfo_rooty() - top.winfo_rooty())], "image": list(image.size)}
+            if now != self._view:
+                self._view = now
+                self.views.append({"t": pv.now_ms(), **now})
+        except Exception as e:  # noqa: BLE001
+            self.error("view", e)
+
+
+def note_pages(probe: Probe) -> dict[str, Any]:
+    """The window's page events (`App._on_page_event`) and its page canvas's drawing (`ImageCanvas._draw_picture`)
+    told to *probe* after they ran; what was replaced."""
+    from taslation.ui import app as app_mod
+    from taslation.ui import preview
+
+    App, Canvas = app_mod.App, preview.ImageCanvas
+    page_event, draw_picture = App._on_page_event, Canvas._draw_picture
+
+    def paged(self: Any, kind: str, data: dict[str, Any]) -> Any:
+        out = page_event(self, kind, data)
+        probe.page_event(self, kind, data)
+        return out
+
+    def pictured(canvas: Any, *a: Any, **k: Any) -> Any:
+        out = draw_picture(canvas, *a, **k)
+        probe.view(canvas)
+        return out
+
+    App._on_page_event, Canvas._draw_picture = paged, pictured
+    return {"_on_page_event": page_event, "_draw_picture": draw_picture}
+
+
+def view_at(views: Sequence[dict[str, Any]], t: float) -> dict[str, Any] | None:
+    """How the window's page canvas showed its picture at *t* (the last ``views`` entry at *t* or before)."""
+    return next((v for v in reversed(views) if float(v["t"]) <= t), None)
+
+
+def on_picture(box: Sequence[float], view: dict[str, Any]) -> tuple[float, float, float, float]:
+    """*box* (pixels of the picture the canvas shows) in pixels of the window: the canvas's scale and offset, then
+    where the canvas is in the window."""
+    k, (ox, oy), (cx, cy) = float(view["scale"]), view["offset"], view["origin"]
+    return (cx + ox + box[0] * k, cy + oy + box[1] * k, cx + ox + box[2] * k, cy + oy + box[3] * k)
 
 
 class QuietNotes:
@@ -2062,7 +2152,7 @@ def run_window(args: argparse.Namespace, standin: StandIn, writer: Any, url: str
 
     notes = QuietNotes()
     hotkeys = e2e.HotKeys(notes)
-    probe = pv.Probe(notes)
+    probe = Probe(notes)
     patched = install(guard, viewer_info, hotkeys, probe)
     state = dv.scratch_state()
     with contextlib.suppress(Exception):
@@ -2203,6 +2293,18 @@ SAMPLE_WINDOW = (744, 516)  # the made-up window's size (as WINDOW_SIZE, smaller
 SAMPLE_WAIT = 6.0  # the middle of each made-up scene: a picture every this many steps, marked as waiting
 
 
+def made_up_sheet(size: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Where `promo_video.made_up_window` of *size* draws its page: the sheet's top left and its size (as it lays
+    them out; every promo tool's version does the same)."""
+    w, h = size
+    s = w / 720
+    bar, foot = max(12, round(44 * s)), max(10, round(30 * s))
+    room_w, room_h = w - 40 * s, h - foot - bar - 40 * s
+    pw = max(20, int(min(room_w, room_h * 830 / 1170)))
+    ph = max(28, int(pw * 1170 / 830))
+    return (int((w - pw) // 2), int(bar + 20 * s + (room_h - ph) // 2)), (pw, ph)
+
+
 def sample_source(scene_ids: Sequence[str] | None = None, seconds: float = 4.0, fps: float = 5.0) -> MemorySource:
     """Made-up recordings of every scene present (or of *scene_ids*): drawn windows (`promo_video.made_up_window`,
     marked MADE-UP FRAMES), drawn viewer pages, a pointer, a key, and a middle stretch marked as waiting for the models
@@ -2222,8 +2324,7 @@ def sample_source(scene_ids: Sequence[str] | None = None, seconds: float = 4.0, 
     third = count // 3
     for k, scene in enumerate(chosen):
         page = k + 1
-        geometry = pv.made_up_geometry(size, page, 6)
-        (x0, y0), (pw, ph) = geometry["at"], geometry["sheet"]
+        (x0, y0), (pw, ph) = made_up_sheet(size)
         blank = pv.made_up_window(size, page, 6, 0, False, "")
         name = f"viewer/{len(meta['viewer_pics']):04d}.jpg"
         images[name] = blank.crop((x0 - 6, y0 - 6, x0 + pw + 6, y0 + ph + 6))
@@ -2756,11 +2857,11 @@ class Painter:
         if frame is None:
             return None
         image = src.image(frame)
-        view = pv.view_at(src.meta.get("views", []), t)
+        view = view_at(src.meta.get("views", []), t)
         if view is None or box is None:
             return image
         left, top, right, bottom, cx, cy = box
-        page = pv.on_picture((0, 0, view["image"][0], view["image"][1]), view)
+        page = on_picture((0, 0, view["image"][0], view["image"][1]), view)
         kx = image.width / max(1.0, right - left)
         crop = ((cx - left + page[0]) * kx, (cy - top + page[1]) * kx, (cx - left + page[2]) * kx,
                 (cy - top + page[3]) * kx)

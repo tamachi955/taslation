@@ -81,13 +81,15 @@ def flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def every_line():
-    """(where, follows, own) of each card line and each step's description."""
+def every_line(present_only: bool = False):
+    """(where, follows, own) of each card line and each step's description (only the steps this checkout can show
+    with *present_only*: a step whose feature is not here has no sentence in this checkout's documents yet)."""
     for kind, (_heading, lines) in iv.CARDS.items():
         for line in lines:
             yield f"card {kind}: {line.text[:50]}", line.follows, line.own
     for scene in iv.SCENES:
-        yield f"step {scene.id}", scene.follows, scene.own
+        if scene.present() or not present_only:
+            yield f"step {scene.id}", scene.follows, scene.own
 
 
 def test_every_card_line_and_step_follows_a_document_or_is_marked_the_tools_own():
@@ -105,7 +107,7 @@ def documents() -> dict[str, str]:
 def stale_lines(facts: dict, docs: dict[str, str]) -> list[str]:
     """The lines with a quote that does not stand in its document, once *facts* are put in."""
     stale = []
-    for where, follows, _own in every_line():
+    for where, follows, _own in every_line(present_only=True):
         for cite in follows:
             quote = iv.filled(cite.quote, facts)
             assert quote is not None, (where, cite.quote)  # (a fact the code does not have)
@@ -130,7 +132,10 @@ def test_a_changed_sentence_or_a_changed_figure_makes_its_line_stale():
 
 
 def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypatch):
-    assert all(row["present"] for row in iv.scene_rows())  # (this checkout has the backlog and the whole-book run)
+    here = {row["id"]: row["present"] for row in iv.scene_rows()}
+    assert here["turned_past"] == ((ROOT / "taslation" / "backlog.py").is_file()
+                                   and (ROOT / "taslation" / "ui" / "side.py").is_file())
+    assert all(present for scene_id, present in here.items() if scene_id != "turned_past")
     absent = {"taslation.backlog", "taslation.ui.dialogs.batch"}
     monkeypatch.setattr(iv, "has_module", lambda name: name not in absent)
     rows = {row["id"]: row["present"] for row in iv.scene_rows()}
@@ -144,7 +149,7 @@ def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypat
 
 def test_scenes_are_picked_in_the_tables_order_and_an_unknown_one_ends_the_run():
     assert [s.id for s in iv.pick_scenes("undo, viewer,language")] == ["viewer", "language", "undo"]
-    assert [s.id for s in iv.pick_scenes("")] == list(ORDER)
+    assert [s.id for s in iv.pick_scenes("")] == [s for s in ORDER if iv.scene_of(s).present()]
     with pytest.raises(SystemExit, match="no such scene: nope"):
         iv.pick_scenes("viewer,nope")
 
