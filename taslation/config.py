@@ -5,7 +5,7 @@ be abused is left behind: translation goes to a loopback Ollama server, the OCR
 model is loaded from a local directory that ``setup_models.py`` filled in
 advance, page images only ever live in memory, and the on-disk cache holds
 translated text plus bubble geometry keyed by page fingerprints (never images,
-never the original text).
+never the bubbles' original text).
 """
 
 from __future__ import annotations

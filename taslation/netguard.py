@@ -1,6 +1,6 @@
 """Process-wide network guard for TASlation.
 
-The whole point of TASlation is that nothing leaves the machine. The pipeline
+The whole point of TASlation is that nothing leaves the machine while it reads. The pipeline
 code never calls out, but it sits on top of large third-party libraries (model
 loaders, HTTP clients) that *could* phone home. This module makes such a call
 fail loudly instead of leaking silently:

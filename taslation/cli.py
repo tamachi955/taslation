@@ -75,8 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = argparse.ArgumentParser(
         prog="taslation",
-        description="Clean, offline manga translation for books you own. "
-                    "Everything stays on this machine; the only network peer is a local Ollama server.",
+        description="Manga translation on this computer, for books you own. While it reads, the only network peer "
+                    "is the local Ollama server; a translation model is downloaded only when you agree.",
     )
     p.add_argument("--version", action="version", version=f"taslation {__version__}")
     p.add_argument("--config", type=Path, help="path to taslation.toml (default: ./taslation.toml, else the one in the state "
