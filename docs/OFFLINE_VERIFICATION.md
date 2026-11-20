@@ -3278,6 +3278,173 @@ changing the prompts.
 
 **Found on the way.** In one run of a first version of the lines kept (which did not keep a line asked again for a bare
 romanisation before the turn), the window's process started 1.4 s later than in the other runs and was ready at 7.74 s instead of 4.8 s, 40 ms
-after the stand-in turned to the third page; the job on that page's soft frame then waited at its gate until
-`GATE_LIMIT_S` (15 s) took the frame as never kept, and the page's first bubble came 21.6 s after its sharp frame. Not
-looked into further; the run is not in the table above.
+after the stand-in turned to the third page; the job on that page's soft frame then held the worker, and the page's
+first bubble came 21.6 s after its sharp frame. It looked like the gate's `GATE_LIMIT_S` (15 s); it was not: the cause
+is in the next section. The run is not in the table above.
+
+## The first page at the start, soft frames, and the first request before the OCR ends (2026-11-20)
+
+**How it was measured.** The machine and the server of the section above. The stand-in viewer:
+`tools/standin_e2e.py --scenario a,e,x --start-ollama 11436 --seed 1` (the slow reading, the turning back, requests
+cancelled in flight), with `--ocr-runs-on gpu` and with `auto`, two runs of each per code, one after the other; the
+scenario c (turns while the window starts) for the start. With one seed every run draws the same soft pictures for the
+same time, so a turn is also compared with the same turn under the other code. The window's start was traced (the
+window's methods, `PageGate`, the worker's spans) with a turn forced to come 40 ms after the window is ready. The
+owner's Ollama on 11434 had no model loaded before or after any run. One run that another program slowed (its OCR
+stage 20 to 40 % longer on turns the change does not touch, ready at 7.05 s) was run again and left out.
+
+**The wait at the start (`2035ef2`).** A page turned to as the window became ready was the first to use the layout
+model, so its detection imported the model's code and loaded it: 5.2 s (4.4 s the import of
+`RTDetrV2ForObjectDetection`, 0.5 s `from_pretrained`, 0.09 s to the GPU, 0.4 s the first forward), where no cancel
+reaches a job. The soft frame's gate was dropped 56 ms after the sharp frame came, but the dropped job held the worker
+until that load ended, and the sharp frame's job began about 6 s late - about 19 s in the run found on the way above,
+whose window started on a slow minute. No gate waited: the 15 s was not `GATE_LIMIT_S`. The trace showed a second
+hole: the look that runs a page queued while the models loaded (`_look`) took the frame the follow had captured tens
+of ms before as settled, so a soft frame could be read with no gate.
+
+Now the start imports the layout model's code on a thread of its own while the OCR readers load, when the settings
+use the model (`pipeline.layout_wanted`, `layout.prepare`: nothing is loaded, no GPU memory taken); the weights load
+where they did. The look leaves a frame its follow is settling to the follow, which starts it early with a gate of
+its own (`_settle_now`).
+
+| | 0.7.0 | `2035ef2` |
+|---|---|---|
+| a turn 40 ms after ready (two runs): the first bubble, from the sharp frame | 7.17 s, 7.13 s | 2.56 s, 2.59 s |
+| the same: the page finished | about 11.2 s | about 6.6 s |
+| the layout model's first load, in that page's job | 5.2 s | 0.65 s |
+| the dropped soft-frame job leaves the worker, after the turn | 6.0 s | 1.29 s |
+| scenario c, the turn while the models load (its third): the first bubble, GPU | 4.36 s, 4.27 s | 2.18 s |
+| the same, "auto" | 6.63 s, 6.49 s | 4.30 s |
+| the page on show at the start (a, e, x): the first bubble, GPU | 12.3 s / 14.0 s | 10.2 to 10.4 s / 12.2 to 12.4 s |
+| the same, "auto" | 14.2 s / 16.2 s | 11.2 to 11.7 s / 13.1 to 13.3 s |
+| that page's detection | 6.0 to 6.3 s | 3.4 to 3.9 s (GPU), 1.8 to 2.2 s ("auto") |
+| ready, after the window's launch, GPU | 4.74 to 4.95 s (9 of 10 runs; one 7.74 s) | 4.73 to 5.04 s (7 runs) |
+| the same, "auto" | 6.08 to 6.20 s (10 runs) | 6.41 to 7.31 s, median 6.54 s (7 runs) |
+
+The page on show at the start: from the stand-in showing it, which it does either as the window is launched or 2 s
+before (the two values). The cost is at the start: the readers' load shares the processor with the import. In a
+process of its own, `load_readers` took 2.69 to 2.77 s alone and 3.44 to 3.54 s beside the import with "auto", 3.07
+to 3.09 s and 3.73 to 3.92 s on the GPU (three of each); the import thread at below-normal priority changed nothing
+(3.50 to 3.58 s, 3.84 to 3.99 s). In the window the GPU's ready did not move (its start waits for other things
+meanwhile) and "auto"'s came about 0.4 s later; the page on show then letters 1.6 to 2.1 s (GPU) and 2.5 to 3.0 s
+("auto") sooner all the same.
+
+*The same wait at other moments.* The import is paid once in a process, now at the start. The weights (0.65 s, no
+cancel there either) load again on the first page after anything that lets the page models go, which happens before
+every load of the translation model: after the keep-alive ran out, "Release the model now", Auto off after a
+whole-book run, another model or language. A soft frame's job dropped in that detection holds the worker up to that
+long (a detection of 0.7 to 0.8 s on such a turn in the runs before 0.7.0); unchanged, and on a viewer that draws soft
+first that frame is no longer started (below). Leaving the full screen, choosing the viewer again, a resize and a
+whole-book run with Auto back on let nothing go: in scenarios r, t, z, f2, w and w2 (four runs of 0.7.0 and the full
+set once) no detection took 0.7 s or more.
+
+*Tests.* `tests/test_gate_at_ready.py`: the window ready 0 to 380 ms after a turn to a page drawn soft first (20
+cases, and two with the frames not counted): the job on the soft frame has a gate and keeps nothing, the sharp frame's
+page is kept; a sharp frame seen while the models loaded starts with a gate as they are ready and is kept after the
+fixed time; 22 of the 23 cases fail on 0.7.0. `tests/test_model_at_start.py`: the layout code is imported on
+its own thread at the start, before the weights, and a page does not wait for it; nothing is imported when the model
+is not used (the import stood in for by a module that takes 0.4 s).
+
+**Soft frames on a viewer that draws soft first (`586424e`).** Measured first, on `2035ef2`: on the turns with a job
+on the soft frame the sharp frame's job began 294 ms (GPU) and 300 ms ("auto") after the sharp frame was drawn
+(median); the sharp job's own detection and OCR took as long as where the soft frame was not started (below:
+detection 165 to 176 ms, the OCR within 10 ms), so the cost was the wait for the dropped job to end, not a slower
+sharp job. 11 to 14 jobs a run were started on soft frames; on the GPU one a run sent a request.
+
+Now `_early_start` leaves a frame that `_looks_soft` says is soft (only on a viewer `_drew_soft` has seen draw a page
+soft first, for a page the cache does not hold whole); the frame is looked at every step and the sharp frame is
+started at its first look. A frame that stays as it is - a page low in detail - is started once it has stayed
+settle_ms, when the settle path takes a page, with a gate as before; a page turned to while a job ran (that job
+cancelled once the frame stayed LEFT_PAGE_MS, as before) waits no longer than that either. A viewer never seen to draw
+soft first measures nothing and goes as before; the gates are untouched.
+
+| code | OCR | jobs on soft frames a run | requests from a soft frame | sharp frame to its job, ms (median / p90 / slowest) | first lettered bubble, ms (median / p90 / slowest) | page finished, ms (median / p90 / slowest; pages finished before the next turn) |
+|---|---|---|---|---|---|---|
+| `2035ef2` | GPU | 14, 14 | 1, 1 | 292 / 356 / 421 | 1,308 / 2,025 / 2,135 | 3,832 / 5,906 / 6,090 (20) |
+| `586424e` | GPU | 5, 5 | 0, 0 | 219 / 496 / 544 | 1,264 / 1,948 / 2,042 | 3,652 / 6,110 / 6,442 (20) |
+| `2035ef2` | auto | 12, 11 | 0, 0 | 287 / 393 / 470 | 2,278 / 3,579 / 4,451 | 4,490 / 5,771 / 7,022 (13) |
+| `586424e` | auto | 4, 4 | 0, 0 | 224 / 390 / 455 | 1,921 / 3,623 / 4,310 | 4,484 / 6,997 / 7,402 (14) |
+
+24 turns over the two runs of each: in each run the slow reading's nine and the three pages of the cancelled-in-flight
+scenario that the cache does not hold (the turning back's pages all come from the cache), timed from the stand-in's
+sharp frame.
+
+Turn for turn: the soft frame is no longer read on 6 of the 9 slow-reading turns on the GPU and 4 with "auto"; there
+the sharp frame's job began 116 and 119 ms sooner (median; sooner on every one) and the first bubble came 131 ms (5 of
+6 sooner) and 229 ms (3 of 4) sooner. The jobs left on soft frames: the first turn after the start (the viewer not yet
+seen to draw soft first), and soft pictures drawn for settle_ms or longer (409 ms on one turn with the GPU, and the 708 to
+720 ms of the cancelled-in-flight scenario's pages), started at settle_ms as the settle path takes a page. The one drawn
+409 ms was started just before the sharp frame came, and its detection, which no cancel reaches, held the worker: that
+turn's first bubble 1,871 ms instead of 1,609 (GPU). A first
+version that started a held frame as soon as a cancelled job had left the worker still read 5 to 7 soft frames a run;
+the commit holds that one too. In every run: soft frames left in the cache 0, results kept from a frame not the sharp
+one 0, stale lettering 0.
+
+*Tests.* `tests/test_early_start.py`: on a viewer that draws soft first, the soft frame (shown 0.15, 0.3 or 0.38 s)
+starts nothing and the sharp frame starts at its first look; a frame that looks soft and stays starts at settle_ms,
+no later; the same two for a page turned to while a job runs; a frame not counted is looked at every step; a viewer
+never seen to draw soft first starts every frame at once (no crispness measured). The soft pictures drawn longer than
+settle_ms are started at settle_ms and never kept, as the test of them asks.
+
+**The first request before the page's OCR ends: measured, not built.** The question: could a page's first request go
+out as soon as its lines are certain to be first in the final order and certain to be lettering to translate, before
+the rest of the page is read? Measured with the real pipeline (the layout model, the three readers, the window's
+settings) on the 214 OpenMantra pages, one page and two to a screen, the readers on the GPU and on the processor; a
+page's job stopped where its first request would go out (`_translate_regions`), the time of each region's verdict
+(the fill's "read" event), each reader's calls, and the first request's lines (the first line to translate, the run
+it opens, the line after it, whose box decides the join, and those after an open run). 8 pages were left out (no line
+to translate, or a first-request line with no reading event of its own); numbers only.
+
+| OCR on | screen | pages | OCR before the first request, ms (median / p90) | every candidate read once for the page's size | the first line judged | the first request's lines judged | sooner, were its lines known then, ms (median / p90) | sooner, its lines certain, ms (median / p90) |
+|---|---|---|---|---|---|---|---|---|
+| GPU | one page | 206 | 601 / 963 | 335 | 377 | 419 | 184 / 371 | 7 / 16 |
+| GPU | two pages | 102 | 597 / 912 | 330 | 370 | 410 | 191 / 357 | 7 / 15 |
+| processor | one page | 206 | 1,261 / 2,027 | 558 | 658 | 772 | 505 / 956 | 8 / 19 |
+| processor | two pages | 102 | 1,309 / 1,970 | 568 | 659 | 776 | 516 / 934 | 8 / 19 |
+
+(Medians, ms from the OCR's start. Two pages to a screen: the page read first, the right one; the other is read
+beside its requests already.)
+
+The first line in the final order is the first line judged on 202 of the 206 pages, but its verdict waits for the
+reading every candidate gets first, for the page's usual character size (`_usual`: so that no region's fate hangs on
+the order of reading), and the first request's lines are all judged at 60 to 70 % of the OCR (419 of 601 ms on the
+GPU, 772 of 1,261 ms on the processor). Even had those lines been known at that moment, the request would have gone out 184 ms sooner on the GPU
+(median) and 505 ms sooner on the processor. They are not known then: the final order is made over the regions read
+as text alone, with the panels found from their lettering (`_order_read`, `order_on_page`), and lines become print or
+titles, or are read again as a paragraph, by rules over all the page's regions (`printed_lines`, `_titles`, `_prose`).
+A region judged later can so put another line first, join two, or take the first one out; the first request's lines
+are certain only once the last region is judged, 7 to 8 ms (median) before the request goes out now. By the brief's
+rule (a median gain of 0.2 s or more) it was not built; a request sent on a guess and taken back would change what a
+request holds.
+
+What the OCR's time is spent on, the same runs (214 pages, one to a screen):
+
+| reader | crops | ms a crop, GPU | ms a crop, processor | share of the OCR, GPU / processor |
+|---|---|---|---|---|
+| charspot | 3,909 | 15.7 | 28.3 | 48 % / 41 % |
+| nar | 1,601 | 25.6 | 82.3 | 32 % / 49 % |
+| CPT (on the processor in both) | 102 | 107.1 | 120.7 | 8.5 % / 4.5 % |
+
+A page has 18 candidates (median; p90 27), of which 8 become lines to translate (p90 12) and 7 are left out as the
+same lettering as one read before (the layout model's box and the classical region of one bubble). Every crop is read
+on its own; nothing is batched. What else would shorten the OCR's share, and what each could give at most:
+
+* Fewer candidates read that are thrown away: the readers spend 168 ms a page on the GPU (median, 32 % of their time)
+  and 306 ms on the processor on candidates that end as no line, 118 and 214 ms of it on those left out as repeats,
+  which charspot reads in the pass for the page's size before the repeat is seen. Leaving them out of that pass
+  changes the samples the page's size is taken from, so it needs the benchmark to show the same verdicts.
+* The third reader only where the first two differ: so it is already (`readers.agree`): CPT reads 102 of the 1,601
+  lines nar reads, 6 %, and takes 8.5 % of the OCR with the others on the GPU. On the GPU it would take less, for its
+  440 MB of weights kept there for a few crops a page.
+* Crop batching: charspot's 15.7 ms and nar's 25.6 ms a crop on the GPU are for crops read one by one; reading the
+  pass for the page's size as one batch is the largest single share (335 of 601 ms). The readers were built without
+  padded batches; not measured.
+* The placing on this 6 GB card: with "auto" the rule finds no room for charspot and nar beside the model the window
+  keeps loaded ("no_room"), and all three read on the processor; the OCR stage of the stand-in turns above was 854 ms
+  ("auto") against 452 ms (GPU), and the first bubble 2,278 ms against 1,308 (median). Every GPU run here read on the
+  GPU with no error recorded; the rule's margin on such a card is the largest lever, and needs the card's peak memory
+  measured with the readers there before it is moved.
+
+**Every scenario at the end.** `tools/standin_e2e.py --scenario all --start-ollama 11436 --seed 1` ("auto") on
+`586424e`: exit 0; in every segment stale lettering 0, results from a soft frame 0, wasted requests 0; soft frames
+left in the cache 0, results kept from a frame not the sharp one 0.
