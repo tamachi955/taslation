@@ -98,6 +98,13 @@ def test_matcher_pairs_one_to_one_largest_overlap_first():
     assert openmantra_eval.match([], regions) == [] and openmantra_eval.match(gold, []) == []
 
 
+def test_the_order_of_work_behind_the_reader_puts_each_page_read_before_those_flipped_past():
+    assert openmantra_eval.behind_order(3, 0) == [(0, False), (1, False), (2, False)]
+    assert openmantra_eval.behind_order(7, 2) == [(2, False), (0, True), (1, True), (5, False), (3, True), (4, True),
+                                                 (6, False)]
+    assert sorted(i for i, _b in openmantra_eval.behind_order(11, 4)) == list(range(11))
+
+
 def test_scores():
     assert openmantra_eval.chrf("Hello there", "hello there") == pytest.approx(100.0)
     assert openmantra_eval.chrf("", "hello") == 0.0 and openmantra_eval.chrf("hello", "") == 0.0

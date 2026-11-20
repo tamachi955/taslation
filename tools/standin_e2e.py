@@ -196,8 +196,15 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "x": ("cancelled in flight", []),  # (its steps: `cancel_steps`, on the screens of little text added for it)
     "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
+    # (scenario k: its steps from `k_steps`, on pages no scenario before it turned to)
+    "k5": ("flipped past at 0.5 s a page, read back", []),
+    "k1": ("flipped past at 1 s a page, read back", []),
+    "k2": ("flipped past at 2 s a page, read back", []),
 }
 ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
+K_PACES = {"k5": 500, "k1": 1000, "k2": 2000}  # scenario k ("k" asks for all three; never in "all"): ms a page
+K_READ_MS = 8000  # ... the pages read back at this pace
+K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
 PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
 KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
 ACTS_WAIT_S = 90.0  # scenario t: the Translator's acts begin at rest on a translated page, or after this long at most
@@ -240,11 +247,24 @@ def wanted(text: str) -> list[str]:
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
+    if "k" in asked:
+        asked = (asked - {"k"}) | set(K_PACES)
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
     asked |= {other for one, other in PAIRS if one in asked}
-    return [n for n in ORDER if n in asked]
+    return [n for n in [*ORDER, *K_PACES] if n in asked]
+
+
+def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool) -> list[str]:
+    """Scenario k's steps at the pace of *name* (`K_PACES`): to page *fresh* (one no scenario before turned to) and a
+    rest there, *turns* pages flipped past, back to the first of them, and *read* of them read at K_READ_MS a page;
+    without *soft*, every page drawn sharp at once (the stand-in's soft time and blur off, and back after)."""
+    pace = K_PACES[name]
+    pre, post = ([], []) if soft else (["t0", "b1"], ["t", "b"])
+    steps = [*pre, f"j{fresh}", f"w{K_READ_MS}", *(["n", f"w{pace}"] * turns), f"j{fresh + width}", f"w{K_READ_MS}"]
+    steps += ["n", f"w{K_READ_MS}"] * max(0, read - 1)
+    return [*steps, *post]
 
 
 def cancel_steps(first: int, back: int, soft_ms: int, keep_ms: int | None = None) -> list[str]:
@@ -275,20 +295,31 @@ def held(steps: list[str], first: int) -> list[str]:
 
 
 def build_plan(names: list[str], count: int, cancel_first: int | None = None, soft_ms: int = 700,
-               wait_done: float | None = None) -> tuple[list[Segment], list[sv.Step]]:
+               wait_done: float | None = None, k: dict[str, Any] | None = None
+               ) -> tuple[list[Segment], list[sv.Step]]:
     """The segments of the stand-in's script (each held at ``gN`` until the driver releases it, ``mN`` to mark it)
     and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window).
-    Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`). With *wait_done*
-    (--wait-done's cap, seconds) the rests of HOLD_SCENARIOS are held (`held`) and x's soft frames kept until the
-    window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever."""
+    Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`); scenario k's
+    segments (`k_steps`, *k*: turns, read, soft, narrow) to pages after the farthest one turned to before. With
+    *wait_done* (--wait-done's cap, seconds) the rests of HOLD_SCENARIOS are held (`held`) and x's soft frames kept
+    until the window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever."""
     segments: list[Segment] = []
-    index, spread = 0, True
+    index, spread, farthest = 0, True, 0
     text: list[str] = []
     holds = 0
+    k = k or {}
     for go, name in enumerate(names, 1):
+        if name in K_PACES and k.get("narrow"):
+            spread = False
         if name == "x":
             keep = None if wait_done is None else round(min(wait_done, KEEP_SOFT_S) * 1000)
             steps = cancel_steps(cancel_first or 0, index, soft_ms, keep)
+        elif name in K_PACES:
+            width = 2 if spread else 1
+            fresh = farthest + width
+            fresh = fresh - fresh % 2 if spread else fresh
+            steps = k_steps(name, fresh, width, int(k.get("turns", 20)), int(k.get("read", 20)),
+                            bool(k.get("soft", True)))
         else:
             steps = SCENARIOS[name][1]
         if wait_done is not None and name in HOLD_SCENARIOS:
@@ -298,11 +329,12 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
         if name == "f2":
             spread = False
         for step in steps:
-            if step in ("n", "p") or step.startswith("j"):
+            if step in ("n", "p") or (step.startswith("j") and step[1:].isdigit()):
                 width = 2 if spread else 1
                 index = int(step[1:]) if step.startswith("j") else index + (width if step == "n" else -width)
                 index = max(0, min(count - 1, index))
                 index = index - index % 2 if spread else index
+                farthest = max(farthest, index + width - 1)
                 segment.screens.append((index, spread))
         segments.append(segment)
         text += [f"g{go}", f"m{go}", *steps]
@@ -310,8 +342,9 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
     return segments, sv.parse_script(",".join(text))
 
 
-def pages_needed(names: list[str]) -> int:
+def pages_needed(names: list[str], k_turns: int = 20) -> int:
     turns = sum(SCENARIOS[n][1].count("n") * (1 if n == "f2" else 2) for n in names)
+    turns += sum(2 * (k_turns + 2) for n in names if n in K_PACES)
     return turns + 8
 
 
@@ -633,6 +666,8 @@ class Notes:
         self.cuts: list[dict[str, Any]] = []
         self.server_resets: list[dict[str, Any]] = []
         self.warms: list[dict[str, Any]] = []  # each step of the warming while the reader reads (no job's request)
+        self.readings: list[dict[str, Any]] = []  # normal reading's events (`backlog`: no thumbnail, no text)
+        self.backlog: list[dict[str, Any]] = []  # the backlog's catches and steps, with what it held after each
         self.warm_calls: list[dict[str, Any]] = []  # each warming begun (`PlamoTranslator.warm_prefix`): what it did
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
@@ -749,6 +784,30 @@ class Notes:
         if isinstance(item, tuple) and len(item) == 2 and item[0] in KINDS and isinstance(item[1], dict):
             with self.lock:
                 self.tags[id(item[1])] = (self.current, now_ms())
+
+    def reading(self, kind: str, data: dict[str, Any]) -> None:
+        """A normal reading event (`backlog`), numbers only: the thumbnail's size, never the thumbnail."""
+        thumb = data.get("thumb")
+        rec = {"t": now_ms(), "kind": kind, **{k: data.get(k) for k in ("seq", "stage", "state", "into", "pages",
+                                                                       "lines", "paused", "dropped")},
+               "thumb": list(getattr(thumb, "size", ())) if thumb is not None else None}
+        with self.lock:
+            self.readings.append(rec)
+
+    def backlog_note(self, what: str, backlog: Any, **facts: Any) -> None:
+        """A catch or a step of the backlog, with what it held after it (the frames' bytes, the most at once, the
+        units, the entries still holding a frame they were read from)."""
+        try:
+            with backlog._lock:
+                entries = [*backlog.entries, *backlog._held.values()]
+                held = {"bytes": backlog.frame_bytes, "peak": backlog.peak_bytes, "units": backlog.unit_total,
+                        "entries": len(entries),
+                        "framed_after_read": sum(1 for e in entries if e.units is not None
+                                                 and (e.raw is not None or e.frame is not None))}
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            held = {"error": type(e).__name__}
+        with self.lock:
+            self.backlog.append({"t": now_ms(), "what": what, **facts, **held})
 
     def app_event(self, app: Any, kind: str, data: dict[str, Any]) -> None:
         t = now_ms()
@@ -1429,6 +1488,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     def handled(self: Any, kind: str, data: dict[str, Any]) -> Any:
         if kind in KINDS:
             notes.app_event(self, kind, data)
+        elif kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading")):
+            notes.reading(kind, data)
         return handle_event(self, kind, data)
 
     def drawn(self: Any) -> Any:
@@ -1535,6 +1596,31 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return kept
 
     linememo.LineMemo.put, pipeline_mod.Pipeline.decide_kept = line_kept, kept_decided
+    from taslation import backlog as backlog_mod
+
+    catch_page, backlog_step = backlog_mod.Backlog.catch, backlog_mod.Backlog.step
+    backlog_mod.HISTORY = args.k_history  # (the internal switch: the pairs behind the reader in story order or not)
+
+    def caught(self: Any, screen: Any, image: Any, work: Any, *a: Any, **k: Any) -> Any:  # a page turned past
+        got = catch_page(self, screen, image, work, *a, **k)
+        notes.backlog_note("catch", self, seq=getattr(screen, "seq", None), sight=getattr(screen, "sight", None),
+                           caught=bool(got), read=bool(work is not None and work.read_all and work.read))
+        return got
+
+    def stepped(self: Any, pipeline: Any, *a: Any, **k: Any) -> Any:  # ... and each step of its work
+        held, notes.local.side = getattr(notes.local, "side", None), "backlog"
+        began, what = now_ms(), ""
+        try:
+            what = backlog_step(self, pipeline, *a, **k)
+            return what
+        finally:
+            notes.local.side = held
+            if what:
+                notes.backlog_note("step", self, began=began, did=what,
+                                   waited_ms=round(self.last_wait * 1000) if what == "stopped"
+                                   and self.last_wait is not None else None)
+
+    backlog_mod.Backlog.catch, backlog_mod.Backlog.step = caught, stepped
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -1945,7 +2031,7 @@ class Director:
                     self.after(self.segments[-1])
                 self.phase, self.phase_at = "end", now
                 return
-            if (self.ended and rested) or waited > self.args.timeout:
+            if (self.ended and rested and self.backlog_done()) or waited > self.args.timeout:
                 if waited > self.args.timeout:
                     self.released["end"] = {"timed_out": True}
                 self.finish()
@@ -1968,6 +2054,10 @@ class Director:
                 go = ready_go and getattr(app, "selected", None) is not None
             elif seg.name == "f2":
                 go = ready_go and rested and self.resized()
+            elif seg.name in K_PACES:  # (each pace on its own: the backlog of the one before done)
+                first = seg is next(x for x in self.segments if x.name in K_PACES)
+                go = (ready_go and rested and self.backlog_done() and (self.index > 0 or self.first_page_done())
+                      and not (first and self.args.k_narrow and not self.resized()))
             elif seg.name in ("r", "o", "z"):
                 go = ready_go and rested and mode is not None and now - mode["at"] >= 1.0 and (
                     seg.name == "z" or bool(app.reading) and (seg.name == "r" or bool(app._over_on)))
@@ -2065,6 +2155,12 @@ class Director:
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
                 self.notes.act(seg.name, "narrow window")
+                place_own(hwnd, self.narrow_rect)
+        elif seg.name in K_PACES and self.args.k_narrow and seg is next(x for x in self.segments
+                                                                            if x.name in K_PACES):
+            self.resize_from = len(self.events)
+            hwnd = self.browser.hwnd
+            if hwnd and self.guard.is_viewer(hwnd):
                 place_own(hwnd, self.narrow_rect)
         elif seg.name == "w2":
             self.notes.act(seg.name, "finished reading")
@@ -2393,6 +2489,12 @@ class Director:
                 place_own(hwnd, (left, top, right - left, bottom - top))
 
         app.after(800, off)
+
+    def backlog_done(self) -> bool:
+        """Whether the window's backlog has nothing left to do (or waits, paused: the end of a scenario all the
+        same)."""
+        b = getattr(self.app, "_backlog", None)
+        return b is None or not b.has_work() or bool(b.paused) or b.fatal is not None
 
     def resized(self) -> bool:
         return any(e["ev"] == "size" for e in self.events[getattr(self, "resize_from", len(self.events)):])
@@ -3494,7 +3596,7 @@ def run(args: argparse.Namespace) -> int:
     os.environ["TASLATION_MODELS_DIR"] = models
 
     names = wanted(args.scenario)
-    count = pages_needed(names)
+    count = pages_needed(names, args.k_turns)
     report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale}
     pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
     report["pages"] = "dataset" if pictures else "synthetic"
@@ -3511,7 +3613,11 @@ def run(args: argparse.Namespace) -> int:
             names.remove("x")
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
-    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done)
+    k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
+              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "history": args.k_history}
+    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
+    if any(n in K_PACES for n in names):
+        report["k_plan"] = k_plan
     sv.write_page_list(standin_dir, pictures)
     sv.write_control(standin_dir, 0)
     report["page_count"] = count
@@ -3888,7 +3994,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                               r.get("prompt_n"), r.get("prompt_ms"), r.get("answer_n"), r.get("answer_ms"),
                               r.get("pairs"), r.get("joined"), r.get("kept_tokens_est"), r.get("prompt_tokens_est")]
                              for r in requests]}
+    k_facts = k_block(notes, turns, rows, requests, spells, rel)
     return {
+        **({"scenario_k": k_facts} if k_facts else {}),
         "latency_rested": latency,
         "stage_split": split,
         "status_line_of_the_page_before": status_summary,
@@ -3984,6 +4092,118 @@ def capture_route(notes: Notes) -> dict[str, Any]:
     frames, none = looks.get("frames", 0), looks.get("none", 0)
     used = wgc.ROUTE if frames > none else "PrintWindow" if none else "none"
     return {"route": route, "looks": looks, "used": used}
+
+
+def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]], requests: list[dict[str, Any]],
+            spells: dict[str, list[dict[str, Any]]], rel: Callable[[float | None], float | None]) -> dict[str, Any]:
+    """Scenario k, per pace (`K_PACES`): each page flipped past - how long its sharp frame stayed (the stand-in's
+    log, and from the window's first capture of it), its screen as the window told it on show (``page_on_show``),
+    whether the backlog caught it -; the pages told as gone by and merged; the time from the turn back until the
+    backlog had nothing left (``backlog`` pages 0); the first lettered bubble of the pages read back while the backlog
+    held pages; lettering on a soft frame or on another page; the backlog's steps, what a stopped one held the worker
+    after the stop, and the next page request's wait at the server; its requests computed in full; the frames' bytes
+    it held. Empty without scenario k."""
+    readings = notes.readings
+    shows = [r for r in readings if r["kind"] == "page_on_show"]
+    totals = [r for r in readings if r["kind"] == "backlog"]
+    catches = [b for b in notes.backlog if b["what"] == "catch"]
+    steps = [b for b in notes.backlog if b["what"] == "step"]
+    mb = 1024 * 1024
+
+    def pages_at(t: float) -> int:
+        before = [r for r in totals if r["t"] <= t]
+        return int(before[-1]["pages"] or 0) if before else 0
+
+    paces: dict[str, Any] = {}
+    for name in K_PACES:
+        index = [k for k, r in enumerate(rows) if r["segment"] == name]
+        if not index:
+            continue
+        mine = [(turns[k], rows[k]) for k in index]
+        lo = mine[0][0]["soft_t"]
+        upto = turns[index[-1] + 1]["soft_t"] if index[-1] + 1 < len(turns) else float("inf")
+        back = next((i for i in range(1, len(mine)) if mine[i][0]["why"] == "jump"), len(mine))
+        flips, reads = mine[1:back], mine[back:]
+        flip_rows = []
+        for turn, row in flips:
+            seq = next((r["seq"] for r in shows if turn["soft_t"] <= r["t"] < turn["next_t"] + 400 and r["seq"]),
+                       None)
+            caught = seq is not None and any(c["caught"] and c["seq"] == seq and c["t"] >= turn["soft_t"]
+                                             for c in catches)
+            stayed = row["rest_ms"]
+            look = (stayed - row["captured_sharp_ms"]
+                    if stayed is not None and row["captured_sharp_ms"] is not None else None)
+            flip_rows.append({"page": row["page"], "rest_ms": stayed, "from_look_ms": look, "seq": seq,
+                              "caught": caught})
+        stayed_n = sum(1 for f in flip_rows if (f["rest_ms"] or 0) >= K_STAYED_MS)
+        caught_n = sum(1 for f in flip_rows if f["caught"])
+        told = [r for r in readings if r["kind"] == "page_stage" and lo <= r["t"] < upto]
+        back_t = reads[0][0]["soft_t"] if reads else None
+        empty = None
+        if back_t is not None:
+            empty = back_t if pages_at(back_t) == 0 else next(
+                (r["t"] for r in totals if r["t"] >= back_t and not r["pages"]), None)
+        flip_end = flips[-1][0]["next_t"] if flips else lo
+        with_backlog = [(t, r) for t, r in reads if pages_at(t["soft_t"]) > 0]
+        bg = [b for b in steps if lo <= b["began"] < upto]
+        held = [b for b in notes.backlog if lo <= b["t"] < upto]
+        reqs = [r for r in requests if lo <= r["t"] < upto]
+        bg_reqs = [r for r in reqs if r.get("side") == "backlog"]
+        page_reqs = [r for r in reqs if r["job"] is not None]
+        slot = []
+        for b in bg:
+            if b["did"] != "stopped":
+                continue
+            nxt = next((r for r in requests if r["t"] >= b["t"] - 50 and r["job"] is not None), None)
+            if nxt is not None:
+                slot.append(server_wait(nxt))
+        jobs = [j for j in notes.jobs if j["started"] and lo <= j["t"] < upto]
+        thumbs = [r["thumb"] for r in told if r["thumb"]]
+        paces[name] = {
+            "pace_ms": K_PACES[name], "flips": len(flip_rows), "stayed": stayed_n, "caught": caught_n,
+            "caught_share": round(caught_n / len(flip_rows), 2) if flip_rows else None,
+            "agree": sum(1 for f in flip_rows if f["caught"] == ((f["rest_ms"] or 0) >= K_STAYED_MS)),
+            "agree_from_look": sum(1 for f in flip_rows
+                                   if f["caught"] == ((f["from_look_ms"] or 0) >= K_STAYED_MS)),
+            "told_on_show": sum(1 for f in flip_rows if f["seq"] is not None),
+            "told_gone_by": sum(1 for r in told if r["stage"] == "read" and r["state"] == "missed"),
+            "merged": sum(1 for r in told if r["state"] == "merged"),
+            "states": dict(Counter(f"{r['stage']}:{r['state']}" for r in told)),
+            "backlog_pages_most": max((int(r["pages"] or 0) for r in totals if lo <= r["t"] < upto), default=0),
+            "drain_s": round((empty - back_t) / 1000, 1) if empty is not None and back_t is not None else None,
+            "drain_from_flips_end_s": round((empty - flip_end) / 1000, 1) if empty is not None else None,
+            "first_lettered_with_backlog": tail([r["first_lettered_ms"] for _t, r in with_backlog]),
+            "first_lettered_with_backlog_not_cached": tail([r["first_lettered_ms"] for _t, r in with_backlog
+                                                            if not r["cached"]]),
+            "first_lettered_read_back": tail([r["first_lettered_ms"] for _t, r in reads]),
+            "read_back_cached": sum(1 for _t, r in reads if r["cached"]), "read_back": len(reads),
+            "lettered_soft_turns": sum(1 for _t, r in mine if r["lettered_soft_ms"]),
+            "stale": sum(1 for x in spells.get("stale", []) if lo <= x["from_t"] < upto),
+            "old_lettering_ms_max": max((r["old_lettering_ms"] or 0 for _t, r in mine), default=0),
+            "results_not_sharp": sum(1 for j in jobs if j["state"] != "sharp" and j.get("result_t")
+                                     and j.get("result_translated")),
+            "results_unconfirmed": sum(1 for j in jobs if j["gate"] and j.get("gate_end") != "confirmed"
+                                       and j.get("result_t") and j.get("result_translated")),
+            "steps": dict(Counter(b["did"] for b in bg)),
+            "steps_busy_s": round(sum(b["t"] - b["began"] for b in bg) / 1000, 1),
+            "waits_ms": tail([b.get("waited_ms") for b in bg]),
+            "next_page_request_server_wait_ms": tail(slot),
+            "background_requests": len(bg_reqs), "background_full": sum(1 for r in bg_reqs if full_computed(r)),
+            "page_requests": len(page_reqs), "page_full": sum(1 for r in page_reqs if full_computed(r)),
+            "peak_mb": round(max((b.get("peak", 0) for b in held), default=0) / mb, 1),
+            "frames_held_after_read_most": max((b.get("framed_after_read", 0) for b in held), default=0),
+            "bytes_at_end": held[-1].get("bytes") if held else 0,
+            "thumb_height_most": max((t[1] for t in thumbs), default=None),
+            "flip_list": flip_rows,
+            "back_s": rel(back_t), "empty_s": rel(empty)}
+    if not paces:
+        return {}
+    return {"paces": paces, "events": dict(Counter(r["kind"] for r in readings)),
+            "catches": {"caught": sum(1 for c in catches if c["caught"]),
+                        "not_caught": sum(1 for c in catches if not c["caught"]),
+                        "from_regions": sum(1 for c in catches if c["caught"] and c["read"])},
+            "thumbs_with_first_event_only": len({r["seq"] for r in readings if r["thumb"]})
+            == sum(1 for r in readings if r["thumb"])}
 
 
 def tk_share(samples: list[tuple[float, float, bool]]) -> dict[str, Any]:
@@ -4098,6 +4318,12 @@ def print_table(report: dict[str, Any], path: Path) -> None:
             s["stale"], s["not_following"])))
     for key, value in run_["latency_rested"]["all"].items():
         print(f"rested turns, {key}: {value}")
+    for name, k in (run_.get("scenario_k") or {}).get("paces", {}).items():
+        print(f"{name}: flips {k['flips']}, stayed {K_STAYED_MS} ms {k['stayed']}, caught {k['caught']} "
+              f"(agree {k['agree']}/{k['flips']}), told gone by {k['told_gone_by']}, drain {k['drain_s']} s, "
+              f"first bubble with a backlog {k['first_lettered_with_backlog']}, peak {k['peak_mb']} MB, "
+              f"background requests {k['background_requests']} ({k['background_full']} in full), "
+              f"waits {k['waits_ms']}")
     split = run_.get("stage_split") or {}
     if split.get("all"):
         print("where a rested page's time went (ms, median/p90/max over the finishing jobs): " + "; ".join(
@@ -4193,7 +4419,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
     ap.add_argument("--scenario", default="all",
-                    help="all, or some of c,a,b,d,e,r,o,z,w,x,f,f2 (f brings f2 with it, w brings w2)")
+                    help="all, or some of c,a,b,d,e,r,o,z,w,x,f,f2,k (f brings f2 with it, w brings w2; k is "
+                         "k5,k1,k2 and never in all)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
@@ -4226,6 +4453,14 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "the window at rest without it), CAP_S at most, and x's soft frames kept until the window "
                          f"asked on them ({KEEP_SOFT_S:g} s at most); the holds in the report (run.waits). Without it "
                          "the scenarios are as written")
+    ap.add_argument("--k-turns", type=int, default=20, help="scenario k: the pages flipped past at each pace")
+    ap.add_argument("--k-read", type=int, default=0, help="scenario k: the pages read back after (default: all)")
+    ap.add_argument("--k-soft", default="on", choices=("on", "off"),
+                    help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
+    ap.add_argument("--k-history", default="story", choices=("story", "work"),
+                    help="the backlog's history (`backlog.HISTORY`): the pages before in the story, or the order of work")
+    ap.add_argument("--k-narrow", action="store_true",
+                    help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
     return ap.parse_args(argv)
 
 

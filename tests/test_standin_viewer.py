@@ -295,6 +295,23 @@ def test_holds_and_kept_soft_frames_are_steps_of_the_script():
         sv.parse_script("h")  # (a hold needs its number)
 
 
+def test_scenario_k_flips_fresh_pages_past_then_reads_them_back_and_is_never_in_all():
+    assert "k5" not in standin_e2e.wanted("all")
+    assert standin_e2e.wanted("k") == ["k5", "k1", "k2"] and standin_e2e.wanted("k1,c") == ["c", "k1"]
+    names = standin_e2e.wanted("c,k")
+    count = standin_e2e.pages_needed(names, 4)
+    segments, _steps = standin_e2e.build_plan(names, count, k={"turns": 4, "read": 2, "soft": False, "narrow": False})
+    k5 = next(s for s in segments if s.name == "k5")
+    assert k5.steps == ["t0", "b1", "j8", "w8000", "n", "w500", "n", "w500", "n", "w500", "n", "w500", "j10",
+                        "w8000", "n", "w8000", "t", "b"]  # (after c's pages; sharp at once; back to the first flipped)
+    k1 = next(s for s in segments if s.name == "k1")
+    assert k1.screens[0] == (18, True) and k1.screens[-1] == (22, True)  # (pages no scenario turned to before)
+    assert all(index < count for s in segments for index, _spread in s.screens)
+    narrow, _ = standin_e2e.build_plan(["k2"], 40, k={"turns": 3, "read": 3, "soft": True, "narrow": True})
+    assert narrow[0].steps[:2] == ["j1", "w8000"]
+    assert narrow[0].screens == [(1, False), (2, False), (3, False), (4, False), (2, False), (3, False), (4, False)]
+
+
 def test_the_pages_of_little_text_come_from_the_annotation_counts_alone(tmp_path):
     import json
 
