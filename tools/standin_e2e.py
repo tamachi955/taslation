@@ -1602,7 +1602,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     backlog_mod.HISTORY = args.k_history  # (the internal switch: the pairs behind the reader in story order or not)
 
     def caught(self: Any, screen: Any, image: Any, work: Any, *a: Any, **k: Any) -> Any:  # a page turned past
-        got = catch_page(self, screen, image, work, *a, **k)
+        # (--k-backlog off: nothing is caught - the same turns timed as before there was a backlog)
+        got = catch_page(self, screen, image, work, *a, **k) if args.k_backlog == "on" else False
         notes.backlog_note("catch", self, seq=getattr(screen, "seq", None), sight=getattr(screen, "sight", None),
                            caught=bool(got), read=bool(work is not None and work.read_all and work.read))
         return got
@@ -3614,7 +3615,8 @@ def run(args: argparse.Namespace) -> int:
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
-              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "history": args.k_history}
+              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "history": args.k_history,
+              "backlog": args.k_backlog == "on"}
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
@@ -4130,11 +4132,16 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
                        None)
             caught = seq is not None and any(c["caught"] and c["seq"] == seq and c["t"] >= turn["soft_t"]
                                              for c in catches)
+            # (... or its page finished while it was on show: nothing left to catch)
+            done = seq is not None and not caught and any(
+                r["kind"] == "page_stage" and r["seq"] == seq and r["stage"] == "translate"
+                and r["state"] in ("done", "skipped") and turn["soft_t"] <= r["t"] < turn["next_t"] + 400
+                for r in readings)
             stayed = row["rest_ms"]
             look = (stayed - row["captured_sharp_ms"]
                     if stayed is not None and row["captured_sharp_ms"] is not None else None)
             flip_rows.append({"page": row["page"], "rest_ms": stayed, "from_look_ms": look, "seq": seq,
-                              "caught": caught})
+                              "caught": caught, "done_on_show": done})
         stayed_n = sum(1 for f in flip_rows if (f["rest_ms"] or 0) >= K_STAYED_MS)
         caught_n = sum(1 for f in flip_rows if f["caught"])
         told = [r for r in readings if r["kind"] == "page_stage" and lo <= r["t"] < upto]
@@ -4162,11 +4169,18 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
         paces[name] = {
             "pace_ms": K_PACES[name], "flips": len(flip_rows), "stayed": stayed_n, "caught": caught_n,
             "caught_share": round(caught_n / len(flip_rows), 2) if flip_rows else None,
-            "agree": sum(1 for f in flip_rows if f["caught"] == ((f["rest_ms"] or 0) >= K_STAYED_MS)),
+            "done_on_show": sum(1 for f in flip_rows if f["done_on_show"]),
+            # (a page stayed 800 ms or more and caught or finished on show, or neither and caught nowhere)
+            "agree": sum(1 for f in flip_rows
+                         if (f["caught"] or f["done_on_show"]) == ((f["rest_ms"] or 0) >= K_STAYED_MS)),
             "agree_from_look": sum(1 for f in flip_rows
-                                   if f["caught"] == ((f["from_look_ms"] or 0) >= K_STAYED_MS)),
+                                   if (f["caught"] or f["done_on_show"]) == ((f["from_look_ms"] or 0) >= K_STAYED_MS)),
             "told_on_show": sum(1 for f in flip_rows if f["seq"] is not None),
             "told_gone_by": sum(1 for r in told if r["stage"] == "read" and r["state"] == "missed"),
+            # (... and of them those whose screen was told nothing else after: a placeholder left as gone by)
+            "gone_by_left": sum(1 for r in told if r["stage"] == "read" and r["state"] == "missed"
+                                and not any(x["seq"] == r["seq"] and x["t"] > r["t"] for x in readings
+                                            if x["kind"] == "page_stage")),
             "merged": sum(1 for r in told if r["state"] == "merged"),
             "states": dict(Counter(f"{r['stage']}:{r['state']}" for r in told)),
             "backlog_pages_most": max((int(r["pages"] or 0) for r in totals if lo <= r["t"] < upto), default=0),
@@ -4199,6 +4213,9 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
     if not paces:
         return {}
     return {"paces": paces, "events": dict(Counter(r["kind"] for r in readings)),
+            "event_list": {"columns": ["t_s", "kind", "seq", "stage", "state", "pages", "thumb"],
+                           "rows": [[rel(r["t"]), r["kind"], r["seq"], r["stage"], r["state"], r["pages"],
+                                     r["thumb"]] for r in readings]},
             "catches": {"caught": sum(1 for c in catches if c["caught"]),
                         "not_caught": sum(1 for c in catches if not c["caught"]),
                         "from_regions": sum(1 for c in catches if c["caught"] and c["read"])},
@@ -4459,6 +4476,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
     ap.add_argument("--k-history", default="story", choices=("story", "work"),
                     help="the backlog's history (`backlog.HISTORY`): the pages before in the story, or the order of work")
+    ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
+                    help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
                     help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
     return ap.parse_args(argv)

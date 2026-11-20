@@ -926,6 +926,8 @@ class PageGate:
         # detail): what its job keeps lasts as ever, but a page turned past on it never goes on being read
         # (`backlog`)
         self.soft = bool(soft)
+        self.settled = True  # (False: confirmed while the frames still changed - pages flipped through without a stop
+        # (`ui.live`) -: its page is never caught once turned past either)
         self.shown_since = time.monotonic()  # (when the job was started on the frame)
         self.gone_at: float | None = None  # (when it was dropped: how long the frame was on show, `backlog`)
         self.gone_by = ""  # (who dropped it: "window" - its frame changed, the follow ended -, "worker", "taken back")
