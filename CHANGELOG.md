@@ -3,6 +3,41 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.8.0 - 2026-11-20
+
+Speed and memory
+
+* The page on show when you start TASlation, and a page you turn to just as the window becomes ready, get their first
+  bubble sooner: the code of the model that finds the bubbles now loads while the Japanese reader loads, not when the
+  first page needs it. On the test computer the first page's first bubble comes 1.6 to 3.0 seconds sooner, and a page
+  turned to right at the start after 2.6 seconds instead of 7.1. With the OCR on "auto" the window says it is ready
+  about 0.4 seconds later.
+* On a viewer that draws a page blurred first, TASlation no longer starts reading the blurred picture: it waits for
+  the sharp one (a page with little on it no longer than it always waited). On those turns the first bubble comes
+  about 0.1 to 0.2 seconds sooner.
+
+Reading
+
+* A page you turned to while TASlation was still starting could be read from its blurred first picture without the
+  check that keeps nothing from such a picture; it now gets that check like any other page.
+
+Saved files
+
+* The notice at the start says in four short sentences that no page image is saved, what is kept of a book and where
+  the help lists it all, and when the network is used. It is shown once more to everyone, because the earlier text
+  left some of this out. Help → "Your data" also names the window's settings and the error log, and the whole-book
+  dialog says that no page image is written to disk.
+
+Other
+
+* The manual, the install guide, the legal notes and `taslation --help` say what is true of the cache (the colophon's
+  details and reused short lines are kept), of the model download you agree to, and of the network (while it reads,
+  the only peer is the Ollama server on this computer). The README names the two articles of Japan's Copyright Act it
+  relies on and points to the notes on 30 countries, and says which changes Ctrl+Z takes back.
+* The repository no longer holds a developer's script that turned a viewer's pages and saved its screens, and the
+  package no longer holds two functions only that script used (a real click at a screen position, an ALT tap to
+  take the foreground). The program never called them.
+
 ## 0.7.0 - 2026-11-20
 
 Speed and memory
