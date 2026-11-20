@@ -106,9 +106,10 @@ stand-in rested on; the window's modes as they changed (reading, over the book, 
 the hot keys it held; the whole-book run's decisions on the frames and the frames it read or erased (each must be a
 sharp one; one that was not, with who got it and when the run took a sharper one after it: ``run_gets``; a frame whose
 reading was thrown away because a sharper one took its place meanwhile is left out of them and counted,
-``readings_thrown_away``), how it ended
-and its requests; the requests of scenario x sent for nothing and what their cancel cost. Into *--out*:
-report.json, and shots/ - pictures of
+``readings_thrown_away``), how it ended and its requests; the requests of scenario x sent for nothing and what their
+cancel cost. Into *--out*: report.json; stacks.txt when a request to the translator stays under way too long
+(`watch_stuck`: the threads' stacks, files, lines and functions only); with --start-ollama the server's own log,
+ollama_server.log (no prompt or answer in it); and shots/ - pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
 moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
 With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
@@ -135,6 +136,7 @@ import re
 import secrets
 import shutil
 import statistics
+import subprocess
 import sys
 import tempfile
 import threading
@@ -1705,6 +1707,67 @@ def stages(notes: Notes, server: ServerState) -> None:
 
     warmed._staged = True  # type: ignore[attr-defined]
     plamo_mod.PlamoTranslator.warm_up, plamo_mod.PlamoTranslator._unload = warmed, unloaded
+
+
+STUCK_NO_HTTP_S = 20.0  # a request this long under way that has not gone out over HTTP: the threads' stacks written
+STUCK_S = 60.0  # ... and one this long under way at all
+STUCK_DUMPS = 6
+
+
+def watch_stuck(notes: Notes, path: Path) -> None:
+    """A thread of the tool's own that writes every thread's stack to *path* (each frame's file, line and function:
+    no source line, no value) when a request to the translator has been under way STUCK_NO_HTTP_S without going out
+    over HTTP, or STUCK_S at all - what a translation that stops without an error is found by. STUCK_DUMPS at most, one
+    per such request, each with the requests then under way (their kind, job, age and whether they went out)."""
+    dumped: set[int] = set()
+
+    def look() -> None:
+        while len(dumped) < STUCK_DUMPS:
+            time.sleep(2.0)
+            now = now_ms()
+            with notes.lock:
+                open_ = [dict(r) for r in notes.requests if r["end_t"] is None]
+            stuck = [r for r in open_ if r["n"] not in dumped and (
+                now - r["t"] > STUCK_S * 1000 or (r["http_t"] is None and now - r["t"] > STUCK_NO_HTTP_S * 1000))]
+            if not stuck:
+                continue
+            dumped.update(r["n"] for r in stuck)
+            names = {t.ident: t.name for t in threading.enumerate()}
+            lines = [f"== {time.strftime('%H:%M:%S')}: requests under way "
+                     + ", ".join(f"#{r['n']} {r['kind']} job {r['job']} {round((now - r['t']) / 1000)} s"
+                                 f"{'' if r['http_t'] else ' (not sent)'}" for r in open_)]
+            for ident, frame in sys._current_frames().items():
+                lines.append(f"-- thread {names.get(ident, ident)}")
+                lines += [f"   {fs.filename}:{fs.lineno} {fs.name}" for fs in traceback.extract_stack(frame)]
+            with contextlib.suppress(OSError):
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+
+    threading.Thread(target=look, name="tool-watch-stuck", daemon=True).start()
+
+
+def keep_server_log(ollama_start: Any, path: Path) -> None:
+    """The Ollama server the window starts (--start-ollama) writes its own log to *path*: what it loads, its slots and
+    its HTTP lines, at Ollama's default level (no prompt and no answer in it: ``OLLAMA_DEBUG_LOG_REQUESTS`` is off),
+    to tell a server that stops answering from a window that stops asking. The rest of the launch as the starter has
+    it (`ollama_start.launch`)."""
+    launch = ollama_start.launch
+
+    def logged(command: list[str], env: dict[str, str] | None = None) -> Any:
+        options: dict[str, Any] = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+        if env is not None:
+            options["env"] = env
+        try:
+            log = open(path, "ab")
+        except OSError:
+            return launch(command, env)
+        proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, shell=False,
+                                cwd=str(Path(command[0]).parent), **options)
+        log.close()  # (the server holds its own handle)
+        ollama_start._launched.append(proc)
+        return proc
+
+    ollama_start.launch = logged
 
 
 def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
@@ -4017,6 +4080,7 @@ def run(args: argparse.Namespace) -> int:
         from taslation import ollama_start
 
         ollama_start.DEFAULT_PORT = args.start_ollama  # (this process alone: the port its starter starts Ollama on)
+        keep_server_log(ollama_start, out / "ollama_server.log")
     enable_dpi_awareness()
     standin_rect, app_rect = Monitors().places()
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
@@ -4104,6 +4168,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     notes = Notes(top, dpr)
     hotkeys = HotKeys(notes)
     patched = install(notes, args, guard, viewer_info, hotkeys)
+    watch_stuck(notes, out / "stacks.txt")
     state = demo_video.scratch_state()
     info = viewer_info()
     remember_role(state, BOOK, "reader")
