@@ -673,6 +673,7 @@ class Notes:
         self.warm_calls: list[dict[str, Any]] = []  # each warming begun (`PlamoTranslator.warm_prefix`): what it did
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
+        self.side: SideCheck | None = None  # the indicator looked at from the window (`--side-indicator` not off)
 
     def span(self, label: str, t0: float, t1: float, extra: Any = None) -> None:
         """A stage of the page job running (*label*, from *t0* to *t1*, on this thread; *extra*: a code or a number),
@@ -809,8 +810,8 @@ class Notes:
         try:
             with backlog._lock:
                 entries = [*backlog.entries, *backlog._held.values()]
-                held = {"bytes": backlog.frame_bytes, "peak": backlog.peak_bytes, "units": backlog.unit_total,
-                        "entries": len(entries),
+                held = {"bytes": backlog.bytes_held, "frames": backlog.frame_bytes, "regions": backlog.region_bytes,
+                        "peak": backlog.peak_bytes, "units": backlog.unit_total, "entries": len(entries),
                         "framed_after_read": sum(1 for e in entries if e.units is not None
                                                  and (e.raw is not None or e.frame is not None))}
         except Exception as e:  # noqa: BLE001 - noted, never in the app's way
@@ -1226,6 +1227,279 @@ class LogTap(logging.Handler):
             pass
 
 
+# ---------------------------------------------------------------------------------------------------- the indicator
+SIDE_CHECK_MS = 200  # the indicator beside the page looked at this long after an event of normal reading (at most)
+
+
+class SideCheck:
+    """The indicator beside the page (`ui.side`) looked at from the window itself (scenario k with it on): what normal
+    reading told it (``page_stage`` with ``reading``, ``page_on_show``, ``backlog``), kept here as the indicator's
+    rules take it (a stage the latest told, "merged" takes a screen away, a drop or another book's screen 1 clears),
+    against what its model holds and what its canvas has drawn - each screen's cell or rail mark in the state last
+    told, the screen on show outlined, a screen that went by drawn as missed, nothing left after a drop. Numbers and
+    screen numbers only. Runs on the Tk thread (the event handler, and a check `SIDE_CHECK_MS` after an event, never
+    inside the event pump)."""
+
+    def __init__(self, notes: Notes):
+        self.notes = notes
+        self.told: dict[int, dict[str, str]] = {}
+        self.prints: dict[int, str] = {}
+        self.on_show: int | None = None
+        self.totals: tuple[int, int, bool, int] | None = None
+        self.pending: str | None = None
+        self.checks = 0
+        self.check_ms: list[float] = []
+        self.wrong: Counter[str] = Counter()
+        self.examples: dict[str, list[Any]] = {}
+        self.kinds: Counter[str] = Counter()
+        self.layouts: Counter[str] = Counter()
+        self.ever: set[tuple[int, str]] = set()  # (seq, fingerprint) of every screen told
+        self.missed_told: set[tuple[int, str]] = set()
+        self.missed_drawn: set[tuple[int, str]] = set()
+        self.on_show_drawn = 0
+        self.on_show_checked = 0
+        self.drops: list[dict[str, Any]] = []
+
+    # what was told
+    def told_event(self, app: Any, kind: str, data: dict[str, Any]) -> None:
+        from taslation import fingerprint as fp
+        from taslation.ui.constants import in_a_run
+        from taslation.ui.side_model import MERGED, SIDE_STAGES, STATES
+
+        self.kinds[kind] += 1
+        if kind == "backlog":
+            if data.get("dropped") is True:
+                self.told.clear()
+                self.prints.clear()
+                self.on_show = None
+            self.totals = (_count_of(data.get("pages")), _count_of(data.get("lines")), bool(data.get("paused")),
+                           0 if data.get("dropped") is True else _count_of(data.get("dropped")))
+            return
+        if kind == "page_on_show":
+            try:
+                self.on_show = None if data.get("seq") is None else int(data["seq"])
+            except (TypeError, ValueError):
+                self.on_show = None
+            return
+        if in_a_run(app):
+            return
+        try:
+            seq = int(data.get("seq"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return
+        print_ = str(data.get("fingerprint") or "")
+        old = self.prints.get(seq)
+        within = int(getattr(app.settings, "fingerprint_max_distance", 0) or 0)
+        if old and print_:
+            try:
+                other = fp.hamming(old, print_) > within
+            except (TypeError, ValueError):
+                other = old != print_
+            if other:  # (the engine numbers another book's screens from 1 again)
+                self.told.clear()
+                self.prints.clear()
+                self.on_show = None
+        stage, state = data.get("stage"), data.get("state")
+        if stage == "read" and state == MERGED:
+            if self.told.pop(seq, None) is not None:
+                self.prints.pop(seq, None)
+                if self.on_show == seq:
+                    self.on_show = None
+            return
+        stages = self.told.setdefault(seq, {s: "waiting" for s in SIDE_STAGES})
+        if print_ and not self.prints.get(seq):
+            self.prints[seq] = print_
+        if stage in SIDE_STAGES and state in STATES:
+            stages[stage] = state
+        key = (seq, self.prints.get(seq, ""))
+        self.ever.add(key)
+        if stages["read"] == "missed" or stages["translate"] == "missed":
+            self.missed_told.add(key)
+
+    def handled(self, app: Any, kind: str, data: dict[str, Any]) -> None:
+        """(the event handled) A drop looked at at once; the rest a little later."""
+        if kind == "backlog" and data.get("dropped") is True:
+            self.drop_looked(app)
+        if self.pending is None:
+            try:
+                self.pending = app.after(SIDE_CHECK_MS, lambda: self.check(app))
+            except Exception:  # noqa: BLE001 - the window closing
+                self.pending = None
+
+    def _wrong(self, what: str, example: Any) -> None:
+        self.wrong[what] += 1
+        items = self.examples.setdefault(what, [])
+        if len(items) < 5:
+            items.append(example)
+
+    # what the window holds
+    def drop_looked(self, app: Any) -> None:
+        st = getattr(app, "_side", None)
+        if st is None:
+            return
+        model, view = st.model, st.view
+        left = sorted(model.screens)
+        drawn = self._drawn_screens(view) if view is not None else []
+        rec = {"t": now_ms(), "screens_left": len(left), "on_show": model.on_show, "drawn_left": len(drawn)}
+        self.drops.append(rec)
+        if left or model.on_show is not None or drawn:
+            self._wrong("drop_not_cleared", rec)
+
+    @staticmethod
+    def _drawn_screens(view: Any) -> list[str]:
+        """The canvas items of a screen's cell (``s<seq>``) or a rail mark (``mark-<mark>``)."""
+        out = []
+        try:
+            for item in view.find_all():
+                tags = view.gettags(item)
+                if any((t.startswith("s") and t[1:].isdigit()) or t.startswith("mark-") for t in tags):
+                    out.append(item)
+        except Exception:  # noqa: BLE001 - the widget gone
+            return []
+        return out
+
+    def check(self, app: Any) -> None:
+        self.pending = None
+        began = time.perf_counter()
+        try:
+            self._check(app)
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            self.notes.error("side check", type(e).__name__)
+        self.check_ms.append((time.perf_counter() - began) * 1000)
+
+    def _check(self, app: Any) -> None:
+        from taslation.ui.side_model import Screen
+
+        st = getattr(app, "_side", None)
+        if st is None:
+            self._wrong("no_indicator", None)
+            return
+        self.checks += 1
+        model, view = st.model, st.view
+        if set(model.screens) != set(self.told):
+            self._wrong("screens", {"told": sorted(self.told), "model": sorted(model.screens)})
+        for seq, stages in self.told.items():
+            screen = model.screens.get(seq)
+            if screen is not None and dict(screen.stages) != stages:
+                self._wrong("stages", {"seq": seq, "told": dict(stages), "model": dict(screen.stages)})
+        if model.on_show != self.on_show:
+            self._wrong("on_show", {"told": self.on_show, "model": model.on_show})
+        if self.totals is not None:
+            b = model.backlog
+            if (b.pages, b.lines, b.paused, b.dropped) != self.totals:
+                self._wrong("totals", {"told": list(self.totals), "model": [b.pages, b.lines, b.paused, b.dropped]})
+        kind = view.layout.kind if view is not None and view.shown else ""
+        self.layouts[kind or "none"] += 1
+        if not kind:
+            return
+        if kind == "column":
+            self._check_column(view, model)
+        else:
+            self._check_rail(view, model)
+        for seq, stages in self.told.items():  # (the screens that went by, drawn as such)
+            told = Screen(seq, stages=dict(stages))
+            if told.mark == "missed" and self._drawn_missed(view, model, seq, kind):
+                self.missed_drawn.add((seq, self.prints.get(seq, "")))
+
+    def _bar_state(self, view: Any, box: tuple[int, int, int, int], seq: int) -> str:
+        from taslation.ui.side_view import MISSED
+        from taslation.ui.strip import DONE, EDGE, FAILED, SKIPPED
+
+        x0, y0, x1, y1 = box
+        items = [i for i in view.find_overlapping(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
+                 if f"s{seq}" in view.gettags(i) and "marks" not in view.gettags(i)
+                 and view.type(i) in ("rectangle", "line")]
+        if any("stripe" in view.gettags(i) for i in items):
+            return "working"
+        rects = [i for i in items if view.type(i) == "rectangle"]
+        fills = {str(view.itemcget(i, "fill")).lower() for i in rects}
+        if DONE.lower() in fills:
+            return "done"
+        if FAILED.lower() in fills:
+            return "failed"
+        if any(str(view.itemcget(i, "dash")) and str(view.itemcget(i, "outline")).lower() == MISSED.lower()
+               for i in rects):
+            return "missed"
+        outlines = {str(view.itemcget(i, "outline")).lower() for i in rects}
+        if SKIPPED.lower() in outlines:
+            return "skipped"
+        if EDGE.lower() in outlines:
+            return "waiting"
+        return "?"
+
+    def _check_column(self, view: Any, model: Any) -> None:
+        from taslation.ui.side_model import SIDE_STAGES
+        from taslation.ui.strip import CHOSEN
+
+        for index, seq in enumerate(model.order):
+            screen = model.screens[seq]
+            parts = view._cell_parts(index)
+            for stage in SIDE_STAGES:
+                drawn = self._bar_state(view, parts[stage], seq)
+                if drawn != screen.state(stage):
+                    self._wrong("bar", {"seq": seq, "stage": stage, "state": screen.state(stage), "drawn": drawn})
+            outlined = any(view.type(i) == "rectangle" and str(view.itemcget(i, "outline")).lower() == CHOSEN.lower()
+                           for i in view.find_withtag(f"s{seq}") if "marks" in view.gettags(i))
+            if seq == model.on_show:
+                self.on_show_checked += 1
+                self.on_show_drawn += outlined
+                if not outlined:
+                    self._wrong("on_show_not_outlined", {"seq": seq})
+            elif outlined:
+                self._wrong("outlined_not_on_show", {"seq": seq, "on_show": model.on_show})
+
+    def _check_rail(self, view: Any, model: Any) -> None:
+        marks = list(getattr(view, "_marks", []) or [])
+        seen = [s for m in marks for s in m.seqs]
+        if sorted(seen) != list(model.order):
+            self._wrong("rail_screens", {"marks": len(seen), "model": len(model.order)})
+        rx, rw = view.layout.rail_x, view.layout.rail_w
+        for m in marks:
+            want = {model.screens[s].mark for s in m.seqs if s in model.screens}
+            if len(m.seqs) == 1 and want and m.mark not in want:
+                self._wrong("rail_mark", {"seqs": list(m.seqs), "mark": m.mark, "model": sorted(want)})
+            drawn = {t for i in view.find_overlapping(rx, m.y0, rx + rw - 1, max(m.y0 + 1, m.y1) - 1)
+                     for t in view.gettags(i) if t.startswith("mark-")}
+            if f"mark-{m.mark}" not in drawn:
+                self._wrong("rail_mark_not_drawn", {"seqs": [m.seqs[0], m.seqs[-1]], "mark": m.mark})
+        on = [m for m in marks if m.on_show]
+        outlined = bool(view.find_withtag("on-show"))
+        if model.on_show is not None and model.on_show in model.screens:
+            self.on_show_checked += 1
+            ok = len(on) == 1 and model.on_show in on[0].seqs and outlined
+            self.on_show_drawn += ok
+            if not ok:
+                self._wrong("on_show_not_outlined", {"seq": model.on_show, "marks_on_show": len(on)})
+        elif on or outlined:
+            self._wrong("outlined_not_on_show", {"on_show": model.on_show})
+
+    def _drawn_missed(self, view: Any, model: Any, seq: int, kind: str) -> bool:
+        if seq not in model.screens:
+            return False
+        if kind == "column":
+            index = model.order.index(seq)
+            parts = view._cell_parts(index)
+            return "missed" in (self._bar_state(view, parts["read"], seq), self._bar_state(view, parts["translate"], seq))
+        return any(seq in m.seqs and m.mark == "missed" for m in getattr(view, "_marks", []) or [])
+
+    def report(self) -> dict[str, Any]:
+        ms = sorted(self.check_ms)
+        return {"checks": self.checks, "events": dict(self.kinds), "layouts": dict(self.layouts),
+                "wrong": dict(self.wrong), "examples": self.examples,
+                "screens_told": len(self.ever), "missed_told": len(self.missed_told),
+                "missed_drawn_as_missed": len(self.missed_drawn & self.missed_told),
+                "on_show_outlined": [self.on_show_drawn, self.on_show_checked],
+                "drops": self.drops,
+                "check_ms": {"median": round(statistics.median(ms), 2), "max": round(ms[-1], 1)} if ms else None}
+
+
+def _count_of(value: Any) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 # ---------------------------------------------------------------------------------------------------- the hooks
 # the live view's calls on the Tk thread whose time is noted (those the window has: older code lacks some)
 TIMED = ("_beat", "_poll", "_look", "_look_over_job", "_watch_page", "_follow_step", "_poll_events")
@@ -1495,11 +1769,24 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.job_over(job)
 
     def handled(self: Any, kind: str, data: dict[str, Any]) -> Any:
+        side = None
         if kind in KINDS:
             notes.app_event(self, kind, data)
         elif kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading")):
             notes.reading(kind, data)
-        return handle_event(self, kind, data)
+            side = notes.side
+            if side is not None:
+                try:
+                    side.told_event(self, kind, data)
+                except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+                    notes.error("side told", type(e).__name__)
+        out = handle_event(self, kind, data)
+        if side is not None:
+            try:
+                side.handled(self, kind, data)
+            except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+                notes.error("side handled", type(e).__name__)
+        return out
 
     def drawn(self: Any) -> Any:
         out = redisplay(self)
@@ -1622,16 +1909,37 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         held, notes.local.side = getattr(notes.local, "side", None), "backlog"
         began, what = now_ms(), ""
         try:
+            nxt = self._next()  # (the page it works on: chosen so again inside, nothing changed between)
+        except Exception:  # noqa: BLE001 - not known
+            nxt = None
+        try:
             what = backlog_step(self, pipeline, *a, **k)
             return what
         finally:
             notes.local.side = held
             if what:
                 notes.backlog_note("step", self, began=began, did=what,
+                                   on=nxt[0] if nxt else None, sight=nxt[1].screen.sight if nxt else None,
+                                   here=getattr(self, "_here", None),
                                    waited_ms=round(self.last_wait * 1000) if what == "stopped"
-                                   and self.last_wait is not None else None)
+                                   and self.last_wait is not None else None,
+                                   frame_wait_ms=round(self.last_frame_wait * 1000) if what == "read"
+                                   and self.last_frame_wait is not None else None)
+
+    on_units = backlog_mod.Tracking.on_units
+
+    def units_known(self: Any, work: Any) -> Any:  # a page job's units known: what the backlog lent it, its screen
+        try:
+            return on_units(self, work)
+        finally:
+            with notes.lock:
+                job = notes.current
+                if job is not None:
+                    job["reuse"] = getattr(self, "reuse", "") or None
+                    job["sight"] = getattr(getattr(self, "screen", None), "sight", None)
 
     backlog_mod.Backlog.catch, backlog_mod.Backlog.step = caught, stepped
+    backlog_mod.Tracking.on_units = units_known
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
@@ -1893,6 +2201,7 @@ class Director:
         self.screen_now: tuple[int, bool] | None = None
         self.screen_state, self.screen_since = "none", time.monotonic()
         self.last_ocr = 0.0
+        self.side_drop_at: float | None = None  # (`side_drop_due`)
         self.saver: queue.Queue[Any] = queue.Queue()
         self.saver_thread = threading.Thread(target=self._save, name="standin-shots", daemon=True)
         self.saver_thread.start()
@@ -2017,6 +2326,14 @@ class Director:
         if (seg, k) in SHOTS:
             delay, label = SHOTS[(seg, k)]
             self.due.append((time.monotonic() + delay, label))
+        if seg in K_PACES and self.notes.side is not None:  # the indicator after the flips, and after the reads back
+            turns = self.args.k_turns
+            read = self.args.k_read or turns
+            if k == turns + 2:  # (the turn back to the first page flipped past)
+                self.due.append((time.monotonic() + 0.4, f"{seg}_side_after_the_flips"))
+            elif k == turns + 1 + read:  # (the last page read back, near the end of its stay)
+                self.due.append((time.monotonic() + max(0.5, self.args.k_read_ms / 1000 - 1.0),
+                                 f"{seg}_side_read_back"))
 
     # the scenarios
     def idle(self) -> bool:
@@ -2043,6 +2360,8 @@ class Director:
                 self.phase, self.phase_at = "end", now
                 return
             if (self.ended and rested and self.backlog_done()) or waited > self.args.timeout:
+                if self.side_drop_due():
+                    return
                 if waited > self.args.timeout:
                     self.released["end"] = {"timed_out": True}
                 self.finish()
@@ -2152,6 +2471,26 @@ class Director:
     def first_page_done(self) -> bool:
         return any(d["kind"] == "translated" for d in self.notes.displays) or (
             self.app.ready and time.monotonic() - self.phase_at > 30)
+
+    def side_drop_due(self) -> bool:
+        """(scenario k with the indicator on, at the end) The backlog dropped once as another book drops it
+        (`backlog.drop_backlog`), pictured before and after: the indicator is looked at as the drop is handled
+        (`SideCheck.drop_looked`); True while the window is given its 2 s for it."""
+        if self.notes.side is None or not any(s.name in K_PACES for s in self.segments):
+            return False
+        from taslation import backlog as backlog_mod
+
+        now = time.monotonic()
+        if self.side_drop_at is None:
+            self.shot("k_side_before_the_drop")
+            held = backlog_mod.backlog_of(self.app, make=False)
+            if held is not None:  # (what it held at the end, before the drop: `bytes_at_end`)
+                self.notes.backlog_note("before the drop", held)
+            backlog_mod.drop_backlog(self.app, "the tool's look at the indicator")
+            self.side_drop_at = now
+            self.due.append((now + 1.0, "k_side_after_the_drop"))
+            return True
+        return now - self.side_drop_at < 2.0
 
     def before(self, seg: Segment) -> None:
         from taslation.ui import theme
@@ -3245,7 +3584,12 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "lettered_soft_ms": lettered_soft_ms(notes.displays, scr, lo, hi),
             # a page the cache held whole (its jobs drew it all from the cache, none read a page unit anew): its
             # lettering from the turn, the first read from the sharp frame, and lettering that left and came back
-            "cached": any(j.get("cache_hits") for j in jobs) and not any(j.get("cache_misses") for j in jobs),
+            "cached": (any(j.get("cache_hits") for j in jobs) and not any(j.get("cache_misses") for j in jobs)
+                       and not any(j.get("reuse") in ("reused", "partial") for j in jobs)),
+            # what the backlog lent its jobs (`backlog.Backlog.lend`: "reused", "partial", or why it was read as ever),
+            # and the screen they were (`Screen.sight`)
+            "reuse": [j.get("reuse") for j in jobs], "sights": [j.get("sight") for j in jobs],
+            "job_ids": [j["id"] for j in jobs],
             "lettered_from_turn_ms": ms(lettered, lo), "lettered_sharp_from_turn_ms": ms(lettered_sharp, lo),
             "lettering_gone_ms": lettering_gone_ms(notes.displays, scr, lo, hi),
             "status_old_page_ms": status_stayed, "status_old_page_kind": status_kind_,
@@ -3775,8 +4119,11 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                         flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
                         ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
-                        ollama_num_gpu=args.ollama_num_gpu)
+                        ollama_num_gpu=args.ollama_num_gpu,
+                        **({"side_indicator": args.side_indicator} if args.side_indicator else {}))
     settings.validate()
+    if getattr(settings, "side_indicator", "off") != "off":
+        notes.side = SideCheck(notes)
     errorlog.setup(settings)
     tap = LogTap(notes)
     logging.getLogger().addHandler(tap)
@@ -3883,7 +4230,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                  "stored": j.get("stored"), "stored_at_cancel": j.get("stored_at_cancel"),
                  "cancelled_s": rel(j["cancelled_t"]), "discarded": j["discarded"], "done_s": rel(j["done_t"]),
                  "confirmed_s": rel(j.get("confirmed_t")), "settled": j.get("settled"), "soft_gate": j.get("soft_gate"),
-                 "settled_by_s": rel(j.get("settled_by_t"))}
+                 "settled_by_s": rel(j.get("settled_by_t")), "reuse": j.get("reuse"), "sight": j.get("sight")}
                 for j in started]
     kept_soft = [j for j in job_list if j["frame"] != "sharp" and j["discarded"] is not True
                  and (j["gate_end"] == "confirmed" or not j["gate"]) and (j["stored"] or j["stored_at_cancel"])]
@@ -4015,8 +4362,16 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                               r.get("pairs"), r.get("joined"), r.get("kept_tokens_est"), r.get("prompt_tokens_est")]
                              for r in requests]}
     k_facts = k_block(notes, turns, rows, requests, spells, rel)
+    pump = sorted(ms_ for ms_, _busy in notes.timings.get("_poll_events", []))
+    side_facts = {"setting": getattr(director.app.settings, "side_indicator", None),
+                  "poll_events_ms": {"n": len(pump), "median": round(statistics.median(pump), 3),
+                                     "p90": round(pump[int(0.9 * (len(pump) - 1))], 2),
+                                     "p99": round(pump[int(0.99 * (len(pump) - 1))], 2),
+                                     "max": round(pump[-1], 1)} if pump else None,
+                  **({"looked": notes.side.report()} if notes.side is not None else {})}
     return {
         **({"scenario_k": k_facts} if k_facts else {}),
+        "side_indicator": side_facts,
         "latency_rested": latency,
         "stage_split": split,
         "status_line_of_the_page_before": status_summary,
@@ -4190,6 +4545,49 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
                 slot.append(server_wait(nxt))
         jobs = [j for j in notes.jobs if j["started"] and lo <= j["t"] < upto]
         thumbs = [r["thumb"] for r in told if r["thumb"]]
+        by_id = {j["id"]: j for j in notes.jobs}
+        flipped = {row["page"]: (f, row) for f, (_t, row) in zip(flip_rows, flips)}
+
+        def read_back(row: dict[str, Any]) -> str:
+            """How a page read back began: wholly from the cache, from what the backlog read, or read again on show
+            (and why)."""
+            lent = [x for x in row["reuse"] if x]
+            if "reused" in lent:
+                return "read reused"
+            if "partial" in lent:
+                return "read in part reused"
+            if row["cached"]:
+                return "from the cache wholly"
+            why = lent[-1] if lent else "none"
+            if why == "frame":
+                return "read again: entry still a frame"
+            if why == "size":
+                return "read again: other size"
+            if why in ("units", "settings"):
+                return f"read again: {why}"
+            flip = flipped.get(row["page"])
+            if flip is None:
+                return "read again: not turned past"
+            if flip[0]["caught"]:
+                return "read again: caught, nothing held"
+            soft = any(by_id.get(i, {}).get("soft_gate") for i in flip[1]["job_ids"])
+            return "read again: soft gate" if soft else "read again: not caught"
+
+        backs = [(row, read_back(row)) for _t, row in reads]
+        caught_pages = {f["page"] for f in flip_rows if f["caught"]}
+        # the steps stopped by a turn to the very page they worked on (the next page job's screen), what they held
+        # the worker after the stop, and that page's first bubble
+        same_page_waits: list[Any] = []
+        same_page_first: list[Any] = []
+        for b in bg:
+            if b["did"] != "stopped" or b.get("sight") is None:
+                continue
+            nxt = next((j for j in notes.jobs if j["started"] and j["t"] >= b["t"] - 50), None)
+            if nxt is not None and nxt.get("sight") == b["sight"]:
+                same_page_waits.append(b.get("waited_ms"))
+                row = next((r for _t, r in reads if nxt["id"] in r["job_ids"]), None)
+                if row is not None:
+                    same_page_first.append(row["first_lettered_ms"])
         paces[name] = {
             "pace_ms": K_PACES[name], "flips": len(flip_rows), "stayed": stayed_n, "caught": caught_n,
             "caught_share": round(caught_n / len(flip_rows), 2) if flip_rows else None,
@@ -4215,6 +4613,18 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
                                                             if not r["cached"]]),
             "first_lettered_read_back": tail([r["first_lettered_ms"] for _t, r in reads]),
             "read_back_cached": sum(1 for _t, r in reads if r["cached"]), "read_back": len(reads),
+            # (point C: each page read back, how it began; of those caught when turned past, how many began with no
+            # new read - from the cache or from what the backlog read)
+            "read_back_how": dict(Counter(how for _row, how in backs)),
+            "read_back_caught": sum(1 for row, _how in backs if row["page"] in caught_pages),
+            "read_back_caught_no_new_read": sum(1 for row, how in backs if row["page"] in caught_pages
+                                                and how in ("from the cache wholly", "read reused")),
+            "first_lettered_read_back_by_how": {how: tail([row["first_lettered_ms"] for row, h in backs if h == how])
+                                                for how in sorted({h for _r, h in backs})},
+            "same_page_turn_waits_ms": tail(same_page_waits),
+            "same_page_turn_first_lettered_ms": tail(same_page_first),
+            "frame_wait_ms": tail([b.get("frame_wait_ms") for b in bg]),
+            "steps_on": dict(Counter(f"{b.get('on')}:{b['did']}" for b in bg)),
             "lettered_soft_turns": sum(1 for _t, r in mine if r["lettered_soft_ms"]),
             "stale": sum(1 for x in spells.get("stale", []) if lo <= x["from_t"] < upto),
             "old_lettering_ms_max": max((r["old_lettering_ms"] or 0 for _t, r in mine), default=0),
@@ -4229,6 +4639,7 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             "background_requests": len(bg_reqs), "background_full": sum(1 for r in bg_reqs if full_computed(r)),
             "page_requests": len(page_reqs), "page_full": sum(1 for r in page_reqs if full_computed(r)),
             "peak_mb": round(max((b.get("peak", 0) for b in held), default=0) / mb, 1),
+            "regions_mb_most": round(max((b.get("regions", 0) or 0 for b in held), default=0) / mb, 2),
             "frames_held_after_read_most": max((b.get("framed_after_read", 0) for b in held), default=0),
             "bytes_at_end": held[-1].get("bytes") if held else 0,
             "thumb_height_most": max((t[1] for t in thumbs), default=None),
@@ -4364,7 +4775,17 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"(agree {k['agree']}/{k['flips']}), told gone by {k['told_gone_by']}, drain {k['drain_s']} s, "
               f"first bubble with a backlog {k['first_lettered_with_backlog']}, peak {k['peak_mb']} MB, "
               f"background requests {k['background_requests']} ({k['background_full']} in full), "
-              f"waits {k['waits_ms']}")
+              f"waits {k['waits_ms']}; read back {k['read_back_how']}, caught and begun with no new read "
+              f"{k['read_back_caught_no_new_read']}/{k['read_back_caught']}, turns to the page worked on: waits "
+              f"{k['same_page_turn_waits_ms']}, first bubble {k['same_page_turn_first_lettered_ms']}; "
+              f"frames held {k['frame_wait_ms']} ms")
+    side = run_.get("side_indicator") or {}
+    looked = side.get("looked")
+    print(f"indicator {side.get('setting')}: event pump {side.get('poll_events_ms')}" + (
+        f"; looked at {looked['checks']} times {looked['layouts']}, wrong {looked['wrong']}, screens told "
+        f"{looked['screens_told']}, gone by {looked['missed_told']} (drawn so {looked['missed_drawn_as_missed']}), "
+        f"on show outlined {looked['on_show_outlined']}, drops {looked['drops']}, a look {looked['check_ms']} ms"
+        if looked else ""))
     split = run_.get("stage_split") or {}
     if split.get("all"):
         print("where a rested page's time went (ms, median/p90/max over the finishing jobs): " + "; ".join(
@@ -4512,6 +4933,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
                     help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
+    ap.add_argument("--side-indicator", default=None, choices=("column", "rail", "off"),
+                    help="the setting side_indicator of the window (default: the app's, column); not off: the "
+                         "indicator beside the page is looked at from the window as the events come (`SideCheck`), "
+                         "pictured after the flips and the reads back of scenario k, and dropped at the end to see "
+                         "it cleared")
     return ap.parse_args(argv)
 
 
