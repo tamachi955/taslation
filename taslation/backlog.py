@@ -7,7 +7,9 @@ reader turned away from (`pipeline.turn_away`) while it was still at work, whose
 stayed as it is for KEEP_SETTLES times settle_ms counted from the look (`ui.live._early_confirm`), the job's
 `pipeline.PageGate` confirmed - and whose confirmation lasts for good (`PageGate.sealed`: the time a viewer that draws a
 page soft first may still take it back is over). On such a viewer a frame that looked soft (`PageGate.soft`) is never
-caught; nor is a page whose job had no gate (a page the window took as settled), nor one over the caps. A page that is
+caught; nor is a frame confirmed while the frames still changed (``PageGate.settled`` False: the window confirms the
+frame there is once the frames have kept changing for its SETTLE_TRIES looks, pages flipped through without a stop),
+nor a page whose job had no gate (a page the window took as settled), nor one over the caps. A page that is
 not caught is as it was before there was a backlog: the lines answered by then stay stored, and the page is read and
 asked for the rest when the viewer shows it again (`Pipeline._complete_page`).
 
@@ -846,7 +848,8 @@ class Tracking:
             b.release(screen, done=False)
             b.totals()
             return
-        if not _sealed(gate) and not _soft(gate):  # (kept for now: caught once sealed, `Backlog.settle_pending`)
+        if not _sealed(gate) and not _soft(gate) and _settled(gate):  # (kept for now: caught once sealed,
+            # `Backlog.settle_pending`)
             with b._lock:
                 b.pending.append((self, work))
             b.tell(screen, "translate", "waiting", self.image)
@@ -861,7 +864,8 @@ class Tracking:
         screen = self.screen
         if screen is None or gate is None:
             return
-        caught = _sealed(gate) and not _soft(gate) and b.catch(screen, self.image, work, self.pipeline, self.hwnd)
+        caught = _sealed(gate) and not _soft(gate) and _settled(gate) and \
+            b.catch(screen, self.image, work, self.pipeline, self.hwnd)
         if caught:
             b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting",
                    self.image)
@@ -890,6 +894,12 @@ class Tracking:
 def _soft(gate: Any) -> bool:
     """Whether *gate*'s frame looked soft (`ui.live`: a viewer seen to draw a page soft first)."""
     return bool(getattr(gate, "soft", False))
+
+
+def _settled(gate: Any) -> bool:
+    """Whether *gate*'s frame had stayed as it is when it was confirmed (``settled``, set by `ui.live`; a gate it was
+    not set on: confirmed is settled)."""
+    return bool(getattr(gate, "settled", True))
 
 
 def _sealed(gate: Any) -> bool:

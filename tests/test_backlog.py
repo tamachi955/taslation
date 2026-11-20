@@ -204,6 +204,29 @@ def test_a_soft_frame_is_never_caught(settings, sample_page):
     assert ("translate", "missed") in _stages(posted)
 
 
+def test_a_frame_confirmed_while_the_frames_still_changed_is_never_caught(settings, sample_page):
+    # (pages flipped through without a stop: the window confirms the frame there is after SETTLE_TRIES looks, and the
+    # frame did not stay - its page goes on being read nowhere, as it was before there was a backlog)
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    gate = _confirmed()
+    gate.settled = False
+    _job(p, b, sample_page, gate)
+    assert not b.entries and not b.pending and b.frame_bytes == 0
+    assert ("translate", "missed") in _stages(posted)
+    gate = _confirmed(open_for=30.0)  # (on a viewer that draws soft first: not even kept for now)
+    gate.settled = False
+    _job(p, b, sample_page, gate)
+    assert not b.entries and not b.pending
+
+
+def test_the_window_says_whether_the_frame_it_confirms_had_stayed():
+    source = inspect.getsource(__import__("taslation.ui.live", fromlist=["x"]))
+    at = source.index("early.gate.settled = not moving")
+    assert at < source.index("if self._early_confirm(op, now):", at)
+
+
 def test_a_page_job_without_a_gate_is_not_caught(settings, sample_page):
     posted, post = _events()
     b = Backlog(post)

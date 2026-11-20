@@ -2838,8 +2838,13 @@ class LiveViewMixin(BlackViewerMixin):
                     op.last_at = now
                 self._next_step(op, round(self._settle_s(op) * 1000))
                 return
-            if self._early_of(op) is not None and self._early_confirm(op, now):
-                return  # (the page started on its first frame goes on: kept, and asks the model now)
+            early = self._early_of(op)
+            if early is not None:
+                # (frames that kept changing for SETTLE_TRIES looks confirm the frame there is: it did not stay, and
+                # its page is never caught once turned past, `backlog`)
+                early.gate.settled = not moving
+                if self._early_confirm(op, now):
+                    return  # (the page started on its first frame goes on: kept, and asks the model now)
             if op.over_job and not op.redo and self.busy and self._on_job_page(image):
                 return  # (back on the page the running job reads: it goes on, nothing is taken)
             if (op.over_job or op.redo) and self._waits_for_worker(op, now):
