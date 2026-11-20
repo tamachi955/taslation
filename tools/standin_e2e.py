@@ -572,6 +572,29 @@ class Notes:
         self.decides: list[dict[str, Any]] = []  # each page job kept for now, decided (`Pipeline.decide_kept`): how
         self.on_display: Callable[[dict[str, Any]], None] | None = None
         self.leaves: list[dict[str, Any]] = []  # each leave of the full screen: when, and the calls that led to it
+        # where a page job's time went (`span`: its stages, by thread), the cuts of the pairs that only grow
+        # (`GrowingContext.take`), and the loads and unloads of the model that leave the server holding nothing
+        self.spans_off: list[tuple[str, float, float, str, Any]] = []  # (spans while no page job ran)
+        self.cuts: list[dict[str, Any]] = []
+        self.server_resets: list[dict[str, Any]] = []
+        # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
+        self.sources: dict[int, int] = {}
+
+    def span(self, label: str, t0: float, t1: float, extra: Any = None) -> None:
+        """A stage of the page job running (*label*, from *t0* to *t1*, on this thread; *extra*: a code or a number),
+        noted with that job (`spans_off` between jobs)."""
+        rec = (label, t0, t1, threading.current_thread().name, extra)
+        with self.lock:
+            job = self.current
+            if job is not None:
+                job.setdefault("spans", []).append(rec)
+            else:
+                self.spans_off.append(rec)
+
+    def cut(self, before: int, after: int) -> None:
+        with self.lock:
+            self.cuts.append({"t": now_ms(), "job": self.current["id"] if self.current else None,
+                              "before": before, "after": after, "thread": threading.current_thread().name})
 
     def timed(self, name: str, ms: float, busy: bool) -> None:
         with self.lock:
@@ -709,7 +732,8 @@ class Notes:
             state = getattr(gate, "state", "none") if gate is not None else "none"
             rec = {"t": t, "kind": kind, "job": job["id"] if job else None, "gate": state,
                    "frame": job["state"] if job else None, "end_t": None,
-                   "outcome": None, "http_t": None, "http_end_t": None, "server_ms": None, "load_ms": None}
+                   "outcome": None, "http_t": None, "http_end_t": None, "server_ms": None, "load_ms": None,
+                   "side": getattr(self.local, "side", None), "n": len(self.requests)}
             self.requests.append(rec)
             if job is not None:
                 job["requests"] += 1
@@ -1080,6 +1104,195 @@ def timed_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callabl
     return call
 
 
+FULL_MS_PER_TOKEN = 1.0  # a request whose prompt took the server this long per prompt token was computed from its start
+FULL_MS_LEAST = 250  # ... and at least this long (an extending request: about 75 to 125 ms with its tail)
+
+
+class ServerState:
+    """What the translator's server holds after each request, in memory only (the last prompt and its answer, never
+    written or printed), so that each request can be told against it: the part of the prompt it shares with what the
+    server holds, and where it parts and why (`prompt_replay.why`: "extends", "history cut", "context block", ...);
+    "first after load" after a load or an unload of the model. A main request after a request beside the page's own
+    (asked again, romanised, aside) that would have extended the main one before it is "after <kind>"."""
+
+    def __init__(self, notes: Notes):
+        import prompt_replay
+
+        self.pr = prompt_replay
+        self.notes = notes
+        self.lock = threading.Lock()
+        self.last: Any = None
+        self.main: Any = None
+
+    def reset(self, why: str) -> None:
+        with self.lock:
+            self.last = self.main = None
+        with self.notes.lock:
+            self.notes.server_resets.append({"t": now_ms(), "why": why,
+                                             "job": self.notes.current["id"] if self.notes.current else None})
+
+    def asked(self, rec: dict[str, Any], prompt: str, answer: str) -> None:
+        pr = self.pr
+        from taslation.translate import plamo as pl
+
+        try:
+            side = rec.get("side")
+            cur = pr.Asked(side or "line", pr.shape_of(prompt), answer, None, {})
+            with self.lock:
+                prev, main = self.last, self.main
+                if prev is None:
+                    reason, kept = "first after load", 0
+                else:
+                    kept = pr.common(prompt, prev.state)
+                    reason = pr.why(cur, prev)[0]
+                    if reason != "extends" and side is None and prev.kind in pr.SIDE_KINDS and main is not None \
+                            and pr.why(cur, main)[0] == "extends":
+                        reason = f"after {prev.kind}"
+                self.last = cur
+                if side is None:
+                    self.main = cur
+            rec["why"] = reason
+            rec["prompt_tokens_est"] = pl.tokens_about(prompt)
+            rec["kept_tokens_est"] = pl.tokens_about(prompt[:kept]) if kept else 0
+            rec["joined"] = "\n" in cur.shape.source
+            rec["pairs"] = len(cur.shape.pairs)
+            with self.notes.lock:
+                self.notes.sources[rec["n"]] = hash(cur.shape.source)
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            self.notes.error("server state", type(e).__name__)
+
+
+def full_computed(rec: dict[str, Any]) -> bool | None:
+    """Whether the server computed the request's prompt from its start (by its own prompt time: `FULL_MS_PER_TOKEN`
+    per prompt token and `FULL_MS_LEAST`); None without the server's counters."""
+    n, took = rec.get("prompt_n"), rec.get("prompt_ms")
+    if not n or took is None:
+        return None
+    return took >= max(FULL_MS_LEAST, FULL_MS_PER_TOKEN * n)
+
+
+# the page job's stages noted (`Notes.span`): (the class's module, class, method, label)
+STAGES = (("pipeline", "Pipeline", "process", "process"), ("pipeline", "Pipeline", "units_of", "units"),
+          ("pipeline", "Pipeline", "_resolve", "resolve"), ("pipeline", "Pipeline", "_detect", "detect"),
+          ("pipeline", "Pipeline", "_annotate", "annotate"), ("pipeline", "Pipeline", "_ocr_regions", "ocr"),
+          ("pipeline", "Pipeline", "_take_corrections", "order"), ("pipeline", "Pipeline", "_order_read", "order"),
+          ("pipeline", "Pipeline", "share_rooms", "order"), ("pipeline", "Pipeline", "_translate_regions", "translate"),
+          ("pipeline", "Pipeline", "_complete_page", "complete"), ("pipeline", "Pipeline", "tighten", "tighten"),
+          ("pipeline", "Pipeline", "review", "review"), ("pipeline", "Pipeline", "_locate_large", "large"),
+          ("pipeline", "Pipeline", "_store_regions", "store"), ("pipeline", "Pipeline", "_render", "render"),
+          ("pipeline", "Pipeline", "letter_region", "letter"), ("pipeline", "Pipeline", "flush_saves", "save"),
+          ("pipeline", "Pipeline", "keep_shown", "keep_shown"), ("pipeline", "Pipeline", "_early_look", "early_look"),
+          ("pipeline", "PageGate", "on_show", "gate_wait"), ("pipeline", "PageWork", "settle", "settle"),
+          ("pipeline", "PageFill", "wait", "drafts_wait"), ("pipeline", "LoadAhead", "_run", "load_ahead"),
+          ("translate.ollama", "OllamaTranslator", "ensure_loaded", "ensure_loaded"),
+          ("translate.plamo", "PlamoTranslator", "warm_up", "warm_up"),
+          ("translate.ollama", "OllamaTranslator", "warm_up", "warm_up"))
+SIDES = (("pipeline", "ask_for_missing", "re-ask"), ("pipeline", "ask_again_romanised", "romanised"))
+
+
+def stages(notes: Notes, server: ServerState) -> None:
+    """The hooks of where a page job's time goes (`STAGES`, each a `Notes.span`; inside `keep_shown` a stage's label
+    begins with "ks."), the OCR readers' reads with the device each ran on (`DeviceModels.run`: "ocr_read"), the
+    requests beside a page's own marked with their kind (`SIDES`, `translate_aside`), the cuts of the pairs that only
+    grow, and the server's state reset by a load or an unload of the model (`ServerState`)."""
+    import importlib
+
+    from taslation.ocr import place
+    from taslation.translate import base
+    from taslation.translate import plamo as plamo_mod
+
+    def spanned(cls: Any, name: str, label: str) -> None:
+        original = cls.__dict__.get(name)
+        if original is None or getattr(original, "_staged", False):
+            return
+
+        def call(self: Any, *a: Any, **k: Any) -> Any:
+            inside = getattr(notes.local, "ks", 0)
+            if label == "keep_shown":
+                notes.local.ks = inside + 1
+            t0 = now_ms()
+            try:
+                return original(self, *a, **k)
+            finally:
+                if label == "keep_shown":
+                    notes.local.ks = inside
+                notes.span(("ks." + label) if inside else label, t0, now_ms())
+
+        call.__name__ = name
+        call._staged = True  # type: ignore[attr-defined]
+        setattr(cls, name, call)
+
+    for module, cls_name, name, label in STAGES:
+        cls = getattr(importlib.import_module("taslation." + module), cls_name, None)
+        if cls is not None:
+            spanned(cls, name, label)
+    for module, name, kind in SIDES:
+        mod = importlib.import_module("taslation." + module)
+        fn = getattr(mod, name, None)
+        if fn is None:
+            continue
+
+        def marked(*a: Any, _fn: Callable[..., Any] = fn, _kind: str = kind, **k: Any) -> Any:
+            held = getattr(notes.local, "side", None)
+            notes.local.side = _kind
+            try:
+                return _fn(*a, **k)
+            finally:
+                notes.local.side = held
+
+        setattr(mod, name, marked)
+    aside = plamo_mod.PlamoTranslator.translate_aside
+
+    def asked_aside(self: Any, *a: Any, **k: Any) -> Any:
+        held = getattr(notes.local, "side", None)
+        notes.local.side = "aside"
+        try:
+            return aside(self, *a, **k)
+        finally:
+            notes.local.side = held
+
+    plamo_mod.PlamoTranslator.translate_aside = asked_aside
+    run = place.DeviceModels.run
+
+    def read_on(self: Any, read: Callable[..., Any]) -> Any:
+        def timed_read(device: str, models: Any) -> Any:
+            t0 = now_ms()
+            try:
+                return read(device, models)
+            finally:
+                notes.span("ocr_read", t0, now_ms(), str(device))
+
+        return run(self, timed_read)
+
+    place.DeviceModels.run = read_on
+    take = base.GrowingContext.take
+
+    def took(self: Any, *a: Any, **k: Any) -> Any:
+        before, cuts = len(self), self.cuts
+        out = take(self, *a, **k)
+        if self.cuts != cuts:
+            notes.cut(before, len(out))
+        return out
+
+    base.GrowingContext.take = took
+    warm, unload = plamo_mod.PlamoTranslator.warm_up, plamo_mod.PlamoTranslator._unload
+
+    def warmed(self: Any, *a: Any, **k: Any) -> Any:
+        try:
+            return warm(self, *a, **k)
+        finally:
+            server.reset("load")
+
+    def unloaded(self: Any, *a: Any, **k: Any) -> Any:
+        try:
+            return unload(self, *a, **k)
+        finally:
+            server.reset("unload")
+
+    warmed._staged = True  # type: ignore[attr-defined]
+    plamo_mod.PlamoTranslator.warm_up, plamo_mod.PlamoTranslator._unload = warmed, unloaded
+
+
 def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
             hotkeys: HotKeys) -> dict[str, Any]:
     """The guard (`demo_video`'s, keys and clicks refused; the global hot keys this tool's *hotkeys*), and the hooks
@@ -1282,6 +1495,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
     requested(plamo_mod.PlamoTranslator, "_generate")
     requested(ollama_mod.OllamaTranslator, "_chat")
+    server = ServerState(notes)
     stream_once = ollama_mod.OllamaTranslator._stream_once
 
     def streamed(self: Any, path: str, payload: dict[str, Any], *a: Any, **k: Any) -> Any:
@@ -1292,19 +1506,61 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         rec = getattr(notes.local, "request", None)
         if rec is None or not (payload.get("prompt") or payload.get("messages")):
             return stream_once(self, path, payload, *a, **k)
+        pieces: list[str] = []
+        if a and callable(a[0]):  # (the answer as it came, for what the server holds after a request cancelled)
+            on_text = a[0]
+
+            def kept(piece: str, _on_text: Callable[[str], None] = on_text) -> None:
+                pieces.append(piece)
+                _on_text(piece)
+
+            a = (kept, *a[1:])
         rec["http_t"] = now_ms()
+        data: Any = None
         try:
             data = stream_once(self, path, payload, *a, **k)
         finally:
             rec["http_end_t"] = now_ms()
+            if payload.get("prompt"):
+                answer = (str((data.get("message") or {}).get("content") or "") if isinstance(data, dict)
+                          else "".join(pieces))
+                server.asked(rec, str(payload["prompt"]), answer)
         with contextlib.suppress(TypeError, ValueError):
             rec["server_ms"] = round(float(data.get("total_duration") or 0) / 1e6, 1)
             rec["load_ms"] = round(float(data.get("load_duration") or 0) / 1e6, 1)
             rec["work_ms"] = round(sum(float(data.get(key) or 0) for key in
                                        ("load_duration", "prompt_eval_duration", "eval_duration")) / 1e6, 1)
+            rec["prompt_n"] = int(data.get("prompt_eval_count") or 0)
+            rec["prompt_ms"] = round(float(data.get("prompt_eval_duration") or 0) / 1e6, 1)
+            rec["answer_n"] = int(data.get("eval_count") or 0)
+            rec["answer_ms"] = round(float(data.get("eval_duration") or 0) / 1e6, 1)
         return data
 
     ollama_mod.OllamaTranslator._stream_once = streamed
+    request_plain = ollama_mod.OllamaTranslator._request
+
+    def plain(self: Any, path: str, payload: Any = None, *a: Any, **k: Any) -> Any:  # (a request not streamed)
+        rec = getattr(notes.local, "request", None)
+        if rec is None or not isinstance(payload, dict) or not payload.get("prompt"):
+            return request_plain(self, path, payload, *a, **k)
+        rec["http_t"] = now_ms()
+        data: Any = None
+        try:
+            data = request_plain(self, path, payload, *a, **k)
+        finally:
+            rec["http_end_t"] = now_ms()
+            server.asked(rec, str(payload["prompt"]), str((data or {}).get("response") or "")
+                         if isinstance(data, dict) else "")
+        with contextlib.suppress(TypeError, ValueError, AttributeError):
+            rec["server_ms"] = round(float(data.get("total_duration") or 0) / 1e6, 1)
+            rec["prompt_n"] = int(data.get("prompt_eval_count") or 0)
+            rec["prompt_ms"] = round(float(data.get("prompt_eval_duration") or 0) / 1e6, 1)
+            rec["answer_n"] = int(data.get("eval_count") or 0)
+            rec["answer_ms"] = round(float(data.get("eval_duration") or 0) / 1e6, 1)
+        return data
+
+    ollama_mod.OllamaTranslator._request = plain
+    stages(notes, server)
     for name in ("_cancel_page", "_early_drop"):  # a running page job cancelled by the live view: when
         if not hasattr(App, name):
             continue
@@ -2613,6 +2869,214 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
     return rows
 
 
+def tail(values: list[Any]) -> dict[str, Any]:
+    """How many, the median, the 90th percentile (nearest rank) and the largest of *values* (None left out)."""
+    kept = sorted(v for v in values if v is not None)
+    if not kept:
+        return {"n": 0}
+    return {"n": len(kept), "median": round(statistics.median(kept)),
+            "p90": round(kept[min(len(kept) - 1, math.ceil(0.9 * len(kept)) - 1)]), "max": round(kept[-1])}
+
+
+# a page job's stages as `job_stages` tells them, in the order of the job
+STAGE_KEYS = ("queued", "to_process", "fingerprint", "detect", "ocr", "order", "before_first_request", "gate_wait",
+              "load_wait", "first_request", "first_prompt", "first_answer", "requests", "prompt", "answer",
+              "between_requests", "between_units", "after_requests", "tighten", "review", "large", "drafts_wait",
+              "translate", "store",
+              "render", "process", "result_to_window", "settle", "save", "keep_shown", "drafts_lettering",
+              "first_answer_to_lettered", "ocr_beside", "ocr_cpu", "ocr_gpu")
+
+
+def job_stages(job: dict[str, Any], requests: list[dict[str, Any]], lettered_t: float | None) -> dict[str, Any] | None:
+    """Where the page job *job*'s time went, in ms (`Notes.span`, on the thread that ran its `Pipeline.process`
+    unless said): from its start to its worker (queued), to its page's reading (to_process: the cache's files, the
+    model named, the job's gate held); the fingerprints and the look at other sizes; the detection; the OCR (its
+    worker's; ``ocr_beside``: a spread's next unit read beside; ``ocr_cpu``/``ocr_gpu``: the readers' reads by the
+    device they ran on, any thread); the reading order and the rooms; from the translation's start to its first
+    request's HTTP (before_first_request: the gate's wait and the model's load in it, and the lines reused), the first
+    request (whole, its prompt and its answer by the server's counters), all requests, the time between them, from the
+    last to the translation's end (the drafts waited for, tighten, review, the larger part); the store; the render; the
+    page's whole reading; to the window's handling of the result; the gate waited for after it; the save; the next
+    showing lettered (keep_shown); the drafts' lettering (their thread); and from the first answer to the first lettered
+    bubble on show (*lettered_t*). With the job's requests: how many, how many computed in full (`full_computed`), and
+    why each parted from what the server held (`ServerState`). None for a job that read no page."""
+    spans = job.get("spans") or []
+    procs = [s for s in spans if s[0] == "process"]
+    if not procs:
+        return None
+    worker, p0, p1 = procs[0][3], procs[0][1], procs[0][2]
+
+    outer = [(a, b) for lab, a, b, th, _x in spans if th == worker and lab in ("translate", "render", "keep_shown",
+                                                                               "early_look")]
+
+    def total(*labels: str, mine: bool | None = True, lo: float | None = None, hi: float | None = None,
+              alone: bool = False) -> int:
+        return round(sum(b - a for lab, a, b, th, _x in spans if lab in labels
+                         and (mine is None or (th == worker) == mine)
+                         and (lo is None or a >= lo) and (hi is None or b <= hi)
+                         and not (alone and any(o0 <= a and b <= o1 for o0, o1 in outer))))
+
+    reqs = sorted((r for r in requests if r["job"] == job["id"]), key=lambda r: r["t"])
+    trs = [s for s in spans if s[0] == "translate" and s[3] == worker and s[2] <= p1]
+    t0 = trs[0][1] if trs else None
+    t1 = trs[-1][2] if trs else None
+    first = reqs[0] if reqs else None
+    ends = [r["end_t"] for r in reqs if r["end_t"] is not None]
+    sent = first["http_t"] or first["t"] if first is not None else None
+    ran = sum(r["end_t"] - r["t"] for r in reqs if r["end_t"] is not None)
+    gaps = units_gap = 0.0  # (between two requests of a unit's translation; between two units' translations)
+    for k, (_lab, a, b, _th, _x) in enumerate(trs):
+        inside = [r for r in reqs if a <= r["t"] and r["end_t"] is not None and r["end_t"] <= b]
+        if inside:
+            gaps += (max(r["end_t"] for r in inside) - inside[0]["t"]
+                     - sum(r["end_t"] - r["t"] for r in inside))
+        if k:
+            units_gap += a - trs[k - 1][2]
+    out: dict[str, Any] = {
+        "queued": ms(job.get("work_t"), job["t"]), "to_process": ms(p0, job.get("work_t")),
+        "fingerprint": total("units", "resolve", hi=p1), "detect": total("detect", "annotate", hi=p1),
+        "ocr": total("ocr", hi=p1), "order": total("order", hi=p1, alone=True),
+        "before_first_request": ms(sent, t0) if first is not None and t0 is not None and sent >= t0 else None,
+        "gate_wait": total("gate_wait", lo=t0, hi=sent) if t0 is not None and sent is not None else None,
+        "load_wait": total("ensure_loaded", lo=t0, hi=sent) if t0 is not None and sent is not None else None,
+        "first_request": ms(first["end_t"], first["t"]) if first is not None else None,
+        "first_prompt": first.get("prompt_ms") if first is not None else None,
+        "first_answer": first.get("answer_ms") if first is not None else None,
+        "requests": round(ran) if reqs else None,
+        "prompt": round(sum(r.get("prompt_ms") or 0 for r in reqs)) if reqs else None,
+        "answer": round(sum(r.get("answer_ms") or 0 for r in reqs)) if reqs else None,
+        "between_requests": round(gaps) if reqs else None,
+        "between_units": round(units_gap) if len(trs) > 1 else None,
+        "after_requests": ms(t1, max(ends)) if ends and t1 is not None else None,
+        "tighten": total("tighten", hi=p1), "review": total("review", hi=p1), "large": total("large", hi=p1),
+        "drafts_wait": total("drafts_wait", hi=p1),
+        "translate": total("translate", hi=p1), "store": total("store", hi=p1), "render": total("render", hi=p1),
+        "process": ms(p1, p0), "result_to_window": ms(job.get("result_t"), p1),
+        "settle": total("settle"), "save": total("save"), "keep_shown": total("keep_shown"),
+        "drafts_lettering": total("letter", mine=False),
+        "first_answer_to_lettered": ms(lettered_t, first["end_t"]) if first is not None and lettered_t else None,
+        "ocr_beside": total("ocr", mine=False),
+        "ocr_cpu": round(sum(b - a for lab, a, b, _th, x in spans if lab == "ocr_read" and x == "cpu")),
+        "ocr_gpu": round(sum(b - a for lab, a, b, _th, x in spans if lab == "ocr_read" and x != "cpu")),
+    }
+    out["ocr_reads"] = {"cpu": sum(1 for s in spans if s[0] == "ocr_read" and s[4] == "cpu"),
+                        "gpu": sum(1 for s in spans if s[0] == "ocr_read" and s[4] != "cpu")}
+    out["requests_n"] = len(reqs)
+    out["full_n"] = sum(1 for r in reqs if full_computed(r))
+    out["full_ms"] = round(sum(r.get("prompt_ms") or 0 for r in reqs if full_computed(r)))
+    out["why"] = dict(Counter(f"{r.get('why')}{' (full)' if full_computed(r) else ''}" for r in reqs))
+    out["sides"] = dict(Counter(str(r.get("side")) for r in reqs if r.get("side")))
+    if first is not None:
+        out["first_why"], out["first_full"] = first.get("why"), full_computed(first)
+        out["first_prompt_tokens"], out["first_kept_tokens"] = first.get("prompt_n"), first.get("kept_tokens_est")
+    return out
+
+
+def stage_split(rows: list[dict[str, Any]], turns: list[dict[str, Any]], notes: Notes,
+                rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """Where the time of a page went, per turn the reader rested on (`REST_MS`): each turn's finishing job's stages
+    (`job_stages`), as median, p90 and slowest per scenario and over all; the turns whose first request was computed
+    in full, why, and the time to the first lettered bubble with and without that; the requests of the whole run by
+    why they parted and whether computed in full, with the cuts of the pairs that only grow; the pages begun, left
+    (their job cancelled or put back) and come back to - the requests the job that finished them made again (a line
+    one of the page's jobs before had asked); the first page with requests after a whole-book run; the jobs of the
+    window's first turns (scenario c)."""
+    by_id = {j["id"]: j for j in notes.jobs}
+    started = [j for j in notes.jobs if j["started"]]
+    rested = [r for r in rows if (r["rest_ms"] or 0) >= REST_MS and r["finishing_job"] is not None]
+    for row in rows:
+        job = by_id.get(row["finishing_job"]) if row["finishing_job"] is not None else None
+        lettered = (row["first_lettered_ms"] + turns[row["n"]]["sharp_t"]
+                    if row["first_lettered_ms"] is not None else None)
+        row["stages"] = job_stages(job, notes.requests, lettered) if job is not None else None
+    out: dict[str, Any] = {"keys": list(STAGE_KEYS), "all": {}, "by_segment": {}}
+    with_stages = [r for r in rested if r["stages"]]
+    out["all"] = {k: tail([r["stages"].get(k) for r in with_stages]) for k in STAGE_KEYS}
+    for seg in dict.fromkeys(r["segment"] for r in with_stages):
+        mine = [r for r in with_stages if r["segment"] == seg]
+        out["by_segment"][seg] = {k: tail([r["stages"].get(k) for r in mine]) for k in STAGE_KEYS}
+        out["by_segment"][seg]["first_lettered_ms"] = tail([r["first_lettered_ms"] for r in mine])
+        out["by_segment"][seg]["finished_ms"] = tail([r["finished_ms"] for r in mine])
+    asked = [r for r in with_stages if r["stages"].get("requests_n")]
+    full = [r for r in asked if r["stages"].get("first_full")]
+    out["first_request_full"] = {
+        "turns_with_requests": len(asked), "full": len(full),
+        "why": dict(Counter(str(r["stages"].get("first_why")) for r in full)),
+        "why_all": dict(Counter(f"{r['stages'].get('first_why')}{' (full)' if r['stages'].get('first_full') else ''}"
+                                for r in asked)),
+        "first_prompt_ms_full": tail([r["stages"].get("first_prompt") for r in full]),
+        "first_prompt_ms_not_full": tail([r["stages"].get("first_prompt") for r in asked if r not in full]),
+        "first_lettered_ms_full": tail([r["first_lettered_ms"] for r in full]),
+        "first_lettered_ms_not_full": tail([r["first_lettered_ms"] for r in asked if r not in full]),
+        "turns": [{"n": r["n"], "segment": r["segment"], "page": r["page"], "why": r["stages"].get("first_why"),
+                   "prompt_ms": r["stages"].get("first_prompt"), "prompt_tokens": r["stages"].get("first_prompt_tokens"),
+                   "first_lettered_ms": r["first_lettered_ms"]} for r in full]}
+    reqs = [r for r in notes.requests if r.get("prompt_n")]
+    out["requests"] = {
+        "n": len(reqs), "full": sum(1 for r in reqs if full_computed(r)),
+        "full_prompt_s": round(sum(r.get("prompt_ms") or 0 for r in reqs if full_computed(r)) / 1000, 1),
+        "prompt_s": round(sum(r.get("prompt_ms") or 0 for r in reqs) / 1000, 1),
+        "answer_s": round(sum(r.get("answer_ms") or 0 for r in reqs) / 1000, 1),
+        "by_why": dict(Counter(f"{r.get('why')}{' (full)' if full_computed(r) else ''}" for r in reqs)),
+        "in_jobs": sum(1 for r in reqs if r["job"] is not None),
+        "extend_prompt_ms": tail([r.get("prompt_ms") for r in reqs if full_computed(r) is False]),
+        "full_prompt_ms": tail([r.get("prompt_ms") for r in reqs if full_computed(r)]),
+        "full_prompt_ms_per_token": tail([1000 * (r.get("prompt_ms") or 0) / r["prompt_n"] for r in reqs
+                                          if full_computed(r)]),
+        # each cut: at its job's first request (the next page's: known at the end of the page before) or later in
+        # the job (a spread's next unit, a request asked again), or outside the page jobs (a whole-book run)
+        "cuts": [{"t_s": rel(c["t"]), "job": c["job"], "before": c["before"], "after": c["after"],
+                  "at": ("run" if c["job"] is None else "first request" if not any(
+                      r["job"] == c["job"] and r["t"] < c["t"] for r in notes.requests) else "later in the job")}
+                 for c in notes.cuts],
+        "server_resets": [{"t_s": rel(s["t"]), "why": s["why"], "job": s["job"]} for s in notes.server_resets]}
+    # pages begun, left and come back to: a turn whose screen had a job before that was cancelled or put back
+    back = []
+    for row in rows:
+        job = by_id.get(row["finishing_job"]) if row["finishing_job"] is not None else None
+        if job is None:
+            continue
+        scr = (row["page"], row["spread"])
+        earlier = [j for j in started if j["id"] < job["id"] and (j["page"], bool(j["spread"])) == scr
+                   and (j.get("cancelled_t") is not None or j.get("discarded")) and j["requests"]]
+        if not earlier or not any(t["screen"] == scr and t["next_t"] <= job["t"] for t in turns):
+            continue  # (a page left on its own turn - a soft frame given up for the sharp one - is no come-back)
+        before = {notes.sources.get(r["n"]) for r in notes.requests if r["job"] in {j["id"] for j in earlier}}
+        mine = [r for r in notes.requests if r["job"] == job["id"]]
+        again = [r for r in mine if notes.sources.get(r["n"]) in before]
+        back.append({"n": row["n"], "segment": row["segment"], "page": row["page"], "jobs_before": len(earlier),
+                     "requests_before": sum(j["requests"] for j in earlier),
+                     "requests": len(mine), "asked_again": len(again),
+                     "asked_again_ms": round(sum((r["end_t"] or r["t"]) - r["t"] for r in again)),
+                     "first_lettered_ms": row["first_lettered_ms"], "finished_ms": row["finished_ms"],
+                     "rested": (row["rest_ms"] or 0) >= REST_MS})
+    out["come_back"] = back
+    ends = [e["t"] for e in notes.run_ends]
+    after = []
+    for end in ends:
+        row = next((r for r in rows if r["finishing_job"] is not None and by_id[r["finishing_job"]]["t"] >= end
+                    and by_id[r["finishing_job"]]["requests"]), None)
+        if row is None:
+            continue
+        job = by_id[row["finishing_job"]]
+        stages_ = row["stages"] or {}
+        loads = [s for s in notes.server_resets if s["why"] == "load" and end <= s["t"] <= (job.get("done_t") or end)]
+        after.append({"run_end_s": rel(end), "turn": row["n"], "segment": row["segment"], "page": row["page"],
+                      "job_after_end_s": round((job["t"] - end) / 1000, 1), "load_in_job": bool(loads),
+                      "load_wait": stages_.get("load_wait"), "before_first_request": stages_.get("before_first_request"),
+                      "first_request": stages_.get("first_request"), "first_why": stages_.get("first_why"),
+                      "first_lettered_ms": row["first_lettered_ms"], "finished_ms": row["finished_ms"]})
+    out["after_a_run"] = after
+    out["first_turns"] = [{"n": r["n"], "segment": r["segment"], "page": r["page"],
+                           "first_lettered_ms": r["first_lettered_ms"], "finished_ms": r["finished_ms"],
+                           **{k: (r["stages"] or {}).get(k) for k in ("load_wait", "before_first_request", "ocr",
+                                                                       "ocr_cpu", "ocr_gpu", "ocr_reads", "first_why",
+                                                                       "first_request")}}
+                          for r in rows if r["segment"] == "c"]
+    out["between_jobs"] = dict(Counter(s[0] for s in notes.spans_off))
+    return out
+
+
 def incidents(notes: Notes, line: list[tuple[float, Any, str]], end: float) -> dict[str, list[dict[str, Any]]]:
     """Stretches where the window's page area showed another screen than the stand-in (black aside): with lettering
     on it longer than STALE_MS (an overlay left behind), any longer than LAG_MS (the window did not follow)."""
@@ -2982,6 +3446,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
 
     for row, turn in zip(rows, turns):
         row["t_s"] = rel(turn["soft_t"])
+    split = stage_split(rows, turns, notes, rel)
     for items in spells.values():
         for item in items:
             item["from_s"] = rel(item["from_t"])
@@ -3111,12 +3576,17 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                                            "jobs_on", "requests", "wasted_requests", "at_rest", "at_rest_from")}
                         for r in cancel_rows]}
     request_list = {"columns": ["t_s", "job", "frame", "gate", "outcome", "ran_ms", "server_ms", "server_wait_ms",
-                                "wasted"],
+                                "wasted", "side", "why", "full", "prompt_n", "prompt_ms", "answer_n", "answer_ms",
+                                "pairs", "joined", "kept_tokens_est", "prompt_tokens_est"],
                     "rows": [[rel(r["t"]), r["job"], r["frame"], r["gate"], r["outcome"], ms(r["end_t"], r["t"]),
                               r["server_ms"], server_wait(r), wasted_why(by_id.get(r["job"]))
-                              if r["job"] is not None else None] for r in requests]}
+                              if r["job"] is not None else None, r.get("side"), r.get("why"), full_computed(r),
+                              r.get("prompt_n"), r.get("prompt_ms"), r.get("answer_n"), r.get("answer_ms"),
+                              r.get("pairs"), r.get("joined"), r.get("kept_tokens_est"), r.get("prompt_tokens_est")]
+                             for r in requests]}
     return {
         "latency_rested": latency,
+        "stage_split": split,
         "status_line_of_the_page_before": status_summary,
         "resizes": resizes,
         "cache_across_sizes": across_sizes(job_list),
@@ -3302,6 +3772,19 @@ def print_table(report: dict[str, Any], path: Path) -> None:
             s["stale"], s["not_following"])))
     for key, value in run_["latency_rested"]["all"].items():
         print(f"rested turns, {key}: {value}")
+    split = run_.get("stage_split") or {}
+    if split.get("all"):
+        print("where a rested page's time went (ms, median/p90/max over the finishing jobs): " + "; ".join(
+            f"{k} {v['median']}/{v['p90']}/{v['max']}" for k, v in split["all"].items() if v.get("n")))
+        full = split["first_request_full"]
+        print(f"first request computed in full: {full['full']} of {full['turns_with_requests']} rested turns "
+              f"{full['why']}; first lettered with it {full['first_lettered_ms_full']}, without "
+              f"{full['first_lettered_ms_not_full']}")
+        req = split["requests"]
+        print(f"requests {req['n']}: computed in full {req['full']} ({req['full_prompt_s']} s of {req['prompt_s']} s "
+              f"prompt; answers {req['answer_s']} s); by why {req['by_why']}; cuts {len(req['cuts'])}")
+        print(f"come back to: {split['come_back']}")
+        print(f"after a run: {split['after_a_run']}")
     wasted = run_["wasted_requests"]
     print(f"wasted requests {wasted['count']} {wasted['by_why']} {wasted['by_outcome']}; ran {wasted['ran_ms']}; "
           f"ran on after the cancel {wasted['ran_on_after_cancel_ms']}; next real request's server wait "
