@@ -52,7 +52,44 @@ An untranslated page fills in while you look at it. The bubbles found are marked
 and they are translated in the order the page's bubbles are read, each with the lines before it as context. Each bubble is lettered as soon as its translation is ready. At the end,
 names spelled differently from the series sheet are made consistent mechanically, so a few bubbles may change. A translation that does not fit its bubble is set in smaller letters
 (the model is not asked to shorten it).
-While it works, the badge at the top right shows what it is doing and how many seconds have passed, and the status bar shows the same.
+In the Reader role the bubbles filling in are the progress. Only when no bubble is lettered 1 second after you look at the page does the left end of the status bar
+(on the full screen, the bottom of the margin on the side the page turns to) say "Loading the model...", "Reading the page..." or "Translating...",
+and it goes when the first bubble is lettered. No seconds are shown and nothing turns. A page that could not be translated shows an orange "!" and
+"This page could not be translated. F5 tries again." in the same place while that page is on show, and a page with nothing to read shows "Nothing to read on this page." for 4 seconds.
+Nothing else is said there. In the Translator role and during a whole-book run, the badge at the top right shows what it is doing and how many seconds have passed, as before,
+and the status bar shows the same.
+
+### Pages you turn past
+
+While you read, TASlation goes on reading and translating the pages you have turned past. How far it is shows in the margin on the side the page turns to
+(the left in a book read right to left, the right in a book read left to right), in both roles, in the window and on the full screen.
+
+* Where the margin is 141 pixels or wider, it is a column of the pages turned past, top to bottom. Each page has a small thumbnail (too small to read),
+  its number and two bars (R for reading the text, T for the translation). A bar shows its state by its letter, its colour and its pattern: empty is not started,
+  a moving stripe is under way, filled is done, a cross did not work, hatched is not needed, dotted could not be taken. The page on show has a yellow outline
+  and a triangle pointing at the page, and the column scrolls by itself to keep it in view (the mouse wheel scrolls it too).
+* Where the margin is narrower, it is a narrow bar beside the page (6 pixels in the window, 8 on the full screen): a mark a page from the top, and with many pages
+  the pages one after another in the same state make one mark, so that hundreds of pages fit. Filled is done, half filled is under way, hollow is waiting,
+  striped across did not work, dotted could not be taken. The page on show has a yellow outline and a triangle.
+  Where the margin is narrower than 24 pixels, the page is drawn 16 pixels in from that side only, so that the bar never covers it.
+  That width changes only with the window's size, the full screen on or off, and the setting, never as you turn the pages.
+* A page turned too fast to be taken is a dashed frame with its number and "?". Turn back to it in the viewer and it is read like any other.
+* A click on a thumbnail shows in the status bar how to read that page (turn to it in the viewer: TASlation shows the translation over it).
+  Nothing else happens: TASlation never shows a page from its memory as a page to read, and sends nothing to the viewer.
+* The pointer resting on a thumbnail says what that page is, on a bar the state of that stage, and anywhere else the whole: how many of the pages seen are done,
+  the pages and lines still to go, about how long that takes (once that can be trusted: 8 lines or more over 15 seconds or more), how many pages could not be taken,
+  and how many were updated since you saw them.
+
+When the words of a bubble on a page you have seen with its translation change later (the work behind finished, names were made consistent, find and replace,
+a series correction, translating again), its thumbnail gets a diamond at its corner (on the narrow bar, beside its mark). So does a bubble you saw in Japanese
+that is translated now. Size, fill, outline, review flags, font and emphasis do not count, nor does a change made on the page on show, nor a page you have
+never seen with its translation. When you turn back to that page, the bubbles whose words changed get corner brackets in the same colour (a shape unlike the
+dashed frame of a bubble found and the solid frame of one read). They go, and so does the diamond, once the page has been on show for a time that follows the
+characters changed (1 second and 60 milliseconds a character, from 2 to 8 seconds), or once the pointer rests on that bubble. Turn away before that, and the
+diamond stays. The words you saw are kept in memory only and never written anywhere; they go with the book.
+
+During a whole-book run this is not shown: the strip under the page shows the run's progress, as before.
+Choose its form in "Tools > Settings...", "Pages turned past:": "Thumbnails where there is room" (the default), "A narrow bar" or "Not shown" (`side_indicator` in `taslation.toml`).
 
 ### With a single screen
 
@@ -104,6 +141,7 @@ so the page keys reach the viewer directly as usual, and TASlation follows to th
 "Full screen" (the toolbar button, or F11) shows the page alone on the whole screen, in the role you chose. It puts a black full screen over the viewer,
 enlarges the capture area to fill the screen, and shows only the translated page. Fit the area exactly to the page first.
 The toolbar, the menus, the page strip and the status bar are away while it lasts; the status is shown at the bottom of the screen instead.
+The pages you turn past (see "Pages you turn past") show in the margin on the side the page turns to, and the Reader role's status at the bottom of that margin.
 It opens on the monitor the window is on, and for a browser window where neither an area nor the page part is known, F11 first asks whether to "Set area..." or "Read as it is".
 
 * **In the Reader role** it is for reading as you would read the original book. Page keys and clicks go to the viewer, and Auto follows (if it was off, it is on only while you read, and this is said at the start of each such session). The status shows for a few seconds only.
@@ -1063,6 +1101,7 @@ sound_when_done = false      # ... and plays the system's default sound
 hover_shows = "original"     # the Reader role: the translation on the page ("original" under the
                              # pointer), or the page as the viewer shows it ("translation" under the pointer)
 hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
+side_indicator = "column"    # the pages turned past beside the page: "column" where it fits, "rail", "off"
 bubble_zoom = true           # false: nothing under the pointer while the translation is on the page
 panel_font_size = 0          # the panel's text in points (6-72, following ui_scale and the monitor); 0: automatic
 hover_delay_ms = 450         # the wait before a bubble under the pointer shows its other side (0-3000; 0: at once)
