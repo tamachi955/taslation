@@ -6,9 +6,10 @@ release; the videos show CC BY-NC pages and are never committed or shipped.
     python tools/promo_video.py record --out REC.zip [--label L] [--ollama URL] [--package CHECKOUT] [--turns 6]
                                        [--pace 2] [--series 1] [--first 2] [--layout single|spread] [--fps 15]
                                        [--start-ollama PORT] [--ollama-window-cache auto|off|on]
-                                       [--ocr-runs-on auto|cpu|gpu]
+                                       [--ocr-runs-on auto|cpu|gpu] [--from-start | --turn-at-ready]
     python tools/promo_video.py render REC.zip [REC_B.zip] --out promo/NAME.mp4 [--title TEXT] [--end LINE]...
                                        [--labels A B] [--pages FROM-TO] [--max-pause 2.5] [--format auto|mp4|gif]
+                                       [--start-speed 4] [--start-head 1] [--real-before 1.5]
     python tools/promo_video.py info REC.zip [REC_B.zip]
     python tools/promo_video.py sample --out FOLDER [--format auto|mp4|gif]
 
@@ -46,14 +47,27 @@ and outside ``~/.taslation``: the scratch folder), so that a video can be made a
   window chosen is checked at every step and anything but the stand-in ends the run at once; the window is told the
   viewer is in front (the reader's case), and the foreground is never changed by this tool;
 * the run: the stand-in starts on the page before *--first*; once the window has loaded the translation model and
-  translated that page (the start-up, never in a video) and rests for a moment, the pictures begin, and then
+  translated that page (the start-up: left out, unless *--from-start* or *--turn-at-ready* below) and rests for a
+  moment, the pictures begin, and then
   *--turns* turns, each released *--pace* seconds after the window finished the page before (its result on the
   page), each timed: the stand-in's own draw of the new page (the turn), the first lettered bubble, the last, the
   finished page and the bubbles lettered (the window's own page events: what its page showed, when);
 * pictures of TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen,
   never the stand-in's window), about *--fps* a second, each with its time, into the recording file (JPEG, a picture
   the same as the one before kept once); *--grab tk* takes them from the Tk loop as `tools/demo_video.py` does,
-  *--grab thread* (the default) from a thread of their own.
+  *--grab thread* (the default) from a thread of their own;
+* *--from-start*: the start-up IS recorded. The pictures begin as the window is made (the first picture is asked for
+  right after `App` is made, before its loop runs) and the window's start is timed: ``launch_t`` just before `App` is
+  made, ``appeared_t`` the first picture of the window that is not of one colour (the window drawn: THE WINDOW'S
+  APPEARANCE, where the clocks of a start begin), ``ready_t`` as the window takes its "ready" event (the status line
+  says Ready). The window opens at its size and place from its first picture on (kept for it in the scratch state as
+  its place at the last close; a package that keeps none opens as at a first start and is moved). The page the
+  stand-in shows at the launch (the one before *--first*) is the recording's first page, timed from the appearance
+  to its first bubble and its last; *--turns* (0 allowed) turns follow it as usual;
+* *--turn-at-ready* (a recording from the start as well): the stand-in shows the page before *--first* at the
+  launch, and its first turn is released at the moment the window says it is ready (from the window's own handler
+  of the "ready" event, right after it ran: the turn a person makes as the window becomes ready); that turn is
+  timed as any turn, from the stand-in's draw of the new page, and its sharp frame is noted too.
 
 Nothing of the pages' text is printed or logged: the tool prints numbers. At the end: the window closed through its
 own close, the browser's process tree (and nothing else) ended, its profile and the scratch state deleted.
@@ -68,6 +82,15 @@ versions, *--package*; each side with its label):
 * per page and side a stopwatch that starts at the turn and stops when the page's last bubble is lettered, and the
   count of bubbles lettered; *--pages FROM-TO* takes a stretch of the recorded turns (pages next to each other only,
   so that nothing in between is left out);
+* a recording from the start (two side by side: both of the same kind): with *--from-start*, the first page's
+  stopwatch starts at each window's appearance (``appeared_t``; both sides at the same moment of the video) and stops
+  at its page's last bubble; with *--turn-at-ready*, the video shows each window from its appearance to the turn
+  (both turns at the same moment of the video, the side that appeared later empty before it appeared) and the
+  stopwatch starts at the turn. Under it: the first bubble's time on the same clock, and the start's own clock
+  (from the appearance; stopped at the window's "ready"). The start's quiet stretch is shown *--start-speed* times
+  faster (1: in full): from *--start-head* s after the appearance to *--real-before* s before the first of the
+  sides' first bubbles (from the start) or before the turn (at ready); while it is, every picture carries an "x4"
+  badge and the caption says so, and the clocks go on showing real seconds (they run faster with the pictures);
 * a title card (*--title*, ``\\n`` for a new line) and an end card of up to four lines (*--end*, once a line: what
   was done, the percentage, the computer it was measured on, the project's address); text on the cards comes from
   the command line, the tool's own words state facts only;
@@ -87,6 +110,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import contextlib
+import faulthandler
 import hashlib
 import io
 import json
@@ -130,6 +154,10 @@ MAX_END_LINES = 4
 CUT_TOLERANCE_MS = 60.0  # a pause shown this much shorter than it was is one cut
 NOTE_REAL = "Real time"
 NOTE_SIDES = "Real time. Both sides start each page at the same moment"
+NOTE_START = "Real time. The clock starts as the window appears"
+NOTE_START_SIDES = "Real time. Both clocks start as each window appears"
+MODES = ("turns", "start", "turn_at_ready")  # a recording of turns after the start-up; from the start; a turn at ready
+MIN_SPED_MS = 1000.0  # a stretch of the start shorter than this is shown as it was
 
 # the record's pace
 TICK_MS = 40
@@ -138,6 +166,7 @@ PREROLL_S = 1.0  # the pictures this long before the first turn
 END_HOLD_S = 2.5  # ... and this long after the last page finished
 PLACEMENT_EVERY_S = 0.5  # where the OCR readers read, looked at so often
 TURN_WAIT_S = 10.0  # the stand-in's draw of a turn released, at most this long after
+END_DUMP_S = 90.0  # the end of a run taking longer than this: where its threads are, said
 GRAB_TK_MIN_MS = 10
 
 # colours of the video
@@ -152,6 +181,15 @@ AMBER = (240, 180, 60)
 
 def now_ms() -> float:
     return time.time() * 1000.0
+
+
+def speed_text(factor: float) -> str:
+    return f"x{factor:g}"
+
+
+def sped_note(factor: float) -> str:
+    """The caption while a stretch is shown *factor* times faster."""
+    return f"Shown {factor:g} times faster ({speed_text(factor)}). The clocks show real seconds"
 
 
 # ---------------------------------------------------------------------------------------------------- the files
@@ -204,6 +242,7 @@ class RecordingWriter:
         self.frames: list[tuple[float, str]] = []
         self.stored = 0
         self.size: tuple[int, int] | None = None  # the first picture's
+        self.last_size: tuple[int, int] | None = None  # ... and the last one's
         self._digest = b""
         self.lock = threading.Lock()
 
@@ -221,6 +260,7 @@ class RecordingWriter:
             self.zip.writestr(name, buffer.getvalue())
             self.stored += 1
             self.size = self.size or rgb.size
+            self.last_size = rgb.size
             self._digest = digest
             self.frames.append((t, name))
             return True
@@ -256,8 +296,13 @@ class Recording:
         if not self.frames:
             raise SystemExit(f"{self.path}: the recording holds no picture")
         self.times = [t for t, _name in self.frames]
-        self.pages = page_times(self.meta.get("turns", []), self.meta.get("displays", []),
-                                self.meta.get("results", []), self.end)
+        self.mode = str(self.meta.get("mode") or "turns")
+        if self.mode not in MODES:
+            raise SystemExit(f"{self.path}: a recording of an unknown kind ({self.mode})")
+        turns = list(self.meta.get("turns", []))
+        if self.mode == "start":  # the page on show at the launch, timed from the window's appearance
+            turns = [start_turn(self.meta, self.appeared)] + turns
+        self.pages = page_times(turns, self.meta.get("displays", []), self.meta.get("results", []), self.end)
         self._lettered = [lettered_line(turn, self.meta.get("displays", [])) for turn in self.pages]
 
     @property
@@ -267,6 +312,22 @@ class Recording:
     @property
     def first(self) -> float:
         return self.times[0]
+
+    @property
+    def from_start(self) -> bool:
+        return self.mode != "turns"
+
+    @property
+    def appeared(self) -> float:
+        """The window's appearance (``appeared_t``: its first picture not of one colour); the first picture where the
+        recording does not say."""
+        value = self.meta.get("appeared_t")
+        return float(value) if value is not None else self.times[0]
+
+    @property
+    def ready_t(self) -> float | None:
+        value = self.meta.get("ready_t")
+        return float(value) if value is not None else None
 
     @property
     def end(self) -> float:
@@ -294,6 +355,51 @@ class Recording:
 
     def close(self) -> None:
         self.zip.close()
+
+
+def start_turn(meta: dict[str, Any], appeared: float) -> dict[str, Any]:
+    """A recording from the start: its first page is the one the stand-in showed at the launch, its "turn" the
+    window's appearance (no turn was made: the clock of the start begins there)."""
+    return {"k": 0, "t": float(appeared), "screen": meta.get("start_screen") or [0, 0], "start": True,
+            "sharp_t": None, "released_t": None}
+
+
+def start_facts(rec: Recording) -> dict[str, Any] | None:
+    """The start of a recording from the start, in seconds: the appearance after the launch, ready after the
+    appearance (and after the launch); from the start: the first page's first bubble and last from the appearance;
+    at ready: the turn after ready, its first bubble and last from the turn, and from its sharp frame."""
+    if not rec.from_start:
+        return None
+
+    def s(ms: float | None) -> float | None:
+        return None if ms is None else round(ms / 1000, 2)
+
+    meta, appeared, ready = rec.meta, rec.appeared, rec.ready_t
+    launch = meta.get("launch_t")
+    out: dict[str, Any] = {"mode": rec.mode,
+                           "appeared_after_launch_s": s(appeared - float(launch)) if launch is not None else None,
+                           "ready_after_appeared_s": s(ready - appeared) if ready is not None else None,
+                           "ready_after_launch_s": s(ready - float(launch)) if ready is not None and launch else None}
+    if not rec.pages:
+        return out
+    page = rec.pages[0]
+    if rec.mode == "start":
+        out.update(first_bubble_after_appeared_s=s(page.get("first_ms")),
+                   last_bubble_after_appeared_s=s(page.get("page_ms")),
+                   finished_after_appeared_s=s(page.get("result_ms")), bubbles=page.get("bubbles"))
+    else:
+        sharp = page.get("sharp_t")
+        out.update(turn_after_ready_s=s(page["t"] - ready) if ready is not None else None,
+                   turn_after_appeared_s=s(page["t"] - appeared),
+                   first_bubble_after_turn_s=s(page.get("first_ms")),
+                   last_bubble_after_turn_s=s(page.get("page_ms")),
+                   finished_after_turn_s=s(page.get("result_ms")),
+                   first_bubble_after_sharp_s=s(page["first_t"] - float(sharp))
+                   if sharp is not None and page.get("first_t") is not None else None,
+                   last_bubble_after_sharp_s=s(page["stop_t"] - float(sharp))
+                   if sharp is not None and page.get("stop_t") is not None else None,
+                   bubbles=page.get("bubbles"))
+    return out
 
 
 def _screen(value: Any) -> tuple[int, bool] | None:
@@ -392,6 +498,12 @@ class Options:
     title_ms: float = 2500.0
     end_ms: float = 4500.0
     pages: tuple[int, int] | None = None  # FROM-TO, 1-based, of the recorded turns
+    # a recording from the start: its quiet stretch shown *start_speed* times faster (1: in full), from *start_head*
+    # after the appearance to *real_before* before the first of the first bubbles (from the start) or the turn (at
+    # ready)
+    start_speed: float = 4.0
+    start_head_ms: float = 1000.0
+    real_before_ms: float = 1500.0
 
 
 @dataclass
@@ -399,7 +511,8 @@ class Segment:
     """A stretch of the video: a card, or a page (*index* into each recording's pages, *number* its place in the
     video), shown from *lead* ms before its turn to *body* + *tail* ms after it (*body*: the slowest side's page);
     *cut_before* / *cut_after*: the pause before / after it was shortened (real and shown ms of the side whose page
-    took longest)."""
+    took longest); *speeds*: stretches of it shown faster, each (from, to, how many times faster), in ms from the
+    turn (*ms* is what the video shows: those stretches take their real time divided by their factor)."""
 
     kind: str
     ms: float
@@ -410,6 +523,45 @@ class Segment:
     tail: float = 0.0
     cut_before: tuple[float, float] | None = None
     cut_after: tuple[float, float] | None = None
+    speeds: tuple[tuple[float, float, float], ...] = ()
+
+    def u_at(self, local: float) -> float:
+        """The real time (ms from the turn) shown *local* ms into the segment."""
+        u, left = -self.lead, local
+        for a, b, factor in self.speeds:
+            if left <= a - u:
+                return u + left
+            left -= a - u
+            if left <= (b - a) / factor:
+                return a + left * factor
+            left -= (b - a) / factor
+            u = b
+        return u + left
+
+    def factor_at(self, local: float) -> float:
+        """How many times faster than real time the video runs *local* ms into the segment (1.0: real time)."""
+        u = self.u_at(local)
+        return next((factor for a, b, factor in self.speeds if a <= u < b), 1.0)
+
+
+def shown_ms(real: float, speeds: Sequence[tuple[float, float, float]]) -> float:
+    """What *real* ms with *speeds* in them take in the video."""
+    return real - sum((b - a) * (1.0 - 1.0 / factor) for a, b, factor in speeds)
+
+
+def sped(a: float, b: float, factor: float) -> tuple[tuple[float, float, float], ...]:
+    """The stretch from *a* to *b* (ms from the turn) shown *factor* times faster: none where the factor is 1 or less,
+    or the stretch shorter than MIN_SPED_MS."""
+    return ((a, b, float(factor)),) if factor > 1.0 and b - a >= MIN_SPED_MS else ()
+
+
+def kind_of(recs: Sequence[Recording]) -> str:
+    """The kind of the recordings of one video (`MODES`): two side by side are of one kind."""
+    modes = {r.mode for r in recs}
+    if len(modes) != 1:
+        raise SystemExit("two recordings side by side are of one kind (both from the start, both a turn at ready, "
+                         "or both of turns)")
+    return modes.pop()
 
 
 def page_span(rec: Recording, index: int) -> float:
@@ -420,7 +572,11 @@ def page_span(rec: Recording, index: int) -> float:
 
 
 def plan(recs: Sequence[Recording], opts: Options) -> list[Segment]:
-    """The video's segments: the title card, the pages, the end card (see `Segment`)."""
+    """The video's segments: the title card, the pages, the end card (see `Segment`). A recording from the start
+    whose first page is shown: from the start, that page from the appearance on (no lead: nothing was there before
+    it); at ready, the turn's lead the longest stretch from a side's appearance to its turn; the stretch of it the
+    options say shown faster (`Options.start_speed`)."""
+    mode = kind_of(recs)
     count = min(len(r.pages) for r in recs)
     if count == 0:
         raise SystemExit("the recording holds no timed page")
@@ -445,6 +601,15 @@ def plan(recs: Sequence[Recording], opts: Options) -> list[Segment]:
     # (the first page of the recording: the page before it is the start-up's, shown for *first_lead* at most)
     lead0 = min([opts.first_lead_ms if first == 0 else opts.lead_ms] + [room_before(r) for r in recs])
     leads = [max(0.0, lead0)] + [min(opts.lead_ms, shown * 0.4) for _real, shown in pauses]
+    speeds0: tuple[tuple[float, float, float], ...] = ()
+    if mode == "start" and first == 0:  # the clock at the appearance: the stretch before the first bubbles
+        leads[0] = 0.0
+        firsts = [float(r.pages[0]["first_ms"]) if r.pages[0].get("first_ms") is not None else page_span(r, 0)
+                  for r in recs]
+        speeds0 = sped(opts.start_head_ms, min(firsts) - opts.real_before_ms, opts.start_speed)
+    elif mode == "turn_at_ready" and first == 0:  # each window from its appearance to the turn
+        leads[0] = max(0.0, max(r.pages[0]["t"] - r.appeared for r in recs))
+        speeds0 = sped(-leads[0] + opts.start_head_ms, -opts.real_before_ms, opts.start_speed)
     last = indexes[-1]
     end_room = min(r.end - (r.pages[last]["t"] + page_span(r, last)) for r in recs)
     tails = [shown - leads[j + 1] for j, (_real, shown) in enumerate(pauses)]
@@ -461,9 +626,11 @@ def plan(recs: Sequence[Recording], opts: Options) -> list[Segment]:
     if opts.title_ms > 0:
         segments.append(Segment("title", opts.title_ms))
     for j, i in enumerate(indexes):
-        segments.append(Segment("page", leads[j] + bodies[j] + tails[j], number=j + 1, index=i, lead=leads[j],
-                                body=bodies[j], tail=tails[j], cut_before=cuts[j - 1] if j > 0 else None,
-                                cut_after=cuts[j] if j < len(cuts) else None))
+        speeds = speeds0 if j == 0 else ()
+        segments.append(Segment("page", shown_ms(leads[j] + bodies[j] + tails[j], speeds), number=j + 1, index=i,
+                                lead=leads[j], body=bodies[j], tail=tails[j],
+                                cut_before=cuts[j - 1] if j > 0 else None,
+                                cut_after=cuts[j] if j < len(cuts) else None, speeds=speeds))
     if opts.end_ms > 0:
         segments.append(Segment("end", opts.end_ms))
     return segments
@@ -473,24 +640,33 @@ def plan(recs: Sequence[Recording], opts: Options) -> list[Segment]:
 class SideState:
     """One side of a page's frame: the picture on show (*name*, taken at *source_t*), the stopwatch (*watch_ms*,
     *watch*: "ready" before the turn, "running", "stopped" at the last bubble, "unfinished") and the bubbles
-    lettered."""
+    lettered. A recording from the start also has: *present* (False before the window appeared: nothing to show),
+    *first_ms* (the page's first bubble on the stopwatch's clock, from the moment it was lettered on), *start_ms* (the
+    start's own clock: from the appearance, stopped at the window's ready) and *ready* (the window said it is ready)."""
 
     name: str
     source_t: float
     watch_ms: float
     watch: str
     lettered: int
+    present: bool = True
+    first_ms: float | None = None
+    start_ms: float | None = None
+    ready: bool = False
 
 
 def side_state(rec: Recording, index: int, u: float) -> SideState:
     """Side *rec* at *u* ms from page *index*'s turn (negative: before it): its own time, never before the page before
-    was finished nor at its next turn or after (a side that waits holds its last picture before it)."""
+    was finished nor at its next turn or after (a side that waits holds its last picture before it); a recording from
+    the start never before the window appeared."""
     page = rec.pages[index]
     a = page["t"]
     src = a + u
     if u < 0 and index > 0 and rec.pages[index - 1].get("stop_t") is not None:
         src = max(src, rec.pages[index - 1]["stop_t"])
-    src = max(rec.first, min(src, page["until"] - 1.0))
+    floor = rec.appeared if rec.from_start else rec.first
+    present = src >= floor
+    src = max(floor, min(src, page["until"] - 1.0))
     span = page_span(rec, index)
     if u < 0:
         watch, ms = "ready", 0.0
@@ -500,7 +676,14 @@ def side_state(rec: Recording, index: int, u: float) -> SideState:
         watch, ms = "unfinished", span
     else:
         watch, ms = "running", u
-    return SideState(rec.at(src), src, ms, watch, rec.lettered(index, src) if u >= 0 else 0)
+    state = SideState(rec.at(src), src, ms, watch, rec.lettered(index, src) if u >= 0 else 0)
+    if rec.from_start:
+        first, ready = page.get("first_t"), rec.ready_t
+        state.present = present
+        state.first_ms = float(first) - a if present and first is not None and u >= 0 and src >= first else None
+        state.start_ms = (min(src, ready) if ready is not None else src) - rec.appeared if present else None
+        state.ready = present and ready is not None and src >= ready
+    return state
 
 
 @dataclass
@@ -514,6 +697,7 @@ class FrameFacts:
     of: int = 0
     sides: list[SideState] = field(default_factory=list)
     note: str = ""
+    speed: float = 1.0  # how many times faster than real time this frame's stretch is shown
 
 
 class Video:
@@ -532,6 +716,7 @@ class Video:
         self.labels = list(labels) if labels else [r.label for r in recs]
         if len(self.labels) != len(recs):
             raise SystemExit("one label for each recording")
+        self.mode = kind_of(self.recs)
         self.segments = plan(self.recs, opts)
         self.starts = [0.0]
         for seg in self.segments:
@@ -539,6 +724,8 @@ class Video:
         self.ms = self.starts[-1]
         self.count = max(1, int(math.floor(self.ms * self.fps / 1000.0 + 1e-6)))
         self.pages = sum(1 for s in self.segments if s.kind == "page")
+        # (a recording from the start whose first page, the start's, is in the video)
+        self.shows_start = self.mode != "turns" and next(s.index for s in self.segments if s.kind == "page") == 0
         self.layout = Layout(self, max_width)
         self._scaled: dict[tuple[int, str], Image.Image] = {}
 
@@ -549,8 +736,14 @@ class Video:
         k = max(0, min(len(self.segments) - 1, bisect.bisect_right(self.starts, ms) - 1))
         return self.segments[k], ms - self.starts[k]
 
-    def note(self, seg: Segment, u: float) -> str:
-        base = NOTE_SIDES if len(self.recs) == 2 else NOTE_REAL
+    def note(self, seg: Segment, u: float, speed: float = 1.0) -> str:
+        if speed > 1.0:
+            return sped_note(speed)
+        two = len(self.recs) == 2
+        if self.mode == "start" and seg.index == 0:
+            base = NOTE_START_SIDES if two else NOTE_START
+        else:
+            base = NOTE_SIDES if two else NOTE_REAL
         cut = seg.cut_before if u < 0 else seg.cut_after if u >= seg.body else None
         if cut is None:
             return base
@@ -564,17 +757,18 @@ class Video:
         seg, local = self.segment_at(ms)
         if seg.kind != "page":
             return FrameFacts(i, ms, seg.kind)
-        u = local - seg.lead
+        u, speed = seg.u_at(local), seg.factor_at(local)
         sides = [side_state(r, seg.index, u) for r in self.recs]
-        return FrameFacts(i, ms, "page", seg.number, self.pages, sides, self.note(seg, u))
+        return FrameFacts(i, ms, "page", seg.number, self.pages, sides, self.note(seg, u, speed), speed)
 
     def notes(self) -> set[str]:
         """Every caption the video's page frames can say (to lay the caption strip out once)."""
         out = {NOTE_SIDES if len(self.recs) == 2 else NOTE_REAL}
         for seg in self.segments:
             if seg.kind == "page":
-                for u in (-1.0, seg.body + 1.0):
+                for u in (-1.0, 1.0, seg.body + 1.0):
                     out.add(self.note(seg, u))
+                out.update(sped_note(factor) for _a, _b, factor in seg.speeds)
         return out
 
     def scaled(self, side: int, name: str) -> Image.Image:
@@ -583,9 +777,16 @@ class Video:
         if picture is None:
             if len(self._scaled) > 64:
                 self._scaled.clear()
-            raw = self.recs[side].picture(name)
+            rec = self.recs[side]
+            raw = rec.picture(name)
             w, h = self.layout.pictures[side]
-            picture = raw if raw.size == (w, h) else raw.resize((w, h), Image.LANCZOS)
+            if rec.from_start and raw.size != rec.size:  # (the window still being laid out: at the same scale)
+                k = w / rec.size[0]
+                shrunk = raw.resize((max(1, round(raw.width * k)), max(1, round(raw.height * k))), Image.LANCZOS)
+                picture = Image.new("RGB", (w, h), BG)
+                picture.paste(shrunk.crop((0, 0, min(w, shrunk.width), min(h, shrunk.height))), (0, 0))
+            else:
+                picture = raw if raw.size == (w, h) else raw.resize((w, h), Image.LANCZOS)
             self._scaled[key] = picture
         return picture
 
@@ -598,11 +799,18 @@ class Video:
 
     def summary(self) -> dict[str, Any]:
         cuts = [s.number for s in self.segments if s.kind == "page" and s.cut_after is not None]
-        return {"seconds": round(self.ms / 1000, 2), "frames": self.count, "fps": self.fps, "pages": self.pages,
-                "size": list(self.layout.size), "pauses_shortened_after_pages": cuts,
-                "page_seconds": [[round(page_span(r, s.index) / 1000, 2) for r in self.recs]
-                                 for s in self.segments if s.kind == "page"],
-                "labels": self.labels}
+        out = {"seconds": round(self.ms / 1000, 2), "frames": self.count, "fps": self.fps, "pages": self.pages,
+               "size": list(self.layout.size), "pauses_shortened_after_pages": cuts,
+               "page_seconds": [[round(page_span(r, s.index) / 1000, 2) for r in self.recs]
+                                for s in self.segments if s.kind == "page"],
+               "labels": self.labels}
+        if self.mode != "turns":
+            out["kind"] = self.mode
+            out["start"] = [start_facts(r) for r in self.recs]
+            out["sped"] = [{"page": s.number, "from_s": round(a / 1000, 2), "to_s": round(b / 1000, 2), "factor": f,
+                            "real_s": round((b - a) / 1000, 2), "shown_s": round((b - a) / f / 1000, 2)}
+                           for s in self.segments for a, b, f in s.speeds]
+        return out
 
 
 # ---------------------------------------------------------------------------------------------------- the drawing
@@ -676,7 +884,11 @@ class Layout:
         self.label_font, self.page_font = font(round(20 * k), bold=True), font(round(17 * k))
         self.watch_font, self.bubble_font = font(round(40 * k), mono=True), font(round(19 * k))
         self.tag_font = font(round(15 * k), bold=True)
-        self.header_h = even(self.pad * 2 + round(24 * k) + round(6 * k) + round(44 * k))
+        # a recording from the start: a third row (the first bubble, the start's own clock) and the speed's badge
+        self.extra = video.mode != "turns"
+        self.extra_font, self.badge_font = font(round(19 * k)), font(round(38 * k), bold=True)
+        self.header_h = even(self.pad * 2 + round(24 * k) + round(6 * k) + round(44 * k)
+                             + (round(30 * k) if self.extra else 0))
         s = max(1.0, width / 1280)
         size = max(14, round(16 * s))  # (small, but never too small to read)
         self.credit_font = self.note_font = font(size)
@@ -744,11 +956,17 @@ class Layout:
         frame.paste(self.caption(""), (0, h - self.caption_h))
         return frame
 
+    def page_text(self, facts: FrameFacts) -> str:
+        if self.extra and facts.number == 1 and self.video.shows_start:
+            return {"start": "The page on show at the start",
+                    "turn_at_ready": "Turned to as the window became ready"}[self.video.mode]
+        return f"Page {facts.number} of {facts.of}"
+
     def header(self, draw: ImageDraw.ImageDraw, x: int, label: str, facts: FrameFacts, side: SideState) -> None:
         k, pad, w = self.k, self.pad, self.column
         draw.rectangle((x, 0, x + w - 1, self.header_h - 1), fill=HEADER_BG)
         top = pad + round(12 * k)
-        page = f"Page {facts.number} of {facts.of}"
+        page = self.page_text(facts)
         if label:
             draw.text((x + pad, top), label, fill=TEXT, font=self.label_font, anchor="lm")
             draw.text((x + w - pad, top), page, fill=DIM, font=self.page_font, anchor="rm")
@@ -765,6 +983,28 @@ class Layout:
         bubbles = f"Bubbles lettered: {side.lettered}"
         draw.text((x + w - pad, row), bubbles, fill=TEXT if side.watch != "ready" else DIM, font=self.bubble_font,
                   anchor="rm")
+        if self.extra:  # the first bubble on the stopwatch's clock, and the start's own clock
+            third = row + round(22 * k) + round(14 * k)
+            first = "First bubble: -" if side.first_ms is None else f"First bubble: {side.first_ms / 1000:.2f} s"
+            draw.text((x + pad, third), first, fill=GREEN if side.first_ms is not None else DIM, font=self.extra_font,
+                      anchor="lm")
+            if not side.present:
+                start, colour = "Not started yet", DIM
+            elif side.ready:
+                start, colour = f"Ready after {side.start_ms / 1000:.2f} s", TEXT
+            else:
+                start, colour = f"Starting: {(side.start_ms or 0.0) / 1000:.2f} s", DIM
+            draw.text((x + w - pad, third), start, fill=colour, font=self.extra_font, anchor="rm")
+
+    def badge(self, draw: ImageDraw.ImageDraw, x: int, speed: float) -> None:
+        """The speed on the picture while its stretch is shown faster: "x4" in a box at the picture's top left."""
+        k, text = self.k, speed_text(speed)
+        pad = round(10 * k)
+        tw = text_width(text, self.badge_font)
+        left, top = x + round(14 * k), self.header_h + round(14 * k)
+        box = (left, top, left + tw + 2 * pad, top + self.badge_font.size + 2 * pad)
+        draw.rounded_rectangle(box, radius=round(8 * k), fill=(20, 20, 22), outline=AMBER, width=max(2, round(3 * k)))
+        draw.text(((box[0] + box[2]) / 2, (box[1] + box[3]) / 2), text, fill=AMBER, font=self.badge_font, anchor="mm")
 
     def draw(self, facts: FrameFacts) -> Image.Image:
         if facts.kind != "page":
@@ -775,7 +1015,10 @@ class Layout:
         for s, side in enumerate(facts.sides):
             x = s * (self.column + self.gap)
             self.header(draw, x, self.video.labels[s], facts, side)
-            frame.paste(self.video.scaled(s, side.name), (x, self.header_h))
+            if side.present:  # (a window not there yet: the ground alone)
+                frame.paste(self.video.scaled(s, side.name), (x, self.header_h))
+            if facts.speed > 1.0:
+                self.badge(draw, x, facts.speed)
         frame.paste(self.caption(facts.note), (0, h - self.caption_h))
         return frame
 
@@ -1161,6 +1404,70 @@ def made_up(path: Path, label: str, pages: Sequence[tuple[float, int]], pauses: 
     return Path(path)
 
 
+def made_up_start(path: Path, label: str, mode: str, appear_ms: float = 900.0, ready_ms: float = 4800.0,
+                  first_ms: float = 6000.0, page_ms: float = 9000.0, bubbles: int = 6, turn_ms: float = 120.0,
+                  soft_ms: float = 260.0, size: tuple[int, int] = (720, 900), fps: float = 15.0, seed: int = 1,
+                  start: float = 1.8e12) -> Path:
+    """A recording from the start of made-up frames (`made_up_window`), as a record with *--from-start* (*mode*
+    "start") or *--turn-at-ready* ("turn_at_ready") would leave it: the window made at *start*, pictures of one colour
+    until it appears *appear_ms* later, ready *ready_ms* after its appearance; from the start, the page on show
+    letters its bubbles one by one from *first_ms* to *page_ms* after the appearance; at ready, the stand-in turns
+    *turn_ms* after the ready (soft for *soft_ms*) and the turned-to page letters from *first_ms* to *page_ms* after
+    the turn."""
+    if mode not in ("start", "turn_at_ready") or not 0 < first_ms <= page_ms:
+        raise ValueError("a made-up recording from the start: from the start or at ready, the first bubble first")
+    writer = RecordingWriter(path)
+    step = 1000.0 / fps
+    first_shot = start + 20.0
+    # (the appearance is a picture's time: the first one taken from *appear_ms* on)
+    appeared = first_shot + math.ceil(max(0.0, start + appear_ms - first_shot) / step - 1e-9) * step
+    ready = appeared + ready_ms
+    states: list[tuple[float, dict[str, Any] | None]] = [(start, None)]  # (None: the window not drawn yet)
+    turns, displays, results = [], [], []
+    states.append((appeared, {"page": 0, "total": 0, "lettered": 0, "soft": False, "status": "Starting..."}))
+    states.append((ready, {"page": 0, "total": bubbles, "lettered": 0, "soft": False, "status": "Ready."}))
+    displays.append({"t": ready, "screen": [0, 0], "kind": "live", "lettered": 0})
+    if mode == "start":
+        a, screen, page = appeared, [0, 0], 0
+    else:
+        a, screen, page = ready + turn_ms, [1, 0], 1
+        turns.append({"k": 1, "t": a, "screen": screen, "sharp_t": a + soft_ms, "released_t": ready + 5.0})
+        states.append((a + 60.0, {"page": 1, "total": bubbles, "lettered": 0, "soft": True, "status": "Reading..."}))
+        displays.append({"t": a + 60.0, "screen": screen, "kind": "live", "lettered": 0})
+        states.append((a + soft_ms + 60.0, {"page": 1, "total": bubbles, "lettered": 0, "soft": False,
+                                            "status": "Translating..."}))
+    for j in range(bubbles):
+        tj = a + first_ms + (page_ms - first_ms) * (j / (bubbles - 1) if bubbles > 1 else 1.0)
+        states.append((tj, {"page": page, "total": bubbles, "lettered": j + 1, "soft": False,
+                            "status": f"Translating... {j + 1} of {bubbles} line(s) done"}))
+        displays.append({"t": tj, "screen": screen, "kind": "filling", "lettered": j + 1})
+    done = a + page_ms + 35.0
+    states.append((done, {"page": page, "total": bubbles, "lettered": bubbles, "soft": False,
+                          "status": f"Translated: {bubbles} lines"}))
+    displays.append({"t": done, "screen": screen, "kind": "translated", "lettered": bubbles})
+    results.append({"t": done + 1.0, "screen": screen, "bubbles": bubbles})
+    end = done + END_HOLD_S * 1000
+    times = [s[0] for s in states]
+    blank = Image.new("RGB", size, (0, 0, 0))
+    drawn: dict[tuple[Any, ...], Image.Image] = {}
+    for k in range(int((end - first_shot) // step) + 1):
+        shot = first_shot + k * step
+        state = states[max(0, bisect.bisect_right(times, shot + 1e-6) - 1)][1]
+        if state is None:
+            writer.add(shot, blank)
+        else:
+            key = (state["page"], state["total"], state["lettered"], state["soft"], state["status"])
+            if key not in drawn:
+                drawn.clear()
+                drawn[key] = made_up_window(size, *key, seed=seed)
+            writer.add(shot, drawn[key])
+    writer.finish({"label": label, "made_up": True, "version": "made-up", "fps": fps, "picture": list(size),
+                   "start_t": first_shot, "end_t": end, "turns": turns, "displays": displays, "results": results,
+                   "mode": mode, "launch_t": start, "constructed_t": start + 10.0, "appeared_t": appeared,
+                   "ready_t": ready, "start_screen": [0, 0]})
+    return Path(path)
+
+
 def sample(out: Path, fmt: str = "auto") -> dict[str, Any]:
     """Made-up recordings rendered alone and side by side (and as a GIF), into *out*."""
     out = check_scratch_path(out)
@@ -1181,13 +1488,39 @@ def sample(out: Path, fmt: str = "auto") -> dict[str, Any]:
     finally:
         for rec in recs:
             rec.close()
+    for mode in ("start", "turn_at_ready"):  # recordings from the start: the stretch before the bubbles sped up
+        slow = made_up_start(out / f"made_up_{mode}_a.zip", "Set-up A", mode, ready_ms=4900.0,
+                             first_ms=8000.0 if mode == "start" else 7000.0, page_ms=11000.0)
+        fast = made_up_start(out / f"made_up_{mode}_b.zip", "Set-up B", mode, appear_ms=1000.0, ready_ms=4700.0,
+                             first_ms=6000.0 if mode == "start" else 2600.0, page_ms=8000.0 if mode == "start" else
+                             6600.0)
+        recs = [Recording(slow), Recording(fast)]
+        try:
+            report[mode] = render(recs, out / f"sample_{mode}.mp4", Options(), title, end, fmt=fmt)
+        finally:
+            for rec in recs:
+                rec.close()
     return report
 
 
 # ---------------------------------------------------------------------------------------------------- the record
 def script_of(turns: int) -> str:
     """The stand-in's script: each turn waits for its release (``gK``, the control file's go), then the next screen."""
-    return ",".join(f"g{k},n" for k in range(1, turns + 1)) + ",e"
+    return ",".join([f"g{k},n" for k in range(1, turns + 1)] + ["e"])
+
+
+def record_mode(args: argparse.Namespace) -> str:
+    """The kind of recording the command line asks for (`MODES`)."""
+    if getattr(args, "turn_at_ready", False):
+        return "turn_at_ready"
+    return "start" if getattr(args, "from_start", False) else "turns"
+
+
+def check_turns(mode: str, turns: int) -> None:
+    """--turns: 1 to 40; 0 too from the start (the page on show at the start alone); at ready 1 at least (the turn)."""
+    low = 0 if mode == "start" else 1
+    if not low <= turns <= 40:
+        raise SystemExit(f"--turns is {low} to 40" + (" with --from-start" if mode == "start" else ""))
 
 
 def pages_needed(turns: int, layout: str) -> int:
@@ -1279,6 +1612,19 @@ class Probe:
         self.errors: dict[str, int] = {}
         self.chosen: set[int] = set()  # every window the app chose
         self.lock = threading.Lock()
+        self.ready_t: float | None = None  # the window took its "ready" event (its handler began)
+        self.on_ready: Callable[[Any], None] | None = None  # called once, right after the window's handler of it ran
+
+    def ready(self, app: Any, before: bool) -> None:
+        """The window's "ready" event: its time as the handler begins (*before*), and `on_ready` once it has run."""
+        try:
+            if before:
+                self.ready_t = self.ready_t or now_ms()
+            elif self.on_ready is not None:
+                call, self.on_ready = self.on_ready, None
+                call(app)
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            self.error("ready", e)
 
     def error(self, where: str, e: BaseException) -> None:
         key = f"{where}: {type(e).__name__}"
@@ -1311,6 +1657,19 @@ class Probe:
         return out
 
 
+# functions an older package's `capture.windows` has that the guard's table no longer names (0.7.0 and before: a real
+# click at a screen position, and a raise with an ALT tap of its own, both input through the system): refused
+# outright where they are there (the program never called them)
+OLDER_GUARDED = {"click_screen": "never", "bring_to_front": "never"}
+
+
+def older_guarded(windows: Any, table: dict[str, Any], target: Callable[..., Any]) -> dict[str, tuple[str, Any]]:
+    """The functions of `OLDER_GUARDED` that *windows* (a package's `capture.windows`) has and *table* does not
+    name, each with whom it may act on and where its window is (*target*)."""
+    return {name: (allow, target) for name, allow in OLDER_GUARDED.items()
+            if name not in table and callable(getattr(windows, name, None))}
+
+
 def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Probe) -> dict[str, Any]:
     """The guard of `tools/demo_video.py` as `tools/standin_e2e.py` has it (keys and clicks refused outright; the
     global hot keys this tool's, never Windows'), the window told the viewer is in front, and the probe on the
@@ -1325,6 +1684,7 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Pro
 
     table = {name: (("never" if allow == "viewer" else allow), target)
              for name, (allow, target) in demo_video.GUARDED.items()}  # (TASlation sends no key, no click here)
+    table.update(older_guarded(windows, table, demo_video.first_arg))
     done = {"list_windows": demo_video.replace_everywhere(windows.list_windows,
                                                           lambda include_own=False: [w for w in [viewer_info()] if w])}
     for name, (allow, target) in table.items():
@@ -1350,9 +1710,13 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Pro
         return out
 
     def handled(self: Any, kind: str, data: dict[str, Any]) -> Any:
+        if kind == "ready":
+            probe.ready(self, before=True)
         out = handle_event(self, kind, data)
         if kind == "result":
             probe.result(self, data)
+        elif kind == "ready":
+            probe.ready(self, before=False)
         return out
 
     def selected(self: Any, *a: Any, **k: Any) -> Any:
@@ -1374,6 +1738,14 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Pro
     return done
 
 
+def one_colour(image: Image.Image) -> bool:
+    """Whether every pixel of *image* is of one colour (a window not drawn yet)."""
+    extrema = image.getextrema()
+    if extrema and isinstance(extrema[0], tuple):
+        return all(lo == hi for lo, hi in extrema)
+    return extrema[0] == extrema[1]
+
+
 class Recorder:
     """Pictures of TASlation's own window (*hwnd*, checked to be this process's and not the stand-in's): about *fps*
     a second, from a thread of their own (*on_tk* False) or from the Tk loop, each with its time, handed to a saver
@@ -1389,6 +1761,7 @@ class Recorder:
         self.taken = self.missed = self.dropped = 0
         self.capture_ms: list[float] = []
         self.began = self.ended = 0.0
+        self.appeared: float | None = None  # the time of the first picture not of one colour (the window drawn)
         self.saver = threading.Thread(target=self._save, name="promo-save", daemon=True)
         self.grabber: threading.Thread | None = None
 
@@ -1435,6 +1808,8 @@ class Recorder:
             return
         self.capture_ms.append((time.perf_counter() - began) * 1000)
         self.taken += 1
+        if self.appeared is None and not one_colour(image):
+            self.appeared = t
         try:
             self.saving.put_nowait((t, image))
         except queue.Full:
@@ -1489,11 +1864,12 @@ class Director:
     what the stand-in said."""
 
     def __init__(self, app: Any, browser: Any, guard: Any, selection: Any, probe: Probe, writer: RecordingWriter,
-                 args: argparse.Namespace, standin_dir: Path, warm_screen: tuple[int, bool]):
+                 args: argparse.Namespace, standin_dir: Path, warm_screen: tuple[int, bool], mode: str = "turns"):
         self.app, self.browser, self.guard, self.selection = app, browser, guard, selection
         self.probe, self.writer, self.args, self.standin_dir = probe, writer, args, standin_dir
         self.warm_screen = warm_screen
-        self.phase, self.phase_at = "warm", time.monotonic()
+        self.mode = mode  # `MODES`: from the start, the pictures from the window's first on, and no rest
+        self.phase, self.phase_at = ("warm" if mode == "turns" else "start"), time.monotonic()
         self.began = time.monotonic()
         self.turns: list[dict[str, Any]] = []
         self.k = 0
@@ -1508,7 +1884,29 @@ class Director:
         self.placed_at = 0.0
 
     def start(self) -> None:
+        if self.mode != "turns":  # the pictures from the first the window gives (its loop runs after this)
+            if self.mode == "turn_at_ready":
+                self.probe.on_ready = self.turn_at_ready
+            self.pictures()
         self.app.after(TICK_MS, self.tick)
+
+    def pictures(self) -> bool:
+        """The pictures of TASlation's own window begin."""
+        hwnd = self.app._own_hwnd() if hasattr(self.app, "_own_hwnd") else None
+        if not hwnd:
+            self.stop("TASlation's own window has no handle")
+            return False
+        self.recorder = Recorder(self.app, int(hwnd), self.guard, self.writer, self.args.fps, self.args.grab == "tk")
+        self.recorder.start()
+        self.say("pictures begin")
+        return True
+
+    def turn_at_ready(self, _app: Any) -> None:
+        """--turn-at-ready: the first turn released as the window has taken its "ready" event."""
+        if self.over or self.phase != "start" or self.k:
+            return
+        self.say("the window is ready: the turn is released")
+        self.release()
 
     def tick(self) -> None:
         if self.over:
@@ -1542,6 +1940,9 @@ class Director:
         if self.over:
             return
         self.over = True
+        # (the end takes seconds: where every thread is, said on standard error each END_DUMP_S it takes longer;
+        # code places only, no text of a page)
+        faulthandler.dump_traceback_later(END_DUMP_S, repeat=True, file=sys.stderr)
         if why != "done":
             self.failed = why
             print(f"run stopped: {why}", file=sys.stderr, flush=True)
@@ -1596,7 +1997,17 @@ class Director:
         now = time.monotonic()
         waited = now - self.phase_at
         args = self.args
-        if self.phase == "warm":
+        if self.phase == "start":  # a recording from the start: the window's start under way, the pictures taken
+            warm = self.result_for(list(self.warm_screen), 0.0) if self.mode == "start" else None
+            if warm is not None and getattr(self.app, "ready", False):
+                self.facts["start_up_s"] = round(now - self.began, 1)
+                self.facts["start_up_page_bubbles"] = warm["bubbles"]
+                self.say(f"the page on show at the start translated ({warm['bubbles']} bubbles)")
+                self.go("pace", now - max(0.0, now_ms() - float(warm["t"])) / 1000)
+            elif waited > args.start_timeout:
+                self.stop("the window did not translate the page on show at the start within --start-timeout"
+                          if self.mode == "start" else "the window was not ready within --start-timeout")
+        elif self.phase == "warm":
             warm = self.result_for(list(self.warm_screen), 0.0)
             if getattr(self.app, "ready", False) and warm is not None:
                 self.facts["start_up_s"] = round(now - self.began, 1)
@@ -1608,14 +2019,8 @@ class Director:
         elif self.phase == "rest":
             self.idle_since = (self.idle_since or now) if self.idle() else None
             if self.idle_since is not None and now - self.idle_since >= REST_S:
-                hwnd = self.app._own_hwnd() if hasattr(self.app, "_own_hwnd") else None
-                if not hwnd:
-                    self.stop("TASlation's own window has no handle")
-                    return
-                self.recorder = Recorder(self.app, int(hwnd), self.guard, self.writer, args.fps, args.grab == "tk")
-                self.recorder.start()
-                self.say("pictures begin")
-                self.go("roll")
+                if self.pictures():
+                    self.go("roll")
             elif waited > 60:
                 self.stop("the window did not come to rest after the start-up")
         elif self.phase == "roll":
@@ -1779,6 +2184,10 @@ def record(args: argparse.Namespace) -> int:
         spans = [p["page_ms"] for p in rec.pages if p.get("page_ms") is not None]
         report["page_ms_median"] = round(float(np.median(spans)), 1) if spans else None
         report["pictures"] = meta.get("pictures")
+        if rec.from_start:
+            report["start"] = start_facts(rec)
+            report["start"]["appeared_on_first_picture"] = meta.get("appeared_on_first_picture")
+            report["start"]["first_picture_after_construction_ms"] = meta.get("first_picture_after_construction_ms")
         report["recording"] = str(out)
     finally:
         rec.close()
@@ -1842,12 +2251,17 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     tap = e2e.LogTap(notes)  # (where the OCR readers went, by the log's templates: codes and numbers only)
     logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer
+    mode = record_mode(args)
+    if mode != "turns":  # (pictured from its first: the window opens at its size and place, not moved there after)
+        open_at(state, app_rect)
+    launch_t = now_ms()  # (from the start: the launch, just before the window is made; its start begins in it)
     app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
+    constructed_t = now_ms()
     x, y, w, h = app_rect
     app.geometry(f"{w}x{h}+{x}+{y}")
     app.after(600, lambda: app.geometry(f"{w}x{h}+{x}+{y}"))
     warm = (0, args.layout == "spread")  # (the stand-in's screens count its own list: the start-up's page is 0)
-    director = Director(app, browser, guard, selection, probe, writer, args, standin_dir, warm)
+    director = Director(app, browser, guard, selection, probe, writer, args, standin_dir, warm, mode)
     director.start()
     try:
         app.mainloop()
@@ -1872,15 +2286,32 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     failed = director.failed or ("" if writer.stored else "no picture was taken")
     start_t = director.recorder.began if director.recorder else None
     end_t = director.recorder.ended if director.recorder else None
+    appeared_t = director.recorder.appeared if director.recorder else None
+    if mode != "turns" and not failed and (appeared_t is None or probe.ready_t is None):
+        failed = "the window's appearance or its ready was not seen"
     with notes.lock:
         placements = [dict(r) for r in notes.ocr]
         ocr_log = [dict(r) for r in notes.ocr_log]
-    readers = {**readers_during(placements, start_t, end_t), "all_placements": [
+    # (from the start: where the readers read once they were loaded, from the window's ready on)
+    read_from = probe.ready_t if mode != "turns" and probe.ready_t is not None else start_t
+    readers = {**readers_during(placements, read_from, end_t), "all_placements": [
         {**r, "t": round(float(r["t"]) - (start_t or 0.0), 1)} for r in placements],
         "log": [{**r, "t": round(float(r["t"]) - (start_t or 0.0), 1)} for r in ocr_log]}
-    return {"failed": failed, "turns": turns, "displays": probe.displays(), "results": probe.results,
+    start: dict[str, Any] = {}
+    if mode != "turns":
+        start = {"mode": mode, "launch_t": round(launch_t, 1), "constructed_t": round(constructed_t, 1),
+                 "appeared_t": round(appeared_t, 1) if appeared_t is not None else None,
+                 "ready_t": round(probe.ready_t, 1) if probe.ready_t is not None else None,
+                 "start_screen": list(warm[:1]) + [int(warm[1])],
+                 # (the window drawn on its first picture already: it may have appeared a moment before it)
+                 "appeared_on_first_picture": bool(writer.frames) and appeared_t == writer.frames[0][0],
+                 "first_picture_after_construction_ms": round(writer.frames[0][0] - constructed_t, 1)
+                 if writer.frames else None}
+    return {**start, "failed": failed, "turns": turns, "displays": probe.displays(), "results": probe.results,
             "start_t": start_t, "end_t": end_t, "readers": readers,
-            "picture": list(writer.size) if writer.size else None, "pictures": recorder, "start_up": director.facts,
+            # (from the start: the window's size once it is laid out, its last picture's; the first may be 1 by 1)
+            "picture": list((writer.last_size if mode != "turns" else writer.size) or ()) or None,
+            "pictures": recorder, "start_up": director.facts,
             "clock": {"standin_lag_ms_min": round(offset, 1), "standin_lag_ms_median":
                       round(lags[len(lags) // 2], 1) if lags else None},
             "probe_errors": probe.errors,
@@ -1888,6 +2319,23 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
                       "chosen": sorted(probe.chosen), "stand_in": hwnd,
                       "only_the_stand_in_chosen": probe.chosen <= {hwnd},
                       "hot_keys_held_at_the_end": sorted(hotkeys.registered)}}
+
+
+def open_at(state: Path, rect: tuple[int, int, int, int]) -> bool:
+    """The window opens at *rect* (x, y, width, height) from its first picture on: the size and place the window keeps
+    in the scratch state for its next start (``window_place`` in ui.json, with the rectangle of its monitor), as the
+    package has it; False where it has no such place (the window opens as at a first start, then is moved)."""
+    try:
+        from taslation.ui.layout import monitor_at
+        from taslation.ui.overbook import keep_place
+    except ImportError:
+        return False
+    x, y, w, h = rect
+    monitor = monitor_at(x + 40, y + 10)
+    if monitor is None:
+        return False
+    keep_place(state, f"{w}x{h}+{x}+{y}", False, monitor)
+    return True
 
 
 def cleanup(state: Path, scratch: Path, url: str, ps_before: list[str] | None) -> dict[str, Any]:
@@ -1944,7 +2392,8 @@ def info(paths: Sequence[Path]) -> dict[str, Any]:
                               "recorder": rec.meta.get("pictures"), "start_up": rec.meta.get("start_up"),
                               "settings_asked": rec.meta.get("settings_asked"), "server": rec.meta.get("server"),
                               "readers": {k: v for k, v in (rec.meta.get("readers") or {}).items()
-                                          if k in ("placements", "all_gpu")}}
+                                          if k in ("placements", "all_gpu")},
+                              "kind": rec.mode, "start": start_facts(rec)}
         finally:
             rec.close()
     return out
@@ -1981,6 +2430,12 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
     rec.add_argument("--start-timeout", type=float, default=600.0, help="seconds for the start-up's page")
     rec.add_argument("--page-timeout", type=float, default=120.0, help="seconds a page may take")
+    start = rec.add_mutually_exclusive_group()
+    start.add_argument("--from-start", action="store_true",
+                       help="record the start too: from the window's first picture, the page on show at the launch "
+                            "timed from the window's appearance (--turns may be 0)")
+    start.add_argument("--turn-at-ready", action="store_true",
+                       help="record the start too, and release the first turn as the window says it is ready")
     ren = sub.add_parser("render", help="make the video of one recording or two side by side")
     ren.add_argument("recordings", type=Path, nargs="+")
     ren.add_argument("--out", type=Path, required=True, help="the video (.mp4; .gif where no MP4 can be made)")
@@ -1998,6 +2453,12 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ren.add_argument("--fps", type=float, default=30.0)
     ren.add_argument("--format", default="auto", choices=("auto", "mp4", "gif"))
     ren.add_argument("--gif-limit-mb", type=float, default=15.0)
+    ren.add_argument("--start-speed", type=float, default=4.0,
+                     help="a recording from the start: its quiet stretch shown this many times faster (1: in full)")
+    ren.add_argument("--start-head", type=float, default=1.0, help="... from this many seconds after the appearance")
+    ren.add_argument("--real-before", type=float, default=1.5,
+                     help="... to this many seconds before the first of the first bubbles (from the start) or before "
+                          "the turn (at ready)")
     inf = sub.add_parser("info", help="a recording's facts, numbers only")
     inf.add_argument("recordings", type=Path, nargs="+")
     sam = sub.add_parser("sample", help="made-up recordings rendered: no window, no model, no manga")
@@ -2006,14 +2467,26 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
+def options_of(args: argparse.Namespace) -> Options:
+    """The render's command line as `Options`."""
+    if args.start_speed < 1:
+        raise SystemExit("--start-speed is 1 (in full) or more")
+    return Options(lead_ms=args.lead * 1000, first_lead_ms=args.first_lead * 1000, max_pause_ms=args.max_pause * 1000,
+                   end_hold_ms=args.end_hold * 1000, title_ms=args.title_s * 1000 if args.title else 0.0,
+                   end_ms=args.end_s * 1000 if args.end else 0.0, pages=args.pages, start_speed=args.start_speed,
+                   start_head_ms=args.start_head * 1000, real_before_ms=args.real_before * 1000)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse(argv)
     if args.command == "record":
         if sys.platform != "win32":
             raise SystemExit("the record needs Windows (window capture)")
-        if not 1 <= args.turns <= 40:
-            raise SystemExit("--turns is 1 to 40")
-        return record(args)
+        check_turns(record_mode(args), args.turns)
+        try:
+            return record(args)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
     if args.command == "info":
         print(json.dumps(info(args.recordings), indent=1, default=str))
         return 0
@@ -2023,9 +2496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out = check_video_path(args.out)
     for suffix in (".mp4", ".gif"):  # (either may be written)
         check_video_path(out.with_suffix(suffix))
-    opts = Options(lead_ms=args.lead * 1000, first_lead_ms=args.first_lead * 1000, max_pause_ms=args.max_pause * 1000,
-                   end_hold_ms=args.end_hold * 1000, title_ms=args.title_s * 1000 if args.title else 0.0,
-                   end_ms=args.end_s * 1000 if args.end else 0.0, pages=args.pages)
+    opts = options_of(args)
     recs = [Recording(p) for p in args.recordings]
     try:
         report = render(recs, out, opts, args.title, args.end, args.labels, args.fps, args.width, args.format,

@@ -1,7 +1,9 @@
 """The promotional video tool (tools/promo_video.py) without a window, a model or a manga page: made-up recordings
 of drawn rectangles and text, the pages' times taken from the window's page events, the video at real speed (a long
 pause cut and said, a page's time never), two sides started together, the cards, the credit on every frame, the
-H.264 MP4 read back from its boxes, the GIF made smaller until it fits, and where files may go."""
+H.264 MP4 read back from its boxes, the GIF made smaller until it fits, and where files may go; recordings from the
+start (the page on show timed from the window's appearance, a turn made at ready), the start's quiet stretch shown
+faster with the clocks in real seconds and the speed said on every such frame."""
 
 from __future__ import annotations
 
@@ -430,6 +432,234 @@ def coded(page: int, top: int = 31) -> Image.Image:
         x, y = sv.CODE_X + k * sv.CELL, top + sv.CODE_Y
         draw.rectangle((x, y, x + sv.CELL - 1, y + sv.CELL - 1), fill=(255, 255, 255) if bit else (0, 0, 0))
     return image
+
+
+# ---------------------------------------------------------------------------------------------------- from the start
+FPS = 10.0
+
+
+def from_start(tmp_path: Path, name: str, mode: str, **kw) -> pv.Recording:
+    return pv.Recording(pv.made_up_start(tmp_path / f"{name}.zip", name, mode, size=SMALL, fps=FPS, **kw))
+
+
+def page_frames(video: pv.Video) -> list[pv.FrameFacts]:
+    return [f for f in map(video.facts, range(len(video))) if f.kind == "page"]
+
+
+def test_a_recording_from_the_start_is_timed_from_the_windows_appearance(tmp_path):
+    rec = from_start(tmp_path, "a", "start", appear_ms=900, ready_ms=4800, first_ms=6000, page_ms=9000, bubbles=4)
+    assert rec.mode == "start" and rec.from_start
+    assert rec.appeared == pytest.approx(rec.meta["launch_t"] + 900, abs=1000 / FPS)  # its first picture drawn
+    (page,) = rec.pages
+    assert page["start"] and page["t"] == rec.appeared and page["screen"] == [0, 0]
+    assert (page["first_ms"], page["page_ms"], page["bubbles"], page["finished"]) == (6000, 9000, 4, True)
+    facts = pv.start_facts(rec)
+    assert facts["ready_after_appeared_s"] == round((rec.ready_t - rec.appeared) / 1000, 2)
+    assert (facts["first_bubble_after_appeared_s"], facts["last_bubble_after_appeared_s"]) == (6.0, 9.0)
+    plain = made_up(tmp_path, "plain", [(2000, 3)])
+    assert plain.mode == "turns" and not plain.from_start and pv.start_facts(plain) is None
+    assert plain.appeared == plain.first  # (no appearance noted: its first picture)
+    rec.close()
+    plain.close()
+
+
+def test_a_segments_real_time_through_a_stretch_shown_faster():
+    seg = pv.Segment("page", pv.shown_ms(1000 + 6000 + 500, ((1000.0, 5000.0, 4.0),)), lead=1000, body=6000,
+                     tail=500, speeds=((1000.0, 5000.0, 4.0),))
+    assert seg.ms == 7500 - 3000  # (4 s shown in 1 s)
+    assert [seg.u_at(v) for v in (0, 1000, 2000, 2500, 3000, 4000, 4500)] == [-1000, 0, 1000, 3000, 5000, 6000, 6500]
+    assert [seg.factor_at(v) for v in (1999, 2000, 2999, 3000)] == [1.0, 4.0, 4.0, 1.0]
+    plain = pv.Segment("page", 7500, lead=1000, body=6000, tail=500)
+    assert all(plain.u_at(v) == v - 1000 and plain.factor_at(v) == 1.0 for v in (0, 1234, 7500))
+    assert pv.sped(0, 999, 4) == () and pv.sped(0, 2000, 1) == () and pv.sped(0, 2000, 4) == ((0, 2000, 4.0),)
+
+
+def test_the_starts_quiet_stretch_is_sped_up_and_the_clocks_show_real_seconds(tmp_path):
+    slow = from_start(tmp_path, "slow", "start", ready_ms=4900, first_ms=8000, page_ms=11000)
+    fast = from_start(tmp_path, "fast", "start", appear_ms=1000, ready_ms=4700, first_ms=6000, page_ms=8000)
+    opts = no_cards(start_speed=4, start_head_ms=1000, real_before_ms=1500)
+    video = pv.Video([slow, fast], opts, labels=["0.7.0", "0.8.0"], fps=FPS)
+    (seg,) = video.segments
+    assert seg.lead == 0 and seg.body == 11000 and seg.speeds == ((1000, 6000 - 1500, 4.0),)
+    assert seg.ms == pytest.approx(11000 + seg.tail - 3500 * 0.75)
+    frames = page_frames(video)
+    sped = [f for f in frames if f.speed > 1]
+    assert sped and all(f.speed == 4 and f.note == pv.sped_note(4) and "x4" in f.note for f in sped)
+    assert all(f.note == pv.NOTE_START_SIDES for f in frames if f.speed == 1)
+    steps = set()
+    for a, b in zip(frames, frames[1:]):  # one frame of the video: 4 x 100 ms of the clocks while sped, else 100 ms
+        if a.sides[0].watch == b.sides[0].watch == "running" and a.speed == b.speed:
+            step = b.sides[0].watch_ms - a.sides[0].watch_ms
+            assert step == pytest.approx(1000 / FPS * a.speed)
+            steps.add(round(step))
+    assert steps == {100, 400}
+    for f in frames:  # both clocks from each window's appearance, the same real seconds on both
+        if all(s.watch == "running" for s in f.sides):
+            assert f.sides[0].watch_ms == pytest.approx(f.sides[1].watch_ms)
+            assert f.sides[0].source_t - slow.appeared == pytest.approx(f.sides[1].source_t - fast.appeared)
+    assert all(s.lettered == 0 and s.first_ms is None for f in sped for s in f.sides)  # no bubble while sped up
+    last_sped = max(f.sides[1].watch_ms for f in sped)
+    assert last_sped <= 6000 - 1500 + 1  # the real time before the first of the first bubbles shown as it was
+    end = frames[-1]
+    assert [s.watch for s in end.sides] == ["stopped", "stopped"]
+    assert [s.watch_ms for s in end.sides] == [11000, 8000] and [s.first_ms for s in end.sides] == [8000, 6000]
+    assert [s.ready for s in end.sides] == [True, True]
+    assert end.sides[0].start_ms == pytest.approx(slow.ready_t - slow.appeared)  # the start's clock stops at ready
+    summary = video.summary()
+    assert summary["kind"] == "start" and summary["sped"] == [{"page": 1, "from_s": 1.0, "to_s": 4.5, "factor": 4.0,
+                                                               "real_s": 3.5, "shown_s": 0.88}]
+    slow.close()
+    fast.close()
+
+
+def test_a_start_shown_in_full(tmp_path):
+    rec = from_start(tmp_path, "a", "start", first_ms=6000, page_ms=8000)
+    video = pv.Video([rec], no_cards(start_speed=1), fps=FPS)
+    (seg,) = video.segments
+    assert seg.speeds == () and seg.ms == seg.lead + seg.body + seg.tail
+    frames = page_frames(video)
+    assert all(f.speed == 1 and f.note == pv.NOTE_START for f in frames)
+    assert all(f.sides[0].watch_ms == pytest.approx(min(f.ms, 8000)) for f in frames)  # one ms shown is one ms
+    rec.close()
+
+
+def test_a_turn_at_ready_shows_each_window_from_its_appearance_and_times_the_turn(tmp_path):
+    slow = from_start(tmp_path, "slow", "turn_at_ready", appear_ms=900, ready_ms=4900, first_ms=7000,
+                      page_ms=11000, turn_ms=150)
+    fast = from_start(tmp_path, "fast", "turn_at_ready", appear_ms=1000, ready_ms=4300, first_ms=2600,
+                      page_ms=6600, turn_ms=150)
+    video = pv.Video([slow, fast], no_cards(), labels=["0.7.0", "0.8.0"], fps=FPS)
+    (seg,) = video.segments
+    stretch = [r.pages[0]["t"] - r.appeared for r in (slow, fast)]
+    assert seg.lead == max(stretch) and seg.body == 11000
+    assert seg.speeds == ((-seg.lead + 1000, -1500, 4.0),)
+    frames = page_frames(video)
+    first = frames[0]
+    assert first.sides[0].present and not first.sides[1].present  # (the side whose start was shorter: not there yet)
+    assert first.sides[1].start_ms is None
+    turn = next(f for f in frames if f.sides[0].watch == "running")
+    assert turn.sides[1].watch == "running" and turn.sides[0].watch_ms == turn.sides[1].watch_ms  # one moment
+    before = [f for f in frames if f.ms < turn.ms]
+    assert all(s.watch == "ready" and s.watch_ms == 0 and s.lettered == 0 for f in before for s in f.sides)
+    assert any(f.speed == 4 for f in before) and all(f.speed == 1 for f in frames if f.ms >= turn.ms)
+    for s, rec in enumerate((slow, fast)):  # the first bubble on the turn's clock, from the moment it was lettered
+        marked = [f for f in frames if f.sides[s].first_ms is not None]
+        assert marked and marked[0].sides[s].first_ms == rec.pages[0]["first_ms"]
+        assert marked[0].sides[s].watch_ms >= rec.pages[0]["first_ms"] and marked[0].sides[s].lettered >= 1
+        assert all(f.sides[s].lettered == 0 for f in frames if f.ms < marked[0].ms)
+        ready = next(f for f in frames if f.sides[s].ready)
+        assert ready.sides[s].start_ms == pytest.approx(rec.ready_t - rec.appeared)
+    assert [s.watch_ms for s in frames[-1].sides] == [11000, 6600]
+    facts = pv.start_facts(fast)
+    assert facts["turn_after_ready_s"] == 0.15 and facts["first_bubble_after_turn_s"] == 2.6
+    assert facts["first_bubble_after_sharp_s"] == round((2600 - 260) / 1000, 2)
+    slow.close()
+    fast.close()
+
+
+def test_two_recordings_of_other_kinds_are_not_put_side_by_side(tmp_path):
+    rec = pv.Recording(pv.made_up(tmp_path / "turns.zip", "t", [(2000, 3), (1800, 2)], size=SMALL, fps=FPS))
+    start = from_start(tmp_path, "s", "start")
+    at_ready = from_start(tmp_path, "r", "turn_at_ready")
+    for pair in ([rec, start], [start, at_ready]):
+        with pytest.raises(SystemExit):
+            pv.Video(pair, no_cards())
+    rec.close()
+    start.close()
+    at_ready.close()
+
+
+def test_every_frame_from_the_start_carries_the_credit_and_says_its_speed(tmp_path):
+    a = from_start(tmp_path, "a", "turn_at_ready", first_ms=6000, page_ms=8000)
+    b = from_start(tmp_path, "b", "turn_at_ready", appear_ms=1200, first_ms=2000, page_ms=4000)
+    video = pv.Video([a, b], pv.Options(title_ms=500, end_ms=500), "Title", ["one line"], fps=5)
+    layout = video.layout
+    w, h = layout.size
+    reference = Image.new("RGB", layout.size)
+    reference.paste(layout.caption(""), (0, h - layout.caption_h))
+    box = layout.credit_box()
+    credit = reference.crop(box).tobytes()
+    for i in range(len(video)):
+        facts = video.facts(i)
+        image = video.image(facts)
+        assert image.crop(box).tobytes() == credit, i
+        if facts.kind == "page" and facts.speed > 1:  # the badge on the picture, in amber
+            corner = image.crop((0, layout.header_h, layout.column // 3, layout.header_h + layout.header_h))
+            assert any(abs(r - pv.AMBER[0]) < 12 and abs(g - pv.AMBER[1]) < 12 and abs(bl - pv.AMBER[2]) < 12
+                       for _n, (r, g, bl) in corner.getcolors(1 << 16))
+    a.close()
+    b.close()
+
+
+def test_a_picture_of_another_size_during_the_start_keeps_the_scale(tmp_path):
+    writer = pv.RecordingWriter(tmp_path / "r.zip")
+    small, full = Image.new("RGB", (100, 120), (200, 0, 0)), Image.new("RGB", (200, 240), (0, 0, 200))
+    writer.add(1000.0, small)
+    writer.add(1100.0, full)
+    writer.finish({"turns": [], "displays": [], "results": [], "end_t": 3000.0, "mode": "start", "appeared_t": 1000.0,
+                   "ready_t": 1500.0, "picture": [200, 240], "start_screen": [0, 0]})
+    rec = pv.Recording(tmp_path / "r.zip")
+    video = pv.Video([rec], no_cards(), fps=FPS)
+    pw, ph = video.layout.pictures[0]
+    early = video.scaled(0, rec.at(1000.0))
+    assert early.size == (pw, ph)
+    assert early.getpixel((2, 2)) == pytest.approx((200, 0, 0), abs=8)  # at the window's own scale, top left ...
+    assert early.getpixel((pw - 2, ph - 2)) == pv.BG  # ... not stretched over the whole picture
+    rec.close()
+
+
+def test_the_windows_appearance_is_its_first_picture_not_of_one_colour():
+    assert pv.one_colour(Image.new("RGB", (40, 30), (0, 0, 0))) and pv.one_colour(Image.new("RGB", (1, 1)))
+    drawn = Image.new("RGB", (40, 30), (240, 240, 240))
+    ImageDraw.Draw(drawn).rectangle((5, 5, 10, 10), fill=(0, 0, 0))
+    assert not pv.one_colour(drawn) and pv.one_colour(Image.new("L", (5, 5), 7))
+
+
+def test_the_records_kinds_on_the_command_line():
+    plain = pv.parse(["record", "--out", "x.zip"])
+    assert pv.record_mode(plain) == "turns" and not plain.from_start and not plain.turn_at_ready
+    assert pv.record_mode(pv.parse(["record", "--out", "x.zip", "--from-start", "--turns", "0"])) == "start"
+    assert pv.record_mode(pv.parse(["record", "--out", "x.zip", "--turn-at-ready"])) == "turn_at_ready"
+    with pytest.raises(SystemExit):  # (one or the other)
+        pv.parse(["record", "--out", "x.zip", "--from-start", "--turn-at-ready"])
+    pv.check_turns("start", 0)
+    for mode, turns in (("turns", 0), ("turn_at_ready", 0), ("start", 41), ("turns", 41)):
+        with pytest.raises(SystemExit):
+            pv.check_turns(mode, turns)
+    pv.check_turns("turn_at_ready", 1)
+    assert pv.script_of(0) == "e" and [s.op for s in sv.parse_script(pv.script_of(1))] == ["g", "n", "e"]
+    assert pv.pages_needed(0, "spread") == 2 and pv.pages_needed(1, "single") == 2
+    ren = pv.parse(["render", "a.zip", "--out", "v.mp4", "--start-speed", "3", "--real-before", "2"])
+    opts = pv.options_of(ren)
+    assert (opts.start_speed, opts.start_head_ms, opts.real_before_ms) == (3.0, 1000.0, 2000.0)
+    with pytest.raises(SystemExit):
+        pv.options_of(pv.parse(["render", "a.zip", "--out", "v.mp4", "--start-speed", "0.5"]))
+
+
+def test_an_older_packages_input_functions_are_refused():
+    older = SimpleNamespace(click_screen=lambda x, y: None, bring_to_front=lambda hwnd: True)
+
+    def target(args, kwargs):
+        return None
+
+    assert pv.older_guarded(older, {}, target) == {"click_screen": ("never", target),
+                                                   "bring_to_front": ("never", target)}
+    assert pv.older_guarded(older, {"click_screen": ("never", target)}, target) == {
+        "bring_to_front": ("never", target)}  # (one the table names stays as it says)
+    assert pv.older_guarded(SimpleNamespace(), {}, target) == {}  # (today's package has neither)
+
+
+def test_the_probe_notes_the_windows_ready_and_acts_once_after_it():
+    probe = pv.Probe(standin_e2e.Notes(31, 1.0))
+    calls = []
+    probe.on_ready = calls.append
+    probe.ready("app", before=True)
+    first = probe.ready_t
+    assert first is not None and calls == []  # (noted as the handler begins; the act after it ran)
+    probe.ready("app", before=False)
+    probe.ready("app", before=True)
+    probe.ready("app", before=False)
+    assert calls == ["app"] and probe.ready_t == first
 
 
 def test_the_probe_notes_what_the_page_showed_and_each_result_taken():

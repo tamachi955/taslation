@@ -185,6 +185,14 @@ rows' languages.
   OpenCV, read back to check) or else a GIF of at most 15 MB. `info` prints a recording's pages and times; `sample`
   renders made-up frames to check the layout. The videos go to `promo/` (listed in `.git/info/exclude`: never
   committed, never shipped) or another folder git ignores; recordings go to a scratch folder outside the repository.
+  The start can be recorded too: `record --from-start` takes pictures from the window's first one on and times the
+  page the stand-in shows at the launch from the window's appearance (its first picture not of one colour) to its
+  first and last bubble (`--turns 0`: that page alone); `record --turn-at-ready` turns the stand-in's page right
+  after the window has handled its "ready" event and times that turn as any other. The window opens at its recorded size and place
+  from its first picture. `render` then starts both sides' clocks at the appearance (from the start) or at the turn
+  (at ready, each window shown from its appearance), adds the first bubble's time and the start's own clock to each
+  side, and shows the quiet stretch of the start `--start-speed` times faster (4 by default, 1 in full) with a badge
+  ("x4") on the pictures and the caption saying so; the clocks show real seconds throughout.
 
 ## The README and the manual
 
