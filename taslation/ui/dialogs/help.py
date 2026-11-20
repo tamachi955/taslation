@@ -75,8 +75,8 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "A name comes out wrong all through the book: in the Translator role, Find and replace... changes it on every page at once.",
     )),
     ("Your data", (
-        "Everything stays on this computer: TASlation sends nothing out.",
-        "It keeps the translated text with the place of each bubble, matched to each page by a short code made from its picture. Your series sheet and notes are kept too.",
+        "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only by the installer and when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed.",
+        "It keeps the translated text with the place of each bubble, matched to each page by a short code made from its picture, what the book's colophon says of it (title, volume, author, publisher, ISBN), a code made with a secret key from each short line it reuses, and your corrections, series sheets and notes. The book's name is in the names of those files and, with the title and program of the viewer's window, in settings files that are not protected.",
         "No page image is ever kept, nor the Japanese lines, and there is no way to save a page. A translation shows only over its page in the viewer.",
         "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks and viewer settings are kept too, in the folder named in Help > About TASlation.",
         "The translations, series sheets and notes are protected for your Windows user on this computer: copied to another computer, or opened by another Windows user, they cannot be read. Programs you run yourself can still read them.",
