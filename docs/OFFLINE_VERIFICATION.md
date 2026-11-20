@@ -57,8 +57,11 @@ The installer and `setup_models.py`, which download, run without the guard.
    application imports neither.
 6. **No image persistence**: there is no code path that writes a captured or
    translated page to disk. The on-disk cache (`~/.taslation/cache/*.json`)
-   holds translated text, normalised bubble geometry and 320-bit page
-   fingerprints only.
+   holds translated text, normalised bubble geometry, 320-bit page
+   fingerprints, the colophon's details (title, volume, author, publisher,
+   ISBN) and the translations of short lines kept for reuse under a keyed
+   hash of the line (HMAC-SHA-256, `taslation/linememo.py`), never the line's
+   Japanese.
 7. **Saved files protected at rest** (`taslation/protect.py`): the caches,
    annotations and series sheets (and the copies kept beside them) are written
    only in their protected form, Windows DPAPI for the Windows user who saved

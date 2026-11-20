@@ -232,7 +232,7 @@ the banner shows once roughly how many seconds a page takes to translate. "Close
 Next, a small dialog asks for the book's name (in page-by-page mode too, if the book has no name yet, the same is asked on the first page).
 The cache and the series sheet are saved under this name. Some viewers read in a browser have a tab title that is only the viewer's name, whatever book is open,
 and with such a title it always asks (a viewer's or a browser's name is never used as the book's name).
-Which part of a title is the viewer's name is learned on this computer: when you choose a second book in the same viewer, or type the book's name without the viewer's part in the "Series" and "Volume" fields. From then on that part is left out of the book's name. For the first book the whole title may show in the "Series" field; correct the name there. A browser-based viewer whose tab shows only its own name asks for the book's name first, and your answer teaches it that the title names no book.
+Which part of a title is the viewer's name is learned on this computer: when you choose a second book in the same viewer, or type the book's name without the viewer's part in the "Series" and "Vol." fields. From then on that part is left out of the book's name. For the first book the whole title may show in the "Series" field; correct the name there. A browser-based viewer whose tab shows only its own name asks for the book's name first, and your answer teaches it that the title names no book.
 What is learned (the titles and program file names of the windows you chose as the viewer, and which parts of titles are a viewer's or a book's) is kept only in `~/.taslation/viewers.json` on this computer. It never goes into a cache export or a log, and it is never sent anywhere. Deleting the file only means choosing the viewer once more.
 A book you have named once is recognised from its translated pages, whatever capture area you read it with, and its name is filled in. If several books look alike, the candidates are offered in the box's list,
 and if it cannot tell, the name last given with the same viewer is filled in ("Last time with this viewer: ...").
@@ -389,7 +389,7 @@ the defaults from "Apply to all viewers", then `taslation.toml`. On the command 
 
 ### The book's name: series and volume
 
-A book's name is given in two fields, "Series" and "Volume" (in the toolbar, in the dialog at the start of a book, and in the colophon's offer).
+A book's name is given in two fields, "Series" and "Volume" (in the toolbar, where the second is labelled "Vol.", in the dialog at the start of a book, and in the colophon's offer).
 The translations, the information attached to pages and the series sheet are saved under the one name these two make. As they are joined in only one way,
 "3巻", "３" and "第三巻" no longer make three books that differ only in how the volume was written.
 
@@ -418,7 +418,7 @@ and put in the one spelling (if translations were saved under an older spelling,
 ### The colophon and renaming the book
 
 Near the end of a volume, TASlation reads the colophon (title, volume, author, publisher, ISBN), saves it in the cache's header,
-and offers the colophon's title as the book's name, once per book. The name is shown in the "Series" and "Volume" fields, so you can correct it. Choose "Use" or "Keep".
+and offers the colophon's title as the book's name, once per book. The name is shown in the toolbar's "Series" and "Vol." fields, so you can correct it. Choose "Use" or "Keep".
 
 When there are files under the book's current name (the name you typed first, or an old cache saved under the viewer's name), "Use" renames the book.
 The translations in every language and the information attached to pages, and the series sheet too if the new name belongs to another series, are moved to the new name,
@@ -693,7 +693,7 @@ is left as it is. A paragraph set across (an explanation page, a foreword) is re
 ### The translation cache and backups
 
 The cache is in `~/.taslation/cache/<book>.json`,
-one file per target language (the book's name comes from the viewer window's title and can be changed in the "Series" and "Volume" fields; books that give the same file name, such as "My:Book 1" and "My
+one file per target language (the book's name comes from the viewer window's title and can be changed in the "Series" and "Vol." fields; books that give the same file name, such as "My:Book 1" and "My
 Book 1", get `<book>-<hash>.json`). "Saved translations..." in the "Tools" menu
 lists and deletes caches (the list shows each book as its series and volume, with its pages, bubbles, the file's size, language and last change,
 and under it how many files, pages and bytes there are in all). A click on a heading sorts the list by that column, a second click the other way round;
@@ -701,7 +701,9 @@ at first it goes by series, volume and language. Ctrl+click and Shift+click choo
 (the translations in other languages stay), after one question that names the book, or how many and which. The confirmation's default button is "Keep them", and the files can be restored from the Recycle Bin. When a file cannot be moved to the Recycle Bin
 (on a drive without one, for example), it is not deleted, and this is said. On the command line, `taslation cache delete` deletes all languages, as before.
 "Rename..." gives the one book chosen a new name in its Series and Volume fields; the rename then goes as the window's own does (the review first where the series sheets
-say otherwise), its translations in every language, page information and series sheet moving along, and the list follows once it is done. A file holds only the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader (and, for a bubble with a part set larger, that part's place in its translation).
+say otherwise), its translations in every language, page information and series sheet moving along, and the list follows once it is done. A file holds the translations, the normalised shapes and positions of the bubbles, the page fingerprints and the notes to the reader (and, for a bubble with a part set larger, that part's place in its translation),
+what the colophon says of the book (title, volume, author, publisher, ISBN) and the translations of short lines kept for reuse, each under a keyed hash of the line's Japanese, never the Japanese itself ("Reusing short lines"); it holds no page image.
+Everything TASlation keeps is listed in "Help > How to use..." under "Your data".
 The model never writes notes about the story to keep (note files that an old version wrote in
 `~/.taslation/series` are left as they are, unread; delete them if you do not need them).
 
@@ -1157,7 +1159,7 @@ For an Ollama that was there before, `install.cmd` sets `LLAMA_ARG_CACHE_RAM=0` 
 
 ### Trying it without a book
 
-`python tools/fake_viewer.py` opens a stand-in viewer that shows synthetic test pages (left arrow for the next page).
+`.\.venv\Scripts\python.exe tools\fake_viewer.py`, run in PowerShell in the folder that holds `install.cmd` (`python tools/fake_viewer.py` in a source checkout), opens a stand-in viewer that shows synthetic test pages (left arrow for the next page).
 Choose the window titled "Fake Viewer" in TASlation, and you can check that capture, the whole-book reading
 and the passing of page keys all work.
 

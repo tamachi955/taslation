@@ -12,7 +12,9 @@ and it is not legal advice. Laws differ from country to country, and they change
 
 Each time you turn a page, TASlation makes a temporary copy of what the viewer drew on the screen (a capture in memory),
 translates the text with a model on your own computer (an adaptation of the work), and shows the result over the same page, to you alone. So that it does not translate a page twice,
-it saves the translations, the positions of the bubbles and the page fingerprint in the cache. It keeps nothing else, and lets nothing out of your computer.
+it saves the translations, the positions of the bubbles and the page fingerprint in the cache. It saves no page image. With the translations it keeps the book's name, what the book's colophon says of it, and your corrections and notes, in files on your computer
+(docs/MANUAL.md, "The translation cache and backups", and Help > How to use... > Your data list all of it). While you read, it sends nothing anywhere but to the translation program on your computer;
+the network is used only by the installer and when you agree to download a translation model.
 
 The capture is temporary. In Japan, since Article 2 requires a tangible reproduction, it may be considered not to be a reproduction at all,
 and in any case it is within the reproduction incidental to computer processing that Article 47-4 allows. In the EU and the UK,
@@ -145,5 +147,5 @@ Buy the book from a store that sells the Japanese edition, open it in that store
 To do that, it reads the Japanese in the speech bubbles of the page the viewer shows, translates it on your own computer, redraws the bubbles with the translation and shows them on the screen.
 It does not upload, copy or share anything. The translations stay on your computer, and there is no feature to save, export or distribute pages.
 
-It is made, on purpose, so that it cannot become a way to read a book without the viewer. It saves only the translations, and even those are tied to a fingerprint of each page (the page fingerprint),
+It is made, on purpose, so that it cannot become a way to read a book without the viewer. It saves no page image, and of the book's text only the translations and the colophon's details ("What it does, in legal terms"); the translations are tied to a fingerprint of each page (the page fingerprint),
 so they are of no use unless the real page is on the screen.

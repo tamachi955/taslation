@@ -105,8 +105,8 @@ or to see the project's issues page. What a stop means is under "If the installa
 When the installation gets to its end but TASlation cannot translate yet (the final check found something missing, or Ollama could not be installed because there is no winget),
 its last line says so, and what to do. Any warnings are listed before it.
 
-The network is used only during the installation. Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
-After that, TASlation does not connect to anything outside this computer.
+The network is used during the installation: Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
+After that, TASlation connects to nothing outside this computer, except to download a translation model when you agree to it (the window offers this when the language you translate into needs a model that is not installed).
 
 All the questions come first. Once you have answered them, you can leave the computer. Depending on your connection, it takes about 15 to 60 minutes.
 Download progress is shown in percent and MB. If the connection breaks partway, it goes on from where it broke off.
