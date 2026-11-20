@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import queue
 import statistics
 import sys
 import tempfile
@@ -150,7 +151,17 @@ def side_main(args) -> int:
     cache = Cache()
     app.pipeline = fake_side.pipeline(cache)
     shots, found, steps = args.shots, {}, []
-    post = lambda kind, data: app._handle_event(kind, data)  # noqa: E731 - as the event pump hands them over
+
+    def post(kind, data):
+        """An event as the engine's arrive (``reading`` True, `fake_side`): into the window's event queue, and the
+        queue drained by the window's own handler, as its event pump does (`JobsMixin._poll_events`), at once."""
+        app._post(kind, **data)
+        while True:
+            try:
+                queued = app._events.get_nowait()
+            except queue.Empty:
+                break
+            app._handle_event(*queued)
 
     def show(image, result_on_show=None):
         app._live, app.last_result = image, result_on_show
@@ -164,6 +175,7 @@ def side_main(args) -> int:
         side_mod.clear(app)
         app.pipeline.rtl = rtl
         app._side.slot = type(app._side.slot)()
+        app._live = None  # (a story starts with no frame of the viewer's on show)
 
     def busy(frame, progress):  # a job on the page on show, as `StatusMixin._go_busy` starts one
         app._go_busy()
@@ -258,9 +270,10 @@ def side_main(args) -> int:
         seen = result(4, ["Who's there?", "", "Wait for me!"])
         show(seen.original, seen)  # page 4 seen lettered, one bubble still in its original
         cache.put(4, ["Who's there?", "Wait for me!"])
-        post("page_on_show", {"seq": 5})
         other = result(5, ["Over here.", "Hurry!", "Fine."])
-        show(other.original, other)
+        show(other.original)  # turned to page 5, as the engine tells it: the frame first, ...
+        post("page_on_show", {"seq": 5, "reading": True})  # ... the screen once the frame is confirmed, ...
+        show(other.original, other)  # ... then its lettering
         cache.put(4, ["Who is there?", "Look, a cat.", "Wait for me!"])  # the work behind finished page 4
         stage(post, 4, translate="done")
         app.update()
@@ -268,9 +281,10 @@ def side_main(args) -> int:
     @scene("13-brackets-on-the-page-turned-back-to", wait=600)
     def _():
         found["diamond_before_turning_back"] = app._side.model.screens[4].updated
-        post("page_on_show", {"seq": 4})
-        app.update()
         again = result(4, ["Who is there?", "Look, a cat.", "Wait for me!"])
+        show(again.original)  # back on page 4
+        post("page_on_show", {"seq": 4, "reading": True})
+        app.update()
         show(again.original, again)
 
     @scene("14-brackets-gone-after-read-time", wait=3600)
