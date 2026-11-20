@@ -20,6 +20,17 @@ the finder from 71.6 % of the gold panels to 76.8 % (precision 76.4 to 77.7 %), 
 80.4 % of the pages right (4 pages better, 1 worse), at about 11 ms a page in place of 4.5 (median 8; the pages with
 wide pale stretches up to about 90).
 
+A part with no cut, level or slanted, is looked at once more with level gutter lines that art may cross for up to
+`RELAXED_FOREIGN` of their length (a figure that breaks the frames across the gutter, effect lines over it), where
+the run of such lines has a frame along both sides: ink within `RELAXED_REACH` lines beyond both of its edges along
+`RELAXED_ALONG` of it, and near both of its ends on one side or the other (`relaxed_cuts`). A run that goes on past
+the frames on both sides runs into a strip with no frame, under or over the two panels, and the strip's lettering
+would go with the panel beside it. The parts are cut further as before, the relaxed pass included; a piece cut off by
+a slanted gutter is not looked at so. On the 214 OpenMantra pages that took the finder from 76.8 to 78.5 % of the
+gold panels (precision 77.7 to 77.5 %) and the gold boxes' order from 160 to 164 of the 199 pages with two or more
+boxes wholly right (4 better, none worse; without the test at the ends 163, 4 better and 1 worse, a cut past such a
+strip), at about 1.2 ms a page more (every part cut no further is looked at again); it cut 8 times on the 214 pages.
+
 `find_panels` finds them, `order_panels` puts boxes (found or known) in reading order the same way, on the boxes alone
 (in the order of the cutting when a found panel has a slanted side).
 """
@@ -51,6 +62,9 @@ SLANT_INSIDE = 0.5  # of a slanted line's points at least this share inside the 
 SLANT_REACH = 40  # px (work scale): the lines this near one that passed first are looked at in full
 FRAME_REACH = 4 * SLANT_STEP  # px (work scale): a slanted gutter's frames lie this near the edges of its run
 FRAME_ALONG = 0.3  # of its length on both sides (a line through a balloon between two letterings has none)
+RELAXED_FOREIGN = 0.2  # a part with no cut: share of a gutter line that may be art, if the run is framed (below)
+RELAXED_REACH = 3  # px (work scale): such a run's frames lie this near both of its edges ...
+RELAXED_ALONG = 0.5  # ... along at least this share of its length
 
 
 class Panel(tuple):
@@ -110,14 +124,15 @@ class _Page:
         else:
             self.min_gutter, self.min_panel = like.min_gutter, like.min_panel
 
-    def gutter_lines(self, rect: Box, across: bool) -> np.ndarray:
-        """Per row (*across*) or column of *rect*: gutter from end to end?"""
+    def gutter_lines(self, rect: Box, across: bool, foreign: float | None = None) -> np.ndarray:
+        """Per row (*across*) or column of *rect*: gutter from end to end, but for *foreign* of it (`MAX_FOREIGN`)?"""
         x0, y0, x1, y1 = rect
         length = x1 - x0 if across else y1 - y0
         end = min(LINE_END, length)
         first = (x0, y0, x0 + end, y1) if across else (x0, y0, x1, y0 + end)
         last = (x1 - end, y0, x1, y1) if across else (x0, y1 - end, x1, y1)
-        return ((_line_sums(self.gutter, rect, across) >= (1 - MAX_FOREIGN) * length)
+        share = 1 - (MAX_FOREIGN if foreign is None else foreign)
+        return ((_line_sums(self.gutter, rect, across) >= share * length)
                 & (_line_sums(self.gutter, first, across) == end) & (_line_sums(self.gutter, last, across) == end))
 
     def trimmed(self, rect: Box) -> Box | None:
@@ -134,10 +149,11 @@ class _Page:
             rect = (x0 + int(cols[0]), y0, x0 + int(cols[-1]) + 1, y1)
         return rect
 
-    def cuts(self, rect: Box, across: bool) -> list[int]:
-        """Where *rect* is cut: the middle of every run of gutter lines thick enough, or of a rule with or without
-        gutter along it, that leaves a panel's worth on both sides. Pixels along the axis of the cut."""
-        gutter = self.gutter_lines(rect, across)
+    def cuts(self, rect: Box, across: bool, foreign: float | None = None) -> list[int]:
+        """Where *rect* is cut: the middle of every run of gutter lines thick enough (`gutter_lines` with *foreign*),
+        or of a rule with or without gutter along it, that leaves a panel's worth on both sides. Pixels along the axis
+        of the cut."""
+        gutter = self.gutter_lines(rect, across, foreign)
         length = rect[2] - rect[0] if across else rect[3] - rect[1]
         rule = _line_sums(self.rule, rect, across) >= (1 - RULE_FOREIGN) * length
         flags = np.concatenate(([0], (gutter | rule).astype(np.int8), [0]))
@@ -153,6 +169,33 @@ class _Page:
             if start + a - last >= self.min_panel[side] and stop - (start + b) >= self.min_panel[side]:
                 out.append(start + (a + b) // 2)
                 last = start + b
+        return out
+
+    def relaxed_cuts(self, rect: Box, across: bool) -> list[int]:
+        """`cuts` of a part with no cut, level or slanted: a gutter line may be something else for `RELAXED_FOREIGN`
+        of its length (a figure or effect lines across the gutter), where the run of such lines a cut is the middle of
+        is a gutter's thickness and has a frame along both sides: ink within `RELAXED_REACH` lines beyond each edge of
+        the run along `RELAXED_ALONG` of it, and beyond one edge or the other within `RELAXED_REACH` of both of its
+        ends (no run past both frames)."""
+        flags = self.gutter_lines(rect, across, RELAXED_FOREIGN)
+        x0, y0, x1, y1 = rect
+        gutter = self.raw_gutter[y0:y1, x0:x1] if across else self.raw_gutter[y0:y1, x0:x1].T  # a line per row
+        start, side = (y0, 0) if across else (x0, 1)
+        out: list[int] = []
+        for cut in self.cuts(rect, across, RELAXED_FOREIGN):
+            a = b = cut - start
+            while a > 0 and flags[a - 1]:
+                a -= 1
+            while b < flags.size and flags[b]:
+                b += 1
+            if b - a < self.min_gutter[side] or a < 1 or b >= flags.size:
+                continue
+            framed = [~lines.all(0) for lines in (gutter[max(0, a - RELAXED_REACH):a], gutter[b:b + RELAXED_REACH])]
+            if any(np.count_nonzero(f) < RELAXED_ALONG * f.size for f in framed):
+                continue
+            either = framed[0] | framed[1]
+            if either[:RELAXED_REACH + 1].any() and either[-RELAXED_REACH - 1:].any():  # framed at both ends
+                out.append(cut)
         return out
 
     def slant(self, rect: Box, across: bool) -> tuple[int, int] | None:
@@ -242,25 +285,33 @@ class _Page:
         x0, y0, x1, y1 = trimmed
         if self.inside is not None and (x1 - x0 < self.min_panel[1] or y1 - y0 < self.min_panel[0]):
             return  # a sliver of a piece a slanted gutter cut off: what it holds is the next panel's
-        cuts = self.cuts(trimmed, True)
-        if cuts:
-            edges = [y0, *cuts, y1]
-            for i, (a, b) in enumerate(zip(edges, edges[1:])):
-                self.split((x0, a, x1, b), out, sides, (*rank, (True, i)))
-            return
-        cuts = self.cuts(trimmed, False)
-        if cuts:
-            edges = [x0, *cuts, x1]
-            for i, (a, b) in enumerate(zip(edges, edges[1:])):
-                self.split((a, y0, b, y1), out, sides, (*rank, (False, i)))
-            return
+        for across in (True, False):
+            cuts = self.cuts(trimmed, across)
+            if cuts:
+                self._split_at(trimmed, across, cuts, out, sides, rank)
+                return
         for across in (True, False):
             line = self.slant(trimmed, across)
             if line is not None:
                 self._split_slanted(trimmed, across, line, out, sides, rank)
                 return
+        if self.inside is None:  # not in a piece a slanted gutter cut off
+            for across in (True, False):
+                cuts = self.relaxed_cuts(trimmed, across)
+                if cuts:
+                    self._split_at(trimmed, across, cuts, out, sides, rank)
+                    return
         ox, oy = self.origin
         out.append(((x0 + ox, y0 + oy, x1 + ox, y1 + oy), sides, rank))
+
+    def _split_at(self, rect: Box, across: bool, cuts: list[int], out: list[_Found], sides: tuple[_Side, ...],
+                  rank: tuple[tuple[bool, int], ...]) -> None:
+        """*rect* cut level at *cuts* (rows when *across*, columns otherwise): each part cut further, top or left one
+        first."""
+        x0, y0, x1, y1 = rect
+        edges = [y0, *cuts, y1] if across else [x0, *cuts, x1]
+        for i, (a, b) in enumerate(zip(edges, edges[1:])):
+            self.split((x0, a, x1, b) if across else (a, y0, b, y1), out, sides, (*rank, (across, i)))
 
     def _split_slanted(self, rect: Box, across: bool, line: tuple[int, int], out: list[_Found],
                        sides: tuple[_Side, ...], rank: tuple[tuple[bool, int], ...]) -> None:

@@ -151,6 +151,53 @@ def slanted(across: bool = True, fall: int = 70, gap: int = 30) -> tuple[np.ndar
     return img, polys
 
 
+def figure_across(img, centre, radius, tone=120):
+    """*img* with a filled figure drawn over the gutter at *centre*, across the frames on both sides."""
+    cv2.circle(img, centre, radius, (tone, tone, tone), -1)
+    return img
+
+
+def test_a_figure_across_a_framed_gutter_does_not_join_the_panels():
+    """A figure across the gutter between the tall panel and the stacked ones covers about 9 % of its lines (more than
+    `MAX_FOREIGN`), so no cut is found; the relaxed pass, along the frames on both sides, cuts there all the same."""
+    img = figure_across(page(TALL_RIGHT), (330, 250), 40)
+    found = find_panels(img)
+    assert near(found, TALL_RIGHT, slack=12)  # cut in the gutter's middle: the figure keeps its halves on the panels
+    tall_low, upper, lower = _region(400, 500, 560, 620), _region(60, 60, 200, 160), _region(60, 600, 200, 700)
+    tall_high = _region(400, 100, 560, 220)
+    ordered = order_on_page(img, (0, 0, SIZE[1], SIZE[0]), [lower, upper, tall_low, tall_high])
+    assert ordered == [tall_high, tall_low, upper, lower]
+    # art across more than `RELAXED_FOREIGN` of the gutter: no gutter, one panel
+    assert len(find_panels(figure_across(page(TALL_RIGHT), (330, 250), 110))) <= 1
+
+
+def test_a_relaxed_gutter_that_goes_on_past_both_frames_is_none():
+    """Two panels side by side with a figure across the gutter between them, over a strip with no frame: art that
+    comes out under the right panel keeps the strip's top with the two, so the gutter's lines go on past both frames
+    there, into the strip; such a run is not cut (the strip's lettering would go with the panel beside it). Where the
+    two panels end with their frames, the same gutter is cut."""
+    top = [(20, 20, 315, 392), (325, 20, 620, 400)]  # their lower frames not in one line, which would be a rule
+    lower = (20, 500, 620, 880)
+    img = figure_across(page([*top, lower]), (320, 200), 30)
+    assert near(find_panels(img), [*top, lower], slack=12)
+    img[400:430, 400:500] = 120  # out under the right panel's frame, away from the gutter
+    assert near(find_panels(img), [(20, 20, 620, 430), lower], slack=12)
+
+
+def test_a_pale_band_with_no_frame_along_it_is_no_relaxed_gutter():
+    """Two round figures on a page without frames, a third one across the band between them: the band's lines are
+    paper but for that one, yet its edges touch the figures only near their widest point, so it is not cut. With a
+    frame along both of its edges, it is."""
+    img = np.full((*SIZE, 3), 255, np.uint8)
+    for x in (170, 470):
+        cv2.circle(img, (x, 450), 140, (150, 150, 150), -1)
+    figure_across(img, (320, 450), 20)  # across the band, 40 of its lines' 280
+    assert len(find_panels(img)) <= 1
+    for x in (306, 334):  # grey: a frame, not a rule (`RULE_MAX`), which would be cut on the first pass
+        cv2.line(img, (x, 311), (x, 589), (120, 120, 120), 3)
+    assert len(find_panels(img)) == 2
+
+
 def test_a_slanted_gutter_across_cuts_the_page_and_keeps_its_slant():
     img, _ = slanted()
     found = find_panels(img)
@@ -238,10 +285,10 @@ def test_lettering_on_a_gutter_does_not_hide_it():
     img = page([(20, 20, 620, 440), (20, 460, 620, 880)])
     cv2.ellipse(img, (320, 450), (130, 70), 0, 0, 360, (255, 255, 255), -1)
     cv2.ellipse(img, (320, 450), (130, 70), 0, 0, 360, (0, 0, 0), 3)
-    for x in range(260, 390, 30):  # columns of lettering across the gutter's lines
-        cv2.line(img, (x, 410), (x, 490), (0, 0, 0), 4)
+    for x in range(210, 440, 10):  # columns of lettering across the gutter's lines, more than `RELAXED_FOREIGN` of them
+        cv2.line(img, (x, 410), (x, 490), (0, 0, 0), 6)
     assert len(find_panels(img)) < 2
-    assert len(find_panels(img, ignore=[(250, 400, 400, 500)])) == 2
+    assert len(find_panels(img, ignore=[(200, 400, 445, 500)])) == 2
 
 
 def test_the_regions_read_as_text_are_ordered_among_themselves(settings):
