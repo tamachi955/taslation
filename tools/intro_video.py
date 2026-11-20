@@ -496,6 +496,7 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Any
     done = pv.install(guard, viewer_info, hotkeys, probe)
     if not PROMO_NOTES_PAGES:  # (an older promo tool: the page's jobs and the canvas noted here)
         done.update(note_pages(probe))
+    done.update(blank_file_lines())
     closed = windows.post_key
     original = getattr(closed, "__wrapped__", closed)
     allow, target = guard_table()["post_key"]
@@ -577,6 +578,34 @@ def note_pages(probe: Probe) -> dict[str, Any]:
 
     App._on_page_event, Canvas._draw_picture = paged, pictured
     return {"_on_page_event": 1, "_draw_picture": 1}
+
+
+def blank_file_lines() -> dict[str, Any]:
+    """The series sheet's line that names its file - a path of this computer - left empty, in this process only (the
+    dialog lays it out with `break_lines`, which is given an empty text for it): no picture can hold it, however soon
+    after the dialog opens it is taken; what was replaced."""
+    from taslation.ui.dialogs import glossary
+
+    original = glossary.break_lines
+    prefix = getattr(glossary, "_", lambda s: s)("File: {path}").split("{", 1)[0]
+
+    def quiet(text: str, *a: Any, **k: Any) -> Any:
+        return "" if str(text).startswith(prefix) else original(text, *a, **k)
+
+    glossary.break_lines = quiet
+    return {"series_sheet_file_line": 1}
+
+
+def name_like(source: str, translated: str) -> tuple[str, str] | None:
+    """(term, rendering) where a region reads as a name: two to four kanji in its Japanese, one to three capitalised
+    words in its translation; else None."""
+    term = "".join(source.split())
+    words = translated.strip().rstrip(".!?…").split()
+    if not (2 <= len(term) <= 4 and all(0x4E00 <= ord(c) <= 0x9FFF for c in term)):
+        return None
+    if not (1 <= len(words) <= 3 and all(w[:1].isupper() and w.isalpha() for w in words)):
+        return None
+    return term, " ".join(words)
 
 
 def view_at(views: Sequence[dict[str, Any]], t: float) -> dict[str, Any] | None:
@@ -1106,6 +1135,7 @@ class Director:
         self.off_page = False  # a dialog of the window's is over the page: the pointer's moves are the dialog's
         self.stepping = False
         self.watch_from: float | None = None
+        self.name: tuple[str, str] | None = None  # a name read on a page and its rendering (`note_name`; memory only)
         self.records: dict[str, Any] = {"scenes": [], "skipped": [], "pointer": [], "keys": [], "regions": [],
                                         "masks": [], "moments": {}, "turned_by_tool": 0}
         self.began = time.monotonic()
@@ -1132,6 +1162,7 @@ class Director:
                 return
             self.follow_window()
             self.watch()
+            self.note_name()
             self._step()
         except Exception as e:  # noqa: BLE001 - said, and the run ends
             traceback.print_exc()
@@ -1281,6 +1312,13 @@ class Director:
             self.scene = None
             self.records["scenes"].append(entry)
             self.grabber.pause()
+            after = getattr(self, f"after_{scene.id}", None)
+            if after is not None and not entry["failed"]:  # (what a scene leaves put back, with no picture taken)
+                try:
+                    yield from after()
+                except SceneFailed as e:
+                    self.say(f"after {scene.id}: {e}")
+                    yield from self.reset()
             if entry["failed"]:
                 yield from self.reset()
         self.say("scenes over")
@@ -1701,11 +1739,16 @@ class Director:
         yield from self.glide(*self.park_point(), seconds=0.6)
         yield from self.wait_page(count, before, "the page in Spanish")
         yield 2.0
+
+    def after_language(self) -> Iterator[Any]:
+        """Back to English for the scenes after it, out of the pictures."""
+        from taslation.ui.app import shown_target
+
+        app = self.app
         count, before = self.results(), app.last_result
-        app.lang_shown.set(shown_target("English"))  # (back to English for the scenes after it)
+        app.lang_shown.set(shown_target("English"))
         self.later(app._target_picked)
-        yield from self.wait_page(count, before, "the page in English again")
-        yield 0.8
+        yield Until(self.page_after(count, before), self.args.timeout, "the page in English again")
 
     def act_sheet(self) -> Iterator[Any]:
         from taslation.ui.dialogs.caches import WarningBox
@@ -1722,8 +1765,8 @@ class Director:
         self.off_page = True
         yield 0.6
         self.mask_path(dialog)
-        if self.term is not None:
-            term, rendering = self.term
+        if self.term is not None or self.name is not None:
+            term, rendering = self.term or self.name  # type: ignore[misc]
             entries = [w for w in dv.walk(dialog) if w.winfo_class() == "TEntry"]
             for var, text, entry in ((dialog.term_var, term, entries[0] if entries else None),
                                      (dialog.rend_var, rendering, entries[1] if len(entries) > 1 else None)):
@@ -1737,15 +1780,22 @@ class Director:
             notebook = next((w for w in dv.walk(dialog) if w.winfo_class() == "TNotebook"), None)
             if notebook is None:
                 raise SceneFailed("the sheet has no tabs")
-            notebook.select(len(notebook.tabs()) - 1)
+            notebook.select(len(notebook.tabs()) - 1)  # (no name read on the page: a choice of the sheet's own words)
             yield 0.8
-            entry = next((w for w in dv.walk(dialog) if w.winfo_class() == "TEntry"
-                          and str(w.cget("textvariable")) == str(dialog.tone_var)), None)
-            if entry is not None:
-                yield from self.glide_to(entry, 0.5)
-                yield from self.mark_press()
-            dialog.tone_var.set("")
-            yield from self.type_into(dialog.tone_var, "Casual and lively.")
+            box = next((w for w in dv.walk(dialog) if w.winfo_class() == "TCombobox"
+                        and str(w.cget("textvariable")) == str(dialog.hon_var)), None)
+            if box is None:
+                raise SceneFailed("the style guide has no Honorifics list")
+            values = list(box.tk.splitlist(box.cget("values")))
+            index = next((i for i, v in enumerate(values) if v != dialog.hon_var.get()), None)
+            if index is None:
+                raise SceneFailed("the Honorifics list has one choice")
+            yield from self.glide_to(box, 0.5)
+            yield from self.mark_press()
+            listbox = post_list(box)
+            yield 0.5
+            if not (yield from self.pick_in_list(box, listbox, index, 120)):
+                dialog.hon_var.set(values[index])
             add = find_widget(dialog, "TButton", "Save style guide")
         if add is None:
             raise SceneFailed("no button to keep it")
@@ -1775,8 +1825,21 @@ class Director:
         yield from self.wait_page(count, before, "the page translated again")
         yield 1.5
 
+    def note_name(self) -> None:
+        """A name the page on show holds (`name_like`: its Japanese and the model's rendering of it), kept in memory
+        for the series sheet scene - the sample's own words and the model's, never written anywhere."""
+        if self.name is not None:
+            return
+        result = getattr(self.app, "last_result", None)
+        for region in getattr(result, "regions", None) or ():
+            found = name_like(getattr(region, "source_text", "") or "", getattr(region, "translated_text", "") or "")
+            if found is not None:
+                self.name = found
+                return
+
     def type_into(self, var: Any, text: str, per_char: float = 0.06) -> Iterator[Any]:
-        """*text* typed into *var* a character at a time (the tool's own words or the owner's --term)."""
+        """*text* typed into *var* a character at a time (a name of the page and the model's rendering of it, or the
+        owner's --term)."""
         for i in range(1, len(text) + 1):
             var.set(text[:i])
             yield per_char
@@ -1834,10 +1897,13 @@ class Director:
                     "the editor")
         editor = app._editor
         self.off_page = True
+        self.beside(editor, point)
         yield 0.8
-        old = editor.text.get("1.0", "end-1c").rstrip()  # (in memory only: never noted)
-        core = old.rstrip(".?!…")
-        new = core + "!" if core + "!" != old else core + "!!"
+        # the model's own words typed in again, a word at a time, as the page follows (in memory only: never noted;
+        # no word of the tool's own goes into a bubble)
+        new = editor.text.get("1.0", "end-1c").strip()
+        if not new:
+            raise SceneFailed("the region has no translation to type")
         yield from self.glide_to(editor.text, 0.5)
         yield from self.mark_press()
         editor.text.tag_add("sel", "1.0", "end-1c")
@@ -1854,6 +1920,19 @@ class Director:
         yield Until(lambda: not app.busy, self.args.timeout, "the page lettered")
         yield from self.glide(*self.park_point(), seconds=0.6)
         yield 1.0
+
+    def beside(self, dialog: Any, point: tuple[float, float]) -> None:
+        """*dialog* (a window of this process's) moved to the side of TASlation's window away from *point*, so that
+        the bubble it edits stays in sight as the page follows it."""
+        app = self.app
+        with contextlib.suppress(Exception):
+            dialog.update_idletasks()
+            w = dialog.winfo_width()
+            left, right = app.winfo_rootx() + 8, app.winfo_rootx() + app.winfo_width() - w - 8
+            x = left if point[0] > app.winfo_rootx() + app.winfo_width() / 2 else right
+            y = max(app.winfo_rooty() + 8, min(dialog.winfo_rooty(), app.winfo_rooty() + app.winfo_height()
+                                                - dialog.winfo_height() - 8))
+            dialog.geometry(f"+{int(x)}+{int(y)}")
 
     def act_region(self) -> Iterator[Any]:
         from taslation.ui import area

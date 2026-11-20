@@ -330,6 +330,24 @@ def test_a_frame_stores_only_what_changed_and_reads_back_whole(tmp_path):
             assert np.array_equal(np.asarray(gif.convert("RGB")), np.asarray(expected)), k
 
 
+def test_a_name_on_the_page_is_two_to_four_kanji_and_a_capitalised_rendering():
+    assert iv.name_like("山田\n太郎", "Taro Yamada.") == ("山田太郎", "Taro Yamada")
+    assert iv.name_like("山田", "Yamada") == ("山田", "Yamada")
+    assert iv.name_like("やまだ", "Yamada") is None  # (kana: not taken for a name)
+    assert iv.name_like("山田太郎", "he is taro") is None
+    assert iv.name_like("山", "Mountain") is None
+    assert iv.name_like("山田太郎", "Taro Yamada, I said") is None
+
+
+def test_the_series_sheets_file_line_is_left_empty_in_the_recording_process(monkeypatch):
+    from taslation.ui.dialogs import glossary
+
+    monkeypatch.setattr(glossary, "break_lines", lambda text, *a, **k: text)
+    assert iv.blank_file_lines() == {"series_sheet_file_line": 1}
+    assert glossary.break_lines("File: C:\\somewhere\\sheet.json", 60, None) == ""
+    assert glossary.break_lines("Facts the model is told", 60, None) == "Facts the model is told"
+
+
 def write_recording(path: Path, source: iv.MemorySource) -> None:
     """*source* as the record leaves a recording: its pictures in a ZIP, its facts in meta.json."""
     writer = pv.RecordingWriter(path)
