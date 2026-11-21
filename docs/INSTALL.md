@@ -133,7 +133,7 @@ If it does not start, the shortcut is removed, and the installation makes it aga
 
 ## Updating
 
-The easiest way is Help → "Check for updates..." in TASlation's window. Only when you choose it, a program of its own, `check_update.py`, asks GitHub (raw.githubusercontent.com) for one small file (`CHANGELOG.md`).
+The easiest way is Help → "Check for updates..." in TASlation's window. Only when you choose it, a program of its own, `check_update.py`, asks GitHub (raw.githubusercontent.com) for the first 16 KB of one file, `CHANGELOG.md`: the request stays this small however long the list of changes grows.
 Nothing about you, this computer, the installed version or your books is sent; GitHub sees your IP address and the time, as any site you open does.
 It shows this version and the new one with their dates, and what changed. "Update now" closes TASlation, and `update.cmd` runs in a window of its own:
 it downloads the new version's ZIP (about 5 MB) from GitHub, keeps the files it replaces or deletes in the folder `.previous`, copies the new files,
@@ -173,7 +173,7 @@ The installation after an update also makes the Ollama settings above (so an Oll
 `taslation.toml`, `.venv`, `models` and the data folder (`~/.taslation`) stay as they are. The program folder `taslation\` gets the same contents as the new version
 (files that are not in the new version are deleted); no other file is deleted.
 `update.cmd` uses the network only when it is asked to look for and download a new version ("Update now", a Yes to its first question, `-Download`):
-then `check_update.py` asks raw.githubusercontent.com for `CHANGELOG.md` and downloads that version's ZIP from github.com (GitHub sends it on to codeload.github.com).
+then `check_update.py` asks raw.githubusercontent.com for the first 16 KB of `CHANGELOG.md` and downloads that version's ZIP from github.com (GitHub sends it on to codeload.github.com).
 Given a ZIP or a folder, it uses no network and reads only what it was given.
 You can also check the current version and its date under Help → "About TASlation".
 

@@ -131,7 +131,7 @@ docs/OFFLINE_VERIFICATION.md の「The full-size window cache」）。
 
 ## 更新
 
-いちばん簡単なのは、TASlation のウィンドウのヘルプ →「更新を確認...」です。選んだときだけ、別のプログラム `check_update.py` が GitHub（raw.githubusercontent.com）に小さなファイルを1つ（`CHANGELOG.md`）問い合わせます。
+いちばん簡単なのは、TASlation のウィンドウのヘルプ →「更新を確認...」です。選んだときだけ、別のプログラム `check_update.py` が GitHub（raw.githubusercontent.com）に、1つのファイル `CHANGELOG.md` の最初の 16 KB を問い合わせます。変更点の一覧がどれだけ長くなっても、問い合わせはこの大きさのままです。
 あなたのこと、このパソコン、入っているバージョン、本については何も送りません。GitHub には、どのサイトを開いたときとも同じく、IP アドレスと時刻が伝わります。
 今のバージョンと新しいバージョンを日付つきで、変更点とともに表示します。「今すぐ更新」を押すと TASlation を閉じ、`update.cmd` が自分のウィンドウで動きます。
 新しい版の ZIP（約 5 MB）を GitHub からダウンロードし、置き換えたり消したりするファイルを `.previous` フォルダーに残してから新しいファイルをコピーし、
@@ -171,7 +171,7 @@ docs/OFFLINE_VERIFICATION.md の「The full-size window cache」）。
 `taslation.toml`、`.venv`、`models`、データフォルダー（`~/.taslation`）はそのまま残ります。プログラムのフォルダー `taslation\` は新しい版と同じ中身になり
 （新しい版にないファイルは消えます）、それ以外のファイルは消しません。
 `update.cmd` がネットワークを使うのは、新しい版を探してダウンロードするよう求められたとき（「今すぐ更新」、最初の質問への「はい」、`-Download`）だけです。
-そのときは `check_update.py` が raw.githubusercontent.com に `CHANGELOG.md` を問い合わせ、github.com からその版の ZIP をダウンロードします（GitHub は codeload.github.com へ回します）。
+そのときは `check_update.py` が raw.githubusercontent.com に `CHANGELOG.md` の最初の 16 KB を問い合わせ、github.com からその版の ZIP をダウンロードします（GitHub は codeload.github.com へ回します）。
 ZIP かフォルダーを渡したときは、ネットワークを使わず、渡されたものだけを読みます。
 今のバージョンと日付は、ヘルプ →「TASlation について」でも確かめられます。
 

@@ -9,13 +9,15 @@ updates..., and the look once a day at its start for who turned it on) and updat
 with the program files' Python; TASlation's own process never imports it and never connects anywhere but Ollama on
 this computer. Standard library only; nothing of TASlation is imported.
 
-``check`` asks for one file, the project's CHANGELOG.md on GitHub (`CHANGELOG_URL`). The newest version is its first
+``check`` asks for the first 16 KB of one file, the project's CHANGELOG.md on GitHub (`CHANGELOG_URL`,
+`CHANGELOG_PART`): the request stays as small however long the changelog grows. The newest version is its first
 ``## X.Y.Z - YYYY-MM-DD`` heading; the installed one is the ``version`` line of the pyproject.toml beside this file, as
 update.ps1 reads it. It prints one line of JSON: ``result`` ("newer", "up to date" or "could not ask"), ``installed``,
-``installed_date`` (its entry's date in the changelog, "" when it has none), ``newest``, ``date`` (the newest one's),
-``newer``, ``changes`` (the changelog's entries newer than the installed version, as plain text,
-at most `CHANGES_CAP` characters) and ``reason`` (one plain sentence when it could not ask). Its exit code says the
-same: `NEWER`, `UP_TO_DATE`, `COULD_NOT_ASK`.
+``installed_date`` (its entry's date in the changelog, "" when it has none or it is not in what came), ``newest``,
+``date`` (the newest one's), ``newer``, ``changes`` (the changelog's entries newer than the installed version, as plain
+text, at most `CHANGES_CAP` characters; for someone so many versions behind that the installed version's entry is not
+in the first 16 KB, the entries that came whole and then `OLDER_CHANGES`) and ``reason`` (one plain sentence when it
+could not ask). Its exit code says the same: `NEWER`, `UP_TO_DATE`, `COULD_NOT_ASK`.
 
 ``download`` gets that version's ZIP (`ZIP_URL`, about 4.6 MB) into DIR as ``taslation-X.Y.Z.zip``: first as a
 ``.part`` file, tried `ATTEMPTS` times `RETRY_WAIT_S` seconds apart as the installer's downloads are, going on from
@@ -26,7 +28,7 @@ short with no length said - counts as a broken download, thrown away and asked f
 same tries. Its progress, in percent and MB, goes to stderr; the path of the ZIP, once it is whole, to stdout.
 
 What a request is: one HTTPS GET of one of the two fixed addresses, with a fixed User-Agent (`USER_AGENT`: no version,
-no system, no Python), no query string, no cookie, no credential, no proxy, nothing about the person, the computer or
+no system, no Python) and a Range header (the check's ``bytes=0-16383``; a download taken up again), no query string, no cookie, no credential, no proxy, nothing about the person, the computer or
 the installation. GitHub sees the IP address and the time, as any site one opens does. A redirect is followed only to
 `HOSTS` over HTTPS; any other address stops the run before it is asked. An answer larger than its cap
 (`CHANGELOG_CAP`, `ZIP_CAP`) stops it too, and so do the timeouts (`CONNECT_S` to connect; the check `CHECK_TOTAL_S`
@@ -57,7 +59,8 @@ ZIP_URL = "https://github.com/tamachi955/taslation/archive/refs/tags/v{version}.
 HOSTS = frozenset({"github.com", "codeload.github.com", "raw.githubusercontent.com"})
 TEST_HOSTS = frozenset({"127.0.0.1", "localhost"})
 USER_AGENT = "TASlation-update-check"
-CHANGELOG_CAP = 1 << 20  # bytes
+CHANGELOG_PART = 16 * 1024  # bytes: the check asks for the changelog's beginning only (Range: bytes=0-16383)
+CHANGELOG_CAP = 1 << 20  # bytes: a server that ignores Range and sends the whole file
 ZIP_CAP = 60 << 20
 CONNECT_S = 5.0
 CHECK_TOTAL_S = 10.0  # the whole check, connecting and reading
@@ -68,6 +71,7 @@ REFUSED_HTTP = frozenset({401, 403, 404, 410})  # trying again does not help
 REDIRECTS = (301, 302, 303, 307, 308)
 MAX_REDIRECTS = 5
 CHANGES_CAP = 6000  # characters of the changelog's entries in the answer
+OLDER_CHANGES = "The older changes are in CHANGELOG.md."  # the last line of changes cut short by CHANGELOG_PART
 CHUNK = 64 * 1024
 PROGRESS_STEP = 10  # percent between progress lines when stderr is no console
 
@@ -77,6 +81,7 @@ DOWNLOADED, NOT_DOWNLOADED = 0, 20  # download
 _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _HEADING = re.compile(r"^## (\S+) - ([0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]*$")
 _PROJECT_VERSION = re.compile(r'^\s*version\s*=\s*"([^"]*)"')
+_CONTENT_RANGE = re.compile(r"bytes ([0-9]+)-([0-9]+)/([0-9]+|\*)")
 _CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
 
 
@@ -149,9 +154,13 @@ def entries(changelog: str) -> list[tuple[str, str, str]]:
 def changes_between(changelog: str, installed: str, cap: int = CHANGES_CAP) -> str:
     """The text of the entries newer than *installed*, newest first, each under its heading, at most *cap*
     characters (cut at a line's end, then "...")."""
+    return _changes_text(entries(changelog), installed, cap)
+
+
+def _changes_text(found: list[tuple[str, str, str]], installed: str, cap: int) -> str:
     floor = version_of(installed)
     parts = []
-    for version, date, body in entries(changelog):
+    for version, date, body in found:
         number = version_of(version)
         if floor is not None and number is not None and number <= floor:
             break
@@ -163,18 +172,26 @@ def changes_between(changelog: str, installed: str, cap: int = CHANGES_CAP) -> s
     return text[: cut if cut > 0 else cap].rstrip() + "\n..."
 
 
-def verdict(changelog: str, installed: str) -> dict:
+def verdict(changelog: str, installed: str, whole: bool = True) -> dict:
     """What the changelog says against the installed version: the answer `check` prints. AskError when the newest
-    version cannot be read from it."""
+    version cannot be read from it. *whole*: the changelog came whole; else it is its beginning (`fetch_changelog`),
+    and when no entry at or below the installed version is in it, the changes are the entries that came whole (the
+    last one may be cut where the part ends: left out, unless it is the only one) and then `OLDER_CHANGES`."""
     found = entries(changelog)
     if not found:
         raise AskError("The newest version could not be read from GitHub's answer.")
     newest, date, _body = found[0]
-    newer = version_of(newest) > version_of(installed)  # (both are X.Y.Z here)
+    floor = version_of(installed)
+    newer = version_of(newest) > floor  # (both are X.Y.Z here)
     installed_date = next((day for version, day, _text in found if version == installed), "")
+    changes = ""
+    if newer and (whole or any(version_of(version) <= floor for version, _day, _text in found)):
+        changes = _changes_text(found, installed, CHANGES_CAP)
+    elif newer:
+        came = found[:-1] if len(found) > 1 else found
+        changes = _changes_text(came, installed, CHANGES_CAP - len(OLDER_CHANGES) - 2) + "\n\n" + OLDER_CHANGES
     return {"result": "newer" if newer else "up to date", "installed": installed, "installed_date": installed_date,
-            "newest": newest, "date": date, "newer": newer,
-            "changes": changes_between(changelog, installed) if newer else "", "reason": ""}
+            "newest": newest, "date": date, "newer": newer, "changes": changes, "reason": ""}
 
 
 # ---------------------------------------------------------------- where a request may go
@@ -339,19 +356,34 @@ def failure_sentence(error: BaseException, writing: bool = False) -> str:
 # ---------------------------------------------------------------- check
 
 
-def fetch_changelog(place: Place, total_s: float | None = None) -> str:
-    """The changelog on GitHub as text (`CHANGELOG_CAP`, within *total_s* seconds in all, `CHECK_TOTAL_S` when not
-    given)."""
+def _part_is_whole(content_range: str) -> bool:
+    """Whether a 206's *content_range* is the whole file; AskError when it is not the file's beginning."""
+    m = _CONTENT_RANGE.fullmatch(content_range.strip())
+    if m is None or int(m.group(1)) != 0:
+        raise AskError("The newest version could not be read from GitHub's answer.")
+    return m.group(3) != "*" and int(m.group(2)) + 1 >= int(m.group(3))
+
+
+def fetch_changelog(place: Place, total_s: float | None = None) -> tuple[str, bool]:
+    """The beginning of the changelog on GitHub as text, and whether that is the whole file, within *total_s*
+    seconds in all (`CHECK_TOTAL_S` when not given). One GET with ``Range: bytes=0-16383`` (`CHANGELOG_PART`): a 206
+    with that part is the usual answer; a 200 with the whole file, from a server that ignores Range, is taken too
+    (`CHANGELOG_CAP`). A part may end inside a line, or inside a character: its last line without a line end is left
+    out."""
     total_s = CHECK_TOTAL_S if total_s is None else total_s
     deadline = time.monotonic() + total_s
-    answer = open_url(place.address(CHANGELOG_URL), place, deadline=deadline, read_s=total_s)
+    answer = open_url(place.address(CHANGELOG_URL), place, (("Range", f"bytes=0-{CHANGELOG_PART - 1}"),),
+                      deadline=deadline, read_s=total_s)
     try:
-        if answer.status != 200:
+        if answer.status not in (200, 206):
             raise AskError(f"GitHub answered with HTTP {answer.status}.")
+        whole = answer.status == 200 or _part_is_whole(answer.header("Content-Range"))
         data = read_capped(answer, CHANGELOG_CAP, deadline, total_s)
     finally:
         answer.close()
-    return plain(data.decode("utf-8", "replace"))
+    if not whole:
+        data = data[: data.rfind(b"\n") + 1]
+    return plain(data.decode("utf-8", "replace")), whole
 
 
 def check(place: Place, root: Path = ROOT) -> dict:
@@ -359,7 +391,8 @@ def check(place: Place, root: Path = ROOT) -> dict:
     installed = ""
     try:
         installed = installed_version(root)
-        return verdict(fetch_changelog(place), installed)
+        text, whole = fetch_changelog(place)
+        return verdict(text, installed, whole)
     except Exception as e:  # noqa: BLE001 - every failure is one sentence, never a stack
         return {"result": "could not ask", "installed": installed, "installed_date": "", "newest": "", "date": "",
                 "newer": False, "changes": "", "reason": failure_sentence(e)}

@@ -7,6 +7,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -195,8 +196,9 @@ def test_the_request_says_nothing_about_the_person_or_the_installation(tmp_path,
     request = s.seen[0]
     assert request["line"] == f"GET {CHANGELOG_PATH} HTTP/1.1"  # no query string
     headers = dict(request["headers"])
-    assert sorted(headers) == ["Accept", "Accept-Encoding", "Host", "User-Agent"]
+    assert sorted(headers) == ["Accept", "Accept-Encoding", "Host", "Range", "User-Agent"]
     assert headers["User-Agent"] == "TASlation-update-check" and headers["Accept-Encoding"] == "identity"
+    assert headers["Range"] == "bytes=0-16383"  # the first 16 KB, however long the changelog grows
     text = json.dumps(request)
     for word in ("0.8.1", "Python", "python", "Windows", "urllib", "Cookie", "Authorization", sys.version.split()[0]):
         assert word not in text, word
@@ -367,6 +369,105 @@ def test_the_changes_are_plain_text_and_capped():
 def test_entries_end_at_a_heading_of_another_kind():
     text = "## 0.9.0 - 2026-11-25\n\n* a\n\n## Notes\n\n## 0.8.0 - 2026-11-01\n"
     assert [v for v, _d, _b in cu.entries(text)] == ["0.9.0"]
+
+
+# ---------------------------------------------------------------- check: the first 16 KB only
+def ranged(data: bytes, start_at: int | None = None, content_range: bool = True):
+    """An answer that honours Range as GitHub's raw host does: the part asked for as a 206 with its Content-Range
+    (*start_at*: a part that starts elsewhere; *content_range* False: none said)."""
+    def answer(h):
+        m = re.fullmatch(r"bytes=([0-9]+)-([0-9]+)", h.headers.get("Range") or "")
+        if m is None:
+            return body(data)(h)
+        start = int(m.group(1)) if start_at is None else start_at
+        end = min(int(m.group(2)) + start, len(data) - 1)
+        part = data[start:end + 1]
+        h.send_response(206)
+        if content_range:
+            h.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+        h.send_header("Content-Length", str(len(part)))
+        h.end_headers()
+        h.wfile.write(part)
+    return answer
+
+
+def long_changelog(newest: int = 80) -> bytes:
+    """A changelog of versions 0.*newest*.0 down to 0.1.0, longer than the part the check asks for, with Japanese in
+    its lines (three bytes a character in UTF-8) so that the part can end inside a character too."""
+    parts = ["# Changelog\n\nWhat changed for someone who uses TASlation, newest first.\n"]
+    for n in range(newest, 0, -1):
+        lines = "".join(f"* 変更 {n}.{i}: a change of version {n} told at some length, as entries are.\n" for i in range(6))
+        parts.append(f"## 0.{n}.0 - {date_of(n)}\n\n{lines}")
+    return "\n".join(parts).encode("utf-8")
+
+
+def date_of(n: int) -> str:
+    return f"2026-{n % 12 + 1:02d}-{n % 28 + 1:02d}"
+
+
+def _cut_of(data: bytes) -> bytes:
+    return data[:cu.CHANGELOG_PART]
+
+
+def test_the_check_takes_the_206_with_the_first_16_kb(tmp_path, server):
+    data = long_changelog()
+    assert len(data) > 2 * cu.CHANGELOG_PART
+    s = server({CHANGELOG_PATH: ranged(data)})
+    answer = answer_of(run(scratch(tmp_path, "0.78.0"), "--base", s.base, "check"))  # two versions behind
+    assert dict(s.seen[0]["headers"])["Range"] == "bytes=0-16383" and len(s.seen) == 1
+    assert answer["result"] == "newer" and (answer["newest"], answer["installed_date"]) == ("0.80.0", date_of(78))
+    assert answer["changes"].startswith(f"0.80.0 - {date_of(80)}\n* 変更 80.0") and "0.79.0 - " in answer["changes"]
+    assert "0.78.0 - " not in answer["changes"] and cu.OLDER_CHANGES not in answer["changes"]
+
+
+def test_a_part_cut_inside_an_entry_and_a_line_for_someone_many_versions_behind(tmp_path, server, monkeypatch):
+    data = long_changelog()
+    cut = _cut_of(data)
+    assert not cut.endswith(b"\n") and not cut[cut.rfind(b"\n") + 1:].startswith(b"## ")  # inside a line ...
+    last = re.findall(rb"^## (0\.[0-9]+\.0) - ", cut, re.M)[-1].decode()  # ... of this entry, cut short
+    s = server({CHANGELOG_PATH: ranged(data)})
+    folder = scratch(tmp_path, "0.1.0")
+    monkeypatch.setattr(cu, "CHANGES_CAP", 100_000)  # (every entry that came, to see which)
+    answer = cu.check(cu.Place(s.base), folder)
+    assert answer["result"] == "newer" and answer["newer"] is True and answer["installed_date"] == ""
+    changes = answer["changes"]
+    assert changes.endswith("\n\n" + cu.OLDER_CHANGES) and changes.count(cu.OLDER_CHANGES) == 1
+    assert f"\n{last} - " not in changes  # the entry the part ends in did not come whole: left out
+    previous = f"0.{int(last.split('.')[1]) + 1}.0"
+    assert f"{previous} - " in changes and "�" not in changes
+    text = data.decode("utf-8")
+    for line in changes.split("\n")[:-1]:  # every line as the changelog has it: none cut short
+        assert not line or line in text or re.fullmatch(r"0\.[0-9]+\.0 - [0-9-]+", line), line
+    monkeypatch.setattr(cu, "CHANGES_CAP", 6000)
+    capped = cu.check(cu.Place(s.base), folder)["changes"]
+    assert len(capped) <= cu.CHANGES_CAP and capped.endswith("\n...\n\n" + cu.OLDER_CHANGES)  # (the window's cap too)
+
+
+@pytest.mark.parametrize("installed", ["0.1.0", "0.78.0"])
+def test_a_server_that_ignores_range_sends_the_whole_file_and_it_is_taken(tmp_path, server, installed):
+    data = long_changelog()
+    s = server({CHANGELOG_PATH: body(data)})  # a 200 with everything
+    answer = answer_of(run(scratch(tmp_path, installed), "--base", s.base, "check"))
+    assert dict(s.seen[0]["headers"])["Range"] == "bytes=0-16383"
+    assert answer["result"] == "newer" and answer["installed_date"] != ""  # the whole file: its entry is there
+    assert cu.OLDER_CHANGES not in answer["changes"]
+
+
+def test_a_206_with_the_whole_short_file_keeps_its_last_line(tmp_path, server):
+    data = CHANGELOG.rstrip("\n").encode()  # (no line end after its last line)
+    s = server({CHANGELOG_PATH: ranged(data)})
+    answer = answer_of(run(scratch(tmp_path, "0.7.0"), "--base", s.base, "check"))  # older than every entry
+    assert answer["result"] == "newer" and answer["installed_date"] == ""
+    assert answer["changes"].endswith("0.8.0 - 2026-11-19\n* Older still.")  # the whole file: nothing left out
+    assert cu.OLDER_CHANGES not in answer["changes"]
+
+
+@pytest.mark.parametrize("start_at, content_range", [(100, True), (None, False)])
+def test_a_206_that_is_not_the_beginning_is_could_not_ask(tmp_path, server, start_at, content_range):
+    s = server({CHANGELOG_PATH: ranged(long_changelog(), start_at, content_range)})
+    answer = answer_of(run(scratch(tmp_path, "0.1.0"), "--base", s.base, "check"))
+    assert answer["result"] == "could not ask"
+    assert answer["reason"] == "The newest version could not be read from GitHub's answer."
 
 
 # ---------------------------------------------------------------- download

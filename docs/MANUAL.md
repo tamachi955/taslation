@@ -1018,7 +1018,7 @@ Last, "Translator's window cache" (`ollama_window_cache`) decides whether the Ol
 "On, unless the OCR then leaves the GPU" (the default), "Off" or "Always on" (see below). It applies from the next start of Ollama; the translation's row above
 says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it, and why).
 Under it, the box "Look for a new version once a day when TASlation starts" (`update_check`: `"off"`, the default, or `"daily"`; the installer asks once) makes TASlation, at a start a day or more after the last look,
-30 seconds or more after the window is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for one small file.
+30 seconds or more after the window is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for the first 16 KB of `CHANGELOG.md`.
 A newer version is named in the Help menu's "Check for updates..." item and in one line at the bottom of the window (no dialog). When it could not ask, it says nothing. It applies from the next start.
 Help → "Check for updates..." asks when you choose it, whether the box is on or off. It shows this version and the new one with their dates and what changed; "Update now" closes TASlation,
 and `update.cmd` downloads the new version, updates and starts TASlation again (docs/INSTALL.md, "Updating"). The same box is in that window too.
@@ -1193,9 +1193,9 @@ and removes one no longer needed when you agree (`ollama list`, `ollama rm`); an
 The downloader (`setup_models.py`, which the window and the command line run as a separate process when you agree to download a model) and the installer (`install.cmd`, which `update.cmd` also runs) run without the guard: they download.
 The third is `check_update.py`, the program that looks for a new version: the window runs it as a process of its own when you choose Help → "Check for updates..." and, when you turned on the look at the start, once a day;
 `update.cmd` runs it when it is asked to look for and download a new version. It runs without the guard too, and the TASlation package never imports it.
-It asks GitHub's three hosts only: raw.githubusercontent.com for `CHANGELOG.md`, and github.com for that version's ZIP, with an HTTPS GET
+It asks GitHub's three hosts only: raw.githubusercontent.com for the first 16 KB of `CHANGELOG.md` (a Range header asks for that part only, so the request stays this small however long the file grows), and github.com for that version's ZIP, with an HTTPS GET
 (the ZIP is tried up to three times when a download breaks off or what came is not a whole ZIP, every entry of it read back: a broken one is downloaded whole again); github.com sends the ZIP on to codeload.github.com. Sent on to any other address, it stops without asking there.
-Besides the plain headers HTTP needs, it sends only a fixed User-Agent (`TASlation-update-check`): no query string, no cookie, not the installed version, nothing about this computer or your books.
+Besides the plain headers HTTP needs and that Range header, it sends only a fixed User-Agent (`TASlation-update-check`): no query string, no cookie, not the installed version, nothing about this computer or your books.
 GitHub sees the IP address and the time, as any site you open does. It uses no proxy.
 The window's own process connects nowhere for it, so what `taslation audit` lists of TASlation's own connections is the same with it.
 
