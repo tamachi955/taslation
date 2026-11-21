@@ -661,7 +661,8 @@ def test_a_request_of_its_own_without_an_answer_pauses_it_says_so_and_an_answer_
     p.translator = silent = Silent(EN_TEXTS)
     assert b.step(p) == "failed" and len(silent.calls) == 1
     assert "no_answer" in b.paused and b.fatal is None and b.entries  # (never waits for a page job as a fatal one)
-    assert ("model_status", {"message": Message("ollama.not_answering")}) in posted  # (the backlog's end is said)
+    # (the backlog's end is said, as the backlog's: in the status line, no page on show's)
+    assert ("model_status", {"message": Message("ollama.not_answering"), "behind": True}) in posted
     assert _paused_told(posted)[-1] is True and _stages(posted)[-1] == ("translate", "waiting")
     window = _window(b, p)
     for _ in range(3):  # (nothing goes on, nothing asks: the reader is told, once)
@@ -706,6 +707,63 @@ def test_another_job_s_request_without_an_answer_pauses_it_until_f5_or_auto_on(s
     p.translator = Silent(EN_TEXTS)  # (another translator: the language switched; nothing ended without an answer)
     backlog_tick(window)
     assert not b.paused
+
+
+class Telling(DictTranslator):
+    """Notes, in each request, whether its thread runs a step of the backlog's (`backlog.in_step`) - and whether
+    another thread is taken for one meanwhile -, and waits on its cancel as the translator's restart does
+    (`ollama_start._wait_answer`: ``cancel.wait``)."""
+
+    def __init__(self, mapping):
+        super().__init__(mapping)
+        self.seen: list[tuple[bool, bool, bool]] = []
+
+    def translate_page(self, texts, *args, cancel=None, **kwargs):
+        other: list[bool] = []
+        thread = threading.Thread(target=lambda: other.append(backlog_mod.in_step()))
+        thread.start()
+        thread.join()
+        waited = cancel.wait(0.01) if cancel is not None else False
+        self.seen.append((backlog_mod.in_step(), other[0], waited))
+        return super().translate_page(texts, *args, cancel=cancel, **kwargs)
+
+
+def test_what_a_request_of_the_backlogs_tells_is_the_backlogs_and_its_cancel_waits_as_an_event(settings, sample_page):
+    """(the rule for a request without an answer, `translate.ollama`) A request of the backlog's is known for one in
+    its thread while its step runs (the window says what it tells in the status line only: `ui.jobs._model_status`),
+    never in another thread nor after the step; its cancel (`Preempt`) is waited on where the restart waits on a
+    request's cancel - it had no ``wait``, and the restart of a server for a request of the backlog's failed."""
+    b = Backlog(lambda kind, **data: None)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Behind-told")
+    _job(p, b, sample_page, _confirmed())
+    assert not backlog_mod.in_step() and b.step(p) == "made"
+    p.translator = telling = Telling(EN_TEXTS)
+    assert b.step(p) == "translate" and telling.seen and not b.entries
+    assert all(seen == (True, False, False) for seen in telling.seen), telling.seen
+    assert not backlog_mod.in_step()  # (the step is over)
+    telling.translate_page(["x"], cancel=threading.Event())  # (a request of the page on show's)
+    assert telling.seen[-1][0] is False
+
+
+def test_the_backlogs_cancel_is_waited_on_as_a_threading_event_and_a_restart_waits_on_it(monkeypatch):
+    from taslation import health, ollama_start
+
+    stop = Preempt()
+    began = time.monotonic()
+    assert stop.wait(0.06) is False and time.monotonic() - began >= 0.05
+    waiting = [False]
+    turned = Preempt(lambda: waiting[0])
+    threading.Timer(0.05, lambda: waiting.__setitem__(0, True)).start()  # (a page job comes to wait for the worker)
+    began = time.monotonic()
+    assert turned.wait(5.0) is True and time.monotonic() - began < 2.0 and turned.set_at is not None
+    stop.set()
+    assert stop.wait() is True and stop.wait(0) is True
+    # (the restart's wait for a server started again: `_wait_answer` with a step's cancel)
+    monkeypatch.setattr(health, "ollama_running", lambda url: False)
+    monkeypatch.setattr(ollama_start, "START_WAIT_S", 0.2)
+    monkeypatch.setattr(ollama_start, "POLL_S", 0.02)
+    assert ollama_start._wait_answer("http://127.0.0.1:1", Preempt()).code == "health.ollama_no_answer"
+    assert ollama_start._wait_answer("http://127.0.0.1:1", Preempt(lambda: True)).code == "health.ollama_down"
 
 
 def test_a_drop_tells_the_window_at_once_and_the_numbering_starts_at_1_again(settings, sample_page):

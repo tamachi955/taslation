@@ -33,7 +33,12 @@ that does not answer pauses it too ("no_answer", `follow_silence`: a request of 
 the rule of `translate.ollama`, asked again and, for the server TASlation started, the server started again): it goes
 on by itself at the next answer of any request, and with F5 or Auto on (`go_on_after_silence`: asked once more, paused
 again at the next such end); a request of its own that ends so is said (``model_status``, the sentence that the
-translator does not answer), and never waits for a page job as a failure every request repeats does (`fatal`).
+translator does not answer), and never waits for a page job as a failure every request repeats does (`fatal`). The
+backlog's requests come under that rule as any request does: the seconds one waited without a byte count with the
+page on show's (`translate.ollama._Waits`; a turn that stops one keeps them), and its restart takes the step's
+`Preempt` as a request's cancel. What one of them tells - a load, the rule's sentences - is the backlog's, not the
+page on show's (`in_step`: ``behind`` in the ``model_status`` event): the window says it in its status line only,
+never as the page's stage, its badge or its slot (`ui.jobs._model_status`).
 
 A page shown again whose entry holds its regions as read is not read again (`Backlog.lend`, at the job's start: the
 frame of the same page units as the capture they came from - `same_units` -, of its pixel size, nothing a reading
@@ -105,6 +110,7 @@ SHOWN_AT_LEAST_MS = 150  # a frame dropped before its confirmation that was on s
 MERGE_WITHIN = 2  # a page that went by is the next screen confirmed when their fingerprints are this many times
 # ``fingerprint_max_distance`` apart at most (a soft picture of the page, drawn first, and its sharp one)
 HOLD_S = 0.0  # a step of the backlog that asks the model waits until the reader has stayed this long on a finished page
+WAIT_STEP_S = 0.05  # how often a `Preempt` waited on looks whether a job waits for the worker
 DONE_CAP_MB = 64  # the regions as read kept of the pages done (`Backlog.keep_done`: a page shown again is read nowhere)
 
 
@@ -117,9 +123,20 @@ def reading_event(window: Any, kind: str, data: dict[str, Any]) -> None:
         handler(data)
 
 
+_STEP = threading.local()  # (``on``: the thread is running a step of the backlog's: `in_step`)
+
+
+def in_step() -> bool:
+    """Whether the calling thread runs a step of the backlog's now (`Backlog.step`): what a request of the translator
+    tells (its ``on_status``: a load, a request without an answer) is the backlog's then, which the window says in its
+    status line only, never as the page on show's (`ui.jobs._model_status`)."""
+    return bool(getattr(_STEP, "on", False))
+
+
 class Preempt:
     """The cancel of a step of the backlog: set by `Pipeline.stop_warm` (a page to read, any job: `ui.jobs.next_job`)
-    and by Stop; and set by itself while *waiting*() says a job waits for the worker."""
+    and by Stop; and set by itself while *waiting*() says a job waits for the worker. Taken where a
+    `threading.Event` is (`is_set`, `wait`): the translator's requests and its restart (`ollama_start._wait_answer`)."""
 
     def __init__(self, waiting: Callable[[], bool] | None = None) -> None:
         self._event = threading.Event()
@@ -139,6 +156,17 @@ class Preempt:
             self.set()
             return True
         return False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """As `threading.Event.wait`: True once it is set - a job that comes to wait for the worker is looked for
+        every WAIT_STEP_S -, False when *timeout* seconds went by first."""
+        end = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
+        while not self.is_set():
+            left = WAIT_STEP_S if end is None else min(WAIT_STEP_S, end - time.monotonic())
+            if left <= 0:
+                return False
+            self._event.wait(left)
+        return True
 
 
 @dataclass(eq=False)
@@ -811,6 +839,7 @@ class Backlog:
         stop = Preempt(waiting)
         pipeline.behind_stop = stop
         last_seq = getattr(pipeline, "last_seq", None)
+        _STEP.on = True  # (what the translator tells meanwhile is the backlog's: `in_step`)
         try:
             if what == "read":
                 return self._read(pipeline, entry, stop)
@@ -831,6 +860,7 @@ class Backlog:
             self._finish(entry, "translate" if what == "translate" else "read", "failed")
             return "failed"
         finally:
+            _STEP.on = False
             pipeline.behind_stop = None
             if last_seq is not None:
                 pipeline.last_seq = last_seq  # (where the book was read last is the reader's, not the backlog's)
@@ -970,9 +1000,10 @@ class Backlog:
         if host._fatal is not None:
             if getattr(host._fatal, "code", "") == "ollama.not_answering":
                 # (the translator does not answer, asked again and, when TASlation started it, started again: the
-                # backlog pauses until the next answer, F5 or Auto on - `follow_silence` - and says so)
+                # backlog pauses until the next answer, F5 or Auto on - `follow_silence` - and says so, in the status
+                # line only: it is no page on show's)
                 self.pause("no_answer")
-                self._post("model_status", message=host._fatal)
+                self._post("model_status", message=host._fatal, behind=True)
             else:
                 with self._lock:
                     self.fatal = host._fatal

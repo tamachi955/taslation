@@ -508,6 +508,40 @@ def test_a_request_without_an_answer_is_said_in_the_status_line(window):
     assert [e[1].code for e in window.events] == ["ollama.loading"]  # (the page's stage is not touched)
 
 
+def test_what_a_request_of_the_backlog_tells_is_said_in_the_status_line_only(window):
+    """(a page turned past, read on behind the reader: ``behind``) Its load, the rule's sentences and its end go to the
+    status line; the page on show's stage, the stage a load of the page's interrupted and its badge stay as they are."""
+    translating = Message("pipeline.stage_translating", bubbles=3, translator="ollama")
+    window._progress = translating
+    said = [Message("ollama.loading", model=MODEL), Message("ollama.no_answer", seconds=30.0),
+            Message("ollama.restarting"), Message("ollama.loading", model=MODEL),
+            Message("ollama.loaded", model=MODEL, seconds=3.4), Message("ollama.not_answering")]
+    for message in said:
+        jobs.JobsMixin._handle_event(window, "model_status", {"message": message, "behind": True})
+    assert window.statuses == said and window.events == []  # (no stage of the page's: `_handle_event` "progress")
+    assert window._progress is translating and window._before_loading is None
+    window._model_status(Message("ollama.loading", model=MODEL))  # (a load of the page's own shows as its stage)
+    window._model_status(Message("ollama.no_answer", seconds=30.0), behind=True)
+    assert window._before_loading is translating  # (and a sentence of the backlog's leaves what it interrupted)
+    split = Message("ollama.partly_on_gpu", model=MODEL, percent=55)
+    window._model_status(split, behind=True)
+    window._model_status(split)
+    assert [e[0] for e in window.events].count("popup") == 1  # (said in a popup once a session, whoever loaded)
+
+
+def test_the_translator_tells_the_window_whether_its_request_is_the_backlogs(monkeypatch):
+    from taslation import backlog
+
+    posted: list = []
+    w = SimpleNamespace(_post=lambda kind, **data: posted.append((kind, data)))
+    loading = Message("ollama.loading", model=MODEL)
+    jobs.JobsMixin._translator_status(w, loading)
+    monkeypatch.setattr(backlog._STEP, "on", True, raising=False)  # (in a step of the backlog's, on its thread)
+    jobs.JobsMixin._translator_status(w, loading)
+    assert posted == [("model_status", {"message": loading, "behind": False}),
+                      ("model_status", {"message": loading, "behind": True})]
+
+
 def test_a_split_model_is_said_in_a_popup_once_a_session(window):
     message = Message("ollama.partly_on_gpu", model=MODEL, percent=55)
     window._model_status(message)

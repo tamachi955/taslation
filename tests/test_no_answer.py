@@ -295,6 +295,42 @@ def test_a_reader_who_turns_before_the_bound_has_the_rule_fire_once_the_waits_ad
     assert len(said) == 1
 
 
+def test_the_backlogs_requests_stopped_by_a_turn_are_counted_with_the_page_on_shows(stand, monkeypatch):
+    """(the work behind the reader, `taslation.backlog`) A request of the backlog's, stopped as a page job comes to
+    wait for the worker (its `Preempt`), counts what it waited as a page's request cancelled by a turn does: the pages
+    on show and the pages turned past take turns, and the rule fires once their waits add up to the bound."""
+    from taslation.backlog import Preempt
+    from taslation.messages import Cancelled
+
+    monkeypatch.setattr(ollama_mod, "POLL_S", 0.02)
+    stand.plan = ["silent"] * 60
+    t, told = _translator(stand)
+    kinds: list[str] = []
+    while len(kinds) < 15 and "ollama.no_answer" not in _codes(told):
+        behind = len(kinds) % 2 == 1
+        kinds.append("behind" if behind else "on show")
+        if behind:  # (a page job comes to wait for the worker TURN_S into the backlog's step)
+            due = time.monotonic() + TURN_S
+            cancel: Any = Preempt(lambda: time.monotonic() >= due)
+            timer = None
+        else:
+            cancel = threading.Event()
+            timer = threading.Timer(TURN_S, cancel.set)
+            timer.start()
+        try:
+            t.translate_page([LINE], cancel=cancel)
+        except Cancelled:
+            pass
+        finally:
+            if timer is not None:
+                timer.cancel()
+        time.sleep(BOUND_S / 2)
+    said = [m for m in told if m.code == "ollama.no_answer"]
+    assert said, f"the rule never fired in {len(kinds)} requests"
+    assert "behind" in kinds[:-1] and len(kinds) >= 4  # (the backlog's waits were counted on the way)
+    assert BOUND_S <= said[0].params["seconds"] <= BOUND_S + 0.2 and len(said) == 1
+
+
 def test_any_answer_between_the_turns_starts_the_count_again(stand, monkeypatch):
     """(the guard of the count: three pages turned before their answer, the fourth answered - 0.4 s in a row at most)"""
     monkeypatch.setattr(ollama_mod, "POLL_S", 0.02)
