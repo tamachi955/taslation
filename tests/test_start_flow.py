@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import threading
 import time
 import tkinter as tk
@@ -487,6 +488,15 @@ def _label_texts(top):
     return [" ".join(t.split("\n")) for t in texts], ["".join(t.split("\n")) for t in texts]
 
 
+def _label_shows(top, note: str) -> bool:
+    """Whether one of the dialog's labels is *note* as `break_lines` wraps it: each break between its lines stands for
+    a space or for nothing (a break at a space drops the space: in a Japanese sentence too, where it has one, as after
+    "TASlation"; elsewhere a Japanese sentence breaks between two characters). Where the breaks fall is the window
+    font's: another computer's breaks the same note elsewhere."""
+    texts = [str(w.cget("text")) for w in _widgets(top) if w.winfo_class() == "TLabel"]
+    return any(re.fullmatch(" ?".join(re.escape(line) for line in t.split("\n")), note) for t in texts)
+
+
 def test_page_by_page_is_the_default_and_whole_book_mode_an_opt_in():
     from pathlib import Path
 
@@ -508,8 +518,8 @@ def test_the_whole_book_question_says_what_a_stores_terms_make_of_it(hidden_root
                 d = StartDialog(hidden_root, "Yomizuq" if generic else "My Story 2", generic=generic, ask=True,
                                 on_answer=lambda *a: None)
                 d.withdraw()
-                spaced, joined = _label_texts(d)
-                assert note in (spaced if code == "en" else joined), (code, generic)
+                spaced, _joined = _label_texts(d)
+                assert (note in spaced) if code == "en" else _label_shows(d, note), (code, generic)
                 labels = [w for w in d.winfo_children()[0].winfo_children() if w.winfo_class() == "TLabel"]
                 assert labels[-1] is d.terms_label  # under the question
                 question = "".join(str(labels[-2].cget("text")).split("\n"))
@@ -519,7 +529,7 @@ def test_the_whole_book_question_says_what_a_stores_terms_make_of_it(hidden_root
                 d.destroy()
             d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: None)
             d.withdraw()  # the name alone (page-by-page mode): no question, no note
-            assert note not in _label_texts(d)[0] and note not in _label_texts(d)[1]
+            assert note not in _label_texts(d)[0] and note not in _label_texts(d)[1] and not _label_shows(d, note)
             d.destroy()
         finally:
             set_language("en")
@@ -531,8 +541,8 @@ def test_the_batch_dialog_says_it_above_start(hidden_root, tmp_path):
         try:
             d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path), on_start=lambda options: None)
             d.withdraw()
-            spaced, joined = _label_texts(d)
-            assert (note in spaced) if code == "en" else (note in joined), code
+            spaced, _joined = _label_texts(d)
+            assert (note in spaced) if code == "en" else _label_shows(d, note), code
             assert max(len(line) for line in str(d.terms_label.cget("text")).split("\n")) < len(note)  # wrapped
             d.destroy()
         finally:
