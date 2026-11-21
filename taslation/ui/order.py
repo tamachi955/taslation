@@ -9,7 +9,8 @@ two when the person brings TASlation to the front.
 What is done, and only that (`keep_under`, each heartbeat of the window: `live.LiveViewMixin._beat`): the viewer's
 window put directly under TASlation's (`capture.keep_viewer_under`: SetWindowPos with SWP_NOACTIVATE - no
 activation, no change of the foreground, no key, no click, nothing that turns a page; only the viewer's place in the
-order), when a window that could hide some of it lies between the two. A window that lay between is not moved: it
+order, and then its location change announced as a window event, which a browser's occlusion tracking looks again
+at), when a window that could hide some of it lies between the two. A window that lay between is not moved: it
 lies under the viewer from then on - one the person laid over a part of the viewer on purpose (a note, a dictionary)
 too, unless PARTLY_COVERED_TOO is False: then only when the windows of other programs hide all of it. Topmost windows stay above the viewer, which is never made topmost (under a
 topmost TASlation - Always on top, the full screen - it goes to the top of the windows that are not topmost). The

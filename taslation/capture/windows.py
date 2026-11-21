@@ -410,6 +410,8 @@ if IS_WINDOWS:
     user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                     ctypes.c_int, wintypes.UINT]
     user32.SetWindowPos.restype = wintypes.BOOL
+    user32.NotifyWinEvent.argtypes = [wintypes.DWORD, wintypes.HWND, wintypes.LONG, wintypes.LONG]
+    user32.NotifyWinEvent.restype = None
     user32.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
     user32.RedrawWindow.restype = wintypes.BOOL
 
@@ -1489,6 +1491,9 @@ class _Order:
     def place(self, hwnd: int, after: int) -> bool:
         return bool(user32.SetWindowPos(hwnd, after, 0, 0, 0, 0, SWP_STAY))
 
+    def tell(self, hwnd: int) -> None:
+        user32.NotifyWinEvent(EVENT_OBJECT_LOCATIONCHANGE, hwnd, OBJID_WINDOW, CHILDID_SELF)
+
 
 def keep_viewer_under(viewer: int, own: int, order: _Order | None = None, between: list[int] | None = None) -> str:
     """The viewer's window *viewer* put directly under TASlation's window *own* in the order of the windows when a
@@ -1501,7 +1506,12 @@ def keep_viewer_under(viewer: int, own: int, order: _Order | None = None, betwee
     "not windows", "gone", "minimised" (either window), "topmost" (the viewer is topmost: nothing can lie over it but
     other topmost windows), "above" (the viewer does not lie under TASlation's window), "refused" (Windows did not take
     it: a viewer that runs as administrator, say). *between* (a list) is given the windows that lay between, from the
-    top down. (Checked on throwaway windows, the viewer's of another process, the caller not in front: put after
+    top down. Once placed, a location change of the viewer's window is announced (NotifyWinEvent
+    EVENT_OBJECT_LOCATIONCHANGE, OBJID_WINDOW: an event to the programs that listen for window events, nothing sent to
+    the viewer): a browser's occlusion tracking (Chromium's, Firefox's) looks again at a window event and does not at a
+    change of the order alone - seen on the stand-in: put over the window that hid it, it drew nothing for 13.7 s more,
+    until another program's window moved. (TASlation's own watch of the viewer asks only for the events of the viewer's
+    process: this one is not among them.) (Checked on throwaway windows, the viewer's of another process, the caller not in front: put after
     TASlation's window it lies directly under it; under a topmost one HWND_TOP puts it over a window that lay between
     and leaves it not topmost, where put after the topmost window it became topmost.)"""
     if order is None:
@@ -1522,7 +1532,10 @@ def keep_viewer_under(viewer: int, own: int, order: _Order | None = None, betwee
         return ""
     if between is not None:
         between.extend(found)
-    return "placed" if order.place(viewer, HWND_TOP if order.topmost(own) else own) else "refused"
+    if not order.place(viewer, HWND_TOP if order.topmost(own) else own):
+        return "refused"
+    order.tell(viewer)
+    return "placed"
 
 
 def behind_others(hwnd: int) -> bool:

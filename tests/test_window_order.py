@@ -21,7 +21,7 @@ SCREEN = (0, 0, 1920, 1080)
 class Desk:
     """Windows' order of the top-level windows, from the top down, with what each is (`Placed`); `place` moves a
     window as SetWindowPos does: directly after another, or to the top of the windows that are not topmost
-    (HWND_TOP). Every move is noted."""
+    (HWND_TOP). Every move is noted, and every location change announced (`tell`)."""
 
     def __init__(self, *placed: Placed, minimised: tuple[int, ...] = (), refuse: bool = False):
         self.z = [p.hwnd for p in placed]
@@ -29,6 +29,7 @@ class Desk:
         self.mins = set(minimised)
         self.refuse = refuse
         self.moves: list[tuple[int, int]] = []
+        self.told: list[int] = []
 
     def root(self, hwnd: int) -> int:
         return hwnd if hwnd in self.of else 0
@@ -60,6 +61,9 @@ class Desk:
             at = self.z.index(after) + 1
         self.z.insert(at, hwnd)
         return True
+
+    def tell(self, hwnd: int) -> None:
+        self.told.append(hwnd)
 
 
 def own(**kw) -> Placed:
@@ -126,6 +130,25 @@ def test_why_nothing_is_done():
     assert keep_viewer_under(VIEWER, OWN, Desk(own(), other())) == "gone"
     refused = Desk(own(), other(), viewer(), refuse=True)  # (a viewer run as administrator, say)
     assert keep_viewer_under(VIEWER, OWN, refused) == "refused" and refused.z == [OWN, OTHER, VIEWER]
+    assert refused.told == []  # (nothing moved: nothing announced)
+
+
+def test_the_viewer_put_up_has_its_location_change_announced_once_so_a_browser_looks_at_its_occlusion_again():
+    """(a browser's occlusion tracking looks again at a window event, not at a change of the order alone: on the
+    stand-in, put over the window that hid it, it drew nothing until another program's window moved)"""
+    desk = Desk(own(), other(), viewer())
+    assert keep_viewer_under(VIEWER, OWN, desk) == "placed" and desk.told == [VIEWER]
+    assert keep_viewer_under(VIEWER, OWN, desk) == "" and desk.told == [VIEWER]  # (nothing between: nothing more)
+    above = Desk(viewer(), own(), other())
+    assert keep_viewer_under(VIEWER, OWN, above) == "above" and above.told == []
+
+
+def test_the_announcement_is_an_event_about_the_viewers_window_not_a_message_to_it(monkeypatch):
+    calls: list[tuple] = []
+    fake = SimpleNamespace(NotifyWinEvent=lambda *a: calls.append(a))
+    monkeypatch.setattr(windows, "user32", fake)
+    windows._Order().tell(VIEWER)
+    assert calls == [(windows.EVENT_OBJECT_LOCATIONCHANGE, VIEWER, windows.OBJID_WINDOW, windows.CHILDID_SELF)]
 
 
 def test_outside_windows_nothing_is_asked(monkeypatch):

@@ -2090,6 +2090,12 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
 
 COVER_CLASS = "StandinToolCover"
 COVER_MARGIN = 24  # the cover's reach beyond the stand-in's window on every side
+COVER_EX = "plain"  # the cover's extended style: "plain" (none: a window as any program's, shown with no activation all
+# the same), "noactivate" (WS_EX_NOACTIVATE: Chromium's occlusion tracking was seen not to count it - the stand-in drew
+# on under it; `--cover-style`)
+COVER_FRONT_S = 3.0  # --front-for-order own: the window put at the top of the order (no activation) so long after the
+# cover came, as a person's click on TASlation puts it (the frames under the cover stand still for that long first;
+# --cover-front-s)
 
 
 class CoverWindow:
@@ -2099,8 +2105,9 @@ class CoverWindow:
     only the left part of the stand-in so wide is covered (a note or a dictionary laid over a part of the viewer), the
     rest stays in sight. Its own thread and message loop; `close` ends it."""
 
-    def __init__(self, standin: int, part: float = 1.0):
+    def __init__(self, standin: int, part: float = 1.0, style: str = COVER_EX):
         self.standin, self.hwnd, self.part = standin, 0, part
+        self.no_activate_style = style == "noactivate"
         self.shown_t: float | None = None
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, name="tool-cover", daemon=True)
@@ -2146,8 +2153,9 @@ class CoverWindow:
         if self.part < 1.0:  # (the left part alone: its right edge inside the stand-in)
             w = COVER_MARGIN + max(1, int((r.right - r.left) * self.part))
         style = 0x00C00000 | 0x00080000  # WS_CAPTION | WS_SYSMENU: a window as any program's (not shown yet)
-        self.hwnd = int(user32.CreateWindowExW(0x08000000, COVER_CLASS, "stand-in cover", style, x, y, w, h,
-                                               None, None, instance, None) or 0)  # WS_EX_NOACTIVATE
+        ex = 0x08000000 if getattr(self, "no_activate_style", False) else 0  # [WS_EX_NOACTIVATE] (see COVER_EX)
+        self.hwnd = int(user32.CreateWindowExW(ex, COVER_CLASS, "stand-in cover", style, x, y, w, h,
+                                               None, None, instance, None) or 0)
         if self.hwnd:
             user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
             user32.GetWindow.restype = wintypes.HWND
@@ -2156,6 +2164,10 @@ class CoverWindow:
             above = user32.GetWindow(self.standin, 3)  # GW_HWNDPREV: the window just above the stand-in, if any
             after = above if above and int(above) != self.hwnd else wintypes.HWND(0)  # (else HWND_TOP)
             user32.SetWindowPos(self.hwnd, after, x, y, w, h, 0x0010 | 0x0040)  # SWP_NOACTIVATE | SWP_SHOWWINDOW
+            # (then moved by a pixel, SWP_NOZORDER: a window shown with no activation and not moved is not seen by
+            # Chromium's occlusion tracking until some other window event; a person's window that comes over the
+            # viewer comes with a change of the window in front or a move)
+            user32.SetWindowPos(self.hwnd, None, x + 1, y, w, h, 0x0010 | 0x0004)  # SWP_NOACTIVATE | SWP_NOZORDER
             self.shown_t = now_ms()
         self._ready.set()
         msg = wintypes.MSG()
@@ -2174,6 +2186,37 @@ class CoverWindow:
             user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
             self._thread.join(3.0)
         return now_ms()
+
+
+def own_to_top(own: int) -> bool:
+    """`--front-for-order own`: TASlation's own window put at the top of the order of the windows (of its band), with
+    no activation and no change of the window in front: the order a click on it gives. Only the tool's own window."""
+    user32 = ctypes.WinDLL("user32")
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, wintypes.UINT]
+    return bool(own) and bool(user32.SetWindowPos(own, None, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010))  # HWND_TOP
+
+
+def order_depth(hwnd: int) -> int:
+    """How many windows lie above *hwnd* in the order of the windows (-1: not found)."""
+    user32 = ctypes.WinDLL("user32")
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetTopWindow.argtypes = [wintypes.HWND]
+    user32.GetTopWindow.restype = wintypes.HWND
+    h, n = user32.GetTopWindow(None), 0
+    while h and n < 8192:
+        if int(h) == int(hwnd):
+            return n
+        h, n = user32.GetWindow(h, 2), n + 1
+    return -1
+
+
+def is_topmost(hwnd: int) -> bool:
+    """Whether the window *hwnd* is a topmost one (WS_EX_TOPMOST)."""
+    user32 = ctypes.WinDLL("user32")
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    return bool(user32.GetWindowLongW(hwnd, -20) & 0x8)
 
 
 def cover_over(cover: int, standin: int) -> bool:
@@ -2706,7 +2749,10 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
         def order_owner(hwnd: Any, viewer: int, *a: Any, **k: Any) -> str:
             real_owner(hwnd, viewer, *a, **k)
-            return "own"
+            with notes.lock:  # (the cover's program in front until the window is put at the top: `cover_step`)
+                c = notes.tool_cover
+                covered = c is not None and c.get("gone_t") is None and "own_top_t" not in c
+            return "other" if covered else "own"
 
         order_mod.foreground_owner = order_owner
     hook = threading.excepthook
@@ -2755,6 +2801,7 @@ class Director:
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
         self.cover: CoverWindow | None = None  # (`cover_step`)
         self.cover_from: float | None = None
+        self.own_topped = False  # (`cover_step`: the window put at the top of the order)
         self.events: list[dict[str, Any]] = []
         self.seen = 0
         self.waiting_go = 0
@@ -2852,20 +2899,38 @@ class Director:
             self.cover_from = time.monotonic()
         since = time.monotonic() - self.cover_from
         if self.cover is None and since >= at:
-            self.cover = CoverWindow(self.browser.hwnd, getattr(self.args, "cover_part", 1.0))
+            self.cover = CoverWindow(self.browser.hwnd, getattr(self.args, "cover_part", 1.0),
+                                     getattr(self.args, "cover_style", COVER_EX))
             with self.notes.lock:
                 self.notes.tool_cover = {"segment": segment, "shown_t": self.cover.shown_t, "gone_t": None,
-                                         "made": bool(self.cover.hwnd), "part": self.cover.part}
+                                         "made": bool(self.cover.hwnd), "part": self.cover.part,
+                                         "style": "noactivate" if self.cover.no_activate_style else "plain"}
         elif self.cover is not None and since >= at + lasts:
             gone = self.cover.close()
             with self.notes.lock:
                 self.notes.tool_cover["gone_t"] = gone
         elif self.cover is not None and self.cover.hwnd:
+            if (getattr(self.args, "front_for_order", "as-is") == "own" and not self.own_topped
+                    and since >= at + getattr(self.args, "cover_front_s", COVER_FRONT_S)):
+                self.own_topped = True
+                own = self.app._own_hwnd()
+                before = (order_depth(own), order_depth(self.browser.hwnd))
+                done = own_to_top(own)
+                with self.notes.lock:
+                    self.notes.tool_cover["own_top_t"] = now_ms() if done else None
+                    self.notes.tool_cover["depths"] = {"before": before, "after": (order_depth(own),
+                                                                                   order_depth(self.browser.hwnd))}
             over = cover_over(self.cover.hwnd, self.browser.hwnd)
             with self.notes.lock:
                 c = self.notes.tool_cover
                 c["looks"] = c.get("looks", 0) + 1
                 c["over_looks"] = c.get("over_looks", 0) + (1 if over else 0)
+                c["standin_topmost_looks"] = c.get("standin_topmost_looks", 0) + (1 if is_topmost(self.browser.hwnd) else 0)
+                said = getattr(getattr(self.app, "_order_state", None), "last", None)
+                lasts = c.setdefault("order_said", {})  # (what `capture.keep_viewer_under` said last, at each look)
+                lasts[str(said)] = lasts.get(str(said), 0) + 1
+                c["own_over_standin_looks"] = c.get("own_over_standin_looks", 0) + (
+                    1 if cover_over(self.app._own_hwnd(), self.browser.hwnd) else 0)
                 if not over and c.get("under_t") is None:
                     c["under_t"] = now_ms()  # (the stand-in first found over the cover: put under the window)
 
@@ -5212,7 +5277,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],
         "tool_cover": None if notes.tool_cover is None else {
             **notes.tool_cover, "shown_t": rel(notes.tool_cover["shown_t"]), "gone_t": rel(notes.tool_cover["gone_t"]),
-            "under_t": rel(notes.tool_cover.get("under_t"))},
+            "under_t": rel(notes.tool_cover.get("under_t")), "own_top_t": rel(notes.tool_cover.get("own_top_t"))},
         "guard": {"patched": patched, "refused": guard.refused, "chosen": sorted(set(notes.selected)),
                   "stand_in": browser.hwnd, "reached_the_stand_in": guard.used,
                   "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
@@ -5601,9 +5666,10 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if cover:
         part = cover.get("part", 1.0)
         print(f"the tool's cover over {'all' if part >= 1 else f'the left {part:.0%}'} of the stand-in from "
-              f"{cover.get('shown_t')} s to {cover.get('gone_t')} s: the "
-              f"stand-in put over it at {cover.get('under_t')} s; the cover found over it {cover.get('over_looks', 0)} of "
-              f"{cover.get('looks', 0)} looks")
+              f"{cover.get('shown_t')} s to {cover.get('gone_t')} s: the window put at the top at "
+              f"{cover.get('own_top_t')} s, the stand-in put over it at {cover.get('under_t')} s; the cover found over "
+              f"it {cover.get('over_looks', 0)} of {cover.get('looks', 0)} looks, the stand-in topmost "
+              f"{cover.get('standin_topmost_looks', 0)}")
     stalls = run_.get("frame_stalls") or []
     if stalls:
         print(f"frames standing still: {len(stalls)}, longest {max((s['lasted_s'] or 0) for s in stalls)} s"
@@ -5768,7 +5834,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--synthetic", action="store_true", help="the repository's test pages, not the dataset")
     ap.add_argument("--front-for-order", default="as-is", choices=("as-is", "own"),
                     help="own: the window keeps the viewer under its own as with it in front (`ui.order`), whoever is "
-                         "in front (nothing is brought to the front; the window order of the stand-in alone changes)")
+                         "in front (nothing is brought to the front); with --cover, as if the cover's program were in "
+                         "front until COVER_FRONT_S after the cover came, when the window is put at the top of the "
+                         "order, as a click on it puts it, with no activation")
     ap.add_argument("--order-partly", default="as-built", choices=("as-built", "on", "off"),
                     help="`ui.order.PARTLY_COVERED_TOO` for this run: on, a window over a part of the viewer sends it "
                          "up too; off, only windows that hide all of it (default: as built)")
@@ -5802,6 +5870,12 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--cover", type=cover_plan, default=None, metavar="SEGMENT:AT:FOR",
                     help="the tool's own plain window laid over the stand-in AT seconds after SEGMENT began, for FOR "
                          "seconds (a viewer wholly covered, on purpose; no key, no activation)")
+    ap.add_argument("--cover-style", default=COVER_EX, choices=("plain", "noactivate"),
+                    help="--cover's extended style: plain (default) or WS_EX_NOACTIVATE (either way shown with no "
+                         "activation)")
+    ap.add_argument("--cover-front-s", type=float, default=COVER_FRONT_S, metavar="S",
+                    help="--front-for-order own with --cover: the window put at the top of the order S seconds after "
+                         "the cover came (default %(default)s)")
     ap.add_argument("--cover-part", type=cover_part, default=1.0, metavar="F",
                     help="--cover over the left F of the stand-in's width alone (0 < F <= 1; default 1: all of it)")
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
