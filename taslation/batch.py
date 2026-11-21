@@ -26,9 +26,11 @@ Two modes:
 The reading follows the reader: a thread (`_sample`) watches the viewer's frame, woken by every new frame of the capture
 (`capture.frame_wait`; without frame events it looks every `sample_s`), and decides frame by frame which ones are the
 pages (`PageWatch`): a picture as it is for settle_ms, or one the reader turned on from after half of that; a viewer
-that draws a page soft first has the sharp picture taken, never the soft one. A thread of its own (`_pack_loop`) puts
-each page on a backlog for the reading loop (`_iterate_pages`), packed in memory (`pageimages`), so that the sampler
-only captures and compares: on the stand-in viewer (`tools/fast_turn_eval.py`, 40 OpenMantra pages) no page is lost
+that draws a page soft first has the sharp picture taken, never the soft one - but for a soft picture taken before the
+run has seen that its viewer does so: its sharper picture takes its place, and when that comes while the page is
+being read, the reading is thrown away and the page read again from the sharper one (`_scan_sharp`). A thread of its
+own (`_pack_loop`) puts each page on a backlog for the reading loop (`_iterate_pages`), packed in memory
+(`pageimages`), so that the sampler only captures and compares: on the stand-in viewer (`tools/fast_turn_eval.py`, 40 OpenMantra pages) no page is lost
 at 2 pages a second, on a viewer that draws every page soft first for 150-400 ms too (blurred, or aliased from a picture
 6 times smaller as Chrome draws it: ``--chrome``), and a reader at 3 a second there loses only the pages whose sharp
 picture never came before the turn, each said at once. A soft picture and its sharp one are one page by their blurred
@@ -927,6 +929,10 @@ class BatchReader:
         self._in_hand = 0
         self._in_hand_lock = threading.Lock()
         self._last_key: int | None = None  # the images' key of the page the packer took last (a sharper picture's)
+        # `PageImages.replaced` of the reading loop's page as its frame was got, and the readings thrown away because a
+        # sharper picture of the page took the frame's place meanwhile (`_scan_sharp`)
+        self._read_from: int | None = 0
+        self.read_again = 0
         # seq -> (the fingerprints, the `page_thumb`, the `detail`) of a page that went by, not taken yet
         self._missed: dict[int, tuple[tuple[str, ...], np.ndarray, np.ndarray]] = {}
         # (seq, `page_thumb`, `detail`) of every page the packer took (`_taken_before`)
@@ -1701,7 +1707,8 @@ class BatchReader:
 
     def _sharper_taken(self, frame: Image.Image) -> None:
         """A sharper picture of the page taken last came after it was taken: it takes the frame's place while the frame
-        waits to be read (`PageImages.replace_unread`)."""
+        waits to be read (`PageImages.replace_unread`), and while it is read: the reading is then done again on it
+        (`_scan_sharp`)."""
         if self._last_key is not None:
             self.images.replace_unread(self._last_key, pack(frame))
 
@@ -1762,6 +1769,7 @@ class BatchReader:
                 if taken is None:
                     break
                 try:
+                    self._read_from = self.images.replaced(taken.key)  # (before the frame is got: `_scan_sharp`)
                     frame = self.images.frame(taken.key)
                     if frame is None:  # (never: a frame to read is never let go)
                         continue
@@ -2405,6 +2413,39 @@ class BatchReader:
         cache cannot say: half of a spread seen before, or a page read by the run an earlier one stopped in.)"""
         return any(fingerprint.hamming(unit.fingerprint, u.fingerprint) <= INDEXED_WITHIN for u in self._units)
 
+    def _scan_sharp(self, frame: Image.Image, taken: _Taken, erasing: bool) -> tuple[Any, list[Any]]:
+        """The reading of *taken*'s *frame* (`Pipeline.scan`; with *erasing*, its regions to erase ahead too), the frame
+        marked read once it is done (`PageImages.read`). A sharper picture of the page that took the frame's place
+        meanwhile (`_sharper_taken`: a viewer that draws a page soft first, before the run has learnt that it does, has
+        the soft picture taken when it stays as it is for settle_ms) has the reading thrown away - none of its units
+        kept, nothing it would store stored (*later*), its regions not erased - and the page read again from the
+        sharper picture, until the frame read is still the page's frame when its reading is done (`read_again` counts
+        the readings thrown away). Before, the sharper picture stayed where nothing read the page again, and the page
+        had the soft picture's lines."""
+        while True:
+            later: list[Callable[[], Any]] = []
+            # (the layout model: no reading while the translator's model loads; the cache, read here, is the
+            # translation's too)
+            with self._gpu_work(), self._storing:
+                scan = self.pipeline.scan(frame, skip_cached=True, fresh=self.retranslate, cancel=self._stop,
+                                          keep_edited=not self.replace_corrections,
+                                          events=self._events_of(taken),
+                                          progress=self._stage if self.show is not None else None, later=later,
+                                          **({"keep_regions": True} if erasing else {}))
+            regions = list(getattr(scan, "erasable", []) or []) if erasing else []
+            with self._storing:
+                if self.images.read(taken.key, erase=bool(regions), read_from=self._read_from):
+                    for action in later:
+                        action()
+                    return scan, regions
+            self.read_again += 1
+            self._read_from = self.images.replaced(taken.key)  # (before the frame, as `_iterate_pages` gets it)
+            again = self.images.frame(taken.key)
+            if again is not None:  # (never None: a frame waiting to be read is never let go)
+                frame = again
+            else:
+                self._read_from = None
+
     def _reading_pass(self, start: float) -> threading.Thread | None:
         """Read every page the reader turns: the capture and the OCR, no model request while the reader turns
         (`Pipeline.scan`). The units with something to translate go to `_units`, text and geometry only. Once the
@@ -2421,14 +2462,7 @@ class BatchReader:
             self._emit(Message("batch.scanning_page", page=page))
             began = time.monotonic()
             erasing = self._erasing and taken.seq > 0
-            # (the layout model: no reading while the translator's model loads; the cache, read here, is the
-            # translation's too)
-            with self._gpu_work(), self._storing:
-                scan = self.pipeline.scan(frame, skip_cached=True, fresh=self.retranslate, cancel=self._stop,
-                                          keep_edited=not self.replace_corrections,
-                                          events=self._events_of(taken),
-                                          progress=self._stage if self.show is not None else None,
-                                          **({"keep_regions": True} if erasing else {}))
+            scan, regions = self._scan_sharp(frame, taken, erasing)
             read = [u for u in scan.units if not u.cached and u.japanese() and not self._read_already(u)]
             with self._fed:
                 self._units.extend(read)
@@ -2436,11 +2470,8 @@ class BatchReader:
                     self._seq_of[id(u)] = taken.seq
             nothing_new = bool(scan.units) and all(u.cached for u in scan.units)
             self._page_stage(taken.seq, "read", "skipped" if nothing_new else "done")
-            regions = list(getattr(scan, "erasable", []) or []) if erasing else []
             if regions:  # (the page being translated is lettered on them: `translation_view`, `pipeline.PageDraft`)
                 self.images.put_regions(taken.key, regions)
-            self.images.read(taken.key, erase=bool(regions))
-            if regions:
                 self._page_stage(taken.seq, "erase", "waiting")
                 self._erase_jobs.put((taken.seq, regions))
             else:

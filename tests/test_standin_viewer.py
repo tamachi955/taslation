@@ -251,7 +251,9 @@ def test_the_runs_frames_are_told_by_who_got_them_and_a_soft_one_with_the_sharpe
     eraser.join()
     assert [r["by"] for r in notes.run_reads] == ["read", "erase"]
     batch = (ROOT / "taslation" / "batch.py").read_text(encoding="utf-8")
-    assert 'name="batch-erase-ahead"' in batch and batch.count("self.images.frame(") == 2  # (its only two callers)
+    # (its only callers: the reading loop - a page's frame, and the one that took its place while it was read - and
+    # the erase ahead)
+    assert 'name="batch-erase-ahead"' in batch and batch.count("self.images.frame(") == 3
     reads = [{"t": 500.0, "key": 0, "by": "read", "page": 0, "spread": True, "state": "sharp"},
              {"t": 1000.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "soft"},
              {"t": 3000.0, "key": 2, "by": "erase", "page": 2, "spread": True, "state": "sharp"}]

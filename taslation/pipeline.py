@@ -2333,9 +2333,15 @@ class Pipeline:
     # ------------------------------------------------------------------ batch
     def scan(self, image: Image.Image, *, skip_cached: bool = True, progress: ProgressFn | None = None,
              fresh: bool = False, cancel: threading.Event | None = None,
-             events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True) -> PageScan:
+             events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True,
+             later: list[Callable[[], Any]] | None = None) -> PageScan:
         """Detect and read a page; keep text and geometry only (the image is not retained). Once *cancel* is set,
         `Cancelled` is raised between regions.
+
+        With *later*, what the scan keeps besides what it returns - a cached page pruned or emptied (`_save_page`), the
+        page's place in the book's order of pages (`record_sequence`) - is appended there, in its order, instead of
+        done: the caller does it once it keeps the scan (a whole-book run throws away the reading of a frame a sharper
+        picture of the page replaced meanwhile, and keeps nothing of it).
 
         A page that is already in the cache is re-synchronised with the current
         detection: cached bubbles that no text region corresponds to any more are
@@ -2368,9 +2374,12 @@ class Pipeline:
         regions = self._annotate(rgb, self._detect(rgb), units)
         owners = self._owners(rgb, regions, units)
         before = _units_before(rgb, s.margins)
+        when_kept: Callable[[Callable[[], Any]], Any] = (later.append if later is not None
+                                                         else (lambda action: action()))
         if self.annotations is not None:
+            annotations = self.annotations
             for unit in units:
-                self.annotations.record_sequence(unit.fingerprint, unit.aspect)
+                when_kept(lambda unit=unit: annotations.record_sequence(unit.fingerprint, unit.aspect))
         plans: list[tuple[fp.PageUnit, list[TextRegion], tuple[CachedPage, int] | None]] = []
         for unit in units:
             hit = None
@@ -2429,8 +2438,9 @@ class Pipeline:
                     held_ids.update(id(cb) for cb, _r in mine)
                     su.regions = [r for r in scanned if not any(r is taken for _cb, taken in mine)]
                 su.kept.extend(self._kept_in_areas(units, unit, [cb for cb in page.bubbles if id(cb) not in held_ids]))
-                if not su.japanese() and page.bubbles:
-                    self._save_page(page.fingerprint, unit.aspect, su.kept)  # no text on this page any more
+                if not su.japanese() and page.bubbles:  # no text on this page any more
+                    when_kept(lambda print_=page.fingerprint, aspect=unit.aspect, kept=list(su.kept):
+                              self._save_page(print_, aspect, kept))
                 scan.units.append(su)
                 continue
             japanese = [r for r in scanned if r.is_japanese]
@@ -2457,8 +2467,9 @@ class Pipeline:
             su.dropped = len(left) - len(held)
             su.regions = [r for i, r in enumerate(japanese) if i not in matched]
             su.cached = not su.regions
-            if su.cached and (su.dropped or page.incomplete):
-                self._save_page(page.fingerprint, unit.aspect, su.kept)  # prune now; nothing to translate
+            if su.cached and (su.dropped or page.incomplete):  # prune now; nothing to translate
+                when_kept(lambda print_=page.fingerprint, aspect=unit.aspect, kept=list(su.kept):
+                          self._save_page(print_, aspect, kept))
             scan.units.append(su)
         return scan
 

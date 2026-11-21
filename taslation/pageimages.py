@@ -13,7 +13,9 @@ What is held, per page (*key*: the run's order of first sight, `BatchReader`'s *
 negative key of its own):
 
 * the frame, *unread* while it waits on the backlog: never let go to make room, so no page the reader turned is lost;
-  once read it stays as long as there is room, *pending* while its erase is still to come;
+  a sharper picture of the page takes its place until it is read (`replace_unread`), also while it is being read, and
+  that reading is then done again on the sharper one (`replaced`, `read`); once read it stays as long as there is room,
+  *pending* while its erase is still to come;
 * the erased page (`put_erased`): the frame with every region the render will erase erased, and for each region an
   `ErasedRegion` (the key the render finds it by, the paper colour, the pixels its erase changed). It takes the frame's
   place: it is the best image of the page for the render. With it goes its `Undo` (the frame's own pixels where the
@@ -263,6 +265,7 @@ class PageImages:
         self._records: dict[int, list[ErasedRegion]] = {}
         self._index: dict[bytes, tuple[int, int]] = {}  # an ErasedRegion's key -> (its page's key, its index)
         self._unread: set[int] = set()
+        self._replaced: dict[int, int] = {}  # a frame's key -> how often a sharper picture took its place (`replaced`)
         self._pending: set[int] = set()
         self._shape: dict[int, tuple[int, int]] = {}  # an erased page's (height, width)
         self._undo: dict[int, Undo] = {}  # an erased page's `Undo`: its frame made again from it (`original`)
@@ -302,6 +305,7 @@ class PageImages:
         if kind == "frame":
             self._frames.pop(key, None)
             self._pending.discard(key)
+            self._replaced.pop(key, None)
         else:
             self._erased.pop(key, None)
             self._shape.pop(key, None)
@@ -343,8 +347,9 @@ class PageImages:
         return True
 
     def replace_unread(self, key: int, packed: Packed) -> bool:
-        """The frame of *key* replaced by *packed* (a sharper picture of the same page) while it waits to be read; False,
-        and nothing changed, once it has been read, or when the new one does not fit."""
+        """The frame of *key* replaced by *packed* (a sharper picture of the same page) while it waits to be read - its
+        reading begun too: `read` with the frame it began on then says so, and it is read again -; False, and nothing
+        changed, once it has been read, or when the new one does not fit."""
         with self._lock:
             old = self._frames.get(key)
             if old is None or key not in self._unread:
@@ -352,16 +357,28 @@ class PageImages:
             if self.used - old.nbytes + packed.nbytes > self.cap:
                 return False
             self._frames[key] = packed
+            self._replaced[key] = self._replaced.get(key, 0) + 1
             self.largest = max(self.largest, packed.nbytes)
         self._changed()
         return True
 
-    def read(self, key: int, erase: bool) -> None:
-        """The frame of *key* has been read; with *erase*, it is kept for the erase to come (*pending*)."""
+    def read(self, key: int, erase: bool, read_from: int | None = None) -> bool:
+        """The frame of *key* has been read; with *erase*, it is kept for the erase to come (*pending*). With
+        *read_from* (`replaced` as its reading began), only while no sharper picture has taken its place since
+        (`replace_unread`): False, and nothing changed, when one has - that one waits to be read."""
         with self._lock:
+            if read_from is not None and self._replaced.get(key, 0) != read_from:
+                return False
             self._unread.discard(key)
             if erase and key in self._frames:
                 self._pending.add(key)
+        return True
+
+    def replaced(self, key: int) -> int:
+        """How often a sharper picture has taken the place of the frame of *key* (`replace_unread`). Asked before the
+        frame is got for its reading (`read`'s *read_from*): one that comes in between is read again, never missed."""
+        with self._lock:
+            return self._replaced.get(key, 0)
 
     def frame(self, key: int) -> Image.Image | None:
         with self._lock:
@@ -483,6 +500,7 @@ class PageImages:
             self._records.clear()
             self._index.clear()
             self._unread.clear()
+            self._replaced.clear()
             self._pending.clear()
             self._shape.clear()
             self._undo.clear()
