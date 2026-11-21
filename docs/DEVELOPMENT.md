@@ -131,7 +131,7 @@ rows' languages.
   each acted on the window's own Tk widgets with no system-wide input (the pointer is drawn in afterwards); it uses
   `tools/demo_video.py`'s guard and a scratch state folder, touches no other window, and keeps no page text in the
   recording. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
-  cards whose figures come from the code's constants - refuses one over 9 MB (`--allow-large`), and deletes the
+  cards whose figures come from the code's constants - refuses one over 5 MB (`--allow-large`), and deletes the
   recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
   4.0 material. Each card line and step names the sentences of README.md, docs/MANUAL.md or docs/THIRD_PARTY.md it
   follows, or is marked as the tool's own words; `tests/test_intro_video.py` fails when one of those sentences no

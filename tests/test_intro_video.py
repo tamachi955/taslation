@@ -3,7 +3,7 @@ table (ids, order, what this checkout has, texts that fit a 960x540 frame, heade
 numbered as the GIF is made, every card line and step following sentences that still stand word for word in README.md,
 docs/MANUAL.md or docs/THIRD_PARTY.md (or marked as the tool's own words), the cards' facts against the code's
 constants and with nothing that compares or boasts, the version on the
-title card and the credit on every frame with a page, the 9 MB limit, a GIF of made-up frames and one of a recording
+title card and the credit on every frame with a page, the 5 MB limit, a GIF of made-up frames and one of a recording
 (deleted once the GIF is written), no page text in a recording's facts, and the guard that refuses another
 program's window."""
 
@@ -124,10 +124,11 @@ def test_every_quote_still_stands_in_its_document_word_for_word():
 
 def test_a_changed_sentence_or_a_changed_figure_makes_its_line_stale():
     facts, docs = iv.code_facts(), documents()
-    changed = dict(docs, **{iv.README: docs[iv.README].replace("| Network | Used only while installing |",
-                                                               "| Network | Used only when installing and updating |")})
+    changed = dict(docs, **{iv.README: docs[iv.README].replace("| Network | Used only when installing and updating |",
+                                                               "| Network | Used only while installing |")})
     assert [s.split(":")[0] for s in stale_lines(facts, changed)] == ["card privacy"]
-    assert "The network is used only while installing." in stale_lines(facts, changed)[0]
+    assert stale_lines(facts, changed)[0].startswith("card privacy: The network is used only when installing")
+    assert "no longer says '| Network | Used only when installing and updating |'" in stale_lines(facts, changed)[0]
     other = dict(facts, plamo_gb="9.9")  # (the code's figure no longer what the README says)
     assert {s.split(":")[0] for s in stale_lines(other, docs)} == {"card models"}
 
@@ -294,7 +295,7 @@ def test_a_gif_over_the_limit_is_refused_and_says_which_scenes_take_the_most(tmp
     assert not out.exists() and not (tmp_path / "big.part.gif").exists()
     report = iv.render(small_sample(), out, quick(limit=1000, allow_large=True))
     assert out.exists() and report["over_by"] > 0
-    assert iv.GIF_LIMIT == 9_000_000
+    assert iv.GIF_LIMIT == 5_000_000
 
 
 def test_the_gifs_images_are_read_back_with_their_times_and_bytes(tmp_path):

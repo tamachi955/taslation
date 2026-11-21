@@ -38,7 +38,7 @@ numbered in their order (the window on the right, the stand-in viewer and the st
 key cap), then the cards "How a page is translated", "The models", "On your own computer" and "Before you use it" -
 their figures from the code's constants (`code_facts`), their sentences those of README.md, docs/MANUAL.md and
 docs/THIRD_PARTY.md. Long waits are cut; a stretch marked as waiting for the models is shown faster, with a badge and
-"shown at N.Nx speed" under it. One palette, no dither. A GIF over 9 MB is refused (``--allow-large`` writes it and
+"shown at N.Nx speed" under it. One palette, no dither. A GIF over 5 MB is refused (``--allow-large`` writes it and
 says by how much it is over); either way the scenes that take the most bytes are said. The recording file is deleted
 once the GIF is written (``--keep-recording`` keeps it); it holds pictures of the sample pages, as the GIF does: both
 are CC BY-NC 4.0 material ("Sample pages: OpenMantra dataset (Mantra Inc., CC BY-NC 4.0), modified" on every frame
@@ -89,7 +89,7 @@ FORMAT = "intro-1"  # the recording's ``intro_format``
 BOOK = "balloon_dream (OpenMantra)"
 DEFAULT_PORT = 11438
 REFUSED_PORTS = range(11434, 11438)  # the owner's own Ollama, and ports other tools use
-GIF_LIMIT = 9_000_000  # bytes: a GIF over this is refused without --allow-large
+GIF_LIMIT = 5_000_000  # bytes: a GIF over this is refused without --allow-large (every visitor of the page loads it)
 SIZE = (960, 540)
 WINDOW_SIZE = (1240, 860)
 WINDOW_AT = (380, 40)
@@ -402,8 +402,8 @@ CARDS: dict[str, tuple[str, tuple[Line, ...]]] = {
              cites(README, "**Fully local**: the reading and the translating happen on this computer, and no page and "
                            "no translation is sent outside.")),
         Line("No model is trained further.", "bullet", cites(README, "No model is trained further.")),
-        Line("The network is used only while installing.", "bullet",
-             cites(README, "| Network | Used only while installing |")),
+        Line("The network is used only when installing and updating.", "bullet",
+             cites(README, "| Network | Used only when installing and updating |")),
         Line("It has none of these: saving page images, operating the viewer by itself, getting round capture "
              "protection, sharing over a network.", "bullet",
              cites(README, "For that reason it has none of these:\n\n* saving page images\n* operating the viewer by "
