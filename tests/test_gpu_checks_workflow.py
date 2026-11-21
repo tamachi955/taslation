@@ -237,7 +237,8 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         names = standin_e2e.wanted(scenarios)
         assert group == "-".join(names), group  # (the group says what the tool runs: a pair comes along)
         covered += names
-    assert sorted(covered) == sorted(standin_e2e.ORDER) and len(covered) == len(set(covered))
+    # every scenario of "all" once, and scenario k's three paces (never in "all") once
+    assert sorted(covered) == sorted([*standin_e2e.ORDER, *standin_e2e.K_ASKED]) and len(covered) == len(set(covered))
     # e turns back to the pages d translated: never alone, never without d
     assert any(standin_e2e.wanted(s)[:2] == ["d", "e"] for s in groups.values())
     choice = _on(_workflow())["workflow_dispatch"]["inputs"]["groups"]["description"]
@@ -260,6 +261,32 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         assert verdict["if"] == "always()" and words in verdict["run"] and "--check" in verdict["run"]
         assert "exit $code" in verdict["run"]
     assert "--timeout $env:SCENARIO_TIMEOUT" in _step("standin", "The verdict")["run"]
+
+
+def test_scenario_k_runs_once_in_a_short_form_its_rests_never_held():
+    import standin_e2e
+
+    groups = _groups()
+    with_k = [g for g, s in groups.items() if "k" in s.split(",")]
+    assert len(with_k) == 1 and with_k[0].endswith("-k5-k1-k2"), with_k
+    run = _step("standin", "Run: tools/standin_e2e.py")["run"]
+    short = "if (($env:SCENARIOS -split ',') -contains 'k') { $arguments += @('--k-turns', '6', '--k-read', '3') }"
+    assert short in run and run.index("$arguments = @(") < run.index(short) < run.index("& $env:PY @arguments")
+    args, tools = standin_e2e.parse(["--scenario", groups[with_k[0]], "--k-turns", "6", "--k-read", "3"]), \
+        standin_e2e.parse([])
+    assert (args.k_turns, args.k_read, args.k_read_ms) == (6, 3, standin_e2e.K_READ_MS)
+    assert args.k_turns < tools.k_turns and tools.k_read == 0  # (the tool's own form: 20, and all of them read back)
+    # (--wait-done holds no rest of k: its rests are its pace; each pace waits for the backlog to empty instead)
+    assert not set(standin_e2e.K_PACES) & set(standin_e2e.HOLD_SCENARIOS)
+
+    def scripted_s(turns: int, read: int) -> float:
+        names = standin_e2e.wanted(groups[with_k[0]])
+        segments, _ = standin_e2e.build_plan(names, 200, 0, 700, 90.0, {"turns": turns, "read": read or turns})
+        waits = [s for seg in segments if seg.name in standin_e2e.K_PACES for s in seg.steps if s.startswith("w")]
+        return sum(int(s[1:].split("-")[0]) for s in waits) / 1000
+
+    # the stand-in's own waits in k: under two minutes for the three paces, against near ten in the tool's form
+    assert scripted_s(6, 3) == 117.0 and scripted_s(20, 0) == 574.0
 
 
 def _run_step(job: str, name_part: str, env: dict[str, str], tmp_path: Path) -> tuple[int, str, dict[str, str]]:
@@ -413,8 +440,14 @@ def test_the_summary_reads_the_tools_own_lines():
     import standin_e2e
 
     assert (s.REST_MS, s.STALE_MS) == (standin_e2e.REST_MS, standin_e2e.STALE_MS)
+    assert (s.K_PACES, s.K_STAYED_MS) == (tuple(standin_e2e.K_PACES), standin_e2e.K_STAYED_MS)
     source = (ROOT / "tools" / "standin_e2e.py").read_text("utf-8")
     assert 'print(f"run stopped: {why}", file=sys.stderr, flush=True)' in source
+    # scenario k's fields as the tool writes them (`k_block`, `told_states`, `wasted_requests`, the request list)
+    for words in ('"frames_held_after_read_most":', '"bytes_at_end":', '"left_working":', '"read_back_caught_no_new_read":',
+                  '"why": why, "frame": r["frame"], "gate": r["gate"]', 'return "dropped"', '"side": getattr(',
+                  '"scenario_k": k_facts', '"request_list": request_list'):
+        assert words in source, words
     for why in s.LEFT_FAULTS:  # (standin_e2e.left_why's words)
         assert f'"{why}"' in source, why
     assert s.console_facts("x\nrun stopped: the stand-in browser ended\n")["stopped"] == "the stand-in browser ended"
@@ -620,6 +653,102 @@ def test_a_soft_frame_the_run_read_fails_with_who_got_it():
     assert failed[0]["seen"] == [["2", "read", 1500]]  # (the page's key, who got it, the sharper frame after it)
     report["run"]["whole_book_run"] = {**whole, "frames_got_not_sharp": [], "frames_got_not_sharp_list": []}
     assert not [c for c in s.standin(report, "", {}, "t", 600)["failed"] if c["scenario"] == "w"]
+
+
+def _k_report(**run) -> dict:
+    """`_report` with scenario k's three paces after it: each a turn to a fresh page, two pages flipped past and two
+    read back, as the tool tells them; at 1 s a page two requests of a page job asked before its frame was confirmed
+    and dropped as the page was flipped past (the window's design), at 2 s both pages caught and read back from what
+    the backlog read."""
+    report = _report()
+    turns = list(report["run"]["turns"])
+    t = 60.0
+    for name in ("k5", "k1", "k2"):
+        for why, rest in (("jump", 8000), ("next", 1000), ("next", 1000), ("jump", 8000), ("next", 8000)):
+            turns.append({"n": len(turns), "segment": name, "t_s": t, "rest_ms": rest, "finished_ms": 3000,
+                          "at_rest": "translated", "at_rest_from": "sharp", "page": 20 + len(turns), "spread": False,
+                          "why": why, "requests": 1})
+            t += rest / 1000
+    pace = {"flips": 2, "stayed": 0, "caught": 0, "done_on_show": 0, "agree": 2, "read_back": 2,
+            "read_back_caught": 0, "read_back_caught_no_new_read": 0, "drain_s": 0.0, "background_requests": 0,
+            "first_lettered_read_back": {"n": 2, "median": 2100, "p90": 3000, "max": 3000}, "peak_mb": 0.0,
+            "frames_held_after_read_most": 0, "bytes_at_end": 0}
+    paces = {"k5": {**pace, "pace_ms": 500},
+             "k1": {**pace, "pace_ms": 1000, "stayed": 1, "caught": 1, "read_back_caught": 1,
+                    "read_back_caught_no_new_read": 1, "drain_s": 4.1, "background_requests": 6, "peak_mb": 2.4},
+             "k2": {**pace, "pace_ms": 2000, "stayed": 2, "caught": 2, "read_back_caught": 2,
+                    "read_back_caught_no_new_read": 2, "drain_s": 31.5, "background_requests": 14, "peak_mb": 5.0,
+                    "first_lettered_read_back": {"n": 2, "median": 160, "p90": 470, "max": 470}}}
+    dropped = [{"t_s": 77.2 + d, "segment": "k1", "job": 40, "why": "dropped", "frame": "sharp", "gate": "pending"}
+               for d in (0.0, 0.1)]
+    base = {"turns": turns, "released": {**report["run"]["released"], "end": {"waited_s": 35.0, "timed_out": False}},
+            "scenario_k": {"paces": paces, "told": {"left_working": [], "done_told_working_again": 0}},
+            "wasted_requests": {"count": 3, "by_segment": {"x": 1, "k1": 2},
+                                "list": [{"t_s": 41.0, "segment": "x", "why": "soft", "gate": "none"}, *dropped]},
+            "request_list": {"columns": ["t_s", "job", "side", "wasted"],
+                             "rows": [[77.2, 40, None, "dropped"], [100.5, None, "backlog", None]]}}
+    base.update(run)
+    report["run"].update(base)
+    report["scenarios"] = [*report["scenarios"], "k5", "k1", "k2"]
+    return report
+
+
+def test_scenario_k_is_judged_on_what_the_pages_turned_past_guarantee_and_its_figures_are_reported():
+    s = _summarise()
+    out = s.standin(_k_report(), "", {}, "t-t2-w-w2-k5-k1-k2", 600)
+    assert out["verdict"] == "pass", _failed(out)
+    k_criteria = [c for c in s.correctness(_k_report(), 600) if c["scenario"] in ("k5", "k1", "k2")]
+    assert len(k_criteria) == 3 * 5 + 2  # (each pace: drawn, last page, told, requests, frames; at the end: two more)
+    assert out["meaning"]["k5"].startswith("holds: 0 of 2 pages flipped past caught")
+    assert out["meaning"]["k2"] == ("holds: 2 of 2 pages flipped past caught and 0 finished on show, 2 stayed 800 ms; "
+                                    "2 of 2 caught pages read back begun with no new read")
+    lost = _k_report(scenario_k={"paces": {**_k_report()["run"]["scenario_k"]["paces"], "k2": {
+        **_k_report()["run"]["scenario_k"]["paces"]["k2"], "caught": 0, "agree": 0, "read_back_caught": 0,
+        "read_back_caught_no_new_read": 0}}, "told": {"left_working": []}})
+    assert s.standin(lost, "", {}, "k", 600)["meaning"]["k2"].startswith("lost: 0 of 2")  # (a meaning, no failure)
+    assert s.standin(lost, "", {}, "k", 600)["verdict"] == "pass"
+    figures = out["scenario_k"]
+    assert figures["k2"]["drain_s"] == 31.5 and figures["k1"]["background_requests"] == 6
+    md = s.standin_md(out)
+    assert "Scenario k (reported, never a failure):" in md
+    assert "| k2 (2000 ms) | 2 (2) | 2, 0 | 2 (2, 2) | 160/470 | 31.5 | 14 | 5.0 |" in md
+    # the faults, each failing its own criterion and no other
+    requests = ("every request sent for nothing was a page job's asked before its frame was confirmed and dropped as "
+                "the page was flipped past (none on a frame that was not the sharp one, none of the backlog's)")
+    base = _k_report()["run"]
+    faults = {
+        requests: [
+            {"wasted_requests": {**base["wasted_requests"], "list": [
+                *base["wasted_requests"]["list"], {"t_s": 66.0, "segment": "k5", "why": "soft", "gate": "pending"}]}},
+            {"wasted_requests": {**base["wasted_requests"], "list": [
+                *base["wasted_requests"]["list"][:2], {**base["wasted_requests"]["list"][2], "gate": "confirmed"}]}},
+            {"request_list": {**base["request_list"], "rows": [*base["request_list"]["rows"],
+                                                               [101.0, None, "backlog", "dropped"]]}},
+            {"wasted_requests": {"count": 3, "by_segment": {"x": 1, "k1": 2}}}],  # (counts only: none told apart)
+        "the backlog held no frame after it was read": [
+            {"scenario_k": {**base["scenario_k"], "paces": {**base["scenario_k"]["paces"], "k1": {
+                **base["scenario_k"]["paces"]["k1"], "frames_held_after_read_most": 1}}}}],
+        "the backlog held nothing at the end of the run, the window at rest (0 bytes)": [
+            {"scenario_k": {**base["scenario_k"], "paces": {**base["scenario_k"]["paces"], "k2": {
+                **base["scenario_k"]["paces"]["k2"], "bytes_at_end": 2_400_000}}}}],
+        "no screen was left told at work at the end of the run, the window at rest": [
+            {"scenario_k": {**base["scenario_k"], "told": {"left_working": ["31:translate"]}}}],
+        "the tool told the pace (its pages flipped past and read back)": [
+            {"scenario_k": {**base["scenario_k"], "paces": {
+                k: v for k, v in base["scenario_k"]["paces"].items() if k != "k1"}}}],
+    }
+    for criterion, runs in faults.items():
+        for run in runs:
+            got = _failed(s.standin(_k_report(**run), "", {}, "k", 600))
+            assert got == [criterion], (criterion, got)
+    # the window not at rest at the end: the hang fails, what the backlog held then is not judged
+    hung = _k_report(released={**base["released"], "end": {"waited_s": 600.4, "timed_out": True}},
+                     scenario_k={**base["scenario_k"], "told": {"left_working": ["31:translate"]}})
+    got = _failed(s.standin(hung, "", {}, "k", 600))
+    assert len(got) == 1 and got[0].startswith("the window came to rest before every scenario"), got
+    # outside k a request sent for nothing still fails
+    assert ("no request sent for nothing (outside scenario x, whose point they are)" in _failed(s.standin(
+        _k_report(wasted_requests={"count": 1, "by_segment": {"a": 1}, "list": []}), "", {}, "k", 600)))
 
 
 def _results(f1: float = 0.9705, cer: float = 0.0325, chrf: float = 38.01, pages: int = 54,

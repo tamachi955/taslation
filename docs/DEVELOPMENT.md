@@ -338,16 +338,23 @@ stops at once with an error naming what is missing when main has not made them. 
 days; a run started by hand on `main` (checks none) makes it again.
 
 Then four stand-in jobs (the scenarios in groups: c, a and b; d, e, r and x, e turning back to d's pages; t and w with
-t2 and w2; o, z and f with f2; each with `--wait-done`) and five benchmark jobs (a title a job, `--series`) run, at
-most nine at a time beside `tests.yml`'s eight, each restoring the caches, fetching OpenMantra from its publisher
-(never cached, never uploaded) and letting TASlation's own starter start Ollama on port 11435. A stand-in job fails
-when a criterion of correctness fails, and only then (`.github/gpu-checks/summarise.py`'s `correctness`: the run went
-through, the window chose the stand-in alone, nothing was kept or shown from a frame that was not the sharp one where
-the sharp frame came in time, no request was sent for nothing outside x, a page translated at rest came back without a
-request, no rested page was left unfinished with the window at rest, each scenario's mode was entered and left, its
-page keys handed on, the whole-book run ended, ...); what depends on the computer's speed is reported beside it
-(`speed`: rests too short for a page, holds at their cap, pages left half done, ...), with what each scenario was meant
-to show and whether it still did. A benchmark job fails when its title's F1, CER or chrF leaves its tolerance around
+t2 and w2, then k's three paces; o, z and f with f2; each with `--wait-done`, which holds no rest of k) and five
+benchmark jobs (a title a job, `--series`) run, at most nine at a time beside `tests.yml`'s eight, each restoring the
+caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
+start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at
+each pace, 3 read back): each pace waits until the backlog has nothing left, and on the CPU a caught page takes some 20
+to 30 s to read and translate, so that 20 pages at the 2 s pace would take near the scenario's `--timeout`. A stand-in
+job fails when a criterion of correctness fails, and only then (`.github/gpu-checks/summarise.py`'s `correctness`: the
+run went through, the window chose the stand-in alone, nothing was kept or shown from a frame that was not the sharp
+one where the sharp frame came in time, no request was sent for nothing outside x and k - in k only page jobs' asked
+before their frame was confirmed and dropped as the page was flipped past, none on a soft frame, none of the
+backlog's -, a page translated at rest came back without a request, no rested page was left unfinished with the
+window at rest, each scenario's mode was entered and left, its page keys handed on, the whole-book run ended, the
+backlog held no frame after its read and, the window at rest at the end, nothing at all and no screen told at work,
+...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
+cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first bubble, the
+time the backlog took to empty), with what each scenario was meant to show and whether it still did. A benchmark job
+fails when its title's F1, CER or chrF leaves its tolerance around
 the runners' own figures in `.github/gpu-checks/benchmark-expected.json` (a run of fewer pages or another
 `detect_model` is not compared); the expected figures are the first run's, each run's own are kept beside them
 (`seen`, two runs so far: F1 and CER the same, chrF up to 0.83 apart on a title), and the tolerances stay wide until
