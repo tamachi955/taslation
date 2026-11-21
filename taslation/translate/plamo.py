@@ -77,6 +77,7 @@ from __future__ import annotations
 import random
 import re
 import threading
+from collections import deque
 from typing import Any, Callable, Sequence
 
 from ..messages import Cancelled, Message
@@ -132,6 +133,11 @@ WARM_STEP_MOST_S = 0.6  # a step that took longer (a slower machine): the warmin
 # keeps none (its settings unknown) is warmed less often than it could be, never more
 HELD_KEPT = 16
 WARM_TIMEOUT = 10.0  # seconds a warming step may take at most
+# the time a request's prompt is expected to take (`_expected_s`, the first byte's bound `ollama.NO_ANSWER_TIMES` it):
+# the tokens the server does not hold of it times the seconds a prompt token took, the slowest of the last RATES_KEPT
+# requests that computed RATE_LEAST_TOKENS tokens or more
+RATES_KEPT = 8
+RATE_LEAST_TOKENS = 64
 _RESERVED = re.compile(r"<\|plamo:[a-z_]+\|>")
 _NOTE_LINE = re.compile(r"^- (.+?) = (.+?)(?: \(.*\))?$")
 
@@ -306,6 +312,7 @@ class PlamoTranslator(OllamaTranslator):
         self._holds_lock = threading.Lock()
         self._warm_halt: threading.Event | None = None  # what ends the warming under way: any request sets it
         self.warm_log: list[dict[str, Any]] | None = None  # (the tools' record of each warming step, as `stats_log`)
+        self._rates: deque[float] = deque(maxlen=RATES_KEPT)  # seconds a prompt token took (`_expected_s`)
 
     # --- the language ------------------------------------------------------------------------------------------
     @property
@@ -358,35 +365,72 @@ class PlamoTranslator(OllamaTranslator):
         halt = self._warm_halt
         if halt is not None:
             halt.set()  # (a request: a warming under way sends no more steps, `warm_prefix`)
-        self.ensure_loaded(cancel, on_slow)
         self._used.add(self.model)
         payload: dict[str, Any] = {"model": self.model, "prompt": prompt, "raw": True,
                                    "options": self._options(max_tokens, offset),
                                    "keep_alive": self.keep_alive}
-        try:
+        sent = [False]  # (whether the prompt went out after the last load: what the server may hold of it)
+
+        def load() -> None:
+            sent[0] = False
+            self.ensure_loaded(cancel, on_slow)
+
+        def send() -> tuple[dict[str, Any], str]:
+            sent[0] = True
             with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
                 if cancel is not None or on_slow is not None:
-                    data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow)
-                    raw = str((data.get("message") or {}).get("content") or "")
-                else:
-                    data = self._request("/api/generate", {**payload, "stream": False})
-                    raw = str(data.get("response") or "")
+                    data = self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow,
+                                        first=self._no_answer_after(self._expected_s(prompt)),
+                                        between=self._silent_after())
+                    return data, str((data.get("message") or {}).get("content") or "")
+                data = self._request("/api/generate", {**payload, "stream": False})
+                return data, str(data.get("response") or "")
+
+        try:
+            # (the model made sure of first; no answer: both asked again as the module `ollama` says)
+            data, raw = self._answer(send, cancel, load=load)
         except TranslationError:
             self._held_now(None)
             self._unsure()  # (the next request asks Ollama whether the model is loaded)
             raise
         except BaseException:
-            self._held_now(prompt, prompt)  # (cancelled: the server computes a prompt it has to its end, WARM_STEP)
+            if sent[0]:  # (cancelled: the server computes a prompt it has to its end, WARM_STEP)
+                self._held_now(prompt, prompt)
             raise
         self._held_now(prompt + raw, prompt)
         self._answered(self.model)
         self.last_stats = {k: data.get(k) for k in ("prompt_eval_count", "eval_count", "prompt_eval_duration",
                                                     "eval_duration", "total_duration", "done_reason")}
+        self._learn_rate(data)
         if self.stats_log is not None:
             self.stats_log.append(dict(self.last_stats))
         self._wrote.text = clean(raw)
         # each line's spaces made one; the line breaks kept (a joined request answers one line per bubble)
         return "\n".join(" ".join(line.split()) for line in clean(raw).splitlines() if line.strip())
+
+    def _learn_rate(self, data: dict[str, Any]) -> None:
+        """The seconds a prompt token took in a request's statistics (*data*), kept for `_expected_s` when it computed
+        `RATE_LEAST_TOKENS` or more."""
+        try:
+            count, ns = int(data.get("prompt_eval_count") or 0), float(data.get("prompt_eval_duration") or 0)
+        except (TypeError, ValueError):
+            return
+        if count >= RATE_LEAST_TOKENS and ns > 0:
+            self._rates.append(ns / 1e9 / count)
+
+    def _expected_s(self, prompt: str) -> float | None:
+        """The seconds the server is expected to take for *prompt* before its first byte: the tokens it does not hold
+        of it (`held_of`, `tokens_about`) times the slowest rate of the last requests (`_learn_rate`); None before one
+        was measured."""
+        rates = list(self._rates)
+        if not rates:
+            return None
+        return tokens_about(prompt[self.held_of(prompt):]) * max(rates)
+
+    def _lost(self) -> None:
+        """(`OllamaTranslator._lost`) And nothing is taken to be held by the server any more (`_holds`)."""
+        super()._lost()
+        self._held_now(None)
 
     def _written(self) -> str:
         """The answer of this thread's last request as the model wrote it (reserved tokens out, trimmed): what the
@@ -528,6 +572,9 @@ class PlamoTranslator(OllamaTranslator):
             if self._loading.locked():
                 facts["why"] = "loading"
                 return facts
+            if self.silent:  # (a request was ended for want of an answer, and none came since: nothing is sent)
+                facts["why"] = "not answering"
+                return facts
             share = self.gpu_share()  # (/api/ps: nothing is loaded for a warming)
             if share is None or share < FULL_GPU_SHARE:
                 facts["why"] = "not loaded" if share is None else "not on the GPU"
@@ -564,9 +611,13 @@ class PlamoTranslator(OllamaTranslator):
         try:
             with ocr_place.translating():  # (as any request: the OCR reads on the CPU while the server computes)
                 data = self._request_once("/api/generate", payload, WARM_TIMEOUT)
-        except BaseException:
+        except BaseException as e:
             self._held_now(None)
             self._unsure()
+            if isinstance(e, TranslationError) and e.message.code == "ollama.timeout":
+                # (no answer: a silence of the incident, said as any; the warming is not asked again, the next
+                # request is - `ollama.OllamaTranslator._after_silence`)
+                self._silence(time.monotonic() - t0, "warming step", "without an answer")
             raise
         self._held_now(prompt + str(data.get("response") or ""), prompt)
         self._answered(self.model)
@@ -592,8 +643,9 @@ class PlamoTranslator(OllamaTranslator):
         with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
             if cancel is None and on_slow is None:
                 self._request("/api/generate", {**payload, "stream": False}, limit)
-            else:
-                self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit)
+            else:  # (the server looked at while it loads: `OllamaTranslator.warm_up`)
+                self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit,
+                             alive=self._ps_answers)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start

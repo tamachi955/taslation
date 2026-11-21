@@ -270,10 +270,10 @@ class Reasked:
 
 
 # a failed request after which no lines are asked for again: the next request would fail the same way (Ollama not
-# running, the model missing, no translator) or wait as long (a timeout)
+# running, the model missing, no translator) or wait as long (a timeout, a translation program that does not answer)
 NO_REASK_CODES = frozenset({"ollama.timeout", "ollama.unreachable", "ollama.model_missing", "health.chosen_model_missing",
                             "translator.model_missing", "plamo.cannot_write", "ollama.not_loopback",
-                            "pipeline.no_translator"})
+                            "pipeline.no_translator", "ollama.not_answering"})
 
 
 

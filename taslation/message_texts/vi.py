@@ -99,6 +99,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.bad_answer": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Nhấn F5 để thử lại.",
     "ollama.not_loopback": "URL của Ollama phải là địa chỉ http(s) loopback (máy này), nhận được: “{url}”",
     "ollama.slow": "Chương trình dịch trả lời chậm (có thể vẫn đang tải). Dừng sẽ hủy trang này.",
+    "ollama.no_answer": "Chương trình dịch không trả lời trong {seconds:.0f} giây, nên TASlation hỏi lại.",
+    "ollama.restarting": "Chương trình dịch vẫn không trả lời, nên TASlation khởi động lại nó...",
+    "ollama.not_answering": ("Chương trình dịch trên máy tính này không trả lời. Hãy khởi động lại nó (hoặc khởi động lại "
+                             "TASlation), rồi nhấn F5."),
     "ollama.loaded": "Bộ dịch đã sẵn sàng.",
     "ollama.loading": "Đang chuẩn bị bộ dịch...",
     "ollama.partly_on_gpu": "Chỉ {percent}% bộ dịch nằm vừa trên card đồ họa nên việc dịch sẽ chậm. Hãy đóng các chương trình khác đang dùng card đồ họa.",

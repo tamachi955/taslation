@@ -75,8 +75,16 @@ Messages of `OllamaStarter.start` (None when Ollama answers):
 * ``health.ollama_down`` {url}: nothing was started, or the wait was cancelled (the banner's line; no popup).
 
 `OllamaStarter` is what the window and the commands hold: at most one try every `RETRY_GAP_S`, so that requests that
-find Ollama gone (`OllamaTranslator.revive`) never start it in a loop. Everything here waits, and runs in a worker
-thread, never on Tk's."""
+find Ollama gone (`OllamaTranslator.revive`) never start it in a loop.
+
+Restarting (`OllamaStarter.restart`): a request that gets no answer twice, or whose /api/ps look gets none either
+(`taslation.translate.ollama`, `OllamaTranslator.restart`), has the server stopped and started again - only the
+server TASlation started (the record names it and it still runs as that process) and only while /api/ps lists no
+model but TASlation's own; at most once in `RESTART_GAP_S`. It is stopped as at the end (`stop_server`), started as
+above with what `server_setup` gives it now, its record carrying the other TASlation processes that used the old one,
+and waited for `START_WAIT_S`. An Ollama the person runs is never stopped, restarted or reconfigured: the request
+then ends with a sentence that asks the reader to restart it. Everything here waits, and runs in a worker thread,
+never on Tk's."""
 
 from __future__ import annotations
 
@@ -106,6 +114,7 @@ DEFAULT_PORT = 11434  # ... and on which port
 START_WAIT_S = 30.0  # how long a started Ollama is given to answer (install.ps1 gives it the same)
 POLL_S = 0.25  # how often it is asked meanwhile
 RETRY_GAP_S = 60.0  # at most one try in this many seconds
+RESTART_GAP_S = 600.0  # at most one restart of the server TASlation started in this many seconds (`restart`)
 POPUP_CODES = frozenset({"health.ollama_not_installed", "health.ollama_no_answer"})  # what the window's popup says
 # llama.cpp's server keeps up to 8 GiB of earlier prompts in RAM unless this says otherwise (MiB; 0: no cache). In a
 # whole-book run on the GPU the translator's server peaked at 9.8 GB working set with it and at 1.7 GB without, and
@@ -910,9 +919,8 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
              path: Path | None, own: Iterable[str], settings: Any = None) -> Message | None:
     """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* (or the server
     TASlation started and recorded at *path* adopted) and waited for (see the module's docstring)."""
-    down = Message("health.ollama_down", url=url)
     if not startable(url) or (cancel is not None and cancel.is_set()):
-        return down
+        return Message("health.ollama_down", url=url)
     with _Lock(path) if path is not None else contextlib.nullcontext():
         record = _valid(path, url) if path is not None else None
         if record is not None:
@@ -920,31 +928,49 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
         elif health.ollama_running(url):
             return None  # one came up meanwhile, not TASlation's
         else:
-            command = find_ollama()
-            if command is None:
-                return Message("health.ollama_not_installed")
-            if on_starting is not None:
-                on_starting()
-            setup = server_setup(settings)
-            try:
-                proc = launch(command, server_env(setup=setup))
-            except OSError:
-                return Message("health.ollama_no_answer")
-            _keep_setup(url, setup)
-            _say_setup(setup)
-            info = process_info(proc.pid)
-            if path is not None and info is not None:
-                record = {"what": "the Ollama server TASlation started; it stops it when the last TASlation that uses "
-                                  "it ends", "pid": proc.pid, "exe": info.exe, "started": info.started, "url": url,
-                          "setup": setup.to_record(), "users": []}
-                _use(path, record, url, own)
+            failed = _launch(url, on_starting, path, own, settings)
+            if failed is not None:
+                return failed
+    return _wait_answer(url, cancel)
+
+
+def _launch(url: str, on_starting: Callable[[], None] | None, path: Path | None, own: Iterable[str],
+            settings: Any = None, users: Iterable[dict[str, Any]] = ()) -> Message | None:
+    """``ollama serve`` started for *url* with what `server_setup` gives it for *settings*, and recorded at *path* with
+    this process and *users* (the TASlation processes that used the server it replaces) as its users. Under the
+    record's lock. None when it was started; else what stands in the way."""
+    command = find_ollama()
+    if command is None:
+        return Message("health.ollama_not_installed")
+    if on_starting is not None:
+        on_starting()
+    setup = server_setup(settings)
+    try:
+        proc = launch(command, server_env(setup=setup))
+    except OSError:
+        return Message("health.ollama_no_answer")
+    _keep_setup(url, setup)
+    _say_setup(setup)
+    info = process_info(proc.pid)
+    if path is not None and info is not None:
+        me = this_process()
+        record = {"what": "the Ollama server TASlation started; it stops it when the last TASlation that uses "
+                          "it ends", "pid": proc.pid, "exe": info.exe, "started": info.started, "url": url,
+                  "setup": setup.to_record(), "users": [u for u in users if not _is(u, me)]}
+        _use(path, record, url, own)
+    return None
+
+
+def _wait_answer(url: str, cancel: threading.Event | None) -> Message | None:
+    """A server just started at *url* waited for, `START_WAIT_S` at most: None once it answers;
+    ``health.ollama_no_answer`` when it did not by then, ``health.ollama_down`` when *cancel* was set meanwhile."""
     pause = cancel if cancel is not None else threading.Event()  # never set, without a caller's event
     deadline = time.monotonic() + START_WAIT_S
     while not health.ollama_running(url):
         if time.monotonic() >= deadline:
             return Message("health.ollama_no_answer")
         if pause.wait(POLL_S):
-            return down
+            return Message("health.ollama_down", url=url)
     return None
 
 
@@ -966,6 +992,8 @@ class OllamaStarter:
         self.settings = settings
         self._last: float | None = None  # when the last try began
         self._lock = threading.Lock()
+        self._restarted: float | None = None  # when the last restart began (`restart`)
+        self._restart_lock = threading.Lock()
 
     def start(self, cancel: threading.Event | None = None) -> Message | None:
         """None when Ollama answers (started now if it has to be); else what stands in the way, and for a look
@@ -1001,6 +1029,59 @@ class OllamaStarter:
     def revive(self, cancel: threading.Event | None = None) -> bool:
         """Whether Ollama answers now (`OllamaTranslator.revive`)."""
         return self.start(cancel) is None
+
+    def restart(self, cancel: threading.Event | None = None) -> bool | None:
+        """The server at this address, which gets requests and gives no answer (`OllamaTranslator.restart`, in the
+        request's thread), stopped and started again as the module's docstring says. True when it answers again;
+        False when it was not started again or did not come back (within `RESTART_GAP_S` of the last restart, it would
+        not stop, it would not start, it did not answer within `START_WAIT_S`, *cancel* set); None when it is not the
+        server TASlation started (no record names it, or another program's model is loaded in it): it is left as it
+        is. The log says what was done, numbers only."""
+        path = self.record
+        if path is None or not startable(self.url):
+            LOG.warning("no answer: the translation program is not one TASlation started here; left as it is")
+            return None
+        with self._restart_lock:
+            now = time.monotonic()
+            if self._restarted is not None and now - self._restarted < RESTART_GAP_S:
+                LOG.warning("no answer: the translation program TASlation started was started again %.0f s ago; not "
+                            "again within %.0f s", now - self._restarted, RESTART_GAP_S)
+                return False
+            with _Lock(path):
+                record = _valid(path, self.url)
+                if record is None:
+                    LOG.warning("no answer: no record names the translation program as one TASlation started; left as "
+                                "it is")
+                    return None
+                loaded = health.loaded_models(self.url, PS_TIMEOUT_S) or []  # (a silent server lists none)
+                foreign = sorted({str(m) for m in loaded if not _ours(m, self.own)})
+                if foreign:
+                    LOG.warning("no answer: another program has %d model(s) loaded in the translation program "
+                                "TASlation started; left as it is", len(foreign))
+                    return None
+                self._restarted = now
+                if not stop_server(record["pid"], record["started"]):
+                    LOG.warning("no answer: the translation program TASlation started would not stop (%.1f s)",
+                                time.monotonic() - now)
+                    return False
+                _drop(path)
+                _keep_setup(self.url, None)
+                stopped = time.monotonic() - now
+                if cancel is not None and cancel.is_set():
+                    LOG.warning("no answer: the translation program TASlation started was stopped (%.1f s); the "
+                                "request was cancelled before it was started again", stopped)
+                    return False
+                users = [u for u in record["users"] if _alive(u)]
+                failed = _launch(self.url, None, path, self.own, self.settings, users)
+            if failed is not None:
+                LOG.warning("no answer: the translation program TASlation started was stopped (%.1f s) and could not "
+                            "be started again (%s)", stopped, failed.code)
+                return False
+            failed = _wait_answer(self.url, cancel)
+            LOG.warning("no answer: the translation program TASlation started was stopped (%.1f s) and started again; "
+                        "%s after %.1f s", stopped, "it answers" if failed is None else failed.code,
+                        time.monotonic() - now)
+            return failed is None
 
 
 @contextlib.contextmanager

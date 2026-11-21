@@ -208,13 +208,13 @@ def follow(translator: Any, settings: Any, name: str, target_language: str) -> A
     """The translator to translate *target_language* with the Ollama model *name* (what `choose` decided), given the
     one in use, *translator*: that one itself, its ``model`` and ``target_language`` set, while its class is the one
     for *name* (`needs_rebuild`); else a new one (`make_translator`, with *settings* and that language) that takes over
-    what the window hung on the old one (``revive``, ``on_status``, ``before_load``) and its ``seed``. The caller hands a
-    new one to the pipeline (`Pipeline.set_translator`, which lets the old one's model go). A translator that is no
-    Ollama one (echo, a test's stand-in) only has ``model`` and ``target_language`` set."""
+    what the window hung on the old one (``revive``, ``restart``, ``on_status``, ``before_load``) and its ``seed``. The
+    caller hands a new one to the pipeline (`Pipeline.set_translator`, which lets the old one's model go). A translator
+    that is no Ollama one (echo, a test's stand-in) only has ``model`` and ``target_language`` set."""
     if name and needs_rebuild(translator, name):
         fresh = make_translator(settings.with_overrides(target_language=target_language), name,
                                 seed=getattr(translator, "seed", None))
-        for hook in ("revive", "on_status", "before_load"):
+        for hook in ("revive", "restart", "on_status", "before_load"):
             if getattr(translator, hook, None) is not None:
                 setattr(fresh, hook, getattr(translator, hook))
         return fresh

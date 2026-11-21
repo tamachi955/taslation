@@ -337,10 +337,12 @@ def test_follow_rebuilds_only_for_the_other_kind():
     s = Settings()
     tr = make_translator(s)
     tr.revive = revive = lambda cancel=None: True
+    tr.restart = restart = lambda cancel=None: None
     same = follow(tr, s, PLAMO.ollama_name, "Korean")
     assert same is tr and tr.target_language == "Korean"
     other = follow(tr, s, QWEN.ollama_name, "Turkish")
     assert type(other) is OllamaTranslator and other.target_language == "Turkish" and other.revive is revive
+    assert other.restart is restart  # (a request without an answer starts TASlation's server again as before)
     back = follow(other, s, PLAMO.ollama_name, "English")
     assert isinstance(back, PlamoTranslator)
 

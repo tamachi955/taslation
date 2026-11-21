@@ -439,9 +439,11 @@ def start_ollama_for(settings: Settings, translator: Any = None, quiet: bool = F
 
 
 def attach_starter(translator: Any, starter: Any) -> None:
-    """*translator* starts Ollama again through *starter* when a request finds it gone, and says on stderr what a load
-    of its model says (`OllamaTranslator.ensure_loaded`)."""
+    """*translator* starts Ollama again through *starter* when a request finds it gone, and the server TASlation
+    started when a request gets no answer (`OllamaTranslator.restart`), and says on stderr what a load of its model
+    says (`OllamaTranslator.ensure_loaded`) and what a request without an answer does."""
     translator.revive = starter.revive
+    translator.restart = getattr(starter, "restart", None)
     translator.on_status = _note
 
 

@@ -103,6 +103,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.not_loopback": ("de URL van Ollama moet een loopback-adres (deze computer) met http(s) zijn, gekregen: "
                             "'{url}'"),
     "ollama.slow": "Het vertaalprogramma reageert traag (het is misschien nog aan het laden). Stop annuleert deze pagina.",
+    "ollama.no_answer": "Het vertaalprogramma heeft {seconds:.0f} s niet gereageerd, dus TASlation vraagt het opnieuw.",
+    "ollama.restarting": "Het vertaalprogramma reageert nog steeds niet, dus TASlation start het opnieuw...",
+    "ollama.not_answering": ("Het vertaalprogramma op deze computer reageert niet. Start het opnieuw (of start TASlation "
+                             "opnieuw) en druk daarna op F5."),
     "ollama.loaded": "Vertaler klaar.",
     "ollama.loading": "Vertaler wordt klaargezet...",
     "ollama.partly_on_gpu": "Slechts {percent}% van de vertaler past op de videokaart, dus vertalen wordt traag. Sluit andere programma's die de videokaart gebruiken.",

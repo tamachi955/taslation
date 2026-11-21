@@ -66,6 +66,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from difflib import SequenceMatcher
 import hashlib
 import inspect
+import logging
 import math
 import re
 import threading
@@ -1264,9 +1265,15 @@ class LoadAhead:
             if not self.gate.on_show(_Either(self.cancel, self.done), close=False) or self.cancel.is_set():
                 return  # (the job decides the gate: its own wait closes it)
         released = pipeline._gpu_released
+        began = time.monotonic()
         try:
             translator.ensure_loaded(self.cancel)
-        except BaseException:  # noqa: BLE001 - Stop, or a load that failed: the request says it, as ever
+        except BaseException as e:  # noqa: BLE001 - Stop, or a load that failed: the request says it, as ever
+            if getattr(getattr(e, "message", None), "code", "") == "ollama.not_answering":
+                # (a load ends by its bounds - /api/ps silent while it loads, `ollama.NoAnswer` - and so does `join`;
+                # the page's request takes it up under the rule for a request without an answer)
+                logging.getLogger(__name__).warning("no answer: the load ahead of the page's request ended after "
+                                                    "%.1f s", time.monotonic() - began)
             return
         if pipeline._gpu_released != released and not self.cancel.is_set():  # (it loaded the model)
             try:

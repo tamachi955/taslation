@@ -1017,7 +1017,7 @@ def test_plamo_s_lines_are_requests_and_its_warm_up_a_load(monkeypatch):
         seen.append((bool(payload.get("prompt")), place._loading, place._translating))
         return {"response": "EN", "done": True}
 
-    def stream(path, payload, on_text, cancel=None, on_slow=None, timeout=None):
+    def stream(path, payload, on_text, cancel=None, on_slow=None, timeout=None, **_bounds):
         seen.append((bool(payload.get("prompt")), place._loading, place._translating))
         return {"message": {"content": "EN"}, "done": True}
 

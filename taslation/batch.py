@@ -214,11 +214,12 @@ from .translate.continuation import facts_of
 from .translation_view import TranslationView
 
 # A failed request with one of these means the next ones fail too: the translation ends there instead of
-# retrying in halves (Ollama not running, the model missing, no translator).
+# retrying in halves (Ollama not running, the model missing, no translator, a translation program that does not
+# answer even after it was asked again and, when TASlation started it, started again).
 NO_PAGE = Message("batch.no_page_seen")  # why a batch ended that read no page: no frame had a page unit
 FATAL_CODES = frozenset({"ollama.unreachable", "ollama.model_missing", "health.chosen_model_missing",
                          "translator.model_missing", "plamo.cannot_write", "ollama.not_loopback",
-                         "pipeline.no_translator"})
+                         "pipeline.no_translator", "ollama.not_answering"})
 
 
 def fatal(error: Any) -> bool:

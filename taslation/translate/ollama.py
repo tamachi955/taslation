@@ -36,6 +36,27 @@ chose (``auto_model``), ``translator.model_missing``, or, for a model of the rea
 ``ollama.timeout``, ...); its English text never carries the operating system's
 own (localised) error text, nor any text of the book.
 
+A streamed request that gets no answer (`NoAnswer`: no first byte within `NO_ANSWER_S`, or `NO_ANSWER_TIMES` the time
+its prompt is expected to take when that is longer, `_no_answer_after`; or a stream silent `NO_ANSWER_S` once it began;
+a stream that is still writing is left alone) is ended: its connection closed (the server then stops the task), what
+the client knew of the server's state made unsure, and the window told once per incident (``ollama.no_answer``, through
+`on_status`, whichever thread asked: the page on show's job, the backlog, a load). The same request is asked once more
+on a new connection after one /api/ps look (`_answer`, `_after_silence`). No answer a second time in the incident (until
+an answer comes), or /api/ps silent: the server TASlation started is stopped and started again by `ollama_start`'s own
+ways (``restart``, `OllamaStarter.restart`: at most once in ten minutes, never a server the person runs, said as
+``ollama.restarting``), the model loaded, the request asked again - once; else, or after that, the request ends with
+``ollama.not_answering`` (the translation program on this computer does not answer: restart it, then F5) and ``silent``
+names the incident until the next answer of any request (the backlog pauses meanwhile). Nothing asks for ever: each
+request makes one restart at most and the incident's second silence ends it. A load is not bounded by a first byte
+(it comes once the model is in memory): it asks /api/ps every `ALIVE_EVERY_S` on a connection of its own while nothing
+comes and ends as no answer when the server is silent `ALIVE_MISSES` times in a row - a request's own load is taken as
+the request itself (`_answer`), the load ahead of a page (`taslation.pipeline.LoadAhead`) leaves it to the page's
+request, and its join ends with it; a request waiting for another thread's load gets its slow note as any request
+does. A warming step (`plamo.PlamoTranslator.warm_prefix`) that times
+out counts as a silence of the incident and is not asked again: the next request is. Requests made in one piece (no
+cancel, no slow note: the commands and the tools) keep ``timeout``. The log names each incident - which request (its
+thread), how long, what was done - and never a line.
+
 The model is in GPU memory only while it is needed. The window loads it at its start,
 while the OCR model loads (``load_model_at_start``, on by default: `ensure_loaded` with
 *quiet*, on a thread of its own, after Ollama was started as ever), so that the first
@@ -87,6 +108,7 @@ import functools
 import http.client
 import io
 import json
+import logging
 import re
 import socket
 import threading
@@ -102,6 +124,8 @@ from ..netguard import is_loopback_host
 from ..ocr import place as ocr_place
 from .base import HINT_FOLLOWS, TranslationError
 
+LOG = logging.getLogger(__name__)
+
 POLL_S = 0.1  # how often a streamed request looks at its cancel event while it waits for the answer
 # How long Ollama keeps the model after a request (Settings.ollama_keep_alive). Long enough for a reader on
 # untranslated pages, who needs it once or twice a minute, to pay for one load (3.4 s) only, and for a pause of a few
@@ -116,6 +140,18 @@ PS_TIMEOUT = 3.0  # seconds /api/ps may take: it only looks
 # ~27 a request took on the client's side, 2026-11-16)
 PS_RECHECK_S = 30.0
 TAIL_WAIT_S = 2.0  # how long the end of a streamed answer is waited for after its last object (it follows at once)
+# A streamed request that gets no answer (`NoAnswer`, see the module's docstring): no first byte within NO_ANSWER_S -
+# or NO_ANSWER_TIMES the time its prompt is expected to take, when that is longer (`_no_answer_after`) - or a stream
+# silent NO_ANSWER_S once it began; NO_ANSWER_CPU_S for either with every layer on the processor where the expected
+# time is not known. Measured on the development machine (2026-11-20/21): a page request's first byte 0.07 to 3.2 s on
+# the GPU, a whole prompt 10 to 13 s on the processor alone, a load 3.4 to 4.9 s (made before the request, never in it)
+NO_ANSWER_S = 30.0
+NO_ANSWER_CPU_S = 60.0
+NO_ANSWER_TIMES = 3.0
+# a load (whose first byte comes once the model is in memory) asks /api/ps this often while nothing comes, on a
+# connection of its own, and ends as no answer when the server is silent ALIVE_MISSES times in a row
+ALIVE_EVERY_S = 10.0
+ALIVE_MISSES = 2
 RELEASE_TIMEOUT = 3.0  # seconds a request to unload may take: the end of a run or the window's close wait for it
 RELEASE_WAIT_S = 10.0  # how long `release(wait=True)` waits for the model to be gone (0.3 s as a rule)
 FULL_GPU_SHARE = 0.99  # the share of the model in GPU memory (`gpu_share`) from which it counts as being on the GPU
@@ -205,6 +241,25 @@ def loaded_message(model: str, seconds: float) -> Message:
     return Message("ollama.loaded", model=str(model), seconds=round(float(seconds), 1))
 
 
+class NoAnswer(TranslationError):
+    """A streamed request that got no answer (`_Watch`): no first byte within its bound, a stream silent past its
+    bound, or (*load*) a load whose server stopped answering /api/ps. Its message is the sentence a request the rule
+    ends with is given (``ollama.not_answering``); *waited*: the seconds of silence; *began*: whether bytes of the
+    answer had come."""
+
+    def __init__(self, waited: float = 0.0, began: bool = False, load: bool = False):
+        super().__init__(Message("ollama.not_answering"))
+        self.waited, self.began, self.load = float(waited), bool(began), bool(load)
+
+
+def _start_again(on_text: Callable[[str], None] | None) -> None:
+    """A handler of an answer's pieces that can start again (`ItemStream.feed`: its object's ``reset``) made to, before
+    the request is asked once more."""
+    reset = getattr(getattr(on_text, "__self__", None), "reset", None)
+    if callable(reset):
+        reset()
+
+
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -289,6 +344,19 @@ class OllamaTranslator:
         # brings Ollama back when a request finds it gone (`taslation.ollama_start.OllamaStarter.revive`): given the
         # request's cancel event, True when it answers again; None: a request that finds it gone fails, as doctor's do
         self.revive: Callable[[threading.Event | None], bool] | None = None
+        # the server TASlation started stopped and started again when a request got no answer twice, or /api/ps was
+        # silent (`OllamaStarter.restart`, given the request's cancel event): True when it answers again, False when it
+        # did not come back (or was started again within ten minutes), None when it is not one TASlation started (never
+        # touched then); None: no restart (the request ends with the sentence)
+        self.restart: Callable[[threading.Event | None], bool | None] | None = None
+        # the incident under way (a request got no answer, and none answered since: `_after_silence`), its number and
+        # its silences; ``silent``: the number of the incident a request was ended in with ``ollama.not_answering``,
+        # 0 once an answer came (`_answered`) - what the backlog pauses for (`backlog.Backlog.tick`)
+        self._incident: dict[str, int] | None = None
+        self._incidents = 0
+        self.silent = 0
+        self._incident_lock = threading.Lock()
+        self._share: float | None = None  # the model's share on the GPU last seen (`gpu_share`; 0.0: the processor)
         # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_before_load`)
         self.before_load: Callable[[], Any] | None = None
         # told about a load as a Message: ``ollama.loading``, ``ollama.loaded``, ``ollama.partly_on_gpu``
@@ -422,20 +490,22 @@ class OllamaTranslator:
 
     def _stream(self, path: str, payload: dict[str, Any], on_text: Callable[[str], None],
                 cancel: threading.Event | None = None, on_slow: Callable[[float], None] | None = None,
-                timeout: float | None = None) -> dict[str, Any]:
+                timeout: float | None = None, first: float | None = None, between: float | None = None,
+                alive: Callable[[], bool] | None = None) -> dict[str, Any]:
         """`_stream_once`; when it finds Ollama gone, sent once more after `_revived` (which *cancel* interrupts)."""
         try:
-            return self._stream_once(path, payload, on_text, cancel, on_slow, timeout)
+            return self._stream_once(path, payload, on_text, cancel, on_slow, timeout, first, between, alive)
         except TranslationError as e:
             if not self._revived(e, cancel):
                 if cancel is not None and cancel.is_set():
                     raise Cancelled() from e
                 raise
-        return self._stream_once(path, payload, on_text, cancel, on_slow, timeout)
+        return self._stream_once(path, payload, on_text, cancel, on_slow, timeout, first, between, alive)
 
     def _stream_once(self, path: str, payload: dict[str, Any], on_text: Callable[[str], None],
                      cancel: threading.Event | None = None, on_slow: Callable[[float], None] | None = None,
-                     timeout: float | None = None) -> dict[str, Any]:
+                     timeout: float | None = None, first: float | None = None, between: float | None = None,
+                     alive: Callable[[], bool] | None = None) -> dict[str, Any]:
         """POST *payload* (``stream: true``) and read the answer as Ollama sends it, one JSON object per line,
         handing every piece of the message to *on_text* as it arrives. Returns the last object (the statistics)
         with the whole message in it. An answer that breaks off before its last object is an error, as a cut-off
@@ -443,7 +513,8 @@ class OllamaTranslator:
 
         The answer is waited for in steps of ``POLL_S``: once *cancel* is set the connection is closed and
         `Cancelled` raised; *on_slow*(seconds) is called once when nothing has come for ``slow_after`` seconds; it
-        gives up after *timeout* (default: the translator's) seconds without a byte.
+        gives up after *timeout* (default: the translator's) seconds without a byte. *first*, *between*, *alive*: the
+        no-answer bounds (`_Watch`): past them the connection is closed and `NoAnswer` raised.
         No proxy is ever involved (the connection goes straight to the loopback address)."""
         if cancel is not None and cancel.is_set():
             raise Cancelled()
@@ -453,7 +524,7 @@ class OllamaTranslator:
         last: dict[str, Any] | None = None
         timeout = timeout or self.timeout
         for _attempt in range(2):
-            watch = _Watch(cancel, on_slow, self.slow_after, timeout)
+            watch = _Watch(cancel, on_slow, self.slow_after, timeout, first, between, alive)
             conn, kept = self._held(timeout)
             resp: http.client.HTTPResponse | None = None
             whole = False  # the answer read to its end: the connection may be kept for the next request
@@ -493,6 +564,7 @@ class OllamaTranslator:
                         break
                 if last is not None:  # the end of the chunked answer read, so that the connection is clean for the
                     watch.timeout = min(timeout, TAIL_WAIT_S)  # next request (not waited for long: closed then)
+                    watch.first = watch.between = watch.alive = None  # (the answer is whole: no no-answer now)
                     try:
                         resp.read()
                         whole = not resp.will_close
@@ -553,8 +625,8 @@ class OllamaTranslator:
               on_text: Callable[[str], None] | None = None, cancel: threading.Event | None = None,
               on_slow: Callable[[float], None] | None = None) -> str:
         """The model's answer to *messages*; with *on_text*, read as it is written (each piece handed over). With
-        *cancel* or *on_slow* the answer is streamed as well, so that it can be cancelled or found slow."""
-        self.ensure_loaded(cancel, on_slow)
+        *cancel* or *on_slow* the answer is streamed as well, so that it can be cancelled or found slow. The model is
+        made sure of first (`ensure_loaded`), within the rule for a request without an answer (`_answer`)."""
         self._used.add(self.model)
         stream = on_text is not None or cancel is not None or on_slow is not None
         options: dict[str, Any] = {"temperature": self.temperature}
@@ -577,19 +649,22 @@ class OllamaTranslator:
         def send() -> dict[str, Any]:
             with ocr_place.translating():  # (the OCR reads on the CPU while the model computes, a stream to its end)
                 if stream:
-                    return self._stream("/api/chat", payload, on_text or _ignore, cancel, on_slow)
+                    return self._stream("/api/chat", payload, on_text or _ignore, cancel, on_slow,
+                                        first=self._no_answer_after(), between=self._silent_after())
                 return self._request("/api/chat", payload)
 
-        try:
+        def asked() -> dict[str, Any]:
             try:
-                data = send()
+                return send()
             except TranslationError as e:
                 if "think" in payload and refuses_think(e):
                     self._supports_think = False  # older server or a model without a thinking mode
                     payload.pop("think")
-                    data = send()
-                else:
-                    raise
+                    return send()
+                raise
+
+        try:
+            data = self._answer(asked, cancel, on_text, load=lambda: self.ensure_loaded(cancel, on_slow))
         except TranslationError:
             self._unsure()
             raise
@@ -599,16 +674,19 @@ class OllamaTranslator:
         return str(data.get("message", {}).get("content", ""))
 
     def _chat_once(self, payload: dict[str, Any], timeout: float | None = None, cancel: threading.Event | None = None,
-                   on_slow: Callable[[float], None] | None = None) -> dict[str, Any]:
+                   on_slow: Callable[[float], None] | None = None,
+                   alive: Callable[[], bool] | None = None) -> dict[str, Any]:
         """POST *payload* to /api/chat (``think`` off when the server knows it; once it refuses it, never again) and
-        return Ollama's answer: in one piece, or streamed when there is a *cancel* or an *on_slow* to serve."""
+        return Ollama's answer: in one piece, or streamed when there is a *cancel* or an *on_slow* to serve (*alive*:
+        a load's look at the server, `_Watch`)."""
         if self._supports_think is not False:
             payload["think"] = False
 
         def send() -> dict[str, Any]:
             if cancel is None and on_slow is None:
                 return self._request("/api/chat", payload, timeout)
-            return self._stream("/api/chat", {**payload, "stream": True}, _ignore, cancel, on_slow, timeout)
+            return self._stream("/api/chat", {**payload, "stream": True}, _ignore, cancel, on_slow, timeout,
+                                alive=alive)
 
         try:
             return send()
@@ -626,7 +704,8 @@ class OllamaTranslator:
         when the model was not loaded yet; a few hundredths when it was). The request asks for the context size every
         request asks for (a model loaded with another would be loaded again by the first page). Raises
         `TranslationError` as every request does; never longer than ``WARM_UP_TIMEOUT``. *cancel* and *on_slow* as for
-        `translate_page`."""
+        `translate_page`; streamed, the server is looked at while it loads (`_ps_answers`: `NoAnswer` when it is
+        silent `ALIVE_MISSES` times in a row)."""
         options: dict[str, Any] = {"num_predict": 1, "temperature": 0}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
@@ -638,7 +717,8 @@ class OllamaTranslator:
         self._used.add(payload["model"])
         start = time.monotonic()
         with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
-            self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow)
+            self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow,
+                            alive=self._ps_answers)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start  # (not last_stats: a warm-up must not stand in for a page's statistics)
@@ -661,7 +741,10 @@ class OllamaTranslator:
             return None
         if entry is None or not entry.get("size") or entry.get("size_vram") is None:
             return None
-        return float(entry["size_vram"]) / float(entry["size"])
+        share = float(entry["size_vram"]) / float(entry["size"])
+        if model is None or model == self.model:
+            self._share = share
+        return share
 
     def _say(self, message: Message) -> None:
         if self.on_status is not None:
@@ -685,23 +768,32 @@ class OllamaTranslator:
         out as it always did, and says what is wrong itself (and starts Ollama). A load that fails raises what the
         request would have raised; Stop raises `Cancelled`. One at a time: a call while another loads (the page's
         model loaded ahead while the page is read, `pipeline.LoadAhead`) waits for it - Stop ends the wait - and then
-        finds the model loaded, so that the model is loaded once and the GPU models let go once.
+        finds the model loaded, so that the model is loaded once and the GPU models let go once. A call that waits gets
+        its slow note (*on_slow*) after ``slow_after`` seconds, as a request does; the load it waits for ends by its own
+        bounds (`warm_up`: ``WARM_UP_TIMEOUT``, and a server silent to /api/ps ends it), and so does the wait.
 
         *quiet* (the window's load at the start, ``load_model_at_start``): the load is not told (``ollama.loading``,
         ``ollama.loaded``), only a model partly on the CPU is; a call that comes to wait for it tells the load as its
         own, from when it began to wait to when the model is there."""
         if unloads_at_once(self.keep_alive):
             return
-        began, told = time.monotonic(), False
+        began, told, slow = time.monotonic(), False, False
         while not self._loading.acquire(timeout=POLL_S):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
             if not told and self._quietly and not quiet:  # (what it waits for says nothing: it says it)
                 told = True
                 self._say(Message("ollama.loading", model=self.model))
+            waited = time.monotonic() - began
+            if on_slow is not None and not slow and waited >= self.slow_after:
+                slow = True  # (said once: its own load, if it makes one, says nothing more of it)
+                try:
+                    on_slow(waited)
+                except Exception:  # noqa: BLE001 - whoever listens must not end the request
+                    pass
         try:
             self._quietly = quiet
-            loaded = self._ensure_loaded(cancel, on_slow, quiet=quiet, told=told)
+            loaded = self._ensure_loaded(cancel, None if slow else on_slow, quiet=quiet, told=told)
         finally:
             self._quietly = False
             self._loading.release()
@@ -723,16 +815,18 @@ class OllamaTranslator:
             return False
         if not (quiet or told):
             self._say(Message("ollama.loading", model=model))
+        # (streamed whatever the caller gave, so that the server is looked at while it loads: `warm_up`)
+        watched = cancel if cancel is not None else threading.Event()
         with ocr_place.loading():  # (from the release of the GPU models on: the OCR decides where it reads after it)
             self._free_gpu()
-            seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
+            seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
             share = self.gpu_share(model)
             checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
             if checked and partly_on_gpu(share):
                 ocr_place.partly_loaded(share)  # (OCR readers kept on the GPU through the load go in the release below)
                 self.release(model, wait=True)
                 self._free_gpu()
-                seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=cancel, on_slow=on_slow)
+                seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
                 share = self.gpu_share(model)
         if not quiet:
             self._say(loaded_message(model, seconds))
@@ -749,11 +843,133 @@ class OllamaTranslator:
         except ValueError:
             fresh = 0.0
         self._fresh = (model, time.monotonic() + fresh) if fresh > 0 else ("", 0.0)
+        with self._incident_lock:  # (an answer: a request without one is an incident of its own from now on)
+            if self._incident is not None:
+                LOG.warning("no answer: the translation program answers again (incident %d)", self._incident["n"])
+            self._incident, self.silent = None, 0
 
     def _unsure(self, model: str | None = None) -> None:
         """A request failed, or *model* (default: any) was unloaded: the next `ensure_loaded` asks /api/ps again."""
         if model is None or self._fresh[0] == model:
             self._fresh = ("", 0.0)
+
+    # --- a request that gets no answer (the module's docstring) -----------------------------------------------
+    def _lost(self) -> None:
+        """What the client knew of the server's state is gone (a request without an answer, a server started again):
+        the next request asks /api/ps whether the model is loaded."""
+        self._unsure()
+
+    def _on_cpu(self) -> bool:
+        """Whether every layer of the model is on the processor (``num_gpu`` 0, or none of it on the GPU last seen)."""
+        return self.num_gpu == 0 or self._share == 0.0
+
+    def _expected_s(self, prompt: str) -> float | None:
+        """The seconds the server is expected to take for *prompt* before its first byte; None when that cannot be
+        worked out (here: never; `plamo.PlamoTranslator` reckons it)."""
+        return None
+
+    def _no_answer_after(self, expected: float | None = None) -> float:
+        """The seconds a request's first byte may take (`NoAnswer`): `NO_ANSWER_TIMES` the *expected* time of its
+        prompt (`_expected_s`), `NO_ANSWER_S` at least; where that cannot be worked out `NO_ANSWER_S`, or
+        `NO_ANSWER_CPU_S` with every layer on the processor."""
+        if expected is None or expected <= 0:
+            return self._silent_after()
+        return max(NO_ANSWER_S, NO_ANSWER_TIMES * float(expected))
+
+    def _silent_after(self) -> float:
+        """The seconds a stream may be silent once it began (`NoAnswer`)."""
+        return NO_ANSWER_CPU_S if self._on_cpu() else NO_ANSWER_S
+
+    def _ps_answers(self, timeout: float | None = None) -> bool:
+        """Whether the server answers /api/ps at all (any HTTP status), within *timeout* (default: `PS_TIMEOUT`), on a
+        connection of its own - never this thread's kept one, which a stream may be reading."""
+        conn = self._connection()
+        conn.timeout = PS_TIMEOUT if timeout is None else timeout
+        try:
+            conn.request("GET", self._prefix + "/api/ps", headers={"Accept": "application/json"})
+            conn.getresponse().read()
+            return True
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - a connection that will not close is let go all the same
+                pass
+
+    def _silence(self, waited: float, kind: str, how: str) -> tuple[int, int, bool]:
+        """A request got no answer: the incident under way (a new one when none is: said once, ``ollama.no_answer``)
+        counts it, and the client's knowledge of the server is gone (`_lost`). (its number, its silences so far, whether
+        it is new); the log names it."""
+        self._lost()
+        with self._incident_lock:
+            new = self._incident is None
+            if new:
+                self._incidents += 1
+                self._incident = {"n": self._incidents, "silences": 0}
+            incident = self._incident
+            incident["silences"] += 1
+            n, silences = incident["n"], incident["silences"]
+        if new:
+            self._say(Message("ollama.no_answer", seconds=round(float(waited), 1)))
+        LOG.warning("no answer: %s (%s), %.1f s %s (incident %d, silence %d)", kind,
+                    threading.current_thread().name, waited, how, n, silences)
+        return n, silences, new
+
+    def _answer(self, send: Callable[[], Any], cancel: threading.Event | None,
+                on_text: Callable[[str], None] | None = None, load: Callable[[], Any] | None = None,
+                kind: str = "request") -> Any:
+        """What *send*() - one request to the model - returns, *load*() before it (the model made sure of,
+        `ensure_loaded`); a load or a request that gets no answer (`NoAnswer`) is taken as the module's docstring says
+        (`_after_silence`) and both asked again on a new connection (*on_text*, a handler that can start again, starts
+        again), or ends with ``ollama.not_answering``. A server started again once at most for it."""
+        tried = {"restart": False}
+        while True:
+            try:
+                if load is not None:
+                    load()
+                return send()
+            except NoAnswer as e:
+                self._after_silence(e, cancel, tried, kind)
+            _start_again(on_text)
+
+    def _after_silence(self, e: NoAnswer, cancel: threading.Event | None, tried: dict[str, bool], kind: str) -> None:
+        """(a request that got no answer, *e*) Returns when the request is to be asked again on a new connection - the
+        incident's first silence and /api/ps answers; or the server TASlation started was started again (`restart`,
+        once for a request: *tried*) -, raises ``ollama.not_answering`` else: the incident is ``silent`` then, until
+        the next answer. A cancel ends it as `Cancelled`."""
+        how = ("after its first bytes" if e.began else "while it loaded, the server silent to /api/ps" if e.load
+               else "without a byte")
+        n, silences, _new = self._silence(e.waited, kind, how)
+        alive = self._ps_answers()
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        if silences == 1 and alive:
+            LOG.warning("no answer: %s asked again on a new connection (/api/ps answers)", kind)
+            return
+        if not tried["restart"] and self.restart is not None:
+            tried["restart"] = True
+            self._say(Message("ollama.restarting"))
+            began = time.monotonic()
+            try:
+                done = self.restart(cancel)
+            except Exception:  # noqa: BLE001 - a restart that fails ends the request as one that did not come back
+                LOG.exception("no answer: starting the translation program again failed")
+                done = False
+            LOG.warning("no answer: /api/ps %s; the translation program %s (%.1f s)", "answers" if alive else "silent",
+                        {True: "was started again", False: "was not started again (it did not come back, or it was "
+                         "within ten minutes of the last time)", None: "is not one TASlation started: left as it is"}
+                        .get(done, "?"), time.monotonic() - began)
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            if done:
+                self._lost()
+                return
+        with self._incident_lock:
+            self.silent = n
+        LOG.warning("no answer: %s ended (/api/ps %s): the reader is told the translation program does not answer",
+                    kind, "answers" if alive else "silent")
+        raise TranslationError(Message("ollama.not_answering"))
 
     def release(self, model: str | None = None, wait: bool = False) -> None:
         """Ollama unloads *model* now (default: the models this translator had it load or use; with none, nothing is
@@ -976,16 +1192,25 @@ def refuses_think(error: TranslationError) -> bool:
 
 class _Watch:
     """Reads a streamed answer in short waits: between them it looks at the cancel event, tells once when nothing
-    has come for *slow_after* seconds, and gives up (a timeout) after *timeout* seconds without a byte."""
+    has come for *slow_after* seconds, and gives up (a timeout) after *timeout* seconds without a byte. The no-answer
+    bounds (the module's docstring): *first*, the seconds the first byte may take, and *between*, those the stream
+    may be silent once it began - past either it raises `NoAnswer` (None: *timeout* alone); *alive* (a load, whose
+    first byte comes once the model is in memory): asked every `ALIVE_EVERY_S` while nothing comes whether the server
+    answers at all, and silent `ALIVE_MISSES` times in a row, `NoAnswer` (*load*)."""
 
     def __init__(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None,
-                 slow_after: float, timeout: float):
+                 slow_after: float, timeout: float, first: float | None = None, between: float | None = None,
+                 alive: Callable[[], bool] | None = None):
         self.cancel = cancel
         self.on_slow = on_slow
         self.slow_after = slow_after
         self.timeout = timeout
+        self.first, self.between, self.alive = first, between, alive
         self.last = time.monotonic()  # when the request was sent, then when the last bytes came
         self.slow_told = False
+        self.began = False  # a byte of the answer came
+        self.asked = self.last  # (when *alive* was asked last)
+        self.misses = 0
 
     def receive(self, sock: socket.socket, buffer: Any) -> int:
         while True:
@@ -994,9 +1219,18 @@ class _Watch:
             try:
                 n = sock.recv_into(buffer)
             except TimeoutError:  # a short wait ended without a byte
-                waited = time.monotonic() - self.last
+                now = time.monotonic()
+                waited = now - self.last
+                bound = self.between if self.began else self.first
+                if bound is not None and waited >= bound:
+                    raise NoAnswer(waited, self.began) from None
                 if waited >= self.timeout:
                     raise
+                if self.alive is not None and now - self.asked >= ALIVE_EVERY_S:
+                    self.misses = 0 if self.alive() else self.misses + 1
+                    self.asked = time.monotonic()
+                    if self.misses >= ALIVE_MISSES:
+                        raise NoAnswer(time.monotonic() - self.last, self.began, load=True) from None
                 if self.on_slow is not None and not self.slow_told and waited >= self.slow_after:
                     self.slow_told = True
                     try:
@@ -1005,6 +1239,7 @@ class _Watch:
                         pass
                 continue
             self.last = time.monotonic()
+            self.began = self.began or n > 0
             return n
 
 
@@ -1050,6 +1285,10 @@ class ItemStream:
 
     def __init__(self, on_object: Callable[[dict[str, Any], int], None]):
         self.on_object = on_object
+        self.reset()
+
+    def reset(self) -> None:
+        """Back to before the reply's first piece (the request asked once more: `_start_again`)."""
         self.count = 0  # objects handed over
         self._lead = ""  # what came before the JSON
         self._started = self._done = False

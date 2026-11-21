@@ -104,6 +104,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.bad_answer": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için F5'e basın.",
     "ollama.not_loopback": "Ollama URL'si bu bilgisayarı gösteren (loopback) bir http(s) adresi olmalı; verilen: “{url}”",
     "ollama.slow": "Çeviri programı yavaş yanıt veriyor (hâlâ yükleniyor olabilir). Durdur bu sayfayı iptal eder.",
+    "ollama.no_answer": "Çeviri programı {seconds:.0f} sn yanıt vermedi, bu yüzden TASlation yeniden soruyor.",
+    "ollama.restarting": "Çeviri programı hâlâ yanıt vermiyor, bu yüzden TASlation onu yeniden başlatıyor...",
+    "ollama.not_answering": ("Bu bilgisayardaki çeviri programı yanıt vermiyor. Onu (veya TASlation'ı) yeniden başlatın, "
+                             "sonra F5'e basın."),
     "ollama.loaded": "Çevirici hazır.",
     "ollama.loading": "Çevirici hazırlanıyor...",
     "ollama.partly_on_gpu": "Çeviricinin yalnızca %{percent} kadarı ekran kartına sığıyor, bu yüzden çeviri yavaş olacak. Ekran kartını kullanan diğer programları kapatın.",

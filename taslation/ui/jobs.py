@@ -93,6 +93,8 @@ from .viewers import show_minimised
 LOG = logging.getLogger(__name__)
 
 HEALTH_RECHECK_MS = 10_000  # while a setup problem stands, it is looked at again this often
+# what a request without an answer says (`OllamaTranslator`'s rule), in the status line (`JobsMixin._model_status`)
+NO_ANSWER_CODES = frozenset({"ollama.no_answer", "ollama.restarting", "ollama.not_answering"})
 # A whole-book run that holds more pages read than this asks before Stop ends it (`JobsMixin.stop_batch`): a few
 # pages are turned again in a minute, more may be an hour of reading. Esc never ends a run without asking.
 FEW_PAGES = 3
@@ -402,6 +404,19 @@ class JobsMixin:
         self._check_in_background()
         return False
 
+    def _restart_ollama(self, cancel: threading.Event | None = None) -> bool | None:
+        """A request got no answer twice, or /api/ps none either (`OllamaTranslator.restart`, in the thread of the
+        request): the server TASlation started is stopped and started again (`OllamaStarter.restart`: at most once in
+        ten minutes; a server the person runs is left as it is: None). Whether it answers again; when it was not
+        started again, or did not come back, the setup is checked again (the banner)."""
+        starter = self._ollama
+        if starter is None:
+            return None
+        done = starter.restart(cancel)
+        if done is False:
+            self._check_in_background()
+        return done
+
     def restart_translator(self) -> None:
         """The banner's Start translator again: Ollama started now (`OllamaStarter`: a starter of its own, so that the
         person's press is not held back by the gap between the window's own tries), in a thread of its own; the setup
@@ -458,6 +473,7 @@ class JobsMixin:
         chosen = choose(s.ollama_model, s.target_language, models)
         self.translator = make_translator(s, chosen.name)
         self.translator.revive = self._revive_ollama
+        self.translator.restart = self._restart_ollama
         self.translator.on_status = lambda message: self._post("model_status", message=message)
         loaded: list[Message] = []  # what loaded where: said once, when the window is ready
         model = chosen.name if models and health.has_model(models, chosen.name) else None
@@ -622,8 +638,15 @@ class JobsMixin:
     def _model_status(self, message: Message) -> None:
         """What a load of Ollama's model says (`OllamaTranslator.on_status`, the "model_status" event), on the Tk
         thread: the load shows as the page's stage and hands back to the stage it interrupted; a model partly on the
-        CPU is said in the status line and, once a session, in a popup, since the status line goes on with the page."""
+        CPU is said in the status line and, once a session, in a popup, since the status line goes on with the page. A
+        request without an answer (`OllamaTranslator`'s rule: asked again, the server started again, or the sentence
+        that it does not answer) is said in the status line; the page's own line comes back with its next step."""
         code = code_of(message)
+        if code in NO_ANSWER_CODES:
+            if code == "ollama.not_answering":
+                self._before_loading = None  # (a load under way ended with it)
+            self.status(message)
+            return
         if code == "ollama.loading":
             self._before_loading = self._progress
             self._handle_event("progress", {"text": message})

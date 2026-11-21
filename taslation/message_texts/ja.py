@@ -101,6 +101,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.bad_answer": "翻訳プログラムの答えを TASlation が使えませんでした。F5 を押してもう一度試してください。",
     "ollama.not_loopback": "Ollama の URL はこのパソコン自身（ループバック）を指す http(s) アドレスにしてください（指定された URL: {url}）",
     "ollama.slow": "翻訳プログラムの応答が遅れています（読み込み中かもしれません）。「停止」でこのページを取り消せます。",
+    "ollama.no_answer": "翻訳プログラムが {seconds:.0f} 秒間応答しなかったため、TASlation がもう一度問い合わせています。",
+    "ollama.restarting": "翻訳プログラムがまだ応答しないため、TASlation が起動し直しています...",
+    "ollama.not_answering": ("このコンピューターの翻訳プログラムが応答しません。翻訳プログラム（または TASlation）を"
+                             "再起動してから F5 を押してください。"),
     "ollama.loaded": "翻訳の準備ができました。",
     "ollama.loading": "翻訳の準備をしています...",
     "ollama.partly_on_gpu": "翻訳に使う部分のうちグラフィックボードに載ったのは {percent}% だけなので、翻訳が遅くなります。グラフィックボードを使う他のプログラムを閉じてください。",

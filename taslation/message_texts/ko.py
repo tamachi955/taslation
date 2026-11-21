@@ -98,6 +98,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.bad_answer": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. F5를 눌러 다시 시도하세요.",
     "ollama.not_loopback": "Ollama URL은 이 컴퓨터를 가리키는 루프백 http(s) 주소여야 합니다. 받은 값: '{url}'",
     "ollama.slow": "번역 프로그램의 응답이 느립니다 (아직 불러오는 중일 수 있습니다). 중지를 누르면 이 페이지를 취소합니다.",
+    "ollama.no_answer": "번역 프로그램이 {seconds:.0f}초 동안 응답하지 않아 TASlation이 다시 요청합니다.",
+    "ollama.restarting": "번역 프로그램이 여전히 응답하지 않아 TASlation이 다시 시작합니다...",
+    "ollama.not_answering": ("이 컴퓨터의 번역 프로그램이 응답하지 않습니다. 번역 프로그램(또는 TASlation)을 다시 시작한 "
+                             "다음 F5를 누르세요."),
     "ollama.loaded": "번역 준비가 끝났습니다.",
     "ollama.loading": "번역을 준비하는 중...",
     "ollama.partly_on_gpu": "번역에 쓰는 부분의 {percent}%만 그래픽 카드에 올라가서 번역이 느려집니다. 그래픽 카드를 사용하는 다른 프로그램을 닫아 주세요.",

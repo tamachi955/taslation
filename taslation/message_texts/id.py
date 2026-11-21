@@ -102,6 +102,10 @@ TEMPLATES: dict[str, str] = {
     "ollama.bad_answer": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan F5 untuk mencoba lagi.",
     "ollama.not_loopback": "URL Ollama harus berupa alamat http(s) loopback (komputer ini), bukan “{url}”",
     "ollama.slow": "Program penerjemah lambat menjawab (mungkin masih memuat). Hentikan membatalkan halaman ini.",
+    "ollama.no_answer": "Program penerjemah tidak menjawab selama {seconds:.0f} dtk, jadi TASlation memintanya lagi.",
+    "ollama.restarting": "Program penerjemah masih tidak menjawab, jadi TASlation memulainya lagi...",
+    "ollama.not_answering": ("Program penerjemah di komputer ini tidak menjawab. Mulai ulang program itu (atau mulai ulang "
+                             "TASlation), lalu tekan F5."),
     "ollama.loaded": "Penerjemah siap.",
     "ollama.loading": "Menyiapkan penerjemah...",
     "ollama.partly_on_gpu": "Hanya {percent}% penerjemah yang muat di kartu grafis, jadi penerjemahan akan lambat. Tutup program lain yang memakai kartu grafis.",

@@ -495,6 +495,19 @@ def test_a_loading_message_shows_the_badge_and_reads_in_the_window_s_language():
         i18n.set_language("en")
 
 
+def test_a_request_without_an_answer_is_said_in_the_status_line(window):
+    translating = Message("pipeline.stage_translating", bubbles=3, translator="ollama")
+    window._progress = translating
+    window._model_status(Message("ollama.loading", model=MODEL))
+    said = [Message("ollama.no_answer", seconds=30.0), Message("ollama.restarting")]
+    for message in said:
+        window._model_status(message)
+    assert window.statuses == said and window._before_loading is translating  # (the load may still come)
+    window._model_status(Message("ollama.not_answering"))
+    assert window.statuses[-1].code == "ollama.not_answering" and window._before_loading is None
+    assert [e[1].code for e in window.events] == ["ollama.loading"]  # (the page's stage is not touched)
+
+
 def test_a_split_model_is_said_in_a_popup_once_a_session(window):
     message = Message("ollama.partly_on_gpu", model=MODEL, percent=55)
     window._model_status(message)
