@@ -536,6 +536,19 @@ def test_the_frame_watch_finds_no_stall_where_the_window_saw_the_page_or_did_not
         thread.join(2)
 
 
+def test_the_input_watch_notes_spells_of_input_by_the_tick_of_the_last_one(monkeypatch):
+    import threading
+
+    ticks = iter([100, 100, 100, 5000, 5000, 6000, 6000, 20000])  # (the first: before the watch's look)
+    stop = threading.Event()
+    monkeypatch.setattr(standin_e2e, "last_input_tick", lambda: next(ticks, None) or stop.set())
+    notes = standin_e2e.Notes(0, 1.0)
+    thread = standin_e2e.watch_input(notes, stop, every=0.005)
+    thread.join(2)
+    assert len(notes.inputs) == 2  # 5000 and 6000 within 3 s of each other, 20000 apart; 100 is no new input
+    assert round(notes.inputs[0][1] - notes.inputs[0][0]) == 1000 and notes.inputs[1][0] == notes.inputs[1][1]
+
+
 def test_the_cover_s_plan_is_a_segment_a_start_and_a_length():
     import argparse
 

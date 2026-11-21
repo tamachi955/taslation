@@ -1827,39 +1827,48 @@ FRESH_FRAME_S = 2.0  # how long the probe's own capture session waits for its fi
 COVER_GRID = 8  # the points of the stand-in's client area (COVER_GRID squared) the probe asks which window is on top
 
 
-def idle_seconds() -> float:
-    """How long ago anyone gave the computer input (keys, mouse, touch: `GetLastInputInfo`, a time and nothing else)."""
+def last_input_tick() -> int | None:
+    """The system's tick count (ms) at anyone's last input to the computer (keys, mouse, touch: `GetLastInputInfo`, a
+    time and nothing else); None when it cannot be had."""
     class Last(ctypes.Structure):
         _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
 
     last = Last()
     last.cbSize = ctypes.sizeof(Last)
     if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(last)):
+        return None
+    return int(last.dwTime)
+
+
+def idle_seconds() -> float:
+    """How long ago anyone gave the computer input (`last_input_tick`); -1 when it cannot be told."""
+    tick = last_input_tick()
+    if tick is None:
         return -1.0
-    return ((ctypes.windll.kernel32.GetTickCount() - last.dwTime) & 0xFFFFFFFF) / 1000.0
+    return ((ctypes.windll.kernel32.GetTickCount() - tick) & 0xFFFFFFFF) / 1000.0
 
 
-def watch_input(notes: Notes) -> None:
+def watch_input(notes: Notes, stop: threading.Event | None = None, every: float = 1.0) -> threading.Thread:
     """A thread that notes when the computer got input from anyone in the run (this tool sends none, nor the window
     under its guard): spells of seconds with input, merged within 3 s - a run with a person at the machine is told
-    from one without."""
+    from one without. *stop* ends it, *every* its pace (tests); its thread."""
     def look() -> None:
-        seen = None
-        while True:
-            time.sleep(1.0)
-            idle = idle_seconds()
-            if idle < 0:
+        seen = last_input_tick()
+        while not (stop.wait(every) if stop is not None else time.sleep(every)):
+            tick = last_input_tick()
+            if tick is None or tick == seen:  # (the tick itself compared: a time worked out from it jitters)
                 continue
-            at = now_ms() - idle * 1000
-            if seen is not None and at - seen > 1:
-                with notes.lock:
-                    if notes.inputs and at - notes.inputs[-1][1] < 3000:
-                        notes.inputs[-1][1] = at
-                    else:
-                        notes.inputs.append([at, at])
-            seen = at
+            seen = tick
+            at = now_ms() - ((ctypes.windll.kernel32.GetTickCount() - tick) & 0xFFFFFFFF)
+            with notes.lock:
+                if notes.inputs and at - notes.inputs[-1][1] < 3000:
+                    notes.inputs[-1][1] = at
+                else:
+                    notes.inputs.append([at, at])
 
-    threading.Thread(target=look, name="tool-watch-input", daemon=True).start()
+    thread = threading.Thread(target=look, name="tool-watch-input", daemon=True)
+    thread.start()
+    return thread
 
 
 def window_cover(hwnd: int, own_pid: int, standin_pids: Callable[[], set[int]] = set) -> dict[str, Any]:
