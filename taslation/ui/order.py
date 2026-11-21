@@ -10,7 +10,8 @@ What is done, and only that (`keep_under`, each heartbeat of the window: `live.L
 window put directly under TASlation's (`capture.keep_viewer_under`: SetWindowPos with SWP_NOACTIVATE - no
 activation, no change of the foreground, no key, no click, nothing that turns a page; only the viewer's place in the
 order), when a window that could hide some of it lies between the two. A window that lay between is not moved: it
-lies under the viewer from then on. Topmost windows stay above the viewer, which is never made topmost (under a
+lies under the viewer from then on - one the person laid over a part of the viewer on purpose (a note, a dictionary)
+too, unless PARTLY_COVERED_TOO is False: then only when the windows of other programs hide all of it. Topmost windows stay above the viewer, which is never made topmost (under a
 topmost TASlation - Always on top, the full screen - it goes to the top of the windows that are not topmost). The
 viewer's own dialogs and popups move with it and stay above it; TASlation's own (its dialogs, the panel beside a
 bubble, an input method's window) are TASlation's and never counted.
@@ -44,6 +45,12 @@ from ..capture import (BROWSER_CLASSES, IS_WINDOWS, foreground_owner, foreground
 
 LOG = logging.getLogger(__name__)
 
+# Which windows between TASlation's and the viewer's have the viewer put up under TASlation's - one switch, no
+# setting, so that both ways can be shown: True, any window that hides some of the viewer (a window the person laid
+# over a part of it on purpose - a note, a dictionary - goes under it at each click on TASlation); False, only once
+# the windows of other programs that hide what lies under them hide all of it (`capture.fully_covered` with *opaque*:
+# what stops a browser drawing), so that one over a part of it stays where the person put it.
+PARTLY_COVERED_TOO = True
 ORDER_EVERY_S = 0.5  # while TASlation is in front, the order looked at this often (and at once when it came to it)
 ORDER_MOST = 5  # the viewer put under TASlation's window at most this many times in one spell of TASlation in front
 COVER_EVERY_S = 1.0  # how often the second measure looks whether the viewer is hidden wholly
@@ -123,16 +130,20 @@ def keep_under(window: Any, now: float | None = None) -> str:
     if now - state.looked < ORDER_EVERY_S - 1e-6 or state.placed >= ORDER_MOST or _busy_with_the_viewer(window):
         return ""
     state.looked = now
+    between: list[int] = []
     try:
-        what = keep_viewer_under(viewer, own)
+        if not PARTLY_COVERED_TOO and not fully_covered(viewer, opaque=True):
+            what = "partly"  # (some of it in sight: a window over a part of it stays where the person put it)
+        else:
+            what = keep_viewer_under(viewer, own, between=between)
     except Exception:  # noqa: BLE001 - the heartbeat goes on
         LOG.exception("the viewer could not be put under TASlation's window")
         return ""
     if what == "placed":
         state.placed += 1
         state.total += 1
-        LOG.info("window order: the viewer put directly under TASlation's window (%d in this spell, %d in all)",
-                 state.placed, state.total)
+        LOG.info("window order: the viewer put directly under TASlation's window (%d in this spell, %d in all; the "
+                 "window(s) between, now under it: %s)", state.placed, state.total, _kinds(between))
         if state.placed >= ORDER_MOST:
             LOG.info("window order: a window comes back between them at once; left as it is until TASlation comes to "
                      "the front again")
@@ -140,6 +151,14 @@ def keep_under(window: Any, now: float | None = None) -> str:
         LOG.warning("window order: Windows did not put the viewer under TASlation's window (%s)", what)
     state.last = what
     return what
+
+
+def _kinds(hwnds: list[int]) -> str:
+    """The window classes of *hwnds* for the log (a class names a kind of window, never what it shows: no title)."""
+    try:
+        return ", ".join(window_class(h)[:40] or "?" for h in hwnds[:8]) + (" ..." if len(hwnds) > 8 else "")
+    except Exception:  # noqa: BLE001 - only the log's
+        return f"{len(hwnds)}"
 
 
 def hidden_wholly(window: Any, viewer: int) -> bool:

@@ -82,7 +82,8 @@ def other(hwnd: int = OTHER, rect=(200, 100, 1300, 900), **kw) -> Placed:
 def test_another_programs_window_between_has_the_viewer_put_directly_under_taslations_and_is_not_moved_itself():
     below = other(40, rect=(0, 0, 1920, 1080))
     desk = Desk(own(), other(), viewer(), below)
-    assert keep_viewer_under(VIEWER, OWN, desk) == "placed"
+    between: list[int] = []
+    assert keep_viewer_under(VIEWER, OWN, desk, between=between) == "placed" and between == [OTHER]
     assert desk.moves == [(VIEWER, OWN)]  # (the viewer alone, put after TASlation's window)
     assert desk.z == [OWN, VIEWER, OTHER, 40]  # (the window that lay between lies under it now, the rest as before)
     assert keep_viewer_under(VIEWER, OWN, desk) == "" and len(desk.moves) == 1  # (nothing between: nothing done)
@@ -164,8 +165,10 @@ def front(monkeypatch):
     monkeypatch.setattr(order, "foreground_owner", lambda hwnd, viewer: state["owner"])
     monkeypatch.setattr(order, "window_class", lambda hwnd: "Chrome_WidgetWin_1")  # (no real window asked)
 
-    def keep(viewer_, own_):
+    def keep(viewer_, own_, between=None):
         state["asked"].append((viewer_, own_))
+        if between is not None and state["gives"] == "placed":
+            between.append(OTHER)
         return state["gives"]
 
     monkeypatch.setattr(order, "keep_viewer_under", keep)
@@ -218,6 +221,39 @@ def test_a_program_that_puts_its_window_back_between_at_once_is_not_fought(front
     order.keep_under(w, t)
     front["owner"] = "own"
     assert order.keep_under(w, t + 0.1) == "placed" and len(front["asked"]) == order.ORDER_MOST + 1
+
+
+def test_with_the_switch_off_a_window_over_a_part_of_the_viewer_stays_and_only_one_hiding_all_of_it_counts(
+        front, monkeypatch):
+    """(`order.PARTLY_COVERED_TOO` False: the way to show the owner, a window laid over a part of the viewer on
+    purpose staying where the person put it)"""
+    hidden = {"all": False}
+    asked_opaque: list[bool] = []
+
+    def covered(hwnd, opaque=False):
+        asked_opaque.append(opaque)
+        return hidden["all"]
+
+    monkeypatch.setattr(order, "fully_covered", covered)
+    monkeypatch.setattr(order, "PARTLY_COVERED_TOO", False)
+    w = _window()
+    assert order.keep_under(w, 100.0) == "partly" and front["asked"] == []  # (some of it in sight: left as it is)
+    hidden["all"] = True
+    assert order.keep_under(w, 100.5) == "placed" and front["asked"] == [(VIEWER, OWN)]
+    assert set(asked_opaque) == {True}  # (by the windows that hide what lies under them: TASlation's own does not)
+    monkeypatch.setattr(order, "PARTLY_COVERED_TOO", True)  # (the way built: any window between, asked at once)
+    hidden["all"] = False
+    assert order.keep_under(w, 101.0) == "placed" and len(asked_opaque) == 2
+
+
+def test_the_log_names_the_kinds_of_window_that_went_under_the_viewer_and_no_title(front, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(order, "window_class", lambda hwnd: {OTHER: "StandinToolCover"}.get(hwnd, "Chrome_WidgetWin_1"))
+    with caplog.at_level(logging.INFO, logger=order.__name__):
+        order.keep_under(_window(), 100.0)
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("window order: the viewer put"))
+    assert line.endswith("now under it: StandinToolCover)")
 
 
 def test_nothing_is_asked_while_the_viewer_is_raised_for_a_look_resized_or_not_chosen(front):

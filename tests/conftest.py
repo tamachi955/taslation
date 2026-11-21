@@ -78,7 +78,7 @@ def no_real_window_reordered(monkeypatch):
     """No test puts a real window in another place in the order of the windows, nor counts the windows over one, as
     the window keeps the viewer under its own (`ui.order`: the tests' handles are made up; one of them could be a real
     window of this machine); tests/test_window_order.py patches its own in."""
-    monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own: "")
+    monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own, between=None: "")
     monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: False)
 
 
