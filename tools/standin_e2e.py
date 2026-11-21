@@ -1723,30 +1723,65 @@ def stages(notes: Notes, server: ServerState) -> None:
 STUCK_NO_HTTP_S = 20.0  # a request this long under way that has not gone out over HTTP: the threads' stacks written
 STUCK_S = 60.0  # ... and one this long under way at all
 STUCK_DUMPS = 6
+STUCK_TK_S = 20.0  # the Tk thread this long without a tick of the driver: the stacks written as well
+PROBE_S = 5.0  # each question the watch asks the server on a dump, on a connection of its own
 
 
-def watch_stuck(notes: Notes, path: Path) -> None:
+def server_says(url: str | None) -> str:
+    """What the server at *url* answers just then, on connections of the watch's own: whether /api/version answers and
+    how fast, and what /api/ps lists (each model's name, its memory on the GPU and when it expires) - to tell a server
+    that answers nothing, one whose model went away and one that answers this but not the window's request."""
+    if not url:
+        return "server: not asked"
+    t0 = time.monotonic()
+    try:
+        version = ollama_get(url, "/api/version", timeout=PROBE_S)
+        t1 = time.monotonic()
+        ps = ollama_get(url, "/api/ps", timeout=PROBE_S)
+    except Exception as e:  # (the window's network guard, say: the watch goes on)
+        return f"server: not asked ({type(e).__name__})"
+    t2 = time.monotonic()
+    said = (f"server: version {version.get('version') if isinstance(version, dict) else 'no answer'} "
+            f"in {round((t1 - t0) * 1000)} ms; ps ")
+    if not isinstance(ps, dict):
+        return said + f"no answer in {round((t2 - t1) * 1000)} ms"
+    models = [f"{m.get('name') or m.get('model')} ({round(int(m.get('size_vram') or 0) / 2 ** 20)} MiB on the GPU, "
+              f"expires {m.get('expires_at')})" for m in ps.get("models") or []]
+    return said + f"{models or 'nothing loaded'} in {round((t2 - t1) * 1000)} ms"
+
+
+def watch_stuck(notes: Notes, path: Path, url: str | None = None) -> None:
     """A thread of the tool's own that writes every thread's stack to *path* (each frame's file, line and function:
     no source line, no value) when a request to the translator has been under way STUCK_NO_HTTP_S without going out
-    over HTTP, or STUCK_S at all - what a translation that stops without an error is found by. STUCK_DUMPS at most, one
-    per such request, each with the requests then under way (their kind, job, age and whether they went out)."""
+    over HTTP, or STUCK_S at all, or the Tk thread has not ticked for STUCK_TK_S - what a translation that stops
+    without an error is found by. STUCK_DUMPS at most, one per such request or silence, each with the requests then
+    under way (their kind, job, age and whether they went out) and what the server at *url* answers then
+    (`server_says`)."""
     dumped: set[int] = set()
+    silences: set[float] = set()
 
     def look() -> None:
-        while len(dumped) < STUCK_DUMPS:
+        while len(dumped) + len(silences) < STUCK_DUMPS:
             time.sleep(2.0)
             now = now_ms()
             with notes.lock:
                 open_ = [dict(r) for r in notes.requests if r["end_t"] is None]
+                last_tick = notes.tk_cpu[-1][0] if notes.tk_cpu else None
             stuck = [r for r in open_ if r["n"] not in dumped and (
                 now - r["t"] > STUCK_S * 1000 or (r["http_t"] is None and now - r["t"] > STUCK_NO_HTTP_S * 1000))]
-            if not stuck:
+            silent = (last_tick is not None and last_tick not in silences
+                      and time.monotonic() - last_tick > STUCK_TK_S)
+            if not stuck and not silent:
                 continue
             dumped.update(r["n"] for r in stuck)
+            if silent:
+                silences.add(last_tick)
             names = {t.ident: t.name for t in threading.enumerate()}
             lines = [f"== {time.strftime('%H:%M:%S')}: requests under way "
                      + ", ".join(f"#{r['n']} {r['kind']} job {r['job']} {round((now - r['t']) / 1000)} s"
-                                 f"{'' if r['http_t'] else ' (not sent)'}" for r in open_)]
+                                 f"{'' if r['http_t'] else ' (not sent)'}" for r in open_)
+                     + (f"; the Tk thread silent {round(time.monotonic() - last_tick)} s" if silent else ""),
+                     server_says(url)]
             for ident, frame in sys._current_frames().items():
                 lines.append(f"-- thread {names.get(ident, ident)}")
                 lines += [f"   {fs.filename}:{fs.lineno} {fs.name}" for fs in traceback.extract_stack(frame)]
@@ -2005,13 +2040,18 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             nxt = self._next()  # (the page it works on: chosen so again inside, nothing changed between)
         except Exception:  # noqa: BLE001 - not known
             nxt = None
+        resumes = dict(getattr(self, "resumes", {}) or {})
         try:
             what = backlog_step(self, pipeline, *a, **k)
             return what
         finally:
             notes.local.side = held
             if what:
-                notes.backlog_note("step", self, began=began, did=what,
+                # (a read that took up one stopped before - "resumed" - or began again from the start, and why: what
+                # `Backlog._resume_of` counted in this step; None for a read with nothing kept of one before)
+                now = dict(getattr(self, "resumes", {}) or {})
+                took = next((key for key, n in now.items() if n != resumes.get(key, 0)), None)
+                notes.backlog_note("step", self, began=began, did=what, resumed=took,
                                    on=nxt[0] if nxt else None, sight=nxt[1].screen.sight if nxt else None,
                                    here=getattr(self, "_here", None),
                                    waited_ms=round(self.last_wait * 1000) if what == "stopped"
@@ -4215,7 +4255,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     notes = Notes(top, dpr)
     hotkeys = HotKeys(notes)
     patched = install(notes, args, guard, viewer_info, hotkeys)
-    watch_stuck(notes, out / "stacks.txt")
+    watch_stuck(notes, out / "stacks.txt", url)
     state = demo_video.scratch_state()
     info = viewer_info()
     remember_role(state, BOOK, "reader")
@@ -4734,6 +4774,9 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             "same_page_turn_first_lettered_ms": tail(same_page_first),
             "frame_wait_ms": tail([b.get("frame_wait_ms") for b in bg]),
             "steps_on": dict(Counter(f"{b.get('on')}:{b['did']}" for b in bg)),
+            # (the reads that followed one stopped before: taken up where it stopped, or begun again and why)
+            "reads_after_a_stop": dict(Counter(f"{b['resumed']}:{b['did']}" for b in bg
+                                               if b.get("on") == "read" and b.get("resumed"))),
             "lettered_soft_turns": sum(1 for _t, r in mine if r["lettered_soft_ms"]),
             "stale": sum(1 for x in spells.get("stale", []) if lo <= x["from_t"] < upto),
             "old_lettering_ms_max": max((r["old_lettering_ms"] or 0 for _t, r in mine), default=0),
@@ -4895,7 +4938,8 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"waits {k['waits_ms']}; read back {k['read_back_how']}, caught and begun with no new read "
               f"{k['read_back_caught_no_new_read']}/{k['read_back_caught']}, turns to the page worked on: waits "
               f"{k['same_page_turn_waits_ms']}, first bubble {k['same_page_turn_first_lettered_ms']}; "
-              f"frames held {k['frame_wait_ms']} ms")
+              f"frames held {k['frame_wait_ms']} ms; steps {k['steps_on']}, busy {k['steps_busy_s']} s, reads after "
+              f"a stop {k['reads_after_a_stop']}")
     side = run_.get("side_indicator") or {}
     looked = side.get("looked")
     print(f"indicator {side.get('setting')}: event pump {side.get('poll_events_ms')}" + (

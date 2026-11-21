@@ -391,6 +391,26 @@ def test_requests_sent_for_nothing_are_told_with_what_they_cost():
     assert standin_e2e.dist([]) == {"n": 0}
 
 
+def test_the_watch_tells_what_the_server_answers_on_a_dump(monkeypatch):
+    assert standin_e2e.server_says(None) == "server: not asked"
+    answers = {"/api/version": {"version": "0.40.0"},
+               "/api/ps": {"models": [{"name": "plamo:2b", "size_vram": 3 * 2 ** 30, "expires_at": "12:00"}]}}
+    monkeypatch.setattr(standin_e2e, "ollama_get", lambda url, path, timeout=3.0: answers.get(path))
+    said = standin_e2e.server_says("http://127.0.0.1:11435")
+    assert said.startswith("server: version 0.40.0 in ") and "plamo:2b (3072 MiB on the GPU, expires 12:00)" in said
+    answers["/api/ps"] = {"models": []}
+    assert "nothing loaded" in standin_e2e.server_says("http://127.0.0.1:11435")
+    answers.clear()
+    assert "version no answer" in standin_e2e.server_says("http://x:1") and "ps no answer" in \
+        standin_e2e.server_says("http://x:1")
+
+    def blocked(*_a, **_k):
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr(standin_e2e, "ollama_get", blocked)
+    assert standin_e2e.server_says("http://x:1") == "server: not asked (RuntimeError)"
+
+
 def _sized(id_, t, page, spread, size, frame="sharp", stored=0, hits=0, misses=0, requests=0, done=None):
     return {"id": id_, "t_s": t, "page": page, "spread": spread, "frame": frame, "size": size, "requests": requests,
             "cache_hits": hits, "cache_misses": misses, "stored": stored, "stored_at_cancel": None, "done_s": done}
