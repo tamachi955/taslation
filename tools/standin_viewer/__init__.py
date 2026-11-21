@@ -191,14 +191,26 @@ FLAGS = ("--no-first-run", "--no-default-browser-check", "--disable-sync", "--di
          "--enable-logging=stderr", "--v=0")
 
 
+# ... and, for a run that must not depend on the windows of a person at the machine (`draws_covered`), the occlusion
+# tracking off: the stand-in draws on under any window, as a viewer that draws while covered does.
+DRAWS_COVERED = ("--disable-backgrounding-occluded-windows",)
+OCCLUSION_FEATURE = "CalculateNativeWinOcclusion"
+
+
 def browser_command(program: Path, url: str, profile: Path, rect: tuple[int, int, int, int],
-                    scale: float = 1.0) -> list[str]:
+                    scale: float = 1.0, draws_covered: bool = False) -> list[str]:
     """The command that opens *url* in a window of its own (``--app``) at *rect* (x, y, width, height) on the
     throwaway *profile*; *scale* other than 1: the browser draws as on a display of that scale
-    (``--force-device-scale-factor``: its own window and the page's devicePixelRatio, no setting of the system's)."""
+    (``--force-device-scale-factor``: its own window and the page's devicePixelRatio, no setting of the system's);
+    *draws_covered*: it goes on drawing while other windows hide it wholly (DRAWS_COVERED, and the occlusion
+    feature added to the one list of features turned off)."""
     x, y, w, h = rect
     scaled = [f"--force-device-scale-factor={scale:g}"] if scale != 1.0 else []
-    return [str(program), f"--user-data-dir={profile}", *FLAGS, *scaled, f"--window-position={x},{y}",
+    flags = list(FLAGS)
+    if draws_covered:
+        flags = [f + "," + OCCLUSION_FEATURE if f.startswith("--disable-features=") else f for f in flags]
+        flags += DRAWS_COVERED
+    return [str(program), f"--user-data-dir={profile}", *flags, *scaled, f"--window-position={x},{y}",
             f"--window-size={w},{h}", f"--app={url}"]
 
 
@@ -312,11 +324,12 @@ class StandinBrowser:
     process tree it started, and of nothing else."""
 
     def __init__(self, program: Path, url: str, profile: Path, rect: tuple[int, int, int, int], token: str,
-                 scale: float = 1.0):
+                 scale: float = 1.0, draws_covered: bool = False):
         self.profile = Path(profile)
         self.token = token
         self.profile.mkdir(parents=True, exist_ok=False)
-        self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale), stdin=subprocess.DEVNULL,
+        self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered),
+                                     stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                      errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.events: list[tuple[float, dict[str, str]]] = []

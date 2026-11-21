@@ -1862,10 +1862,11 @@ def watch_input(notes: Notes) -> None:
     threading.Thread(target=look, name="tool-watch-input", daemon=True).start()
 
 
-def window_cover(hwnd: int, own_pid: int) -> dict[str, Any]:
-    """Which window is on top at COVER_GRID x COVER_GRID points of the stand-in's client area (the stand-in, a
-    TASlation window, or another program by its file name; no window's title), which one is in front, and whether the
-    stand-in is minimised, hidden or cloaked: a browser window wholly covered by opaque ones stops drawing."""
+def window_cover(hwnd: int, own_pid: int, standin_pids: Callable[[], set[int]] = set) -> dict[str, Any]:
+    """Which window is on top at COVER_GRID x COVER_GRID points of the stand-in's client area (the stand-in, another
+    window of the stand-in's browser - its processes *standin_pids* -, a TASlation window, the tool's cover, or
+    another program by its file name; no window's title), which one is in front, and whether the stand-in is
+    minimised, hidden or cloaked: a browser window wholly covered by opaque ones stops drawing."""
     from taslation.capture import client_rect_on_screen, program_name
     from taslation.capture import windows as win
 
@@ -1887,8 +1888,11 @@ def window_cover(hwnd: int, own_pid: int) -> dict[str, Any]:
         user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
         if pid.value == own_pid:
             return "tool cover" if win.window_class(h) == COVER_CLASS else "TASlation"
+        if pid.value in browser:
+            return "stand-in browser"
         return program_name(pid.value) or "?"
 
+    browser = set(standin_pids())
     x, y, w, h = client_rect_on_screen(hwnd)
     points: Counter[str] = Counter()
     for i in range(COVER_GRID):
@@ -1946,7 +1950,7 @@ def fresh_frame(notes: Notes, hwnd: int) -> dict[str, Any]:
 
 
 def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: threading.Event | None = None,
-                 every: float = 0.5) -> threading.Thread:
+                 every: float = 0.5, standin_pids: Callable[[], set[int]] = set) -> threading.Thread:
     """A thread that finds the window's frames of the stand-in standing still: a sharp screen the stand-in drew and
     kept FRAME_STALL_S that no frame the window took showed, while it took FRAME_STALL_CAPTURES or more. Each stall
     noted from then until the window's frames move again (one of another screen, or more of its capture session),
@@ -1963,7 +1967,7 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
             "this_window": s.hwnd == hwnd, "frames": s.seq, "ended": s.ended, "error": (s.error or "")[:120],
             "age_s": round(time.monotonic() - s.started, 1), "thread_alive": s._thread.is_alive()}
         try:
-            look["cover"] = window_cover(hwnd, own_pid)
+            look["cover"] = window_cover(hwnd, own_pid, standin_pids)
         except Exception as e:  # noqa: BLE001
             look["cover"] = type(e).__name__
         try:
@@ -4589,7 +4593,9 @@ def run(args: argparse.Namespace) -> int:
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
     page = sv.page_url(token, steps, standin_dir, seed=args.seed)
-    browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale)
+    report["standin_draws_covered"] = bool(args.standin_draws_covered)
+    browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale,
+                                draws_covered=args.standin_draws_covered)
     closed: dict[str, Any] = {}
     try:
         hwnd = browser.wait_window()
@@ -4675,7 +4681,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     hotkeys = HotKeys(notes)
     patched = install(notes, args, guard, viewer_info, hotkeys)
     watch_stuck(notes, out / "stacks.txt", url)
-    watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt")
+    watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt", standin_pids=lambda: {pid, *browser.tree})
     watch_input(notes)
     state = demo_video.scratch_state()
     info = viewer_info()
@@ -5527,6 +5533,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "a GPU, whose page on show takes longer)")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
+    ap.add_argument("--standin-draws-covered", action="store_true",
+                    help="the stand-in browser goes on drawing while other windows hide it wholly (its occlusion "
+                         "tracking off): a run that does not depend on the windows of a person at the machine")
     ap.add_argument("--cover", type=cover_plan, default=None, metavar="SEGMENT:AT:FOR",
                     help="the tool's own plain window laid over the stand-in AT seconds after SEGMENT began, for FOR "
                          "seconds (a viewer wholly covered, on purpose; no key, no activation)")

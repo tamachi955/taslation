@@ -178,7 +178,9 @@ rows' languages.
   the tool's own, the seconds since anyone's input) and `input_spells` (when the computer got input from anyone: a run
   with a person at the machine, whose windows may cover the stand-in, is told apart), the app's log in `app_log/` when
   the run had a stop, a stall or a request without an answer (unless it holds Japanese script), `--cover
-  SEGMENT:AT:FOR` laying a window of the tool's own over the stand-in on purpose, and with
+  SEGMENT:AT:FOR` laying a window of the tool's own over the stand-in on purpose (the stand-in, a browser, stops
+  drawing under it, as under any window that hides it wholly), `--standin-draws-covered` keeping it drawing under
+  any window (a run that does not depend on the windows of a person at the machine), and with
   `--start-ollama` the server's own log `ollama_server.log`,
   at Ollama's default level, with no prompt and no answer in it),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
