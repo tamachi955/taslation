@@ -1260,6 +1260,9 @@ class LogTap(logging.Handler):
     # the lines of the rule for a request without an answer (`translate.ollama`, `ollama_start.OllamaStarter.restart`,
     # `pipeline.LoadAhead`) and of the backlog's pause for it: fixed words, numbers and a thread's name, never a line
     NO_ANSWER_PREFIXES = ("no answer:", "backlog paused: the translation program", "backlog goes on:")
+    # the window's lines of the viewer kept under it and of the viewer hidden wholly (`ui.order`): fixed words and
+    # numbers only
+    WINDOW_ORDER_PREFIXES = ("window order:", "the viewer is hidden wholly")
 
     def __init__(self, notes: Notes, url: str | None = None):
         super().__init__(logging.INFO)
@@ -1267,6 +1270,7 @@ class LogTap(logging.Handler):
         self.url = url
         self.levels: Counter[str] = Counter()
         self.no_answer: list[dict[str, Any]] = []
+        self.window_order: list[dict[str, Any]] = []
 
     def _no_answer(self, record: logging.LogRecord) -> None:
         """A line of the rule kept with its time and thread; for the first line of each silence (it names the
@@ -1283,6 +1287,9 @@ class LogTap(logging.Handler):
             msg = record.msg if isinstance(record.msg, str) else ""
             if msg.startswith(self.NO_ANSWER_PREFIXES):
                 self._no_answer(record)
+            if msg.startswith(self.WINDOW_ORDER_PREFIXES):
+                with self.notes.lock:
+                    self.window_order.append({"t": now_ms(), "line": record.getMessage()[:200]})
             for template, code in self.TEMPLATES:
                 if msg.startswith(template):
                     args = record.args if isinstance(record.args, tuple) else ()
@@ -5146,6 +5153,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
+        "window_order": [{**n, "t": rel(n["t"])} for n in tap.window_order],
         "frame_stalls": stalls_report(notes, rel),
         "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],
         "tool_cover": None if notes.tool_cover is None else {
@@ -5526,6 +5534,12 @@ def print_table(report: dict[str, Any], path: Path) -> None:
         print(f"no answer: {sum(1 for n in said if ', silence ' in n['line'])} silence(s), "
               f"{sum(1 for n in said if 'was stopped' in n['line'])} restart(s), "
               f"{sum(1 for n in said if ' ended (' in n['line'])} request(s) ended with the sentence")
+    kept = run_.get("window_order") or []
+    if kept:
+        print(f"window order: the stand-in put under the window {sum(1 for n in kept if 'put directly under' in n['line'])}"
+              f" time(s), left as it was {sum(1 for n in kept if 'left as it is' in n['line'])} time(s), "
+              f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s); hidden wholly with its frames "
+              f"standing still {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
     stalls = run_.get("frame_stalls") or []
     if stalls:
         print(f"frames standing still: {len(stalls)}, longest {max((s['lasted_s'] or 0) for s in stalls)} s"

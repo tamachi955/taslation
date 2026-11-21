@@ -49,7 +49,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 from PIL import Image
@@ -1410,6 +1410,116 @@ def _lower_all() -> None:
 atexit.register(_lower_all)
 
 
+# --- the viewer kept directly under TASlation's window -----------------------------------
+GW_HWNDNEXT = 2  # the window below in the order of the windows
+HWND_TOP = 0
+TK_CLASSES = "Tk"  # (the start of the class name of the windows Tk makes: TkTopLevel, TkChild)
+
+
+@dataclass(frozen=True)
+class Placed:
+    """A top-level window as the walk of the order of the windows sees it (`windows_between`): shown (visible, not
+    minimised, not cloaked), topmost, click-through (WS_EX_TRANSPARENT), its process, its class, the top-level window
+    that owns it (GA_ROOTOWNER: itself when none does) and its rectangle."""
+
+    hwnd: int
+    shown: bool = True
+    topmost: bool = False
+    see_through: bool = False
+    pid: int = 0
+    class_name: str = ""
+    root_owner: int = 0
+    rect: Rect = (0, 0, 0, 0)
+
+
+def windows_between(own: int, viewer: int, below: Callable[[int], int], about: Callable[[int], Placed],
+                    own_pid: int) -> list[int] | None:
+    """The windows between TASlation's top-level window *own* and the viewer's *viewer* in the order of the windows
+    that could hide some of the viewer, from the top down: shown, not topmost (one that is stays above the viewer
+    whatever is done: the viewer is never made topmost), not click-through, not the viewer's own (its dialogs and
+    popups, which Windows keeps above it and moves with it), not TASlation's own (one its window owns - a dialog, the
+    panel beside a bubble, an input method's window - or one Tk made in its process), and over some of the viewer's
+    rectangle. *below*(h): the window under *h* (0: none); *about*(h): what is known of it (`Placed`). None when the
+    viewer does not lie under *own* (above it, or gone) - nothing to do then."""
+    target = about(viewer).rect
+    found: list[int] = []
+    h = below(own)
+    for _ in range(MAX_WINDOWS_ABOVE):
+        if not h:
+            return None
+        if h == viewer:
+            return found
+        w = about(h)
+        mine = w.root_owner == own or (w.pid == own_pid and w.class_name.startswith(TK_CLASSES))
+        if (w.shown and not w.topmost and not w.see_through and w.root_owner != viewer and not mine
+                and rects_overlap(w.rect, target)):
+            found.append(h)
+        h = below(h)
+    return None
+
+
+class _Order:
+    """What `keep_viewer_under` asks of Windows (user32), one call each; tests give a list of made-up windows."""
+
+    def root(self, hwnd: int) -> int:
+        return int(user32.GetAncestor(hwnd, GA_ROOT) or hwnd) if user32.IsWindow(hwnd) else 0
+
+    def minimised(self, hwnd: int) -> bool:
+        return bool(user32.IsIconic(hwnd))
+
+    def topmost(self, hwnd: int) -> bool:
+        return bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+    def below(self, hwnd: int) -> int:
+        return int(user32.GetWindow(hwnd, GW_HWNDNEXT) or 0)
+
+    def about(self, hwnd: int) -> Placed:
+        ex = int(user32.GetWindowLongW(hwnd, GWL_EXSTYLE))
+        shown = bool(user32.IsWindowVisible(hwnd)) and not user32.IsIconic(hwnd) and not _is_cloaked(hwnd)
+        try:
+            rect = _window_rect(hwnd) if shown else (0, 0, 0, 0)
+        except CaptureError:
+            rect = (0, 0, 0, 0)
+        return Placed(hwnd, shown, bool(ex & WS_EX_TOPMOST), bool(ex & WS_EX_TRANSPARENT), window_pid(hwnd),
+                      window_class(hwnd) if shown else "", int(user32.GetAncestor(hwnd, GA_ROOTOWNER) or hwnd), rect)
+
+    def own_pid(self) -> int:
+        return os.getpid()
+
+    def place(self, hwnd: int, after: int) -> bool:
+        return bool(user32.SetWindowPos(hwnd, after, 0, 0, 0, 0, SWP_STAY))
+
+
+def keep_viewer_under(viewer: int, own: int, order: _Order | None = None) -> str:
+    """The viewer's window *viewer* put directly under TASlation's window *own* in the order of the windows when a
+    window that could hide some of it lies between the two (`windows_between`): SetWindowPos with SWP_NOACTIVATE and
+    neither its place nor its size changed - no activation, no change of the foreground, no key, no click; only the
+    viewer's place in the order. A window that lay between is not moved: it lies under the viewer from then on, above
+    what lay under the viewer before. Under a topmost *own* (Always on top, the full screen) the viewer goes to the top
+    of the windows that are not topmost (HWND_TOP), right under the topmost ones: put after a topmost window it would
+    become topmost itself. What was done: "placed", "" (nothing between could hide it), or why nothing was:
+    "not windows", "gone", "minimised" (either window), "topmost" (the viewer is topmost: nothing can lie over it but
+    other topmost windows), "above" (the viewer does not lie under TASlation's window), "refused" (Windows did not take
+    it: a viewer that runs as administrator, say)."""
+    if order is None:
+        if not IS_WINDOWS:
+            return "not windows"
+        order = _Order()
+    viewer, own = order.root(viewer), order.root(own)
+    if not viewer or not own or viewer == own:
+        return "gone"
+    if order.minimised(viewer) or order.minimised(own):
+        return "minimised"
+    if order.topmost(viewer):
+        return "topmost"
+    between = windows_between(own, viewer, order.below, order.about, order.own_pid())
+    if between is None:
+        return "above"
+    if not between:
+        return ""
+    return "placed" if order.place(viewer, HWND_TOP if order.topmost(own) else own) else "refused"
+
+
 def behind_others(hwnd: int) -> bool:
     """Whether another window on the screen lies over the client area of the window *hwnd*: a copy of the screen
     there would show that window. Click-through overlays (WS_EX_TRANSPARENT) and windows that are cloaked, hidden or
@@ -1440,10 +1550,11 @@ def behind_others(hwnd: int) -> bool:
 RDW_INVALIDATE, RDW_ALLCHILDREN = 0x0001, 0x0080
 
 
-def windows_over(hwnd: int) -> list[Rect]:
+def windows_over(hwnd: int, opaque: bool = False) -> list[Rect]:
     """The rectangles of the windows above the top-level window of *hwnd* that a copy of the screen would show, as
-    `behind_others` counts them (shown, not minimised nor cloaked, not click-through), the nearest first. [] outside
-    Windows or for a window that is gone."""
+    `behind_others` counts them (shown, not minimised nor cloaked, not click-through), the nearest first; with
+    *opaque* only those that hide what lies under them (`fully_opaque`: not TASlation's own at WINDOW_ALPHA, say). []
+    outside Windows or for a window that is gone."""
     if not IS_WINDOWS or not user32.IsWindow(hwnd):
         return []
     found: list[Rect] = []
@@ -1451,7 +1562,9 @@ def windows_over(hwnd: int) -> list[Rect]:
     for _ in range(MAX_WINDOWS_ABOVE):
         if not above:
             break
-        if (user32.IsWindowVisible(above) and not user32.IsIconic(above) and not _is_cloaked(above)
+        if opaque and not fully_opaque(above):
+            pass
+        elif (user32.IsWindowVisible(above) and not user32.IsIconic(above) and not _is_cloaked(above)
                 and not user32.GetWindowLongW(above, GWL_EXSTYLE) & WS_EX_TRANSPARENT):
             try:
                 found.append(_window_rect(above))
@@ -1464,12 +1577,13 @@ def windows_over(hwnd: int) -> list[Rect]:
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
 
 
-def fully_covered(hwnd: int) -> bool:
+def fully_covered(hwnd: int, opaque: bool = False) -> bool:
     """Whether the windows above *hwnd* (`windows_over`) hide every pixel of its client area that lies on the screens
     (what lies off them is seen by no one either; Chromium's occlusion tracking counts it so too): only then can a
     viewer have stopped drawing for being covered - Windows composes every window from a surface of its own, so a
     window partly in sight draws as one in front does, and Chromium and Firefox stop only for a window hidden wholly.
-    False outside Windows, for a window that is gone, minimised or hidden."""
+    With *opaque* only the windows that hide what lies under them count (`fully_opaque`): what a browser stops drawing
+    under. False outside Windows, for a window that is gone, minimised or hidden."""
     if not IS_WINDOWS or not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
         return False
     try:
@@ -1483,7 +1597,7 @@ def fully_covered(hwnd: int) -> bool:
     if vw <= 0 or vh <= 0:
         vx, vy, vw, vh = x, y, width, height
     seen = (max(x, vx), max(y, vy), min(x + width, vx + vw), min(y + height, vy + vh))
-    return covers(windows_over(hwnd), seen)
+    return covers(windows_over(hwnd, opaque), seen)
 
 
 def ask_repaint(hwnd: int) -> bool:
