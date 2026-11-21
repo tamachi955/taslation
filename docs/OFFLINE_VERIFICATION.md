@@ -3600,3 +3600,50 @@ entry is read back before it is used, and it must hold the version that was anno
 change the Ollama settings of a program in use, so the chain was run in scratch folders with a stand-in installer
 only. A computer that reaches the network through a proxy only: the program uses none and says that GitHub could
 not be asked; the ZIP by hand works as before.
+
+## A request without an answer, on a real server (2026-11-21)
+
+The rule for a request without an answer (`translate.ollama`, `NoAnswer`) on its own, without the work behind the
+reader. It came from a stop seen in the stand-in runs: Ollama 0.40.16 took every request and passed none to its model
+process for 2 min 28 s, /api/ps answering all the while, and a reader who turned every 8 s cancelled each request
+after 6 to 7 s, before its own 30 s. The wait for a first byte is therefore counted over the requests in a row that
+got none (`_Waits`), the time with none under way left out, and any byte of any request to the model starts it again.
+On the stand-in server of `tests/test_no_answer.py`, which takes every request and sends nothing, at the module's own
+bounds: a reader turning every 7 s, 2 s between pages, was told `ollama.no_answer` at 30.0 s waited in all, on the
+fifth page; turning every 6 s, the fifth request reached 30 s as its turn cancelled it and the sixth was ended at once,
+told 30.1 s. Before, no request at either pace reached its own 30 s.
+
+Then a real Ollama 0.40.16 on a port of its own (11435; the default port's server was never asked), with the window's
+translator (`make_translator`, PLaMo) and `OllamaStarter`'s revive and restart hung on it as the window hangs them, on
+a page of six made-up lines: after the second line was answered the server's model process (`llama-server.exe`) was
+suspended - not ended. Ollama does not wait for a model process that stops: it starts another and loads the model in
+it, /api/ps answering. With the first process alone suspended, the new one answered the third line 25.4 s later and
+the rule was not needed. With every model process of that server suspended as it came:
+
+| | a start record names the server | no start record (a server the person runs) |
+|---|---|---|
+| model process suspended | 10.9 s | 10.4 s |
+| told it did not answer for 30 s (`ollama.no_answer`) | 41.0 s (30.1 s) | 40.5 s (30.1 s) |
+| the request asked again on a new connection: its load | 41.0 s | 40.6 s |
+| the second silence: the load past its bound | 101.0 s (60.0 s) | 100.6 s (60.1 s) |
+| told it is started again (`ollama.restarting`) | 101.0 s, once | never |
+| stopped; started again and answering | 0.1 s; 3.5 s | never touched |
+| the model loaded again | 3.9 s | - |
+| the page | finished at 109.1 s, 6 of 6 lines | ended at 100.6 s with `ollama.not_answering` |
+
+Before the last change the load of the request asked again had no bound but /api/ps, which answered: it was waited
+for `WARM_UP_TIMEOUT`, 300 s, and the page ended with `ollama.timeout` after 330.5 s, the server never started again.
+A load within an incident now has `NO_ANSWER_LOAD_S` (60 s, or three times the longest load measured), and the
+sentence that the program is started again is said once a restart is under way only: it had been said of a server the
+person runs too, which is left as it is. After each run no model process of the test was left, the server started
+again was stopped as TASlation's own end stops it, and the default port's server was as before.
+
+The rule changes no answer: the official benchmark (`tools/openmantra_eval.py --seed 1 --start-ollama 11435`) on this
+branch and on v0.9.2, the same server set up the same way: 1,586 of 1,586 lines translated, every line with the same
+chrF, 41.0 both (the same 1,418 requests and tokens; 293.2 and 294.7 s); detection F1 97.2. The 41.2 of the release
+notes for 0.9.0 came from the server on the default port, which is set up otherwise.
+
+The window on the stand-in viewer (`tools/standin_e2e.py --scenario all --start-ollama 11435`, every scenario of
+this line's tool: c, a, b, d, e, r, t, t2, o, z, w, w2, x, f, f2) ran to its end in 334.5 s with no request
+without an answer, no warning or error in the log, nothing refused by the guard and only the stand-in chosen; the
+server it started was stopped at the end.
