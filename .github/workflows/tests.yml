@@ -52,11 +52,17 @@ jobs:
 
       - name: Install the packages (the CPU build of PyTorch)
         run: |
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # a virtual environment, as install.ps1 makes one: the update tests copy its launcher
+          python -m venv .venv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install -e ".[backup,dev]"
+          $py = Join-Path $PWD '.venv\Scripts\python.exe'
+          "PY=$py" >> $env:GITHUB_ENV
+          & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -c "import torch, taslation; print('torch', torch.__version__, 'taslation', taslation.__version__)"
+          & $py -m pip install -e ".[backup,dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -c "import torch, taslation; print('torch', torch.__version__, 'taslation', taslation.__version__)"
+          & $py -m pip freeze --exclude-editable > "packages-${{ matrix.shard }}.txt"
 
       # The OCR, layout and inpainting models and the fonts, about 1.1 GB, at the revisions setup_models.py fixes:
       # downloaded once and kept for the later runs (the key changes when the script does).
@@ -70,7 +76,7 @@ jobs:
       - name: Download the models
         if: steps.models.outputs.cache-hit != 'true'
         run: |
-          python setup_models.py --models-dir models --agreed --brief --font --fonts
+          & $env:PY setup_models.py --models-dir models --agreed --brief --font --fonts
           exit $LASTEXITCODE
 
       - name: Run this job's test files
@@ -78,10 +84,10 @@ jobs:
           TASLATION_MODELS_DIR: ${{ github.workspace }}\models
           TASLATION_STATE_DIR: ${{ runner.temp }}\taslation-state
         run: |
-          $files = @(python tools/test_shards.py --of $env:SHARDS --shard ${{ matrix.shard }})
+          $files = @(& $env:PY tools/test_shards.py --of $env:SHARDS --shard ${{ matrix.shard }})
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { Write-Host 'no test files for this job'; exit 1 }
           Write-Host "$($files.Count) test files"
-          python -m pytest -q -p no:cacheprovider --durations=0 --durations-min=0.5 @files 2>&1 | Tee-Object -FilePath "pytest-${{ matrix.shard }}.txt"
+          & $env:PY -m pytest -q -p no:cacheprovider --durations=0 --durations-min=0.5 @files 2>&1 | Tee-Object -FilePath "pytest-${{ matrix.shard }}.txt"
           $code = $LASTEXITCODE
           $tail = Get-Content "pytest-${{ matrix.shard }}.txt" -Tail 40
           "### Tests ${{ matrix.shard }}`n" >> $env:GITHUB_STEP_SUMMARY
@@ -95,6 +101,8 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: pytest-${{ matrix.shard }}
-          path: pytest-${{ matrix.shard }}.txt
+          path: |
+            pytest-${{ matrix.shard }}.txt
+            packages-${{ matrix.shard }}.txt
           retention-days: 7
           if-no-files-found: ignore
