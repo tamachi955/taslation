@@ -2300,6 +2300,8 @@ class Pipeline:
         if on_show is not None:
             on_show.needs = {unit.index for unit, unit_regions, page in plans
                              if (page is None and unit_regions) or (page is not None and completes(page))}
+            if not on_show.needs:  # (nothing to read: a page the cache holds - its read is done, before it is drawn)
+                on_show.told(on_show.on_read)
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
         ahead = (LoadAhead(self, cancel, work.gate if work is not None else None)
                  if getattr(_ON_SHOW, "window", False) and cancel is not None and translate

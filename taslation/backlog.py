@@ -12,7 +12,11 @@ frame there is once the frames have kept changing for its SETTLE_TRIES looks, pa
 unless a look of the window's KEEP_SETTLES times settle_ms after then still saw it (``PageGate.settled_by``: the recheck
 RECHECK_MS after the confirmation), nor a page whose job had no gate (a page the window took as settled), nor one over the caps. A
 page that is not caught is as it was before there was a backlog: the lines answered by then stay stored, and the page
-is read and asked for the rest when the viewer shows it again (`Pipeline._complete_page`).
+is read and asked for the rest when the viewer shows it again (`Pipeline._complete_page`); the window is told so
+("missed"). A page job never leaves a stage told at work with nothing at work on it (`Tracking._left`): stopped, its
+confirmation taken back, it waits; failed, it failed. (A page turned by TASlation's own page key while a job ran was
+taken as settled, its job without a gate: `ui.live._await_change` now starts it early, a gate of its own, as a page
+the viewer turned while the job ran.)
 
 What is kept of a page caught, in memory only and never written anywhere: when the job had read every page unit it
 reads (`PageWork.read_all`), its regions as read (copies taken before the translation changed them) and from them
@@ -39,7 +43,10 @@ viewer's current frame, which the window takes as it takes a page the cache does
 draws a page soft first: not a frame that looks soft, `ui.live`). A read of the backlog's stopped (by a turn, any
 job) leaves its detection and the units read by then (``found``, counted against FRAME_CAP_MB with the frame, let go
 with the entry): a page job of that very page takes them and reads the rest, and so does the backlog's own next read
-of the frame (`Backlog._resume_of`, under the conditions `lend` has), rather than read it from the start.
+of the frame (`Backlog._resume_of`, under the conditions `lend` has), rather than read it from the start. A page done
+- by the backlog, or on show - keeps its regions as read (`Backlog.keep_done`, DONE_CAP_MB, the oldest go first): shown
+again, it is lettered from the cache over them, nothing found or read, its bar done throughout (`Tracking._progress`:
+a stage told done is never told at work again while the page is on show).
 
 The order of work on the window's single worker (`Backlog.tick`, `Backlog.step`): the page on show first, always - a
 step of the backlog is queued only while no page job runs or waits, nothing of a page job is held for its frame
@@ -98,6 +105,7 @@ SHOWN_AT_LEAST_MS = 150  # a frame dropped before its confirmation that was on s
 MERGE_WITHIN = 2  # a page that went by is the next screen confirmed when their fingerprints are this many times
 # ``fingerprint_max_distance`` apart at most (a soft picture of the page, drawn first, and its sharp one)
 HOLD_S = 0.0  # a step of the backlog that asks the model waits until the reader has stayed this long on a finished page
+DONE_CAP_MB = 64  # the regions as read kept of the pages done (`Backlog.keep_done`: a page shown again is read nowhere)
 
 
 def reading_event(window: Any, kind: str, data: dict[str, Any]) -> None:
@@ -349,6 +357,8 @@ class Backlog:
         self.screens: list[Screen] = []
         self.entries: list[Entry] = []
         self._held: dict[int, Entry] = {}  # (by sight: an entry whose page is on show again, its job at work)
+        # (by sight, the oldest first: what a page done or failed kept of its read, for its next showing - `keep_done`)
+        self._done: dict[int, Entry] = {}
         self._sight = 0
         self._seq = 0
         self._order = 0
@@ -474,6 +484,33 @@ class Backlog:
         with self._lock:
             return sum(e.unit_count for e in [*self.entries, *self._held.values()])
 
+    @property
+    def done_bytes(self) -> int:
+        """What the reads kept of the pages done hold (`keep_done`: DONE_CAP_MB at most, apart from FRAME_CAP_MB)."""
+        with self._lock:
+            return sum(e.kept_bytes for e in self._done.values())
+
+    def keep_done(self, entry: Entry) -> None:
+        """(under the lock, or not) What *entry* - its page done or failed, by the backlog or on show - read of its
+        page kept for the page's next showing (`lend`): its regions as read with the capture's page units, pixel size
+        and read signature, nothing else (no frame). Then a page turned back to is lettered from the cache over those
+        regions, nothing found or read on its frame - before, its read was let go with the page done and the page job
+        found and read the page again (3.4 s on the processor), its bar "reading" over a page shown translated. The
+        oldest go first past DONE_CAP_MB; dropped with the backlog."""
+        if not entry.read or not entry.page_units or entry.size is None or not entry.sig:
+            return
+        kept = Entry(entry.screen, entry.hwnd, read=dict(entry.read), page_units=list(entry.page_units),
+                     size=tuple(entry.size), sig=entry.sig, kept_bytes=entry.kept_bytes or _region_bytes(entry.read))
+        if kept.kept_bytes > DONE_CAP_MB * MB:
+            return
+        with self._lock:
+            if not any(s is entry.screen for s in self.screens):
+                return  # (a screen of before a drop)
+            self._done.pop(entry.screen.sight, None)
+            self._done[entry.screen.sight] = kept
+            while sum(e.kept_bytes for e in self._done.values()) > DONE_CAP_MB * MB:
+                self._done.pop(next(iter(self._done)))
+
     def _pack_later(self, entry: Entry) -> None:
         """*entry*'s frame packed on the backlog's thread (`pageimages.pack`); what it counts goes down to the packed
         size."""
@@ -557,6 +594,7 @@ class Backlog:
                 self.entries.sort(key=lambda x: x.screen.sight)
             elif e is not None and done:
                 self._frame_gone(e)
+                self.keep_done(e)  # (its read, for the page's next showing)
                 e.let_go()
 
     def lend(self, screen: Screen, work: Any, pipeline: Any, within: int) -> str:
@@ -565,13 +603,15 @@ class Backlog:
         its regions as read (``reuse``; ``lent``: the very ones kept, never changed, for what the job keeps of them;
         ``found``: the detection of a read stopped half-way, the units not read by then read from it). Only when the
         frame is of the same page units as the capture they came from (`same_units`), of its pixel size, and nothing
-        a reading depends on changed since (`Pipeline.read_signature`). What it said: "reused", "partial", or why the
-        page is read as ever - "none" (no entry, or one with nothing read), "frame" (its frame not read yet),
-        "size", "units", "settings"."""
+        a reading depends on changed since (`Pipeline.read_signature`). A page done has no entry: what its read kept
+        is lent the same way (`keep_done`). What it said: "reused", "partial", or why the page is read as ever -
+        "none" (no entry, or one with nothing read), "frame" (its frame not read yet), "size", "units", "settings"."""
         import copy
 
         with self._lock:
             e = self._held.get(screen.sight)
+            if e is None or e.screen is not screen:
+                e = self._done.get(screen.sight)
             if e is None or e.screen is not screen:
                 why = "none"
             elif not e.read and e.found is None:
@@ -606,6 +646,7 @@ class Backlog:
         with self._lock:
             had = bool(self.entries or self._held or self.screens or self.pending)
             self.entries, self._held, self.screens, self.pending = [], {}, [], []
+            self._done = {}
             self._sight = self._seq = 0
             self._here = 0
             self.paused.discard("stop")
@@ -948,6 +989,8 @@ class Backlog:
             if entry in self.entries:
                 self.entries.remove(entry)
             self._frame_gone(entry)
+            if stage == "translate":
+                self.keep_done(entry)  # (its read, for the page's next showing)
             entry.let_go()
         self.tell(entry.screen, stage, state)
 
@@ -974,6 +1017,8 @@ class Tracking:
         self.read_done = False
         self.reported = False
         self.reuse = ""  # (what `Backlog.lend` said of the page: "" before its units were known)
+        self.ended = False  # (`finished` or `cancelled` came: else the job failed, `over`)
+        self.work: Any = None  # (the job's `PageWork`, once its units are known)
         self._lock = backlog._lock
         backlog.resume("stop")  # (the reader reads on: Stop and a release paused the backlog until now)
         backlog.resume("release")
@@ -995,6 +1040,7 @@ class Tracking:
         on show - what the backlog read of the page given to the job in place of a reading (`Backlog.lend`) -; told to
         the window once the gate is confirmed (at once when it is)."""
         units = list(work.units or [])
+        self.work = work
         if not units:
             self.backlog.show(None)
             return
@@ -1009,15 +1055,27 @@ class Tracking:
             on_kept(self._report)
 
     def on_read(self, work: Any) -> None:
-        """(the worker) Every unit the job reads is read."""
+        """(the worker) Every unit the job reads is read (none to read: a page the cache holds, `Pipeline.process`)."""
         with self._lock:  # (the backlog's: told in order with the confirmation's, `_report`)
             self.read_done = True
             if self.reported and self.screen is not None:
-                self.backlog.tell(self.screen, "read", "done", self.image)
-                self.backlog.tell(self.screen, "translate", "working", self.image)
+                self._progress("read", "done")
+                self._progress("translate", "working")
+
+    def _progress(self, stage: str, state: str) -> None:
+        """(under the lock) The job's progress told: a stage the screen was told done or skipped - the page done by
+        the backlog or a job before, shown translated from the cache - is never told at work again while it is on
+        show (its job's end says what came of it, `finished`)."""
+        screen = self.screen
+        if screen is None:
+            return
+        if state == "working" and screen.stages.get(stage) in ("done", "skipped"):
+            return
+        self.backlog.tell(screen, stage, state, self.image)
 
     def _report(self) -> None:
-        """(the frame confirmed) The screen on show, and how far its job is."""
+        """(the frame confirmed) The screen on show, and how far its job is: its read done once every unit is read,
+        or when the backlog's read of it is lent whole (`Backlog.lend`: nothing read on show)."""
         screen = self.screen
         if screen is None:
             return
@@ -1025,15 +1083,29 @@ class Tracking:
         with self._lock:
             self.reported = True
             screen.missed = False  # (a page told as gone by is on show now)
-            b.tell(screen, "read", "done" if self.read_done else "working", self.image)
-            if self.read_done:
-                b.tell(screen, "translate", "working", self.image)
+            read = self.read_done or self.reuse == "reused"
+            self._progress("read", "done" if read else "working")
+            if read:
+                self._progress("translate", "working")
             merge_missed(b, screen, self._within())
             b.show(screen)
         b.totals()
 
+    def _left(self, state: str) -> None:
+        """The job ends with its page neither done nor caught: a stage it told the window as at work is told *state*
+        ("waiting": still to do - read, or asked for the rest, when shown again -; "failed": the job failed), never
+        left at work with nothing at work on it. Nothing when it told the window nothing."""
+        screen = self.screen
+        if screen is None or not self.reported:
+            return
+        for stage in ("read", "translate"):
+            if screen.stages.get(stage) == "working":
+                self.backlog.tell(screen, stage, state, self.image)
+        self.backlog.totals()
+
     def finished(self, result: Any) -> None:
         """(the worker) The job is done, the page shown: its stages ended as they came out."""
+        self.ended = True
         b = self.backlog
         b.finished_at = time.monotonic()
         screen = self.screen
@@ -1043,8 +1115,9 @@ class Tracking:
                 b.show(None)
                 return
             screen = self.screen = b.screen_for(units, self._within())
-        if self.gate is not None and not self.gate.confirmed:
-            b.release(screen, done=False)
+        if self.gate is not None and not self.gate.confirmed:  # (its confirmation taken back: a sharper picture
+            b.release(screen, done=False)  # of the page came, whose own job tells it)
+            self._left("waiting")
             return
         regions = list(getattr(result, "regions", None) or [])
         untranslated = any(getattr(r, "status", "") == "untranslated" for r in regions)
@@ -1057,12 +1130,30 @@ class Tracking:
             b.tell(screen, "translate", "done" if translated else "skipped", self.image)
         screen.missed = False
         b.release(screen, done=not (error or untranslated))
+        self._keep_read(screen)
         b.show(screen)
         b.totals()
 
+    def _keep_read(self, screen: Screen) -> None:
+        """(the page done on show) What the job read of every unit it read, kept for the page's next showing
+        (`Backlog.keep_done`): that showing finds and reads nothing, as for a page the backlog did, where what was
+        lettered ahead of it (`Pipeline.keep_shown`) does not serve it (another frame of the page, of the same size)."""
+        work = self.work
+        if work is None or not getattr(work, "read", None) or not getattr(work, "read_all", False):
+            return
+        try:
+            sig = self.pipeline.read_signature(list(work.units))
+        except Exception:  # noqa: BLE001 - not kept: the next showing reads the page as ever
+            return
+        size = tuple(work.size) if getattr(work, "size", None) else None
+        self.backlog.keep_done(Entry(screen, self.hwnd, read=dict(work.read), page_units=list(work.units),
+                                     size=size, sig=sig))
+
     def cancelled(self, turned: bool, work: Any) -> None:
         """(the worker, the job raised `Cancelled`) *turned*: the reader turned away from the page (`turn_away`); a
-        page whose gate was sealed is caught (when the caps allow), one whose frame went by is told as such."""
+        page whose gate was sealed is caught (when the caps allow), one whose frame went by is told as such, one with
+        no gate (taken as settled) is told as not caught."""
+        self.ended = True
         b = self.backlog
         gate = self.gate
         screen = self.screen
@@ -1079,8 +1170,9 @@ class Tracking:
             return
         if screen is None:
             return
-        if not (gate is not None and gate.confirmed):
-            b.release(screen, done=False)
+        if gate is not None and not gate.confirmed:  # (its confirmation taken back, or never given: what it told
+            b.release(screen, done=False)  # the window waits for the page's next job)
+            self._left("waiting")
             return
         if not turned:  # (Stop, the close: the page stays as it is - still to do, read or asked when shown again)
             for stage in ("read", "translate"):
@@ -1089,8 +1181,8 @@ class Tracking:
             b.release(screen, done=False)
             b.totals()
             return
-        if not _sealed(gate) and not _soft(gate) and _settled(gate):  # (kept for now: caught once sealed,
-            # `Backlog.settle_pending`)
+        if gate is not None and not _sealed(gate) and not _soft(gate) and _settled(gate):  # (kept for now: caught
+            # once sealed, `Backlog.settle_pending`)
             with b._lock:
                 b.pending.append((self, work))
             b.tell(screen, "translate", "waiting", self.image)
@@ -1098,14 +1190,15 @@ class Tracking:
         self.catch(work)
 
     def catch(self, work: Any) -> None:
-        """(the page turned past, its gate sealed or soft) Caught when it may be (see the module's docstring), else
-        told as not caught."""
+        """(the page turned past, its gate sealed or soft, or none) Caught when it may be (see the module's
+        docstring), else told as not caught - as waiting when the backlog goes on with an entry of the page that was
+        held while it was on show."""
         b = self.backlog
         gate = self.gate
         screen = self.screen
-        if screen is None or gate is None:
+        if screen is None:
             return
-        caught = _sealed(gate) and not _soft(gate) and _settled(gate) and \
+        caught = gate is not None and _sealed(gate) and not _soft(gate) and _settled(gate) and \
             b.catch(screen, self.image, work, self.pipeline, self.hwnd)
         if caught:
             b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting",
@@ -1114,18 +1207,23 @@ class Tracking:
         else:
             b.not_caught += 1
             b.release(screen, done=False)
+            with b._lock:
+                queued = any(e.screen is screen for e in b.entries)
             for stage in ("read", "translate"):
                 if screen.stages.get(stage) not in ("done", "failed", "skipped"):
-                    b.tell(screen, stage, "missed", self.image)
-            screen.missed = screen.stages.get("translate") == "missed"
+                    b.tell(screen, stage, "waiting" if queued else "missed", self.image)
+            screen.missed = not queued and screen.stages.get("translate") == "missed"
         b.totals()
 
     def over(self) -> None:
         """(the worker, the job's end, however it ended) What the backlog held for the page while it was on show
-        (`Backlog.hold`) and was not let go of goes back to it."""
+        (`Backlog.hold`) and was not let go of goes back to it; a job that ended neither done nor cancelled (it
+        failed) leaves no stage told at work."""
         screen = self.screen
         if screen is not None and self.backlog.held_entry(screen) is not None:
             self.backlog.release(screen, done=False)
+        if not self.ended:
+            self._left("failed")
 
     def kept_later(self, work: Any) -> bool:
         """A page turned past whose confirmation was kept for now (`Pipeline.decide_kept`): caught once it is sealed."""

@@ -3029,6 +3029,11 @@ class LiveViewMixin(BlackViewerMixin):
                     op.turned_at = now  # (does it turn once more, soon? "settle" watches; several keys turn several)
             elif self._take_at_once(op.hwnd, image, thumb, frame_detail, operation=True, shown=False):
                 return  # a page the cache holds: taken on its first frame, then rechecked
+            # (a page job at work meanwhile - the page before still read or asked for -: the page goes as one the
+            # viewer turned while the job ran, `_look_over_job` - the job cancelled once the frame has stayed
+            # LEFT_PAGE_MS, the page started early, a gate of its own, once the worker is free - not taken as settled
+            # and queued, then started with no gate: never caught once turned past, `backlog`)
+            op.over_job = bool(self.auto_var.get()) and (self._page_job_runs() or self._page_job_ends())
             self._show_live(image, thumb)  # the turned page shows at once
             self._settle_on(op, thumb, frame_detail, now, image)
             return
