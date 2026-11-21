@@ -436,6 +436,102 @@ def test_the_log_tap_keeps_each_line_of_the_rule_for_no_answer_with_what_the_ser
     assert "server_says" not in tap.no_answer[1] and tap.levels["WARNING taslation.translate.ollama"] == 3
 
 
+def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
+    """The frame watch on notes where the stand-in drew page *drawn_page* sharp 7 s ago and the window took
+    *capture_n* frames since, the last of *captures* a moment ago; its probes' parts stand-ins."""
+    import threading
+    from taslation.capture import wgc
+
+    monkeypatch.setattr(standin_e2e, "window_cover", lambda hwnd, pid: {"points": {"stand-in": 64}, "front": "x"})
+    monkeypatch.setattr(standin_e2e, "fresh_frame", lambda notes, hwnd: {"ms": 50, "shows": {"page": drawn_page}})
+    monkeypatch.setattr(standin_e2e, "idle_seconds", lambda: 12.0)
+    monkeypatch.setattr(wgc, "_session", None)
+    notes = standin_e2e.Notes(0, 1.0)
+    now = standin_e2e.now_ms()
+    notes.drawn_last = {"t": now - 7000, "page": drawn_page, "spread": False, "state": "sharp", "capture_n": 0}
+    notes.captures = [{"t": now + dt, "page": p, "spread": False, "state": "sharp", "size": [9, 9]}
+                      for dt, p in captures]
+    notes.capture_n, notes.last_capture_t = capture_n, now - 100
+    stop = threading.Event()
+    thread = standin_e2e.watch_frames(notes, 1, 2, tmp_path / "stacks.txt", stop, every=0.02)
+    return notes, stop, thread
+
+
+def _until(test, seconds=3.0):
+    import time
+
+    deadline = time.monotonic() + seconds
+    while not test() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return test()
+
+
+def test_the_frame_watch_finds_the_window_s_frames_standing_still_and_their_end(monkeypatch, tmp_path):
+    notes, stop, thread = _frames_watched(monkeypatch, tmp_path, [(-9000, 4)])
+    try:
+        assert _until(lambda: notes.frame_stalls and notes.frame_stalls[0]["probes"])
+        stall = notes.frame_stalls[0]
+        assert stall["frozen"] == (4, False, "sharp") and stall["drawn"]["page"] == 5 and stall["until_t"] is None
+        probe = stall["probes"][0]
+        assert probe["cover"]["points"] == {"stand-in": 64} and probe["fresh"]["shows"] == {"page": 5}
+        assert probe["idle_s"] == 12.0 and probe["window_session"] is None and probe["drawn"]["page"] == 5
+        assert "stand still on (4, False, 'sharp')" in (tmp_path / "stacks.txt").read_text(encoding="utf-8")
+        with notes.lock:  # the window's frames go on: the stall ends
+            notes.captures.append({"t": standin_e2e.now_ms(), "page": 5, "spread": False, "state": "sharp",
+                                   "size": [9, 9]})
+        assert _until(lambda: stall["until_t"] is not None)
+        assert stall["shows_then"] == (5, False, "sharp") and stall["lasted_s"] >= 7.0
+        assert len(notes.frame_stalls) == 1
+        report = standin_e2e.stalls_report(notes, lambda t: None if t is None else round(t - stall["from_t"]))
+        assert report[0]["from"] == 0 and report[0]["drawn"] == [5, False, "sharp"]
+        assert report[0]["frozen"] == [4, False, "sharp"] and report[0]["probes"][0]["drawn"] == [5, False, "sharp"]
+    finally:
+        stop.set()
+        thread.join(2)
+
+
+@pytest.mark.parametrize("captures, capture_n", [
+    ([(-9000, 4), (-6900, 5), (-3000, 4)], 5),  # the window saw the page once since it was drawn
+    ([(-9000, 4)], 2),  # the window took too few frames since: it was not looking
+])
+def test_the_frame_watch_finds_no_stall_where_the_window_saw_the_page_or_did_not_look(monkeypatch, tmp_path,
+                                                                                     captures, capture_n):
+    import time
+
+    notes, stop, thread = _frames_watched(monkeypatch, tmp_path, captures, capture_n=capture_n)
+    try:
+        time.sleep(0.3)
+        assert notes.frame_stalls == [] and not (tmp_path / "stacks.txt").exists()
+    finally:
+        stop.set()
+        thread.join(2)
+
+
+def test_the_cover_s_plan_is_a_segment_a_start_and_a_length():
+    import argparse
+
+    assert standin_e2e.cover_plan("k2:12:30") == ("k2", 12.0, 30.0)
+    for bad in ("k2:12", "k2:x:30", "k2:-1:30", "k2:5:0"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            standin_e2e.cover_plan(bad)
+
+
+def test_the_app_s_log_is_kept_after_an_incident_unless_it_holds_japanese_script(monkeypatch, tmp_path):
+    import re as re_
+
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "log.txt").write_text("2026-11-21 12:00:00 INFO taslation: page job 84 done\n", encoding="utf-8")
+    assert standin_e2e.keep_app_log(state, tmp_path / "kept") == "kept: log.txt"
+    assert (tmp_path / "kept" / "log.txt").read_text(encoding="utf-8").endswith("job 84 done\n")
+    assert standin_e2e.JAPANESE_SCRIPT.search(chr(0x3042)) and standin_e2e.JAPANESE_SCRIPT.search(chr(0x6F22))
+    assert not standin_e2e.JAPANESE_SCRIPT.search("page job 84 done")
+    monkeypatch.setattr(standin_e2e, "JAPANESE_SCRIPT", re_.compile("job 84"))  # (a stand-in for the script)
+    assert standin_e2e.keep_app_log(state, tmp_path / "not") == "not kept: it holds Japanese script"
+    assert not (tmp_path / "not").exists()
+    assert standin_e2e.keep_app_log(tmp_path / "nothing", tmp_path / "none") == "no log"
+
+
 def _sized(id_, t, page, spread, size, frame="sharp", stored=0, hits=0, misses=0, requests=0, done=None):
     return {"id": id_, "t_s": t, "page": page, "spread": spread, "frame": frame, "size": size, "requests": requests,
             "cache_hits": hits, "cache_misses": misses, "stored": stored, "stored_at_cancel": None, "done_s": done}
