@@ -38,8 +38,11 @@ numbered in their order (the window on the right, the stand-in viewer and the st
 key cap), then the cards "How a page is translated", "The models", "On your own computer" and "Before you use it" -
 their figures from the code's constants (`code_facts`), their sentences those of README.md, docs/MANUAL.md and
 docs/THIRD_PARTY.md. Long waits are cut; a stretch marked as waiting for the models is shown faster, with a badge and
-"shown at N.Nx speed" under it. One palette, no dither. A GIF over 5 MB is refused (``--allow-large`` writes it and
-says by how much it is over); either way the scenes that take the most bytes are said. The recording file is deleted
+"shown at N.Nx speed" under it. The GIF costs each visitor of the page as little as it can: one palette of 64
+colours with the window's own colours kept apart, no dither; each frame stores only what changed; where only the
+window's picture changes (a bubble lettered, a word typed, a wait) at most 4 frames a second; a card is one frame.
+A GIF over 5 MB is refused (``--allow-large`` writes it and says by how much it is over); either way the scenes that
+take the most bytes are said. The recording file is deleted
 once the GIF is written (``--keep-recording`` keeps it); it holds pictures of the sample pages, as the GIF does: both
 are CC BY-NC 4.0 material ("Sample pages: OpenMantra dataset (Mantra Inc., CC BY-NC 4.0), modified" on every frame
 with a page), never part of a release. The GIF goes where git ignores it (``promo/``) or outside the repository; the
@@ -99,7 +102,9 @@ CLOSE_WAIT_S = 60  # the window not closed this long after the scenes: every thr
 GLIDE_HZ = 30
 KEY_CAP_MS = 1600.0  # a key cap shows this long (as shown)
 MAX_SPEED = 8.0
-LONGEST_S = 1.2  # a wait with nothing changing is cut to this long
+LONGEST_S = 1.0  # a wait with nothing changing is cut to this long
+COLOURS = 64  # the GIF's palette: the pages are black and white with greys, the window's colours are kept apart
+STILL_FPS = 4.0  # frames where only the window's picture changes (lettering, typing, waiting): at most this many a second
 TITLE_S, CARD_S = 5.0, 5.5
 PIC_HEIGHT = 560  # the stand-in's pictures, at most this high
 NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
@@ -613,6 +618,43 @@ def name_like(source: str, translated: str) -> tuple[str, str] | None:
 def view_at(views: Sequence[dict[str, Any]], t: float) -> dict[str, Any] | None:
     """How the window's page canvas showed its picture at *t* (the last ``views`` entry at *t* or before)."""
     return next((v for v in reversed(views) if float(v["t"]) <= t), None)
+
+
+def filling_moment(meta: dict[str, Any]) -> float | None:
+    """The "how" card's middle moment where the window did not note one: halfway through the lettering of the page
+    job the "original" moment shows (the letters noted, numbers only), or None."""
+    moments = meta.get("moments") or {}
+    t0, t1 = moments.get("original"), moments.get("translated")
+    if t0 is None:
+        return None
+    fill = next((f for f in meta.get("fills", []) if float(f["t"]) >= float(t0) - 1.0), None)
+    if fill is None:
+        return None
+    times = sorted(float(x["t"]) for x in meta.get("letters", [])
+                   if x.get("n") == fill["n"] and x.get("on") and (t1 is None or float(x["t"]) <= float(t1)))
+    if len(times) < 2:
+        return None
+    return round(times[(len(times) - 1) // 2] + 60.0, 1)  # (just after the middle bubble was lettered)
+
+
+def page_on_capture(view: dict[str, Any], pic: Image.Image | None) -> tuple[float, float, float, float]:
+    """Where the page is on the picture of the stand-in the window shows (its client area, *view*'s ``image``): the
+    stand-in fits each screen with 20 px round it and centres it (`serve_viewer`); the screen's shape from the
+    viewer's picture *pic* (the screen and a margin of the ground round it). The whole picture where *pic* is
+    missing."""
+    W, H = (float(v) for v in view["image"])
+    if pic is None:
+        return (0.0, 0.0, W, H)
+    ground = np.array([int(dv.GROUND[i:i + 2], 16) for i in (1, 3, 5)], np.int16)
+    a = np.asarray(pic.convert("RGB"), np.int16)
+    off = np.abs(a - ground).max(axis=2) > 40
+    cols, rows = np.flatnonzero(off.mean(axis=0) > 0.02), np.flatnonzero(off.mean(axis=1) > 0.02)
+    if len(cols) < 2 or len(rows) < 2:
+        return (0.0, 0.0, W, H)
+    shape = (cols[-1] - cols[0] + 1) / (rows[-1] - rows[0] + 1)
+    h = min(H - 40.0, (W - 40.0) / shape)
+    w = h * shape
+    return ((W - w) / 2, (H - h) / 2, (W + w) / 2, (H + h) / 2)
 
 
 def on_picture(box: Sequence[float], view: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -1252,18 +1294,15 @@ class Director:
 
     # what is noted
     def watch(self) -> None:
-        """The three moments of the first page translated in a scene (for the "how" card's pictures): its page shown,
-        half its bubbles lettered, all of them."""
+        """Two moments of the first page translated in a scene (for the "how" card's pictures): its page shown, all
+        of it lettered (the one between, half its bubbles lettered, is found from the letters noted:
+        `filling_moment`)."""
         if self.watch_from is None:
             return
         moments = self.records["moments"]
         fills = [f for f in self.probe.fills if f["t"] >= self.watch_from]
         if fills:
-            fill = fills[-1]
-            moments.setdefault("original", fill["t"])
-            done = sum(1 for x in self.probe.letters if x["n"] == fill["n"] and x["on"])
-            if "filling" not in moments and fill["boxes"] and max(1, fill["boxes"] // 2) <= done < fill["boxes"]:
-                moments["filling"] = round(pv.now_ms(), 1)
+            moments.setdefault("original", fills[-1]["t"])
         results = [r for r in self.probe.results if r["t"] >= self.watch_from]
         if results and not self.app.busy and "original" in moments:
             moments.setdefault("translated", round(pv.now_ms() + 300, 1))
@@ -1429,6 +1468,46 @@ class Director:
         yield 0.12
         self.down = False
         self.move_to(*self.pointer.at)  # type: ignore[misc]
+
+    def shown_drawn(self, dialog: Any) -> Iterator[Any]:
+        """Pictures again (after `grabber.pause()` before a dialog opened), once *dialog* is drawn where it stays: a
+        dialog being built shows white a moment, the editor where it opens before it is moved aside - the GIF holds
+        the picture before it instead."""
+        try:
+            dialog.update_idletasks()
+            yield 0.35
+        finally:
+            self.grabber.resume()
+
+    def show_list(self, box: Any) -> Iterator[Any]:
+        """`post_list` of the combobox *box*, with no picture until its list is drawn (a list just shown is black a
+        moment); the path of its listbox."""
+        self.grabber.pause()
+        try:
+            listbox = post_list(box)
+        except BaseException:
+            self.grabber.resume()
+            raise
+        yield from self.shown_drawn(box)
+        return listbox
+
+    def open_dialog(self, widget: Any, kind: type, what: str, seconds: float = 0.7) -> Iterator[Any]:
+        """`click_widget` on *widget* that opens a dialog of *kind*, with no picture from the press until the dialog
+        is drawn (`shown_drawn`); the dialog."""
+        yield from self.glide_to(widget, seconds)
+        yield 0.15
+        yield from self.mark_press()
+        yield 0.1
+        self.grabber.pause()
+        self.app.after(0, widget.invoke)
+        try:
+            yield Until(lambda: self.toplevel(kind) is not None, 10, what)
+        except BaseException:
+            self.grabber.resume()
+            raise
+        dialog = self.toplevel(kind)
+        yield from self.shown_drawn(dialog)
+        return dialog
 
     def click_widget(self, widget: Any, seconds: float = 0.7) -> Iterator[Any]:
         """Glide to *widget*, press, and its command run as a click runs it (from Tk's loop: a command that holds
@@ -1627,8 +1706,8 @@ class Director:
         yield from self.glide_to(box, 0.9)
         yield 0.2
         yield from self.mark_press()
-        listbox = post_list(box)  # (its -postcommand looks for the windows again)
-        yield 0.8
+        listbox = yield from self.show_list(box)  # (its -postcommand looks for the windows again)
+        yield 0.5
         index = next((i for i, w in enumerate(app.windows) if int(w.hwnd) == self.standin.hwnd), None)
         if index is None:
             unpost_list(box)
@@ -1740,8 +1819,8 @@ class Director:
         yield 0.2
         yield from self.mark_press()
         count, before = self.results(), app.last_result
-        listbox = post_list(box)
-        yield 0.5
+        listbox = yield from self.show_list(box)
+        yield 0.2
         picked = yield from self.pick_in_list(box, listbox, index, 120)
         if not picked:
             app.lang_shown.set(target)
@@ -1769,11 +1848,9 @@ class Director:
         button = next((b for b in app.tool_btns if str(b.cget("text")).startswith("Series sheet")), None)
         if button is None:
             raise SceneFailed("no Series sheet... button")
-        yield from self.click_widget(button)
-        yield Until(lambda: self.toplevel(GlossaryDialog) is not None, 10, "the series sheet")
-        dialog = self.toplevel(GlossaryDialog)
         self.off_page = True
-        yield 0.6
+        dialog = yield from self.open_dialog(button, GlossaryDialog, "the series sheet")
+        yield 0.3
         self.mask_path(dialog)
         if self.term is not None or self.name is not None:
             term, rendering = self.term or self.name  # type: ignore[misc]
@@ -1802,8 +1879,8 @@ class Director:
                 raise SceneFailed("the Honorifics list has one choice")
             yield from self.glide_to(box, 0.5)
             yield from self.mark_press()
-            listbox = post_list(box)
-            yield 0.5
+            listbox = yield from self.show_list(box)
+            yield 0.2
             if not (yield from self.pick_in_list(box, listbox, index, 120)):
                 dialog.hon_var.set(values[index])
             add = find_widget(dialog, "TButton", "Save style guide")
@@ -1896,19 +1973,26 @@ class Director:
         for k, kind in enumerate(("ButtonPress-1", "ButtonRelease-1", "ButtonPress-1", "ButtonRelease-1")):
             self.down = kind.startswith("ButtonPress")
             self.records["pointer"].append([round(pv.now_ms(), 1), int(point[0]), int(point[1]), int(self.down)])
+            if k == 2:
+                self.grabber.pause()  # (until the editor is drawn beside the bubble: `shown_drawn`)
             app.canvas.event_generate(f"<{kind}>", x=cx, y=cy, rootx=int(point[0]), rooty=int(point[1]),
                                       time=t + 40 * k)
             yield 0.05
         self.down = False
-        yield 0.4
-        if getattr(app, "_editor", None) is None or not app._editor.winfo_exists():
-            self.later(lambda: app._on_double(SimpleNamespace(x=cx, y=cy, state=0)))  # (the binding's own call)
-        yield Until(lambda: getattr(app, "_editor", None) is not None and app._editor.winfo_exists(), 5,
-                    "the editor")
+        try:
+            yield 0.4
+            if getattr(app, "_editor", None) is None or not app._editor.winfo_exists():
+                self.later(lambda: app._on_double(SimpleNamespace(x=cx, y=cy, state=0)))  # (the binding's own call)
+            yield Until(lambda: getattr(app, "_editor", None) is not None and app._editor.winfo_exists(), 5,
+                        "the editor")
+        except BaseException:
+            self.grabber.resume()
+            raise
         editor = app._editor
         self.off_page = True
         self.beside(editor, point)
-        yield 0.8
+        yield from self.shown_drawn(editor)
+        yield 0.5
         # the model's own words typed in again, a word at a time, as the page follows (in memory only: never noted;
         # no word of the tool's own goes into a bubble)
         new = editor.text.get("1.0", "end-1c").strip()
@@ -2077,7 +2161,7 @@ class Director:
             self.fast(True)
             yield Until(read_over, self.args.timeout, "the screen on show read")
             self.fast(False)
-            yield 0.8
+            yield 0.5
             if self.standin.index >= last:
                 break
             yield from self.press_page_key("next", may_fail=True)
@@ -2100,7 +2184,7 @@ class Director:
             except SceneFailed as e:
                 self.say(f"reading on stopped: {e}")
                 break
-            yield 1.2
+            yield 1.0
 
 
 # ---------------------------------------------------------------------------------------------------- record
@@ -2278,7 +2362,9 @@ def run_window(args: argparse.Namespace, standin: StandIn, writer: Any, url: str
     failed = director.failed or ("" if writer.stored else "no picture was taken")
     if not failed and not [s for s in records["scenes"] if not s["failed"]]:
         failed = "no scene was recorded"
-    return {"failed": failed, **records, "views": list(probe.views), "frame_boxes": list(grabber.boxes),
+    return {"failed": failed, **records, "views": list(probe.views), "fills": list(probe.fills),
+            "letters": [{k: v for k, v in x.items() if k != "box"} for x in probe.letters],
+            "frame_boxes": list(grabber.boxes),
             "pictures": grabber.facts(), "probe_errors": probe.errors,
             "guard": {"patched": patched, "refused": guard.refused, "reached_the_stand_in": guard.used,
                       "chosen": sorted(probe.chosen), "stand_in": hwnd,
@@ -2549,6 +2635,8 @@ class Options:
     max_speed: float = MAX_SPEED
     title_s: float = TITLE_S
     card_s: float = CARD_S
+    colours: int = COLOURS
+    still_fps: float | None = STILL_FPS
     scenes: Sequence[str] | None = None
     allow_large: bool = False
     limit: int | None = None
@@ -2913,7 +3001,9 @@ class Painter:
     def how_pictures(self, img: Image.Image, d: ImageDraw.ImageDraw) -> None:
         lay = self.layout
         s = lay.s
-        moments = self.source.meta.get("moments") or {}
+        moments = dict(self.source.meta.get("moments") or {})
+        if moments.get("filling") is None:
+            moments["filling"] = filling_moment(self.source.meta)
         pictures = [self.moment_picture(i, moments.get(key)) for i, key in
                     enumerate(("original", "filling", "translated"))]
         x0, x1 = lay.W * 0.58, lay.W - round(28 * s)
@@ -2952,7 +3042,8 @@ class Painter:
         if view is None or box is None:
             return image
         left, top, right, bottom, cx, cy = box
-        page = on_picture((0, 0, view["image"][0], view["image"][1]), view)
+        pic = src.pic_at(t)
+        page = on_picture(page_on_capture(view, src.image(pic) if pic is not None else None), view)
         kx = image.width / max(1.0, right - left)
         crop = ((cx - left + page[0]) * kx, (cy - top + page[1]) * kx, (cx - left + page[2]) * kx,
                 (cy - top + page[3]) * kx)
@@ -3000,17 +3091,43 @@ def gif_frames(data: bytes) -> list[tuple[int, int]]:
     return out
 
 
-def palette_of(frames: Sequence[Image.Image]) -> Image.Image:
-    """One palette for the whole GIF: from a montage of *frames* and a swatch of the colours drawn over them."""
+def used_colours(image: Image.Image) -> list[tuple[int, int, int]]:
+    """The colours a paletted *image* uses, in the order of their index."""
+    palette = image.getpalette() or []
+    return [tuple(palette[3 * i:3 * i + 3]) for _count, i in sorted(image.getcolors(256) or [], key=lambda c: c[1])]
+
+
+DRAWN = (BG, TEXT, DIM, AMBER, BLUE, PANEL, CAP_BG, CAP_EDGE, (255, 255, 255), (0, 0, 0))  # the colours drawn over
+VIVID_SPREAD = 64  # a pixel whose channels differ by this much is a colour (the window's frames, bars, badges)
+
+
+def palette_of(frames: Sequence[Image.Image], colours: int = 255) -> Image.Image:
+    """One palette of *colours* entries for the whole GIF: the colours drawn over the frames (`DRAWN`), about an
+    eighth for the vivid colours of *frames* at full size (a region's thin frame and its handles keep their colour:
+    in a palette made of the pages and the window's greys they would come out dull), the rest from a montage of
+    *frames*. Index `TRANSPARENT` (255) is never one of them."""
+    colours = max(len(DRAWN) + 2, min(255, colours))
+    entries: list[tuple[int, int, int]] = list(DRAWN)
+    pixels = np.concatenate([np.asarray(f.convert("RGB")).reshape(-1, 3) for f in frames])
+    vivid = pixels[(pixels.max(axis=1).astype(np.int16) - pixels.min(axis=1)) >= VIVID_SPREAD]
+    if len(vivid):
+        vivid = vivid[:: max(1, len(vivid) // 250_000)]
+        side = int(np.ceil(np.sqrt(len(vivid))))
+        strip = np.zeros((side * side, 3), np.uint8)
+        strip[:len(vivid)] = vivid
+        strip[len(vivid):] = vivid[0]
+        entries += used_colours(Image.fromarray(strip.reshape(side, side, 3), "RGB").quantize(
+            colors=max(1, colours // 8), method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
     w, h = frames[0].size
     cols = min(4, len(frames))
-    montage = Image.new("RGB", (w // 2 * cols, h // 2 * ((len(frames) + cols - 1) // cols) + 16), BG)
+    montage = Image.new("RGB", (w // 2 * cols, h // 2 * ((len(frames) + cols - 1) // cols)), BG)
     for k, frame in enumerate(frames):
         montage.paste(frame.resize((w // 2, h // 2), Image.BOX), ((k % cols) * (w // 2), (k // cols) * (h // 2)))
-    d = ImageDraw.Draw(montage)
-    for i, colour in enumerate((BG, TEXT, DIM, AMBER, BLUE, PANEL, CAP_BG, CAP_EDGE, (255, 255, 255), (0, 0, 0))):
-        d.rectangle((i * 16, montage.height - 16, i * 16 + 15, montage.height), fill=colour)
-    return montage.quantize(colors=255, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    entries += used_colours(montage.quantize(colors=max(1, colours - len(entries)), method=Image.Quantize.MEDIANCUT,
+                                             dither=Image.Dither.NONE))
+    palette = Image.new("P", (1, 1))
+    palette.putpalette([v for colour in entries[:colours] for v in colour])
+    return palette
 
 
 TRANSPARENT = 255  # the GIF's transparent index (the one palette has 255 colours, so it is free)
@@ -3057,9 +3174,10 @@ def render(source: Source, out: Path, opts: Options) -> dict[str, Any]:
             merged[-1][2] += ms
         else:
             merged.append([i, key, ms])
-    sample_at = sorted({int(v) for v in np.linspace(0, len(merged) - 1, min(len(merged), 20))})
+    merged = thinned(merged, opts.still_fps)
+    sample_at =sorted({int(v) for v in np.linspace(0, len(merged) - 1, min(len(merged), 20))})
     sample = [painter.draw(parts[merged[j][0]], merged[j][1]) for j in sample_at]
-    palette = palette_of(sample)
+    palette = palette_of(sample, opts.colours)
     if opts.frames_png is not None:
         save_pngs(painter, parts, merged, Path(opts.frames_png))
 
@@ -3093,6 +3211,36 @@ def render(source: Source, out: Path, opts: Options) -> dict[str, Any]:
     os.replace(temporary, out)
     report["gif"] = str(out)
     return report
+
+
+def only_window_moved(a: Sequence[Any], b: Sequence[Any]) -> bool:
+    """Whether frame *b* (part index, key, ms) differs from *a* in the window's picture alone: the same scene, the
+    same viewer picture, pointer, key cap, badge and masks."""
+    if a[0] != b[0] or a[1][0] != "scene" or b[1][0] != "scene":
+        return False
+    return a[1][:2] == b[1][:2] and a[1][3:] == b[1][3:]
+
+
+def thinned(merged: list[list[Any]], still_fps: float | None) -> list[list[Any]]:
+    """*merged* with frames where only the window's picture changed shown at most *still_fps* a second: such a
+    frame is left out (the one before shown on for its time) while the last one kept is younger than 1/*still_fps*
+    and the next frame changes the window alone too - the last of each such stretch is always kept, so it ends on
+    the window as it was. Frames with the pointer, a key cap or the viewer moving are all kept."""
+    if not still_fps:
+        return merged
+    period = 1000.0 / still_fps
+    out: list[list[Any]] = []
+    since = 0.0
+    for k, m in enumerate(merged):
+        nxt = merged[k + 1] if k + 1 < len(merged) else None
+        if out and since < period and only_window_moved(out[-1], m) and nxt is not None \
+                and only_window_moved(m, nxt):
+            out[-1][2] += m[2]
+            since += m[2]
+            continue
+        out.append(list(m))
+        since = m[2]
+    return out
 
 
 def part_bytes(data: bytes, parts: Sequence[Part]) -> list[int]:
@@ -3174,6 +3322,9 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ren.add_argument("--max-speed", type=float, default=MAX_SPEED)
     ren.add_argument("--title-seconds", type=float, default=TITLE_S)
     ren.add_argument("--card-seconds", type=float, default=CARD_S)
+    ren.add_argument("--colours", type=int, default=COLOURS, help="the palette's colours (at most 255)")
+    ren.add_argument("--still-fps", type=float, default=STILL_FPS,
+                     help="frames where only the window's picture changes, at most this many a second (0: all)")
     ren.add_argument("--allow-large", action="store_true", help=f"write a GIF over {GIF_LIMIT} bytes all the same")
     ren.add_argument("--keep-recording", action="store_true", help="keep the recording file after the GIF")
     ren.add_argument("--frames-png", type=Path, default=None, help="a scratch folder for a few frames as PNG")
@@ -3191,7 +3342,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if out.suffix.lower() != ".gif":
         raise SystemExit("--out is a .gif")
     opts = Options(size=args.size, fps=args.fps, longest_s=args.longest, max_speed=args.max_speed,
-                   title_s=args.title_seconds, card_s=args.card_seconds,
+                   title_s=args.title_seconds, card_s=args.card_seconds, colours=args.colours,
+                   still_fps=args.still_fps or None,
                    scenes=[s.strip() for s in args.scenes.split(",")] if args.scenes else None,
                    allow_large=args.allow_large, frames_png=args.frames_png)
     if args.sample:

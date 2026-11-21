@@ -331,6 +331,56 @@ def test_a_frame_stores_only_what_changed_and_reads_back_whole(tmp_path):
             assert np.array_equal(np.asarray(gif.convert("RGB")), np.asarray(expected)), k
 
 
+def test_the_palette_keeps_the_windows_colours_and_leaves_the_transparent_index_free():
+    page = Image.new("RGB", (480, 270), (250, 250, 250))
+    for x in range(0, 480, 4):  # (greys of a page: many of them, as the screentones give)
+        page.paste((x // 2, x // 2, x // 2), (x, 0, x + 4, 200))
+    page.paste((255, 212, 0), (100, 220, 106, 226))  # (a selected region's handle: a few pixels)
+    page.paste((40, 160, 70), (200, 210, 330, 212))  # (a region's thin green frame)
+    for colours in (255, 64):
+        palette = iv.palette_of([page], colours)
+        assert len(palette.getpalette()) // 3 <= colours
+        mapped = page.quantize(palette=palette, dither=Image.Dither.NONE)
+        assert int(np.asarray(mapped).max()) < iv.TRANSPARENT
+        back = np.asarray(mapped.convert("RGB")).astype(int)
+        for (x, y), colour in (((102, 222), (255, 212, 0)), ((250, 211), (40, 160, 70))):
+            assert np.abs(back[y, x] - colour).max() <= 24, (colours, colour, back[y, x])
+
+
+def scene_frame(window: str, pointer=None, ms: float = 100.0, part: int = 1) -> list:
+    return [part, ("scene", 1, window, "pic-1", pointer, None, None, (), (0, 0, 10, 10)), ms]
+
+
+def test_frames_where_only_the_window_changes_are_held_to_the_still_rate():
+    merged = [scene_frame(f"w{k}") for k in range(10)]  # (a second of lettering: the window alone changes)
+    kept = iv.thinned([list(m) for m in merged], 4.0)
+    assert [m[1][2] for m in kept] == ["w0", "w3", "w6", "w9"]  # (one each 250 ms or so, and the last)
+    assert sum(m[2] for m in kept) == 1000.0  # (the same time shown)
+    moving = [scene_frame(f"w{k}", pointer=(k, k, 0)) for k in range(10)]  # (the pointer gliding: every frame)
+    assert len(iv.thinned([list(m) for m in moving], 4.0)) == 10
+    assert iv.thinned([list(m) for m in merged], None) == merged
+    other = merged[:3] + [scene_frame("w3", part=2)] + [scene_frame(f"w{k}", part=2) for k in range(4, 6)]
+    assert [m[0] for m in iv.thinned([list(m) for m in other], 4.0)][:2] == [1, 1]  # (a part's last frame kept)
+    assert any(m[0] == 2 and m[1][2] == "w3" for m in iv.thinned([list(m) for m in other], 4.0))
+
+
+def test_the_how_cards_pictures_are_the_page_and_half_way_through_its_lettering():
+    ground = tuple(int(dv.GROUND[i:i + 2], 16) for i in (1, 3, 5))
+    pic = Image.new("RGB", (220, 300), ground)
+    pic.paste((255, 255, 255), (10, 10, 210, 290))  # (a 200x280 screen with the stand-in's ground round it)
+    view = {"image": [1000, 600]}
+    x0, y0, x1, y1 = iv.page_on_capture(view, pic)
+    assert (y0, y1) == (20.0, 580.0) and abs((x1 - x0) / (y1 - y0) - 200 / 280) < 0.01
+    assert abs((x0 + x1) / 2 - 500) < 1e-6
+    assert iv.page_on_capture(view, None) == (0.0, 0.0, 1000.0, 600.0)
+    meta = {"moments": {"original": 1000.0, "translated": 5000.0},
+            "fills": [{"t": 900.0, "n": 1, "boxes": 9}, {"t": 1001.0, "n": 2, "boxes": 6}],
+            "letters": [{"t": 1500.0 + 100 * k, "n": 2, "i": k, "on": k != 1} for k in range(6)]
+            + [{"t": 1200.0, "n": 1, "i": 0, "on": True}]}
+    assert iv.filling_moment(meta) == 1800.0 + 60.0  # (the middle one of the five lettered of job 2)
+    assert iv.filling_moment({"moments": {}}) is None
+
+
 def test_a_name_on_the_page_is_two_to_four_kanji_and_a_capitalised_rendering():
     assert iv.name_like("山田\n太郎", "Taro Yamada.") == ("山田太郎", "Taro Yamada")
     assert iv.name_like("山田", "Yamada") == ("山田", "Yamada")
