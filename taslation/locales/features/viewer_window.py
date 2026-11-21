@@ -3,8 +3,8 @@ is the file it shows) the waiting line while its window is hidden or minimised (
 a browser window has its own line, about the tab in front), and the line for a window that keeps its size when it is
 enlarged (`ui.viewers.ViewerMixin._enlarge_done`), the waiting line for a browser window minimised after it was chosen
 (`_say_waiting`) and the viewer's line for a viewer chosen while it was minimised and shown again
-(`ui.viewers.ViewerMixin._on_window_selected`); the line for a viewer hidden wholly by other windows whose frames
-stand still (`ui.order.covered_line`)."""
+(`ui.viewers.ViewerMixin._on_window_selected`); the line for a viewer hidden wholly by other windows that drew no
+frame of a page key handed on to it (`ui.order.covered_line`)."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "Waiting: the viewer's window is hidden or minimised; bring it back.": {

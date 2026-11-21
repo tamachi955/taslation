@@ -56,6 +56,7 @@ from .constants import (
     viewer_rests,
 )
 from .layout import place_window
+from .order import turn_asked
 from .strip import place_strip
 from .viewers import looks_like_browser
 from .bubble_text import BubbleTextMixin
@@ -570,6 +571,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             if not self.reading:
                 self.say("Viewer: {error}", error=e)
             return
+        turn_asked(self, hwnd, seq)  # (a turn asked for: a viewer hidden wholly that draws no frame of it is said so)
         if self.role_var.get() == "translator":  # a reader sees the page turn
             self.status(lambda: _("Sent {key} to the viewer...").format(key=key_label(key)))
         if reference is not None:

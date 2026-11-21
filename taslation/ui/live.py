@@ -1162,8 +1162,8 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _beat(self) -> int:
         """One heartbeat: Windows' notes taken in (`_take_notes`) and what `follow_decision` says done; while TASlation
-        is in front the viewer kept directly under its window, and a viewer hidden wholly whose frames stand still said
-        in the status line (`order.beat`). Returns the ms to the next heartbeat."""
+        is in front the viewer kept directly under its window, and a viewer hidden wholly that drew no frame of a page
+        key handed on to it said in the status line (`order.beat`). Returns the ms to the next heartbeat."""
         f = self._follower()
         self._watch_beside()
         order.beat(self)
