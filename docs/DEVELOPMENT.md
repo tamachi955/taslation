@@ -81,6 +81,15 @@ comparison altogether. `--mode page --warm` translates with the warming the wind
 (`Pipeline.warm_soon`): the prompts stay the same, but the server computes their beginnings in other batches, so a
 fixed seed can still draw some answers otherwise.
 
+`python tools/openmantra_merge.py part1.json part2.json ... --out all.json` joins the results of the eval run on parts
+of the dataset (`--series`: a title or several a part, say each in a job of its own) into those of the whole. The page
+rows are pooled and scored again as the eval scores them, so the "all" row is the pooled one, never a mean of the
+parts', and `compare_runs.py` reads the joined file as a run of the whole. Parts that share a title or were run
+otherwise (the options but `--series`, the model, the settings, the dataset) are refused; `--force` joins them and
+the file lists what differs. In book mode a title's context never reaches another title; what still differs from one
+run of the whole is that a line asked for before in another title is drawn anew there, and that each part's server
+starts without the caches of the titles before it.
+
 ## A setting in the Settings dialog
 
 Tools > Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:
@@ -146,7 +155,8 @@ rows' languages.
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
   answerer in its place), and the tool writes numbers (the sharp frame to the first request, the first lettered
   bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; jobs kept
-  from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; the pages the
+  from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; which capture
+  gave the stand-in's frames, Windows.Graphics.Capture or PrintWindow where it gave none (`capture_route`); the pages the
   cache held as they were stored at another window size only, met right after a change of size or on a turn back, with
   the page units the cache gave and did not and the requests sent for them, a page alone and a page of a spread told
   apart; each page unit looked for in the cache, with the frame's size, the capture area and the distance of the page
@@ -252,6 +262,32 @@ without running it.
 install.ps1 counts as agreement only with `-Yes` and only as these exact sentences, and the comment beside them records
 that the repository owner has read both licences and agrees to them for this non-commercial check. Whoever runs the
 workflow in a copy of the repository agrees through those lines too, so reads the two licences first.
+
+## The GPU computer's checks on GitHub's runners (a trial)
+
+`.github/workflows/gpu-checks-trial.yml` tries the two checks that need the developer's computer today,
+`tools/standin_e2e.py` and `tools/openmantra_eval.py`, on GitHub's Windows runners (`windows-2025`: 4 processors,
+16 GB, no GPU, so the OCR, the layout model and PLaMo run on the CPU), to see whether they run there at all and how
+long they take; its numbers are not the GPU computer's. It runs for a push to a branch named `ci/trial-...`
+(`tests.yml` leaves those out) and when started by hand, with inputs: which checks, Ollama's release (`latest`, as
+winget installs it, or a tag), the benchmark's `detect_model` (`on`, the layout model, as a GPU computer's default has
+it) and pages, the stand-in's `--timeout` (600 s) and `--cancel-soft-ms`, and the runner's screen (1920x1080 for the
+session where the display offers it; the job's summary says which it had). The job `prepare` fills three caches once:
+Ollama's installer from its release on GitHub (checked against the release's `sha256sum.txt`), Ollama's model store
+with PLaMo imported by `setup_models.py --translator-for English` (its licence agreed through
+`TASLATION_AGREE_PLAMO_LICENCE` in that step alone, with the owner's agreement written beside it, as in the install
+check), and the models folder as `tests.yml` keys it. Then eleven stand-in jobs (a scenario a job: d with e, which
+turns back to d's pages; t, w and f with their pairs) and five benchmark jobs (a title a job, `--series`) run at once,
+each installing Ollama from the kept installer, fetching OpenMantra from its publisher (never cached, never uploaded)
+and letting TASlation's own starter start Ollama on port 11435. Each job's summary
+(`.github/gpu-checks-trial/summarise.py`, numbers only) tells for the stand-in whether the window got frames and from
+which capture, whether the run ended or why it stopped, what points to a fault and what to a slow computer (scenarios
+released by `--timeout`, rested pages not finished within the rest the script gave them), and per scenario whether it
+still showed what it is for; for the benchmark the seconds per stage, F1, CER, chrF and the tokens a second, and how far a run cut by its time
+limit got. The job `Summary` joins the titles (`tools/openmantra_merge.py`) and puts every job's minutes (waiting,
+setting up, the run, after it: GitHub's step times), both checks' tables and the repository's caches against GitHub's
+10 GB on the run's page. The artifacts are the tools' reports, their console output and the summaries, never the
+stand-in's pictures. `tests/test_gpu_checks_trial_workflow.py` checks the workflow without running it.
 
 ## Releases
 

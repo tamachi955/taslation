@@ -85,7 +85,8 @@ cancel, and when the next request went out and how long that waited at the serve
 it); the jobs on a soft frame whose frame was confirmed, those of them whose confirmation was taken back (while they
 ran, after them), and the jobs on a frame that was not the sharp one with a page unit or a kept line of theirs in the
 cache the window left (must be none where the sharp frame of their page came: each told with its page, how late the
-window captured that sharp frame and why); the jobs cancelled, per scenario (d, the
+window captured that sharp frame and why); which capture gave the stand-in's frames (Windows.Graphics.Capture, or
+PrintWindow where it gave none: ``capture_route``); the jobs cancelled, per scenario (d, the
 flashes and spinners: none); overlays left on a page the stand-in had left; that no profile in the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
@@ -548,6 +549,9 @@ class Notes:
         self.displays: list[dict[str, Any]] = []
         self.captures: list[dict[str, Any]] = []
         self.capture_counts: Counter[str] = Counter()
+        # the stand-in's looks at Windows.Graphics.Capture: "frames" when it gave one, "none" when the capture went on
+        # with PrintWindow (`capture_route`)
+        self.compositor: Counter[str] = Counter()
         self.loads: list[list[float]] = []
         self.load_depth = 0
         self.ocr: list[dict[str, Any]] = []
@@ -1326,7 +1330,10 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
     def compositor(hwnd: int, *a: Any, **k: Any) -> Any:
         if guard.is_viewer(hwnd):
-            return latest(hwnd, *a, **k)
+            frame = latest(hwnd, *a, **k)
+            with notes.lock:
+                notes.compositor["frames" if frame is not None else "none"] += 1
+            return frame
         if guard.is_own(hwnd):
             return None  # PrintWindow: the viewer's capture session is never taken for a picture of the window
         guard.refuse("a capture session")
@@ -3700,6 +3707,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                      "warm_ups": len(notes.warmups),
                      "warm_ups_for_unconfirmed": sum(1 for w in notes.warmups if w["gate"] == "pending")},
         "captures": dict(notes.capture_counts),
+        "capture_route": capture_route(notes),
         "capture_sizes": [[rel(c["t"]), *c["size"]] for k, c in enumerate(notes.captures)
                           if k == 0 or c["size"] != notes.captures[k - 1]["size"]],
         "ocr": {"placements": [{**o, "t": rel(o["t"])} for o in notes.ocr],
@@ -3714,6 +3722,23 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "stand_in_events": dict(Counter(e["ev"] for e in events)),
         "rested_pages": rested_pages(rows),
     }
+
+
+def capture_route(notes: Notes) -> dict[str, Any]:
+    """Which capture gave the stand-in's frames: Windows.Graphics.Capture as TASlation finds it (`wgc.route`: its name,
+    or PrintWindow and why), how often a look at it gave a frame and how often none (the capture went on with
+    PrintWindow then: a session's first look, a look right after a change of size, or every look where it does not
+    work), and the one that gave the most."""
+    from taslation.capture import wgc
+
+    try:
+        route = wgc.route()
+    except Exception as e:  # noqa: BLE001 - said by its type
+        route = f"unknown ({type(e).__name__})"
+    looks = dict(notes.compositor)
+    frames, none = looks.get("frames", 0), looks.get("none", 0)
+    used = wgc.ROUTE if frames > none else "PrintWindow" if none else "none"
+    return {"route": route, "looks": looks, "used": used}
 
 
 def tk_share(samples: list[tuple[float, float, bool]]) -> dict[str, Any]:
@@ -3810,6 +3835,9 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     run_ = report["run"]
     print(f"translator: {report['translator']}; browser: {report['browser']}; pages: {report['pages']}; "
           f"{run_.get('seconds')} s" + (f"; STOPPED: {run_['failed']}" if run_.get("failed") else ""))
+    if run_.get("capture_route"):
+        route = run_["capture_route"]
+        print(f"capture: {route['used']} (looks {route['looks']}; {route['route']}); frames {run_.get('captures')}")
     if "segments" not in run_:
         print(f"report {path}")
         return

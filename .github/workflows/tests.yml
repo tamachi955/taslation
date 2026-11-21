@@ -2,7 +2,8 @@
 # measurements that need its GPU (the stand-in viewer's timings, the benchmark's translation).
 #
 # It runs for every push to a branch named ci/... and when started by hand. A ci/ branch holds work that is not
-# released yet; it is public like everything here, and is deleted once its run was read.
+# released yet; it is public like everything here, and is deleted once its run was read. A branch named ci/trial-...
+# is for gpu-checks-trial.yml alone and is left out here.
 #
 # What it does not cover: anything that needs a GPU, the real translator or a real viewer. Tests that want those are
 # skipped here as on any computer without them.
@@ -10,7 +11,7 @@ name: Tests
 
 on:
   push:
-    branches: ['ci/**']
+    branches: ['ci/**', '!ci/trial-**']
   workflow_dispatch:
 
 permissions:

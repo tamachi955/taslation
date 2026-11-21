@@ -1,0 +1,614 @@
+# A TRIAL: the two checks that need the developer's computer with its GPU today - the real window beside the stand-in
+# viewer (tools/standin_e2e.py) and the OpenMantra benchmark (tools/openmantra_eval.py) - on GitHub's own Windows
+# runners instead (4 processors, 16 GB, no GPU: the OCR, the layout model and the translator run on the CPU), spread
+# over parallel jobs: the stand-in's scenarios a job each (a scenario that needs the one before it goes with it) and
+# the benchmark's five titles a job each. It shows whether they run there at all, and how long each part takes; its
+# numbers are not those of the GPU computer and are not compared with them as if they were.
+#
+# It runs for a push to a branch named ci/trial-... (tests.yml leaves those out), with the defaults the env block below
+# gives the inputs, and when started by hand with inputs (GitHub offers that once the file is on the default branch).
+# The job "prepare" fills what may be kept between runs: Ollama's installer, Ollama's model store holding the
+# translation model, and the OCR, layout and inpainting models; every other job restores them. The OpenMantra pages
+# (CC BY-NC 4.0) are downloaded from their publisher by tools/fetch_openmantra.py in each job that reads them, and
+# are never kept in a cache or an artifact. The artifacts hold numbers only: the tools' reports (which hold no line of
+# the pages, read or translated), their console output, and the summaries .github/gpu-checks-trial/summarise.py makes
+# of them; never the stand-in tool's pictures. The job "Summary" puts every job's times (GitHub's step times), both
+# checks' numbers, the benchmark's titles joined (tools/openmantra_merge.py) and the caches' sizes on the run's page.
+name: GPU checks on runners (trial)
+
+on:
+  push:
+    branches: ['ci/trial-**']
+  workflow_dispatch:
+    inputs:
+      checks:
+        description: Which checks to run
+        type: choice
+        options: [both, stand-in, benchmark]
+        default: both
+      ollama_version:
+        description: "Ollama's release: latest (as winget installs it), or a tag such as v0.40.16"
+        type: string
+        default: latest
+      detect_model:
+        description: "The benchmark's detect_model: on (the layout model, as the GPU computer's default), auto, off"
+        type: choice
+        options: ['on', 'auto', 'off']
+        default: 'on'
+      pages:
+        description: 'The benchmark: only the first N pages of each title (0: all of them)'
+        type: string
+        default: '0'
+      scenario_timeout:
+        description: "The stand-in: seconds a scenario may wait for the window's rest (the tool's --timeout)"
+        type: string
+        default: '600'
+      cancel_soft_ms:
+        description: "The stand-in's scenario x: how long its soft frames show (the tool's --cancel-soft-ms)"
+        type: string
+        default: '700'
+      display:
+        description: "The runner's screen for the stand-in: WIDTHxHEIGHT (when the display offers it), or as-is"
+        type: string
+        default: 1920x1080
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpu-checks-trial-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  OLLAMA_PORT: '11435'  # the spare port TASlation's own starter starts Ollama on (--start-ollama), as on the developer's
+  # the inputs (a push has none: the defaults), checked where they are used
+  CHECKS: ${{ inputs.checks || 'both' }}
+  OLLAMA_VERSION: ${{ inputs.ollama_version || 'latest' }}
+  DETECT_MODEL: ${{ inputs.detect_model || 'on' }}
+  PAGES: ${{ inputs.pages || '0' }}
+  SCENARIO_TIMEOUT: ${{ inputs.scenario_timeout || '600' }}
+  CANCEL_SOFT_MS: ${{ inputs.cancel_soft_ms || '700' }}
+  DISPLAY_SIZE: ${{ inputs.display || '1920x1080' }}
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      ollama_tag: ${{ steps.plan.outputs.ollama_tag }}
+      setup_key: ${{ steps.plan.outputs.setup_key }}
+      store_key: ${{ steps.plan.outputs.store_key }}
+      models_key: ${{ steps.plan.outputs.models_key }}
+      standin: ${{ steps.plan.outputs.standin }}
+      benchmark: ${{ steps.plan.outputs.benchmark }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Which checks, and which release of Ollama
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}  # (to read Ollama's latest release on GitHub: a lookup, nothing is sent)
+          MODELS_HASH: ${{ hashFiles('setup_models.py') }}
+          TRANSLATOR_HASH: ${{ hashFiles('taslation/translator_install.py') }}
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          if ($env:CHECKS -notin 'both', 'stand-in', 'benchmark') { throw "checks is both, stand-in or benchmark, not '$env:CHECKS'" }
+          $tag = Resolve-OllamaTag $env:OLLAMA_VERSION
+          # the keys: the installer by Ollama's release; the store by that release and taslation/translator_install.py
+          # (PLaMo's pinned file and its Modelfile); the models as tests.yml keys them (by setup_models.py)
+          $plan = [ordered]@{
+              ollama_tag = $tag
+              setup_key = "ollama-setup-$tag"
+              store_key = "ollama-store-$tag-$($env:TRANSLATOR_HASH.Substring(0, 16))"
+              models_key = "models-$env:MODELS_HASH"
+              standin = "$($env:CHECKS -ne 'benchmark')".ToLowerInvariant()
+              benchmark = "$($env:CHECKS -ne 'stand-in')".ToLowerInvariant()
+          }
+          foreach ($key in $plan.Keys) {
+              Write-Host "$key = $($plan[$key])"
+              Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$key=$($plan[$key])"
+          }
+          Set-Fact 'ollama_tag' $tag
+          Set-Fact 'machine' (Get-MachineFacts)
+
+      - name: Is Ollama's installer in the cache?
+        id: setup
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/ollama-setup
+          key: ${{ steps.plan.outputs.setup_key }}
+          lookup-only: true
+
+      - name: Is the translation model in the cache?
+        id: store
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.ollama/models
+          key: ${{ steps.plan.outputs.store_key }}
+          lookup-only: true
+
+      - name: Are the models in the cache?
+        id: models
+        uses: actions/cache/restore@v5
+        with:
+          path: models
+          key: ${{ steps.plan.outputs.models_key }}
+          lookup-only: true
+
+      - name: Download Ollama's installer
+        if: steps.setup.outputs.cache-hit != 'true'
+        env:
+          TAG: ${{ steps.plan.outputs.ollama_tag }}
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $saved = Save-OllamaSetup $env:TAG (Join-Path $env:RUNNER_TEMP 'ollama-setup')
+          Write-Host "OllamaSetup.exe of $($saved.tag): $($saved.gb) GB in $($saved.seconds) s; $($saved.checked)"
+          Set-Fact 'setup' $saved
+
+      - name: Keep Ollama's installer
+        if: steps.setup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/ollama-setup
+          key: ${{ steps.plan.outputs.setup_key }}
+
+      - name: Ollama's installer from the cache (for the translation model)
+        if: steps.setup.outputs.cache-hit == 'true' && steps.store.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/ollama-setup
+          key: ${{ steps.plan.outputs.setup_key }}
+          fail-on-cache-miss: true
+
+      - name: Python 3.13
+        if: steps.store.outputs.cache-hit != 'true' || steps.models.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the packages (the CPU build of PyTorch)
+        if: steps.store.outputs.cache-hit != 'true' || steps.models.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $py = Join-Path $PWD '.venv\Scripts\python.exe'
+          "PY=$py" >> $env:GITHUB_ENV
+          & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -m pip install -e .
+          exit $LASTEXITCODE
+
+      # The OCR, layout and inpainting models and the fonts, about 1.1 GB, at the revisions setup_models.py fixes, as
+      # tests.yml downloads them (the OCR models' licence, CC BY-NC-SA 4.0, agreed with --agreed as there).
+      - name: Download the models
+        if: steps.models.outputs.cache-hit != 'true'
+        run: |
+          & $env:PY setup_models.py --models-dir models --agreed --brief --font --fonts
+          exit $LASTEXITCODE
+
+      - name: Keep the models
+        if: steps.models.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: models
+          key: ${{ steps.plan.outputs.models_key }}
+
+      - name: Install Ollama (for the translation model's import)
+        if: steps.store.outputs.cache-hit != 'true'
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $installed = Install-Ollama (Join-Path $env:RUNNER_TEMP 'ollama-setup\OllamaSetup.exe')
+          Write-Host "Ollama $($installed.version): exit code $($installed.exit_code) after $($installed.seconds) s; $($installed.program_gb) GB; processes stopped after it: $($installed.stopped_after_it)"
+          Set-Fact 'ollama' $installed
+
+      # PLaMo 3 Translate 2B downloaded from Hugging Face, checked and imported into Ollama's store by setup_models.py,
+      # as install.ps1 has it do (Ollama's server started for the import by TASlation's own starter and stopped again).
+      - name: Import the translation model into Ollama's store
+        if: steps.store.outputs.cache-hit != 'true'
+        timeout-minutes: 30
+        env:
+          # The repository owner has read the licence below and agrees to it. The model is used here only to measure
+          # how TASlation's checks run on GitHub's runners, which is non-commercial use; nothing it makes leaves the
+          # runner but numbers, and the runner is deleted after the job.
+          #   PLaMo 3 Translate 2B: the PLaMo Community License, https://plamo.preferredai.jp/info/plamo-community-license-en
+          # setup_models.py is told that the agreement was given through this variable only when it holds this exact
+          # sentence, as install.ps1 counts it; setting it is that agreement.
+          TASLATION_AGREE_PLAMO_LICENCE: "I agree to the PLaMo Community License"
+          TASLATION_STATE_DIR: ${{ runner.temp }}\taslation-state
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          if ($env:TASLATION_AGREE_PLAMO_LICENCE -cne 'I agree to the PLaMo Community License') { throw 'the PLaMo licence is not agreed' }
+          $ollama = Join-Path $OllamaHome 'ollama.exe'
+          $download = Join-Path $env:RUNNER_TEMP 'plamo-download'  # (the GGUF, deleted once Ollama has its copy)
+          & $env:PY -u setup_models.py --models-dir $download --translator-for English --brief --plamo-agreed TASLATION_AGREE_PLAMO_LICENCE --ollama-exe $ollama
+          $code = $LASTEXITCODE
+          $null = Stop-OllamaProcesses 3
+          Set-Fact 'store_gb' (Get-FolderGB (Join-Path $env:USERPROFILE '.ollama\models'))
+          exit $code
+
+      - name: Keep the translation model
+        if: steps.store.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.ollama/models
+          key: ${{ steps.plan.outputs.store_key }}
+
+      - name: The sizes of what was kept
+        if: always()
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          # (only what this run made: the jobs API's list of the caches in the summary has them all)
+          $sizes = [ordered]@{
+              setup = Get-FolderGB (Join-Path $env:RUNNER_TEMP 'ollama-setup')
+              store = Get-FolderGB (Join-Path $env:USERPROFILE '.ollama\models')
+              models = Get-FolderGB (Join-Path $env:GITHUB_WORKSPACE 'models')
+          }
+          Write-Host "made here, in GB: $($sizes | ConvertTo-Json -Compress)"
+          Set-Fact 'caches' $sizes
+
+      - name: Keep the facts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: prepare
+          path: ${{ runner.temp }}/gpu-checks-trial/facts.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  standin:
+    name: Stand-in ${{ matrix.group }}
+    needs: prepare
+    if: needs.prepare.outputs.standin == 'true'
+    # Each job: the real window (OCR on the CPU) beside the stand-in viewer, a browser window of its own drawing the
+    # dataset's pages, the translator through the Ollama TASlation's own starter starts on OLLAMA_PORT. A scenario
+    # that turns back to pages translated before goes with the one that translates them (d with e); t, w and f bring
+    # t2, w2 and f2 with them (the tool's PAIRS).
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 11
+      matrix:
+        include:
+          - {group: c, scenarios: c}
+          - {group: a, scenarios: a}
+          - {group: b, scenarios: b}
+          - {group: d-e, scenarios: 'd,e'}
+          - {group: r, scenarios: r}
+          - {group: t-t2, scenarios: t}
+          - {group: o, scenarios: o}
+          - {group: z, scenarios: z}
+          - {group: w-w2, scenarios: w}
+          - {group: x, scenarios: x}
+          - {group: f-f2, scenarios: f}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TASLATION_MODELS_DIR: ${{ github.workspace }}\models
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up: Python 3.13'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 'Set up: the packages'
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $py = Join-Path $PWD '.venv\Scripts\python.exe'
+          "PY=$py" >> $env:GITHUB_ENV
+          & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -m pip install -e .
+          exit $LASTEXITCODE
+
+      - name: 'Set up: the models'
+        uses: actions/cache/restore@v5
+        with:
+          path: models
+          key: ${{ needs.prepare.outputs.models_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: Ollama''s installer'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/ollama-setup
+          key: ${{ needs.prepare.outputs.setup_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: the translation model'
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.ollama/models
+          key: ${{ needs.prepare.outputs.store_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: Ollama'
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $installed = Install-Ollama (Join-Path $env:RUNNER_TEMP 'ollama-setup\OllamaSetup.exe')
+          Write-Host "Ollama $($installed.version): exit code $($installed.exit_code) after $($installed.seconds) s"
+          Set-Fact 'ollama' $installed
+          Set-Fact 'machine' (Get-MachineFacts)
+
+      - name: 'Set up: the dataset'
+        run: |
+          # (from its publisher, into ~/.taslation/datasets/openmantra on this runner: never cached, never uploaded)
+          & $env:PY tools/fetch_openmantra.py
+          exit $LASTEXITCODE
+
+      - name: 'Set up: the screen'
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $screen = Set-Screen $env:DISPLAY_SIZE
+          Write-Host "screen: $($screen.before) -> $($screen.after) (asked $($screen.asked): $($screen.answer); offered: $($screen.offered -join ', '))"
+          Set-Fact 'screen' $screen
+
+      - name: 'Run: tools/standin_e2e.py --scenario ${{ matrix.scenarios }}'
+        timeout-minutes: 45
+        env:
+          SCENARIOS: ${{ matrix.scenarios }}
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          if ($env:SCENARIO_TIMEOUT -notmatch '^\d{2,4}$') { throw "scenario_timeout is seconds, not '$env:SCENARIO_TIMEOUT'" }
+          if ($env:CANCEL_SOFT_MS -notmatch '^\d{2,5}$') { throw "cancel_soft_ms is milliseconds, not '$env:CANCEL_SOFT_MS'" }
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE  # (the tool checks that taslation comes from this checkout)
+          $console = Join-Path $TrialDir 'console.txt'
+          $arguments = @('-u', 'tools/standin_e2e.py', '--out', (Join-Path $TrialDir 'standin'), '--scenario', $env:SCENARIOS,
+                         '--start-ollama', $env:OLLAMA_PORT, '--seed', '1', '--timeout', $env:SCENARIO_TIMEOUT,
+                         '--cancel-soft-ms', $env:CANCEL_SOFT_MS)
+          Write-Host "python $($arguments -join ' ')"
+          $ErrorActionPreference = 'Continue'  # what the tool writes to stderr is part of its output
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          & $env:PY @arguments 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $console
+          $code = $LASTEXITCODE
+          Set-Fact 'run' ([ordered]@{ exit_code = $code; seconds = [math]::Round($clock.Elapsed.TotalSeconds, 1) })
+          exit $code
+
+      - name: Summary of the numbers
+        if: always()
+        env:
+          GROUP: ${{ matrix.group }}
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $py = $(if ($env:PY) { $env:PY } else { 'python' })
+          & $py .github/gpu-checks-trial/summarise.py standin (Join-Path $TrialDir 'standin\report.json') --console (Join-Path $TrialDir 'console.txt') --facts $FactsFile --group $env:GROUP --out $TrialDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content -LiteralPath (Join-Path $TrialDir 'summary.md') -Raw -Encoding utf8 | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: standin-${{ matrix.group }}
+          # numbers only: never the tool's pictures (shots/, which show the dataset's pages)
+          path: |
+            ${{ runner.temp }}/gpu-checks-trial/summary.json
+            ${{ runner.temp }}/gpu-checks-trial/summary.md
+            ${{ runner.temp }}/gpu-checks-trial/facts.json
+            ${{ runner.temp }}/gpu-checks-trial/console.txt
+            ${{ runner.temp }}/gpu-checks-trial/standin/report.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  benchmark:
+    name: Benchmark ${{ matrix.title }}
+    needs: prepare
+    if: needs.prepare.outputs.benchmark == 'true'
+    # Each job: one title of the dataset (by its place in the annotation, as openmantra_eval.py takes them), detection,
+    # OCR and translation on the CPU, with the Ollama TASlation's own starter starts on OLLAMA_PORT.
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        title: [1, 2, 3, 4, 5]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      TASLATION_MODELS_DIR: ${{ github.workspace }}\models
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up: Python 3.13'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 'Set up: the packages'
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $py = Join-Path $PWD '.venv\Scripts\python.exe'
+          "PY=$py" >> $env:GITHUB_ENV
+          & $py -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $py -m pip install -e .
+          exit $LASTEXITCODE
+
+      - name: 'Set up: the models'
+        uses: actions/cache/restore@v5
+        with:
+          path: models
+          key: ${{ needs.prepare.outputs.models_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: Ollama''s installer'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/ollama-setup
+          key: ${{ needs.prepare.outputs.setup_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: the translation model'
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.ollama/models
+          key: ${{ needs.prepare.outputs.store_key }}
+          fail-on-cache-miss: true
+
+      - name: 'Set up: Ollama'
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $installed = Install-Ollama (Join-Path $env:RUNNER_TEMP 'ollama-setup\OllamaSetup.exe')
+          Write-Host "Ollama $($installed.version): exit code $($installed.exit_code) after $($installed.seconds) s"
+          Set-Fact 'ollama' $installed
+          Set-Fact 'machine' (Get-MachineFacts)
+
+      - name: 'Set up: the dataset and the title'
+        env:
+          TITLE: ${{ matrix.title }}
+        run: |
+          # (from its publisher, into ~/.taslation/datasets/openmantra on this runner: never cached, never uploaded)
+          & $env:PY tools/fetch_openmantra.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $name = "$(& $env:PY -c "import sys; sys.path.insert(0, 'tools'); import openmantra; names = openmantra.series_names(openmantra.load()); k = int(sys.argv[1]); print(names[k - 1] if 1 <= k <= len(names) else '')" $env:TITLE)".Trim()
+          if ($name -notmatch '^[\w .''-]{1,80}$') { throw "no title $env:TITLE in the dataset" }
+          Write-Host "title $env:TITLE`: $name"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SERIES=$name"
+
+      - name: 'Run: tools/openmantra_eval.py --series (title ${{ matrix.title }})'
+        timeout-minutes: 48
+        env:
+          TASLATION_STATE_DIR: ${{ runner.temp }}\taslation-state
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          if ($env:PAGES -notmatch '^\d{1,3}$') { throw "pages is a number, not '$env:PAGES'" }
+          if ($env:DETECT_MODEL -notin 'on', 'auto', 'off') { throw "detect_model is on, auto or off, not '$env:DETECT_MODEL'" }
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE
+          $console = Join-Path $TrialDir 'console.txt'
+          $arguments = @('-u', 'tools/openmantra_eval.py', '--series', $env:SERIES, '--seed', '1', '--start-ollama', $env:OLLAMA_PORT,
+                         '--detect-model', $env:DETECT_MODEL, '--out', (Join-Path $TrialDir 'results.json'))
+          if ($env:PAGES -ne '0') { $arguments += @('--pages', $env:PAGES) }
+          Write-Host "python $($arguments -join ' ')"
+          $ErrorActionPreference = 'Continue'  # what the tool writes to stderr is part of its output
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          & $env:PY @arguments 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $console
+          $code = $LASTEXITCODE
+          Set-Fact 'run' ([ordered]@{ exit_code = $code; seconds = [math]::Round($clock.Elapsed.TotalSeconds, 1) })
+          exit $code
+
+      - name: Summary of the numbers
+        if: always()
+        env:
+          TITLE: ${{ matrix.title }}
+        run: |
+          . .github/gpu-checks-trial/helpers.ps1
+          $py = $(if ($env:PY) { $env:PY } else { 'python' })
+          & $py .github/gpu-checks-trial/summarise.py bench (Join-Path $TrialDir 'results.json') --console (Join-Path $TrialDir 'console.txt') --facts $FactsFile --title $env:TITLE --out $TrialDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content -LiteralPath (Join-Path $TrialDir 'summary.md') -Raw -Encoding utf8 | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmark-${{ matrix.title }}
+          # numbers only: openmantra_eval.py's results hold no text of the pages (no --dump, no --scan here)
+          path: |
+            ${{ runner.temp }}/gpu-checks-trial/summary.json
+            ${{ runner.temp }}/gpu-checks-trial/summary.md
+            ${{ runner.temp }}/gpu-checks-trial/facts.json
+            ${{ runner.temp }}/gpu-checks-trial/console.txt
+            ${{ runner.temp }}/gpu-checks-trial/results.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  summary:
+    name: Summary
+    needs: [prepare, standin, benchmark]
+    if: ${{ !cancelled() }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read  # the run's jobs and their step times, and the repository's caches (GitHub's API, read only)
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: The jobs' artifacts
+        uses: actions/download-artifact@v6
+        continue-on-error: true  # (a run whose every job failed early may have none)
+        with:
+          path: artifacts
+
+      - name: The jobs' step times and the caches' sizes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8  # (gh writes UTF-8)
+          $jobs = "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/attempts/$env:GITHUB_RUN_ATTEMPT/jobs?per_page=100"
+          gh api --paginate $jobs --jq '.jobs[]' > jobs.jsonl
+          if ($LASTEXITCODE -ne 0) { Write-Host '::warning title=Summary::the jobs API gave no step times' }
+          gh api --paginate "repos/$env:GITHUB_REPOSITORY/actions/caches?per_page=100" --jq '.actions_caches[] | {key, ref, size_in_bytes, last_accessed_at}' > caches.jsonl
+          if ($LASTEXITCODE -ne 0) { Write-Host '::warning title=Summary::the caches API gave no sizes' }
+          exit 0
+
+      - name: The benchmark's titles joined
+        run: |
+          $parts = @(Get-ChildItem -LiteralPath artifacts -Recurse -Filter results.json -ErrorAction SilentlyContinue | Sort-Object FullName | ForEach-Object { $_.FullName })
+          Write-Host "$($parts.Count) results files"
+          if ($parts.Count -eq 0) { exit 0 }
+          python tools/openmantra_merge.py @parts --out merged.json
+          if ($LASTEXITCODE -ne 0) { Write-Host '::warning title=Benchmark::the titles could not be joined (see this step)' }
+          exit 0
+
+      - name: The run's tables
+        run: |
+          $arguments = @('.github/gpu-checks-trial/summarise.py', 'table', 'artifacts', '--jobs', 'jobs.jsonl',
+                         '--caches', 'caches.jsonl', '--out', 'summary.md')
+          if (Test-Path -LiteralPath merged.json) { $arguments += @('--merged', 'merged.json') }
+          python @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content -LiteralPath summary.md -Raw -Encoding utf8 | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Keep the tables
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: summary
+          path: |
+            summary.md
+            jobs.jsonl
+            caches.jsonl
+            merged.json
+          retention-days: 14
+          if-no-files-found: warn
