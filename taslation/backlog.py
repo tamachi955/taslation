@@ -781,8 +781,10 @@ class Backlog:
 
     def settle_pending(self) -> None:
         """The pages turned past whose confirmation was kept for now (`Pipeline.decide_kept`, before the worker's next
-        job): caught once their gate is sealed; dropped, without a word, when it was taken back (a sharper picture of
-        the page came: its own job is the page's)."""
+        job): caught once their gate is sealed; told as not caught when it was taken back (`Tracking.tell_not_caught`: its
+        stages not done "missed" - nothing holds the page any more, and a sharper picture of it on show again has a job
+        of its own that tells it anew). Before, such a page was only let go of, its stages left as they were (translate
+        "waiting", read perhaps "working") with nothing at work on it."""
         with self._lock:
             pending, self.pending = self.pending, []
         left: list[tuple[Tracking, Any]] = []
@@ -792,8 +794,8 @@ class Backlog:
                 tracking.catch(work)
             elif gate is not None and gate.state == "confirmed":
                 left.append((tracking, work))
-            elif tracking.screen is not None:
-                self.release(tracking.screen, done=False)
+            else:
+                tracking.tell_not_caught()
         if left:
             with self._lock:
                 self.pending = left + self.pending
@@ -1290,19 +1292,31 @@ class Tracking:
             return
         caught = gate is not None and _sealed(gate) and not _soft(gate) and _settled(gate) and \
             b.catch(screen, self.image, work, self.pipeline, self.hwnd)
-        if caught:
-            b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting",
-                   self.image)
-            b.tell(screen, "translate", "waiting", self.image)
-        else:
-            b.not_caught += 1
-            b.release(screen, done=False)
-            with b._lock:
-                queued = any(e.screen is screen for e in b.entries)
-            for stage in ("read", "translate"):
-                if screen.stages.get(stage) not in ("done", "failed", "skipped"):
-                    b.tell(screen, stage, "waiting" if queued else "missed", self.image)
-            screen.missed = not queued and screen.stages.get("translate") == "missed"
+        if not caught:
+            self.tell_not_caught()
+            return
+        b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting", self.image)
+        b.tell(screen, "translate", "waiting", self.image)
+        b.totals()
+
+    def tell_not_caught(self) -> None:
+        """(the page turned past, not caught: `catch`, and `Backlog.settle_pending` for a page kept for now whose
+        confirmation was taken back) What its entry held goes back to the backlog (`Backlog.release`), and every stage
+        not done is told "missed" - as waiting when the backlog goes on with an entry of the page that was held while it
+        was on show -, the screen counted among the pages gone by (``backlog``'s dropped) when its translation was
+        missed."""
+        b = self.backlog
+        screen = self.screen
+        if screen is None:
+            return
+        b.not_caught += 1
+        b.release(screen, done=False)
+        with b._lock:
+            queued = any(e.screen is screen for e in b.entries)
+        for stage in ("read", "translate"):
+            if screen.stages.get(stage) not in ("done", "failed", "skipped"):
+                b.tell(screen, stage, "waiting" if queued else "missed", self.image)
+        screen.missed = not queued and screen.stages.get("translate") == "missed"
         b.totals()
 
     def over(self) -> None:

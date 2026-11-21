@@ -366,17 +366,35 @@ def test_a_confirmation_kept_for_now_is_caught_once_sealed(settings, sample_page
     assert len(b.entries) == 1 and not b.pending
 
 
-def test_a_confirmation_taken_back_is_dropped_without_a_word(settings, sample_page):
+@pytest.mark.parametrize("while_it", ["asks", "reads"])
+def test_a_page_kept_for_now_whose_confirmation_is_taken_back_is_told_as_not_caught(settings, sample_page, while_it):
+    # (turned away from within the hold, then its confirmation taken back: nothing holds the page any more. Before, it
+    # was only let go of - translate left "waiting", read "working" when it was turned away from as it read)
     posted, post = _events()
     b = Backlog(post)
-    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
     gate = _confirmed(open_for=30.0)
-    _job(p, b, sample_page, gate)
-    told = len(posted)
-    assert gate.take_back() and p.decide_kept() is False
+    if while_it == "asks":
+        p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Taken back, asked")
+        _job(p, b, sample_page, gate)
+    else:
+        holder: dict = {}
+        p = _pipeline(settings, DictTranslator(EN_TEXTS), "Taken back, read",
+                      ocr=TurnWhileReading(lambda: holder["cancel"]))
+        tracking = Tracking(b, p, sample_page, gate, 7)
+        holder["cancel"] = cancel = threading.Event()
+        with pytest.raises(Cancelled):
+            with p.page_on_show(gate) as work:
+                tracking.attach(work)
+                p.process(sample_page, cancel=cancel, events=lambda kind, data: None)
+        tracking.cancelled(keeps_answered(cancel), work)
+    read = "done" if while_it == "asks" else "working"
+    assert len(b.pending) == 1 and _last(posted) == {"read": read, "translate": "waiting"}  # (kept for now)
+    assert gate.take_back()
+    p.decide_kept()
     b.settle_pending()
-    assert not b.entries and not b.pending
-    assert not [d for k, d in posted[told:] if k == "page_stage"]
+    assert not b.entries and not b.pending and b.not_caught == 1
+    assert _last(posted) == {"read": "done" if while_it == "asks" else "missed", "translate": "missed"}
+    assert posted[-1][0] == "backlog" and posted[-1][1]["dropped"] == 1
 
 
 class TurnWhileReading(FakeOcr):
