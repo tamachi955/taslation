@@ -106,7 +106,7 @@ def _job(p: Pipeline, backlog: Backlog, image, gate, hwnd=7):
     if looker is not None:
         looker.start()
     try:
-        with (p.page_on_show(gate) if gate is not None else p.saves_held()) as work:
+        with p.page_on_show(gate) as work:  # (no gate: a page the window took as settled, as the window's job has it)
             tracking.attach(work)
             result = p.process(image, cancel=cancel, events=lambda kind, data: None)  # (a page fill: lines handed over)
     except Cancelled:
@@ -239,6 +239,117 @@ def test_a_page_job_without_a_gate_is_not_caught(settings, sample_page):
     p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
     _job(p, b, sample_page, None)
     assert not b.entries and not b.pending
+
+
+# ------------------------------------------------------------------ never left at work with nothing at work on it
+def _last(posted, seq=1) -> dict[str, str]:
+    """The last state told of each stage of screen *seq*."""
+    return dict(_stages(posted, seq))
+
+
+class CancelWhileReading(FakeOcr):
+    """Reads one region, then the job is cancelled: the reader turned away (*turned*), or Stop."""
+
+    def __init__(self, cancel_of, turned=True):
+        super().__init__()
+        self.cancel_of, self.turned = cancel_of, turned
+
+    def read(self, image):
+        text = super().read(image)
+        if self.calls == 1:
+            cancel = self.cancel_of()
+            turn_away(cancel) if self.turned else cancel.set()
+        return text
+
+
+def _job_cancelled_reading(settings, b, sample_page, gate, turned, book):
+    """A page job (`_job`) cancelled while it reads: turned past (*turned*) or stopped."""
+    holder: dict = {}
+    p = _pipeline(settings, DictTranslator(EN_TEXTS), book, ocr=CancelWhileReading(lambda: holder["cancel"], turned))
+    tracking = Tracking(b, p, sample_page, gate, 7)
+    holder["cancel"] = cancel = threading.Event()
+    try:
+        with pytest.raises(Cancelled):
+            with p.page_on_show(gate) as work:
+                tracking.attach(work)
+                p.process(sample_page, cancel=cancel, events=lambda kind, data: None)
+        tracking.cancelled(keeps_answered(cancel), work)
+    finally:
+        tracking.over()
+    return tracking
+
+
+@pytest.mark.parametrize("turned", [True, False])
+def test_a_page_job_without_a_gate_cancelled_while_it_reads_is_never_left_at_work(settings, sample_page, turned):
+    # (a page the window took as settled - a page key passed on while a job ran: the page queued, started with no
+    # gate once the job was gone -, told "read working" at once: turned past, it went by uncaught; stopped, it waits
+    # to be read when shown again. Before, its bar stayed "working" for good, nothing at work on it)
+    posted, post = _events()
+    b = Backlog(post)
+    _job_cancelled_reading(settings, b, sample_page, None, turned, f"Gateless {turned}")
+    assert _stages(posted)[0] == ("read", "working")
+    assert "working" not in _last(posted).values()
+    assert _last(posted)["read"] == ("missed" if turned else "waiting")
+    assert not b.entries and not b.pending and b.not_caught == (1 if turned else 0)
+
+
+def test_a_page_job_without_a_gate_turned_past_while_it_asks_is_told_as_not_caught(settings, sample_page):
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    _job(p, b, sample_page, None)
+    assert ("translate", "working") in _stages(posted)
+    assert _last(posted) == {"read": "done", "translate": "missed"} and b.not_caught == 1
+    assert posted[-1][0] == "backlog" and posted[-1][1]["dropped"] == 1  # (the totals count it as gone by)
+
+
+@pytest.mark.parametrize("turned", [True, False])
+def test_a_confirmation_taken_back_while_its_job_reads_leaves_nothing_at_work(settings, sample_page, turned):
+    # (a sharper picture of the page came: the window takes the confirmation back and cancels the job - the sharper
+    # frame's own job tells the page from then on; until it does, the page waits)
+    posted, post = _events()
+    b = Backlog(post)
+    gate = _confirmed(open_for=30.0)
+    real_set = threading.Event.set
+
+    class Taken(threading.Event):
+        def set(self):
+            gate.take_back()
+            real_set(self)
+
+    holder: dict = {}
+    p = _pipeline(settings, DictTranslator(EN_TEXTS), f"Taken back {turned}",
+                  ocr=CancelWhileReading(lambda: holder["cancel"], turned))
+    tracking = Tracking(b, p, sample_page, gate, 7)
+    holder["cancel"] = cancel = Taken()
+    with pytest.raises(Cancelled):
+        with p.page_on_show(gate) as work:
+            tracking.attach(work)
+            p.process(sample_page, cancel=cancel, events=lambda kind, data: None)
+    tracking.cancelled(keeps_answered(cancel), work)
+    tracking.over()
+    assert gate.state == "dropped" and _stages(posted)[0] == ("read", "working")
+    assert _last(posted) == {"read": "waiting"} and not b.entries and not b.pending
+
+
+def test_a_page_job_that_fails_leaves_nothing_at_work(settings, sample_page):
+    class Failing(FakeOcr):
+        def read(self, image):
+            raise RuntimeError("a reader that fails")
+
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, DictTranslator(EN_TEXTS), "Fails", ocr=Failing())
+    gate = _confirmed()
+    tracking = Tracking(b, p, sample_page, gate, 7)
+    try:
+        with pytest.raises(RuntimeError):
+            with p.page_on_show(gate) as work:
+                tracking.attach(work)
+                p.process(sample_page, cancel=threading.Event(), events=lambda kind, data: None)
+    finally:
+        tracking.over()  # (`ui.jobs._job_translate`'s finally: neither finished nor cancelled)
+    assert _stages(posted)[0] == ("read", "working") and _last(posted) == {"read": "failed"}
 
 
 def test_a_confirmation_kept_for_now_is_caught_once_sealed(settings, sample_page):
@@ -739,6 +850,37 @@ def test_a_page_shown_again_takes_what_its_job_had_read_and_reads_nothing(settin
     assert not b.entries and b.bytes_held == 0 and b.lends == {"none": 1, "reused": 1}  # (the first: nothing held)
 
 
+@pytest.mark.parametrize("from_frame", [False, True])
+def test_a_page_the_backlog_finished_shown_again_is_read_nowhere_and_told_done_throughout(settings, sample_page,
+                                                                                           monkeypatch, from_frame):
+    # (turned back to a page the backlog read - from what its job had read, or from its frame - and translated: it is
+    # lettered from the cache with the regions as the backlog had them, nothing found or read on the frame, and its
+    # bar stays done. Before, the read was let go with the page done: the page job found and read it again - 3.4 s on
+    # the processor -, its bar "reading" over a page shown translated)
+    posted, post = _events()
+    b = Backlog(post)
+    if from_frame:
+        p = _reading_job(settings, b, sample_page, "Done frame")
+        _packed(b)
+        p.translator = DictTranslator(EN_TEXTS)
+    else:
+        p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Done read")
+        _job(p, b, sample_page, _confirmed())
+        p.translator = DictTranslator(EN_TEXTS)
+    _drain(p, b)
+    assert not b.entries and _last(posted) == {"read": "done", "translate": "done"}
+    assert not p.cache.pages[0].incomplete
+    told = len(posted)
+    calls, detected = p.ocr.calls, _watch_detect(p, monkeypatch)
+    asked = len(p.translator.calls)
+    tracking, work, result = _job(p, b, sample_page, _confirmed())
+    assert tracking.reuse == "reused" and not detected and p.ocr.calls == calls and len(p.translator.calls) == asked
+    assert not [d for k, d in posted[told:] if k == "page_stage" and d["state"] != "done"]
+    assert result.translated and not result.error and b.bytes_held == 0
+    tracking, work, result = _job(p, b, sample_page, _confirmed())  # (and every time it is shown)
+    assert tracking.reuse == "reused" and not detected
+
+
 def test_a_page_the_backlog_read_from_its_frame_is_not_read_again_when_shown(settings, sample_page, monkeypatch):
     posted, post = _events()
     b = Backlog(post)
@@ -836,8 +978,9 @@ def test_a_page_shown_again_is_read_as_ever_at_another_size_or_once_a_setting_ch
     p = _reading_job(settings, b, sample_page, "Still a frame")
     tracking, _work, _result = _job(p, b, sample_page, _confirmed())
     assert tracking.reuse == "frame"
+    detected = _watch_detect(p, monkeypatch)
     tracking, _work, _result = _job(p, b, sample_page, _confirmed())
-    assert tracking.reuse == "none"  # (done: nothing held for it)
+    assert tracking.reuse == "reused" and not detected  # (done on show: its read kept for this showing, `keep_done`)
 
 
 def test_the_regions_kept_count_against_the_cap(settings, sample_page, monkeypatch):
