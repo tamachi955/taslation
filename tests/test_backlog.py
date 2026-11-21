@@ -764,6 +764,141 @@ def test_the_regions_kept_count_against_the_cap(settings, sample_page, monkeypat
     assert not b.entries  # (its regions as read would pass the cap: not caught, as a frame over it is not)
 
 
+# ------------------------------------------------------------------ the backlog's own read, stopped, taken up
+class ByCrop(FakeOcr):
+    """Reads each region by what its crop holds (the same line for the same crop, in whatever order the regions are
+    read), and stops the backlog's step at the next region read once *armed* (a turn: `Pipeline.stop_warm`)."""
+
+    def __init__(self, pipeline_of=None):
+        super().__init__()
+        self.pipeline_of, self.armed = pipeline_of, False
+
+    def read(self, image):
+        self.calls += 1
+        if self.armed:
+            self.armed = False
+            self.pipeline_of().stop_warm()
+        digest = sum(np.asarray(image.convert("L"), dtype=np.int64).ravel()[::7]) + image.width * 31 + image.height
+        return self.texts[int(digest) % len(self.texts)]
+
+
+def _spread(right, left):
+    from PIL import Image
+
+    w, h = right.size
+    spread = Image.new("RGB", (w * 2 + 60, h + 40), (30, 30, 30))
+    spread.paste(left, (0, 20))
+    spread.paste(right, (w + 60, 20))
+    return spread
+
+
+def _as_read(units) -> list:
+    """What a read gave of each page unit, as the backlog keeps it to translate: every region's place, text, state,
+    order, room and the boxes it stands for."""
+    return [(su.index, [(r.bbox, r.source_text, r.status, r.order, r.room, r.aliases) for r in su.regions])
+            for su in units]
+
+
+def _stopped_read(settings, b, image, book, after_unit=False, monkeypatch=None):
+    """A page turned past while its job read it (caught as its frame), and the backlog's read of that frame stopped:
+    at its first region (*after_unit*: at the first region after its first page unit was read)."""
+    p = _reading_job(settings, b, image, book)
+    _packed(b)
+    ocr = ByCrop(lambda: p)
+    p.ocr = ocr
+    p._ocr_memo.clear()  # (the page job's readings, in its reader's order: read by the crop from now on)
+    p._unanimous_memo.clear()
+    if after_unit:
+        real = p.share_rooms
+
+        def share(regions, size):  # (`scan`: a page unit read, ordered and given its rooms)
+            real(regions, size)
+            ocr.armed = True
+
+        monkeypatch.setattr(p, "share_rooms", share)
+    else:
+        ocr.armed = True
+    assert b.step(p) == "stopped"
+    if after_unit:
+        monkeypatch.setattr(p, "share_rooms", real)
+    return p, ocr
+
+
+def _whole_read(settings, image, book) -> tuple[list, int]:
+    """The same frame read once without a stop, by a pipeline of its own (the reference), and its regions read."""
+    ocr = ByCrop()
+    p = _pipeline(settings, DictTranslator(EN_TEXTS), book, ocr=ocr)
+    scan = p.scan(image, skip_cached=True, cancel=threading.Event(), behind=True,
+                  keep=SimpleNamespace(units=None, found=None, read={}, aliases={}))
+    return _as_read(scan.units), ocr.calls
+
+
+def test_a_read_of_the_backlogs_stopped_is_taken_up_where_it_stopped_not_begun_again(settings, sample_page,
+                                                                                      monkeypatch):
+    b = Backlog(_events()[1])
+    p, ocr = _stopped_read(settings, b, sample_page, "Taken up")
+    entry = b.entries[0]
+    assert entry.found and entry.read == {} and entry.frame is not None and entry.kept_bytes > 0
+    assert b.bytes_held == entry.held_bytes + entry.kept_bytes  # (counted against the cap with the frame)
+    detected = _watch_detect(p, monkeypatch)
+    assert b.step(p) == "read"
+    assert not detected and b.resumes == {"resumed": 1}  # (its detection taken: nothing found again)
+    assert entry.frame is None and entry.found is None and entry.aliases is None
+    assert _as_read(entry.units) == _whole_read(settings, sample_page, "Taken up, the reference")[0]
+    p.translator = DictTranslator(EN_TEXTS)
+    assert _drain(p, b) == ["translate"] and not b.entries and b.bytes_held == 0
+    assert entry.read is None and entry.found is None and entry.aliases is None  # (let go with the entry)
+
+
+def test_a_spread_stopped_after_its_first_page_reads_only_the_second_and_a_second_stop_keeps_the_first(
+        settings, sample_page, sample_page2, monkeypatch):
+    spread = _spread(sample_page, sample_page2)
+    b = Backlog(_events()[1])
+    p, ocr = _stopped_read(settings, b, spread, "Spread taken up", after_unit=True, monkeypatch=monkeypatch)
+    entry = b.entries[0]
+    assert len(entry.page_units) == 2 and set(entry.read) == {0} and entry.found and set(entry.aliases) == {0}
+    first = len(entry.read[0][1])
+    ocr.armed = True  # (stopped again, at the first region of the resumed read: the second page's)
+    assert b.step(p) == "stopped"
+    assert set(entry.read) == {0} and len(entry.read[0][1]) == first and b.resumes == {"resumed": 1}
+    detected = _watch_detect(p, monkeypatch)
+    calls = ocr.calls
+    assert b.step(p) == "read"
+    reference, whole_calls = _whole_read(settings, spread, "Spread taken up, the reference")
+    assert not detected and b.resumes == {"resumed": 2}
+    assert 0 < ocr.calls - calls < whole_calls  # (the first page not read again)
+    assert _as_read(entry.units) == reference
+
+
+def test_a_stopped_read_is_begun_again_at_another_size_with_other_units_once_a_setting_changed_or_over_the_cap(
+        settings, sample_page, monkeypatch):
+    for change in ("size", "units", "settings", "cap"):
+        b = Backlog(_events()[1])
+        if change == "cap":  # (the frame caught; its read's regions would pass the cap with it: not kept)
+            p = _reading_job(settings, b, sample_page, f"Begun again, {change}")
+            _packed(b)
+            ocr = ByCrop(lambda: p)
+            p.ocr, ocr.armed = ocr, True
+            with monkeypatch.context() as m:
+                m.setattr(backlog_mod, "FRAME_CAP_MB", (b.bytes_held + 1) / backlog_mod.MB)
+                assert b.step(p) == "stopped"
+        else:
+            p, ocr = _stopped_read(settings, b, sample_page, f"Begun again, {change}")
+        entry = b.entries[0]
+        if change == "size":
+            w, h = entry.size
+            entry.size = (w, h + 1)
+        elif change == "units":
+            entry.page_units[0].box = (1, 1, 2, 2)
+        elif change == "settings":
+            p._base_settings.white_threshold -= 1
+        else:
+            assert entry.found is None and entry.kept_bytes == 0
+        detected = _watch_detect(p, monkeypatch)
+        assert b.step(p) == "read" and detected, change  # (read from the start)
+        assert b.resumes == ({} if change == "cap" else {change: 1}), change
+
+
 # ------------------------------------------------------------------ the events and the window
 def test_reading_events_go_to_the_reading_handlers_and_never_to_the_runs_page_strip():
     from taslation.ui.jobs import JobsMixin
