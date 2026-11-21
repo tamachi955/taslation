@@ -267,6 +267,26 @@ def test_the_runs_frames_are_told_by_who_got_them_and_a_soft_one_with_the_sharpe
         "sharper_taken_after_ms"] is None
 
 
+def test_a_soft_frame_whose_reading_was_thrown_away_for_the_sharper_one_is_no_frame_the_run_read():
+    import threading
+
+    notes = standin_e2e.Notes(31, 1.0)
+    for key in (1, 2):
+        notes.run_read(key, None)
+    eraser = threading.Thread(target=notes.run_read, args=(2, None), name="batch-erase-ahead")
+    eraser.start()
+    eraser.join()
+    notes.run_read_again(2)  # the reading loop's frame of page 2, not the erase's
+    assert [r.get("thrown_away", False) for r in notes.run_reads] == [False, True, False]
+    reads = [{"t": 1000.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "soft", "thrown_away": True},
+             {"t": 1900.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "sharp"}]
+    frames = [{"t": 1800.0, "kind": "sharper", "page": 2, "spread": True, "state": "sharp"}]
+    got = standin_e2e.run_gets(reads, frames, lambda t: t)
+    assert got["frames_got_by"] == {"read": {"soft": 1, "sharp": 1}} and got["frames_got_not_sharp_list"] == []
+    tool = (ROOT / "tools" / "standin_e2e.py").read_text(encoding="utf-8")
+    assert "pageimages.PageImages.read = run_marked" in tool and 'not f.get("thrown_away")' in tool
+
+
 def test_holds_and_kept_soft_frames_are_steps_of_the_script():
     steps = sv.parse_script("g1,m1,k15000,n,w6000,h1,k,e")
     assert steps[2] == sv.Step("k", 15000) and steps[5] == sv.Step("h", 1) and steps[6] == sv.Step("k")

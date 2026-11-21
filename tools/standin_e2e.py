@@ -104,7 +104,9 @@ turn times; where the OCR read (the readers' placement, through every load of th
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
 stand-in rested on; the window's modes as they changed (reading, over the book, a run, beside it, the text size) and
 the hot keys it held; the whole-book run's decisions on the frames and the frames it read or erased (each must be a
-sharp one; one that was not, with who got it and when the run took a sharper one after it: ``run_gets``), how it ended
+sharp one; one that was not, with who got it and when the run took a sharper one after it: ``run_gets``; a frame whose
+reading was thrown away because a sharper one took its place meanwhile is left out of them and counted,
+``readings_thrown_away``), how it ended
 and its requests; the requests of scenario x sent for nothing and what their cancel cost. Into *--out*:
 report.json, and shots/ - pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
@@ -941,6 +943,14 @@ class Notes:
         with self.lock:
             self.run_reads.append({"t": now_ms(), "key": key, "by": by, **self.code(self.shown(image))})
 
+    def run_read_again(self, key: Any) -> None:
+        """The reading of the frame of *key* the run's reading loop got last was thrown away: a sharper picture of the
+        page took its place meanwhile, and the page is read again from it (`batch.BatchReader._scan_sharp`)."""
+        with self.lock:
+            got = next((f for f in reversed(self.run_reads) if f["key"] == key and f["by"] == "read"), None)
+            if got is not None:
+                got["thrown_away"] = True
+
     def act(self, segment: str, what: str) -> None:
         with self.lock:
             self.acts.append({"t": now_ms(), "segment": segment, "act": what})
@@ -1454,6 +1464,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
     App._batch_done = run_done
     decided, stored = batch_mod.BatchReader._decided, pageimages.PageImages.frame
+    marked = pageimages.PageImages.read
 
     def run_decided(self: Any, decisions: Any) -> Any:  # a whole-book run's decisions on the viewer's frames
         for kind, image in decisions:
@@ -1465,7 +1476,14 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         notes.run_read(key, image)
         return image
 
+    def run_marked(self: Any, key: Any, *a: Any, **k: Any) -> Any:  # ... and a reading of one thrown away
+        done = marked(self, key, *a, **k)
+        if done is False:
+            notes.run_read_again(key)
+        return done
+
     batch_mod.BatchReader._decided, pageimages.PageImages.frame = run_decided, run_stored
+    pageimages.PageImages.read = run_marked
     units_of, lookup = pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup
 
     def fingerprinted(self: Any, rgb: Any) -> Any:  # the page units, by the capture area in force as they are found
@@ -2810,14 +2828,14 @@ def run_gets(reads: list[dict[str, Any]], frames: list[dict[str, Any]], rel: Cal
     """A whole-book run's frames got from its store, by who got them (`Notes.run_read`: "read", its reading loop, or
     "erase", its erase ahead), and each one that was not the sharp frame: when, its screen, who got it, and how long
     after it the run took a sharper frame of that screen in its place (its decision "sharper"; None: none after it).
-    A frame its reading loop got so is the page it read: a sharper frame taken after it is stored where nothing reads
-    the page again."""
+    A frame its reading loop got so is the page it read - but for one whose reading was thrown away (``thrown_away``:
+    a sharper picture took its place while it was read, and the page was read again from that one), left out here."""
     by: dict[str, Counter[str]] = {}
     for f in reads:
         by.setdefault(str(f.get("by", "read")), Counter())[f["state"]] += 1
     listed = []
     for f in reads:
-        if f["state"] == "sharp":
+        if f["state"] == "sharp" or f.get("thrown_away"):
             continue
         screen = (f.get("page"), f.get("spread"))
         sharper = next((d["t"] for d in frames if d["t"] >= f["t"] and d["kind"] == "sharper"
@@ -3838,7 +3856,10 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     whole_book = {
         "decisions": dict(Counter(f"{f['kind']}:{f['state']}" for f in notes.run_frames)),
         "frames_got": dict(Counter(f["state"] for f in notes.run_reads)),
-        "frames_got_not_sharp": sorted({str(f["key"]) for f in notes.run_reads if f["state"] != "sharp"}),
+        # (a frame whose reading was thrown away for the sharper picture that took its place is no frame the run read)
+        "frames_got_not_sharp": sorted({str(f["key"]) for f in notes.run_reads
+                                        if f["state"] != "sharp" and not f.get("thrown_away")}),
+        "readings_thrown_away": dict(Counter(f["state"] for f in notes.run_reads if f.get("thrown_away"))),
         **run_gets(notes.run_reads, notes.run_frames, rel),
         "pages_got": len({f["key"] for f in notes.run_reads}),
         "ends": [{"code": e["code"], "pages": e["pages"], "t_s": rel(e["t"])} for e in notes.run_ends],
@@ -4152,6 +4173,7 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if whole["decisions"] or whole["ends"]:
         print(f"whole-book run: decisions {whole['decisions']}; frames got {whole['frames_got_by']}, not sharp "
               f"{[(f['key'], f['by'], f['sharper_taken_after_ms']) for f in whole['frames_got_not_sharp_list']]}; "
+              f"readings thrown away for a sharper picture {whole.get('readings_thrown_away')}; "
               f"ended {whole['ends']}; requests {whole['requests']}")
     cancel = run_["cancel_in_flight"]
     if cancel["turns"]:
