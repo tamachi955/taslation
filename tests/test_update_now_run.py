@@ -49,8 +49,14 @@ time.sleep(3)
 (here / "ended.txt").write_text("ended")
 """
 
-# the closing window: it ends *seconds* later and writes down when
-WINDOW_STAND_IN = "import sys, time\ntime.sleep(float(sys.argv[1]))\nopen(sys.argv[2], 'w').write(repr(time.time()))\n"
+# the closing window: it ends once the file *close* is there (the test's word), at the latest *seconds* later, and
+# writes down when
+WINDOW_STAND_IN = """import os, sys, time
+end = time.monotonic() + float(sys.argv[1])
+while time.monotonic() < end and not os.path.exists(sys.argv[3]):
+    time.sleep(0.05)
+open(sys.argv[2], 'w').write(repr(time.time()))
+"""
 
 
 def _program_folder(tmp: Path) -> Path:
@@ -89,10 +95,30 @@ def _newer_zip(tmp: Path, app: Path) -> Path:
 
 
 def _window(app: Path, seconds: float, closed: Path) -> subprocess.Popen:
+    """The window that closes: it ends when `_close` tells it to (at the latest *seconds* later), writing *closed*."""
     script = _write(app.parent / "window-stand-in.py", WINDOW_STAND_IN)
     return subprocess.Popen([str(app / ".venv" / "Scripts" / "python.exe"), "-I", str(script), str(seconds),
-                             str(closed)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+                             str(closed), str(_close_word(closed))], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _close_word(closed: Path) -> Path:
+    return closed.with_name(closed.stem + "-close-now")
+
+
+def _close(closed: Path) -> None:
+    """The window of `_window` told to close (as the window closes itself once Update now started update.cmd)."""
+    _close_word(closed).write_text("close")
+
+
+def _said(log: Path, text: str, seconds: float) -> bool:
+    """Whether update.cmd's console output (*log*, written as it runs) says *text* within *seconds*."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if log.is_file() and text in log.read_bytes().decode("utf-8", "replace"):
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def _scratch_env(monkeypatch, tmp: Path) -> Path:
@@ -166,17 +192,25 @@ def test_update_now_runs_update_cmd_from_end_to_end_and_starts_the_new_version(t
     _newer_zip(tmp_path, app)
     outside = _outside()
     closed = tmp_path / "window-closed.txt"
-    window = _window(app, 2, closed)
+    window = _window(app, 90, closed)
     launcher = Launcher(tmp_path / "update-console.txt")
     try:
         assert updates.launch_update(NEW, root=app, pid=window.pid, popen=launcher) is None
         line, kwargs = launcher.calls[0]
         assert line == updates.update_command(NEW, window.pid, app)
         assert kwargs["cwd"] == str(app) and kwargs["creationflags"] & subprocess.CREATE_NEW_CONSOLE
+        # the window closes only once update.ps1 said it waits for it (closed before update.ps1 looks, the window
+        # is no longer there to wait for: update.ps1 rightly says nothing of it, which a slow computer showed)
+        waiting = f"Waiting for TASlation (process {window.pid}) to close ..."
+        assert _said(launcher.log, waiting, 60), launcher.log.read_bytes().decode("utf-8", "replace")
+        assert window.poll() is None
+        time.sleep(1.0)  # (update.ps1 waits on: nothing is kept or copied while the window is open)
+        assert not (app / ".previous").exists() and window.poll() is None
+        _close(closed)
         code, out = launcher.finish()
         assert code == 0, out
         # the window was waited for: it closed before the old version was kept and the new one copied
-        assert f"Waiting for TASlation (process {window.pid}) to close ..." in out
+        assert out.count(waiting) == 1
         assert window.poll() is not None and closed.is_file()
         note = app / ".previous" / "previous-version.txt"
         assert note.stat().st_mtime >= float(closed.read_text()) - 0.01
