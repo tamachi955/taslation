@@ -513,6 +513,90 @@ def test_another_book_a_run_and_another_viewer_window_drop_it_stop_auto_and_a_re
     assert not b.entries and p.cache.pages  # (what is stored stays)
 
 
+class Silent(DictTranslator):
+    """A translator whose server does not answer, as `translate.ollama`'s rule leaves it: each request ends with
+    ``ollama.not_answering`` (asked again and, for the server TASlation started, the server started again, before),
+    ``silent`` the incident and ``endings`` counted, until *answers* is set: then it answers again."""
+
+    def __init__(self, mapping):
+        super().__init__(mapping)
+        self.silent = self.endings = 0
+        self.answers = False
+
+    def translate_page(self, texts, *args, **kwargs):
+        from taslation.messages import Message
+        from taslation.translate import TranslationError
+
+        if self.answers:
+            self.silent = 0  # (`OllamaTranslator._answered`)
+            return super().translate_page(texts, *args, **kwargs)
+        self.calls.append(list(texts))
+        self.silent, self.endings = 1, self.endings + 1
+        raise TranslationError(Message("ollama.not_answering"))
+
+
+def _paused_told(posted) -> list[bool]:
+    return [d["paused"] for k, d in posted if k == "backlog"]
+
+
+def test_a_request_of_its_own_without_an_answer_pauses_it_says_so_and_an_answer_lets_it_go_on(settings, sample_page):
+    from taslation.messages import Message
+
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "NoAnswer")
+    _job(p, b, sample_page, _confirmed())
+    assert b.step(p) == "made"
+    p.translator = silent = Silent(EN_TEXTS)
+    assert b.step(p) == "failed" and len(silent.calls) == 1
+    assert "no_answer" in b.paused and b.fatal is None and b.entries  # (never waits for a page job as a fatal one)
+    assert ("model_status", {"message": Message("ollama.not_answering")}) in posted  # (the backlog's end is said)
+    assert _paused_told(posted)[-1] is True and _stages(posted)[-1] == ("translate", "waiting")
+    window = _window(b, p)
+    for _ in range(3):  # (nothing goes on, nothing asks: the reader is told, once)
+        backlog_tick(window)
+    assert window._jobs.empty() and b.step(p) == "" and len(silent.calls) == 1
+    silent.answers = True
+    p.translator.translate_page(["x"])  # (a request of any job answered: the page on show's, say)
+    backlog_tick(window)
+    assert not b.paused and _paused_told(posted)[-1] is False and window._jobs.qsize() == 1  # (on by itself)
+    assert window._jobs.get()() is None and not b.entries and not p.cache.pages[0].incomplete
+
+
+def test_another_job_s_request_without_an_answer_pauses_it_until_f5_or_auto_on(settings, sample_page):
+    from taslation.ui import jobs
+
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "NoAnswer2")
+    _job(p, b, sample_page, _confirmed())
+    assert b.step(p) == "made"
+    p.translator = silent = Silent(EN_TEXTS)
+    silent.silent, silent.endings = 1, 1  # (the page on show's request ended so)
+    window = _window(b, p)
+    backlog_tick(window)
+    assert b.paused == {"no_answer"} and window._jobs.empty() and _paused_told(posted)[-1] is True
+    queued: list[str] = []
+    f5 = SimpleNamespace(ready=False, busy=False, _backlog=b, pipeline=p, _queue=queued.append)
+    jobs.JobsMixin.translate_now(f5)  # (F5)
+    assert not b.paused and queued == ["translate"]
+    backlog_tick(window)
+    assert not b.paused and window._jobs.qsize() == 1  # (asked once more)
+    window._jobs.get()()
+    assert "no_answer" in b.paused and silent.endings == 2  # (its own request ended so too: paused again)
+    window.auto_var = SimpleNamespace(get=lambda: False)
+    backlog_tick(window)
+    assert b.paused == {"auto", "no_answer"}
+    window.auto_var = SimpleNamespace(get=lambda: True)  # (Auto on)
+    backlog_tick(window)
+    assert not b.paused and window._jobs.qsize() == 1
+    window._jobs.get()()
+    assert b.paused == {"no_answer"}
+    p.translator = Silent(EN_TEXTS)  # (another translator: the language switched; nothing ended without an answer)
+    backlog_tick(window)
+    assert not b.paused
+
+
 def test_a_drop_tells_the_window_at_once_and_the_numbering_starts_at_1_again(settings, sample_page):
     posted, post = _events()
     b = Backlog(post)
