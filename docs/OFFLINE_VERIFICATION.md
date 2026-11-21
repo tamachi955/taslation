@@ -4269,7 +4269,8 @@ covered shown), so they show nothing of it. It stopped drawing in three runs: wi
 0.9 s and 0.8 s *before* the viewer was put up: something else made the browser look again, with the person at the
 computer), without it once (`no_announce.py`, a scratch wrapper that leaves the call out: frames back 1.5 to 1.9 s
 after the viewer was put up, a fresh capture 1.3 s after it still showing the old page). The 13.7 s seen before the
-change did not come again. The call is an event of the viewer's own window and changes nothing else; whether it is
+change did not come again. All three stalls came while the person was at the computer; a third pair, each way, on a
+computer with no input for 52 minutes stalled in neither run (every turn while covered shown). The call is an event of the viewer's own window and changes nothing else; whether it is
 what brings the frames back is not shown by these runs.
 
 *The status line, a false alarm.* In every covered run with a plain cover the window said "The viewer is hidden behind
