@@ -10,11 +10,7 @@ The TASlation (Tool Assisting Self-translation of manga) window reads the manga 
 
 https://github.com/user-attachments/assets/a99d3445-bd31-4dd2-be83-ff3702f4959c
 
-![The TASlation introduction: beside the viewer, a page is translated as you turn to it, and corrected](docs/media/taslation-intro.gif)
-
-▶ [Watch the 49-second video](https://github.com/tamachi955/taslation/releases/download/v0.9.2/taslation-introduction.mp4) (MP4, 12 MB): the idea, what happens inside, the speed, and the features.
-
-The pages in the recording and in the video are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial); the pages in the recording and in the video are changed.
+The pages in the video are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial); the pages in the video are changed.
 
 ## Features
 

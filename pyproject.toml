@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taslation"
-version = "0.9.3"
+version = "0.9.4"
 description = "Self-contained, offline manga translation for books you own."
 readme = "README.md"
 requires-python = ">=3.11"

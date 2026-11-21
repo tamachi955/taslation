@@ -3,6 +3,13 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.4 - 2026-11-21
+
+Documents
+
+* The README shows the introduction video at its top (49 seconds: the idea, what happens inside, the speed and the
+  features). The earlier recording is no longer in the repository.
+
 ## 0.9.3 - 2026-11-21
 
 Translating

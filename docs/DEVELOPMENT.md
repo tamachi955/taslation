@@ -41,8 +41,8 @@ The evaluation dataset of "Towards Fully Automated Manga Translation" (Ryota Hin
 Yasuda, Yusuke Matsui; AAAI 2021), published by Mantra Inc.: five Japanese manga, 214 pages, 1,592 text regions with
 frames, Japanese text and professional English and Chinese translations. Its licence is CC BY-NC 4.0 (non-commercial,
 with attribution), which the MIT-licensed TASlation cannot carry, so the dataset is neither in the repository nor in a
-release (the one exception in the repository is the README's recording, `docs/media/taslation-intro.gif`, which shows
-pages of one of its titles being translated, credited there and left out of every ZIP of the repository by `.gitattributes`): `python tools/fetch_openmantra.py` downloads it once into `~/.taslation/datasets/openmantra/` (the archive is
+release (the README's video, which shows pages of one of its titles being translated and is credited there, is an
+attachment kept by GitHub, not a file of the repository): `python tools/fetch_openmantra.py` downloads it once into `~/.taslation/datasets/openmantra/` (the archive is
 inspected and only what is needed is extracted; the provenance goes to `SOURCE.md` there). The application itself
 never reads it. `python tools/openmantra_eval.py` prints numbers only: detection precision, recall and F1 at IoU 0.5,
 the OCR character error rate, chrF of the default model's translation against the professional English, and the share
@@ -122,7 +122,8 @@ rows' languages.
   From then to November 21, 2026 the README's recording, `docs/media/taslation-intro.gif`, was made with this tool's
   guard and scratch state by a longer script that is not in the repository; since then it is made by
   `tools/intro_video.py` (the next entry), the first time with version 0.9.0. Each of these recordings holds
-  CC BY-NC 4.0 material.
+  CC BY-NC 4.0 material. Since version 0.9.4 the README shows a video instead (an attachment kept by GitHub) and the
+  repository holds no recording.
 * `tools/intro_video.py` records the README's introduction again from the code its checkout holds (a dev tool, never
   part of a release). `record --out FILE` runs the real window in English beside a stand-in viewer of its own (a Tk
   window of a child process showing OpenMantra pages, turned only by the page key the window passes on to it), with
