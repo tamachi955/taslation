@@ -1,0 +1,100 @@
+# The whole test suite on GitHub's own machines, in parallel jobs, so that the developer's computer stays free for the
+# measurements that need its GPU (the stand-in viewer's timings, the benchmark's translation).
+#
+# It runs for every push to a branch named ci/... and when started by hand. A ci/ branch holds work that is not
+# released yet; it is public like everything here, and is deleted once its run was read.
+#
+# What it does not cover: anything that needs a GPU, the real translator or a real viewer. Tests that want those are
+# skipped here as on any computer without them.
+name: Tests
+
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SHARDS: 8
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: '1'
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+jobs:
+  suite:
+    name: Tests ${{ matrix.shard }}
+    # The same fixed image as the install check. No GPU: the CPU build of PyTorch.
+    runs-on: windows-2025
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the packages (the CPU build of PyTorch)
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e ".[backup,dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import torch, taslation; print('torch', torch.__version__, 'taslation', taslation.__version__)"
+
+      # The OCR, layout and inpainting models and the fonts, about 1.1 GB, at the revisions setup_models.py fixes:
+      # downloaded once and kept for the later runs (the key changes when the script does).
+      - name: The models from an earlier run
+        id: models
+        uses: actions/cache@v5
+        with:
+          path: models
+          key: models-${{ hashFiles('setup_models.py') }}
+
+      - name: Download the models
+        if: steps.models.outputs.cache-hit != 'true'
+        run: |
+          python setup_models.py --models-dir models --agreed --brief --font --fonts
+          exit $LASTEXITCODE
+
+      - name: Run this job's test files
+        env:
+          TASLATION_MODELS_DIR: ${{ github.workspace }}\models
+          TASLATION_STATE_DIR: ${{ runner.temp }}\taslation-state
+        run: |
+          $files = @(python tools/test_shards.py --of $env:SHARDS --shard ${{ matrix.shard }})
+          if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { Write-Host 'no test files for this job'; exit 1 }
+          Write-Host "$($files.Count) test files"
+          python -m pytest -q -p no:cacheprovider --durations=0 --durations-min=0.5 @files 2>&1 | Tee-Object -FilePath "pytest-${{ matrix.shard }}.txt"
+          $code = $LASTEXITCODE
+          $tail = Get-Content "pytest-${{ matrix.shard }}.txt" -Tail 40
+          "### Tests ${{ matrix.shard }}`n" >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          $tail >> $env:GITHUB_STEP_SUMMARY
+          '```' >> $env:GITHUB_STEP_SUMMARY
+          exit $code
+
+      - name: Keep the output
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-${{ matrix.shard }}
+          path: pytest-${{ matrix.shard }}.txt
+          retention-days: 7
+          if-no-files-found: ignore
