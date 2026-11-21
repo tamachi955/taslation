@@ -5,7 +5,9 @@ turned, formatted, in capitals, outlined, in shaped and other scripts), their pi
 from the code before the emphasis (`tests/fixtures/lettering_identity.json`). The goldens hold on the fonts they were
 made with: on a computer whose font files differ (another system, another version of a font) the cases are skipped.
 The sample page has a golden for each set of fonts it was made with (a checkout with its models folder letters it in
-the fonts that folder brings).
+the fonts that folder brings). The quarter turn's golden ("turned-down") was made again when a quarter turn's picture
+stopped being a pixel too large (`detect.tilt.Upright`): the same lines, size and flags, half a pixel over and no
+longer blended into the next pixel.
 
 ``python tests/test_lettering_identity.py --write`` writes the goldens anew (only ever from code known to letter as
 before)."""
@@ -29,6 +31,15 @@ if str(ROOT) not in sys.path:
 from taslation.regions import TextRegion  # noqa: E402
 
 GOLDEN = Path(__file__).with_name("fixtures") / "lettering_identity.json"
+# The cases set at a slant are turned back onto the page by OpenCV's bilinear warp (`render.slant`), whose rounding
+# puts a few edge pixels one level apart from one version of OpenCV to the next (5.0 and 5.1): for them the picture its
+# golden's digest was made of (`_warped_picture`, that digest checked) is compared within that (`helpers.warp_alike`).
+# A quarter turn ("turned-down") is no blend: exact on either.
+WARPED = ("slanted",)
+
+
+def _warped_picture(name: str) -> Path:
+    return GOLDEN.with_name("slanted") / f"identity-{name}.png"
 
 ENGLISH = [
     "Why on earth did you weld the hatch shut, Pyo?! That really hurt, you know! I was stuck in there for hours.",
@@ -154,6 +165,12 @@ def _bubble_cases() -> list[tuple[str, dict[str, Any]]]:
 def _letter_case(spec: dict[str, Any], draw: bool) -> tuple[str, int, list[str], str, str]:
     """One typesetter case lettered (or only measured, without *draw*): its digest, size, flags, the layout that
     won and the font file it used."""
+    picture, size, flags, won, font = _lettered(spec, draw)
+    return (_digest(picture) if picture is not None else ""), size, flags, won, font
+
+
+def _lettered(spec: dict[str, Any], draw: bool) -> tuple[np.ndarray | None, int, list[str], str, str]:
+    """`_letter_case` with the picture itself (None when only measured) in place of its digest."""
     from taslation.render import find_font, letter_text
     from taslation.render.typeset import TextFormat
 
@@ -170,7 +187,8 @@ def _letter_case(spec: dict[str, Any], draw: bool) -> tuple[str, int, list[str],
     done = letter_text(image, region, spec["text"], font, 9, 64, 1.12, spec.get("uppercase", False), background,
                        False, language, spec.get("outline"), fmt, direction=spec.get("direction", ""),
                        color=spec.get("color"), outline_color=spec.get("outline_color"))
-    return (_digest(image) if image is not None else ""), int(done.size), list(done.flags), done.won, font or ""
+    picture = np.asarray(image.convert("RGB"), dtype=np.uint8).copy() if image is not None else None
+    return picture, int(done.size), list(done.flags), done.won, font or ""
 
 
 def _page_case(state_dir: Path) -> tuple[str, list[int], list[list[str]], list[str]]:
@@ -242,10 +260,18 @@ def test_a_bubble_letters_as_before(name):
     spec = dict(_bubble_cases())[name]
     for draw in (True, False):
         want = golden["cases"][name + ("" if draw else ":measured")]
-        digest, size, flags, won, font = _letter_case(spec, draw)
+        picture, size, flags, won, font = _lettered(spec, draw)
         _same_fonts(want["fonts"], [font])
         assert (size, flags, won) == (want["size"], want["flags"], want["won"])
-        assert digest == want["digest"]
+        digest = _digest(picture) if picture is not None else ""
+        if picture is None or name not in WARPED:
+            assert digest == want["digest"]
+            continue
+        from helpers import warp_alike
+
+        made = np.asarray(Image.open(_warped_picture(name)).convert("RGB"))
+        assert _digest(made) == want["digest"]  # the very picture the golden's digest was made of ...
+        assert not warp_alike(picture, made), warp_alike(picture, made)  # ... and this one, but for OpenCV's rounding
 
 
 if __name__ == "__main__":
@@ -262,3 +288,8 @@ if __name__ == "__main__":
             golden["pages_other_fonts"] = others
     GOLDEN.write_text(json.dumps(golden, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"written: {GOLDEN}")
+    for name in WARPED:  # the pictures the slanted cases' digests are made of
+        path = _warped_picture(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(_lettered(dict(_bubble_cases())[name], True)[0]).save(path, optimize=True)
+        print(f"written: {path}")

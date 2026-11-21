@@ -20,6 +20,29 @@ EN_TEXTS = {
 }
 
 
+# OpenCV's bilinear warp (a slanted region's lettering turned back onto the page, `render.slant`) rounds a few edge
+# pixels one level apart from one version of OpenCV to the next (5.0 and 5.1: at most 10 of 60,000 pixels in the
+# suite's cases): a picture made through it is compared within that
+WARP_LEVELS = 1  # the most a channel may differ ...
+WARP_SHARE = 0.002  # ... at this share of the pixels at most
+
+
+def warp_alike(got, want) -> str:
+    """'' when picture *got* (an array) is *want* but for OpenCV's rounding of its warp (`WARP_LEVELS` at
+    `WARP_SHARE` of the pixels at most), else what differs: a line, a glyph or a colour of the lettering changed moves
+    far more pixels by far more."""
+    import numpy as np
+
+    got, want = np.asarray(got), np.asarray(want)
+    if got.shape != want.shape:
+        return f"a picture of {got.shape}, not {want.shape}"
+    diff = np.abs(got.astype(np.int16) - want.astype(np.int16))
+    off = diff.max(axis=-1) > 0 if diff.ndim == 3 else diff > 0
+    if int(diff.max(initial=0)) > WARP_LEVELS or float(off.mean()) > WARP_SHARE:
+        return f"{int(off.sum())} of {off.size} pixels differ, by up to {int(diff.max())} levels"
+    return ""
+
+
 def store_text(path) -> str:
     """The text of a store's file (a cache, annotations, a series sheet, a copy kept beside one) as TASlation reads
     it: opened when it is protected for this Windows user (`protect.read`), an earlier version's plain file as it

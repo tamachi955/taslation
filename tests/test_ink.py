@@ -3,7 +3,8 @@ and the outline (automatic on a drawing, on or off) in its own colour (automatic
 region in the region editor and per kind in the series sheet, the region's own winning over its kind's, which wins
 over the automatic; on every lettering path (across, slanted, turned a quarter, stacked) and never changing where the
 lines go. With nothing set, the lettering is byte for byte what it was before the ink could be set (`GOLDEN`, hashes
-made before the change, on this computer's font; and the same calls with the old arguments)."""
+made before the change, on this computer's font; set at a slant, but for OpenCV's rounding of its warp: `WARPED`; and
+the same calls with the old arguments)."""
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr
+from helpers import EN_TEXTS, FakeOcr, warp_alike
 from PIL import Image
 
 from test_formatting import Window, window  # noqa: F401 - the fixture: an edit, undo and redo on the real pipeline
@@ -105,8 +106,10 @@ def font_identity() -> tuple[str, int]:
 
 # made before the ink could be set (on the code of 933328b; the cases made again there when TEXT got its invented
 # name, and those set along a bubble's body made again when its layout was rebuilt: lines planned over the body with
-# a margin of the size), on the font they name: a computer whose automatic font is another file letters other
-# pixels, and checks the old arguments against the new ones only
+# a margin of the size; "turned" made again when a quarter turn's picture stopped being a pixel too large,
+# `detect.tilt.Upright`: the same lines half a pixel over, no longer blended into the next pixel), on the font they
+# name: a computer whose automatic font is another file letters other pixels, and checks the old arguments against
+# the new ones only
 GOLDEN: dict[str, object] = {
     "font": ("comicbd.ttf", 255972),
     "plain": "ea9a41b93ff6dee4",
@@ -117,13 +120,22 @@ GOLDEN: dict[str, object] = {
     "formatted": "8210f6e268099f23",
     "formatted-overflow": "27ae3889d946c5e1",
     "slanted": "040521f644f1cfd4",
-    "turned": "d5a246ed995e2152",
+    "turned": "51ee325e1d2df7e2",
     "stacked": "305bf8ef17914411",
     "stacked-slanted": "1bc246b71218707a",
     "sample_page": "e425f860f681ee0b",
     "sample_page2": "461a94c023daec16",
 }
 AUTOMATIC = {"color": None, "outline_color": None}  # the ink's own arguments, automatic
+# The cases set at a slant are turned back onto the page by OpenCV's bilinear warp (`render.slant`), whose rounding
+# puts a few edge pixels one level apart from one version of OpenCV to the next (5.0 and 5.1): for them the picture
+# their hash was made of (its hash checked) is compared within that (`helpers.warp_alike`). A quarter turn ("turned")
+# is no blend: exact on either.
+WARPED = ("slanted", "stacked-slanted")
+
+
+def warped_picture(name: str) -> Path:
+    return Path(__file__).with_name("fixtures") / "slanted" / f"ink-{name}.png"
 
 
 # ------------------------------------------------------------------ nothing set: as before, byte for byte
@@ -133,7 +145,12 @@ def test_with_no_ink_set_every_path_letters_as_before(name):
     assert np.array_equal(lettered(name, AUTOMATIC), old)  # the new arguments, automatic: the old arguments' pixels
     if font_identity() != GOLDEN["font"]:
         pytest.skip("another automatic font on this computer: the hashes were made with another")
-    assert digest(old) == GOLDEN[name]
+    if name not in WARPED:
+        assert digest(old) == GOLDEN[name]
+        return
+    made = np.asarray(Image.open(warped_picture(name)).convert("RGB"))
+    assert digest(made) == GOLDEN[name]  # the very picture the hash was made of ...
+    assert not warp_alike(old, made), warp_alike(old, made)  # ... and this one, but for OpenCV's rounding
 
 
 def test_with_no_style_or_an_empty_one_both_fixture_pages_are_as_before(sample_page, sample_page2, settings):

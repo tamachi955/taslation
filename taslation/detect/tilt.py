@@ -49,6 +49,7 @@ SHORT_ELONGATION = 1.5  # its rectangle at least this many times as long as wide
 SHORT_AGREE = 2.0  # degrees: the moments' axis and the sharpest projection within this of the rectangle's
 SHORT_GAIN = 0.10  # the turned rectangle at least this much smaller than the upright box round the same ink
 SHORT_SEARCH = 25.0  # degrees either way the projection across the line is searched
+SIZE_HAIR = 1e-6  # px: what `Upright` takes off its picture's size before rounding it up (a float's error, not a pixel)
 
 
 @dataclass(frozen=True)
@@ -274,7 +275,11 @@ class Upright:
         m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), -angle, 1.0)
         a = math.radians(angle)
         c, s = abs(math.cos(a)), abs(math.sin(a))
-        self.width, self.height = int(math.ceil(w * c + h * s)), int(math.ceil(w * s + h * c))
+        # (less a hair before rounding up: a quarter turn's cosine is a rounding error, 6e-17, not 0, which made its
+        # picture a pixel larger than the crop turned, the crop's pixels falling on its half pixels: each pixel turned
+        # back a blend of two, and the mask turned to the nearest pixel a tie that OpenCV 5.0 and 5.1 break apart)
+        self.width = int(math.ceil(w * c + h * s - SIZE_HAIR))
+        self.height = int(math.ceil(w * s + h * c - SIZE_HAIR))
         m[0, 2] += self.width / 2.0 - w / 2.0
         m[1, 2] += self.height / 2.0 - h / 2.0
         self.matrix = m  # crop -> upright
