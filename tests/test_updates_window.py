@@ -114,16 +114,16 @@ def test_the_window_s_process_asks_nothing_itself_the_program_beside_it_does(tmp
     folder = scratch(tmp_path, "0.8.1")
     server = Server({CHANGELOG_PATH: body(CHANGELOG.encode())})
     before = dict(os.environ)
-    netguard.install(audit_hook=False)
+    guard = netguard.install(audit_hook=False)
     netguard.record_allowed(True)
+    blocked_before = len(guard.blocked)  # (what other tests in this process had blocked)
     try:
         monkeypatch.setattr(updates, "TEST_BASE", server.base)
         check = updates.Check(folder)
         deadline = time.monotonic() + 60
         while check.answer is None and time.monotonic() < deadline:
             time.sleep(0.05)
-        guard = netguard.state()
-        assert guard.blocked == [] and guard.allowed == []
+        assert guard.blocked[blocked_before:] == [] and guard.allowed == []
     finally:
         netguard.record_allowed(False)
         netguard.uninstall()
@@ -277,6 +277,7 @@ def fake_check(monkeypatch, program):
 
 
 def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet_line(hidden_root, state, fake_check):
+    before = set(hidden_root.winfo_children())  # (what other tests left on the shared root)
     w = Window(hidden_root, state)
     updates.setup(w)
     updates.relabel(w)
@@ -290,7 +291,8 @@ def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet
     w.run_later()  # its answer, as `watch` polls for it
     assert w.label() == "Check for updates... (0.9.0 is available)"
     assert w.status_var.get() == "TASlation 0.9.0 is available: Help > Check for updates..."
-    assert not [c for c in hidden_root.winfo_children() if isinstance(c, tk.Toplevel)]  # no dialog, no popup
+    assert not [c for c in hidden_root.winfo_children()
+                if isinstance(c, tk.Toplevel) and c not in before]  # no dialog, no popup
     assert updates.load_state(state) == {"checked": NOW, "newest": "0.9.0", "date": "2026-11-25"}
     assert not w.later  # once
     other = Window(hidden_root, state)  # the next start within the day: nothing asked, the menu says it
