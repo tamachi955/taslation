@@ -187,11 +187,16 @@ rows' languages.
   at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
   at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
   dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
-  dark theme). `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's runners): a rest that
-  a turn follows is held until the page on show is finished, or the window rests with it unfinished, or CAP_S have
-  passed (the stand-in waits at an `hN` step of its script until the tool's word), and x's soft frames stay on show
-  until the window has asked on them (15 s and CAP_S at most); the report keeps the holds and their reasons (`waits`).
-  Without it the script and the stand-in's control file are the same as ever. Its global hot keys are never
+  dark theme). `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's runners): each rest of
+  a, d, e, r, o, z, x, f and f2, the one at a scenario's end too, is held until the page on show is finished, or the
+  window rests with it unfinished, or CAP_S have passed (the stand-in waits at an `hN` step of its script until the
+  tool's word), and x's soft frames stay on show until the window has asked on them (15 s and CAP_S at most); the
+  report keeps the holds and their reasons (`waits`). Without it the script and the stand-in's control file are the
+  same as ever. A turn's rest ends at the next turn or where the tool changed the window for the next scenario (a mode
+  left or entered, the theme, the text size, the stand-in's size, Finished reading: the report's `driver_acts`),
+  whichever comes first, and the page at rest is what the window showed then; a job cancelled as the window took its
+  page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`); the whole-book
+  run's frames are told by who got them, its reading or its erase ahead. Its global hot keys are never
   registered with Windows: the tool holds them, notes which the window held, and hands it a press as Windows would.
   Over the book the window gives the stand-in the foreground from its own window, as the mode does; the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
@@ -305,11 +310,12 @@ page keys handed on, the whole-book run ended, ...); what depends on the compute
 (`speed`: rests too short for a page, holds at their cap, pages left half done, ...), with what each scenario was meant
 to show and whether it still did. A benchmark job fails when its title's F1, CER or chrF leaves its tolerance around
 the runners' own figures in `.github/gpu-checks/benchmark-expected.json` (a run of fewer pages or another
-`detect_model` is not compared); the tolerances are wide while one run is known and are to be tightened as more show
-the spread. The job `Summary` joins the titles (`tools/openmantra_merge.py`), compares the pooled scores with the
-expected ones, and puts every job's minutes (waiting, setting up, the run, after it: GitHub's step times), both
-checks' verdicts and tables and the repository's caches against GitHub's 10 GB on the run's page. The artifacts are
-the tools' reports, their console output and the summaries, numbers only, never the stand-in's pictures.
+`detect_model` is not compared); the expected figures are the first run's, each run's own are kept beside them
+(`seen`, two runs so far: F1 and CER the same, chrF up to 0.83 apart on a title), and the tolerances stay wide until
+more runs show the spread. The job `Summary` joins the titles (`tools/openmantra_merge.py`), compares the pooled
+scores with the expected ones, and puts every job's minutes (waiting, setting up, the run, after it: GitHub's step
+times), both checks' verdicts and tables and the repository's caches against GitHub's 10 GB on the run's page. The
+artifacts are the tools' reports, their console output and the summaries, numbers only, never the stand-in's pictures.
 `tests/test_gpu_checks_workflow.py` checks the workflow without running it.
 
 ## Releases

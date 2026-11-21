@@ -584,6 +584,44 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
     assert _failed(gone) == ["the tool wrote its report"]
 
 
+def test_a_job_that_gave_its_page_over_to_a_new_size_is_no_cancel_with_its_page_on_show():
+    s = _summarise()
+    # scenario o on a runner, as a tool before `resized_away` reported it: the job on the old size's frame cancelled
+    # 2.3 s after the stand-in's size changed, 1.3 s after the window's first capture of the new size
+    cancel = {"id": 9, "t_s": 79.33, "segment": "o", "frame": "sharp", "gate_end": "confirmed", "page_on_show": True,
+              "resize_within_1s": False}
+    run = {"cancels": {"page_still_on_show": [cancel], "list": [cancel]},
+           "job_list": [{"id": 9, "t_s": 70.91, "size": [1904, 1072]}, {"id": 10, "t_s": 79.44, "size": [1904, 1024]}],
+           "resizes": [{"from_s": 77.06, "size_before": [1904, 1072], "size_after": [1904, 1024],
+                        "first_capture_ms": 934}]}
+    criterion = "no job cancelled while its page was on show"
+    assert s.standin(_report(**run), "", {}, "o", 600)["verdict"] == "pass"
+    for other in ({"resizes": []},  # no change of size
+                  {"resizes": [{**run["resizes"][0], "first_capture_ms": 3000}]},  # the new size captured after it
+                  {"resizes": [{**run["resizes"][0], "from_s": 60.0}]},  # a change before the job began
+                  {"resizes": [{**run["resizes"][0], "size_before": [1904, 1024]}]},  # not from the job's size
+                  {"cancels": {"page_still_on_show": [{**cancel, "resized_away": False}]}}):  # the tool's own word
+        out = s.standin(_report(**{**run, **other}), "", {}, "o", 600)
+        assert out["verdict"] == "fail" and criterion in _failed(out), other
+        assert next(c for c in out["failed"] if c["criterion"] == criterion)["seen"] == [79.33]
+
+
+def test_a_soft_frame_the_run_read_fails_with_who_got_it():
+    s = _summarise()
+    whole = {"ends": [{"code": "done", "pages": 5}], "pages_got": 5, "frames_got_not_sharp": ["2"],
+             "frames_got_not_sharp_list": [{"key": "2", "by": "read", "t_s": 40.2, "sharper_taken_after_ms": 1500}]}
+    report = _report(whole_book_run=whole, turns=[*_report()["run"]["turns"], {
+        "n": 5, "segment": "w", "t_s": 50.0, "rest_ms": 2700, "page": 2, "spread": True, "why": "next",
+        "run": "run reading"}])
+    report["scenarios"] = ["c", "a", "x", "w"]
+    out = s.standin(report, "", {}, "t", 600)
+    failed = [c for c in out["failed"] if c["scenario"] == "w"]
+    assert [c["criterion"] for c in failed] == ["every frame the run read was a sharp one"]
+    assert failed[0]["seen"] == [["2", "read", 1500]]  # (the page's key, who got it, the sharper frame after it)
+    report["run"]["whole_book_run"] = {**whole, "frames_got_not_sharp": [], "frames_got_not_sharp_list": []}
+    assert not [c for c in s.standin(report, "", {}, "t", 600)["failed"] if c["scenario"] == "w"]
+
+
 def _results(f1: float = 0.9705, cer: float = 0.0325, chrf: float = 38.01, pages: int = 54,
              series: str = "rasetugari", **more) -> dict:
     return {"tool": "openmantra_eval", "dataset": {"series": [series], "pages": pages},
@@ -602,7 +640,16 @@ def test_the_expected_benchmark_figures_are_the_runners_own_per_title():
         assert sorted(expected["tolerance"][part]) == ["cer", "chrf", "f1"]
     for t in (*titles.values(), expected["pooled"]):
         assert 0 < t["f1"] <= 1 and 0 <= t["cer"] < 1 and 0 < t["chrf"] < 100
-    assert expected["measured"]["runs"] and "runners" in expected["measured"]["note"]
+    runs = expected["measured"]["runs"]
+    assert len(runs) == len(set(runs)) >= 2 and "runners" in expected["measured"]["note"]
+    # the spread seen so far: each run's figures in the order of the runs, the first run's the expected ones, and
+    # each within its tolerance (tightened only once more runs show the spread)
+    for part, figures in (*(("title", t) for t in titles.values()), ("pooled", expected["pooled"])):
+        tolerance = expected["tolerance"][part]
+        assert sorted(figures["seen"]) == ["cer", "chrf", "f1"]
+        for name, seen in figures["seen"].items():
+            assert len(seen) == len(runs) and seen[0] == figures[name]
+            assert all(abs(v - figures[name]) <= tolerance[name] + 1e-9 for v in seen), (part, name, seen)
 
 
 def test_a_benchmark_title_fails_when_a_score_leaves_its_tolerance(tmp_path):

@@ -88,7 +88,7 @@ def test_without_wait_done_the_script_is_as_written():
                        "b", "j76", "w4000"]
 
 
-def test_wait_done_holds_the_rests_a_turn_follows_and_keeps_x_soft_until_asked():
+def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
     _first, (plain, _steps) = _plan()
     _first, (held, held_steps) = _plan(wait_done=60.0)
     assert [s.screens for s in held] == [s.screens for s in plain]  # the same turns to the same screens
@@ -103,16 +103,23 @@ def test_wait_done_holds_the_rests_a_turn_follows_and_keeps_x_soft_until_asked()
             assert bare[0] == "k15000" and "k" in bare  # (kept until asked, 15 s at most; then as before)
             bare = [{"k15000": "t700", "k": "t"}.get(s, s) for s in bare]
         assert bare == p.steps
+        rests = [s for s in p.steps if s.startswith("w") and int(s[1:].split("-")[0]) >= standin_e2e.REST_MS]
+        assert sum(1 for s in h.steps if s.startswith("h")) == len(rests)  # each rest a reader takes ...
         for k, step in enumerate(h.steps):
-            if step.startswith("h"):  # after a rest a reader takes, with a turn, a flash or a spinner after it
+            if step.startswith("h"):
                 before = h.steps[k - 1]
                 assert before.startswith("w") and int(before[1:].split("-")[0]) >= standin_e2e.REST_MS
-                assert any(s[0] in "npjfs" for s in h.steps[k + 1:])
+        # ... the one at the end too: the driver changes the window for the next scenario once the stand-in waits
+        assert h.steps[-1].startswith("h"), h.name
     by = {s.name: s.steps for s in held}
-    assert by["a"][:4] == ["n", "w6000-8000", "h1", "n"] and by["a"][-2:] == ["n", "w6000-8000"]
-    assert [s for s in by["d"] if s.startswith("h")] == ["h9", "h10", "h11", "h12"]
+    assert by["a"][:4] == ["n", "w6000-8000", "h1", "n"] and by["a"][-3:] == ["n", "w6000-8000", "h9"]
+    assert [s for s in by["d"] if s.startswith("h")] == ["h10", "h11", "h12", "h13", "h14"]
     assert "w300" in by["d"] and by["d"][by["d"].index("w300") + 1] == "f700"  # (a quick turn: no hold)
-    assert sum(1 for s in by["x"] if s.startswith("h")) == 3
+    assert sum(1 for s in by["x"] if s.startswith("h")) == 4
+    assert by["f"] == ["n", "w6000", next(s for s in by["f"] if s.startswith("h")), "n", "w6000", by["f"][-1]]
+    text = sv.format_script(held_steps)  # f's last page is held before f2's narrow window comes
+    f2 = next(s for s in held if s.name == "f2")
+    assert f",w6000,{by['f'][-1]},g{f2.go},m{f2.go}," in text
     _first, (short, _s) = _plan(wait_done=8.0)
     assert next(s for s in short if s.name == "x").steps[0] == "k8000"  # never longer than the cap
 
@@ -190,6 +197,72 @@ def test_a_stale_overlay_says_how_long_of_it_came_after_the_window_captured_the_
     assert len(stale) == 1 and stale[0]["ms"] == 2000 and stale[0]["seen_ms"] == 400
     spells = standin_e2e.incidents(SimpleNamespace(displays=displays, captures=captures[:1]), line, 9000.0)
     assert spells["stale_overlays"][0]["seen_ms"] is None  # (never captured within it)
+
+
+def _on_show(t, page, kind, lettered=0, state="sharp"):
+    return {"t": t, "page": page, "spread": True, "state": state, "kind": kind, "lettered": lettered, "from": state,
+            "quick": False}
+
+
+def test_a_rest_ends_where_the_driver_changed_the_window_for_the_next_scenario():
+    # t2's page came back from the cache at once; then, as the stand-in waited for w, the driver left the full screen
+    # and started the whole-book run, whose live frame of the same page came before w's first turn (a runner)
+    turns = [{"segment": "t2", "screen": (0, True), "why": "previous", "soft_t": 1000.0, "sharp_t": 1100.0,
+              "next_t": 8000.0},
+             {"segment": "w", "screen": (2, True), "why": "next", "soft_t": 8000.0, "sharp_t": 8300.0,
+              "next_t": 12000.0}]
+    displays = [_on_show(1300.0, 0, "translated", 6), _on_show(6000.0, 0, "live"), _on_show(8500.0, 2, "reading")]
+    notes = SimpleNamespace(jobs=[], displays=displays, captures=[], requests=[], status_lines=[], modes=[],
+                            acts=[{"t": 5000.0, "segment": "t2", "act": "left"},
+                                  {"t": 5050.0, "segment": "w", "act": "entered"}])
+    rows = standin_e2e.turn_rows(turns, notes, 12000.0)
+    assert (rows[0]["at_rest"], rows[0]["rest_ms"], rows[0]["rest_ended_by"]) == ("translated", 3900, "t2 left")
+    assert (rows[1]["at_rest"], rows[1]["rest_ms"], rows[1]["rest_ended_by"]) == ("being read", 3700, None)
+    assert rows[0]["finished_ms"] == 200  # (its times are the page's own, as before)
+    notes.acts = []  # without the driver's changes: the next turn ends the rest, as it always did
+    rows = standin_e2e.turn_rows(turns, notes, 12000.0)
+    assert (rows[0]["at_rest"], rows[0]["rest_ms"], rows[0]["rest_ended_by"]) == ("untranslated", 6900, None)
+    # a change before the turn's sharp frame (the start's first scenario changing the window at once) cuts nothing
+    notes.acts = [{"t": 1050.0, "segment": "f2", "act": "narrow window"}]
+    assert standin_e2e.turn_rows(turns, notes, 12000.0)[0]["rest_ms"] == 6900
+
+
+def test_a_job_whose_page_went_on_at_a_new_size_was_not_cancelled_with_its_page_on_show():
+    # scenario o on a runner: the stand-in back from its monitor's size at 77.06 s, the window's first capture of the
+    # new size 0.93 s later, the job on the old size's frame cancelled at 79.33 s, a job on the new frame after it
+    job = {"t": 70910.0, "cancelled_t": 79330.0, "size": [1904, 1072]}
+    captures = [{"t": 70000.0, "size": [1904, 1072]}, {"t": 77994.0, "size": [1904, 1024]},
+                {"t": 79400.0, "size": [1904, 1024]}]
+    assert standin_e2e.resized_away(job, [77060.0], captures)
+    assert not standin_e2e.resized_away(job, [], captures)  # no change of size while it ran
+    assert not standin_e2e.resized_away(job, [60000.0], captures)  # one before it began
+    assert not standin_e2e.resized_away(job, [77060.0], captures[:1])  # the new size not captured by the cancel
+    assert not standin_e2e.resized_away({**job, "cancelled_t": None}, [77060.0], captures)
+    assert not standin_e2e.resized_away({**job, "size": None}, [77060.0], captures)
+
+
+def test_the_runs_frames_are_told_by_who_got_them_and_a_soft_one_with_the_sharper_frame_after_it():
+    import threading
+
+    notes = standin_e2e.Notes(31, 1.0)
+    notes.run_read(1, None)
+    eraser = threading.Thread(target=notes.run_read, args=(2, None), name="batch-erase-ahead")
+    eraser.start()
+    eraser.join()
+    assert [r["by"] for r in notes.run_reads] == ["read", "erase"]
+    batch = (ROOT / "taslation" / "batch.py").read_text(encoding="utf-8")
+    assert 'name="batch-erase-ahead"' in batch and batch.count("self.images.frame(") == 2  # (its only two callers)
+    reads = [{"t": 500.0, "key": 0, "by": "read", "page": 0, "spread": True, "state": "sharp"},
+             {"t": 1000.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "soft"},
+             {"t": 3000.0, "key": 2, "by": "erase", "page": 2, "spread": True, "state": "sharp"}]
+    frames = [{"t": 900.0, "kind": "take", "page": 2, "spread": True, "state": "soft"},
+              {"t": 1800.0, "kind": "sharper", "page": 2, "spread": True, "state": "sharp"}]
+    got = standin_e2e.run_gets(reads, frames, lambda t: round(t / 1000, 2))
+    assert got["frames_got_by"] == {"read": {"sharp": 1, "soft": 1}, "erase": {"sharp": 1}}
+    assert got["frames_got_not_sharp_list"] == [{"key": "2", "by": "read", "t_s": 1.0, "page": 2, "spread": True,
+                                                 "state": "soft", "sharper_taken_after_ms": 800}]
+    assert standin_e2e.run_gets(reads, frames[:1], lambda t: t)["frames_got_not_sharp_list"][0][
+        "sharper_taken_after_ms"] is None
 
 
 def test_holds_and_kept_soft_frames_are_steps_of_the_script():

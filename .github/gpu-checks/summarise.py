@@ -21,8 +21,9 @@ only: the summary job has no virtual environment.
 
 A stand-in run is judged by what it must show on any computer however slow (`correctness`: the run went through, the
 window followed the stand-in and nothing else, nothing was kept or shown from a frame that was not the sharp one, no
-request was sent for nothing, a page translated before came back without a request, each scenario did what it is
-for - the modes entered and left, the page keys handed on, the whole-book run ended, ...). What depends on the
+request was sent for nothing, no job was cancelled with its page on show (but for one that gave its page over to the
+frame of a new size, `_resized_away`), a page translated before came back without a request, each scenario did what
+it is for - the modes entered and left, the page keys handed on, the whole-book run ended, ...). What depends on the
 computer's speed - the rested turns translated within their rest, the holds of ``--wait-done`` that reached their
 cap, lettering left on a page until the window's next capture, pages left half done in the cache - is reported beside
 it and never fails a run (`speed`); so is what each scenario was meant to show and whether it still did (`meanings`).
@@ -164,6 +165,26 @@ def _left_on_soft(run: dict[str, Any], segment_at: Any) -> list[dict[str, Any]] 
     return [{**r, "segment": segment_at(r.get("t_s"))} for r in at_end.get("left") or [] if isinstance(r, dict)]
 
 
+def _resized_away(cancel: dict[str, Any], job: dict[str, Any] | None, resizes: list[Any]) -> bool:
+    """Whether a page job cancelled with its page on show gave that page over to its frame at a new size of the stand-in
+    (standin_e2e.resized_away, the window's design): the tool's own word where it says it; for a report of a tool
+    before it, from its lists - a change of size came while the job ran (`resizes`' from_s between the job's start and
+    its cancel), from the size of the job's frame, and the window had captured the new size by the cancel (its
+    first_capture_ms after the change; the times are to 0.01 s)."""
+    if cancel.get("resized_away") is not None:
+        return bool(cancel["resized_away"])
+    start, end = (job or {}).get("t_s"), cancel.get("t_s")
+    if start is None or end is None:
+        return False
+    for r in resizes:
+        if not isinstance(r, dict) or r.get("from_s") is None or r.get("first_capture_ms") is None:
+            continue
+        if (start <= r["from_s"] <= end and r.get("size_before") == job.get("size")
+                and r["from_s"] + r["first_capture_ms"] / 1000 <= end + 0.01):
+            return True
+    return False
+
+
 def _displays(run: dict[str, Any]) -> list[dict[str, Any]]:
     table = run.get("displays") or {}
     columns = table.get("columns") or []
@@ -295,9 +316,10 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     jobs = run.get("jobs") or {}
     check("all", "no page lettered from a black frame, a spinner or a frame without the stand-in's code",
           not jobs.get("on_black_spinner_unknown_shown"), jobs.get("on_black_spinner_unknown_shown"))
-    false = (run.get("cancels") or {}).get("page_still_on_show") or []
-    check("all", "no job cancelled while its page was on show", not false,
-          [c.get("t_s") for c in false if isinstance(c, dict)])
+    by_id = {j.get("id"): j for j in run.get("job_list") or [] if isinstance(j, dict)}
+    false = [c for c in (run.get("cancels") or {}).get("page_still_on_show") or [] if isinstance(c, dict)
+             and not _resized_away(c, by_id.get(c.get("id")), run.get("resizes") or [])]
+    check("all", "no job cancelled while its page was on show", not false, [c.get("t_s") for c in false])
     turns = _turns(run)
     segment_at = _segment_at(turns)
     judged = _judged(run)
@@ -397,8 +419,10 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             whole = run.get("whole_book_run") or {}
             check(name, "the whole-book run read pages and ended", bool(whole.get("ends")) and (whole.get("pages_got") or 0) > 0,
                   {"pages_got": whole.get("pages_got"), "ends": len(whole.get("ends") or [])})
+            listed = [[f.get("key"), f.get("by"), f.get("sharper_taken_after_ms")]
+                      for f in whole.get("frames_got_not_sharp_list") or [] if isinstance(f, dict)]
             check(name, "every frame the run read was a sharp one", not whole.get("frames_got_not_sharp"),
-                  whole.get("frames_got_not_sharp"))
+                  listed or whole.get("frames_got_not_sharp"))  # (the page's key, who got it, a sharper one after)
         elif name == "w2":
             facts = entered.get("w2") or {}
             check(name, "Finished reading", facts.get("finished_reading") is True, facts.get("finished_reading"))

@@ -1,7 +1,7 @@
 {
  "measured": {
-  "note": "GitHub's runners (4 logical processors, no GPU), the OCR on the CPU, PLaMo through Ollama v0.40.17, detect_model on; one run so far (44929445468): the tolerances are wide until more runs show the spread, then tightened",
-  "runs": [44929445468]
+  "note": "GitHub's runners (4 logical processors, no GPU), the OCR on the CPU, PLaMo through Ollama v0.40.17, detect_model on; the expected figures are the first run's; two runs so far (runs, their figures in each one's seen, in that order): F1 and CER the same in both, chrF up to 0.83 apart on a title and 0.04 pooled; the tolerances stay wide until more runs show the spread, then tightened",
+  "runs": [44929445468, 44938004658]
  },
  "detect_model": "on",
  "tolerance": {
@@ -9,11 +9,17 @@
   "pooled": {"f1": 0.005, "cer": 0.003, "chrf": 1.0}
  },
  "titles": {
-  "1": {"series": "tojime_no_siora", "pages": 46, "f1": 0.9862, "cer": 0.0122, "chrf": 38.96},
-  "2": {"series": "balloon_dream", "pages": 38, "f1": 0.9708, "cer": 0.0145, "chrf": 43.69},
-  "3": {"series": "tencho_isoro", "pages": 40, "f1": 0.9597, "cer": 0.0095, "chrf": 44.32},
-  "4": {"series": "boureisougi", "pages": 36, "f1": 0.972, "cer": 0.0267, "chrf": 41.7},
-  "5": {"series": "rasetugari", "pages": 54, "f1": 0.9705, "cer": 0.0325, "chrf": 38.01}
+  "1": {"series": "tojime_no_siora", "pages": 46, "f1": 0.9862, "cer": 0.0122, "chrf": 38.96,
+        "seen": {"f1": [0.9862, 0.9862], "cer": [0.0122, 0.0122], "chrf": [38.96, 39.79]}},
+  "2": {"series": "balloon_dream", "pages": 38, "f1": 0.9708, "cer": 0.0145, "chrf": 43.69,
+        "seen": {"f1": [0.9708, 0.9708], "cer": [0.0145, 0.0145], "chrf": [43.69, 43.35]}},
+  "3": {"series": "tencho_isoro", "pages": 40, "f1": 0.9597, "cer": 0.0095, "chrf": 44.32,
+        "seen": {"f1": [0.9597, 0.9597], "cer": [0.0095, 0.0095], "chrf": [44.32, 44.01]}},
+  "4": {"series": "boureisougi", "pages": 36, "f1": 0.972, "cer": 0.0267, "chrf": 41.7,
+        "seen": {"f1": [0.972, 0.972], "cer": [0.0267, 0.0267], "chrf": [41.7, 41.7]}},
+  "5": {"series": "rasetugari", "pages": 54, "f1": 0.9705, "cer": 0.0325, "chrf": 38.01,
+        "seen": {"f1": [0.9705, 0.9705], "cer": [0.0325, 0.0325], "chrf": [38.01, 38.01]}}
  },
- "pooled": {"pages": 214, "f1": 0.9719, "cer": 0.0187, "chrf": 41.2}
+ "pooled": {"pages": 214, "f1": 0.9719, "cer": 0.0187, "chrf": 41.2,
+            "seen": {"f1": [0.9719, 0.9719], "cer": [0.0187, 0.0187], "chrf": [41.2, 41.24]}}
 }
