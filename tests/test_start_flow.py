@@ -2121,6 +2121,7 @@ def test_the_start_goes_on_when_the_ocr_model_fails_to_load(flow, monkeypatch):
     flow._start_keep_alive = lambda: None
     flow._revive_ollama = lambda cancel=None: False
     flow._restart_ollama = lambda cancel=None, on_restarting=None: None
+    flow._translator_status = app_mod.App._translator_status.__get__(flow)
     flow._job_init = app_mod.App._job_init.__get__(flow)
     flow._job_init()
     flow.pump()
