@@ -1490,7 +1490,7 @@ class _Order:
         return bool(user32.SetWindowPos(hwnd, after, 0, 0, 0, 0, SWP_STAY))
 
 
-def keep_viewer_under(viewer: int, own: int, order: _Order | None = None) -> str:
+def keep_viewer_under(viewer: int, own: int, order: _Order | None = None, between: list[int] | None = None) -> str:
     """The viewer's window *viewer* put directly under TASlation's window *own* in the order of the windows when a
     window that could hide some of it lies between the two (`windows_between`): SetWindowPos with SWP_NOACTIVATE and
     neither its place nor its size changed - no activation, no change of the foreground, no key, no click; only the
@@ -1500,7 +1500,10 @@ def keep_viewer_under(viewer: int, own: int, order: _Order | None = None) -> str
     become topmost itself. What was done: "placed", "" (nothing between could hide it), or why nothing was:
     "not windows", "gone", "minimised" (either window), "topmost" (the viewer is topmost: nothing can lie over it but
     other topmost windows), "above" (the viewer does not lie under TASlation's window), "refused" (Windows did not take
-    it: a viewer that runs as administrator, say)."""
+    it: a viewer that runs as administrator, say). *between* (a list) is given the windows that lay between, from the
+    top down. (Checked on throwaway windows, the viewer's of another process, the caller not in front: put after
+    TASlation's window it lies directly under it; under a topmost one HWND_TOP puts it over a window that lay between
+    and leaves it not topmost, where put after the topmost window it became topmost.)"""
     if order is None:
         if not IS_WINDOWS:
             return "not windows"
@@ -1512,11 +1515,13 @@ def keep_viewer_under(viewer: int, own: int, order: _Order | None = None) -> str
         return "minimised"
     if order.topmost(viewer):
         return "topmost"
-    between = windows_between(own, viewer, order.below, order.about, order.own_pid())
-    if between is None:
+    found = windows_between(own, viewer, order.below, order.about, order.own_pid())
+    if found is None:
         return "above"
-    if not between:
+    if not found:
         return ""
+    if between is not None:
+        between.extend(found)
     return "placed" if order.place(viewer, HWND_TOP if order.topmost(own) else own) else "refused"
 
 

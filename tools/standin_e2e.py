@@ -2173,6 +2173,22 @@ class CoverWindow:
         return now_ms()
 
 
+def cover_over(cover: int, standin: int) -> bool:
+    """Whether the tool's cover lies above the stand-in's window in the order of the windows (the walk down from
+    the cover reaches the stand-in)."""
+    user32 = ctypes.WinDLL("user32")
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    h = user32.GetWindow(cover, 2)  # GW_HWNDNEXT
+    for _ in range(4096):
+        if not h:
+            return False
+        if int(h) == int(standin):
+            return True
+        h = user32.GetWindow(h, 2)
+    return False
+
+
 def cover_plan(text: str) -> tuple[str, float, float]:
     """`--cover`'s SEGMENT:AT:FOR."""
     try:
@@ -2668,6 +2684,14 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return "viewer" if args.front == "viewer" and got != "own" else got
 
     overbook.foreground_owner = over_owner
+    if getattr(args, "front_for_order", "as-is") == "own":  # (the viewer kept under the window as with it in front)
+        from taslation.ui import order as order_mod
+
+        def order_owner(hwnd: Any, viewer: int, *a: Any, **k: Any) -> str:
+            real_owner(hwnd, viewer, *a, **k)
+            return "own"
+
+        order_mod.foreground_owner = order_owner
     hook = threading.excepthook
 
     def thread_error(info: Any) -> None:
@@ -2819,6 +2843,14 @@ class Director:
             gone = self.cover.close()
             with self.notes.lock:
                 self.notes.tool_cover["gone_t"] = gone
+        elif self.cover is not None and self.cover.hwnd:
+            over = cover_over(self.cover.hwnd, self.browser.hwnd)
+            with self.notes.lock:
+                c = self.notes.tool_cover
+                c["looks"] = c.get("looks", 0) + 1
+                c["over_looks"] = c.get("over_looks", 0) + (1 if over else 0)
+                if not over and c.get("under_t") is None:
+                    c["under_t"] = now_ms()  # (the stand-in first found over the cover: put under the window)
 
     def stop(self, why: str) -> None:
         if self.over:
@@ -4658,7 +4690,8 @@ def run(args: argparse.Namespace) -> int:
 
     names = wanted(args.scenario)
     count = pages_needed(names, args.k_turns)
-    report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale}
+    report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale,
+                              "front_for_order": getattr(args, "front_for_order", "as-is")}
     pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
     report["pages"] = "dataset" if pictures else "synthetic"
     if not pictures:
@@ -5160,7 +5193,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "frame_stalls": stalls_report(notes, rel),
         "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],
         "tool_cover": None if notes.tool_cover is None else {
-            **notes.tool_cover, "shown_t": rel(notes.tool_cover["shown_t"]), "gone_t": rel(notes.tool_cover["gone_t"])},
+            **notes.tool_cover, "shown_t": rel(notes.tool_cover["shown_t"]), "gone_t": rel(notes.tool_cover["gone_t"]),
+            "under_t": rel(notes.tool_cover.get("under_t"))},
         "guard": {"patched": patched, "refused": guard.refused, "chosen": sorted(set(notes.selected)),
                   "stand_in": browser.hwnd, "reached_the_stand_in": guard.used,
                   "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
@@ -5545,6 +5579,11 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f" time(s), left as it was {sum(1 for n in kept if 'left as it is' in n['line'])} time(s), "
               f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s); hidden wholly with its frames "
               f"standing still {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
+    cover = run_.get("tool_cover") or {}
+    if cover:
+        print(f"the tool's cover over the stand-in from {cover.get('shown_t')} s to {cover.get('gone_t')} s: the "
+              f"stand-in put over it at {cover.get('under_t')} s; the cover found over it {cover.get('over_looks', 0)} of "
+              f"{cover.get('looks', 0)} looks")
     stalls = run_.get("frame_stalls") or []
     if stalls:
         print(f"frames standing still: {len(stalls)}, longest {max((s['lasted_s'] or 0) for s in stalls)} s"
@@ -5707,6 +5746,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--series", type=int, default=1, help="the dataset's series, by its place in the sorted list")
     ap.add_argument("--first", type=int, default=1, help="its first page (from 1)")
     ap.add_argument("--synthetic", action="store_true", help="the repository's test pages, not the dataset")
+    ap.add_argument("--front-for-order", default="as-is", choices=("as-is", "own"),
+                    help="own: the window keeps the viewer under its own as with it in front (`ui.order`), whoever is "
+                         "in front (nothing is brought to the front; the window order of the stand-in alone changes)")
     ap.add_argument("--front", default="viewer", choices=("viewer", "as-is"),
                     help="viewer: the window is told the viewer is in front (the reader's case); as-is: as it is")
     ap.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")

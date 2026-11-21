@@ -477,7 +477,7 @@ def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hid
         monkeypatch.setattr(order, "IS_WINDOWS", True)
         monkeypatch.setattr(order, "foreground_window", lambda: 99)
         monkeypatch.setattr(order, "foreground_owner", lambda hwnd, viewer: "own")
-        monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own: "placed")
+        monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own, between=None: "placed")
         monkeypatch.setattr(order, "window_class", lambda hwnd: "Chrome_WidgetWin_1")
         monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: True)
         w = SimpleNamespace(selected=SimpleNamespace(hwnd=20), _own_hwnd=lambda: 10, _raised=None,
