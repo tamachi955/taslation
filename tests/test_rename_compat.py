@@ -46,7 +46,7 @@ def test_an_export_with_the_old_first_line_still_imports():
 
 
 def test_the_title_carries_the_expansion():
-    assert constants.APP_TITLE == "TASlation - Tool Assisting Self-translation"
+    assert constants.APP_TITLE == "TASlation - Tool Assisting Self-translation of manga"
     root = Path(__file__).resolve().parents[1] / "taslation" / "ui"
     assert "self.title(APP_TITLE)" in (root / "app.py").read_text(encoding="utf-8")
     assert "self.title(APP_TITLE)" in (root / "status.py").read_text(encoding="utf-8")

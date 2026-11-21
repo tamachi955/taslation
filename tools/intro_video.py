@@ -351,8 +351,9 @@ CARDS: dict[str, tuple[str, tuple[Line, ...]]] = {
              cites(README, "**A tool for reading your own manga on your own computer, translating as you read**")),
         Line("The window reads the manga page your viewer is showing, translates it on this computer, and shows the "
              "translation laid over the page.", "body",
-             cites(README, "The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is "
-                           "showing, translates it on this computer, and shows the translation laid over the page.")),
+             cites(README, "The TASlation (Tool Assisting Self-translation of manga) window reads the manga page your "
+                           "viewer is showing, translates it on this computer, and shows the translation laid over "
+                           "the page.")),
         Line("Recorded with version {version}", "small",
              own="the version of the checkout the recording was made with (taslation.__version__)"),
     )),

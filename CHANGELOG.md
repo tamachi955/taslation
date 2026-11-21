@@ -3,6 +3,15 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.2 - 2026-11-21
+
+Other
+
+* The name is spelt out as "Tool Assisting Self-translation of manga" (before: "Tool Assisting Self-translation") in
+  the window's title, under Help → "About TASlation", in the README and in the project's description on GitHub.
+* The README links a 49-second video that shows the idea, what happens inside TASlation, its speed and its
+  features. The video is a file attached to this version's release on GitHub, not a part of the program.
+
 ## 0.9.1 - 2026-11-21
 
 Updating

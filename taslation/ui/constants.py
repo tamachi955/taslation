@@ -59,7 +59,7 @@ LIVE_CHANGE = 0.0  # the live view draws a frame whose thumbnail differs at all 
 BLANK_SPREAD = 8  # a frame whose thumbnail spans fewer grey levels is blank (as capture.is_blank judges a frame)
 QUEUE_RANK = {"auto": 0, "translate": 1, "batch": 2}  # a waiting request gives way to one ranked higher
 APP_NAME = "TASlation"
-APP_EXPANSION = "Tool Assisting Self-translation"  # TAS as in the tool-assisted speedrun: the tool assists, you translate
+APP_EXPANSION = "Tool Assisting Self-translation of manga"  # TAS as in the tool-assisted speedrun: the tool assists, you translate
 APP_TITLE = f"{APP_NAME} - {APP_EXPANSION}"  # the main window's title; dialogs keep the short name
 
 READY = "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen."

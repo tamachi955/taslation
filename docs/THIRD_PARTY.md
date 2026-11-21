@@ -242,3 +242,6 @@ TASlation translates them (the Japanese erased, an English translation set in it
 and a translation rewritten in the editing scenes: the pages are changed). The
 recording is under CC BY-NC 4.0 with that credit, not under TASlation's MIT licence, and `.gitattributes` leaves
 `docs/media` out of every ZIP of the repository.
+The video the README links (a file attached to a release on GitHub, not in the repository or in a ZIP of it) shows
+pages of the same title and of the dataset's other titles in the same way, with the credit on every frame that shows
+one; it is under CC BY-NC 4.0 too.
