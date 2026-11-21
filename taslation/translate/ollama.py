@@ -38,7 +38,10 @@ own (localised) error text, nor any text of the book.
 
 A streamed request that gets no answer (`NoAnswer`: no first byte within `NO_ANSWER_S`, or `NO_ANSWER_TIMES` the time
 its prompt is expected to take when that is longer, `_no_answer_after`; or a stream silent `NO_ANSWER_S` once it began;
-a stream that is still writing is left alone) is ended: its connection closed (the server then stops the task), what
+a stream that is still writing is left alone; the wait for a first byte is counted over the requests in a row that got
+none - a reader who turns every few seconds cancels each before its own bound -, the time with none under way left out,
+and any byte of any request to the model starts it again, `_Waits`) is ended: its connection closed (the server then
+stops the task), what
 the client knew of the server's state made unsure, and the window told once per incident (``ollama.no_answer``, through
 `on_status`, whichever thread asked: the page on show's job, the backlog, a load). The same request is asked once more
 on a new connection after one /api/ps look (`_answer`, `_after_silence`). No answer a second time in the incident (until
@@ -356,6 +359,7 @@ class OllamaTranslator:
         self._incidents = 0
         self.silent = 0
         self._incident_lock = threading.Lock()
+        self._waits = _Waits()  # the seconds the requests waited for a first byte in a row, none coming (`_Watch`)
         self._share: float | None = None  # the model's share on the GPU last seen (`gpu_share`; 0.0: the processor)
         # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_before_load`)
         self.before_load: Callable[[], Any] | None = None
@@ -524,7 +528,7 @@ class OllamaTranslator:
         last: dict[str, Any] | None = None
         timeout = timeout or self.timeout
         for _attempt in range(2):
-            watch = _Watch(cancel, on_slow, self.slow_after, timeout, first, between, alive)
+            watch = _Watch(cancel, on_slow, self.slow_after, timeout, first, between, alive, self._waits)
             conn, kept = self._held(timeout)
             resp: http.client.HTTPResponse | None = None
             whole = False  # the answer read to its end: the connection may be kept for the next request
@@ -578,6 +582,7 @@ class OllamaTranslator:
                     continue  # (kept, and closed by the server: the request never reached it)
                 raise self._failure(e, path, timeout) from e
             finally:
+                watch.close()
                 if resp is not None:
                     resp.close()
                 if whole and conn.sock is not None:
@@ -843,6 +848,7 @@ class OllamaTranslator:
         except ValueError:
             fresh = 0.0
         self._fresh = (model, time.monotonic() + fresh) if fresh > 0 else ("", 0.0)
+        self._waits.came()  # (an answer: the waits without one are counted from nothing)
         with self._incident_lock:  # (an answer: a request without one is an incident of its own from now on)
             if self._incident is not None:
                 LOG.warning("no answer: the translation program answers again (incident %d)", self._incident["n"])
@@ -856,8 +862,10 @@ class OllamaTranslator:
     # --- a request that gets no answer (the module's docstring) -----------------------------------------------
     def _lost(self) -> None:
         """What the client knew of the server's state is gone (a request without an answer, a server started again):
-        the next request asks /api/ps whether the model is loaded."""
+        the next request asks /api/ps whether the model is loaded, and the waits without a byte are counted from
+        nothing (`_Waits`: the incident takes it from here)."""
         self._unsure()
+        self._waits.clear()
 
     def _on_cpu(self) -> bool:
         """Whether every layer of the model is on the processor (``num_gpu`` 0, or none of it on the GPU last seen)."""
@@ -1190,17 +1198,66 @@ def refuses_think(error: TranslationError) -> bool:
     return http_status_is(error, 400) and "think" in str(error.message.params.get("detail", "")).lower()
 
 
+class _Waits:
+    """The seconds the requests to the model waited for their first byte in a row, none coming (`NoAnswer`): the time
+    while one at least waits for its first byte, over every request since the last byte of any - a reader who turns
+    every few seconds cancels each request before its own bound, and the server that takes them and answers none is
+    found all the same -, the time with none waiting not counted. Back to nothing at any byte of any request to the
+    model (a load's too), any answer, a request ended as no answer and a server started again. One for a translator,
+    shared by its threads; a look at /api/ps is no request to the model and changes nothing."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._banked = 0.0  # the seconds of the requests that ended without a byte since the last byte
+        self._since: float | None = None  # since when one request at least waits for its first byte
+        self._waiting = 0  # the requests waiting for their first byte
+
+    def begin(self) -> None:
+        """A request waits for its first byte from now on."""
+        with self._lock:
+            if self._waiting == 0:
+                self._since = time.monotonic()
+            self._waiting += 1
+
+    def end(self) -> None:
+        """A request that waited for its first byte ended without one (cancelled, failed, ended as no answer)."""
+        with self._lock:
+            self._waiting = max(0, self._waiting - 1)
+            if self._waiting == 0 and self._since is not None:
+                self._banked += time.monotonic() - self._since
+                self._since = None
+
+    def came(self, first: bool = False) -> None:
+        """A byte came, or an answer (*first*: the first byte of a request that waited for it): from nothing again."""
+        with self._lock:
+            if first:
+                self._waiting = max(0, self._waiting - 1)
+            self._banked = 0.0
+            self._since = time.monotonic() if self._waiting else None
+
+    def clear(self) -> None:
+        """The count served (a request ended as no answer, a server started again): from nothing again."""
+        self.came()
+
+    def waited(self) -> float:
+        """The seconds counted so far."""
+        with self._lock:
+            return self._banked + (time.monotonic() - self._since if self._since is not None else 0.0)
+
+
 class _Watch:
     """Reads a streamed answer in short waits: between them it looks at the cancel event, tells once when nothing
     has come for *slow_after* seconds, and gives up (a timeout) after *timeout* seconds without a byte. The no-answer
-    bounds (the module's docstring): *first*, the seconds the first byte may take, and *between*, those the stream
+    bounds (the module's docstring): *first*, the seconds the first byte may take - counted with *waits* over the
+    requests in a row that got none (`_Waits`), or this request's alone without -, and *between*, those the stream
     may be silent once it began - past either it raises `NoAnswer` (None: *timeout* alone); *alive* (a load, whose
     first byte comes once the model is in memory): asked every `ALIVE_EVERY_S` while nothing comes whether the server
-    answers at all, and silent `ALIVE_MISSES` times in a row, `NoAnswer` (*load*)."""
+    answers at all, and silent `ALIVE_MISSES` times in a row, `NoAnswer` (*load*). Its bytes count in *waits* as any
+    (`_Waits.came`); `close` once the request ended."""
 
     def __init__(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None,
                  slow_after: float, timeout: float, first: float | None = None, between: float | None = None,
-                 alive: Callable[[], bool] | None = None):
+                 alive: Callable[[], bool] | None = None, waits: _Waits | None = None):
         self.cancel = cancel
         self.on_slow = on_slow
         self.slow_after = slow_after
@@ -1211,6 +1268,16 @@ class _Watch:
         self.began = False  # a byte of the answer came
         self.asked = self.last  # (when *alive* was asked last)
         self.misses = 0
+        self.waits = waits
+        self.waiting = waits is not None and first is not None  # counted in *waits* until its first byte
+        if self.waiting:
+            waits.begin()
+
+    def close(self) -> None:
+        """The request ended: one that still waited for its first byte is counted no more (`_Waits.end`)."""
+        if self.waiting:
+            self.waiting = False
+            self.waits.end()
 
     def receive(self, sock: socket.socket, buffer: Any) -> int:
         while True:
@@ -1221,9 +1288,15 @@ class _Watch:
             except TimeoutError:  # a short wait ended without a byte
                 now = time.monotonic()
                 waited = now - self.last
-                bound = self.between if self.began else self.first
-                if bound is not None and waited >= bound:
-                    raise NoAnswer(waited, self.began) from None
+                if self.began:
+                    if self.between is not None and waited >= self.between:
+                        raise NoAnswer(waited, True) from None
+                elif self.first is not None:
+                    # (the count is started again by the incident, `OllamaTranslator._silence`; a request cancelled as
+                    # it ends so leaves it as it is, and the next request ends at once)
+                    silent = self.waits.waited() if self.waiting else waited
+                    if silent >= self.first:
+                        raise NoAnswer(silent, False) from None
                 if waited >= self.timeout:
                     raise
                 if self.alive is not None and now - self.asked >= ALIVE_EVERY_S:
@@ -1239,7 +1312,11 @@ class _Watch:
                         pass
                 continue
             self.last = time.monotonic()
-            self.began = self.began or n > 0
+            if n > 0:
+                self.began = True
+                if self.waits is not None:
+                    self.waits.came(self.waiting)
+                    self.waiting = False
             return n
 
 

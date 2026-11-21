@@ -250,6 +250,56 @@ def test_a_request_the_server_takes_and_never_answers_ends_at_its_bound_and_is_a
     assert _codes(told).count("ollama.no_answer") == 1 and t.silent == 0
 
 
+TURN_S = BOUND_S / 5  # (a reader who turns a page every 6 s against the 30 s bound)
+
+
+def _reader_turning(t: PlamoTranslator, told: list[Message], most: int, gap: float) -> int:
+    """A reader who turns a page every TURN_S seconds - each page's request cancelled then - with *gap* seconds
+    between two pages in which nothing is asked; until the window is told ``ollama.no_answer`` or *most* pages. The
+    pages turned."""
+    from taslation.messages import Cancelled
+
+    turns = 0
+    while turns < most and "ollama.no_answer" not in _codes(told):
+        turns += 1
+        cancel = threading.Event()
+        timer = threading.Timer(TURN_S, cancel.set)
+        timer.start()
+        try:
+            t.translate_page([LINE], cancel=cancel)
+        except Cancelled:
+            pass
+        finally:
+            timer.cancel()
+        time.sleep(gap)
+    return turns
+
+
+def test_a_reader_who_turns_before_the_bound_has_the_rule_fire_once_the_waits_add_up_to_it(stand, monkeypatch):
+    """(the stop of 2026-11-21: the server took every request and answered none, the reader's turns cancelled each
+    after 6 to 7 s, and the 30 s bound of a request was never reached) The seconds without a byte are counted over the
+    requests in a row that got none, the gaps with no request under way left out: the rule fires once they reach the
+    bound, the window told of the seconds waited in all."""
+    monkeypatch.setattr(ollama_mod, "POLL_S", 0.02)
+    stand.plan = ["silent"] * 60
+    t, told = _translator(stand)
+    turns = _reader_turning(t, told, most=15, gap=BOUND_S / 2)
+    said = [m for m in told if m.code == "ollama.no_answer"]
+    assert said, f"the rule never fired in {turns} pages turned"
+    assert turns >= 4  # (0.12 s a page: the waits reach 0.6 s on the fifth; the gaps, 0.3 s each, are not counted)
+    assert BOUND_S <= said[0].params["seconds"] <= BOUND_S + 0.2
+    assert len(said) == 1
+
+
+def test_any_answer_between_the_turns_starts_the_count_again(stand, monkeypatch):
+    """(the guard of the count: three pages turned before their answer, the fourth answered - 0.4 s in a row at most)"""
+    monkeypatch.setattr(ollama_mod, "POLL_S", 0.02)
+    stand.plan = ["silent", "silent", "silent", "answer"] * 4
+    t, told = _translator(stand)
+    assert _reader_turning(t, told, most=16, gap=0.05) == 16
+    assert "ollama.no_answer" not in _codes(told) and len(stand.requests) == 16
+
+
 def test_a_stream_silent_in_the_middle_is_no_answer_and_what_came_of_it_is_not_kept(stand):
     stand.plan = ["mid", "answer"]
     t, told = _translator(stand)
