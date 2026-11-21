@@ -50,15 +50,16 @@ Updates
 
 class Server:
     """A loopback HTTP server: *routes* maps a path to a function of the handler that answers it; every request's
-    line and headers are kept in ``seen``."""
+    line and headers are kept in ``seen``. It answers in *protocol* (HTTP/1.0: it closes the connection after each
+    answer)."""
 
-    def __init__(self, routes):
+    def __init__(self, routes, protocol: str = "HTTP/1.1"):
         self.routes = routes
         self.seen: list[dict] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+            protocol_version = protocol
 
             def do_GET(self):  # noqa: N802 - the server's name
                 outer.seen.append({"line": self.requestline, "path": self.path,
@@ -123,8 +124,8 @@ def redirect(location: str):
 def server():
     made: list[Server] = []
 
-    def make(routes):
-        s = Server(routes)
+    def make(routes, protocol="HTTP/1.1"):
+        s = Server(routes, protocol)
         made.append(s)
         return s
 
@@ -651,6 +652,42 @@ def test_an_oversized_zip_stops_at_once(tmp_path, server, monkeypatch):
     with pytest.raises(cu.TooLarge):
         cu.download("0.9.0", tmp_path, cu.Place(s.base), wait_s=0, progress=cu.Progress(io.StringIO()))
     assert len(s.seen) == 1 and list(tmp_path.iterdir()) == []
+
+
+CLOSING = ["HTTP/1.0", "Connection: close"]  # a server that closes the connection after its answer, the body's length said
+
+
+def closing_server(server, how: str, routes: dict) -> Server:
+    """*routes* (path: bytes) answered with their length by a server that closes the connection after each answer:
+    one that answers HTTP/1.0, or HTTP/1.1 with ``Connection: close``."""
+    closing = {"Connection": "close"} if how == "Connection: close" else {}
+    return server({path: body(data, headers=closing) for path, data in routes.items()},
+                  protocol="HTTP/1.0" if how == "HTTP/1.0" else "HTTP/1.1")
+
+
+@pytest.mark.parametrize("how", CLOSING)
+def test_the_check_reads_an_answer_after_which_the_server_closes(tmp_path, server, how):
+    """http.client lets go of the socket once the body has come: the check reads the changelog whole and answers, as
+    from a server that keeps the connection."""
+    s = closing_server(server, how, {CHANGELOG_PATH: CHANGELOG.encode()})
+    checked = run(scratch(tmp_path), "--base", s.base, "check")
+    answer = answer_of(checked)
+    assert answer["result"] == "newer" and answer["newest"] == "0.9.0", answer
+    assert answer["changes"].startswith("0.9.0 - 2026-11-25") and checked.returncode == cu.NEWER
+    assert len(s.seen) == 1
+
+
+@pytest.mark.parametrize("how", CLOSING)
+def test_the_download_reads_an_answer_after_which_the_server_closes(tmp_path, server, how):
+    """The same for the download: the ZIP comes whole at the first try."""
+    data = a_zip()
+    s = closing_server(server, how, {zip_path("0.9.0"): data})
+    to = tmp_path / "into"
+    to.mkdir()
+    result = run(scratch(tmp_path), "--base", s.base, "download", "--version", "0.9.0", "--to", str(to))
+    assert result.returncode == cu.DOWNLOADED, result.stderr
+    assert (to / "taslation-0.9.0.zip").read_bytes() == data and "Attempt" not in result.stderr
+    assert len(s.seen) == 1  # (nothing was tried again)
 
 
 @pytest.mark.parametrize("version", ["0.9", "v0.9.0", "../0.9.0", "0.9.0/../../x", "0.9.0?x=1"])

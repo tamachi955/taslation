@@ -256,8 +256,9 @@ def _remaining(deadline: float | None, most: float) -> float:
 
 
 class Answer:
-    """An answer being read: its connection, the connection's socket (kept: http.client lets go of it when the server
-    closes after the answer) and the response, whose status is not a redirect."""
+    """An answer being read: its connection, the connection's socket (kept: the connection lets go of it at once when
+    the server closes after the answer - HTTP/1.0, ``Connection: close`` - and the response holds it until the body
+    has come) and the response, whose status is not a redirect."""
 
     def __init__(self, conn: http.client.HTTPConnection, sock: socket.socket, resp: http.client.HTTPResponse):
         self.conn, self.sock, self.resp = conn, sock, resp
@@ -268,7 +269,10 @@ class Answer:
 
     def read(self, most: int, deadline: float | None = None, read_s: float = READ_S) -> bytes:
         """What comes next, at most *most* bytes, after one wait of at most *read_s* (and no later than
-        *deadline*)."""
+        *deadline*); nothing once the body has come. The response lets go of the socket when its body has come, and
+        after an answer the server closes that is the socket's end: it is never touched again."""
+        if self.resp.isclosed():
+            return b""
         self.sock.settimeout(_remaining(deadline, read_s))
         return self.resp.read1(most)
 
