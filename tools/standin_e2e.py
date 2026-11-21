@@ -2095,11 +2095,12 @@ COVER_MARGIN = 24  # the cover's reach beyond the stand-in's window on every sid
 class CoverWindow:
     """A plain opaque window of this tool's own process laid over the stand-in's window and directly above it in the
     order of windows (`--cover`): what a reader's other program over the viewer is, made on purpose. Shown with no
-    activation and no key; any window that lay above the stand-in stays above the cover. Its own thread and message
-    loop; `close` ends it."""
+    activation and no key; any window that lay above the stand-in stays above the cover. *part* below 1 (`--cover-part`):
+    only the left part of the stand-in so wide is covered (a note or a dictionary laid over a part of the viewer), the
+    rest stays in sight. Its own thread and message loop; `close` ends it."""
 
-    def __init__(self, standin: int):
-        self.standin, self.hwnd = standin, 0
+    def __init__(self, standin: int, part: float = 1.0):
+        self.standin, self.hwnd, self.part = standin, 0, part
         self.shown_t: float | None = None
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, name="tool-cover", daemon=True)
@@ -2142,6 +2143,8 @@ class CoverWindow:
         user32.GetWindowRect(self.standin, ctypes.byref(r))
         x, y = r.left - COVER_MARGIN, r.top - COVER_MARGIN
         w, h = r.right - r.left + 2 * COVER_MARGIN, r.bottom - r.top + 2 * COVER_MARGIN
+        if self.part < 1.0:  # (the left part alone: its right edge inside the stand-in)
+            w = COVER_MARGIN + max(1, int((r.right - r.left) * self.part))
         style = 0x00C00000 | 0x00080000  # WS_CAPTION | WS_SYSMENU: a window as any program's (not shown yet)
         self.hwnd = int(user32.CreateWindowExW(0x08000000, COVER_CLASS, "stand-in cover", style, x, y, w, h,
                                                None, None, instance, None) or 0)  # WS_EX_NOACTIVATE
@@ -2187,6 +2190,17 @@ def cover_over(cover: int, standin: int) -> bool:
             return True
         h = user32.GetWindow(h, 2)
     return False
+
+
+def cover_part(text: str) -> float:
+    """`--cover-part`'s F."""
+    try:
+        part = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("a number, as 0.4") from None
+    if not 0 < part <= 1:
+        raise argparse.ArgumentTypeError("more than 0, at most 1")
+    return part
 
 
 def cover_plan(text: str) -> tuple[str, float, float]:
@@ -2684,8 +2698,11 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return "viewer" if args.front == "viewer" and got != "own" else got
 
     overbook.foreground_owner = over_owner
+    from taslation.ui import order as order_mod
+
+    if getattr(args, "order_partly", "as-built") != "as-built":  # (`ui.order`'s switch, for this run alone)
+        order_mod.PARTLY_COVERED_TOO = args.order_partly == "on"
     if getattr(args, "front_for_order", "as-is") == "own":  # (the viewer kept under the window as with it in front)
-        from taslation.ui import order as order_mod
 
         def order_owner(hwnd: Any, viewer: int, *a: Any, **k: Any) -> str:
             real_owner(hwnd, viewer, *a, **k)
@@ -2835,10 +2852,10 @@ class Director:
             self.cover_from = time.monotonic()
         since = time.monotonic() - self.cover_from
         if self.cover is None and since >= at:
-            self.cover = CoverWindow(self.browser.hwnd)
+            self.cover = CoverWindow(self.browser.hwnd, getattr(self.args, "cover_part", 1.0))
             with self.notes.lock:
                 self.notes.tool_cover = {"segment": segment, "shown_t": self.cover.shown_t, "gone_t": None,
-                                         "made": bool(self.cover.hwnd)}
+                                         "made": bool(self.cover.hwnd), "part": self.cover.part}
         elif self.cover is not None and since >= at + lasts:
             gone = self.cover.close()
             with self.notes.lock:
@@ -4691,7 +4708,8 @@ def run(args: argparse.Namespace) -> int:
     names = wanted(args.scenario)
     count = pages_needed(names, args.k_turns)
     report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale,
-                              "front_for_order": getattr(args, "front_for_order", "as-is")}
+                              "front_for_order": getattr(args, "front_for_order", "as-is"),
+                              "order_partly": getattr(args, "order_partly", "as-built")}
     pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
     report["pages"] = "dataset" if pictures else "synthetic"
     if not pictures:
@@ -5581,7 +5599,9 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"standing still {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
     cover = run_.get("tool_cover") or {}
     if cover:
-        print(f"the tool's cover over the stand-in from {cover.get('shown_t')} s to {cover.get('gone_t')} s: the "
+        part = cover.get("part", 1.0)
+        print(f"the tool's cover over {'all' if part >= 1 else f'the left {part:.0%}'} of the stand-in from "
+              f"{cover.get('shown_t')} s to {cover.get('gone_t')} s: the "
               f"stand-in put over it at {cover.get('under_t')} s; the cover found over it {cover.get('over_looks', 0)} of "
               f"{cover.get('looks', 0)} looks")
     stalls = run_.get("frame_stalls") or []
@@ -5749,6 +5769,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--front-for-order", default="as-is", choices=("as-is", "own"),
                     help="own: the window keeps the viewer under its own as with it in front (`ui.order`), whoever is "
                          "in front (nothing is brought to the front; the window order of the stand-in alone changes)")
+    ap.add_argument("--order-partly", default="as-built", choices=("as-built", "on", "off"),
+                    help="`ui.order.PARTLY_COVERED_TOO` for this run: on, a window over a part of the viewer sends it "
+                         "up too; off, only windows that hide all of it (default: as built)")
     ap.add_argument("--front", default="viewer", choices=("viewer", "as-is"),
                     help="viewer: the window is told the viewer is in front (the reader's case); as-is: as it is")
     ap.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
@@ -5779,6 +5802,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--cover", type=cover_plan, default=None, metavar="SEGMENT:AT:FOR",
                     help="the tool's own plain window laid over the stand-in AT seconds after SEGMENT began, for FOR "
                          "seconds (a viewer wholly covered, on purpose; no key, no activation)")
+    ap.add_argument("--cover-part", type=cover_part, default=1.0, metavar="F",
+                    help="--cover over the left F of the stand-in's width alone (0 < F <= 1; default 1: all of it)")
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
