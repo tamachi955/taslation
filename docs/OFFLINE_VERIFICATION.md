@@ -4142,3 +4142,45 @@ own (failed before: no gate). `tests/test_backlog.py`: a job stopped, cancelled 
 turned past with no gate, or failed leaves no stage at work; a page the backlog finished, shown again, is read
 nowhere and told done throughout (failed before: read again, told "reading"). `tests/test_standin_viewer.py`: the
 steps and times of `--k-keys` and `--k-stay-ms`.
+
+**The stop hunted.** Scenario k as in the section before (0.5, 1 and 2 s, 20 pages flipped past, 10 read back at 8
+s, soft first), seeds 1 to 10, the tool's server on 11435, on a frozen copy of c101f13, the stand-in drawing while
+covered from the third pair on; with the backlog and with nothing caught (`--k-backlog off`), wide and narrow. The OCR
+read on the processor in 32 of the 33 runs ("auto" found no room beside the model on this 6 GB card).
+
+| backlog | window | runs | translation stopped | read back lettered | left incomplete in the cache | bytes held at the end |
+|---|---|---|---|---|---|---|
+| on | wide | 10 | 0 | 300 of 300 | 0 | 0 |
+| on | narrow | 10 | 0 | 289 of 300 | 0 | 0 |
+| off | wide | 5 | 1 | 141 of 150 | 35 | 0 |
+| off | narrow | 3 | 0 | 87 of 90 | 4 | 0 |
+
+Two runs with the backlog on (narrow) are counted apart: the owner's windows lay over the stand-in, which stopped
+drawing, and the window's capture kept its last frame (19 of 30 read back lettered each; no request went unanswered):
+a browser wholly covered by windows that hide what lies under them stops drawing, and nothing in the window notices
+it on the capture's way. Two runs covered the stand-in on purpose with a window of the tool's own for 60 s: its
+frames stood still 9.5 s; with the stand-in drawing while covered, not at all. One narrow run another agent's
+recording slowed (26 of 30 lettered) was run again; two wide runs it overlapped are counted (slower, nothing else).
+The page not lettered at 0.5 s in every narrow run is the same page each time, with nothing caught as with the
+backlog. Of the runs with nothing caught, two the other agent's recording overlapped were run again; the stop came
+in a rerun no other run overlapped.
+
+**What the stop is.** In that run (wide, nothing caught, at 2 s, the pages read back) the server sent nothing to any
+request for 2 min 28 s. Its log shows where: the last request answered (HTTP 200) had its task in the model's runner
+cancelled after the answer (as 2 to 13 requests in every run of the hunt had, with nothing after); from the next
+request on, Ollama took each request (`/api/generate`
+logged, and "aborting completion request due to client closing the connection" when TASlation gave up) but none
+reached the runner - no line of the runner for any of the 12 requests, the runner telling all its slots idle -,
+while `/api/ps` answered in 1 to 2 ms with the model loaded on the GPU. TASlation's no-answer rule (a request with no
+byte for 30 s asked again on a new connection, then the server started again) came only once a request had waited
+30 s: the reader turned every 8 s, and each of the first 10 requests was cancelled by the turn after 6 to 7 s with
+nothing. The rule then asked again (30 s more, nothing) and started the server again (3.7 s): the next request was
+answered and the run went on to its end. So the stop is the server's (Ollama 0.40.16, between its own server and its
+runner), not the backlog's, and not TASlation's request: the requests reached the server, on new connections too.
+The round's other 32 runs had no such stretch (requests that never reached the runner: only the first and last of a
+run and ones cancelled within a second at the 0.5 s pace).
+
+Not done, a proposal: the 30 s counted over the requests in a row that got nothing (a request cancelled with no byte
+leaving its silence to the next one, the time with no request under way not counted), so that a reader who turns on
+does not hide a server that has stopped; here it would have come some 70 s sooner. The two stops of the section
+before had the same look (requests begun, none answered, cancelled at the turns); their server logs were not kept.
