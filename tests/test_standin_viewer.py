@@ -490,6 +490,32 @@ def test_the_frame_watch_finds_the_window_s_frames_standing_still_and_their_end(
         thread.join(2)
 
 
+def test_a_stall_lasts_through_a_turn_to_the_screen_it_stands_still_on_until_the_frames_move(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    from taslation.capture import wgc
+
+    notes, stop, thread = _frames_watched(monkeypatch, tmp_path, [(-9000, 4)])
+    session = SimpleNamespace(seq=10, hwnd=1, ended=False, started=time.monotonic(), error="",
+                              _thread=threading.current_thread())
+    monkeypatch.setattr(wgc, "_session", session)
+    try:
+        assert _until(lambda: notes.frame_stalls and notes.frame_stalls[0]["probes"])
+        stall = notes.frame_stalls[0]
+        assert stall["frames_at_find"] == 10 and stall["probes"][0]["window_session"]["frames"] == 10
+        with notes.lock:  # the stand-in turns to the screen the frames stand still on: they have not moved
+            notes.drawn_last = {**notes.drawn_last, "page": 4, "t": standin_e2e.now_ms()}
+        time.sleep(0.2)
+        assert stall["until_t"] is None
+        session.seq = 11  # a frame of the session: they move again
+        assert _until(lambda: stall["until_t"] is not None)
+        assert stall["shows_then"] == (4, False, "sharp")
+    finally:
+        stop.set()
+        thread.join(2)
+
+
 @pytest.mark.parametrize("captures, capture_n", [
     ([(-9000, 4), (-6900, 5), (-3000, 4)], 5),  # the window saw the page once since it was drawn
     ([(-9000, 4)], 2),  # the window took too few frames since: it was not looking
