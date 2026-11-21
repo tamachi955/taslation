@@ -281,26 +281,31 @@ def _job_cancelled_reading(settings, b, sample_page, gate, turned, book):
 
 @pytest.mark.parametrize("turned", [True, False])
 def test_a_page_job_without_a_gate_cancelled_while_it_reads_is_never_left_at_work(settings, sample_page, turned):
-    # (a page the window took as settled - a page key passed on while a job ran: the page queued, started with no
-    # gate once the job was gone -, told "read working" at once: turned past, it went by uncaught; stopped, it waits
-    # to be read when shown again. Before, its bar stayed "working" for good, nothing at work on it)
+    # (a page job with no gate - F5, a page taken as settled, a sharper frame read again: `backlog`'s docstring -,
+    # told "read working" at once: turned past or stopped, it waits to be read when shown again. Before, its bar
+    # stayed "working" for good, nothing at work on it; then, turned past, it was told "missed" as a page gone by)
     posted, post = _events()
     b = Backlog(post)
     _job_cancelled_reading(settings, b, sample_page, None, turned, f"Gateless {turned}")
     assert _stages(posted)[0] == ("read", "working")
     assert "working" not in _last(posted).values()
-    assert _last(posted)["read"] == ("missed" if turned else "waiting")
+    assert _last(posted)["read"] == "waiting" and not b.screens[0].missed
     assert not b.entries and not b.pending and b.not_caught == (1 if turned else 0)
 
 
-def test_a_page_job_without_a_gate_turned_past_while_it_asks_is_told_as_not_caught(settings, sample_page):
+def test_a_page_job_without_a_gate_turned_past_while_it_asks_waits_for_its_next_showing(settings, sample_page):
+    # (it is never caught - nothing from a frame never confirmed is kept behind the reader -, and it is no page that
+    # went by too fast: before, it was told "missed" and the totals counted it among the pages gone by)
     posted, post = _events()
     b = Backlog(post)
     p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
     _job(p, b, sample_page, None)
     assert ("translate", "working") in _stages(posted)
-    assert _last(posted) == {"read": "done", "translate": "missed"} and b.not_caught == 1
-    assert posted[-1][0] == "backlog" and posted[-1][1]["dropped"] == 1  # (the totals count it as gone by)
+    assert _last(posted) == {"read": "done", "translate": "waiting"} and b.not_caught == 1
+    assert not b.entries and not b.pending and not b.screens[0].missed
+    assert all(d["dropped"] == 0 for k, d in posted if k == "backlog")  # (not counted as gone by)
+    # (one whose gate was sealed but is not caught - soft, not settled, over the caps - is told "missed" as ever:
+    # test_a_soft_frame_is_never_caught and those after it)
 
 
 @pytest.mark.parametrize("turned", [True, False])
