@@ -169,8 +169,9 @@ rows' languages.
   and how long lettering left the page and came back; each frame the window judged soft or sharp, by the page's own
   sharp picture and by the viewer's pictures of all pages, against what the stand-in drew, `soft_looks`) and pictures of TASlation's own window to the `--out`
   folder (one of them 3 s after each change of the stand-in's size, its page at the new size; there too
-  `stacks.txt` when a request to the translator stays under way 20 s without going out, or 60 s at all - each thread's
-  stack, its files, lines and functions only -, and with `--start-ollama` the server's own log `ollama_server.log`,
+  `stacks.txt` when a request to the translator stays under way 20 s without going out, or 60 s at all, or the Tk
+  thread is silent 20 s - each thread's stack, its files, lines and functions only, with what the server answers just
+  then to /api/version and /api/ps -, and with `--start-ollama` the server's own log `ollama_server.log`,
   at Ollama's default level, with no prompt and no answer in it),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
