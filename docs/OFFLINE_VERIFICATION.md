@@ -4276,9 +4276,9 @@ what brings the frames back is not shown by these runs.
 *The status line, a false alarm.* In every covered run with a plain cover the window said "The viewer is hidden behind
 other windows and has stopped drawing" 1 to 4 times while the stand-in drew on: the line counts frames that stand
 still for 3 s while the viewer is hidden wholly, and a page that does not change gives no frame at all; each frame
-that came took the line back and started a new spell. Not changed. A proposal: say it only when a page key the window
-handed on to the viewer brought no frame within a few seconds while it was hidden wholly (then it has surely stopped),
-and otherwise not; the wording of the key can stay.
+that came took the line back and started a new spell. Changed after the round (*After the review*, below): the line is
+said only when a page key the window handed on to the viewer brought no frame for 3 s while it was hidden wholly
+(then it has surely stopped), and otherwise not; the wording of the key stays.
 
 **Scenario k on 0.9.** As in the sections before (20 pages flipped past at 0.5, 1 and 2 s, 10 read back at 8 s, one
 run each with the backlog and with nothing caught, `--k-backlog off`), the stand-in drawing while covered. Two runs
@@ -4377,6 +4377,40 @@ below page by page's first run (within 0.5).
 
 **The tests.** The whole suite on `046959e`: 5,467 passed, 22 skipped (the real-data tests without their data), in
 32 min 13 s.
+
+**After the review** (on `810ccad`, the branch moved onto 0.9.5). Four things put right, each with tests on fakes
+(`tests/test_window_order.py`, `test_covered_viewer.py`, `test_backlog.py`): the covered line is said only when a page
+key handed on to the viewer brought no frame for 3 s while it was hidden wholly - counted from the frame count before
+the key (`ui.order.turn_asked`, from `_pass_on`), taken back at the next frame or once the viewer is in sight, never
+for a still page under a cover; a page turned past within the hold whose confirmation is then taken back is told as
+not caught ("missed"), where before it was only let go of, its stages left as they were; the pairs answered before a
+step of the backlog is stopped reach the pages' pairs for a translator that does not grow its own (they were lost on
+the way out); a page job with no gate turned past - F5, the sharper frame of a page read again, a frame taken as
+settled where the early start is not allowed, Translator mode's completions (the list is in `backlog`'s docstring) -
+is told as waiting for its next showing, never as gone by too fast, and still never caught (its frame was never
+confirmed).
+
+The covered runs in which the line had come, again, the same commands: the cover over the viewer 30 s from 4 s in
+with TASlation's window brought up 12 s in, 0 lines (2 before); the same brought up 25 s in without activation, 0 (3);
+pages turned by the window's own keys at 1 s under a 40 s cover, brought up 10 s in, 0 (1), 22 turns under the cover;
+scenario r under a 24 s cover, brought up 10 s in, 0 (2). Every turn while covered was shown in all four (in the last
+one before, one was not).
+
+Scenario k, soft first and narrow, once each way (first bubble of the pages read back, median / p90 in ms):
+
+| pace | caught | with the backlog | nothing caught | difference |
+|---|---|---|---|---|
+| 0.5 s | 0 | 2,131 / 3,086 | 2,191 / 3,070 | -60 |
+| 1 s | 1 (4 stayed 0.8 s or more) | 1,334 / 1,903 | 1,614 / 2,002 | -280 |
+| 2 s | 18, 2 more finished while on show | 158 / 251 | 462 / 1,212 | -304 |
+
+At 2 s the 10 pages read back all began with no new read. Both runs: 0 stale lettering, 0 results kept from
+unsettled frames, 0 soft frames left in the cache, 0 frames held after their read, 0 bytes held at the end (6.5 MB of
+frames at most); 4 requests dropped each way, page jobs' on pages flipped past at 1 s whose gate the window dropped,
+and in each one such job that had lettered on the sharp frame before the turn (what it stored went back with it), as
+in the round. The page jobs with no gate in these runs (9) were the pages read back that the cache held whole, none
+turned past while at work, and the translator there grows its own pairs: the last three fixes are shown by the tests
+only. The whole suite on the same code: 5,478 passed, 22 skipped, in 26 min 34 s.
 
 **Not verified.** The real viewer (the stand-in only); with TASlation really the window in front, the covered runs
 beyond the one before the announcement; what the announcement does (above); a window between that is itself topmost
