@@ -279,6 +279,18 @@ def test_the_log_names_the_kinds_of_window_that_went_under_the_viewer_and_no_tit
     assert line.endswith("now under it: StandinToolCover)")
 
 
+def test_the_log_says_which_window_between_was_another_one_of_the_viewers_program(front, monkeypatch, caplog):
+    """(a browser's second window over the viewer is another program's for the order, but the log says whose it is)"""
+    import logging
+
+    monkeypatch.setattr(order, "window_class", lambda hwnd: "Chrome_WidgetWin_1")
+    monkeypatch.setattr(order, "window_pid", lambda hwnd: {VIEWER: VIEWER_PID, OTHER: VIEWER_PID}.get(hwnd, 0))
+    with caplog.at_level(logging.INFO, logger=order.__name__):
+        order.keep_under(_window(), 100.0)
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("window order: the viewer put"))
+    assert line.endswith("now under it: Chrome_WidgetWin_1 (the viewer's program))")
+
+
 def test_nothing_is_asked_while_the_viewer_is_raised_for_a_look_resized_or_not_chosen(front):
     assert order.keep_under(_window(_raised=object()), 100.0) == ""
     assert order.keep_under(_window(_resizing=lambda: True), 100.0) == ""

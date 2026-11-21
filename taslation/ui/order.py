@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..capture import (BROWSER_CLASSES, IS_WINDOWS, foreground_owner, foreground_window, fully_covered,
-                       keep_viewer_under, window_class)
+                       keep_viewer_under, window_class, window_pid)
 
 LOG = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def keep_under(window: Any, now: float | None = None) -> str:
         state.placed += 1
         state.total += 1
         LOG.info("window order: the viewer put directly under TASlation's window (%d in this spell, %d in all; the "
-                 "window(s) between, now under it: %s)", state.placed, state.total, _kinds(between))
+                 "window(s) between, now under it: %s)", state.placed, state.total, _kinds(between, viewer))
         if state.placed >= ORDER_MOST:
             LOG.info("window order: a window comes back between them at once; left as it is until TASlation comes to "
                      "the front again")
@@ -154,10 +154,13 @@ def keep_under(window: Any, now: float | None = None) -> str:
     return what
 
 
-def _kinds(hwnds: list[int]) -> str:
-    """The window classes of *hwnds* for the log (a class names a kind of window, never what it shows: no title)."""
+def _kinds(hwnds: list[int], viewer: int = 0) -> str:
+    """The window classes of *hwnds* for the log (a class names a kind of window, never what it shows: no title), each
+    of the viewer's own program said so (another window of it, not one the viewer owns)."""
     try:
-        return ", ".join(window_class(h)[:40] or "?" for h in hwnds[:8]) + (" ..." if len(hwnds) > 8 else "")
+        program = window_pid(viewer) if viewer else 0
+        return ", ".join((window_class(h)[:40] or "?") + (" (the viewer's program)" if program and window_pid(h) == program
+                                                          else "") for h in hwnds[:8]) + (" ..." if len(hwnds) > 8 else "")
     except Exception:  # noqa: BLE001 - only the log's
         return f"{len(hwnds)}"
 
