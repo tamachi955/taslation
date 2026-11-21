@@ -2926,9 +2926,16 @@ class Director:
                 c["looks"] = c.get("looks", 0) + 1
                 c["over_looks"] = c.get("over_looks", 0) + (1 if over else 0)
                 c["standin_topmost_looks"] = c.get("standin_topmost_looks", 0) + (1 if is_topmost(self.browser.hwnd) else 0)
-                said = getattr(getattr(self.app, "_order_state", None), "last", None)
+                state = getattr(self.app, "_order_state", None)
+                said = getattr(state, "last", None)
                 lasts = c.setdefault("order_said", {})  # (what `capture.keep_viewer_under` said last, at each look)
                 lasts[str(said)] = lasts.get(str(said), 0) + 1
+                from taslation.ui import order as order_mod
+
+                busy = order_mod._busy_with_the_viewer(self.app)
+                c["busy_looks"] = c.get("busy_looks", 0) + (1 if busy else 0)  # (raised for a look, or resizing)
+                c["order_spell"] = {"front": getattr(state, "front", None), "placed": getattr(state, "placed", None),
+                                    "spells": getattr(state, "spells", None)}
                 c["own_over_standin_looks"] = c.get("own_over_standin_looks", 0) + (
                     1 if cover_over(self.app._own_hwnd(), self.browser.hwnd) else 0)
                 if not over and c.get("under_t") is None:
