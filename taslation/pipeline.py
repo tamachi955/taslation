@@ -2733,6 +2733,32 @@ class Pipeline:
         (`Provisional`), none kept for now (`decide_kept`) - what `warm_soon` waits for too."""
         return self._provisional is None and self._kept_open is None and self._held_for is None
 
+    def behind_reads_allowed(self) -> bool:
+        """Whether the work behind the reader that asks the translator nothing - a page turned past read from its
+        capture, its regions made units (`backlog.Backlog._next` with *reads_only*) - may run now: whenever
+        `behind_allowed`, and in the hold of a page job kept for now (`Provisional.keep`: its job over, the window
+        able to take its confirmation back until its time is up, `kept_open_left`). A read changes nothing that job
+        stored (the cache's pruning of a cached page the read finds changed goes back with the rest, should the window
+        take it back) and adds nothing to the requests' history; a translation would, and waits for the decision
+        (`decide_kept`). The read holds the decision off while it runs (`holding_decision`) and stops as the time is
+        up."""
+        if self.behind_allowed():
+            return True
+        held = self._kept_open
+        if held is None or self._provisional is not None or self._held_for not in (None, held):
+            return False
+        left = self.kept_open_left()
+        return left is not None and left > 0.0
+
+    @contextmanager
+    def holding_decision(self) -> Iterator[None]:
+        """(the backlog's read in a page job's hold, on the worker: `backlog.Backlog.step`) The decision of the page
+        job kept for now waits while the read runs (`decide_kept` takes the same lock): the window's close, which
+        decides it on its own thread (`drop_unconfirmed`, after the read was told to stop: `stop_warm`), neither puts
+        that job's stores back nor seals them under the read. The worker decides it itself only between its jobs."""
+        with self._open_lock:
+            yield
+
     def _kept_in_areas(self, units: Sequence[fp.PageUnit], unit: fp.PageUnit,
                        bubbles: Sequence[CachedBubble]) -> list[CachedBubble]:
         """Those of *bubbles* (cached, no region found for them) that lie mostly inside an area ignored on every page

@@ -182,8 +182,8 @@ def keep_page_names(window: Any, result: Any, book: str, model: str, language: s
 
 def next_job(window: Any) -> Callable[[], None]:
     """*window*'s worker's next job (`JobsMixin._worker_loop`). A page job kept for now (`Pipeline.decide_kept`: its
-    stores put back still, should a sharper picture of its page come) is decided before it, and once its time is up
-    while none comes."""
+    stores put back still, should a sharper picture of its page come) is decided before it - but for the backlog's
+    read in its hold (`_read_in_hold`) -, and once its time is up while none comes."""
     while True:
         pipeline = getattr(window, "pipeline", None)
         left = pipeline.kept_open_left() if hasattr(pipeline, "kept_open_left") else None
@@ -195,10 +195,19 @@ def next_job(window: Any) -> Callable[[], None]:
         stop = getattr(pipeline, "stop_warm", None)
         if job is not None and stop is not None:
             stop()  # (the warming while the reader read sends nothing more; the job does not wait for it)
-        if hasattr(pipeline, "decide_kept"):
+        if hasattr(pipeline, "decide_kept") and not _read_in_hold(pipeline, job):
             pipeline.decide_kept()
         if job is not None:
             return job
+
+
+def _read_in_hold(pipeline: Any, job: Any) -> bool:
+    """Whether *job* is the backlog's read in the hold of a page job kept for now (`backlog.Backlog.tick`: a read
+    changes nothing a take-back puts back) while that hold's time is not up: that job is left undecided for it."""
+    if not getattr(job, "in_hold", False):
+        return False
+    left = pipeline.kept_open_left() if hasattr(pipeline, "kept_open_left") else None
+    return left is not None and left > 0.0
 
 
 def job_news(window: Any, data: dict[str, Any]) -> None:

@@ -55,7 +55,12 @@ a stage told done is never told at work again while the page is on show).
 
 The order of work on the window's single worker (`Backlog.tick`, `Backlog.step`): the page on show first, always - a
 step of the backlog is queued only while no page job runs or waits, nothing of a page job is held for its frame
-(`Pipeline.behind_allowed`) and the window is idle (not busy, no whole-book run, nothing queued); then the page
+(`Pipeline.behind_allowed`) and the window is idle (not busy, no whole-book run, nothing queued); in the hold of a page
+job kept for now (the 2 s in which the window may still take its confirmation back on a viewer that draws a page soft
+first: `Pipeline.behind_reads_allowed`) a read only, of the nearest page that needs one - it asks the translator
+nothing and changes nothing a take-back puts back -, the decision held off while it runs (`Pipeline.holding_decision`;
+the worker does not decide that job before such a step, `ui.jobs.next_job`) and stopped as the hold's time is up, the
+translations waiting for the decision; then the page
 nearest the reader ahead of it, one page at a time (`_next`, chosen anew at each step: the entry with the smallest
 `Screen.sight` past the screen on show, or the one last on show, else the smallest of all - the page the reader is
 likeliest to turn to next), all it needs in order - its read, then its translation - before the next page; then the
@@ -131,6 +136,15 @@ def in_step() -> bool:
     tells (its ``on_status``: a load, a request without an answer) is the backlog's then, which the window says in its
     status line only, never as the page on show's (`ui.jobs._model_status`)."""
     return bool(getattr(_STEP, "on", False))
+
+
+def _allowed(pipeline: Any) -> tuple[bool, bool]:
+    """Whether the backlog may work now at all, and whether a translation too: everything while nothing of a page
+    job is held (`Pipeline.behind_allowed`), a read only in the hold of a page job kept for now
+    (`Pipeline.behind_reads_allowed`)."""
+    full = bool(pipeline.behind_allowed())
+    reads = getattr(pipeline, "behind_reads_allowed", None)
+    return full or (bool(reads()) if callable(reads) else False), full
 
 
 class Preempt:
@@ -408,6 +422,7 @@ class Backlog:
         self.frame_waits: list[float] = []
         self.lends: dict[str, int] = {}  # (what `lend` said, how many times: the scenario's measurement)
         self.resumes: dict[str, int] = {}  # (what came of the reads stopped before, `_resume_of`: the same)
+        self.in_hold: dict[str, int] = {}  # (the steps run in a page job's hold, by what they did; "time up": stopped)
         self.finished_at = float("-inf")  # (when the page on show was last done: `HOLD_S`)
         self.fatal: Any = None  # (a failure every later request repeats: the backlog waits for a page job)
         # (page jobs turned past whose confirmation is kept for now, `Pipeline.decide_kept`: caught once sealed)
@@ -734,11 +749,13 @@ class Backlog:
         self._packer.shutdown(wait=False)
 
     # ------------------------------------------------------------------ the work
-    def _next(self) -> tuple[str, Entry] | None:
+    def _next(self, reads_only: bool = False) -> tuple[str, Entry] | None:
         """The next step, chosen anew at each: the page nearest the reader ahead of it - the entry with the smallest
         sight past the screen on show (or the one last on show, `_here`), else the smallest of all - and what it still
         needs, in order: its read (or its regions made units), then its translation. The next entry comes once it is
-        done or failed (or the reader is elsewhere)."""
+        done or failed (or the reader is elsewhere). With *reads_only* (a page job's hold: `step`) the nearest entry
+        that still needs a read (or its regions made units), the translations left for after the hold, in the same
+        order."""
         with self._lock:
             ahead = sorted((e for e in self.entries if e.screen.sight > self._here), key=lambda e: e.screen.sight)
             rest = sorted((e for e in self.entries if e.screen.sight <= self._here), key=lambda e: e.screen.sight)
@@ -747,7 +764,7 @@ class Backlog:
                     return "read", e
                 if e.regions is not None:
                     return "make", e
-                if e.units is not None:
+                if e.units is not None and not reads_only:
                     return "translate", e
         return None
 
@@ -808,17 +825,23 @@ class Backlog:
         if (self.paused or self.fatal is not None or pipeline is None or not getattr(window, "ready", False)
                 or getattr(window, "busy", False) or getattr(window, "batch", None) is not None
                 or getattr(window, "_batching", False) or getattr(window, "_queued", None) is not None
-                or not window._jobs.empty() or not pipeline.behind_allowed()):
+                or not window._jobs.empty()):
             return
-        if getattr(pipeline, "translator", None) is None:
+        allowed, full = _allowed(pipeline)
+        if not allowed or getattr(pipeline, "translator", None) is None:
             return
-        nxt = self._next()
+        nxt = self._next(reads_only=not full)
         if nxt is None:
             return
         if nxt[0] == "translate" and time.monotonic() - self.finished_at < HOLD_S:
             return
         self.step_queued = True
-        window._jobs.put(lambda: self._run(window))
+
+        def job() -> None:
+            self._run(window)
+
+        job.in_hold = not full  # type: ignore[attr-defined] # (a read in a hold: `ui.jobs.next_job` leaves it undecided)
+        window._jobs.put(job)
 
     def _run(self, window: Any) -> None:
         """(the worker) One step, then the window's idle look queues the next."""
@@ -829,14 +852,46 @@ class Backlog:
 
     def step(self, pipeline: Any, waiting: Callable[[], bool] | None = None, settings: Any = None) -> str:
         """(the worker) One step of the backlog's work, stopped by a page or any job (`Preempt`); what it did: "read",
-        "translate", "made", "stopped", "failed" or "" (nothing to do, or not now)."""
-        if not pipeline.behind_allowed() or self.paused:
+        "translate", "made", "stopped", "failed" or "" (nothing to do, or not now). In the hold of a page job kept for
+        now (`Pipeline.behind_reads_allowed` without `behind_allowed`) only a read (or regions made units): the
+        nearest one (`_next` with *reads_only*), with the decision of that job held off meanwhile
+        (`Pipeline.holding_decision`: the window's close decides it on its own thread) and stopped as the hold's time
+        is up (`Pipeline.kept_open_left`), what it read by then kept for its next read (`_resume_of`)."""
+        allowed, full = _allowed(pipeline)
+        if not allowed or self.paused:
             return ""
-        nxt = self._next()
+        if not full:
+            with pipeline.holding_decision():
+                allowed, full = _allowed(pipeline)  # (as it stands now: the close may have decided it meanwhile)
+                if allowed and not full:
+                    did = self._step(pipeline, waiting, settings, hold=True)
+                    if did:
+                        with self._lock:
+                            self.in_hold[did] = self.in_hold.get(did, 0) + 1
+                    return did
+            if not allowed:
+                return ""
+        return self._step(pipeline, waiting, settings, hold=False)
+
+    def _step(self, pipeline: Any, waiting: Callable[[], bool] | None, settings: Any, hold: bool) -> str:
+        """`step`'s work: *hold* - a read only, stopped as the hold's time is up (not a turn: no wait counted)."""
+        nxt = self._next(reads_only=hold)
         if nxt is None:
             return ""
         what, entry = nxt
-        stop = Preempt(waiting)
+        time_up = [False]
+
+        def stopping() -> bool:
+            if waiting is not None and waiting():
+                return True
+            if hold:
+                left = pipeline.kept_open_left()
+                if left is None or left <= 0.0:
+                    time_up[0] = True
+                    return True
+            return False
+
+        stop = Preempt(stopping if waiting is not None or hold else None)
         pipeline.behind_stop = stop
         last_seq = getattr(pipeline, "last_seq", None)
         _STEP.on = True  # (what the translator tells meanwhile is the backlog's: `in_step`)
@@ -847,7 +902,11 @@ class Backlog:
                 return self._make(pipeline, entry)
             return self._translate(pipeline, entry, stop, settings)
         except Cancelled:  # (a page, a job, Stop: the step ends, what it answered stored; it comes again)
-            if stop.set_at is not None:
+            if time_up[0]:  # (the hold's time up: no turn waited for it)
+                self.last_wait = None
+                with self._lock:
+                    self.in_hold["time up"] = self.in_hold.get("time up", 0) + 1
+            elif stop.set_at is not None:
                 waited = time.monotonic() - stop.set_at
                 self.last_wait = waited
                 self.waits.append(waited)
