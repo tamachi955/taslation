@@ -266,3 +266,30 @@ def hidden_root(tk_root):
     import gc
 
     gc.collect()
+
+
+def pytest_collection_modifyitems(config, items):
+    """A parallel job runs only its part of a test file divided between jobs (`TASLATION_TEST_SPLIT`, as
+    tools/test_shards.py gives it: FILE:I/N keeps the file's tests whose number in collection order leaves I when
+    divided by N). Without the variable every test runs."""
+    import os
+
+    spec = os.environ.get("TASLATION_TEST_SPLIT", "")
+    if not spec:
+        return
+    import importlib.util
+
+    tool_spec = importlib.util.spec_from_file_location("test_shards_tool",
+                                                       Path(__file__).resolve().parent.parent / "tools" / "test_shards.py")
+    tool = importlib.util.module_from_spec(tool_spec)
+    tool_spec.loader.exec_module(tool)
+    seen: dict[str, int] = {}
+    keep, drop = [], []
+    for item in items:
+        name = Path(str(item.fspath)).name
+        index = seen.get(name, 0)
+        seen[name] = index + 1
+        (keep if tool.kept(spec, name, index) else drop).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep

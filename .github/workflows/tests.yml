@@ -86,7 +86,9 @@ jobs:
         run: |
           $files = @(& $env:PY tools/test_shards.py --of $env:SHARDS --shard ${{ matrix.shard }})
           if ($LASTEXITCODE -ne 0 -or $files.Count -eq 0) { Write-Host 'no test files for this job'; exit 1 }
-          Write-Host "$($files.Count) test files"
+          # (a file heavier than a job's share is divided between jobs: tests/conftest.py keeps this job's part)
+          $env:TASLATION_TEST_SPLIT = "$(& $env:PY tools/test_shards.py --of $env:SHARDS --shard ${{ matrix.shard }} --split)".Trim()
+          Write-Host "$($files.Count) test files; divided: '$env:TASLATION_TEST_SPLIT'"
           & $env:PY -m pytest -q -p no:cacheprovider --durations=0 --durations-min=0.5 @files 2>&1 | Tee-Object -FilePath "pytest-${{ matrix.shard }}.txt"
           $code = $LASTEXITCODE
           $tail = Get-Content "pytest-${{ matrix.shard }}.txt" -Tail 40
