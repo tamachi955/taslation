@@ -172,7 +172,13 @@ rows' languages.
   `stacks.txt` when a request to the translator stays under way 20 s without going out, or 60 s at all, or the Tk
   thread is silent 20 s - each thread's stack, its files, lines and functions only, with what the server answers just
   then to /api/version and /api/ps -, the report's `no_answer` (each line of the rule for a request without an
-  answer and of the backlog's pause for it, a silence with what the server answered just then), and with
+  answer and of the backlog's pause for it, a silence with what the server answered just then), the report's
+  `frame_stalls` (a sharp page the stand-in kept 6 s that none of the window's frames showed while it went on taking
+  them: what covered the stand-in by program file name, the window's capture session, the first frame of a session of
+  the tool's own, the seconds since anyone's input) and `input_spells` (when the computer got input from anyone: a run
+  with a person at the machine, whose windows may cover the stand-in, is told apart), the app's log in `app_log/` when
+  the run had a stop, a stall or a request without an answer (unless it holds Japanese script), `--cover
+  SEGMENT:AT:FOR` laying a window of the tool's own over the stand-in on purpose, and with
   `--start-ollama` the server's own log `ollama_server.log`,
   at Ollama's default level, with no prompt and no answer in it),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's

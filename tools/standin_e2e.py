@@ -641,6 +641,12 @@ class Notes:
         # the stand-in's looks at Windows.Graphics.Capture: "frames" when it gave one, "none" when the capture went on
         # with PrintWindow (`capture_route`)
         self.compositor: Counter[str] = Counter()
+        self.capture_n = 0  # every capture the window made, and when the last one was (`watch_frames`)
+        self.last_capture_t = 0.0
+        self.drawn_last: dict[str, Any] | None = None  # the screen the stand-in drew last (its page, state, when)
+        self.frame_stalls: list[dict[str, Any]] = []  # (`watch_frames`)
+        self.inputs: list[list[float]] = []  # spells of input to the computer from anyone (`watch_input`)
+        self.tool_cover: dict[str, Any] | None = None  # the tool's own window over the stand-in (`--cover`)
         self.loads: list[list[float]] = []
         self.load_depth = 0
         self.ocr: list[dict[str, Any]] = []
@@ -1050,6 +1056,8 @@ class Notes:
         rec = {"t": now_ms(), **self.code(shown), "size": list(getattr(image, "size", (0, 0)))}
         with self.lock:
             self.capture_counts[rec["state"]] += 1
+            self.capture_n += 1
+            self.last_capture_t = rec["t"]
             last = self.captures[-1] if self.captures else None
             if last is None or any(last[k] != rec[k] for k in ("page", "spread", "state", "size")):
                 self.captures.append(rec)
@@ -1812,6 +1820,330 @@ def watch_stuck(notes: Notes, path: Path, url: str | None = None) -> None:
     threading.Thread(target=look, name="tool-watch-stuck", daemon=True).start()
 
 
+FRAME_STALL_S = 6.0  # a sharp screen the stand-in drew and kept this long that no frame the window took showed ...
+FRAME_STALL_CAPTURES = 3  # ... while the window took this many frames: its frames are standing still
+FRAME_PROBE_AT_S = (0.0, 30.0, 120.0, 300.0)  # when a stall is looked at, from its finding
+FRESH_FRAME_S = 2.0  # how long the probe's own capture session waits for its first frame
+COVER_GRID = 8  # the points of the stand-in's client area (COVER_GRID squared) the probe asks which window is on top
+
+
+def idle_seconds() -> float:
+    """How long ago anyone gave the computer input (keys, mouse, touch: `GetLastInputInfo`, a time and nothing else)."""
+    class Last(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+    last = Last()
+    last.cbSize = ctypes.sizeof(Last)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(last)):
+        return -1.0
+    return ((ctypes.windll.kernel32.GetTickCount() - last.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
+def watch_input(notes: Notes) -> None:
+    """A thread that notes when the computer got input from anyone in the run (this tool sends none, nor the window
+    under its guard): spells of seconds with input, merged within 3 s - a run with a person at the machine is told
+    from one without."""
+    def look() -> None:
+        seen = None
+        while True:
+            time.sleep(1.0)
+            idle = idle_seconds()
+            if idle < 0:
+                continue
+            at = now_ms() - idle * 1000
+            if seen is not None and at - seen > 1:
+                with notes.lock:
+                    if notes.inputs and at - notes.inputs[-1][1] < 3000:
+                        notes.inputs[-1][1] = at
+                    else:
+                        notes.inputs.append([at, at])
+            seen = at
+
+    threading.Thread(target=look, name="tool-watch-input", daemon=True).start()
+
+
+def window_cover(hwnd: int, own_pid: int) -> dict[str, Any]:
+    """Which window is on top at COVER_GRID x COVER_GRID points of the stand-in's client area (the stand-in, a
+    TASlation window, or another program by its file name; no window's title), which one is in front, and whether the
+    stand-in is minimised, hidden or cloaked: a browser window wholly covered by opaque ones stops drawing."""
+    from taslation.capture import client_rect_on_screen, program_name
+    from taslation.capture import windows as win
+
+    user32 = ctypes.WinDLL("user32")
+    user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    user32.WindowFromPoint.restype = wintypes.HWND
+    user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetAncestor.restype = wintypes.HWND
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+
+    def who(h: Any) -> str:
+        h = int(h or 0)
+        if not h:
+            return "none"
+        if h == hwnd:
+            return "stand-in"
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(h, ctypes.byref(pid))
+        if pid.value == own_pid:
+            return "tool cover" if win.window_class(h) == COVER_CLASS else "TASlation"
+        return program_name(pid.value) or "?"
+
+    x, y, w, h = client_rect_on_screen(hwnd)
+    points: Counter[str] = Counter()
+    for i in range(COVER_GRID):
+        for j in range(COVER_GRID):
+            p = wintypes.POINT(x + w * (2 * i + 1) // (2 * COVER_GRID), y + h * (2 * j + 1) // (2 * COVER_GRID))
+            points[who(user32.GetAncestor(user32.WindowFromPoint(p), 2))] += 1  # (GA_ROOT)
+    return {"points": dict(points), "front": who(user32.GetForegroundWindow()),
+            "iconic": bool(ctypes.windll.user32.IsIconic(hwnd)),
+            "visible": bool(ctypes.windll.user32.IsWindowVisible(hwnd)), "cloaked": win._is_cloaked(hwnd),
+            "client": [x, y, w, h]}
+
+
+def fresh_frame(notes: Notes, hwnd: int) -> dict[str, Any]:
+    """The stand-in as a capture session of the probe's own sees it (its first frame is the window as the compositor
+    holds it now), decoded and let go (nothing kept): the same page as the window's frames - the browser drew nothing
+    new -, or the page the stand-in drew - the window's session stands still."""
+    from taslation.capture import wgc
+    from taslation.capture import windows as win
+
+    import numpy as np
+
+    try:
+        from windows_capture import WindowsCapture
+    except Exception as e:  # noqa: BLE001 - said by its type
+        return {"none": type(e).__name__}
+    got: dict[str, Any] = {}
+    done = threading.Event()
+    t0 = time.monotonic()
+    capture = WindowsCapture(cursor_capture=False, draw_border=False, window_hwnd=hwnd)
+
+    def on_frame_arrived(frame: Any, control: Any) -> None:
+        if "bgra" not in got:
+            got["bgra"], got["ms"] = np.array(frame.frame_buffer, copy=True), round((time.monotonic() - t0) * 1000)
+            done.set()
+        control.stop()
+
+    def on_closed() -> None:
+        done.set()
+
+    capture.event(on_frame_arrived)
+    capture.event(on_closed)
+    try:
+        control = capture.start_free_threaded()
+    except Exception as e:  # noqa: BLE001
+        return {"none": type(e).__name__}
+    done.wait(FRESH_FRAME_S)
+    with contextlib.suppress(Exception):
+        control.stop()
+    if "bgra" not in got:
+        return {"none": f"no frame in {FRESH_FRAME_S:g} s"}
+    bgra = got.pop("bgra")
+    box = wgc.crop_box((bgra.shape[1], bgra.shape[0]), win._frame_bounds(hwnd), win._client_box(hwnd))
+    image = wgc.Frame(bgra, 0).image(box) if box is not None else None
+    return {"ms": got["ms"], "shows": Notes.code(notes.shown(image)) if image is not None else "another size"}
+
+
+def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: threading.Event | None = None,
+                 every: float = 0.5) -> threading.Thread:
+    """A thread that finds the window's frames of the stand-in standing still: a sharp screen the stand-in drew and
+    kept FRAME_STALL_S that no frame the window took showed, while it took FRAME_STALL_CAPTURES or more. Each stall
+    noted from then until a frame of the window shows something else, and looked at FRAME_PROBE_AT_S after its
+    finding: the window's capture session (its frame count, ended, its thread), the probe's own session's first frame
+    (`fresh_frame`), what covers the stand-in (`window_cover`), the seconds since anyone's input; the threads' stacks
+    written to *path* once a stall (the first three). *stop* ends it, *every* its pace (tests); its thread."""
+    from taslation.capture import wgc
+
+    def probe(stall: dict[str, Any]) -> None:
+        s = wgc._session
+        look: dict[str, Any] = {"t": now_ms(), "idle_s": round(idle_seconds(), 1)}
+        look["window_session"] = None if s is None else {
+            "this_window": s.hwnd == hwnd, "frames": s.seq, "ended": s.ended, "error": (s.error or "")[:120],
+            "age_s": round(time.monotonic() - s.started, 1), "thread_alive": s._thread.is_alive()}
+        try:
+            look["cover"] = window_cover(hwnd, own_pid)
+        except Exception as e:  # noqa: BLE001
+            look["cover"] = type(e).__name__
+        try:
+            look["fresh"] = fresh_frame(notes, hwnd)
+        except Exception as e:  # noqa: BLE001
+            look["fresh"] = type(e).__name__
+        with notes.lock:
+            look["drawn"] = dict(notes.drawn_last) if notes.drawn_last else None
+            stall["probes"].append(look)
+
+    def stacks(header: str) -> None:
+        names = {t.ident: t.name for t in threading.enumerate()}
+        lines = [header]
+        for ident, frame in sys._current_frames().items():
+            lines.append(f"-- thread {names.get(ident, ident)}")
+            lines += [f"   {fs.filename}:{fs.lineno} {fs.name}" for fs in traceback.extract_stack(frame)]
+        with contextlib.suppress(OSError):
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+
+    def go_on() -> bool:
+        if stop is None:
+            time.sleep(every)
+            return True
+        return not stop.wait(every)
+
+    def look() -> None:
+        stall: dict[str, Any] | None = None
+        while go_on():
+            with notes.lock:
+                drawn = dict(notes.drawn_last) if notes.drawn_last else None
+                last = notes.captures[-1] if notes.captures else None
+                shows = (last["page"], last["spread"], last["state"]) if last else None
+                n, last_t = notes.capture_n, notes.last_capture_t
+            now = now_ms()
+            if stall is not None:
+                want = (drawn["page"], drawn["spread"], drawn["state"]) if drawn else None
+                if shows != stall["frozen"] or shows == want:
+                    with notes.lock:
+                        stall.update(until_t=now, lasted_s=round((now - stall["from_t"]) / 1000, 1), shows_then=shows)
+                    stall = None
+                elif len(stall["probes"]) < len(FRAME_PROBE_AT_S) and \
+                        now - stall["found_t"] >= FRAME_PROBE_AT_S[len(stall["probes"])] * 1000:
+                    probe(stall)
+                continue
+            if (drawn is None or drawn["state"] != "sharp" or now - drawn["t"] < FRAME_STALL_S * 1000
+                    or n - drawn["capture_n"] < FRAME_STALL_CAPTURES or last_t <= drawn["t"]
+                    or shows == (drawn["page"], drawn["spread"], drawn["state"])):
+                continue
+            with notes.lock:
+                seen_since = any(c["t"] >= drawn["t"] and (c["page"], c["spread"]) == (drawn["page"], drawn["spread"])
+                                 for c in notes.captures)
+            if seen_since:
+                continue
+            stall = {"from_t": drawn["t"], "found_t": now, "drawn": drawn, "frozen": shows,
+                     "frozen_since_t": last["t"] if last else None, "until_t": None, "lasted_s": None, "probes": []}
+            with notes.lock:
+                notes.frame_stalls.append(stall)
+            if len(notes.frame_stalls) <= 3:
+                stacks(f"== {time.strftime('%H:%M:%S')}: the window's frames stand still on {shows} while the "
+                       f"stand-in shows {(drawn['page'], drawn['spread'], drawn['state'])}")
+            probe(stall)
+
+    thread = threading.Thread(target=look, name="tool-watch-frames", daemon=True)
+    thread.start()
+    return thread
+
+
+COVER_CLASS = "StandinToolCover"
+COVER_MARGIN = 24  # the cover's reach beyond the stand-in's window on every side
+
+
+class CoverWindow:
+    """A plain opaque window of this tool's own process laid over the stand-in's window and directly above it in the
+    order of windows (`--cover`): what a reader's other program over the viewer is, made on purpose. Shown with no
+    activation and no key; any window that lay above the stand-in stays above the cover. Its own thread and message
+    loop; `close` ends it."""
+
+    def __init__(self, standin: int):
+        self.standin, self.hwnd = standin, 0
+        self.shown_t: float | None = None
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="tool-cover", daemon=True)
+        self._thread.start()
+        self._ready.wait(3.0)
+
+    def _run(self) -> None:
+        user32, kernel32, gdi32 = ctypes.WinDLL("user32"), ctypes.WinDLL("kernel32"), ctypes.WinDLL("gdi32")
+        proc_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                                       wintypes.LPARAM)
+        user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.DefWindowProcW.restype = ctypes.c_ssize_t
+
+        def proc(hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+            if msg == 0x0002:  # WM_DESTROY
+                user32.PostQuitMessage(0)
+                return 0
+            return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+        self._proc = proc_type(proc)  # (kept: the class holds a pointer to it)
+
+        class WndClass(ctypes.Structure):
+            _fields_ = [("style", wintypes.UINT), ("lpfnWndProc", proc_type), ("cbClsExtra", ctypes.c_int),
+                        ("cbWndExtra", ctypes.c_int), ("hInstance", wintypes.HINSTANCE), ("hIcon", wintypes.HICON),
+                        ("hCursor", wintypes.HANDLE), ("hbrBackground", wintypes.HBRUSH),
+                        ("lpszMenuName", wintypes.LPCWSTR), ("lpszClassName", wintypes.LPCWSTR)]
+
+        kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+        gdi32.GetStockObject.restype = wintypes.HGDIOBJ
+        instance = kernel32.GetModuleHandleW(None)
+        wc = WndClass(0, self._proc, 0, 0, instance, None, None, gdi32.GetStockObject(2), None, COVER_CLASS)  # GRAY
+        user32.RegisterClassW.argtypes = [ctypes.POINTER(WndClass)]
+        user32.RegisterClassW(ctypes.byref(wc))
+        user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                                           ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND,
+                                           wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
+        user32.CreateWindowExW.restype = wintypes.HWND
+        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        r = wintypes.RECT()
+        user32.GetWindowRect(self.standin, ctypes.byref(r))
+        x, y = r.left - COVER_MARGIN, r.top - COVER_MARGIN
+        w, h = r.right - r.left + 2 * COVER_MARGIN, r.bottom - r.top + 2 * COVER_MARGIN
+        style = 0x00C00000 | 0x00080000  # WS_CAPTION | WS_SYSMENU: a window as any program's (not shown yet)
+        self.hwnd = int(user32.CreateWindowExW(0x08000000, COVER_CLASS, "stand-in cover", style, x, y, w, h,
+                                               None, None, instance, None) or 0)  # WS_EX_NOACTIVATE
+        if self.hwnd:
+            user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+            user32.GetWindow.restype = wintypes.HWND
+            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, wintypes.UINT]
+            above = user32.GetWindow(self.standin, 3)  # GW_HWNDPREV: the window just above the stand-in, if any
+            after = above if above and int(above) != self.hwnd else wintypes.HWND(0)  # (else HWND_TOP)
+            user32.SetWindowPos(self.hwnd, after, x, y, w, h, 0x0010 | 0x0040)  # SWP_NOACTIVATE | SWP_SHOWWINDOW
+            self.shown_t = now_ms()
+        self._ready.set()
+        msg = wintypes.MSG()
+        user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(msg))
+            user32.DispatchMessageW(ctypes.byref(msg))
+        user32.UnregisterClassW.argtypes = [wintypes.LPCWSTR, wintypes.HINSTANCE]
+        user32.UnregisterClassW(COVER_CLASS, instance)
+
+    def close(self) -> float:
+        """The cover gone; when."""
+        if self.hwnd:
+            user32 = ctypes.WinDLL("user32")
+            user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
+            self._thread.join(3.0)
+        return now_ms()
+
+
+def cover_plan(text: str) -> tuple[str, float, float]:
+    """`--cover`'s SEGMENT:AT:FOR."""
+    try:
+        segment, at, lasts = text.split(":")
+        plan = (segment, float(at), float(lasts))
+    except ValueError:
+        raise argparse.ArgumentTypeError("SEGMENT:AT:FOR, as k2:12:30") from None
+    if plan[1] < 0 or plan[2] <= 0:
+        raise argparse.ArgumentTypeError("AT 0 or more, FOR more than 0")
+    return plan
+
+
+def stalls_report(notes: Notes, rel: Callable[[float | None], float | None]) -> list[dict[str, Any]]:
+    """The report's stalls of the window's frames (`watch_frames`), its times from the run's start."""
+    def screen(code: Any) -> list[Any] | None:
+        if isinstance(code, dict):
+            return [code.get("page"), code.get("spread"), code.get("state")]
+        return list(code) if code else None
+
+    with notes.lock:
+        stalls = [dict(s, probes=[dict(p) for p in s["probes"]]) for s in notes.frame_stalls]
+    return [{"from": rel(s["from_t"]), "found": rel(s["found_t"]), "until": rel(s["until_t"]),
+             "lasted_s": s["lasted_s"], "drawn": screen(s["drawn"]), "frozen": screen(s["frozen"]),
+             "frozen_since": rel(s["frozen_since_t"]), "shows_then": screen(s.get("shows_then")),
+             "probes": [{**{k: v for k, v in p.items() if k not in ("t", "drawn")}, "t": rel(p["t"]),
+                         "drawn": screen(p.get("drawn"))} for p in s["probes"]]} for s in stalls]
+
+
 def keep_server_log(ollama_start: Any, path: Path) -> None:
     """The Ollama server the window starts (--start-ollama) writes its own log to *path*: what it loads, its slots and
     its HTTP lines, at Ollama's default level (no prompt and no answer in it: ``OLLAMA_DEBUG_LOG_REQUESTS`` is off),
@@ -2320,6 +2652,8 @@ class Director:
         self.run_ends_seen = 0
         self.resized_at, self.resizes_seen = float("-inf"), 0  # the stand-in's last draw at a new size, pictured after
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
+        self.cover: CoverWindow | None = None  # (`cover_step`)
+        self.cover_from: float | None = None
         self.events: list[dict[str, Any]] = []
         self.seen = 0
         self.waiting_go = 0
@@ -2386,6 +2720,7 @@ class Director:
                 self.notes.mode(self.app)
                 self.step()
                 self.due_shots()
+                self.cover_step()
         except Exception as e:  # noqa: BLE001 - said by its type, and the run ends
             self.stop(f"{type(e).__name__} in the driver")
         if not self.over:
@@ -2401,10 +2736,36 @@ class Director:
         elif not self.browser.alive():
             self.stop("the stand-in browser ended")
 
+    def cover_step(self) -> None:
+        """`--cover SEGMENT:AT:FOR`: AT seconds after SEGMENT began, the tool's own window laid over the stand-in
+        (`CoverWindow`) for FOR seconds, once; when, in the notes."""
+        plan = getattr(self.args, "cover", None)
+        if not plan or (self.notes.tool_cover or {}).get("gone_t"):
+            return
+        segment, at, lasts = plan
+        if self.cover_from is None:
+            if self.current != segment:
+                return
+            self.cover_from = time.monotonic()
+        since = time.monotonic() - self.cover_from
+        if self.cover is None and since >= at:
+            self.cover = CoverWindow(self.browser.hwnd)
+            with self.notes.lock:
+                self.notes.tool_cover = {"segment": segment, "shown_t": self.cover.shown_t, "gone_t": None,
+                                         "made": bool(self.cover.hwnd)}
+        elif self.cover is not None and since >= at + lasts:
+            gone = self.cover.close()
+            with self.notes.lock:
+                self.notes.tool_cover["gone_t"] = gone
+
     def stop(self, why: str) -> None:
         if self.over:
             return
         self.over = True
+        if self.cover is not None and not (self.notes.tool_cover or {}).get("gone_t"):
+            gone = self.cover.close()
+            with self.notes.lock:
+                self.notes.tool_cover["gone_t"] = gone
         if why != "done":
             self.failed = why
             print(f"run stopped: {why}", file=sys.stderr, flush=True)
@@ -2425,6 +2786,12 @@ class Director:
                 with contextlib.suppress(KeyError, ValueError):
                     x0, y0, x1, y1 = (int(round(float(v))) for v in e["box"].split(","))
                     self.page_rect, self.band_px = (x0, y0, x1, y1), int(e["band"])
+                with contextlib.suppress(KeyError, ValueError), self.notes.lock:  # (`watch_frames`)
+                    self.notes.drawn_last = {"t": e["recv"], "page": int(e["page"]), "spread": e["spread"] == "1",
+                                             "state": e["state"], "capture_n": self.notes.capture_n}
+            elif ev == "black" and e.get("on") == "1":
+                with self.notes.lock:
+                    self.notes.drawn_last = None
             if ev == "wait":
                 self.waiting_go = int(e.get("go", 0))
             elif ev == "mark":
@@ -4075,6 +4442,27 @@ def segment_table(rows: list[dict[str, Any]], spells: dict[str, list[dict[str, A
     return out
 
 
+JAPANESE_SCRIPT = re.compile("[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]")  # kana, kanji, half-width kana
+
+
+def keep_app_log(state: Path, folder: Path) -> str:
+    """The app's log of a run with an incident (a stop, frames standing still, a request without an answer) copied to
+    *folder* before the scratch state goes - unless a line of it holds a character of Japanese script (no Japanese
+    text is written outside the state): then nothing is kept. What was done."""
+    texts = {}
+    for path in sorted(state.glob("log.txt*")):
+        with contextlib.suppress(OSError):
+            texts[path.name] = path.read_text(encoding="utf-8", errors="replace")
+    if not texts:
+        return "no log"
+    if any(re.search(JAPANESE_SCRIPT, t) for t in texts.values()):
+        return "not kept: it holds Japanese script"
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, text in texts.items():
+        (folder / name).write_bytes(text.encode("utf-8"))
+    return f"kept: {', '.join(texts)}"
+
+
 def log_facts(state: Path) -> dict[str, Any]:
     """The app's log in the scratch state: how many tracebacks, warnings and errors, and the exception type names
     in it (nothing else of a line)."""
@@ -4213,7 +4601,10 @@ def run(args: argparse.Namespace) -> int:
         closed = browser.close()
     if args.start_ollama:
         report["server_started"] = stop_started(url, state)
-    report["cleanup"] = cleanup(report, closed, state, standin_dir, mode, url if mode == "real" else "", ps_before)
+    run_ = report.get("run") or {}
+    keep = run_.get("failed") or run_.get("frame_stalls") or run_.get("no_answer") or (out / "stacks.txt").exists()
+    report["cleanup"] = cleanup(report, closed, state, standin_dir, mode, url if mode == "real" else "", ps_before,
+                                out / "app_log" if keep else None)
     path = out / "report.json"
     path.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     print_table(report, path)
@@ -4276,6 +4667,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     hotkeys = HotKeys(notes)
     patched = install(notes, args, guard, viewer_info, hotkeys)
     watch_stuck(notes, out / "stacks.txt", url)
+    watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt")
+    watch_input(notes)
     state = demo_video.scratch_state()
     info = viewer_info()
     remember_role(state, BOOK, "reader")
@@ -4612,6 +5005,10 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
+        "frame_stalls": stalls_report(notes, rel),
+        "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],
+        "tool_cover": None if notes.tool_cover is None else {
+            **notes.tool_cover, "shown_t": rel(notes.tool_cover["shown_t"]), "gone_t": rel(notes.tool_cover["gone_t"])},
         "guard": {"patched": patched, "refused": guard.refused, "chosen": sorted(set(notes.selected)),
                   "stand_in": browser.hwnd, "reached_the_stand_in": guard.used,
                   "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
@@ -4883,10 +5280,10 @@ def rested_pages(rows: list[dict[str, Any]]) -> int:
 
 
 def cleanup(report: dict[str, Any], closed: dict[str, Any], state: Path, standin_dir: Path, mode: str, url: str,
-            ps_before: list[str] | None) -> dict[str, Any]:
+            ps_before: list[str] | None, keep_log_in: Path | None = None) -> dict[str, Any]:
     """What the state holds at the end (any turn times a profile keeps - none -, the pages in the cache, the log's
     errors), read before it goes; the scratch folders deleted; what the window loaded in Ollama checked gone (and let
-    go of if not)."""
+    go of if not). *keep_log_in*: the app's log copied there first (`keep_app_log`)."""
     out: dict[str, Any] = {"browser": closed}
     try:
         from taslation.cache import CacheStore
@@ -4906,6 +5303,8 @@ def cleanup(report: dict[str, Any], closed: dict[str, Any], state: Path, standin
     except Exception as e:  # noqa: BLE001 - said by its type
         out["state_error"] = type(e).__name__
     out["log"] = log_facts(state)
+    if keep_log_in is not None:
+        out["app_log_kept"] = keep_app_log(state, keep_log_in)
     if url:
         after = loaded_models(url)
         out["ollama_loaded_after_close"] = after
@@ -4941,6 +5340,13 @@ def print_table(report: dict[str, Any], path: Path) -> None:
         print(f"no answer: {sum(1 for n in said if ', silence ' in n['line'])} silence(s), "
               f"{sum(1 for n in said if 'was stopped' in n['line'])} restart(s), "
               f"{sum(1 for n in said if ' ended (' in n['line'])} request(s) ended with the sentence")
+    stalls = run_.get("frame_stalls") or []
+    if stalls:
+        print(f"frames standing still: {len(stalls)}, longest {max((s['lasted_s'] or 0) for s in stalls)} s"
+              f"{' (one still standing at the end)' if any(s['until'] is None for s in stalls) else ''}; "
+              f"what covered the stand-in: {[p.get('cover', {}).get('points') for s in stalls for p in s['probes'][:1]]}")
+    if run_.get("input_spells"):
+        print(f"input to the computer from anyone: {len(run_['input_spells'])} spell(s)")
     if "segments" not in run_:
         print(f"report {path}")
         return
@@ -5113,6 +5519,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "a GPU, whose page on show takes longer)")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
+    ap.add_argument("--cover", type=cover_plan, default=None, metavar="SEGMENT:AT:FOR",
+                    help="the tool's own plain window laid over the stand-in AT seconds after SEGMENT began, for FOR "
+                         "seconds (a viewer wholly covered, on purpose; no key, no activation)")
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
