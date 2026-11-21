@@ -42,15 +42,17 @@ a stream that is still writing is left alone; the wait for a first byte is count
 none - a reader who turns every few seconds cancels each before its own bound -, the time with none under way left out,
 and any byte of any request to the model starts it again, `_Waits`) is ended: its connection closed (the server then
 stops the task), what the client knew of the server's state made unsure, and the window told once per incident
-(``ollama.no_answer``, through `on_status`, whichever thread asked: the page on show's job, a load). The same request
-is asked once more
+(``ollama.no_answer``, through `on_status`, whichever thread asked: the page on show's job, the backlog - the window
+says what a request of the backlog's tells in its status line only, never as the page on show's
+(`backlog.in_step`) -, a load). The backlog's requests are counted as any (`_Waits`): a turn that stops one keeps
+what it waited. The same request is asked once more
 on a new connection after one /api/ps look (`_answer`, `_after_silence`). No answer a second time in the incident (until
 an answer comes), or /api/ps silent: the server TASlation started is stopped and started again by `ollama_start`'s own
 ways (``restart``, `OllamaStarter.restart`: at most once in ten minutes, never a server the person runs, said as
 ``ollama.restarting`` once the restart is under way - never of a server it leaves alone), the model loaded, the
 request asked again - once; else, or after that, the request ends with ``ollama.not_answering`` (the translation
 program on this computer does not answer: restart it, then F5) and ``silent`` names the incident until the next
-answer of any request. Nothing asks for ever: each request makes one restart at most and the incident's second
+answer of any request (the backlog pauses meanwhile; ``endings`` counts such ends). Nothing asks for ever: each request makes one restart at most and the incident's second
 silence ends it. A load is not bounded by a first byte outside an incident (it comes once the model is in memory,
 from a slow disk late): it asks /api/ps every `ALIVE_EVERY_S` on a connection of its own while nothing comes and ends
 as no answer when the server is silent `ALIVE_MISSES` times in a row; within an incident its first byte has a bound
@@ -363,7 +365,7 @@ class OllamaTranslator:
         self.restart: Callable[[threading.Event | None], bool | None] | None = None
         # the incident under way (a request got no answer, and none answered since: `_after_silence`), its number and
         # its silences; ``silent``: the number of the incident a request was ended in with ``ollama.not_answering``,
-        # 0 once an answer came (`_answered`)
+        # 0 once an answer came (`_answered`) - what the backlog pauses for (`backlog.Backlog.tick`)
         self._incident: dict[str, int] | None = None
         self._incidents = 0
         self.silent = 0

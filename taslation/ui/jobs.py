@@ -72,8 +72,8 @@ from ..messages import Cancelled, Message, message_of
 from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
-from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, pause_backlog, reading_event,
-                       tick as backlog_tick, tracking_for)
+from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, in_step as in_backlog_step, pause_backlog,
+                       reading_event, tick as backlog_tick, tracking_for)
 from ..pipeline import keeps_answered, turn_away
 from . import area, name_check, updates
 from .attention import tell_run_ended
@@ -478,7 +478,7 @@ class JobsMixin:
         self.translator = make_translator(s, chosen.name)
         self.translator.revive = self._revive_ollama
         self.translator.restart = self._restart_ollama
-        self.translator.on_status = lambda message: self._post("model_status", message=message)
+        self.translator.on_status = self._translator_status
         loaded: list[Message] = []  # what loaded where: said once, when the window is ready
         model = chosen.name if models and health.has_model(models, chosen.name) else None
         if model and never_unloads(s.ollama_keep_alive):
@@ -639,13 +639,26 @@ class JobsMixin:
         return line
 
     # ------------------------------------------------------------------ Ollama's model
-    def _model_status(self, message: Message) -> None:
+    def _translator_status(self, message: Message) -> None:
+        """(`OllamaTranslator.on_status`, in the thread of the request) The "model_status" event; *behind* when the
+        request is one of the backlog's (`backlog.in_step`): what it tells is then no page on show's."""
+        self._post("model_status", message=message, behind=in_backlog_step())
+
+    def _model_status(self, message: Message, behind: bool = False) -> None:
         """What a load of Ollama's model says (`OllamaTranslator.on_status`, the "model_status" event), on the Tk
         thread: the load shows as the page's stage and hands back to the stage it interrupted; a model partly on the
         CPU is said in the status line and, once a session, in a popup, since the status line goes on with the page. A
         request without an answer (`OllamaTranslator`'s rule: asked again, the server started again, or the sentence
-        that it does not answer) is said in the status line; the page's own line comes back with its next step."""
+        that it does not answer) is said in the status line; the page's own line comes back with its next step. What a
+        request of the backlog's tells (*behind*: a page turned past, read on behind the reader) is said in the status
+        line alone - never as the page on show's stage, badge or slot, nor in place of the stage a load interrupted."""
         code = code_of(message)
+        if behind:
+            self.status(message)
+            if code == "ollama.partly_on_gpu" and not self._partial_said:
+                self._partial_said = True
+                self._warn_unasked(rendered(message))
+            return
         if code in NO_ANSWER_CODES:
             if code == "ollama.not_answering":
                 self._before_loading = None  # (a load under way ended with it)
@@ -1049,7 +1062,7 @@ class JobsMixin:
             if self._busy_shown:
                 self._show_badge()
         elif kind == "model_status":  # Ollama's model is being loaded
-            self._model_status(data["message"])
+            self._model_status(data["message"], bool(data.get("behind", False)))
         elif kind == "slow":  # the model has said nothing for a while: the badge says so, and that Stop cancels
             if self._page_cancel is None or self.batch is not None:
                 return
