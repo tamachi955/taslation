@@ -10,13 +10,27 @@ page soft first may still take it back is over). On such a viewer a frame that l
 caught; nor is a frame confirmed while the frames still changed (``PageGate.settled`` False: the window confirms the
 frame there is once the frames have kept changing for its SETTLE_TRIES looks, pages flipped through without a stop)
 unless a look of the window's KEEP_SETTLES times settle_ms after then still saw it (``PageGate.settled_by``: the recheck
-RECHECK_MS after the confirmation), nor a page whose job had no gate (a page the window took as settled), nor one over the caps. A
+RECHECK_MS after the confirmation), nor a page whose job had no gate, nor one over the caps. A
 page that is not caught is as it was before there was a backlog: the lines answered by then stay stored, and the page
 is read and asked for the rest when the viewer shows it again (`Pipeline._complete_page`); the window is told so
-("missed"). A page job never leaves a stage told at work with nothing at work on it (`Tracking._left`): stopped, its
-confirmation taken back, it waits; failed, it failed. (A page turned by TASlation's own page key while a job ran was
-taken as settled, its job without a gate: `ui.live._await_change` now starts it early, a gate of its own, as a page
-the viewer turned while the job ran.)
+("missed", the page counted among those that went by - ``backlog``'s dropped -; a page whose job had no gate "waiting",
+not counted so: `Tracking.tell_not_caught`). A page job never leaves a stage told at work with nothing at work on it
+(`Tracking._left`): stopped, its confirmation taken back, it waits; failed, it failed. (A page turned by TASlation's own
+page key while a job ran was taken as settled, its job without a gate: `ui.live._await_change` now starts it early, a
+gate of its own, as a page the viewer turned while the job ran.)
+
+A page job of normal reading with Auto on still has no gate (`ui.jobs._start_translate` takes one only from the early
+start, `ui.live._early_start`) when it is: F5 (`translate_now`); the sharper frame of a page read again
+(`ui.live._take_retake`: a viewer that drew the page soft first, when the soft frame was taken - before the viewer is
+known to draw so, or a soft frame not seen as soft); a frame taken as settled when the early start is not allowed
+(`_early_allowed`: the first key of a viewer that ignores posted keys, pressed for real after a wait - ``turned_at`` -,
+the first page of a book that waits for its start - `_translate_pending` -, a page the cache holds whole, also a soft
+frame of one, and with early_start off); a frame two looks found alike with no follow under way (`ui.live._look`);
+and in Translator mode the completion of a page taken from the cache (`_complete_taken`) and the completions after an
+edit (follow = "poll" has no gate at all). Such a page was never confirmed - F5 captures at once, the settle path takes a
+frame still changing after SETTLE_TRIES looks, a sharper frame is taken as it comes, no take-back time has passed on a
+viewer that draws soft first - and so it is never caught (nothing from an unconfirmed frame is read or kept behind the
+reader: the second of the design's guarantees); turned past, it is no page that went by too fast either, and waits for its next showing.
 
 What is kept of a page caught, in memory only and never written anywhere: when the job had read every page unit it
 reads (`PageWork.read_all`), its regions as read (copies taken before the translation changed them) and from them
@@ -1248,7 +1262,8 @@ class Tracking:
     def cancelled(self, turned: bool, work: Any) -> None:
         """(the worker, the job raised `Cancelled`) *turned*: the reader turned away from the page (`turn_away`); a
         page whose gate was sealed is caught (when the caps allow), one whose frame went by is told as such, one with
-        no gate (taken as settled) is told as not caught."""
+        no gate (F5, a page taken as settled, a sharper frame read again: the module's docstring) is told as waiting
+        for its next showing, not caught."""
         self.ended = True
         b = self.backlog
         gate = self.gate
@@ -1287,8 +1302,8 @@ class Tracking:
 
     def catch(self, work: Any) -> None:
         """(the page turned past, its gate sealed or soft, or none) Caught when it may be (see the module's
-        docstring), else told as not caught - as waiting when the backlog goes on with an entry of the page that was
-        held while it was on show."""
+        docstring), else told as not caught (`tell_not_caught`): a page whose job had a gate as one that went by, one
+        whose job had none as one waiting for its next showing - it is no page that went by too fast."""
         b = self.backlog
         gate = self.gate
         screen = self.screen
@@ -1297,18 +1312,20 @@ class Tracking:
         caught = gate is not None and _sealed(gate) and not _soft(gate) and _settled(gate) and \
             b.catch(screen, self.image, work, self.pipeline, self.hwnd)
         if not caught:
-            self.tell_not_caught()
+            self.tell_not_caught(went_by=gate is not None)
             return
         b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting", self.image)
         b.tell(screen, "translate", "waiting", self.image)
         b.totals()
 
-    def tell_not_caught(self) -> None:
+    def tell_not_caught(self, went_by: bool = True) -> None:
         """(the page turned past, not caught: `catch`, and `Backlog.settle_pending` for a page kept for now whose
         confirmation was taken back) What its entry held goes back to the backlog (`Backlog.release`), and every stage
-        not done is told "missed" - as waiting when the backlog goes on with an entry of the page that was held while it
-        was on show -, the screen counted among the pages gone by (``backlog``'s dropped) when its translation was
-        missed."""
+        not done is told "missed", the screen counted among the pages gone by (``backlog``'s dropped) when its
+        translation was missed - as "waiting" when the backlog goes on with an entry of the page that was held while it
+        was on show, and when the page did not go by (*went_by* False: a page job with no gate, which is never caught -
+        see the module's docstring -: read, or asked for the rest, when the viewer shows it again, as after Stop). Every
+        such page is counted in ``not_caught``."""
         b = self.backlog
         screen = self.screen
         if screen is None:
@@ -1317,10 +1334,11 @@ class Tracking:
         b.release(screen, done=False)
         with b._lock:
             queued = any(e.screen is screen for e in b.entries)
+        state = "missed" if went_by and not queued else "waiting"
         for stage in ("read", "translate"):
             if screen.stages.get(stage) not in ("done", "failed", "skipped"):
-                b.tell(screen, stage, "waiting" if queued else "missed", self.image)
-        screen.missed = not queued and screen.stages.get("translate") == "missed"
+                b.tell(screen, stage, state, self.image)
+        screen.missed = state == "missed" and screen.stages.get("translate") == "missed"
         b.totals()
 
     def over(self) -> None:
