@@ -26,7 +26,8 @@ What follows holds for TASlation's own process (the window and the
 `taslation` commands). Ollama is a program of its own, which TASlation starts
 when it is not running and asks to load, release and run the translation
 model on 127.0.0.1; what else Ollama does is not under TASlation's control.
-The installer and `setup_models.py`, which download, run without the guard.
+The installer, `setup_models.py` and `check_update.py`, which use the network, run
+without the guard.
 
 1. **Socket allowlist in the process** (`taslation/netguard.py`). Installed by
    every entry point before any heavy import. It patches
@@ -53,10 +54,14 @@ The installer and `setup_models.py`, which download, run without the guard.
    is the installer (`install.cmd` / `install.ps1`, also run by `update.cmd`)
    and `setup_models.py`, which the installer runs and which the window and
    the command line run as a separate process when the person agrees to
-   download a translation model; the developer tool
-   `tools/fetch_openmantra.py` (one download of a sample dataset, see
-   "OpenMantra as the sample dataset (2026-10-30)") is the other. The
-   application imports neither.
+   download a translation model, and `check_update.py`, which the window
+   (Help > Check for updates..., and at most once a day at its start for who
+   turned that on) and `update.cmd` run as a separate process to ask GitHub
+   for the newest version and, when the person updates, to download that
+   version's ZIP ("Looking for a new version and updating (2026-11-21)");
+   the developer tool `tools/fetch_openmantra.py` (one download of a sample
+   dataset, see "OpenMantra as the sample dataset (2026-10-30)") is the
+   other. The application imports none of them.
 6. **No image persistence**: there is no code path that writes a captured or
    translated page to disk. The on-disk cache (`~/.taslation/cache/*.json`)
    holds translated text, normalised bubble geometry, 320-bit page
@@ -3546,3 +3551,52 @@ not; a pale band between two figures with no frame is not cut, the same band wit
 that runs on past both frames into a strip with no frame is not cut, the same gutter where the panels end with their
 frames is. All five fail on `4bebb97`. `test_lettering_on_a_gutter_does_not_hide_it` now draws lettering over more than
 a fifth of the gutter's lines: what it covered before, about 4 %, the second pass now cuts through.
+
+## Looking for a new version and updating (2026-11-21)
+
+**What was added.** `check_update.py`, a program of its own beside `setup_models.py` (standard library only, never
+imported by the package); `update.ps1 -Download`, `-Version`, `-WaitFor`, `-Confirmed`, `-Restart` and `-Back`;
+Help > Check for updates... with its "Update now"; the setting `update_check` ("off" by default, "daily"); the
+installer's one question. TASlation's own process is as before: it starts the program as a process of its own and
+reads its one line of JSON. `taslation/netguard.py` is unchanged but for its docstring.
+
+**What goes to GitHub, and when.** The look: one GET of the project's `CHANGELOG.md` on raw.githubusercontent.com
+with `Range: bytes=0-16383`, so the request stays the same 16 KB however long the changelog grows. Its headers are
+Host, a fixed User-Agent (`TASlation-update-check`: no version, no system), Accept, Accept-Encoding and Range; no
+query string, no cookie, nothing of the person, the computer, the installed version or the books. It is sent when
+Help > Check for updates... is chosen (not again within 60 seconds of an answer), and with `update_check = "daily"`
+at most once a day, 30 seconds or more after the window is ready and while nothing is read or translated; never in a
+folder that is a git clone. The download: one version's ZIP from github.com (which sends it on to
+codeload.github.com), only on "Update now" or a yes in `update.cmd`. A redirect is followed to those three hosts
+only; an answer over 1 MB (the look) or 60 MB (the ZIP) ends the run; the look ends after 10 seconds. The ZIP's every
+entry is read back before it is used, and it must hold the version that was announced, newer than the installed one.
+
+**How it was checked.**
+
+- On a loopback server, with no request leaving the computer: `tests/test_check_update.py` (the request as the
+  server saw it, the Range, a part cut inside a line or an entry, a server that ignores Range, redirects to another
+  host, answers too large, broken off or slow, a wrong version string, a ZIP joined from two builds),
+  `tests/test_updates_window.py` (the menu item, the dialog's states, the once-a-day rule with a made-up clock, no
+  dialog and no focus taken by the look at the start, the 60 seconds, a git clone; with the guard on, the window's
+  process made no connection while the program beside it asked: blocked none, allowed none),
+  `tests/test_update_script.py`, `tests/test_install_scripts.py` (the question asked once, Enter is no).
+- `tests/test_update_now_run.py`: the command line the window builds is really started through cmd.exe in a scratch
+  folder whose path holds a space, parentheses and an ampersand: the wait for the closing window, the download from
+  a stand-in, `.previous` with its note, the new files, a stand-in installer run with `TASLATION_UPDATING=1`, the
+  restart. The run found one fault, fixed before the release: the restarted TASlation inherited the update's own two
+  variables.
+- Against GitHub itself, four looks and one download: from a folder at the public version "up to date", from a scratch
+  copy marked 0.8.0 "newer" with the 0.8.1 entry (548 characters), both again after the request was cut to its
+  first 16 KB with the same answers, and the ZIP of 0.8.1 once (4,602,405 bytes, 607 entries, every entry read
+  back).
+- The whole suite: 5,206 passed, 22 skipped. `tools/standin_e2e.py` (every scenario, 335.5 s): 0 wasted requests, 0
+  stale lettering, 0 soft frames confirmed or left in the cache, the whole-book run finished its 5 pages. The
+  official benchmark: F1 97.2, 1,586 of 1,586 lines translated, chrF 41.2, 2.5 % flagged, as for 0.8.1. Its
+  translation took 372.8 s where 294 s was measured before: no file on the translation's way changed since 0.8.1,
+  the same 47 requests were computed again (56.8 s) and the answers took the same 94.5 s, but the prompts ran at
+  6,635 tokens a second instead of about 9,800 while other programs of the desktop used the GPU that morning.
+
+**Not checked.** "Update now" on a real installation: on the development computer the installer that follows would
+change the Ollama settings of a program in use, so the chain was run in scratch folders with a stand-in installer
+only. A computer that reaches the network through a proxy only: the program uses none and says that GitHub could
+not be asked; the ZIP by hand works as before.

@@ -42,7 +42,7 @@ The questions (the language to translate into, agreeing to the models' licences 
 
 ### Updating
 
-Download the new ZIP, close TASlation, and double-click `update.cmd`.
+In the TASlation window, choose Help → "Check for updates..." and press "Update now". Or download the new ZIP, close TASlation, and double-click `update.cmd`. A TASlation of version 0.8.1 or earlier is updated with the ZIP once.
 
 ### Uninstalling
 
@@ -56,7 +56,7 @@ Double-click `uninstall.cmd`, and delete the folder when it has finished.
 | GPU | An NVIDIA GPU (6 GB of memory) recommended. It runs without one |
 | RAM | 16 GB recommended |
 | Free disk space | About 7.5 GB (the translation model, about 1.8 GB, included). On a computer with an NVIDIA GPU, about 3.7 GB more |
-| Network | Used only while installing |
+| Network | Used only when installing and updating |
 | Viewer | An app or a browser that shows the book |
 
 Translating into Portuguese (Brazil) or Turkish uses another translation model (about 3.3 GB), and then about 9.0 GB of free disk space is needed.
