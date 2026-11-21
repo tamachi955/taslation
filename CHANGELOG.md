@@ -3,6 +3,21 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.5 - 2026-11-22
+
+Lettering
+
+* Lettering turned a quarter turn (text that runs down or up the page) sat half a pixel off and came out slightly
+  blurred: the turned picture was made one pixel too large. It is now placed exactly; the words, their size and the
+  line breaks are unchanged. With OpenCV 5.1, which a new installation gets, the old fault also moved the erased
+  shape by a pixel.
+
+For developers
+
+* The whole test suite runs on GitHub's own machines in eight parallel jobs for a push to a branch named `ci/...`
+  (`.github/workflows/tests.yml`, `tools/test_shards.py`), in about six minutes. Nine tests that depended on the
+  developer's computer (its fonts, its GPU, its package versions, its speed) no longer do.
+
 ## 0.9.4 - 2026-11-21
 
 Documents
