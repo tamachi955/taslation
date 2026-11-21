@@ -1949,10 +1949,11 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
                  every: float = 0.5) -> threading.Thread:
     """A thread that finds the window's frames of the stand-in standing still: a sharp screen the stand-in drew and
     kept FRAME_STALL_S that no frame the window took showed, while it took FRAME_STALL_CAPTURES or more. Each stall
-    noted from then until a frame of the window shows something else, and looked at FRAME_PROBE_AT_S after its
-    finding: the window's capture session (its frame count, ended, its thread), the probe's own session's first frame
-    (`fresh_frame`), what covers the stand-in (`window_cover`), the seconds since anyone's input; the threads' stacks
-    written to *path* once a stall (the first three). *stop* ends it, *every* its pace (tests); its thread."""
+    noted from then until the window's frames move again (one of another screen, or more of its capture session),
+    and looked at FRAME_PROBE_AT_S after its finding: the window's capture session (its frame count, ended, its
+    thread), the probe's own session's first frame (`fresh_frame`), what covers the stand-in (`window_cover`), the
+    seconds since anyone's input; the threads' stacks written to *path* once a stall (the first three). *stop* ends
+    it, *every* its pace (tests); its thread."""
     from taslation.capture import wgc
 
     def probe(stall: dict[str, Any]) -> None:
@@ -1983,6 +1984,11 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
             with open(path, "a", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
 
+    def window_frames() -> int | None:
+        """How many frames the window's capture session of the stand-in has had (None: no session of it)."""
+        s = wgc._session
+        return s.seq if s is not None and s.hwnd == hwnd and not s.ended else None
+
     def go_on() -> bool:
         if stop is None:
             time.sleep(every)
@@ -1998,9 +2004,11 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
                 shows = (last["page"], last["spread"], last["state"]) if last else None
                 n, last_t = notes.capture_n, notes.last_capture_t
             now = now_ms()
-            if stall is not None:
-                want = (drawn["page"], drawn["spread"], drawn["state"]) if drawn else None
-                if shows != stall["frozen"] or shows == want:
+            frames = window_frames()
+            if stall is not None:  # (it ends as the window's frames move again: a frame of another screen, or more
+                # frames of its session - not a turn of the stand-in to the screen the frames stood still on)
+                moved = frames is not None and stall["frames_at_find"] is not None and frames > stall["frames_at_find"]
+                if shows != stall["frozen"] or moved:
                     with notes.lock:
                         stall.update(until_t=now, lasted_s=round((now - stall["from_t"]) / 1000, 1), shows_then=shows)
                     stall = None
@@ -2017,7 +2025,7 @@ def watch_frames(notes: Notes, hwnd: int, own_pid: int, path: Path, stop: thread
                                  for c in notes.captures)
             if seen_since:
                 continue
-            stall = {"from_t": drawn["t"], "found_t": now, "drawn": drawn, "frozen": shows,
+            stall = {"from_t": drawn["t"], "found_t": now, "drawn": drawn, "frozen": shows, "frames_at_find": frames,
                      "frozen_since_t": last["t"] if last else None, "until_t": None, "lasted_s": None, "probes": []}
             with notes.lock:
                 notes.frame_stalls.append(stall)
