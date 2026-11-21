@@ -29,8 +29,14 @@ cap, lettering left on a page until the window's next capture, pages left half d
 it and never fails a run (`speed`); so is what each scenario was meant to show and whether it still did (`meanings`).
 In scenario x with --wait-done, whose soft frames stay on show until the window has asked on them, what the window
 shows or keeps of them is not judged by the soft frames' criteria (`_judged`: a frame on show so long has settled, for
-the window as for a reader). With --check, ``standin`` exits 1 when a criterion of correctness failed (or there is no
-report), and only then.
+the window as for a reader). Scenario k (pages flipped past at 0.5, 1 and 2 s a page, then read back: `K_PACES`) is
+judged on what the pages turned past guarantee on any computer (`_k_correctness`): a request sent for nothing there is
+only a page job's asked before its frame's confirmation and dropped as the page was flipped past (none on a frame that
+was not the sharp one, none of the backlog's), the backlog holds no frame after its read, and once the window has come
+to rest at the end it holds nothing and no screen is told at work; the stale lettering, the soft frames kept and left
+are the criteria of all the scenarios. How many pages it caught, how the pages read back began and how long they took
+are reported (`k_figures`, and its meaning). With --check, ``standin`` exits 1 when a criterion of correctness failed
+(or there is no report), and only then.
 
 A benchmark title is judged by its scores against the expected ones (`EXPECTED`, the runner's own figures per title),
 within their tolerance: with --check, ``bench`` exits 1 when one of F1, CER or chrF leaves it, or the translation did
@@ -63,6 +69,8 @@ OTHER_STATES = ("black", "spinner", "unknown")
 AT_REST = ("a", "d", "r", "o", "z", "w2", "f", "f2")  # the scenarios whose rests are for reading translated pages
 RUN_SCENARIOS = ("w", "w2")  # a whole-book run reads or translates their pages, not the window's page jobs
 TURNED = ("next", "previous", "jump")
+K_PACES = ("k5", "k1", "k2", "k3")  # standin_e2e.K_PACES: scenario k, pages flipped past at a pace, then read back
+K_STAYED_MS = 800  # standin_e2e.K_STAYED_MS: a page flipped past whose sharp frame stayed so long is one to catch
 
 
 def read_json(path: Path | None) -> Any:
@@ -274,9 +282,101 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
             out[name] = (f"holds: {cut} requests cancelled in flight ({soft} on the soft frame)" if cut
                          else f"partly: {soft} requests on the soft frame, none cancelled in flight" if soft
                          else f"lost: no request on the soft frame, {how}: the window read it too slowly here")
+        elif name in K_PACES:
+            out[name] = _k_meaning(_k_paces(run).get(name))
         else:
             out[name] = at_rest(name)
     return out
+
+
+def _k_paces(run: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Scenario k's paces as the tool tells them (`standin_e2e.k_block`); {} without it."""
+    paces = (run.get("scenario_k") or {}).get("paces") or {}
+    return {k: v for k, v in paces.items() if isinstance(v, dict)} if isinstance(paces, dict) else {}
+
+
+def _k_meaning(k: dict[str, Any] | None) -> str:
+    """Whether a pace of scenario k showed what it is for: every page flipped past whose sharp frame stayed
+    K_STAYED_MS caught by the backlog (or finished while on show), none that did not, and each page caught that was
+    read back begun with no new read (from the cache, or from what the backlog read). On a slower computer the window
+    sees a sharp frame later, and the backlog may not have finished a caught page when it is read back."""
+    if not k:
+        return "unclear: the tool told nothing of the pace"
+    flips = k.get("flips") or 0
+    if not flips:
+        return "unclear: no page flipped past"
+    caught, done, stayed = k.get("caught") or 0, k.get("done_on_show") or 0, k.get("stayed") or 0
+    back, back_caught = k.get("read_back_caught_no_new_read") or 0, k.get("read_back_caught") or 0
+    says = (f"{caught} of {flips} pages flipped past caught and {done} finished on show, {stayed} stayed "
+            f"{K_STAYED_MS} ms; {back} of {back_caught} caught pages read back begun with no new read")
+    if k.get("agree") == flips and back == back_caught:
+        return "holds: " + says
+    if caught or done or back:
+        return "partly: " + says
+    return ("lost: " if stayed else "unclear: ") + says
+
+
+def k_figures(report: dict[str, Any]) -> dict[str, Any] | None:
+    """Scenario k's figures, per pace, reported and never a failure (they depend on the computer's speed): the pages
+    flipped past, those whose sharp frame stayed K_STAYED_MS, caught and finished on show; the pages read back, how
+    they began, their first lettered bubble (with the backlog holding pages, and all of them); the time the backlog
+    took to have nothing left after the turn back, its steps, requests and the most it held. None without k."""
+    run = report.get("run") or {}
+    paces = _k_paces(run)
+    if not paces:
+        return None
+    keys = ("pace_ms", "flips", "stayed", "caught", "done_on_show", "agree", "read_back", "read_back_cached",
+            "read_back_caught", "read_back_caught_no_new_read", "read_back_how", "first_lettered_read_back",
+            "first_lettered_with_backlog", "backlog_pages_most", "drain_s", "drain_from_flips_end_s", "steps",
+            "steps_busy_s", "waits_ms", "same_page_turn_waits_ms", "background_requests", "page_requests", "peak_mb",
+            "results_unconfirmed", "lettered_soft_turns", "stale")
+    out: dict[str, Any] = {name: {key: k.get(key) for key in keys} for name, k in paces.items()}
+    told = (run.get("scenario_k") or {}).get("told") or {}
+    out["told_done_then_working_again"] = told.get("done_told_working_again")
+    return out
+
+
+def _k_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """Scenario k's criteria, true on any computer however slow: per pace, every request sent for nothing a page job's
+    asked while its frame's confirmation was pending and dropped as the page was flipped past (none on a frame that
+    was not the sharp one - `standin_e2e.wasted_why` -, none of the backlog's), and no frame the backlog held after
+    it was read; at the end of the run - judged when the window came to rest there within --timeout, else the hang
+    is the criterion that fails - nothing held by the backlog and no screen told at work."""
+    paces = _k_paces(run)
+    wasted = run.get("wasted_requests") or {}
+    listed = [w for w in wasted.get("list") or [] if isinstance(w, dict)]
+    requests = run.get("request_list") or {}
+    columns = requests.get("columns") or []
+    rows = [dict(zip(columns, row)) for row in requests.get("rows") or [] if isinstance(row, list)]
+    segment_at = _segment_at(_turns(run))
+    mine = [n for n in names if n in K_PACES]
+    for name in mine:
+        k = paces.get(name)
+        check(name, "the tool told the pace (its pages flipped past and read back)", isinstance(k, dict), None)
+        if not isinstance(k, dict):
+            continue
+        if listed or not wasted.get("by_segment"):
+            bad = [[w.get("t_s"), w.get("why"), w.get("gate")] for w in listed if w.get("segment") == name
+                   and not (w.get("why") == "dropped" and w.get("gate") == "pending")]
+        else:  # (a tool that gave the counts only: none can be told apart)
+            bad = [[None, "count", n] for s, n in wasted["by_segment"].items() if s == name and n]
+        bad += [[r.get("t_s"), "backlog", r.get("wasted")] for r in rows
+                if r.get("side") == "backlog" and r.get("wasted") and segment_at(r.get("t_s")) == name]
+        check(name, "every request sent for nothing was a page job's asked before its frame was confirmed and "
+              "dropped as the page was flipped past (none on a frame that was not the sharp one, none of the "
+              "backlog's)", not bad, bad)
+        most = k.get("frames_held_after_read_most")
+        check(name, "the backlog held no frame after it was read", not most, most)
+    if not mine:
+        return
+    end = (run.get("released") or {}).get("end") or {}
+    if isinstance(end, dict) and end.get("timed_out"):
+        return
+    last = paces.get(mine[-1]) or {}
+    check(mine[-1], "the backlog held nothing at the end of the run, the window at rest (0 bytes)",
+          not last.get("bytes_at_end"), last.get("bytes_at_end"))
+    left = ((run.get("scenario_k") or {}).get("told") or {}).get("left_working")
+    check(mine[-1], "no screen was left told at work at the end of the run, the window at rest", not left, left)
 
 
 def _check(found: list[dict[str, Any]], scenario: str, criterion: str, ok: bool, seen: Any = None) -> None:
@@ -344,8 +444,10 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     if not run.get("displays"):  # (no list of what the window showed: the run's count)
         empty = [["all", n] for n in [run.get("empty_unsettled_results_shown") or 0] if n]
     check("all", "no empty result read from a frame that was not the sharp one shown", not empty, empty)
-    wasted = {s: n for s, n in ((run.get("wasted_requests") or {}).get("by_segment") or {}).items() if s != "x" and n}
+    wasted = {s: n for s, n in ((run.get("wasted_requests") or {}).get("by_segment") or {}).items()
+              if s != "x" and s not in K_PACES and n}
     check("all", "no request sent for nothing (outside scenario x, whose point they are)", not wasted, wasted)
+    # (scenario k: a page job asks before its frame is confirmed, and a page flipped past drops it - `_k_correctness`)
     stale = [s for s in (run.get("incidents") or {}).get("stale_overlays") or [] if isinstance(s, dict)]
     if all("seen_ms" in s for s in stale):  # (a tool before it said when the window saw the change: not looked at)
         late = [s for s in stale if (s.get("seen_ms") or 0) > STALE_MS]
@@ -437,6 +539,7 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             sizes = [r for r in run.get("resizes") or [] if isinstance(r, dict)]
             check(name, "the narrow window's page read at its new size",
                   any(r.get("first_capture_ms") is not None for r in sizes), len(sizes))
+    _k_correctness(run, names, check)
     return found
 
 
@@ -522,6 +625,7 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
         if waits else None,
         "segments": segment_rows(run), "meaning": meanings(report),
         "criteria": len(criteria), "failed": failed, "speed": speed(report, timeout_s),
+        "scenario_k": k_figures(report),
         "requests": {k: requests.get(k) for k in ("total", "outside_page_jobs", "gate_pending", "warm_ups")},
         "jobs": {k: jobs.get(k) for k in ("started", "on", "discarded")},
         "server_started": {"setup": server.get("setup"), "stopped": server.get("stopped")} if server else None,
@@ -576,6 +680,22 @@ def standin_md(s: dict[str, Any]) -> str:
                          f"{row['finished_within_rest']} | {row['translated_at_rest']} | {held} | "
                          f"{_pair(row['first_request_ms'])} | {_pair(row['finished_ms'])} | {row['requests']} "
                          f"({row['wasted_requests']}) | {(s.get('meaning') or {}).get(row['scenario'], '')} |")
+        lines.append("")
+    if s.get("scenario_k"):
+        lines += ["Scenario k (reported, never a failure):", "",
+                  "| pace | flipped past (stayed 0.8 s) | caught, finished on show | read back (of them caught, "
+                  "begun with no new read) | first bubble read back ms med/max | backlog emptied after the turn back "
+                  "s | backlog requests | most held MB |", "|---|---|---|---|---|---|---|---|"]
+        for name, k in s["scenario_k"].items():
+            if not isinstance(k, dict):
+                continue
+            first = k.get("first_lettered_read_back") or {}
+            drained = "-" if k.get("drain_s") is None else k.get("drain_s")
+            lines.append(f"| {name} ({k.get('pace_ms')} ms) | {k.get('flips')} ({k.get('stayed')}) | "
+                         f"{k.get('caught')}, {k.get('done_on_show')} | {k.get('read_back')} "
+                         f"({k.get('read_back_caught')}, {k.get('read_back_caught_no_new_read')}) | "
+                         f"{_pair([first.get('median'), first.get('max')])} | {drained} | "
+                         f"{k.get('background_requests')} | {k.get('peak_mb')} |")
         lines.append("")
     if "speed" in s:
         found = s["speed"]
