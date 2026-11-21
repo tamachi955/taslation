@@ -42,7 +42,7 @@ Yasuda, Yusuke Matsui; AAAI 2021), published by Mantra Inc.: five Japanese manga
 frames, Japanese text and professional English and Chinese translations. Its licence is CC BY-NC 4.0 (non-commercial,
 with attribution), which the MIT-licensed TASlation cannot carry, so the dataset is neither in the repository nor in a
 release (the one exception in the repository is the README's recording, `docs/media/taslation-intro.gif`, which shows
-twelve of its pages being translated, credited there and left out of every ZIP of the repository by `.gitattributes`): `python tools/fetch_openmantra.py` downloads it once into `~/.taslation/datasets/openmantra/` (the archive is
+pages of one of its titles being translated, credited there and left out of every ZIP of the repository by `.gitattributes`): `python tools/fetch_openmantra.py` downloads it once into `~/.taslation/datasets/openmantra/` (the archive is
 inspected and only what is needed is extracted; the provenance goes to `SOURCE.md` there). The application itself
 never reads it. `python tools/openmantra_eval.py` prints numbers only: detection precision, recall and F1 at IoU 0.5,
 the OCR character error rate, chrF of the default model's translation against the professional English, and the share
@@ -119,10 +119,10 @@ rows' languages.
 * `tools/demo_video.py` makes a recording of a whole-book run (`docs/media/whole-book-demo.gif` by default; the README's
   recording until November 15, 2026): the real window, the real OCR and the real translator over OpenMantra pages in a
   stand-in viewer of its own, pictures of TASlation's own window only, a scratch state folder, no other window touched.
-  The README's recording since then, `docs/media/taslation-intro.gif`, was made with this tool's guard and scratch state
-  by a longer script that is not in the repository: the real window beside an image viewer the script opened on the
-  sample pages, with translator mode's actions sent to TASlation's own widgets (the pointer is drawn in afterwards),
-  followed by cards of facts. Both recordings hold CC BY-NC 4.0 material.
+  From then to November 21, 2026 the README's recording, `docs/media/taslation-intro.gif`, was made with this tool's
+  guard and scratch state by a longer script that is not in the repository; since then it is made by
+  `tools/intro_video.py` (the next entry), the first time with version 0.9.0. Each of these recordings holds
+  CC BY-NC 4.0 material.
 * `tools/intro_video.py` records the README's introduction again from the code its checkout holds (a dev tool, never
   part of a release). `record --out FILE` runs the real window in English beside a stand-in viewer of its own (a Tk
   window of a child process showing OpenMantra pages, turned only by the page key the window passes on to it), with

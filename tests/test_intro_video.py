@@ -68,9 +68,9 @@ def test_every_step_fits_the_left_column_at_960x540():
     assert len(layout.cap_lines()[1]) == 1
 
 
-def test_the_page_turn_is_named_on_the_fly_translation_with_no_timing_figures():
+def test_the_page_turn_is_named_real_time_translation_with_no_timing_figures():
     title, description = iv.step_texts(iv.scene_of("next_page"), iv.code_facts())
-    assert title == "On-the-fly translation"
+    assert title == "Real-time translation"
     assert description.startswith("When you turn a page, its bubbles are replaced by their translations there and "
                                   "then, in reading order.")
     assert description.endswith(" Press the page key in TASlation; it is passed on to your viewer.")

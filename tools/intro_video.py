@@ -198,10 +198,10 @@ SCENES: tuple[Scene, ...] = (
           "Choose your viewer's window in the Viewer list. Its page fills in while you look at it.", 12.0,
           follows=cites(MANUAL, "Choose the viewer's window in the \"Viewer\" list.",
                         "An untranslated page fills in while you look at it.")),
-    Scene("next_page", "On-the-fly translation",
+    Scene("next_page", "Real-time translation",
           "When you turn a page, its bubbles are replaced by their translations there and then, in reading order. "
           "Press the page key in TASlation; it is passed on to your viewer.", 8.0,
-          follows=cites(README, "**On-the-fly translation**: when you turn a page, its bubbles are replaced by their "
+          follows=cites(README, "**Real-time translation**: when you turn a page, its bubbles are replaced by their "
                                 "translations there and then, in reading order (from the top right).",
                         "A page key you press in TASlation is passed on to the viewer.")),
     Scene("original", "See the original",

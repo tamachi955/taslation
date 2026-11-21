@@ -3,6 +3,25 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.1 - 2026-11-21
+
+Updating
+
+* The "Check for updates" dialog is placed again when the answer makes it taller: it no longer hangs below the window,
+  and on a low screen its buttons stay on the screen (a long list of changes then shows fewer lines and scrolls). It
+  no longer takes the focus when the answer comes.
+* The changes in that dialog are shown as paragraphs the box wraps itself, each change with a bullet, in place of the
+  changelog's short broken lines.
+* Looking for a new version also works with a server that closes the connection after its answer; such an answer made
+  it say that GitHub could not be asked. (GitHub does not answer that way today.)
+
+Other
+
+* The README and the project's description on GitHub call what TASlation does real-time translation (before:
+  on-the-fly translation).
+* The README's recording is new: made with version 0.9.0, and 1.4 MB where the old one was 7.5 MB. It is made by a tool
+  in the repository now (`tools/intro_video.py`), so that it can be made again for a later version.
+
 ## 0.9.0 - 2026-11-21
 
 Updating

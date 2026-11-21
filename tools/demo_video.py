@@ -1,6 +1,6 @@
 """A recording of a whole-book run, the one at the top of the README until November 15, 2026 (dev tool, never part of
-a release; the README's recording since then was made with this tool's guard by a longer script that is not in the
-repository): the real TASlation window, in English,
+a release; the README's recording after that was made with this tool's guard by a longer script that is not in the
+repository, and since November 21, 2026 by tools/intro_video.py): the real TASlation window, in English,
 in a whole-book run over public sample pages - the pages read as a stand-in viewer turns them, then translated by the
 real models, each line lettered as the model answers it - taken from TASlation's own window only and made into an
 animated GIF.

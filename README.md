@@ -8,13 +8,13 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 
 The TASlation (Tool Assisting Self-translation) window reads the manga page your viewer is showing, translates it on this computer, and shows the translation laid over the page. In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating it for that use (Article 47-6); [docs/LEGAL.md](docs/LEGAL.md) sums up what 30 countries allow.
 
-![The TASlation introduction: beside the viewer, a page is translated, corrected, and a whole book is translated](docs/media/taslation-intro.gif)
+![The TASlation introduction: beside the viewer, a page is translated as you turn to it, and corrected](docs/media/taslation-intro.gif)
 
 The pages in the recording are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial); the pages in the recording are changed.
 
 ## Features
 
-* **On-the-fly translation**: when you turn a page, its bubbles are replaced by their translations there and then, in reading order (from the top right). On the recommended computer the first bubble takes 1 to 2 seconds after the turn, and from there the translation generally moves faster than you read.
+* **Real-time translation**: when you turn a page, its bubbles are replaced by their translations there and then, in reading order (from the top right). On the recommended computer the first bubble takes 1 to 2 seconds after the turn, and from there the translation generally moves faster than you read.
 * **Many languages**: 20 languages to translate into (English, Spanish, Portuguese (Brazil), French, German, Italian, Russian, Polish, Dutch, Turkish, Indonesian, Vietnamese, Thai, Chinese (Simplified), Chinese (Traditional), Korean, Arabic, Hebrew, Hindi, Bengali), and 17 languages for the window itself.
 * **Accurate translation**: the text is read by three OCR models, and where their readings differ, the one closest to the other two is taken. Lettering is erased in two ways (a white bubble is filled with the colour of its paper; under lettering on the drawing, the inpainting model LaMa fills the drawing in). The translation is made by PLaMo 3 Translate 2B, a model built for translation, which is given the pages before as context and your list of names and terms.
 * **Any viewer**: TASlation captures the viewer's window as the screen shows it and lays the translation over that picture. A page key you press in TASlation is passed on to the viewer. It works with every viewer that a screenshot can be taken of.

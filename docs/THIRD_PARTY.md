@@ -236,7 +236,7 @@ of it is bundled or downloaded. Without it, a rule of `breaks.py`'s own keeps a 
 The evaluation dataset of Hinami, Ishiwatari, Yasuda and Matsui, "Towards Fully Automated Manga Translation" (AAAI
 2021), published by Mantra Inc. under CC BY-NC 4.0. It is downloaded by `tools/fetch_openmantra.py` into the
 developer's own folder for measurements (`docs/DEVELOPMENT.md`); the dataset is not in the repository or in a release.
-The README's recording, `docs/media/taslation-intro.gif`, shows twelve pages of one of its titles
+The README's recording, `docs/media/taslation-intro.gif`, shows pages of one of its titles
 (バルーンドリーム by Mitsuki Kuchitaka, 朽鷹みつき, as its title page credits it) while
 TASlation translates them (the Japanese erased, an English translation set in its place, a Spanish one in one scene,
 and a translation rewritten in the editing scenes: the pages are changed). The
