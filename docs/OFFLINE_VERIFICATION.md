@@ -4184,3 +4184,12 @@ Not done, a proposal: the 30 s counted over the requests in a row that got nothi
 leaving its silence to the next one, the time with no request under way not counted), so that a reader who turns on
 does not hide a server that has stopped; here it would have come some 70 s sooner. The two stops of the section
 before had the same look (requests begun, none answered, cancelled at the turns); their server logs were not kept.
+
+Done on 2026-11-21 (`ollama._Waits`): the wait for a first byte is counted over the requests in a row that got none,
+the time with none under way left out, and any byte of any request to the model, or any answer, starts it again. On
+the stand-in server of `tests/test_no_answer.py`, which takes every request and sends nothing, at the module's own
+bounds: a reader turning every 7 s, 2 s between pages, was told `ollama.no_answer` at 30.0 s waited in all, on the
+fifth page (the request then asked again on a new connection); turning every 6 s, the fifth request reached 30 s as
+its turn cancelled it and the sixth was ended at once, told 30.1 s. Before the change no request at either pace
+reached its own 30 s, so the rule could not come (the test of it, scaled to 0.6 s and turns of 0.12 s, fails there in
+15 pages). A look at `/api/ps` is no request to the model and changes nothing of the count.
