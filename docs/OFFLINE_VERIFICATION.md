@@ -4072,3 +4072,73 @@ translate, the choice made again at each step), what a page job takes of the bac
 size or read signature; a read stopped half-way), the drop told first and the numbering from 1 again, a page job
 stopped without a turn left waiting. `tests/test_follow.py`: a page judged by its own sharp picture, which only adds
 soft frames.
+
+## Pages left at work, a page done read again, and the stop that did not come back (2026-11-21)
+
+Three things another agent's recordings showed on a computer without a GPU (a stand-in viewer of its own, single
+pages, the page turned by TASlation's page key handed on), each found again with `tools/standin_e2e.py`, then the
+hunt for the stop of the section before.
+
+**What changed.**
+
+- *A page turned by TASlation's page key while a job ran.* The turn was taken as a page that settled
+  (`ui.live._await_change`): queued, and started with no gate once the job before was cancelled. A page with no gate
+  is never caught when turned past, and its job's cancel told the window nothing, so the stages it had told "working"
+  stayed so for good. The turn now goes as one the viewer made while the job ran (`_look_over_job`: the job cancelled
+  once the frame has stayed LEFT_PAGE_MS, the page started early once the worker is free, a gate of its own).
+- *Never left at work.* A page job that ends with its page neither done nor caught tells each stage it told
+  "working" what came of it (`backlog.Tracking._left`): "waiting" when it was stopped or its confirmation taken back,
+  "failed" when it failed; a page with no gate turned past is told missed, and one the backlog still has an entry of
+  is told waiting.
+- *A page done keeps its read.* A page the backlog finished, or one finished on show (`Tracking._keep_read`), keeps
+  its regions as read with the capture's units, size and read signature (`Backlog.keep_done`, DONE_CAP_MB 64, the
+  oldest out first, dropped with the backlog); shown again, the page job takes them (`Backlog.lend`), finds and reads
+  nothing and letters from the cache. Before, that read was let go with the page done, and the page job read the page
+  again (3.4 s on the processor in the recording) while its bar went back to "reading" over a page shown translated.
+  A stage told done or skipped is never told at work again while the page is on show (`Tracking._progress`), and a
+  page with nothing to read is told read at once (`Pipeline.process`).
+- *The tool.* `--k-keys` releases each turn of scenario k by the window's next page key once the window hands it on
+  (the stand-in's new `u` step waits for the control file's "turns"; the window's raise of the viewer before a key
+  is left out, the stand-in drawing while covered); `--k-stay-ms` keeps the last page flipped to that long (a page
+  read afresh on show while the pages turned past wait); k3, 3 s a page; per run the screens left told at work at
+  the end and the stages told at work again after done (`told`); per pace the backlog's first step after a page job
+  that showed its page (`first_steps`).
+
+**How it was measured.** `CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0`, the tool's server on
+11435, scenario k at 1 s and 3 s a page (k1, k3), 5 pages flipped past and 5 read back at 8 s, sharp at once, single
+pages, the stand-in drawing while covered (`--standin-draws-covered`), seed 1; once with the stand-in's own turns and
+once by the page key with the last page flipped to kept 8 s (`--k-keys --k-stay-ms 8000`), each on c101f13 (with the
+new tool) and on the final code. No other run overlapped them.
+
+| turns | code | screens left at work | stages at work again after done | page jobs with no gate | caught at 1 s / 3 s | read back: reused / read again / from the cache |
+|---|---|---|---|---|---|---|
+| the stand-in's own | before | 0 | 1 | 1 of 24 | 4 / 5 of 5 | 8 / 2 / 0 |
+| | final | 0 | 0 | 1 of 24 | 4 / 5 | 9 / 1 / 0 |
+| the page key | before | 2 | 6 | 12 of 24 | 1 / 0 | 0 / 6 / 4 |
+| | final | 0 | 0 | 1 of 24 | 2 / 5 | 8 / 2 / 0 |
+
+The one job with no gate in each run is a page the window took at once (the first page; a page the cache held
+whole), as it should. With the stand-in's own turns the tool's scenario k never took the key's way, which is why
+the first runs of this round saw none of it. By the key at 1 s, 2 of the 5 pages flipped past were not caught in
+the final run (1 finished on show): their jobs ran 0.64 and 0.74 s before the turn, short of the 0.8 s a
+confirmation takes (the stand-in's log: 972 and 1,010 ms on show; the stand-in turns once it has looked at its
+control file, every 100 ms, after the key reached it 34 to 46 ms after it was pressed). The first bubble of a page read back, median at 1 s / 3 s:
+286 / 492 ms before and 292 / 474 ms after with the stand-in's turns; 1,096 / 784 ms before and 350 / 473 ms after by
+the key.
+
+**The backlog's first step after the page on show.** In the four runs it came within 40 ms of the page job's end,
+but where the job ended less than 2 s after its confirmation: there it came 0 to 60 ms after the confirmation and 2 s
+(6 such jobs of 22). That is the take-back hold: the stand-in drew its first page soft, the window has seen it draw
+soft first, and the stores of a page job done within TAKE_BACK_MS of its confirmation stay open that long for a
+sharper picture of the page (`Pipeline.decide_kept`); the worker decides it before any other job, so a step of the
+backlog then would close it at once. A job's own time after showing its page was at most 0.62 s (its wait for its
+confirmation at most 0.52 s, the lettering ahead for the page's next showing, `keep_shown`, at most 92 ms). In the
+two-turn recording the step came 1.2 s after the page on show was told done, some 10 s after its confirmation: not
+the hold; it did not come here, nor the 7 s of the four-turn recordings (those are not kept). A change that left
+out the lettering ahead while pages turned past waited was taken out again, as `keep_shown` costs that little here.
+
+*Tests.* `tests/test_early_start.py`: a page turned by a key handed on while a job runs starts with a gate of its
+own (failed before: no gate). `tests/test_backlog.py`: a job stopped, cancelled with its confirmation taken back,
+turned past with no gate, or failed leaves no stage at work; a page the backlog finished, shown again, is read
+nowhere and told done throughout (failed before: read again, told "reading"). `tests/test_standin_viewer.py`: the
+steps and times of `--k-keys` and `--k-stay-ms`.

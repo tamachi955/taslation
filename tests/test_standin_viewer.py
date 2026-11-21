@@ -150,6 +150,12 @@ def test_the_control_file_is_the_go_alone_without_wait_done(tmp_path):
     assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 0});\n'
     standin_e2e.Director.release(me, sharp=1)
     assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 1});\n'
+    # --k-keys: the turns released go with the rest once there is one
+    standin_e2e.Director.release(me, turns=2)
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 1, "turns": 2});\n'
+    me.wait_done = None
+    standin_e2e.Director.release(me, go=4)
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 4, "turns": 2});\n'
 
 
 def test_wait_done_lets_a_hold_go_when_its_page_is_finished_and_a_soft_frame_when_the_window_asked():
@@ -311,6 +317,24 @@ def test_scenario_k_flips_fresh_pages_past_then_reads_them_back_and_is_never_in_
     narrow, _ = standin_e2e.build_plan(["k2"], 40, k={"turns": 3, "read": 3, "soft": True, "narrow": True})
     assert narrow[0].steps[:2] == ["j1", "w8000"]
     assert narrow[0].screens == [(1, False), (2, False), (3, False), (4, False), (2, False), (3, False), (4, False)]
+
+
+def test_scenario_k_by_the_windows_page_key_waits_for_each_release_and_its_last_flip_may_stay(tmp_path):
+    keyed = standin_e2e.k_steps("k5", 8, 2, 4, 2, False, keyed=True)  # (--k-keys: no wait of the stand-in's own)
+    assert keyed == ["t0", "b1", "j8", "u", "n", "u", "n", "u", "n", "u", "n", "u", "j10", "u", "n", "u", "t", "b"]
+    times = standin_e2e.k_key_times(500, 4, 2)  # (the waits of the steps without keys)
+    assert times == [(8.0, "key"), (8.5, "key"), (9.0, "key"), (9.5, "key"), (10.0, "driver"), (18.0, "key"),
+                     (26.0, "driver")]
+    assert keyed.count("u") == len(times)
+    stay = standin_e2e.k_steps("k1", 8, 2, 3, 2, True, stay_ms=6000)  # (--k-stay-ms: the last page flipped to)
+    assert stay == ["j8", "w8000", "n", "w1000", "n", "w1000", "n", "w6000", "j10", "w8000", "n", "w8000"]
+    assert standin_e2e.k_key_times(1000, 3, 2, stay_ms=6000)[2:4] == [(10.0, "key"), (16.0, "driver")]
+    plan = {"turns": 3, "read": 3, "soft": False, "narrow": True}
+    plain, _ = standin_e2e.build_plan(["k2"], 40, k=plan)
+    keys, steps = standin_e2e.build_plan(["k2"], 40, k={**plan, "keys": True})
+    assert keys[0].screens == plain[0].screens and sv.Step("u") in steps  # (the same turns, released otherwise)
+    control = sv.write_control(tmp_path, 3, turns=2)
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "turns": 2});\n'
 
 
 def test_the_pages_of_little_text_come_from_the_annotation_counts_alone(tmp_path):
@@ -546,7 +570,8 @@ def test_the_input_watch_notes_spells_of_input_by_the_tick_of_the_last_one(monke
     thread = standin_e2e.watch_input(notes, stop, every=0.005)
     thread.join(2)
     assert len(notes.inputs) == 2  # 5000 and 6000 within 3 s of each other, 20000 apart; 100 is no new input
-    assert round(notes.inputs[0][1] - notes.inputs[0][0]) == 1000 and notes.inputs[1][0] == notes.inputs[1][1]
+    # (each tick turned into a time by the system's tick count, whose step is about 16 ms: within two steps)
+    assert abs(notes.inputs[0][1] - notes.inputs[0][0] - 1000) <= 40 and notes.inputs[1][0] == notes.inputs[1][1]
 
 
 def test_the_cover_s_plan_is_a_segment_a_start_and_a_length():
