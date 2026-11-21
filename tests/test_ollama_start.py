@@ -640,6 +640,39 @@ def test_it_is_stopped_at_the_end_once(machine, tmp_path):
     assert finish_all() == [] and machine.asked == [pid]  # nothing more to give up
 
 
+def test_the_end_while_the_server_is_being_launched_gives_up_what_was_launched_at_once(machine, tmp_path):
+    """(the window closed while its start, on a worker thread, was launching Ollama: seen on the stand-in, a run
+    stopped 1.5 s into its window left the server it had started running)"""
+    _install(tmp_path)
+    machine.after_start = 0
+    ended: list[list[str]] = []
+    starter = OllamaStarter(URL, on_starting=lambda: ended.append(finish_all()), state_dir=_state(tmp_path))
+    assert starter.start() is not None  # (no answer to wait for: it is gone again)
+    assert ended == [[]]  # (the end found nothing to give up yet: the launch came after it)
+    pid = machine.pids[0]
+    assert machine.asked == [pid] and pid not in machine.procs  # (stopped by the start itself, at once)
+    assert not _record_file(tmp_path).exists() and not owns_server()
+
+
+def test_the_end_before_the_launch_launches_nothing(machine, tmp_path, monkeypatch):
+    _install(tmp_path)
+    looks = {"n": 0}
+
+    def running(url, timeout=1.0):  # (the end comes between the start's first look and its launch)
+        looks["n"] += 1
+        if looks["n"] == 2:
+            finish_all()
+        return False
+
+    monkeypatch.setattr(health, "ollama_running", running)
+    assert OllamaStarter(URL, state_dir=_state(tmp_path)).start() is not None
+    assert machine.started == [] and not owns_server()
+    machine.after_start = 0  # (a start after the end is a start as ever: a command run later in the same process)
+    monkeypatch.setattr(health, "ollama_running", machine.running)
+    assert start_ollama(URL, state=_state(tmp_path)) is None and len(machine.started) == 1 and owns_server()
+    assert finish_all() == [STOPPED]
+
+
 def test_an_ollama_that_ran_before_is_never_owned_nor_stopped(machine, tmp_path):
     _install(tmp_path)
     machine.answers = True  # the person's own, or an Ollama that starts with Windows
