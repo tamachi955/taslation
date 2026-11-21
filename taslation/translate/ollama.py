@@ -367,6 +367,7 @@ class OllamaTranslator:
         self._incident: dict[str, int] | None = None
         self._incidents = 0
         self.silent = 0
+        self.endings = 0  # (the requests ended so, all told: a pause the reader lifted comes back at the next one)
         self._incident_lock = threading.Lock()
         self._waits = _Waits()  # the seconds the requests waited for a first byte in a row, none coming (`_Watch`)
         self._load_most = 0.0  # the longest load this translator measured (`_load_bound`)
@@ -999,6 +1000,7 @@ class OllamaTranslator:
                 return
         with self._incident_lock:
             self.silent = n
+            self.endings += 1
         LOG.warning("no answer: %s ended (/api/ps %s): the reader is told the translation program does not answer",
                     kind, "answers" if alive else "silent")
         raise TranslationError(Message("ollama.not_answering"))

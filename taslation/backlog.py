@@ -24,7 +24,12 @@ is not caught (regions that would pass it are not kept: the page is then read ag
 `batch.THUMB_HEIGHT` px high of every screen told to the window (in memory, too small to read; never shown as a page).
 The backlog is dropped (`drop`) when the window closes, for another book, another viewer window, and when a
 whole-book run starts; pages already stored stay stored, and nothing more is told of a screen dropped. Auto off, Stop
-and Tools > Release the model now pause it (`paused`); the next page job, or Auto on, goes on with it.
+and Tools > Release the model now pause it (`paused`); the next page job, or Auto on, goes on with it. A translator
+that does not answer pauses it too ("no_answer", `follow_silence`: a request of any job's ended without an answer by
+the rule of `translate.ollama`, asked again and, for the server TASlation started, the server started again): it goes
+on by itself at the next answer of any request, and with F5 or Auto on (`go_on_after_silence`: asked once more, paused
+again at the next such end); a request of its own that ends so is said (``model_status``, the sentence that the
+translator does not answer), and never waits for a page job as a failure every request repeats does (`fatal`).
 
 A page shown again whose entry holds its regions as read is not read again (`Backlog.lend`, at the job's start: the
 frame of the same page units as the capture they came from - `same_units` -, of its pixel size, nothing a reading
@@ -347,7 +352,9 @@ class Backlog:
         self._sight = 0
         self._seq = 0
         self._order = 0
-        self.paused: set[str] = set()  # "auto", "stop", "release"
+        self.paused: set[str] = set()  # "auto", "stop", "release", "no_answer"
+        # (the translator and its count of requests ended without an answer when the reader last went on: F5, Auto on)
+        self._silence_seen: tuple[int, int] = (0, 0)
         self.hwnd: Any = None  # (the viewer window its pages come from)
         self.book = ""
         self._told: tuple[Any, ...] | None = None  # (None: nothing told yet)
@@ -623,6 +630,35 @@ class Backlog:
             self.paused.discard(why)
         self.totals()
 
+    # ------------------------------------------------------------------ a translator that does not answer
+    @staticmethod
+    def _silence_of(pipeline: Any) -> tuple[int, tuple[int, int]]:
+        """The translator's incident a request was ended in without an answer (0: none, or an answer since: its
+        ``silent``) and the mark of where it stands (the translator, its ``endings``)."""
+        translator = getattr(pipeline, "translator", None)
+        silent = int(getattr(translator, "silent", 0) or 0)
+        return silent, (id(translator), int(getattr(translator, "endings", 0) or 0))
+
+    def follow_silence(self, pipeline: Any) -> None:
+        """(`tick`) Paused ("no_answer") while the translator does not answer - a request of any job ended so (the
+        rule of `translate.ollama`) and no answer came since - unless the reader went on since its last such end
+        (`go_on_after_silence`); going on by itself once an answer comes."""
+        silent, mark = self._silence_of(pipeline)
+        if silent and mark != self._silence_seen:
+            if "no_answer" not in self.paused:
+                LOG.info("backlog paused: the translation program does not answer (incident %d)", silent)
+                self.pause("no_answer")
+        elif "no_answer" in self.paused:
+            LOG.info("backlog goes on: %s", "an answer came" if not silent else "the reader went on")
+            self.resume("no_answer")
+
+    def go_on_after_silence(self, pipeline: Any) -> None:
+        """(F5, Auto on) The pause for a translator that does not answer lifted: the backlog asks once more, and pauses
+        again at the next request ended without an answer."""
+        _silent, self._silence_seen = self._silence_of(pipeline)
+        if "no_answer" in self.paused:
+            self.resume("no_answer")
+
     def close(self) -> None:
         """(the window closes) Dropped, and its thread let go."""
         self.drop("close")
@@ -687,8 +723,10 @@ class Backlog:
             on = True
         if on and "auto" in self.paused:
             self.resume("auto")
+            self.go_on_after_silence(getattr(window, "pipeline", None))
         elif not on and "auto" not in self.paused:
             self.pause("auto")
+        self.follow_silence(getattr(window, "pipeline", None))
         if self.pending:
             self.settle_pending()
         if not self.has_work() or self.step_queued:
@@ -889,8 +927,14 @@ class Backlog:
         if isinstance(recent, _Recording) and on and context is not None and recent.added:
             context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)
         if host._fatal is not None:
-            with self._lock:
-                self.fatal = host._fatal
+            if getattr(host._fatal, "code", "") == "ollama.not_answering":
+                # (the translator does not answer, asked again and, when TASlation started it, started again: the
+                # backlog pauses until the next answer, F5 or Auto on - `follow_silence` - and says so)
+                self.pause("no_answer")
+                self._post("model_status", message=host._fatal)
+            else:
+                with self._lock:
+                    self.fatal = host._fatal
             self.tell(entry.screen, "translate", "waiting")
             return "failed"
         if all(id(u) in host.complete for u in todo):
@@ -1163,6 +1207,13 @@ def pause_backlog(window: Any, why: str) -> None:
     stop = getattr(getattr(window, "pipeline", None), "behind_stop", None)
     if stop is not None:
         stop.set()
+
+
+def go_on_after_silence(window: Any) -> None:
+    """(F5) *window*'s backlog paused for a translator that does not answer goes on (`Backlog.go_on_after_silence`)."""
+    backlog = backlog_of(window, make=False)
+    if backlog is not None:
+        backlog.go_on_after_silence(getattr(window, "pipeline", None))
 
 
 def tick(window: Any) -> None:

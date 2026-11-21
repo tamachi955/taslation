@@ -72,7 +72,8 @@ from ..messages import Cancelled, Message, message_of
 from ..name_variants import PageLines, find_variants
 from ..notes import is_temporary_name, sheet_key
 from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
-from ..backlog import drop_backlog, holds_warming, pause_backlog, reading_event, tick as backlog_tick, tracking_for
+from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, pause_backlog, reading_event,
+                       tick as backlog_tick, tracking_for)
 from ..pipeline import keeps_answered, turn_away
 from . import area, name_check, updates
 from .attention import tell_run_ended
@@ -2192,7 +2193,9 @@ class JobsMixin:
         """Translate (F5): the page in the viewer read and translated now (from the cache when it is there),
         whether or not Auto has taken it. While the models load or a job runs it waits, and runs after. A viewer
         not read yet has its window enlarged first (`_enlarge_first`). A Book box that names no book gets its name
-        first (`_ask_name`; not over the full screen, where the page is translated and nothing of it kept)."""
+        first (`_ask_name`; not over the full screen, where the page is translated and nothing of it kept). The pages
+        turned past that wait for a translator that did not answer go on too (`backlog.go_on_after_silence`)."""
+        go_on_after_silence(self)
         if not self.ready or self.busy:
             self._queue("translate")
             return

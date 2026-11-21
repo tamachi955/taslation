@@ -357,10 +357,10 @@ def test_a_server_the_person_runs_or_a_restart_that_failed_ends_the_request_with
     assert restart.calls == 1 and len(stand.requests) == 2  # (asked again once, then the restart asked once)
     # (that it is started again is said only of a restart under way: never of a server the person runs)
     assert ("ollama.restarting" in _codes(told)) is (gives is False)
-    assert t.silent != 0  # (the client says it does not answer until the next answer)
+    assert t.silent != 0 and t.endings == 1  # (the backlog pauses while it is so)
     out = _asked(t)  # F5: no answer since - the incident goes on, the request ends after its bound
     assert out["ended"] and out.get("error") == "ollama.not_answering", out
-    assert len(stand.requests) == 3 and restart.calls == 2
+    assert len(stand.requests) == 3 and restart.calls == 2 and t.endings == 2  # (a backlog let go pauses again)
     assert _codes(told).count("ollama.no_answer") == 1  # (once per incident)
     stand.plan = ["answer"]
     assert _asked(t).get("result") == ["EN:" + LINE] and t.silent == 0  # (an answer ends the incident)
