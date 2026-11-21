@@ -485,6 +485,20 @@ def test_the_page_nearest_the_reader_ahead_of_it_comes_first_with_all_it_needs_b
                      ("translate", 1), ("read", 2), ("translate", 2)]
 
 
+def test_in_a_page_jobs_hold_the_next_step_is_the_nearest_read_its_translations_wait():
+    """(`Backlog._next` with *reads_only*: a page kept for now, `Pipeline.behind_reads_allowed`)"""
+    b = Backlog(lambda kind, **data: None)
+    for sight, kind in ((1, "units"), (2, "frame"), (3, "regions"), (4, "units")):
+        _entry(b, sight, kind)
+    assert [b._next()[0], b._next()[1].screen.sight] == ["translate", 1]
+    order = []
+    while (nxt := b._next(reads_only=True)) is not None:
+        order.append((nxt[0], nxt[1].screen.sight))
+        _done_with(b, nxt[0], nxt[1])
+    assert order == [("read", 2), ("make", 3)] and len(b.entries) == 4  # (all four left to translate, nearest first)
+    assert [b._next()[0], b._next()[1].screen.sight] == ["translate", 1]
+
+
 def test_the_choice_is_made_again_at_every_step_where_the_reader_is_now():
     b = Backlog(lambda kind, **data: None)
     entries = {sight: _entry(b, sight, "frame") for sight in (2, 3, 7, 8)}
@@ -535,8 +549,42 @@ def test_the_window_queues_a_step_only_when_it_is_idle_and_nothing_is_held(setti
     pipeline.behind_allowed = lambda: True
     backlog_tick(window)
     assert window._jobs.qsize() == 1 and b.step_queued
+    assert not getattr(window._jobs.queue[0], "in_hold", False)
     backlog_tick(window)
     assert window._jobs.qsize() == 1  # (one at a time)
+
+
+def test_in_a_page_jobs_hold_the_window_queues_a_read_only_and_the_worker_leaves_the_page_undecided_for_it(settings):
+    """(a page kept for now: `Pipeline.behind_reads_allowed` without `behind_allowed`; `ui.jobs.next_job`)"""
+    import queue
+
+    from taslation.ui import jobs
+
+    b = Backlog(lambda kind, **data: None)
+    b.hwnd = 7
+    _entry(b, 1, "units")
+    decided: list[str] = []
+    left = [1.5]
+    pipeline = SimpleNamespace(behind_allowed=lambda: False, behind_reads_allowed=lambda: True,
+                               translator=object(), behind_paused=False, kept_open_left=lambda: left[0],
+                               decide_kept=lambda: decided.append("decided"), stop_warm=lambda: None)
+    window = SimpleNamespace(auto_var=SimpleNamespace(get=lambda: True), selected=SimpleNamespace(hwnd=7),
+                             pipeline=pipeline, ready=True, busy=False, batch=None, _batching=False, _queued=None,
+                             _jobs=queue.Queue(), _backlog=b)
+    backlog_tick(window)
+    assert window._jobs.empty()  # (only a translation to do: it waits for the decision)
+    _entry(b, 2, "frame")
+    backlog_tick(window)
+    assert window._jobs.qsize() == 1 and window._jobs.queue[0].in_hold
+    job = jobs.next_job(window)
+    assert job.in_hold and decided == []  # (the page kept for now stays undecided while the read runs)
+    window._jobs.put(job)
+    left[0] = 0.0  # (its time up by the time the worker takes it: decided first, as before any job)
+    assert jobs.next_job(window) is job and decided == ["decided"]
+    pipeline.behind_reads_allowed = lambda: False  # (a page job's changes held for its frame: nothing at all)
+    b.step_queued = False
+    backlog_tick(window)
+    assert window._jobs.empty()
 
 
 # ------------------------------------------------------------------ pre-emption
@@ -584,6 +632,96 @@ def test_no_step_runs_while_a_page_jobs_changes_are_held(settings, sample_page):
     assert b.step(p) == ""
     p._held_for = None
     assert b.step(p) == "made"
+
+
+def _held_with_a_frame_behind(settings, b, sample_page, sample_page2, book, open_for=30.0):
+    """A page turned past while it was read (its frame to read, `_reading_job`), then a page job on another page kept
+    for now (`Provisional.keep`: its confirmation open for *open_for* s)."""
+    p = _reading_job(settings, b, sample_page, book)
+    _packed(b)
+    assert len(b.entries) == 1 and b.entries[0].frame is not None
+    gate = _confirmed(open_for=open_for)
+    _job(p, b, sample_page2, gate)
+    assert p._kept_open is not None and p._provisional is None and not gate.sealed
+    return p, gate
+
+
+@pytest.mark.parametrize("taken_back", [False, True])
+def test_while_a_page_is_kept_for_now_the_backlog_reads_and_its_translation_waits(settings, sample_page, sample_page2,
+                                                                                  taken_back):
+    b = Backlog(lambda kind, **data: None)
+    p, gate = _held_with_a_frame_behind(settings, b, sample_page, sample_page2, f"Hold {taken_back}")
+    held = p._kept_open
+    pages_before = len(p.cache.pages)
+    assert not p.behind_allowed() and p.behind_reads_allowed()
+    assert b.step(p) == "read"  # (in the hold: the frame of the page turned past read)
+    assert b.entries[0].frame is None and b.entries[0].units
+    assert b.step(p) == ""  # (its translation waits: a take-back would put back what it stored)
+    assert p._kept_open is held and not gate.sealed and len(p.cache.pages) == pages_before
+    if taken_back:
+        assert gate.take_back()
+    assert p.decide_kept() is (not taken_back)
+    assert b.step(p) == "translate" and not b.entries
+    assert len(p.cache.pages) == (1 if taken_back else 2) and not any(pg.incomplete for pg in p.cache.pages)
+
+
+def test_a_read_in_the_hold_stops_as_its_time_is_up_and_the_next_read_takes_it_up(settings, sample_page,
+                                                                                    sample_page2):
+    b = Backlog(lambda kind, **data: None)
+    p, _gate = _held_with_a_frame_behind(settings, b, sample_page, sample_page2, "Hold up")
+    left = [30.0]
+    p.kept_open_left = lambda: left[0]  # (the hold's time, as the step looks at it)
+
+    class TimeUp(FakeOcr):
+        """(the same reader read before and after: what a read depends on unchanged, `Pipeline.read_signature`)"""
+
+        def __init__(self):
+            super().__init__()
+            self.up = False
+
+        def read(self, image):
+            if not self.up:
+                self.up, left[0] = True, 0.0  # (the time is up while the first region is read)
+            return super().read(image)
+
+    ocr = p.ocr = TimeUp()
+    assert b.step(p) == "stopped" and b.waits == [] and b.last_wait is None  # (no turn stopped it: no wait counted)
+    assert b.entries[0].found is not None and b.in_hold == {"time up": 1, "stopped": 1}  # (what it read kept)
+    calls = ocr.calls
+    del p.kept_open_left
+    assert p.decide_kept() is True
+    assert b.step(p) == "read" and b.resumes.get("resumed") == 1
+    assert ocr.calls > calls and b.in_hold == {"time up": 1, "stopped": 1}  # (the rest read, outside the hold)
+    assert b.step(p) == "translate" and not b.entries
+
+
+def test_the_windows_close_decides_a_page_kept_for_now_once_the_read_in_its_hold_is_over(settings, sample_page,
+                                                                                          sample_page2):
+    """(the close decides it on its own thread, `Pipeline.drop_unconfirmed`: never under the backlog's read)"""
+    b = Backlog(lambda kind, **data: None)
+    p, gate = _held_with_a_frame_behind(settings, b, sample_page, sample_page2, "Hold close")
+    entered, release = threading.Event(), threading.Event()
+
+    class Held(FakeOcr):
+        def read(self, image):
+            entered.set()
+            assert release.wait(10)
+            return super().read(image)
+
+    p.ocr = Held()
+    stepped: list[str] = []
+    step = threading.Thread(target=lambda: stepped.append(b.step(p)), daemon=True)
+    step.start()
+    assert entered.wait(10)
+    decided: list = []
+    close = threading.Thread(target=lambda: decided.append(p.decide_kept()), daemon=True)
+    close.start()
+    close.join(0.3)
+    assert close.is_alive() and p._kept_open is not None and not gate.sealed  # (it waits for the read)
+    release.set()
+    step.join(10)
+    close.join(10)
+    assert stepped == ["read"] and decided == [True] and gate.sealed and p._kept_open is None
 
 
 # ------------------------------------------------------------------ drops and pauses

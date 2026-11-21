@@ -2446,9 +2446,12 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         held, notes.local.side = getattr(notes.local, "side", None), "backlog"
         began, what = now_ms(), ""
         try:
-            nxt = self._next()  # (the page it works on: chosen so again inside, nothing changed between)
+            # (the page it works on: chosen so again inside, nothing changed between; in a page job's hold a read only,
+            # `Pipeline.behind_reads_allowed`)
+            hold = not pipeline.behind_allowed()
+            nxt = self._next(reads_only=hold)
         except Exception:  # noqa: BLE001 - not known
-            nxt = None
+            hold, nxt = None, None
         resumes = dict(getattr(self, "resumes", {}) or {})
         try:
             what = backlog_step(self, pipeline, *a, **k)
@@ -2460,7 +2463,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
                 # `Backlog._resume_of` counted in this step; None for a read with nothing kept of one before)
                 now = dict(getattr(self, "resumes", {}) or {})
                 took = next((key for key, n in now.items() if n != resumes.get(key, 0)), None)
-                notes.backlog_note("step", self, began=began, did=what, resumed=took,
+                notes.backlog_note("step", self, began=began, did=what, resumed=took, in_hold=hold,
                                    on=nxt[0] if nxt else None, sight=nxt[1].screen.sight if nxt else None,
                                    here=getattr(self, "_here", None),
                                    waited_ms=round(self.last_wait * 1000) if what == "stopped"
@@ -5352,6 +5355,8 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             "results_unconfirmed": sum(1 for j in jobs if j["gate"] and j.get("gate_end") != "confirmed"
                                        and j.get("result_t") and j.get("result_translated")),
             "steps": dict(Counter(b["did"] for b in bg)),
+            # (the steps run in a page job's hold - a read only, `Pipeline.behind_reads_allowed` -, by what they did)
+            "steps_in_hold": dict(Counter(b["did"] for b in bg if b.get("in_hold"))),
             "steps_busy_s": round(sum(b["t"] - b["began"] for b in bg) / 1000, 1),
             # (the backlog's first step after a page job that showed its page - none started between -: from the page
             # shown, and from the job's end; and each such job's time after it showed its page, `keep_shown` within)
