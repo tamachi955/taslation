@@ -3,6 +3,22 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.6 - 2026-11-22
+
+Translating a whole book
+
+* A whole-book run could read a page from the soft picture a viewer draws first and never read its sharp one: when
+  the sharp picture arrived while the soft one was being read, it was kept but not read. The run now throws that
+  reading away - nothing of it is translated or stored - and reads the page again from the sharp picture. Seen once
+  in 13 runs on the test computer, and more often on a slower one. (With `context_mode` off, the run that reads page
+  by page, this is not changed yet.)
+
+For developers
+
+* The stand-in viewer run and the benchmark also run on GitHub's machines, in parallel jobs, for a push to a branch
+  named `ci/...` (`.github/workflows/gpu-checks.yml`): about 20 minutes beside the test suite's six. The developer's
+  computer is needed only for the timing figures.
+
 ## 0.9.5 - 2026-11-22
 
 Lettering
