@@ -8,6 +8,8 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 
 The TASlation (Tool Assisting Self-translation of manga) window reads the manga page your viewer is showing, translates it on this computer, and shows the translation laid over the page. In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating it for that use (Article 47-6); [docs/LEGAL.md](docs/LEGAL.md) sums up what 30 countries allow.
 
+https://github.com/user-attachments/assets/a99d3445-bd31-4dd2-be83-ff3702f4959c
+
 ![The TASlation introduction: beside the viewer, a page is translated as you turn to it, and corrected](docs/media/taslation-intro.gif)
 
 ▶ [Watch the 49-second video](https://github.com/tamachi955/taslation/releases/download/v0.9.2/taslation-introduction.mp4) (MP4, 12 MB): the idea, what happens inside, the speed, and the features.
