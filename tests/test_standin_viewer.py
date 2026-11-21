@@ -442,7 +442,8 @@ def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
     import threading
     from taslation.capture import wgc
 
-    monkeypatch.setattr(standin_e2e, "window_cover", lambda hwnd, pid: {"points": {"stand-in": 64}, "front": "x"})
+    monkeypatch.setattr(standin_e2e, "window_cover", lambda hwnd, pid, pids: {"points": {"stand-in": 64},
+                                                                              "front": "x", "pids": sorted(pids())})
     monkeypatch.setattr(standin_e2e, "fresh_frame", lambda notes, hwnd: {"ms": 50, "shows": {"page": drawn_page}})
     monkeypatch.setattr(standin_e2e, "idle_seconds", lambda: 12.0)
     monkeypatch.setattr(wgc, "_session", None)
@@ -453,7 +454,8 @@ def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
                       for dt, p in captures]
     notes.capture_n, notes.last_capture_t = capture_n, now - 100
     stop = threading.Event()
-    thread = standin_e2e.watch_frames(notes, 1, 2, tmp_path / "stacks.txt", stop, every=0.02)
+    thread = standin_e2e.watch_frames(notes, 1, 2, tmp_path / "stacks.txt", stop, every=0.02,
+                                      standin_pids=lambda: {30, 31})
     return notes, stop, thread
 
 
@@ -474,6 +476,7 @@ def test_the_frame_watch_finds_the_window_s_frames_standing_still_and_their_end(
         assert stall["frozen"] == (4, False, "sharp") and stall["drawn"]["page"] == 5 and stall["until_t"] is None
         probe = stall["probes"][0]
         assert probe["cover"]["points"] == {"stand-in": 64} and probe["fresh"]["shows"] == {"page": 5}
+        assert probe["cover"]["pids"] == [30, 31]  # (the stand-in browser's processes, to tell its own windows)
         assert probe["idle_s"] == 12.0 and probe["window_session"] is None and probe["drawn"]["page"] == 5
         assert "stand still on (4, False, 'sharp')" in (tmp_path / "stacks.txt").read_text(encoding="utf-8")
         with notes.lock:  # the window's frames go on: the stall ends
@@ -844,6 +847,12 @@ def test_the_browser_command_keeps_its_own_profile_and_window():
     scaled = sv.browser_command(Path("C:/b/chrome.exe"), "file:///p.html", Path("C:/scratch/profile"),
                                 (0, 0, 1300, 900), 1.5)
     assert "--force-device-scale-factor=1.5" in scaled and scaled[-1] == "--app=file:///p.html"
+    assert not any("occlu" in a.lower() for a in cmd)  # (by default it stops drawing under windows, as a browser does)
+    covered = sv.browser_command(Path("C:/b/chrome.exe"), "file:///p.html", Path("C:/scratch/profile"),
+                                 (0, 0, 1300, 900), draws_covered=True)
+    features = [a for a in covered if a.startswith("--disable-features=")]
+    assert len(features) == 1 and features[0].endswith(",CalculateNativeWinOcclusion")  # (one list: the last would win)
+    assert "--disable-backgrounding-occluded-windows" in covered and covered[-1] == "--app=file:///p.html"
 
 
 # ---------------------------------------------------------------------------------------------------- the window
