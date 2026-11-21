@@ -9,7 +9,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import ttk
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from ..capture import IS_WINDOWS, foreground_owner, foreground_window, give_foreground, monitor_rect, window_exists
 from . import area
@@ -188,38 +188,102 @@ def initial_geometry(widget: tk.Misc, size: tuple[int, int] = DEFAULT_SIZE,
     return f"{width}x{height}+{x}+{y}"
 
 
-def place_window(win: tk.Toplevel, parent: tk.Misc | None = None, at: tuple[int, int] | None = None) -> None:
+def dialog_area(win: tk.Misc, parent: tk.Misc | None = None,
+                at: tuple[int, int] | None = None) -> tuple[tuple[int, int, int, int], tuple[int, int]]:
+    """The work area (left, top, right, bottom) a dialog is kept on and the screen point it is centred on, as
+    `place_window` takes them: the middle of *parent* and the work area of the monitor there (with *at*: that point;
+    with neither: the primary monitor's work area and its middle)."""
+    if at is not None:
+        cx, cy = int(at[0]), int(at[1])
+        return work_area(win, cx, cy), (cx, cy)
+    if parent is not None:
+        cx = parent.winfo_rootx() + parent.winfo_width() // 2
+        cy = parent.winfo_rooty() + parent.winfo_height() // 2
+        return work_area(win, cx, cy), (cx, cy)
+    left, top, right, bottom = work_area(win)
+    return (left, top, right, bottom), ((left + right) // 2, (top + bottom) // 2)
+
+
+def dialog_spot(size: tuple[int, int], centre: tuple[int, int], area: tuple[int, int, int, int]) -> tuple[int, int]:
+    """Where a dialog whose inside is *size* goes (Tk's "+X+Y" of its frame): its frame centred on *centre*, moved
+    as needed so that the whole of it, title bar first, lies on *area*."""
+    border, caption = frame_extents()
+    outer_w, outer_h = int(size[0]) + 2 * border, int(size[1]) + caption + border
+    left, top, right, bottom = area
+    x = max(left, min(centre[0] - outer_w // 2, right - outer_w))
+    y = max(top, min(centre[1] - outer_h // 2, bottom - outer_h))
+    return x, y
+
+
+def place_window(win: tk.Toplevel, parent: tk.Misc | None = None, at: tuple[int, int] | None = None,
+                 fit: Callable[[], None] | None = None) -> None:
     """Centre the dialog *win* over *parent* (with no parent: over the primary monitor's work area; with *at*, over
     that screen point instead) and move it as needed so that the whole of it, title bar included, stays on the
-    monitor it lands on. It is placed while still withdrawn, so it never shows first somewhere else. A dialog whose
-    parent is not on the screen is left alone."""
+    monitor it lands on. It is placed while still withdrawn, so it never shows first somewhere else; *fit*, when
+    given, runs then too (a dialog that makes itself lower for the work area). A dialog whose parent is not on the
+    screen is left alone. (A dialog on the screen whose content changed: `place_again`.)"""
     try:
         if parent is not None and not parent.winfo_viewable():
             return
         hidden = win.state() == "withdrawn"
         win.withdraw()
         win.update_idletasks()
+        if fit is not None:
+            fit()
+            win.update_idletasks()
         size = re.match(r"(\d+)x(\d+)", win.wm_geometry())
         width, height = (int(size.group(1)), int(size.group(2))) if size else (win.winfo_reqwidth(), win.winfo_reqheight())
-        border, caption = frame_extents()
-        outer_w, outer_h = width + 2 * border, height + caption + border
-        if at is not None:
-            cx, cy = int(at[0]), int(at[1])
-            left, top, right, bottom = work_area(win, cx, cy)
-        elif parent is not None:
-            cx = parent.winfo_rootx() + parent.winfo_width() // 2
-            cy = parent.winfo_rooty() + parent.winfo_height() // 2
-            left, top, right, bottom = work_area(win, cx, cy)
-        else:
-            left, top, right, bottom = work_area(win)
-            cx, cy = (left + right) // 2, (top + bottom) // 2
-        x = max(left, min(cx - outer_w // 2, right - outer_w))
-        y = max(top, min(cy - outer_h // 2, bottom - outer_h))
+        area, centre = dialog_area(win, parent, at)
+        x, y = dialog_spot((width, height), centre, area)
         win.geometry(f"+{x}+{y}")
         if not hidden:
             win.deiconify()
     except tk.TclError:
         pass
+
+
+def asked_size(win: tk.Misc) -> tuple[int, int]:
+    """The inside size *win* asks for with what it shows now (a dialog that is not resized by hand has that size)."""
+    win.update_idletasks()
+    return win.winfo_reqwidth(), win.winfo_reqheight()
+
+
+def hold_size(win: tk.Toplevel) -> tuple[int, int]:
+    """*win* kept at the size it has (`asked_size`) while its content changes, until `place_again` gives it its new
+    size and place in one move: it is never seen grown or shrunk where it stood. That size."""
+    size = asked_size(win)
+    try:
+        win.geometry(f"{size[0]}x{size[1]}")
+    except tk.TclError:
+        pass
+    return size
+
+
+def place_again(win: tk.Toplevel, parent: tk.Misc | None = None, before: tuple[int, int] | None = None) -> bool:
+    """The dialog *win*, whose content changed, placed where `place_window` would place a dialog of its new size over
+    *parent* (`dialog_area`, `dialog_spot`): centred on it and kept on the work area of the monitor there, its new
+    size and place given in one move. It is moved where it stands - never withdrawn, shown again, raised or given the
+    focus, so a dialog on the screen takes nothing from the window in front and a hidden one stays hidden. Left where
+    it is when its size is still *before* (`hold_size` before the change: the reader may have moved it) or its parent
+    is not on the screen. Either way it then takes the size its content asks for (`hold_size` ends). Whether it was
+    moved."""
+    moved = False
+    try:
+        size = asked_size(win)
+        if (parent is None or parent.winfo_viewable()) and (before is None or tuple(before) != size):
+            area, centre = dialog_area(win, parent)
+            x, y = dialog_spot(size, centre, area)
+            win.geometry(f"{size[0]}x{size[1]}+{x}+{y}")
+            win.update_idletasks()  # (moved now, not at the next idle moment)
+            moved = True
+    except tk.TclError:
+        pass
+    try:
+        win.geometry("")  # (the size its content asks for again: the same now)
+        win.update_idletasks()
+    except tk.TclError:
+        pass
+    return moved
 
 
 def book_monitor(parent: tk.Misc) -> tuple[int, int, int, int] | None:

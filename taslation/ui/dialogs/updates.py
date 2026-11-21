@@ -4,7 +4,12 @@ version and date), GitHub could not be asked (one plain sentence: `reason_text`)
 versions with their dates, the changes since this one in a scrolling plain-text box, Update now and Later. In a git
 clone nothing is asked: git updates it. Opened again within a minute of an answer that was no failure, it shows that
 answer again and asks nothing (`updates.recent`). Under it, the box that turns the start's look on and off (``update_check``,
-kept in taslation.toml as the Settings dialog keeps it), with one sentence on what is asked of whom."""
+kept in taslation.toml as the Settings dialog keeps it), with one sentence on what is asked of whom.
+
+The dialog is centred over the window and kept on the work area of the monitor there (`layout.place_window`); each
+time what it says changes, it is placed again as a dialog of its new size would be (`layout.place_again`), without
+taking the focus, and where it is when its size stayed the same. Where it would be taller than the work area, the
+changes box gets fewer lines (`_fit`)."""
 
 from __future__ import annotations
 
@@ -16,12 +21,12 @@ from typing import Any, Callable
 
 from ... import config
 from ...i18n import _
-from .. import updates
-from ..layout import place_window
+from .. import layout, updates
 from .caches import in_lines
 
 TEXT_CHARS = 60  # the dialog's sentences are broken at this many "0" widths of its font
 CHANGES_SIZE = (72, 12)  # the changes box: characters wide, lines high (it scrolls)
+CHANGES_MIN_LINES = 4  # ... and never fewer lines than this, however low the screen
 
 
 def reason_text(reason: str) -> str:
@@ -110,7 +115,7 @@ class UpdateDialog(tk.Toplevel):
             self.check = updates.Check(self.root_dir)
             updates.watch(window, self.check, self._answered)
         self.close_btn.focus_set()
-        place_window(self, master)
+        layout.place_window(self, master, fit=self._fit)
         try:
             self.grab_set()
         except tk.TclError:  # not on the screen (yet): no grab
@@ -186,8 +191,34 @@ class UpdateDialog(tk.Toplevel):
         except tk.TclError:
             return
         self.answer = answer
-        self._show(answer["result"], answer)
-        place_window(self, self.master)
+        self._changed(lambda: self._show(answer["result"], answer))
+
+    def _changed(self, change: Callable[[], None]) -> None:
+        """(Tk) *change* to what the dialog says, then the dialog lowered for the work area as needed (`_fit`) and
+        placed again at its new size (`layout.place_again`): until then it keeps its size and place
+        (`layout.hold_size`), so that it is never seen grown where it stood."""
+        before = layout.hold_size(self)
+        try:
+            change()
+            self._fit()
+        finally:
+            layout.place_again(self, self.master, before)
+
+    def _fit(self) -> None:
+        """The changes box with fewer lines (it scrolls; at least `CHANGES_MIN_LINES`) while the dialog would be
+        taller than the work area of the monitor it is placed on (`layout.dialog_area`, as `place_window` finds it)."""
+        if self.changes is None:
+            return
+        area, _centre = layout.dialog_area(self, self.master)
+        border, caption = layout.frame_extents()
+        over = layout.asked_size(self)[1] - (area[3] - area[1] - caption - border)
+        if over <= 0:
+            return
+        line = max(1, tkfont.Font(self, font=self.changes.cget("font")).metrics("linespace"))
+        lines = int(self.changes.cget("height"))
+        fewer = max(CHANGES_MIN_LINES, lines - -(-over // line))
+        if fewer < lines:
+            self.changes.configure(height=fewer)
 
     # ------------------------------------------------------------------ what it does
     def _keep_choice(self) -> None:
@@ -199,7 +230,8 @@ class UpdateDialog(tk.Toplevel):
         except (config.ConfigError, OSError) as e:
             self.choice_var.set(not self.choice_var.get())
             reason = getattr(e, "strerror", None) or str(e)
-            self.choice_note.configure(text=in_lines(_("Not kept: {reason}").format(reason=reason), self.text_width))
+            note = in_lines(_("Not kept: {reason}").format(reason=reason), self.text_width)
+            self._changed(lambda: self.choice_note.configure(text=note))
             return
         self.window.settings.update_check = value
 

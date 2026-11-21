@@ -2,7 +2,8 @@
 and the once-a-day rule with a made-up clock, the asking program's answer read and checked, the real check_update.py
 asked by the window's code against a small HTTP server on 127.0.0.1 with the offline guard in this process (nothing
 blocked, nothing allowed: the window's process connects nowhere), the start's look that waits while a page is read and
-says a newer version only in the Help menu and one quiet status line, the dialog's three answers and its box, and
+says a newer version only in the Help menu and one quiet status line, the dialog's three answers and its box, its
+place after the answer on a made-up low screen in every window language, and
 Update now: update.cmd's command line, its console of its own, the environment the guard changed given back, the
 window closed only once it started. Nothing here reaches the network, the real ~/.taslation or a real update."""
 
@@ -11,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import time
@@ -22,10 +24,10 @@ import pytest
 
 from taslation import netguard
 from taslation.config import ConfigError, Settings
-from taslation.i18n import _, set_language
-from taslation.ui import updates
+from taslation.i18n import UI_LANGUAGES, _, set_language
+from taslation.ui import layout, updates
 from taslation.ui.dialogs import updates as dialog_mod
-from taslation.ui.dialogs.updates import UpdateDialog, reason_text
+from taslation.ui.dialogs.updates import CHANGES_MIN_LINES, CHANGES_SIZE, UpdateDialog, reason_text
 
 from test_check_update import CHANGELOG, CHANGELOG_PATH, Server, body, scratch  # (the loopback server)
 
@@ -593,6 +595,123 @@ def test_chosen_again_within_a_minute_the_dialog_shows_the_same_answer_and_asks_
     assert opened() == ("could not ask", "", 4)
     assert opened() == ("could not ask", "", 5)  # a failure is asked again at once
     assert updates.recent(w) is None
+
+
+# ---------------------------------------------------------------- the dialog's place on the screen
+CHANGES_090 = (ROOT / "tests" / "fixtures" / "changes-0.9.0.txt").read_text("utf-8").rstrip("\n")  # the real 0.9.0
+#   entry as check_update.py gives it to a 0.8.1 (2,244 characters)
+LOW = (0, 0, 1366, 728)  # the work area of a 1366 x 768 screen with its taskbar
+LOWER = (0, 0, 910, 485)  # the same screen at 150 %, in the pixels of a dialog at 100 %
+FRAME = (8, 31)  # a window frame's border and its title bar with the top border
+WINDOW = (8, 59, 1350, 640)  # the window's inside on that screen: left, top, width, height
+
+
+@pytest.fixture
+def screen(monkeypatch, hidden_root):
+    """A made-up screen: the work area *area[0]* (LOW at first) with the window's inside at WINDOW on it. The tests'
+    root, never shown, is taken for that window on the screen; the dialogs stay withdrawn, as the root is."""
+    area = [LOW]
+    monkeypatch.setattr(layout, "work_area", lambda widget, x=None, y=None: area[0])
+    monkeypatch.setattr(layout, "frame_extents", lambda: FRAME)
+    for name, value in zip(("winfo_rootx", "winfo_rooty", "winfo_width", "winfo_height"), WINDOW):
+        monkeypatch.setattr(hidden_root, name, lambda value=value: value)
+    monkeypatch.setattr(hidden_root, "winfo_viewable", lambda: 1)
+    return area
+
+
+def _placed(d) -> tuple[int, int, int, int]:
+    """The dialog's frame on the screen (left, top, right, bottom): where Tk was told to put it, at the size it asks
+    for."""
+    m = re.fullmatch(r"\d+x\d+\+(-?\d+)\+(-?\d+)", d.wm_geometry())
+    x, y = int(m.group(1)), int(m.group(2))
+    width, height = layout.asked_size(d)
+    return x, y, x + width + 2 * FRAME[0], y + height + FRAME[1] + FRAME[0]
+
+
+def _centred(size, area) -> tuple[int, int]:
+    """Where a dialog whose inside is *size* goes when it opens over the window: centred on it, moved onto *area*."""
+    outer_w, outer_h = size[0] + 2 * FRAME[0], size[1] + FRAME[1] + FRAME[0]
+    cx, cy = WINDOW[0] + WINDOW[2] // 2, WINDOW[1] + WINDOW[3] // 2
+    return (max(area[0], min(cx - outer_w // 2, area[2] - outer_w)),
+            max(area[1], min(cy - outer_h // 2, area[3] - outer_h)))
+
+
+@pytest.fixture
+def shown_again(monkeypatch):
+    """What the dialog asked of the window manager after it began to ask: withdrawn, shown, raised, focused."""
+    seen: list[str] = []
+    for name in ("withdraw", "deiconify", "lift", "focus_force"):
+        original = getattr(UpdateDialog, name)
+
+        def spy(self, *args, _name=name, _original=original, **kwargs):
+            if getattr(self, "shown", "asking") != "asking":
+                seen.append(_name)
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(UpdateDialog, name, spy)
+    return seen
+
+
+@pytest.mark.parametrize("area", [LOW, LOWER], ids=["1366x768", "1366x768-at-150"])
+@pytest.mark.parametrize("code", sorted(UI_LANGUAGES))
+def test_the_answered_dialog_lies_on_the_screen_centred_on_the_window_with_its_buttons(
+        tmp_path, hidden_root, dialog_checks, screen, shown_again, area, code):
+    """The dialog opens small ("asking") and grows with the answer: it is placed again as a dialog of its new size
+    opened over the window would be, its frame and its buttons on the work area, never hidden, shown again, raised or
+    focused for it. Where the screen is lower than the dialog, the changes box has fewer lines. In every window
+    language (the tallest answered dialog is in German, Spanish, French, Indonesian, Japanese, Korean, Dutch, Polish,
+    Portuguese, Russian and Turkish: one line more than in English)."""
+    screen[0] = area
+    set_language(code)
+    w = DialogWindow(hidden_root, tmp_path / "state", tmp_path / "taslation.toml")
+    FakeCheck.answers, FakeCheck.made = [newer_answer(changes=CHANGES_090, date="2026-11-21")], 0
+    d = UpdateDialog(hidden_root, w, root=dialog_checks)
+    asking = _placed(d)
+    deadline = time.monotonic() + 5
+    while d.shown == "asking" and time.monotonic() < deadline:
+        hidden_root.update()
+        time.sleep(0.02)
+    assert d.shown == "newer" and d.update_btn is not None
+    size = layout.asked_size(d)
+    left, top, right, bottom = _placed(d)
+    assert (left, top) == _centred(size, area) and (left, top) != asking[:2], (code, d.wm_geometry(), size)
+    assert area[0] <= left and area[1] <= top and right <= area[2] and bottom <= area[3], (code, (left, top, right, bottom))
+    frame = d.btns.master  # the buttons' row is the dialog's last, inside its frame
+    assert frame.pack_slaves()[-1] is d.btns and set(d.btns.pack_slaves()) == {d.update_btn, d.close_btn}
+    lines = int(d.changes.cget("height"))
+    if area == LOW:
+        assert lines == CHANGES_SIZE[1]  # (room enough)
+    else:
+        assert CHANGES_MIN_LINES <= lines < CHANGES_SIZE[1]
+        assert bottom > area[3] - 40  # (no more lines taken than needed: about one line of room left at most)
+    assert shown_again == []
+    d.close()
+
+
+def test_a_change_that_keeps_the_dialog_s_size_leaves_it_where_it_is(tmp_path, hidden_root, dialog_checks, screen):
+    _w, d = _open(hidden_root, tmp_path, newer_answer(changes=CHANGES_090), dialog_checks)
+    d.geometry("+300+120")  # (moved by the reader)
+    size = layout.asked_size(d)
+    d._changed(lambda: d.choice_note.configure(text=d.choice_note.cget("text")))
+    assert _placed(d)[:2] == (300, 120) and layout.asked_size(d) == size
+    d._changed(lambda: d.choice_note.configure(text="A note\nof\nfive\nshort\nlines."))  # taller: placed again
+    assert layout.asked_size(d)[1] > size[1] and _placed(d)[:2] == _centred(layout.asked_size(d), LOW)
+    d.close()
+
+
+def test_opened_again_with_an_answer_the_box_is_fitted_before_it_shows(tmp_path, hidden_root, screen, monkeypatch,
+                                                                      program):
+    """Chosen again within a minute, the dialog opens with the answer at once: lowered for the work area while it is
+    still withdrawn (`place_window`'s *fit*)."""
+    screen[0] = LOWER
+    monkeypatch.setattr(updates, "installed_version", lambda: "0.8.1")
+    w = DialogWindow(hidden_root, tmp_path / "state", tmp_path / "taslation.toml")
+    w._update_recent = (updates._clock(), newer_answer(changes=CHANGES_090))
+    d = UpdateDialog(hidden_root, w, root=program)
+    assert d.shown == "newer" and d.check is None
+    assert CHANGES_MIN_LINES <= int(d.changes.cget("height")) < CHANGES_SIZE[1]
+    assert layout.asked_size(d)[1] + FRAME[1] + FRAME[0] <= LOWER[3] - LOWER[1]
+    d.close()
 
 
 # ---------------------------------------------------------------- Update now

@@ -1,0 +1,31 @@
+0.9.0 - 2026-11-21
+Updating
+
+* Help → "Check for updates..." asks GitHub whether a newer version is out, only when you choose it, and shows both
+  versions with what changed. "Update now" closes TASlation, downloads the new version, updates the program files and
+  starts TASlation again. It asks once before it starts, and the installation that follows still asks before any
+  download of its own.
+* The files an update replaces are kept in the folder `.previous`, and `update.cmd -Back` goes back to the version
+  before. An update that stops no longer leaves you without the old version.
+* The installer asks once whether TASlation may look for a new version when it starts (Enter means no). If you say
+  yes, it looks at most once a day, while nothing is being read or translated; a newer version is named in the Help
+  menu and in one line of the status bar, never in a dialog. Tools → "Settings..." → System changes it later
+  (`update_check`).
+* What is asked of GitHub is the first 16 KB of the project's `CHANGELOG.md`, by a small program of its own
+  (`check_update.py`); the window itself still connects to nothing but Ollama on this computer. Nothing about you,
+  your computer, the installed version or your books is sent; GitHub sees your IP address and the time, as any site
+  you open does. Nothing is downloaded or installed without asking.
+* Double-clicking `update.cmd` first asks whether to look on GitHub (Enter means no; it then takes a ZIP you
+  downloaded yourself, as before).
+* A TASlation of version 0.8.1 or earlier has none of this yet: update it once with the ZIP and `update.cmd`, as
+  before.
+
+Other
+
+* The Settings dialog fits a 1366 x 768 screen in every language: a page that is too tall scrolls, and Save and Close
+  stay on the screen. Before, the dialog was taller than such a screen.
+* The boxes of choices in the Settings dialog are as wide as their longest choice in Japanese, Korean and Chinese
+  too; some of them cut their text.
+* The notice at the start names updating and the look for a new version where it says when the network is used. It is
+  shown once more to everyone, because that sentence changed.
+* The README's requirements say that the network is used only when installing and updating.
