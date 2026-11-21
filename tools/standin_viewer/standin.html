@@ -35,6 +35,8 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
   hN wait until the control file's "hold" is N or more (a rest held until the driver lets it go)
   kN the turns after kept soft until the control file's "sharp" is their number or more (the turns kept so far,
      counted from 1), N ms at most    k drawn sharp after the soft time again
+  u wait for the next turn the control file's "turns" releases (it grows by one for each: a page key TASlation
+    handed on, or the driver's own release)
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
@@ -332,7 +334,8 @@ function spinner(ms) {  // a spinner over the page on show, for a while
 }
 
 // ------------------------------------------------------------------------------------------------ the control file
-const control = { go: 0, hold: 0, sharp: 0 };  // (each only ever raised)
+const control = { go: 0, hold: 0, sharp: 0, turns: 0 };  // (each only ever raised)
+let turnsTaken = 0;  // the turns of the control file the "u" steps have taken
 let polls = 0;
 window.standinControl = function (c) {
   if (!c || typeof c !== "object") return;
@@ -340,6 +343,7 @@ window.standinControl = function (c) {
   if (typeof c.go === "number" && c.go > control.go) { control.go = c.go; say("control", "go=" + c.go); }
   if (typeof c.hold === "number" && c.hold > control.hold) { control.hold = c.hold; say("control", "hold=" + c.hold); }
   if (typeof c.sharp === "number" && c.sharp > control.sharp) { control.sharp = c.sharp; say("control", "sharp=" + c.sharp); }
+  if (typeof c.turns === "number" && c.turns > control.turns) { control.turns = c.turns; say("control", "turns=" + c.turns); }
   if (typeof c.band === "number" && c.band >= 0 && c.band !== bandBefore) {
     cfg.band = c.band;
     say("control", "band=" + c.band);
@@ -357,7 +361,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfstbmehk])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbmehku])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -383,6 +387,7 @@ async function run(steps) {
     else if (s.op === "m") say("mark", "id=" + s.a);
     else if (s.op === "h") { say("hold", "id=" + s.a); await until(() => control.hold >= s.a); say("held", "id=" + s.a); }
     else if (s.op === "k") { keepMs = s.a; say("soft", "keep=" + (keepMs === null ? "off" : keepMs)); }
+    else if (s.op === "u") { await until(() => control.turns > turnsTaken); turnsTaken++; say("released", "turn=" + turnsTaken); }
     else if (s.op === "e") break;
   }
   say("end");

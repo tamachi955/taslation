@@ -206,10 +206,13 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "k5": ("flipped past at 0.5 s a page, read back", []),
     "k1": ("flipped past at 1 s a page, read back", []),
     "k2": ("flipped past at 2 s a page, read back", []),
+    "k3": ("flipped past at 3 s a page, read back (by its name only)", []),
 }
 ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
-K_PACES = {"k5": 500, "k1": 1000, "k2": 2000}  # scenario k ("k" asks for all three; never in "all"): ms a page
+K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
+K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
 K_READ_MS = 8000  # ... the pages read back at this pace
+K_KEY_GIVE_UP_S = 3.0  # --k-keys: a key the window has not handed on so long after it was pressed releases its turn
 K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
 PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
 KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
@@ -254,7 +257,7 @@ def wanted(text: str) -> list[str]:
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
     if "k" in asked:
-        asked = (asked - {"k"}) | set(K_PACES)
+        asked = (asked - {"k"}) | set(K_ASKED)
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
@@ -263,16 +266,41 @@ def wanted(text: str) -> list[str]:
 
 
 def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool,
-            read_ms: int = K_READ_MS) -> list[str]:
+            read_ms: int = K_READ_MS, keyed: bool = False, stay_ms: int = 0) -> list[str]:
     """Scenario k's steps at the pace of *name* (`K_PACES`): to page *fresh* (one no scenario before turned to) and a
-    rest there, *turns* pages flipped past, back to the first of them, and *read* of them read at *read_ms* a page
-    (K_READ_MS); without *soft*, every page drawn sharp at once (the stand-in's soft time and blur off, and back
-    after)."""
+    rest there, *turns* pages flipped past, the last of them kept *stay_ms* (0: the pace), back to the first of them,
+    and *read* of them read at *read_ms* a page (K_READ_MS); without *soft*, every page drawn sharp at once (the
+    stand-in's soft time and blur off, and back after). *keyed* (--k-keys): no wait of the stand-in's own - each turn
+    waits for its release (``u``), at the times of `k_key_times`."""
     pace = K_PACES[name]
     pre, post = ([], []) if soft else (["t0", "b1"], ["t", "b"])
-    steps = [*pre, f"j{fresh}", f"w{read_ms}", *(["n", f"w{pace}"] * turns), f"j{fresh + width}", f"w{read_ms}"]
+    if keyed:
+        steps = [*pre, f"j{fresh}", *(["u", "n"] * turns), "u", f"j{fresh + width}", *(["u", "n"] * max(0, read - 1))]
+        return [*steps, "u", *post]
+    flips = ["n", f"w{pace}"] * turns
+    if stay_ms and flips:
+        flips[-1] = f"w{stay_ms}"
+    steps = [*pre, f"j{fresh}", f"w{read_ms}", *flips, f"j{fresh + width}", f"w{read_ms}"]
     steps += ["n", f"w{read_ms}"] * max(0, read - 1)
     return [*steps, *post]
+
+
+def k_key_times(pace_ms: int, turns: int, read: int, read_ms: int = K_READ_MS,
+                stay_ms: int = 0) -> list[tuple[float, str]]:
+    """--k-keys: when each turn of scenario k (`k_steps`, *keyed*) is released, in seconds after the pace began, and
+    how: "key" by the window's page key handed on, "driver" by the driver alone (the turn back to the first page
+    flipped past, and the end of the last page read back) - the times of the waits of the steps without keys."""
+    out: list[tuple[float, str]] = []
+    t = read_ms / 1000
+    for i in range(turns):
+        out.append((round(t, 3), "key"))
+        t += (stay_ms if stay_ms and i == turns - 1 else pace_ms) / 1000
+    out.append((round(t, 3), "driver"))
+    for _ in range(max(0, read - 1)):
+        t += read_ms / 1000
+        out.append((round(t, 3), "key"))
+    out.append((round(t + read_ms / 1000, 3), "driver"))
+    return out
 
 
 def cancel_steps(first: int, back: int, soft_ms: int, keep_ms: int | None = None) -> list[str]:
@@ -327,7 +355,8 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
             fresh = farthest + width
             fresh = fresh - fresh % 2 if spread else fresh
             steps = k_steps(name, fresh, width, int(k.get("turns", 20)), int(k.get("read", 20)),
-                            bool(k.get("soft", True)), int(k.get("read_ms") or K_READ_MS))
+                            bool(k.get("soft", True)), int(k.get("read_ms") or K_READ_MS), bool(k.get("keys")),
+                            int(k.get("stay_ms") or 0))
         else:
             steps = SCENARIOS[name][1]
         if wait_done is not None and name in HOLD_SCENARIOS:
@@ -2697,13 +2726,15 @@ class Director:
         self.current = ""
         self.keyed: dict[str, dict[str, Any]] = {}  # scenario t's and t2's page key: how it was pressed, what it handed
         self.key_for: Segment | None = None  # the scenario whose turn the next key handed to the stand-in releases
+        self.turns_released = 0  # --k-keys: the turns the control file has released (the stand-in's ``u`` steps)
+        self.k_keys: dict[str, dict[str, Any]] = {}  # --k-keys: per pace, the keys pressed and what became of them
         self._hook_page_keys()
         self.page_rect: tuple[int, int, int, int] | None = None  # the page the stand-in drew last (its canvas's pixels)
         self.band_px = 0  # the height of its band then
         # --wait-done (its cap, seconds; None: the script has no holds and keeps no soft frame): the control file's
         # values, the script's holds and kept soft frames as the stand-in said them, what it shows (`waits`)
         self.wait_done: float | None = getattr(args, "wait_done", None)
-        self.control = {"go": 0, "hold": 0, "sharp": 0}
+        self.control = {"go": 0, "hold": 0, "sharp": 0, "turns": 0}
         self.holds: list[dict[str, Any]] = []
         self.keeps: list[dict[str, Any]] = []
         self.screen_now: tuple[int, bool] | None = None
@@ -2957,22 +2988,27 @@ class Director:
                 self.release(go=seg.go)
                 self.phase, self.phase_at = "running", now
             return
+        if self.phase == "running" and seg.name in K_PACES and self.args.k_keys:
+            self.k_keys_step(seg, now)
         if self.phase == "running" and (self.waiting_go > seg.go or self.ended):
             self.index += 1
             self.phase, self.phase_at = "prepare", now
 
-    def release(self, go: int | None = None, hold: int | None = None, sharp: int | None = None) -> None:
+    def release(self, go: int | None = None, hold: int | None = None, sharp: int | None = None,
+                turns: int | None = None) -> None:
         """The control file written: the stand-in's script released to *go* (``gN``); with --wait-done, its holds to
-        *hold* (``hN``) and its turns kept soft to *sharp* (``kN``) as well, a value not given as it was. Without the
-        option the file is what it always was (the go alone)."""
-        for key, value in (("go", go), ("hold", hold), ("sharp", sharp)):
+        *hold* (``hN``) and its turns kept soft to *sharp* (``kN``) as well; with --k-keys, once a turn was released,
+        the turns released (*turns*, ``u``); a value not given as it was. Without the options the file is what it
+        always was (the go alone)."""
+        for key, value in (("go", go), ("hold", hold), ("sharp", sharp), ("turns", turns)):
             if value is not None:
                 self.control[key] = int(value)
+        turned = {"turns": self.control["turns"]} if self.control.get("turns") else {}
         if self.wait_done is None:
-            sv.write_control(self.standin_dir, self.control["go"])
+            sv.write_control(self.standin_dir, self.control["go"], **turned)
         else:
             sv.write_control(self.standin_dir, self.control["go"], hold=self.control["hold"],
-                             sharp=self.control["sharp"])
+                             sharp=self.control["sharp"], **turned)
 
     def waits(self, now: float) -> None:
         """--wait-done, at every look: the hold the stand-in is at let go once `hold_over` says why (its page finished,
@@ -3113,6 +3149,84 @@ class Director:
         elif seg.name == "z":
             self.notes.act(seg.name, "left")
             app._settings_saved({"ui_scale": self.args.scale})
+        elif seg.name in K_PACES and seg.name in self.k_keys:
+            self.key_for = None
+            app.__dict__.pop("_raise_for_key", None)
+
+    # scenario k by the window's page key (--k-keys)
+    def k_keys_step(self, seg: Segment, now: float) -> None:
+        """--k-keys: scenario k's turns, each released by the window's next page key (pressed on the window's page:
+        its binding's own call, `forward_key`) once the window hands it on (`_hook_page_keys`), at the times of
+        `k_key_times` from the pace's release; the turn back and the end of the last page read back released by the
+        driver alone. A key not handed on within K_KEY_GIVE_UP_S releases its turn all the same, noted so. The
+        window's raise of the viewer before a key is left out (the stand-in drawing while covered,
+        --standin-draws-covered: the windows of a person at the machine stay as they lie)."""
+        plan = self.k_keys.get(seg.name)
+        if plan is None:
+            a = self.args
+            plan = self.k_keys[seg.name] = {
+                "due": k_key_times(K_PACES[seg.name], a.k_turns, a.k_read or a.k_turns, a.k_read_ms, a.k_stay_ms),
+                "next": 0, "keys": [], "extra": 0, "began": self.phase_at}
+            self.app._raise_for_key = lambda _hwnd: None
+        t = now - plan["began"]
+        while plan["next"] < len(plan["due"]) and t >= plan["due"][plan["next"]][0]:
+            at, how = plan["due"][plan["next"]]
+            plan["next"] += 1
+            if how == "key":
+                self.k_press(seg, plan, at)
+            else:
+                self.k_release(seg)
+        for row in plan["keys"]:
+            if row.get("handed_after_ms") is None and not row.get("gave_up") and now - row["mono"] > K_KEY_GIVE_UP_S:
+                row["gave_up"] = True
+                self.k_release(seg)
+
+    def k_press(self, seg: Segment, plan: dict[str, Any], at: float) -> None:
+        """The window's next page key, as Page > Page keys... has it, pressed on its page (the binding's own call:
+        Tk delivers keys to the window with the system's keyboard focus, which this tool never moves)."""
+        app = self.app
+        pair = app._page_key_pair()
+        key = (getattr(pair[1], "next", "") if pair is not None else "") or "Left"
+        now = time.monotonic()
+        plan["keys"].append({"due_s": at, "late_ms": round((now - plan["began"] - at) * 1000), "mono": now,
+                             "t": now_ms(), "busy": bool(getattr(app, "busy", False))})
+        self.key_for = seg
+        app.forward_key(key)
+
+    def k_release(self, seg: Segment) -> None:
+        self.turns_released += 1
+        self.release(turns=self.turns_released)
+
+    def k_handed(self, seg: Segment, key: Any) -> None:
+        """--k-keys: the keys the window handed on (one or several in one handover), each releasing the turn of the
+        oldest key pressed that was not handed on yet; one with no such key is counted (`extra`) and releases
+        nothing."""
+        plan = self.k_keys.get(seg.name)
+        keys = [key] if isinstance(key, str) else list(key)
+        for _ in keys:
+            row = next((r for r in (plan or {}).get("keys", [])
+                        if r.get("handed_after_ms") is None and not r.get("gave_up")), None)
+            if row is None:
+                if plan is not None:
+                    plan["extra"] += 1
+                continue
+            row["handed_after_ms"] = round((time.monotonic() - row["mono"]) * 1000)
+            row["handed_t"] = now_ms()
+            row["together"] = len(keys)
+            self.k_release(seg)
+
+    def k_keys_facts(self, rel: Callable[[float | None], float | None]) -> dict[str, Any]:
+        """--k-keys, per pace: the keys pressed, handed on, given up on; each with its time on the run's clock (*rel*:
+        ``t_s`` pressed, ``handed_s`` handed on)."""
+        out: dict[str, Any] = {}
+        for name, plan in self.k_keys.items():
+            rows = [{**{k: v for k, v in r.items() if k not in ("mono", "t", "handed_t")}, "t_s": rel(r.get("t")),
+                     "handed_s": rel(r.get("handed_t"))} for r in plan["keys"]]
+            out[name] = {"pressed": len(rows), "handed_on": sum(1 for r in rows if r.get("handed_after_ms") is not None),
+                         "gave_up": sum(1 for r in rows if r.get("gave_up")), "extra": plan["extra"],
+                         "handed_after_ms": tail([r.get("handed_after_ms") for r in rows]),
+                         "pressed_busy": sum(1 for r in rows if r["busy"]), "keys": rows}
+        return out
 
     # scenario t: the full screen in the Translator role
     def _hook_page_keys(self) -> None:
@@ -3128,6 +3242,9 @@ class Director:
             seg = self.key_for
             if seg is None or not self.guard.is_viewer(hwnd):
                 return guarded(hwnd, key, *a, **k)
+            if seg.name in K_PACES:  # (--k-keys: every key handed on releases a turn, `k_handed`)
+                self.k_handed(seg, key)
+                return True
             self.key_for = None
             facts = self.keyed.setdefault(seg.name, {})
             facts["handed_on"] = key if isinstance(key, str) else list(key)
@@ -4549,7 +4666,7 @@ def run(args: argparse.Namespace) -> int:
     count = len(pictures)
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
               "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "backlog": args.k_backlog == "on",
-              "read_ms": args.k_read_ms}
+              "read_ms": args.k_read_ms, "keys": bool(args.k_keys), "stay_ms": args.k_stay_ms}
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
@@ -4996,6 +5113,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "released": director.released, "theme": director.theme,
         **({"waits": director.waits_report()} if director.wait_done is not None else {}),
         "page_keys": {name: {k: v for k, v in facts.items() if k != "at"} for name, facts in director.keyed.items()},
+        "k_keys": director.k_keys_facts(rel),
         "segments": table, "turns": rows, "incidents": spells,
         "jobs": {"started": len(started), "on": dict(Counter(j["state"] for j in started)),
                  "not_started": len(jobs) - len(started),
@@ -5227,6 +5345,9 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
                                        and j.get("result_t") and j.get("result_translated")),
             "steps": dict(Counter(b["did"] for b in bg)),
             "steps_busy_s": round(sum(b["t"] - b["began"] for b in bg) / 1000, 1),
+            # (the backlog's first step after a page job that showed its page - none started between -: from the page
+            # shown, and from the job's end; and each such job's time after it showed its page, `keep_shown` within)
+            **first_steps(jobs, bg, notes.jobs),
             "waits_ms": tail([b.get("waited_ms") for b in bg]),
             "next_page_request_server_wait_ms": tail(slot),
             "background_requests": len(bg_reqs), "background_full": sum(1 for r in bg_reqs if full_computed(r)),
@@ -5252,11 +5373,53 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             "event_list": {"columns": ["t_s", "kind", "seq", "stage", "state", "pages", "thumb"],
                            "rows": [[rel(r["t"]), r["kind"], r["seq"], r["stage"], r["state"], r["pages"],
                                      r["thumb"]] for r in readings]},
+            "told": told_states(readings),
             "catches": {"caught": sum(1 for c in catches if c["caught"]),
                         "not_caught": sum(1 for c in catches if not c["caught"]),
                         "from_regions": sum(1 for c in catches if c["caught"] and c["read"])},
             "thumbs_with_first_event_only": len({r["seq"] for r in readings if r["thumb"]})
             == sum(1 for r in readings if r["thumb"])}
+
+
+def first_steps(jobs: list[dict[str, Any]], steps: list[dict[str, Any]], every: list[dict[str, Any]]
+                ) -> dict[str, Any]:
+    """Of *jobs* (page jobs of a pace) that showed their page: the backlog's first step (of *steps*) begun after the
+    job's end with no other job of *every* started between - how long after the page was shown and after the job
+    ended -, and how long each such job went on after showing its page."""
+    after_shown: list[Any] = []
+    after_end: list[Any] = []
+    on_after: list[Any] = []
+    for j in jobs:
+        shown, over = j.get("result_t"), j.get("over_t")
+        if shown is None or over is None:
+            continue
+        on_after.append(round(over - shown))
+        step = next((b for b in steps if b["began"] >= over), None)
+        if step is None:
+            continue
+        if any(x["started"] and over < x["t"] < step["began"] for x in every if x is not j):
+            continue
+        after_shown.append(round(step["began"] - shown))
+        after_end.append(round(step["began"] - over))
+    return {"first_step_after_shown_ms": tail(after_shown), "first_step_after_job_end_ms": tail(after_end),
+            "job_after_shown_ms": tail(on_after)}
+
+
+def told_states(readings: list[dict[str, Any]]) -> dict[str, Any]:
+    """The states the window was told of its screens (``page_stage``): those a screen was left at work in at the end
+    of the run - none should be, with nothing at work on it once the run is over -, and how often a stage told done
+    or skipped was told at work again (a page shown translated, its bar back at work)."""
+    last: dict[tuple[Any, str], str] = {}
+    again = 0
+    for r in readings:
+        if r["kind"] != "page_stage" or r["state"] == "merged":
+            continue
+        key = (r["seq"], r["stage"])
+        if r["state"] == "working" and last.get(key) in ("done", "skipped"):
+            again += 1
+        last[key] = r["state"]
+    left = sorted(f"{seq}:{stage}" for (seq, stage), state in last.items() if state == "working")
+    return {"left_working": left, "done_told_working_again": again}
 
 
 def tk_share(samples: list[tuple[float, float, bool]]) -> dict[str, Any]:
@@ -5540,6 +5703,13 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--k-read-ms", type=int, default=K_READ_MS,
                     help=f"scenario k: ms a page read back stays (default {K_READ_MS}; longer for a computer without "
                          "a GPU, whose page on show takes longer)")
+    ap.add_argument("--k-keys", action="store_true",
+                    help="scenario k: each turn released by the window's next page key once the window hands it on "
+                         "(pressed on its page, as a reader turns by TASlation's keys), not by the stand-in's own "
+                         "clock; the window's raise of the viewer before a key left out (with --standin-draws-covered)")
+    ap.add_argument("--k-stay-ms", type=int, default=0,
+                    help="scenario k: ms the last page flipped to stays before the turn back (default: the pace) - a "
+                         "page read afresh on show while the pages turned past wait")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
     ap.add_argument("--standin-draws-covered", action="store_true",

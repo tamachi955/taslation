@@ -203,33 +203,41 @@ rows' languages.
   at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
   dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
   dark theme). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
-  1 and 2 s a page (k5, k1, k2; `k` is the three, each once the backlog of the one before has nothing left), then a
+  1 and 2 s a page (k5, k1, k2; `k` is the three, each once the backlog of the one before has nothing left; k3, 3 s
+  a page, only by its name), then a
   jump back to the first of them and `--k-read` of them read at `--k-read-ms` a page (8 s); the tool tells, per pace,
   how long each page flipped past had its sharp frame on show and whether the backlog caught it, how each page read
   back began (wholly from the cache, from what the backlog had read, or read again on show and why: another size, not
   caught, a soft gate, its entry still a frame), its first lettered bubble, what a turn to the page being worked on
-  waited for the worker, how long the backlog held each frame and the most it held, its steps and their requests.
+  waited for the worker, how long the backlog held each frame and the most it held, its steps and their requests,
+  the backlog's first step after a page job that showed its page (from the page shown and from the job's end) and
+  how long each such job went on after showing its page; and for the run (`told`) the screens left told at work at
+  the end (`left_working`: none should be) and how often a stage told done was told at work again.
   `--k-soft off` draws every page sharp at once, `--k-narrow` places the stand-in at the narrow size first (single
   pages; with scenario w too, the whole-book run to set beside it), `--k-backlog off` catches nothing (the baseline of
-  the same turns); `--ocr-runs-on` and `--ollama-num-gpu` set those settings (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on
-  cpu --ollama-num-gpu 0` is a computer without a GPU). `--side-indicator column|rail|off` sets the indicator beside
-  the page (the app's column by default); when it is not off the tool looks at it from the window as normal reading's
-  events come - every screen told has its cell or rail mark in the state last told, the screen on show is outlined, a
-  screen that went by is drawn as missed -, and after scenario k drops the backlog as another book does and looks that
-  nothing is left, with pictures after the flips, after the reads back and on each side of the drop; the report gives
-  the event pump's times (`_poll_events`) either way. `--wait-done CAP_S` keeps each scenario's meaning on a slower
-  computer (GitHub's runners): each rest of a, d, e, r, o, z, x, f and f2, the one at a scenario's end too, is held
-  until the page on show is finished, or the window rests with it unfinished, or CAP_S have passed (the stand-in waits
-  at an `hN` step of its script until the tool's word), and x's soft frames stay on show until the window has asked on
-  them (15 s and CAP_S at most); the report keeps the holds and their reasons (`waits`). Without it the script and the
-  stand-in's control file are the same as ever. A turn's rest ends at the next turn or where the tool changed the
-  window for the next scenario (a mode left or entered, the theme, the text size, the stand-in's size, Finished
-  reading: the report's `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a
-  job cancelled as the window took its page at a new size of the stand-in is not one cancelled with its page on show
-  (`resized_away`); the whole-book run's frames are told by who got them, its reading or its erase ahead. Its global
-  hot keys are never registered with Windows: the tool holds them, notes which the window held, and hands it a press
-  as Windows would. Over the book the window gives the stand-in the foreground from its own window, as the mode does;
-  the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
+  the same turns), `--k-keys` releases each turn by the window's next page key once the window hands it on (the reader
+  turning by TASlation's keys: pressed on its page, the window's raise of the viewer before a key left out, with
+  `--standin-draws-covered`; per pace, the keys handed on and after how long), `--k-stay-ms` keeps the last page
+  flipped to that long (a page read afresh on show while the pages turned past wait); `--ocr-runs-on` and
+  `--ollama-num-gpu` set those settings (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0` is a computer
+  without a GPU). `--side-indicator column|rail|off` sets the indicator beside the page (the app's column by default);
+  when it is not off the tool looks at it from the window as normal reading's events come - every screen told has its
+  cell or rail mark in the state last told, the screen on show is outlined, a screen that went by is drawn as missed
+  -, and after scenario k drops the backlog as another book does and looks that nothing is left, with pictures after
+  the flips, after the reads back and on each side of the drop; the report gives the event pump's times
+  (`_poll_events`) either way. `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's
+  runners): each rest of a, d, e, r, o, z, x, f and f2, the one at a scenario's end too, is held until the page on
+  show is finished, or the window rests with it unfinished, or CAP_S have passed (the stand-in waits at an `hN` step
+  of its script until the tool's word), and x's soft frames stay on show until the window has asked on them (15 s and
+  CAP_S at most); the report keeps the holds and their reasons (`waits`). Without it the script and the stand-in's
+  control file are the same as ever. A turn's rest ends at the next turn or where the tool changed the window for the
+  next scenario (a mode left or entered, the theme, the text size, the stand-in's size, Finished reading: the report's
+  `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
+  window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`); the
+  whole-book run's frames are told by who got them, its reading or its erase ahead. Its global hot keys are never
+  registered with Windows: the tool holds them, notes which the window held, and hands it a press as Windows would.
+  Over the book the window gives the stand-in the foreground from its own window, as the mode does; the tool itself
+  never changes it. `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
