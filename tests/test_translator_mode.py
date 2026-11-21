@@ -606,7 +606,10 @@ def test_an_upright_region_keeps_its_box_and_handles_and_a_turned_one_is_drawn_t
     assert w.canvas.items[1][1][0] == pytest.approx(points["n"])  # the rotate handle on the turned frame's top
     w._grip_box = (60, 55, 160, 125)  # moved: the turned frame goes with it
     w._draw_frame()
-    assert w.canvas.items[0][1] == pytest.approx([(x + 10, y + 5) for x, y in corners])
+    # (the corners' coordinates in one flat list: given a list of points, pytest.approx before 9.2 compared each point
+    # exactly, and 9.2 refuses such a list)
+    moved = [c for x, y in w.canvas.items[0][1] for c in (x, y)]
+    assert len(moved) == 8 and moved == pytest.approx([c for x, y in corners for c in (x + 10, y + 5)])
 
 
 def test_a_turned_regions_handles_resize_the_side_they_point_to(hidden_root):
