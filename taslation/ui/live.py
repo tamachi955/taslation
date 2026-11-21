@@ -144,7 +144,7 @@ from ..messages import Message
 from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
 from ..pipeline import PageGate, turn_away
 from ..regions import PageResult
-from . import area, hover, in_place, side
+from . import area, hover, in_place, order, side
 from .constants import (
     BLANK_SPREAD,
     BROWSER_MINIMISED,
@@ -1161,10 +1161,12 @@ class LiveViewMixin(BlackViewerMixin):
             self.after(delay, self._auto_tick)
 
     def _beat(self) -> int:
-        """One heartbeat: Windows' notes taken in (`_take_notes`) and what `follow_decision` says done. Returns the ms
-        to the next heartbeat."""
+        """One heartbeat: Windows' notes taken in (`_take_notes`) and what `follow_decision` says done; while TASlation
+        is in front the viewer kept directly under its window, and a viewer hidden wholly whose frames stand still said
+        in the status line (`order.beat`). Returns the ms to the next heartbeat."""
         f = self._follower()
         self._watch_beside()
+        order.beat(self)
         if f.mode != "events":
             if not self._black_beat():
                 self._tick()

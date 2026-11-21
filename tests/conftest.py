@@ -14,7 +14,7 @@ from taslation.ocr import place
 from taslation.ocr.charspot import check_model_dir
 from taslation.ollama_start import OllamaStarter
 from taslation.render import artwork
-from taslation.ui import live, viewers
+from taslation.ui import live, order, viewers
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -71,6 +71,15 @@ def no_real_window_asked_to_repaint(monkeypatch):
     machine); tests/test_covered_viewer.py patches its own in."""
     monkeypatch.setattr(live, "ask_repaint", lambda hwnd: False)
     monkeypatch.setattr(live, "fully_covered", lambda hwnd: False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_window_reordered(monkeypatch):
+    """No test puts a real window in another place in the order of the windows, nor counts the windows over one, as
+    the window keeps the viewer under its own (`ui.order`: the tests' handles are made up; one of them could be a real
+    window of this machine); tests/test_window_order.py patches its own in."""
+    monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own: "")
+    monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: False)
 
 
 def _real_state_folder(state_dir) -> bool:

@@ -3,7 +3,8 @@ is the file it shows) the waiting line while its window is hidden or minimised (
 a browser window has its own line, about the tab in front), and the line for a window that keeps its size when it is
 enlarged (`ui.viewers.ViewerMixin._enlarge_done`), the waiting line for a browser window minimised after it was chosen
 (`_say_waiting`) and the viewer's line for a viewer chosen while it was minimised and shown again
-(`ui.viewers.ViewerMixin._on_window_selected`)."""
+(`ui.viewers.ViewerMixin._on_window_selected`); the line for a viewer hidden wholly by other windows whose frames
+stand still (`ui.order.covered_line`)."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "Waiting: the viewer's window is hidden or minimised; bring it back.": {
@@ -41,6 +42,24 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "此檢視器被遮住時不繪製內容：從現在起每一頁都會讓它在最前面顯示片刻。",
         "ko": "이 뷰어는 가려져 있는 동안 아무것도 그리지 않습니다. 이제부터 페이지마다 잠깐 앞으로 나옵니다.",
         "th": "โปรแกรมอ่านนี้ไม่วาดอะไรขณะถูกบัง: ตั้งแต่นี้ไปจะนำขึ้นมาด้านหน้าชั่วครู่ในแต่ละหน้า",
+    },
+    "The viewer is hidden behind other windows and has stopped drawing: move them off it, or bring the viewer to the front.": {
+        "ja": "ビューアがほかのウィンドウに完全に隠れて、描画を止めています。それらのウィンドウをどかすか、ビューアを前面に出してください。",
+        "es": "El visor está oculto detrás de otras ventanas y ha dejado de dibujar: apártalas o trae el visor al frente.",
+        "pt": "O visualizador está escondido atrás de outras janelas e parou de desenhar: tire-as de cima dele ou traga o visualizador para a frente.",
+        "fr": "La visionneuse est cachée derrière d'autres fenêtres et ne s'affiche plus : déplacez-les ou mettez la visionneuse au premier plan.",
+        "de": "Der Viewer ist hinter anderen Fenstern verborgen und zeichnet nicht mehr: Schieben Sie sie beiseite oder holen Sie den Viewer nach vorn.",
+        "it": "Il visualizzatore è nascosto dietro altre finestre e ha smesso di disegnare: spostale o porta il visualizzatore in primo piano.",
+        "nl": "De viewer ligt achter andere vensters en tekent niet meer: schuif ze opzij of haal de viewer naar voren.",
+        "pl": "Czytnik jest ukryty za innymi oknami i przestał rysować: odsuń je albo przenieś czytnik na wierzch.",
+        "ru": "Просмотрщик скрыт за другими окнами и перестал рисовать: отодвиньте их или выведите просмотрщик на передний план.",
+        "tr": "Görüntüleyici başka pencerelerin arkasında kaldı ve çizmeyi bıraktı: onları kenara çekin ya da görüntüleyiciyi öne getirin.",
+        "id": "Penampil tersembunyi di balik jendela lain dan berhenti menggambar: geser jendela-jendela itu, atau bawa penampil ke depan.",
+        "vi": "Trình xem bị các cửa sổ khác che khuất và đã ngừng vẽ: hãy dời chúng ra hoặc đưa trình xem lên trước.",
+        "zh": "查看器被其他窗口完全挡住，已停止绘制：请把这些窗口移开，或把查看器调到最前面。",
+        "zh-tw": "檢視器被其他視窗完全擋住，已停止繪製：請把這些視窗移開，或把檢視器移到最前面。",
+        "ko": "뷰어가 다른 창 뒤에 완전히 가려져 그리기를 멈췄습니다. 그 창들을 치우거나 뷰어를 앞으로 가져오세요.",
+        "th": "โปรแกรมอ่านถูกหน้าต่างอื่นบังจนมิดและหยุดวาดแล้ว: เลื่อนหน้าต่างเหล่านั้นออก หรือนำโปรแกรมอ่านขึ้นมาด้านหน้า",
     },
     "This viewer's window keeps its size, so it is read as it is.": {
         "ja": "このビューアのウィンドウは大きさが変わらないので、そのままの大きさで読み取ります。",

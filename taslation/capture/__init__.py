@@ -35,6 +35,7 @@ from .windows import (  # noqa: F401
     enlarge_window,
     give_foreground,
     input_target,
+    keep_viewer_under,
     key_target,
     is_black,
     is_blank,
@@ -46,6 +47,7 @@ from .windows import (  # noqa: F401
     match_windows,
     monitor_rect,
     move_window,
+    Placed,
     post_click,
     post_key,
     program_name,
@@ -71,6 +73,7 @@ from .windows import (  # noqa: F401
     window_rect,
     window_shown,
     window_title,
+    windows_between,
     windows_over,
     work_area,
 )

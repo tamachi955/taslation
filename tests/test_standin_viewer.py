@@ -460,6 +460,47 @@ def test_the_log_tap_keeps_each_line_of_the_rule_for_no_answer_with_what_the_ser
     assert "server_says" not in tap.no_answer[1] and tap.levels["WARNING taslation.translate.ollama"] == 3
 
 
+def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hidden_wholly(monkeypatch, capsys):
+    """(the very lines `ui.order` logs, from its own calls on made-up windows)"""
+    import logging
+    import threading
+
+    from taslation.ui import order
+
+    notes = SimpleNamespace(lock=threading.Lock(), ocr_log=[])
+    tap = standin_e2e.LogTap(notes)
+    log = logging.getLogger(order.__name__)
+    level = log.level
+    log.addHandler(tap)
+    log.setLevel(logging.INFO)
+    try:
+        monkeypatch.setattr(order, "IS_WINDOWS", True)
+        monkeypatch.setattr(order, "foreground_window", lambda: 99)
+        monkeypatch.setattr(order, "foreground_owner", lambda hwnd, viewer: "own")
+        monkeypatch.setattr(order, "keep_viewer_under", lambda viewer, own: "placed")
+        monkeypatch.setattr(order, "window_class", lambda hwnd: "Chrome_WidgetWin_1")
+        monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: True)
+        w = SimpleNamespace(selected=SimpleNamespace(hwnd=20), _own_hwnd=lambda: 10, _raised=None,
+                            _resizing=lambda: False, _frame_count=lambda: 7, _status_key=None,
+                            say=lambda key: None, status=lambda text: None)
+        t = 100.0
+        for _ in range(order.ORDER_MOST + 1):
+            order.beat(w, t)
+            t += max(order.ORDER_EVERY_S, order.COVER_EVERY_S)
+        order.keep_under(w, t)
+    finally:
+        log.removeHandler(tap)
+        log.setLevel(level)
+    lines = [n["line"] for n in tap.window_order]
+    assert sum("put directly under" in x for x in lines) == order.ORDER_MOST
+    assert sum("left as it is" in x for x in lines) == 1
+    assert sum(x.startswith("the viewer is hidden wholly") for x in lines) == 1
+    standin_e2e.print_table({"translator": "t", "browser": "b", "pages": 1,
+                             "run": {"seconds": 1, "window_order": tap.window_order}}, Path("report.json"))
+    assert (f"put under the window {order.ORDER_MOST} time(s), left as it was 1 time(s), refused 0 time(s); hidden "
+            "wholly with its frames standing still 1 time(s)") in capsys.readouterr().out
+
+
 def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
     """The frame watch on notes where the stand-in drew page *drawn_page* sharp 7 s ago and the window took
     *capture_n* frames since, the last of *captures* a moment ago; its probes' parts stand-ins."""
