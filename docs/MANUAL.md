@@ -1020,7 +1020,7 @@ says whether the Ollama running now has it ("Started by TASlation with the windo
 Under it, the box "Look for a new version once a day when TASlation starts" (`update_check`: `"off"`, the default, or `"daily"`; the installer asks once) makes TASlation, at a start a day or more after the last look,
 30 seconds or more after the window is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for the first 16 KB of `CHANGELOG.md`.
 A newer version is named in the Help menu's "Check for updates..." item and in one line at the bottom of the window (no dialog). When it could not ask, it says nothing. It applies from the next start.
-Help → "Check for updates..." asks when you choose it, whether the box is on or off. It shows this version and the new one with their dates and what changed; "Update now" closes TASlation,
+Help → "Check for updates..." asks when you choose it, whether the box is on or off; chosen again within a minute of an answer, it shows that answer again and asks nothing (after "could not ask" it asks again at once). It shows this version and the new one with their dates and what changed; "Update now" closes TASlation,
 and `update.cmd` downloads the new version, updates and starts TASlation again (docs/INSTALL.md, "Updating"). The same box is in that window too.
 The time of the last look and the newest version it found are kept in `update-check.json` in the state folder (nothing else is written there). In a git clone there is no look at the start.
 

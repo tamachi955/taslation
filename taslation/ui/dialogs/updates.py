@@ -2,7 +2,8 @@
 process of its own; TASlation's own process asks nothing), then says one of: this is the newest version (with its
 version and date), GitHub could not be asked (one plain sentence: `reason_text`), or a newer version is out - both
 versions with their dates, the changes since this one in a scrolling plain-text box, Update now and Later. In a git
-clone nothing is asked: git updates it. Under it, the box that turns the start's look on and off (``update_check``,
+clone nothing is asked: git updates it. Opened again within a minute of an answer that was no failure, it shows that
+answer again and asks nothing (`updates.recent`). Under it, the box that turns the start's look on and off (``update_check``,
 kept in taslation.toml as the Settings dialog keeps it), with one sentence on what is asked of whom."""
 
 from __future__ import annotations
@@ -98,8 +99,12 @@ class UpdateDialog(tk.Toplevel):
         self.close_btn.pack(side="right")
         self.bind("<Escape>", lambda _e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
+        kept = None if updates.is_clone(self.root_dir) else updates.recent(window)
         if updates.is_clone(self.root_dir):
             self._show("clone")
+        elif kept is not None:  # chosen again within a minute of an answer: that answer, nothing asked
+            self.answer = kept
+            self._show(kept["result"], kept)
         else:
             self._show("asking")
             self.check = updates.Check(self.root_dir)
@@ -170,9 +175,11 @@ class UpdateDialog(tk.Toplevel):
             self.update_btn.focus_set()
 
     def _answered(self, answer: dict[str, Any]) -> None:
-        """(Tk) The asking program answered: noted (`updates.noted`), then shown."""
+        """(Tk) The asking program answered: noted (`updates.noted`) and kept for a minute (`updates.remember`), then
+        shown."""
         self.check = None
         updates.noted(self.window, answer)
+        updates.remember(self.window, answer)
         try:
             if not self.winfo_exists():
                 return

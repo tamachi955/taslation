@@ -293,6 +293,7 @@ def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet
     assert w.status_var.get() == "TASlation 0.9.0 is available: Help > Check for updates..."
     assert not [c for c in hidden_root.winfo_children()
                 if isinstance(c, tk.Toplevel) and c not in before]  # no dialog, no popup
+    assert updates.recent(w) is None  # (the start's look is not the dialog's answer: Help > Check asks anew)
     assert updates.load_state(state) == {"checked": NOW, "newest": "0.9.0", "date": "2026-11-25"}
     assert not w.later  # once
     other = Window(hidden_root, state)  # the next start within the day: nothing asked, the menu says it
@@ -544,6 +545,54 @@ def test_closing_the_dialog_while_it_asks_ends_the_program(tmp_path, hidden_root
     assert cancelled == [True] and not d.winfo_exists()
     hidden_root.update()
     assert not (tmp_path / "state" / "update-check.json").exists()  # nothing noted
+
+
+COUNTING_STAND_IN = """import pathlib
+here = pathlib.Path(__file__).resolve().parent
+with open(here / "runs.txt", "a", encoding="utf-8") as runs:
+    runs.write("run\\n")
+print((here / "answer.json").read_text("utf-8"))
+"""
+
+
+def test_chosen_again_within_a_minute_the_dialog_shows_the_same_answer_and_asks_nothing(tmp_path, hidden_root,
+                                                                                        monkeypatch, program):
+    """A stand-in check_update.py, run as the window runs it, counts its runs: Help > Check for updates... chosen
+    again within 60 s of an answer shows that answer with no run; after 60 s, or after a failure, it asks again."""
+    (program / "check_update.py").write_text(COUNTING_STAND_IN, "utf-8")
+    answer_file, runs = program / "answer.json", program / "runs.txt"
+    answer_file.write_text(json.dumps(newer_answer()), "utf-8")
+    monkeypatch.setattr(updates, "installed_version", lambda: "0.8.1")
+    clock = [1000.0]
+    monkeypatch.setattr(updates, "_clock", lambda: clock[0])
+    w = DialogWindow(hidden_root, tmp_path / "state", tmp_path / "taslation.toml")
+
+    def opened():
+        d = UpdateDialog(hidden_root, w, root=program)
+        deadline = time.monotonic() + 30
+        while d.shown == "asking" and time.monotonic() < deadline:
+            hidden_root.update()
+            time.sleep(0.02)
+        shown, changes = d.shown, d.changes.get("1.0", "end-1c") if d.changes else ""
+        d.close()
+        return shown, changes, len(runs.read_text("utf-8").splitlines()) if runs.exists() else 0
+
+    first = opened()
+    assert first == ("newer", newer_answer()["changes"], 1)
+    clock[0] += 59
+    assert opened() == first  # the same answer, no run
+    clock[0] += 2  # 61 s after the answer: asked again
+    assert opened() == ("newer", newer_answer()["changes"], 2)
+    answer_file.write_text(json.dumps(newer_answer(result="up to date", newest="0.8.1", newer=False, changes="")), "utf-8")
+    clock[0] += 61
+    assert opened() == ("up to date", "", 3)
+    clock[0] += 30
+    assert opened() == ("up to date", "", 3)  # an up-to-date answer is kept too
+    answer_file.write_text(json.dumps(updates.failed("GitHub did not answer in time.", "0.8.1")), "utf-8")
+    clock[0] += 61
+    assert opened() == ("could not ask", "", 4)
+    assert opened() == ("could not ask", "", 5)  # a failure is asked again at once
+    assert updates.recent(w) is None
 
 
 # ---------------------------------------------------------------- Update now

@@ -4,7 +4,9 @@ TASlation's own process never asks the network: it starts the program files' ``c
 own, beside setup_models.py, outside the offline guard) as a process of its own, without a console window and below
 normal priority, and reads the one line of JSON it prints (`Check`, `parse_answer`). That happens only
 
-* when the reader chooses Help > Check for updates... (`dialogs.updates.UpdateDialog`), and
+* when the reader chooses Help > Check for updates... (`dialogs.updates.UpdateDialog`; chosen again within
+  `RECENT_S` of an answer that was no failure, that answer is shown again and nothing is asked: `remember`,
+  `recent`, in the window's memory only), and
 * at the window's start, for who turned it on (``update_check = "daily"``: the installer asks, Tools > Settings... and
   the dialog change it), at most once a day (`start_check_due`), no sooner than `START_DELAY_MS` after the window is
   ready and only while nothing is read or translated (`idle`), never in a git clone. A newer version found then is
@@ -48,7 +50,9 @@ QUIET_RETRY_MS = 2_000  # the quiet line waits so long while the status line is 
 POLL_MS = 200  # how often the window looks whether the asking program has answered
 CHECK_WAIT_S = 20.0  # the asking program ends itself after 10 s (its CHECK_TOTAL_S); this long, it is ended
 CHANGES_CAP = 6000  # characters of the changes shown (check_update.py's cap)
+RECENT_S = 60.0  # Help > Check for updates... chosen again this soon after an answer shows it again, asking nothing
 TEST_BASE: str | None = None  # tests only: the loopback address check_update.py asks instead (its --base)
+_clock = time.monotonic  # (`recent`'s clock; the tests set their own)
 
 _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
@@ -294,6 +298,7 @@ def setup(window: Any) -> None:
     window._update_known = newer_known(load_state(window.settings.state_dir), installed_version())
     window._update_planned = False
     window._update_check = None
+    window._update_recent = None  # (`remember`)
 
 
 def menu_label(window: Any) -> str:
@@ -380,6 +385,20 @@ def _say_quietly(window: Any, version: str) -> None:
     render = lambda: quiet_line(version)  # noqa: E731 - said again after a language switch
     window.status_var.set(render())
     window._status_render, window._status_key, window._status_page = render, None, None
+
+
+def remember(window: Any, answer: dict[str, Any]) -> None:
+    """The dialog's answer, kept in the window's memory only (never on disk) for `recent`; a failure is not kept, so
+    that it can be asked again at once."""
+    window._update_recent = None if answer.get("result") == "could not ask" else (_clock(), dict(answer))
+
+
+def recent(window: Any) -> dict[str, Any] | None:
+    """The answer the dialog got less than `RECENT_S` ago, when it was no failure: shown again with no new request."""
+    kept = getattr(window, "_update_recent", None)
+    if kept is None or _clock() - kept[0] >= RECENT_S:
+        return None
+    return dict(kept[1])
 
 
 def stop(window: Any) -> None:
