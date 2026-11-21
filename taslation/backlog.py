@@ -31,8 +31,10 @@ frame of the same page units as the capture they came from - `same_units` -, of 
 depends on changed since - `Pipeline.read_signature`): its page job takes copies of them (`PageWork.reuse`), finds
 and reads nothing on the frame on show, letters the lines stored at once and asks for the rest only - over the
 viewer's current frame, which the window takes as it takes a page the cache does not hold whole (on a viewer that
-draws a page soft first: not a frame that looks soft, `ui.live`). A read of the backlog's stopped by a turn to that
-very page leaves its detection and the units read by then (``found``): the page job takes them and reads the rest.
+draws a page soft first: not a frame that looks soft, `ui.live`). A read of the backlog's stopped (by a turn, any
+job) leaves its detection and the units read by then (``found``, counted against FRAME_CAP_MB with the frame, let go
+with the entry): a page job of that very page takes them and reads the rest, and so does the backlog's own next read
+of the frame (`Backlog._resume_of`, under the conditions `lend` has), rather than read it from the start.
 
 The order of work on the window's single worker (`Backlog.tick`, `Backlog.step`): the page on show first, always - a
 step of the backlog is queued only while no page job runs or waits, nothing of a page job is held for its frame
@@ -149,7 +151,8 @@ class Entry:
     (``units``; ``regions``: as `process` left them, until made units) - and, once read, its regions as read
     (``read``, by unit index: what a page job takes in place of a reading, `Backlog.lend`), with the capture's page
     units, pixel size and `Pipeline.read_signature` (``page_units``, ``size``, ``sig``); ``found``: the detection of a
-    read of the backlog's stopped half-way (``read`` then holds the units read by then)."""
+    read of the backlog's stopped half-way (``read`` then holds the units read by then, and ``aliases`` what
+    `Pipeline.scan` noted of their regions: what the backlog's own next read of the frame takes up, `_resume_of`)."""
 
     screen: Screen
     hwnd: Any
@@ -166,12 +169,13 @@ class Entry:
     size: tuple[int, int] | None = None
     sig: bytes = b""
     kept_bytes: int = 0  # (what the regions kept count against FRAME_CAP_MB: their masks)
+    aliases: dict[int, list[Any]] | None = None
 
     def let_go(self) -> None:
         """Everything it holds of the page goes (its screen stays)."""
         self.raw = self.frame = None
         self.held_bytes = 0
-        self.read = self.found = None
+        self.read = self.found = self.aliases = None
         self.kept_bytes = 0
 
     @property
@@ -220,6 +224,23 @@ def same_units(kept: Sequence[Any], units: Sequence[Any], within: int) -> bool:
                 or abs(float(a.aspect) - float(b.aspect)) > 0.02 or hamming(a.fingerprint, b.fingerprint) > within):
             return False
     return True
+
+
+def _not_the_same(pipeline: Any, kept: Sequence[Any], at: Any, sig: bytes, units: Sequence[Any], size: Any,
+                  within: int) -> str:
+    """Why what a read of a capture gave - its page units *kept*, its pixel size *at*, its `Pipeline.read_signature`
+    *sig* - is not taken for a reading of a frame of page units *units* and pixel size *size*: "size", "units" (not
+    `same_units`), "settings" (something a reading depends on changed since); "" when it is (`Backlog.lend`,
+    `Backlog._resume_of`)."""
+    if at is None or tuple(at) != tuple(size):
+        return "size"
+    if not same_units(kept, list(units), within):
+        return "units"
+    try:
+        same = bool(sig) and sig == pipeline.read_signature(list(units))
+    except Exception:  # noqa: BLE001 - not known: read as ever
+        same = False
+    return "" if same else "settings"
 
 
 class _Recording(deque):  # type: ignore[type-arg]
@@ -341,6 +362,7 @@ class Backlog:
         self.last_frame_wait: float | None = None  # (s from the catch of the frame read last to the end of its read)
         self.frame_waits: list[float] = []
         self.lends: dict[str, int] = {}  # (what `lend` said, how many times: the scenario's measurement)
+        self.resumes: dict[str, int] = {}  # (what came of the reads stopped before, `_resume_of`: the same)
         self.finished_at = float("-inf")  # (when the page on show was last done: `HOLD_S`)
         self.fatal: Any = None  # (a failure every later request repeats: the backlog waits for a page job)
         # (page jobs turned past whose confirmation is kept for now, `Pipeline.decide_kept`: caught once sealed)
@@ -551,18 +573,8 @@ class Backlog:
                 why = ""
                 read, found, kept, size, sig = e.read or {}, e.found, list(e.page_units), e.size, e.sig
         if not why:
-            frame = tuple(getattr(work, "size", ()) or ())
-            if size is None or tuple(size) != frame:
-                why = "size"
-            elif not same_units(kept, list(getattr(work, "units", ()) or ()), within):
-                why = "units"
-            else:
-                try:
-                    same = bool(sig) and sig == pipeline.read_signature(list(work.units))
-                except Exception:  # noqa: BLE001 - not known: read as ever
-                    same = False
-                if not same:
-                    why = "settings"
+            why = _not_the_same(pipeline, kept, size, sig, list(getattr(work, "units", ()) or ()),
+                                tuple(getattr(work, "size", ()) or ()), within)
         if not why:
             copies = copy.deepcopy(read)  # (one copy of them all: what one region points at stays with the copy)
             work.reuse = {i: regions for i, (_unit, regions) in copies.items()}
@@ -747,20 +759,22 @@ class Backlog:
 
     def _read(self, pipeline: Any, entry: Entry, stop: Preempt) -> str:
         """The frame of *entry* read (`Pipeline.scan`, the cache's entries held to it), the units with something to
-        translate kept, the frame dropped."""
+        translate kept, the frame dropped. A read of it stopped before is taken up where it stopped (`_resume_of`)."""
         with self._lock:
             raw, packed = entry.raw, entry.frame
         image = raw if raw is not None else unpack(packed) if packed is not None else None
         if image is None:
             return ""
         self.tell(entry.screen, "read", "working")
-        keep = SimpleNamespace(units=None, found=None, read={})  # (the reading as it goes: `Pipeline.scan`'s *keep*)
         size = tuple(image.size)
+        # (the reading as it goes: `Pipeline.scan`'s *keep*; *resume*: what a read of this frame stopped before had)
+        keep = SimpleNamespace(units=None, found=None, read={}, aliases={},
+                               resume=self._resume_of(pipeline, entry, size))
         try:
             scan = pipeline.scan(image, skip_cached=True, cancel=stop, behind=True, keep=keep)
         except Cancelled:
-            # (stopped half-way: its detection and the units read by then kept, for the page job of this very page
-            # should the reader turn to it now - `lend` -; the backlog's own next read reads it from the start)
+            # (stopped half-way: its detection and the units read by then kept - for the page job of this very page
+            # should the reader turn to it now, `lend`, and for the backlog's own next read of it, `_resume_of`)
             if keep.found is not None:
                 self._keep_read(pipeline, entry, keep, size, partial=True)
             raise
@@ -794,17 +808,45 @@ class Backlog:
             return
         read = dict(keep.read)
         found = keep.found if partial else None
+        aliases = dict(getattr(keep, "aliases", None) or {}) if partial else None
         kept = _region_bytes(read) + (_region_bytes(found) if found is not None else 0)
         with self._lock:
             # (the frame stays while a read stopped half-way; else it goes right after)
             others = self.bytes_held - entry.kept_bytes - (0 if partial else entry.held_bytes)
             if others + kept > FRAME_CAP_MB * MB:
-                entry.read, entry.found, entry.kept_bytes = None, None, 0
+                entry.read, entry.found, entry.aliases, entry.kept_bytes = None, None, None, 0
                 return
-            entry.read, entry.found, entry.kept_bytes = read, found, kept
+            entry.read, entry.found, entry.aliases, entry.kept_bytes = read, found, aliases, kept
             entry.page_units, entry.size, entry.sig = list(keep.units or ()), size, sig
             if partial:
                 self.peak_bytes = max(self.peak_bytes, self.bytes_held)
+
+    def _resume_of(self, pipeline: Any, entry: Entry, size: tuple[int, int]) -> Callable[[Sequence[Any]], Any] | None:
+        """(`_read`) What a read of *entry*'s frame stopped half-way kept (`_keep_read` *partial*: its detection, the
+        units read by then, the regions those were read in place of), for its next read to take up rather than read
+        the frame from the start: `Pipeline.scan`'s ``keep.resume``, called with the frame's page units, which gives
+        copies of them (found, read, aliases) under the conditions `lend` gives them to a page job - the same page
+        units as the read stopped had (`same_units`), the frame's pixel size *size*, nothing a reading depends on
+        changed since (`Pipeline.read_signature`) -, else None and the frame is read from the start. None when
+        nothing was kept. What came of it is counted in ``resumes`` ("resumed", or why not)."""
+        import copy
+
+        with self._lock:
+            found, read, aliases = entry.found, entry.read, entry.aliases
+            kept, at, sig = list(entry.page_units), entry.size, entry.sig
+        if found is None:
+            return None
+        within = int(getattr(getattr(pipeline, "settings", None), "fingerprint_max_distance", 36) or 36)
+
+        def resume(units: Sequence[Any]) -> Any:
+            why = _not_the_same(pipeline, kept, at, sig, units, size, within)
+            with self._lock:
+                self.resumes[why or "resumed"] = self.resumes.get(why or "resumed", 0) + 1
+            if why:
+                return None
+            return copy.deepcopy((found, dict(read or {}), dict(aliases or {})))  # (the entry's own never change)
+
+        return resume
 
     def _make(self, pipeline: Any, entry: Entry) -> str:
         """The regions `process` read of *entry*'s page units made units to translate (`Pipeline.scanned_of`)."""

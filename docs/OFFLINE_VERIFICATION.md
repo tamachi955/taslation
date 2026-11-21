@@ -3915,7 +3915,10 @@ to 3.0 s. In the wide window at 1 s a page the reader read back took most of its
 page), so the worker was idle for the backlog for some 0.3 s a page: its read of the next page was stopped by the
 turn, in its detection 15 times of 30 (nothing to lend: "still a frame") and after it 8 times (detection and the units
 read by then lent: "in part"). A stopped read starts again from the start at the backlog's next step: the stopped steps
-took 2.1 to 20.8 s of the worker per run (reads 0.3 to 16.7 s), most of it in the wide sharp and soft runs.
+took 2.1 to 20.8 s of the worker per run (reads 0.3 to 16.7 s), most of it in the wide sharp and soft runs. (Since
+then the backlog's next step on that page takes up what the stopped read had, its detection and the units read by
+then, under the conditions of the lending - `Backlog._resume_of`, tested in tests/test_backlog.py; the tool counts
+these reads, `reads_after_a_stop`. Not measured on the stand-in yet.)
 
 **The first bubble of a page read back**, with the backlog and with nothing caught, median / p90 in ms, one run each
 (the 1 s pace also over its three runs, thirty pages each way):

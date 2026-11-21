@@ -2512,9 +2512,15 @@ class Pipeline:
         With *behind* (a page the reader turned past, read from its capture: `backlog`), *cancel* stops it between
         the detectors too, as it stops a page on show. *keep* (an object, `backlog`) is told the reading as it goes,
         for a page job that takes it in place of a reading of its own (`PageWork.reuse`): ``units`` (the page units),
-        ``found`` (copies of the regions as detected, before the reading changes them) and ``read`` (by unit index,
-        the unit and its regions once read, ordered and given their rooms, as `process` reads them) - so far, when it
-        is stopped.
+        ``found`` (copies of the regions as detected, before the reading changes them), ``read`` (by unit index,
+        the unit and its regions once read, ordered and given their rooms, as `process` reads them) and, when it has
+        one, ``aliases`` (by unit index, for each of those regions the boxes of the regions read in place of it, which
+        `ScannedRegion.aliases` gives) - so far, when it is stopped. A *keep* with a ``resume`` (`Backlog._resume_of`:
+        the page units -> copies of a read of the same frame stopped before, as ``found``, ``read`` and ``aliases``
+        were then, or None) takes that read up: its detection in place of one, its units read as they were then (a
+        misreading corrected since taken: `_take_corrections`), the rest read from its detection - what the read
+        would have been had it never stopped. Not with *events*, *keep_regions* or *fresh*: the backlog's read has
+        none of them.
         """
         s = self.settings
         report = progress or (lambda _msg: None)
@@ -2524,8 +2530,24 @@ class Pipeline:
         units = self.units_of(rgb)  # (a spread: the page read first first, and so recorded)
         if not units:
             return scan
+        resume = getattr(keep, "resume", None) if keep is not None and fill is None and not keep_regions and not fresh \
+            else None
+        prior = resume(units) if callable(resume) else None
+        prior_read: dict[int, list[TextRegion]] = {}  # (by unit index: the regions the read stopped before had read)
+        prior_aliases: dict[int, list[tuple[Box, ...]]] = {}
+        aliases = getattr(keep, "aliases", None) if keep is not None else None
         report(Message("pipeline.stage_finding"))
-        if behind and cancel is not None:
+        if prior is not None:
+            found_before, read_before, aliases_before = prior
+            by_index = {u.index: u for u in units}
+            prior_read = {i: list(rs) for i, (_u, rs) in read_before.items() if i in by_index}
+            prior_aliases = {i: list(a) for i, a in (aliases_before or {}).items() if i in prior_read}
+            regions = list(found_before)  # (the detection of the read stopped before)
+            if keep is not None:  # (told at once: a stop before its units come again keeps them all the same)
+                keep.read.update({i: (by_index[i], rs) for i, rs in prior_read.items()})
+                if isinstance(aliases, dict):
+                    aliases.update(prior_aliases)
+        elif behind and cancel is not None:
             check_cancel(cancel)
             _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel  # (`_detect`: stopped between detectors)
             try:
@@ -2549,6 +2571,9 @@ class Pipeline:
             hit = None
             if (skip_cached or fresh) and self.cache is not None:
                 hit = self._lookup(unit, before)
+            if unit.index in prior_read:  # (read before, ordered then)
+                plans.append((unit, prior_read[unit.index], hit))
+                continue
             plans.append((unit, apply_order_hints(
                 order_on_page(rgb, unit.box, [r for r in regions if owners[id(r)] is unit], self.rtl)), hit))
         if fill is not None:
@@ -2556,10 +2581,12 @@ class Pipeline:
         unread = {id(r): copy.copy(r) for _unit, unit_regions, _hit in plans for r in unit_regions} if keep_regions else {}
         for unit, unit_regions, hit in plans:
             su = ScannedUnit(index=unit.index, box=unit.box, fingerprint=unit.fingerprint, aspect=unit.aspect)
+            taken = unit.index in prior_read  # (read by the read stopped before: as it read it, ordered and roomed)
             left_out = (self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
-                        if unit_regions else [])
+                        if unit_regions and not taken else [])
             self._take_corrections(unit, unit_regions)
-            self._order_read(rgb, unit.box, unit_regions)
+            if not taken:
+                self._order_read(rgb, unit.box, unit_regions)
             for r in unit_regions:
                 if keep_regions and (r.status == "untranslated" and r.source_text or r.status == ERASED):
                     seen = unread.get(id(r)) or copy.copy(r)  # (a paragraph's region was made in the reading)
@@ -2567,11 +2594,18 @@ class Pipeline:
                     seen.panel = r.panel  # (found after the reading, `_order_read`)
                     scan.erasable.append(seen)
             stands_for: dict[int, list[Box]] = {}  # a region's id -> the boxes of the regions it repeated
+            if taken:
+                for r, boxes in zip(unit_regions, prior_aliases.get(unit.index) or ()):
+                    if boxes:
+                        stands_for[id(r)] = list(boxes)
             for gone in left_out or []:
                 stands_for.setdefault(id(gone.repeats), []).append(gone.bbox)
-            self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (the room hint: its own part of a room)
+            if not taken:
+                self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (the room hint: its own part of a room)
             if keep is not None:
                 keep.read[unit.index] = (unit, unit_regions)  # (read: nothing below changes them)
+                if isinstance(aliases, dict):
+                    aliases[unit.index] = [tuple(stands_for.get(id(r), ())) for r in unit_regions]
             scanned = self._scanned_regions(unit_regions, stands_for)
             if fill is not None:
                 for r, kept in zip(unit_regions, scanned):
