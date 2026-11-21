@@ -630,6 +630,30 @@ def test_the_next_page_stops_a_step_at_once_and_what_was_answered_is_stored(sett
     assert b.step(p) == "translate" and not p.cache.pages[0].incomplete
 
 
+def test_a_step_stopped_mid_page_gives_the_pairs_answered_by_then_to_the_pages_pairs(settings, sample_page):
+    # (a translator that does not grow its context - `_Recording` -: before, the pairs answered before the stop never
+    # reached `Pipeline._context`, so the next request did not have them; one that grows it has them grown as it goes)
+    b = Backlog(_events()[1])
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1), "Stopped, not growing")
+    _job(p, b, sample_page, _confirmed())
+    assert b.step(p) == "made"
+    p.translator = Blocking(EN_TEXTS)  # (answers one line, then holds the request until it is stopped)
+    assert not getattr(p.translator, "grows_context", False) and p._context.maxlen
+    p._context.clear()
+    out: list[str] = []
+    thread = threading.Thread(target=lambda: out.append(b.step(p)), daemon=True)
+    thread.start()
+    assert p.translator.waiting.wait(10)
+    p.stop_warm()
+    thread.join(5)
+    assert out == ["stopped"]
+    pairs = [pair for page in p._context for pair in page]
+    asked = p.translator.calls[0][0]
+    assert pairs == [(asked, EN_TEXTS[asked])]  # (the one line answered before the stop)
+    p.translator = DictTranslator(EN_TEXTS)
+    assert b.step(p) == "translate" and len(p._context) == 2  # (the rest of the page: its pairs once more, as ever)
+
+
 def test_a_job_waiting_for_the_worker_stops_a_step_too():
     waiting = [False]
     stop = Preempt(lambda: waiting[0])

@@ -1032,7 +1032,9 @@ class Backlog:
     def _translate(self, pipeline: Any, entry: Entry, stop: Preempt, settings: Any) -> str:
         """What is still to translate of *entry*'s units (held to the cache first: `Pipeline.resync`) asked for, as a
         whole-book run asks for a run of units (`translate.sequence.translate_units`), stopped between line requests,
-        what was answered by then stored. Its requests get the pairs in the order of work, as the page on show's do."""
+        what was answered by then stored. Its requests get the pairs in the order of work, as the page on show's do: a
+        translator that grows them (`GrowingContext`) has them grown as it answers; for one that does not, the pairs
+        answered (`_Recording`) join the pages' pairs (`Pipeline._context`) as the step ends, stopped or not."""
         from .translate.base import GrowingContext, grows_context
 
         units = [pipeline.resync(u) for u in entry.units or []]
@@ -1055,9 +1057,11 @@ class Backlog:
         else:
             recent = _Recording(pipeline.context_pairs() if on else (),
                                 maxlen=max(0, int(getattr(s, "context_pairs", 40))))
-        host._translate_units(todo, recent, notes, [], language)
-        if isinstance(recent, _Recording) and on and context is not None and recent.added:
-            context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)
+        try:
+            host._translate_units(todo, recent, notes, [], language)
+        finally:  # (stopped too - `Cancelled`, the lines answered by then stored -: what was answered goes on as context)
+            if isinstance(recent, _Recording) and on and context is not None and recent.added:
+                context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)
         if host._fatal is not None:
             if getattr(host._fatal, "code", "") == "ollama.not_answering":
                 # (the translator does not answer, asked again and, when TASlation started it, started again: the
