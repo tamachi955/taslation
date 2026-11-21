@@ -3,6 +3,19 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.3 - 2026-11-21
+
+Translating
+
+* When the translation program (Ollama) takes a request and sends nothing back, TASlation no longer waits for up to
+  15 minutes. After 30 seconds without an answer (counted over the pages you turn meanwhile; longer for a long
+  request) it says so and asks again on a new connection. If that gets nothing either, it starts the translation
+  program again and goes on with the page - only a program TASlation started itself, and at most once in ten
+  minutes. A translation program you run yourself is never stopped: TASlation then says that it does not answer and
+  asks you to restart it and press F5.
+* This was seen once in 33 long test runs with Ollama 0.40.16: the program logged the requests but none reached the
+  model, while it still answered other questions. With the change the run went on by itself.
+
 ## 0.9.2 - 2026-11-21
 
 Other
