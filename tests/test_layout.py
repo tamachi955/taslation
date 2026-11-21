@@ -505,8 +505,10 @@ print(len(regions))
 @needs_weights
 @pytest.mark.page_models
 def test_the_whole_way_on_the_sample_page(sample_page):
-    """The sample page's bubbles, model first: no bubble twice, each with a real mask."""
-    s = Settings(detect_model="auto", art_erase="auto")
+    """The sample page's bubbles, model first: no bubble twice, each with a real mask. The settings are those the
+    defaults ("auto" and "auto") come to where torch has a CUDA GPU, named, so that a computer without one (LaMa on the
+    CPU) goes the same way; what the defaults come to on either computer is the tests' above."""
+    s = Settings(detect_model="on", art_erase="lama")
     p = Pipeline(s, ocr=FakeOcr(), translator=None, cache=None)
     assert p.layout is not None
     rs = p.process(sample_page, translate=False, use_cache=False).regions
