@@ -1030,13 +1030,15 @@ class OllamaStarter:
         """Whether Ollama answers now (`OllamaTranslator.revive`)."""
         return self.start(cancel) is None
 
-    def restart(self, cancel: threading.Event | None = None) -> bool | None:
+    def restart(self, cancel: threading.Event | None = None,
+                on_restarting: Callable[[], Any] | None = None) -> bool | None:
         """The server at this address, which gets requests and gives no answer (`OllamaTranslator.restart`, in the
-        request's thread), stopped and started again as the module's docstring says. True when it answers again;
-        False when it was not started again or did not come back (within `RESTART_GAP_S` of the last restart, it would
-        not stop, it would not start, it did not answer within `START_WAIT_S`, *cancel* set); None when it is not the
-        server TASlation started (no record names it, or another program's model is loaded in it): it is left as it
-        is. The log says what was done, numbers only."""
+        request's thread), stopped and started again as the module's docstring says; *on_restarting*() is called once
+        that is under way (just before the stop), never when nothing is done. True when it answers again; False when
+        it was not started again or did not come back (within `RESTART_GAP_S` of the last restart, it would not stop,
+        it would not start, it did not answer within `START_WAIT_S`, *cancel* set); None when it is not the server
+        TASlation started (no record names it, or another program's model is loaded in it): it is left as it is. The
+        log says what was done, numbers only."""
         path = self.record
         if path is None or not startable(self.url):
             LOG.warning("no answer: the translation program is not one TASlation started here; left as it is")
@@ -1060,6 +1062,11 @@ class OllamaStarter:
                                 "TASlation started; left as it is", len(foreign))
                     return None
                 self._restarted = now
+                if on_restarting is not None:
+                    try:
+                        on_restarting()
+                    except Exception:  # noqa: BLE001 - whoever is told must not keep the server from its restart
+                        LOG.exception("no answer: telling of the restart failed")
                 if not stop_server(record["pid"], record["started"]):
                     LOG.warning("no answer: the translation program TASlation started would not stop (%.1f s)",
                                 time.monotonic() - now)

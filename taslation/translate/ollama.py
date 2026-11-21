@@ -47,12 +47,15 @@ is asked once more
 on a new connection after one /api/ps look (`_answer`, `_after_silence`). No answer a second time in the incident (until
 an answer comes), or /api/ps silent: the server TASlation started is stopped and started again by `ollama_start`'s own
 ways (``restart``, `OllamaStarter.restart`: at most once in ten minutes, never a server the person runs, said as
-``ollama.restarting``), the model loaded, the request asked again - once; else, or after that, the request ends with
-``ollama.not_answering`` (the translation program on this computer does not answer: restart it, then F5) and ``silent``
-names the incident until the next answer of any request. Nothing asks for ever: each
-request makes one restart at most and the incident's second silence ends it. A load is not bounded by a first byte
-(it comes once the model is in memory): it asks /api/ps every `ALIVE_EVERY_S` on a connection of its own while nothing
-comes and ends as no answer when the server is silent `ALIVE_MISSES` times in a row - a request's own load is taken as
+``ollama.restarting`` once the restart is under way - never of a server it leaves alone), the model loaded, the
+request asked again - once; else, or after that, the request ends with ``ollama.not_answering`` (the translation
+program on this computer does not answer: restart it, then F5) and ``silent`` names the incident until the next
+answer of any request. Nothing asks for ever: each request makes one restart at most and the incident's second
+silence ends it. A load is not bounded by a first byte outside an incident (it comes once the model is in memory,
+from a slow disk late): it asks /api/ps every `ALIVE_EVERY_S` on a connection of its own while nothing comes and ends
+as no answer when the server is silent `ALIVE_MISSES` times in a row; within an incident its first byte has a bound
+too (`NO_ANSWER_LOAD_S`, `_load_bound`: a server whose model process hangs loads it again and again while /api/ps
+answers) - a request's own load is taken as
 the request itself (`_answer`), the load ahead of a page (`taslation.pipeline.LoadAhead`) leaves it to the page's
 request, and its join ends with it; a request waiting for another thread's load gets its slow note as any request
 does. A warming step (`plamo.PlamoTranslator.warm_prefix`) that times
@@ -155,6 +158,11 @@ NO_ANSWER_TIMES = 3.0
 # connection of its own, and ends as no answer when the server is silent ALIVE_MISSES times in a row
 ALIVE_EVERY_S = 10.0
 ALIVE_MISSES = 2
+# ... and within an incident (a request got no answer, and none answered since) its first byte is bounded too: within
+# NO_ANSWER_LOAD_S, or NO_ANSWER_TIMES the longest load this translator measured when that is longer (`_load_bound`).
+# A server whose model process hangs loads the model again and again while /api/ps answers: the load of the request
+# asked again was waited for WARM_UP_TIMEOUT and ended as a timeout, the server never started again (2026-11-21)
+NO_ANSWER_LOAD_S = 60.0
 RELEASE_TIMEOUT = 3.0  # seconds a request to unload may take: the end of a run or the window's close wait for it
 RELEASE_WAIT_S = 10.0  # how long `release(wait=True)` waits for the model to be gone (0.3 s as a rule)
 FULL_GPU_SHARE = 0.99  # the share of the model in GPU memory (`gpu_share`) from which it counts as being on the GPU
@@ -246,13 +254,14 @@ def loaded_message(model: str, seconds: float) -> Message:
 
 class NoAnswer(TranslationError):
     """A streamed request that got no answer (`_Watch`): no first byte within its bound, a stream silent past its
-    bound, or (*load*) a load whose server stopped answering /api/ps. Its message is the sentence a request the rule
-    ends with is given (``ollama.not_answering``); *waited*: the seconds of silence; *began*: whether bytes of the
-    answer had come."""
+    bound, or (*load*) a load past its bound within an incident or (*ps_silent*) whose server stopped answering
+    /api/ps. Its message is the sentence a request the rule ends with is given (``ollama.not_answering``); *waited*:
+    the seconds of silence; *began*: whether bytes of the answer had come."""
 
-    def __init__(self, waited: float = 0.0, began: bool = False, load: bool = False):
+    def __init__(self, waited: float = 0.0, began: bool = False, load: bool = False, ps_silent: bool = False):
         super().__init__(Message("ollama.not_answering"))
-        self.waited, self.began, self.load = float(waited), bool(began), bool(load)
+        self.waited, self.began, self.load = float(waited), bool(began), bool(load or ps_silent)
+        self.ps_silent = bool(ps_silent)
 
 
 def _start_again(on_text: Callable[[str], None] | None) -> None:
@@ -360,6 +369,7 @@ class OllamaTranslator:
         self.silent = 0
         self._incident_lock = threading.Lock()
         self._waits = _Waits()  # the seconds the requests waited for a first byte in a row, none coming (`_Watch`)
+        self._load_most = 0.0  # the longest load this translator measured (`_load_bound`)
         self._share: float | None = None  # the model's share on the GPU last seen (`gpu_share`; 0.0: the processor)
         # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_before_load`)
         self.before_load: Callable[[], Any] | None = None
@@ -527,6 +537,8 @@ class OllamaTranslator:
         pieces: list[str] = []
         last: dict[str, Any] | None = None
         timeout = timeout or self.timeout
+        if alive is not None and first is None:  # (a load: bounded within an incident only)
+            first = self._load_bound()
         for _attempt in range(2):
             watch = _Watch(cancel, on_slow, self.slow_after, timeout, first, between, alive, self._waits)
             conn, kept = self._held(timeout)
@@ -825,13 +837,16 @@ class OllamaTranslator:
         with ocr_place.loading():  # (from the release of the GPU models on: the OCR decides where it reads after it)
             self._free_gpu()
             seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
+            self._load_most = max(self._load_most, seconds)
             share = self.gpu_share(model)
             checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
             if checked and partly_on_gpu(share):
                 ocr_place.partly_loaded(share)  # (OCR readers kept on the GPU through the load go in the release below)
                 self.release(model, wait=True)
                 self._free_gpu()
-                seconds += self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
+                again = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
+                self._load_most = max(self._load_most, again)
+                seconds += again
                 share = self.gpu_share(model)
         if not quiet:
             self._say(loaded_message(model, seconds))
@@ -883,6 +898,15 @@ class OllamaTranslator:
         if expected is None or expected <= 0:
             return self._silent_after()
         return max(NO_ANSWER_S, NO_ANSWER_TIMES * float(expected))
+
+    def _load_bound(self) -> float | None:
+        """The seconds a load's first byte - the model in memory - may take (`NoAnswer`): no bound outside an incident
+        (a load from a slow disk keeps ``WARM_UP_TIMEOUT``); within one `NO_ANSWER_LOAD_S`, or `NO_ANSWER_TIMES` the
+        longest load this translator measured when that is longer."""
+        with self._incident_lock:
+            if self._incident is None:
+                return None
+        return max(NO_ANSWER_LOAD_S, NO_ANSWER_TIMES * self._load_most)
 
     def _silent_after(self) -> float:
         """The seconds a stream may be silent once it began (`NoAnswer`)."""
@@ -945,9 +969,10 @@ class OllamaTranslator:
         """(a request that got no answer, *e*) Returns when the request is to be asked again on a new connection - the
         incident's first silence and /api/ps answers; or the server TASlation started was started again (`restart`,
         once for a request: *tried*) -, raises ``ollama.not_answering`` else: the incident is ``silent`` then, until
-        the next answer. A cancel ends it as `Cancelled`."""
-        how = ("after its first bytes" if e.began else "while it loaded, the server silent to /api/ps" if e.load
-               else "without a byte")
+        the next answer. A cancel ends it as `Cancelled`. That the server is started again (``ollama.restarting``) is
+        said once the restart is under way (the hook's *on_restarting*), never of a server it leaves as it is."""
+        how = ("after its first bytes" if e.began else "while it loaded, the server silent to /api/ps" if e.ps_silent
+               else "while it loaded" if e.load else "without a byte")
         n, silences, _new = self._silence(e.waited, kind, how)
         alive = self._ps_answers()
         if cancel is not None and cancel.is_set():
@@ -957,10 +982,9 @@ class OllamaTranslator:
             return
         if not tried["restart"] and self.restart is not None:
             tried["restart"] = True
-            self._say(Message("ollama.restarting"))
             began = time.monotonic()
             try:
-                done = self.restart(cancel)
+                done = self.restart(cancel, on_restarting=lambda: self._say(Message("ollama.restarting")))
             except Exception:  # noqa: BLE001 - a restart that fails ends the request as one that did not come back
                 LOG.exception("no answer: starting the translation program again failed")
                 done = False
@@ -1296,14 +1320,14 @@ class _Watch:
                     # it ends so leaves it as it is, and the next request ends at once)
                     silent = self.waits.waited() if self.waiting else waited
                     if silent >= self.first:
-                        raise NoAnswer(silent, False) from None
+                        raise NoAnswer(silent, False, load=self.alive is not None) from None
                 if waited >= self.timeout:
                     raise
                 if self.alive is not None and now - self.asked >= ALIVE_EVERY_S:
                     self.misses = 0 if self.alive() else self.misses + 1
                     self.asked = time.monotonic()
                     if self.misses >= ALIVE_MISSES:
-                        raise NoAnswer(time.monotonic() - self.last, self.began, load=True) from None
+                        raise NoAnswer(time.monotonic() - self.last, self.began, ps_silent=True) from None
                 if self.on_slow is not None and not self.slow_told and waited >= self.slow_after:
                     self.slow_told = True
                     try:

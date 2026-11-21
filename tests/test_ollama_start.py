@@ -789,15 +789,18 @@ def test_the_server_taslation_started_is_started_again_at_most_once_in_ten_minut
     _record_file(tmp_path).write_text(json.dumps(record), "utf-8")
     machine.loaded = None  # (hung: /api/ps is silent too)
     starter = OllamaStarter(URL, state_dir=_state(tmp_path))
+    told: list[int] = []  # (told once the restart is under way: before the stop, with the old server still there)
     with caplog.at_level(logging.WARNING, logger="taslation"):
-        assert starter.restart() is True
+        assert starter.restart(on_restarting=lambda: told.append(len(machine.asked))) is True
+    assert told == [0]
     assert machine.asked == [first] and first not in machine.procs and len(machine.pids) == 2
     record = _record(tmp_path)
     assert record["pid"] == machine.pids[1] and owns_server()
     assert {(u["pid"], u["started"]) for u in record["users"]} == {(ME, 1), (other, machine.procs[other].started)}
     assert "was stopped" in caplog.text and "started again; it answers" in caplog.text
-    # within ten minutes: not again, nothing stopped or started
-    assert starter.restart() is False and machine.asked == [first] and len(machine.pids) == 2
+    # within ten minutes: not again, nothing stopped or started, nothing told
+    assert starter.restart(on_restarting=lambda: told.append(-1)) is False and told == [0]
+    assert machine.asked == [first] and len(machine.pids) == 2
     assert "not again within 600 s" in caplog.text
     monkeypatch.setattr(ollama_start, "RESTART_GAP_S", 0.0)  # (ten minutes later)
     assert starter.restart() is True and machine.asked == [first, machine.pids[1]] and len(machine.pids) == 3
@@ -809,24 +812,29 @@ def test_a_server_taslation_did_not_start_is_never_stopped_nor_started_again(mac
     _install(tmp_path)
     machine.answers = True  # the person's own Ollama
     assert start_ollama(URL, state=_state(tmp_path)) is None and not _record_file(tmp_path).exists()
-    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart() is None
-    assert OllamaStarter(URL).restart() is None  # (no state folder: nothing is TASlation's)
-    assert OllamaStarter("http://127.0.0.1:11500", state_dir=_state(tmp_path)).restart() is None
-    assert machine.asked == machine.terminated == [] and machine.started == []
+    told: list[str] = []
+    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart(on_restarting=lambda: told.append("x")) is None
+    assert OllamaStarter(URL).restart(on_restarting=lambda: told.append("x")) is None  # (no state folder)
+    assert OllamaStarter("http://127.0.0.1:11500", state_dir=_state(tmp_path)).restart(
+        on_restarting=lambda: told.append("x")) is None
+    assert machine.asked == machine.terminated == [] and machine.started == [] and told == []
 
 
 def test_another_program_s_model_keeps_the_server_from_being_started_again(machine, tmp_path):
     pid = _started_one(machine, tmp_path)
     machine.loaded = ["taslation-plamo3-translate-2b:latest", "llama3.2:3b"]
-    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart() is None
+    told: list[str] = []
+    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart(on_restarting=lambda: told.append("x")) is None
     assert machine.asked == machine.terminated == [] and pid in machine.procs and len(machine.started) == 1
+    assert told == []
 
 
 def test_a_server_that_will_not_stop_or_does_not_come_back_is_no_restart(machine, tmp_path):
     pid = _started_one(machine, tmp_path)
     machine.obeys = machine.killable = False
-    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart() is False
-    assert pid in machine.procs and len(machine.started) == 1 and _record(tmp_path)["pid"] == pid
+    told: list[str] = []  # (a restart under way that fails was told: the sentence that it does not answer follows)
+    assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart(on_restarting=lambda: told.append("x")) is False
+    assert pid in machine.procs and len(machine.started) == 1 and _record(tmp_path)["pid"] == pid and told == ["x"]
     machine.obeys = machine.killable = True
     machine.after_start = None  # (the one started again never answers)
     assert OllamaStarter(URL, state_dir=_state(tmp_path)).restart() is False
@@ -949,7 +957,9 @@ def test_the_window_starts_its_server_again_for_a_request_without_an_answer(mach
     _started_one(machine, tmp_path)
     w = SimpleNamespace(_ollama=OllamaStarter(URL, state_dir=_state(tmp_path)),
                         _check_in_background=lambda: checked.append("checked"))
-    assert jobs.JobsMixin._restart_ollama(w) is True and len(machine.started) == 2 and checked == []
+    told: list[str] = []
+    assert jobs.JobsMixin._restart_ollama(w, None, lambda: told.append("x")) is True and len(machine.started) == 2
+    assert checked == [] and told == ["x"]
     assert jobs.JobsMixin._restart_ollama(w) is False and checked == ["checked"]  # (within ten minutes)
     assert jobs.JobsMixin._restart_ollama(SimpleNamespace(_ollama=None)) is None
 

@@ -141,7 +141,9 @@ class _Handler(BaseHTTPRequestHandler):
         server.requests.append({"port": self.client_address[1], "mode": mode})
         line = payload["prompt"].rsplit("<|plamo:msg|>", 2)[-2].split("<|plamo:tag|>")[0]
         text = "EN:" + line
-        if mode == "silent":
+        if mode in ("silent", "unload"):  # ("unload": the model gone from /api/ps as well, as a hung process makes it)
+            if mode == "unload":
+                server.loaded = False
             self._hang()
             return
         if not payload.get("stream"):
@@ -226,8 +228,10 @@ class Restarts:
     def __init__(self, stand: Stand, gives: Any):
         self.stand, self.gives, self.calls = stand, gives, 0
 
-    def __call__(self, cancel: threading.Event | None = None) -> Any:
+    def __call__(self, cancel: threading.Event | None = None, on_restarting: Any = None) -> Any:
         self.calls += 1
+        if self.gives is not None and on_restarting is not None:  # (a restart under way: True, or one that failed)
+            on_restarting()
         if self.gives:
             self.stand.plan.clear()
             self.stand.ps, self.stand.load = "answer", "answer"
@@ -351,6 +355,8 @@ def test_a_server_the_person_runs_or_a_restart_that_failed_ends_the_request_with
     out = _asked(t)
     assert out["ended"] and out.get("error") == "ollama.not_answering", out
     assert restart.calls == 1 and len(stand.requests) == 2  # (asked again once, then the restart asked once)
+    # (that it is started again is said only of a restart under way: never of a server the person runs)
+    assert ("ollama.restarting" in _codes(told)) is (gives is False)
     assert t.silent != 0  # (the client says it does not answer until the next answer)
     out = _asked(t)  # F5: no answer since - the incident goes on, the request ends after its bound
     assert out["ended"] and out.get("error") == "ollama.not_answering", out
@@ -452,7 +458,25 @@ def test_a_load_ahead_of_the_page_ends_with_the_load_it_waits_for(stand):
     assert not joined.is_alive() and not t._loading.locked()
 
 
-def test_a_load_is_waited_for_while_its_server_answers_ps(stand):
+def test_a_load_after_a_silence_that_gets_no_answer_while_ps_answers_ends_at_its_bound_and_the_server_is_restarted(
+        stand, monkeypatch):
+    """(a model process that hangs, on a real server: the server loads the model again and again while /api/ps
+    answers, and the load of the request asked again was waited for 300 s and ended as a timeout, the server never
+    started again; 2026-11-21) Within an incident a load's first byte has a bound too: past it, a silence."""
+    monkeypatch.setattr(ollama_mod, "NO_ANSWER_LOAD_S", 2 * BOUND_S, raising=False)
+    stand.plan, stand.load = ["unload"], "silent"
+    restart = Restarts(stand, True)
+    t, told = _translator(stand, restart)
+    out = _asked(t)
+    assert out["ended"] and out.get("result") == ["EN:" + LINE], out
+    assert restart.calls == 1 and [r["mode"] for r in stand.requests] == ["unload", "answer"]
+    assert _codes(told).count("ollama.no_answer") == 1 and _codes(told).count("ollama.restarting") == 1
+    assert out["seconds"] < BOUND_S + 2 * BOUND_S + 3.0 and t.silent == 0
+
+
+def test_a_load_is_waited_for_while_its_server_answers_ps(stand, monkeypatch):
+    # (no incident under way: a load from a slow disk keeps its time, whatever the bound of one within an incident)
+    monkeypatch.setattr(ollama_mod, "NO_ANSWER_LOAD_S", BOUND_S, raising=False)
     stand.loaded, stand.load = False, 1.5  # (longer than ALIVE_MISSES looks at it)
     t, _told = _translator(stand)
     t0 = time.monotonic()

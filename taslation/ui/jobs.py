@@ -404,15 +404,17 @@ class JobsMixin:
         self._check_in_background()
         return False
 
-    def _restart_ollama(self, cancel: threading.Event | None = None) -> bool | None:
+    def _restart_ollama(self, cancel: threading.Event | None = None,
+                        on_restarting: Callable[[], Any] | None = None) -> bool | None:
         """A request got no answer twice, or /api/ps none either (`OllamaTranslator.restart`, in the thread of the
         request): the server TASlation started is stopped and started again (`OllamaStarter.restart`: at most once in
-        ten minutes; a server the person runs is left as it is: None). Whether it answers again; when it was not
-        started again, or did not come back, the setup is checked again (the banner)."""
+        ten minutes, *on_restarting* called once it is under way; a server the person runs is left as it is: None).
+        Whether it answers again; when it was not started again, or did not come back, the setup is checked again (the
+        banner)."""
         starter = self._ollama
         if starter is None:
             return None
-        done = starter.restart(cancel)
+        done = starter.restart(cancel, on_restarting)
         if done is False:
             self._check_in_background()
         return done
