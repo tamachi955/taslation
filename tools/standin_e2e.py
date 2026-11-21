@@ -5667,8 +5667,8 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if kept:
         print(f"window order: the stand-in put under the window {sum(1 for n in kept if 'put directly under' in n['line'])}"
               f" time(s), left as it was {sum(1 for n in kept if 'left as it is' in n['line'])} time(s), "
-              f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s); hidden wholly with its frames "
-              f"standing still {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
+              f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s); hidden wholly, no frame after "
+              f"a page key {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
     cover = run_.get("tool_cover") or {}
     if cover:
         part = cover.get("part", 1.0)

@@ -484,6 +484,7 @@ def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hid
                             _resizing=lambda: False, _frame_count=lambda: 7, _status_key=None,
                             say=lambda key: None, status=lambda text: None)
         t = 100.0
+        order.turn_asked(w, 20, 7, t)  # (a page key handed on to it, whose frame does not come)
         for _ in range(order.ORDER_MOST + 1):
             order.beat(w, t)
             t += max(order.ORDER_EVERY_S, order.COVER_EVERY_S)
@@ -498,7 +499,7 @@ def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hid
     standin_e2e.print_table({"translator": "t", "browser": "b", "pages": 1,
                              "run": {"seconds": 1, "window_order": tap.window_order}}, Path("report.json"))
     assert (f"put under the window {order.ORDER_MOST} time(s), left as it was 1 time(s), refused 0 time(s); hidden "
-            "wholly with its frames standing still 1 time(s)") in capsys.readouterr().out
+            "wholly, no frame after a page key 1 time(s)") in capsys.readouterr().out
 
 
 def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
