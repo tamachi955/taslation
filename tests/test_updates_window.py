@@ -3,7 +3,7 @@ and the once-a-day rule with a made-up clock, the asking program's answer read a
 asked by the window's code against a small HTTP server on 127.0.0.1 with the offline guard in this process (nothing
 blocked, nothing allowed: the window's process connects nowhere), the start's look that waits while a page is read and
 says a newer version only in the Help menu and one quiet status line, the dialog's three answers and its box, its
-place after the answer on a made-up low screen in every window language, and
+place after the answer on a made-up low screen in every window language, the changes as its box shows them, and
 Update now: update.cmd's command line, its console of its own, the environment the guard changed given back, the
 window closed only once it started. Nothing here reaches the network, the real ~/.taslation or a real update."""
 
@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +28,8 @@ from taslation.config import ConfigError, Settings
 from taslation.i18n import UI_LANGUAGES, _, set_language
 from taslation.ui import layout, updates
 from taslation.ui.dialogs import updates as dialog_mod
-from taslation.ui.dialogs.updates import CHANGES_MIN_LINES, CHANGES_SIZE, UpdateDialog, reason_text
+from taslation.ui.dialogs.updates import (BULLET, CHANGES_MIN_LINES, CHANGES_SIZE, UpdateDialog, change_blocks,
+                                          change_lines, reason_text)
 
 from test_check_update import CHANGELOG, CHANGELOG_PATH, Server, body, scratch  # (the loopback server)
 
@@ -470,7 +472,8 @@ def test_the_dialog_shows_a_newer_version_with_its_changes_and_update_now(tmp_pa
     texts = _texts(d)
     assert "A newer version of TASlation is available." in d.lines
     assert "This one: 0.8.1, of 2026-11-20" in d.lines and "The new one: 0.9.0, of 2026-11-25" in d.lines
-    assert d.changes.get("1.0", "end-1c") == newer_answer()["changes"] and str(d.changes.cget("state")) == "disabled"
+    assert d.changes.get("1.0", "end-1c") == "0.9.0 - 2026-11-25\n• Help > Check for updates..."  # (a bullet: "•")
+    assert d.answer["changes"] == newer_answer()["changes"] and str(d.changes.cget("state")) == "disabled"
     assert "Update now" in texts and "Later" in texts
     assert "Look for a new version once a day when TASlation starts" in texts
     assert updates.load_state(tmp_path / "state")["newest"] == "0.9.0"  # noted
@@ -575,7 +578,7 @@ def test_chosen_again_within_a_minute_the_dialog_shows_the_same_answer_and_asks_
         while d.shown == "asking" and time.monotonic() < deadline:
             hidden_root.update()
             time.sleep(0.02)
-        shown, changes = d.shown, d.changes.get("1.0", "end-1c") if d.changes else ""
+        shown, changes = d.shown, (d.answer or {}).get("changes", "") if d.changes else ""
         d.close()
         return shown, changes, len(runs.read_text("utf-8").splitlines()) if runs.exists() else 0
 
@@ -711,6 +714,51 @@ def test_opened_again_with_an_answer_the_box_is_fitted_before_it_shows(tmp_path,
     assert d.shown == "newer" and d.check is None
     assert CHANGES_MIN_LINES <= int(d.changes.cget("height")) < CHANGES_SIZE[1]
     assert layout.asked_size(d)[1] + FRAME[1] + FRAME[0] <= LOWER[3] - LOWER[1]
+    d.close()
+
+
+# ---------------------------------------------------------------- the changes box
+def test_a_bullet_s_lines_and_a_paragraph_s_are_one_line_that_the_box_wraps():
+    """The real 0.9.0 entry: its hard line breaks and two-space continuation lines are gone, every word stays in its
+    order, the heading and the section names stand alone, a bullet shows "•", backticks and arrows stay."""
+    blocks = change_blocks(CHANGES_090)
+    assert [kind for kind, _text in blocks] == (["heading", "text", "gap"] + ["item"] * 6 + ["gap", "text", "gap"]
+                                                 + ["item"] * 4)
+    assert blocks[:2] == [("heading", "0.9.0 - 2026-11-21"), ("text", "Updating")] and blocks[10] == ("text", "Other")
+    assert blocks[3][1].startswith('Help → "Check for updates..." asks GitHub whether a newer version is out')
+    assert blocks[3][1].endswith("the installation that follows still asks before any download of its own.")
+    shown = "\n".join(line for _kind, line in change_lines(CHANGES_090))
+    assert " ".join(shown.replace(BULLET, "* ").split()) == " ".join(CHANGES_090.split())
+    assert len(shown.split("\n")) == 16 and "\n " not in shown
+    assert [line[:2] for line in shown.split("\n") if line[:1] in ("*", BULLET[0])] == [BULLET] * 10
+    assert shown.count("→") == CHANGES_090.count("→") == 3 and shown.count("`") == CHANGES_090.count("`")
+    assert "`update.cmd -Back`" in shown and "(`update_check`)" in shown
+
+
+def test_the_cut_line_and_the_older_changes_stand_alone_and_entries_keep_their_gap():
+    text = ("0.9.1 - 2026-11-23\n* A fix of\n  two lines.\n\n0.9.0 - 2026-11-21\nUpdating\n\n* Help → it.\n...\n\n"
+            "The older changes are in CHANGELOG.md.")
+    assert change_blocks(text) == [
+        ("heading", "0.9.1 - 2026-11-23"), ("item", "A fix of two lines."), ("gap", ""),
+        ("heading", "0.9.0 - 2026-11-21"), ("text", "Updating"), ("gap", ""), ("item", "Help → it."),
+        ("text", "..."), ("gap", ""), ("text", "The older changes are in CHANGELOG.md.")]
+    assert change_blocks("The first\npublic version.\n\n\n") == [("text", "The first public version.")]
+    assert change_blocks("") == []
+
+
+def test_the_box_shows_a_bullet_with_a_hanging_indent_and_nothing_clickable(tmp_path, hidden_root, dialog_checks):
+    _w, d = _open(hidden_root, tmp_path, newer_answer(changes=CHANGES_090), dialog_checks)
+    box, lines = d.changes, change_lines(CHANGES_090)
+    assert box.get("1.0", "end-1c") == "\n".join(line for _kind, line in lines)
+    assert d.answer["changes"] == CHANGES_090  # (the program's answer as it came)
+    indent = tkfont.Font(box, font=box.cget("font")).measure(BULLET)
+    assert indent > 0 and float(box.tag_cget("item", "lmargin2")) == indent and float(box.tag_cget("item", "lmargin1")) == 0
+    ranges = box.tag_ranges("item")
+    tagged = [int(str(start).split(".")[0]) for start in ranges[::2]]
+    assert tagged == [number for number, (kind, _line) in enumerate(lines, 1) if kind == "item"] and len(tagged) == 10
+    assert all(str(end).endswith(".end") or box.compare(end, "==", f"{str(end).split('.')[0]}.end") for end in ranges[1::2])
+    assert set(box.tag_names()) == {"sel", "item"} and box.tk.call(str(box), "tag", "bind", "item") == ""  # no link
+    assert str(box.cget("state")) == "disabled" and str(box.cget("wrap")) == "word"
     d.close()
 
 

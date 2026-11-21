@@ -1,10 +1,11 @@
 """Help > Check for updates...: asks GitHub for the newest version when it opens (`updates.Check`: check_update.py in a
 process of its own; TASlation's own process asks nothing), then says one of: this is the newest version (with its
 version and date), GitHub could not be asked (one plain sentence: `reason_text`), or a newer version is out - both
-versions with their dates, the changes since this one in a scrolling plain-text box, Update now and Later. In a git
-clone nothing is asked: git updates it. Opened again within a minute of an answer that was no failure, it shows that
-answer again and asks nothing (`updates.recent`). Under it, the box that turns the start's look on and off (``update_check``,
-kept in taslation.toml as the Settings dialog keeps it), with one sentence on what is asked of whom.
+versions with their dates, the changes since this one in a scrolling plain-text box (`change_lines`: a bullet or a
+paragraph of the changelog one line that the box wraps), Update now and Later. In a git clone nothing is asked: git
+updates it. Opened again within a minute of an answer that was no failure, it shows that answer again and asks nothing
+(`updates.recent`). Under it, the box that turns the start's look on and off (``update_check``, kept in taslation.toml
+as the Settings dialog keeps it), with one sentence on what is asked of whom.
 
 The dialog is centred over the window and kept on the work area of the monitor there (`layout.place_window`); each
 time what it says changes, it is placed again as a dialog of its new size would be (`layout.place_again`), without
@@ -27,6 +28,54 @@ from .caches import in_lines
 TEXT_CHARS = 60  # the dialog's sentences are broken at this many "0" widths of its font
 CHANGES_SIZE = (72, 12)  # the changes box: characters wide, lines high (it scrolls)
 CHANGES_MIN_LINES = 4  # ... and never fewer lines than this, however low the screen
+BULLET = "• "  # in place of the changelog's "* "
+_VERSION_LINE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+ - [0-9]{4}-[0-9]{2}-[0-9]{2}")  # check_update.py's entry heading
+
+
+def change_blocks(changes: str) -> list[tuple[str, str]]:
+    """The changes as the box shows them, one (kind, text) per line of the box: "heading", "item" (a bullet's text
+    without its "* "), "text" or "gap" (an empty line). The changelog is written with hard line breaks at about 118
+    characters and two-space continuation lines; here a bullet's or a paragraph's lines are one line, which the box
+    wraps itself. A line that starts with "* " starts a bullet; an indented line goes on with the bullet or paragraph
+    before it; a line that is not indented goes on with a paragraph, but after a bullet or a heading starts one of its
+    own; an empty line ends a paragraph (one "gap" however many); an entry's heading ("X.Y.Z - YYYY-MM-DD") stands
+    alone, and so does a section's name such as "Updating", which empty lines or a bullet surround. Nothing else
+    changes: backticks, arrows and every other character stay as they are."""
+    blocks: list[list[Any]] = []
+    for line in changes.split("\n"):
+        words = line.strip()
+        if not words:
+            if blocks and blocks[-1][0] != "gap":
+                blocks.append(["gap", []])
+            continue
+        if _VERSION_LINE.fullmatch(words):
+            blocks.append(["heading", [words]])
+        elif line.startswith("* "):
+            blocks.append(["item", [line[2:].strip()]])
+        elif blocks and (blocks[-1][0] == "text" or (blocks[-1][0] == "item" and line[:1].isspace())):
+            blocks[-1][1].append(words)
+        else:
+            blocks.append(["text", [words]])
+    while blocks and blocks[-1][0] == "gap":
+        blocks.pop()
+    return [(kind, " ".join(parts)) for kind, parts in blocks]
+
+
+def change_lines(changes: str) -> list[tuple[str, str]]:
+    """`change_blocks` as the box's lines: (kind, the line), a bullet with "•" in place of "* "."""
+    return [(kind, BULLET + text if kind == "item" else text) for kind, text in change_blocks(changes)]
+
+
+def fill_changes(box: tk.Text, changes: str) -> None:
+    """*changes* into the box (`change_lines`), a bullet with a hanging indent under its text. Plain text only:
+    nothing in it is run, opened or made clickable."""
+    lines = change_lines(changes)
+    indent = tkfont.Font(box, font=box.cget("font")).measure(BULLET)
+    box.tag_configure("item", lmargin1=0, lmargin2=indent)
+    box.insert("1.0", "\n".join(line for _kind, line in lines))
+    for number, (kind, _line) in enumerate(lines, 1):
+        if kind == "item":
+            box.tag_add("item", f"{number}.0", f"{number}.end")
 
 
 def reason_text(reason: str) -> str:
@@ -169,7 +218,7 @@ class UpdateDialog(tk.Toplevel):
             self.changes.configure(yscrollcommand=scroll.set)
             scroll.pack(side="right", fill="y")
             self.changes.pack(side="left", fill="both", expand=True)
-            self.changes.insert("1.0", answer.get("changes", ""))  # plain text: shown, never run or opened
+            fill_changes(self.changes, answer.get("changes", ""))  # plain text: shown, never run or opened
             self.changes.configure(state="disabled")
             self._sentence(_("Update now closes TASlation, downloads the new version from GitHub, updates the program files and starts TASlation again. The files it replaces are kept: update.cmd -Back goes back to this version."),
                            pady=(10, 0))
