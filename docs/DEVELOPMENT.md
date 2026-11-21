@@ -187,9 +187,13 @@ rows' languages.
   at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
   at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
   dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
-  dark theme). Its global hot keys are never registered with Windows: the tool holds them, notes which the window
-  held, and hands it a press as Windows would. Over the book the window gives the stand-in the foreground from its
-  own window, as the mode does; the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
+  dark theme). `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's runners): a rest that
+  a turn follows is held until the page on show is finished, or the window rests with it unfinished, or CAP_S have
+  passed (the stand-in waits at an `hN` step of its script until the tool's word), and x's soft frames stay on show
+  until the window has asked on them (15 s and CAP_S at most); the report keeps the holds and their reasons (`waits`).
+  Without it the script and the stand-in's control file are the same as ever. Its global hot keys are never
+  registered with Windows: the tool holds them, notes which the window held, and hands it a press as Windows would.
+  Over the book the window gives the stand-in the foreground from its own window, as the mode does; the tool itself never changes it. `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
@@ -263,31 +267,50 @@ install.ps1 counts as agreement only with `-Yes` and only as these exact sentenc
 that the repository owner has read both licences and agrees to them for this non-commercial check. Whoever runs the
 workflow in a copy of the repository agrees through those lines too, so reads the two licences first.
 
-## The GPU computer's checks on GitHub's runners (a trial)
+## The GPU computer's checks on GitHub's runners
 
-`.github/workflows/gpu-checks-trial.yml` tries the two checks that need the developer's computer today,
-`tools/standin_e2e.py` and `tools/openmantra_eval.py`, on GitHub's Windows runners (`windows-2025`: 4 processors,
-16 GB, no GPU, so the OCR, the layout model and PLaMo run on the CPU), to see whether they run there at all and how
-long they take; its numbers are not the GPU computer's. It runs for a push to a branch named `ci/trial-...`
-(`tests.yml` leaves those out) and when started by hand, with inputs: which checks, Ollama's release (`latest`, as
-winget installs it, or a tag), the benchmark's `detect_model` (`on`, the layout model, as a GPU computer's default has
-it) and pages, the stand-in's `--timeout` (600 s) and `--cancel-soft-ms`, and the runner's screen (1920x1080 for the
-session where the display offers it; the job's summary says which it had). The job `prepare` fills three caches once:
-Ollama's installer from its release on GitHub (checked against the release's `sha256sum.txt`), Ollama's model store
-with PLaMo imported by `setup_models.py --translator-for English` (its licence agreed through
+`.github/workflows/gpu-checks.yml` runs the two checks that need the developer's computer for their timings,
+`tools/standin_e2e.py` and `tools/openmantra_eval.py`, for their verdicts on GitHub's Windows runners
+(`windows-2025`: 4 processors, 16 GB, no GPU, so the OCR, the layout model and PLaMo run on the CPU). The GPU computer
+keeps only the timing figures (the stand-in's times from the sharp frame to the finished page, the benchmark's seconds
+per stage and tokens a second); what must hold on any computer is judged on the runners. It runs for every push to a
+branch named `ci/...` (one push starts it and `tests.yml`), for a push to `main` (the caches alone, see below), and
+when started by hand (Actions > GPU checks on runners > Run workflow), with inputs: which checks (both, stand-in,
+benchmark or none), the stand-in's groups and the benchmark's titles, Ollama's release (the pinned `v0.40.17`;
+`latest` or another tag only by hand, after a run on `main` has made its caches), the benchmark's `detect_model`
+(`on`, the layout model, as a GPU computer's default has it) and pages, the stand-in's `--wait-done` cap (90 s; 0
+runs the scenarios as written), `--timeout` (600 s) and `--cancel-soft-ms`, and the runner's screen (1920x1080 for
+the session where the display offers it; the job's summary says which it had).
+
+The job `prepare` plans the jobs and looks for four caches: Ollama's standalone files of its pinned release
+(`ollama-windows-amd64.zip` from its release on GitHub, checked against the SHA-256 the workflow fixes for it,
+GitHub's digest of the file and the release's `sha256sum.txt` where that lists it, and unpacked into
+`%LOCALAPPDATA%\Programs\Ollama`, where TASlation's starter looks for `ollama.exe`; no installer runs), Ollama's model
+store with PLaMo imported by `setup_models.py --translator-for English` (its licence agreed through
 `TASLATION_AGREE_PLAMO_LICENCE` in that step alone, with the owner's agreement written beside it, as in the install
-check), and the models folder as `tests.yml` keys it. Then eleven stand-in jobs (a scenario a job: d with e, which
-turns back to d's pages; t, w and f with their pairs) and five benchmark jobs (a title a job, `--series`) run at once,
-each installing Ollama from the kept installer, fetching OpenMantra from its publisher (never cached, never uploaded)
-and letting TASlation's own starter start Ollama on port 11435. Each job's summary
-(`.github/gpu-checks-trial/summarise.py`, numbers only) tells for the stand-in whether the window got frames and from
-which capture, whether the run ended or why it stopped, what points to a fault and what to a slow computer (scenarios
-released by `--timeout`, rested pages not finished within the rest the script gave them), and per scenario whether it
-still showed what it is for; for the benchmark the seconds per stage, F1, CER, chrF and the tokens a second, and how far a run cut by its time
-limit got. The job `Summary` joins the titles (`tools/openmantra_merge.py`) and puts every job's minutes (waiting,
-setting up, the run, after it: GitHub's step times), both checks' tables and the repository's caches against GitHub's
-10 GB on the run's page. The artifacts are the tools' reports, their console output and the summaries, never the
-stand-in's pictures. `tests/test_gpu_checks_trial_workflow.py` checks the workflow without running it.
+check), the models folder and pip's downloads (`tests.yml` reads those two as well). Only a run on `main` makes them:
+a `ci/` branch reads main's (GitHub lets a branch read the default branch's caches), saves nothing, and its `prepare`
+stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
+days; a run started by hand on `main` (checks none) makes it again.
+
+Then four stand-in jobs (the scenarios in groups: c, a and b; d, e, r and x, e turning back to d's pages; t and w with
+t2 and w2; o, z and f with f2; each with `--wait-done`) and five benchmark jobs (a title a job, `--series`) run, at
+most nine at a time beside `tests.yml`'s eight, each restoring the caches, fetching OpenMantra from its publisher
+(never cached, never uploaded) and letting TASlation's own starter start Ollama on port 11435. A stand-in job fails
+when a criterion of correctness fails, and only then (`.github/gpu-checks/summarise.py`'s `correctness`: the run went
+through, the window chose the stand-in alone, nothing was kept or shown from a frame that was not the sharp one where
+the sharp frame came in time, no request was sent for nothing outside x, a page translated at rest came back without a
+request, no rested page was left unfinished with the window at rest, each scenario's mode was entered and left, its
+page keys handed on, the whole-book run ended, ...); what depends on the computer's speed is reported beside it
+(`speed`: rests too short for a page, holds at their cap, pages left half done, ...), with what each scenario was meant
+to show and whether it still did. A benchmark job fails when its title's F1, CER or chrF leaves its tolerance around
+the runners' own figures in `.github/gpu-checks/benchmark-expected.json` (a run of fewer pages or another
+`detect_model` is not compared); the tolerances are wide while one run is known and are to be tightened as more show
+the spread. The job `Summary` joins the titles (`tools/openmantra_merge.py`), compares the pooled scores with the
+expected ones, and puts every job's minutes (waiting, setting up, the run, after it: GitHub's step times), both
+checks' verdicts and tables and the repository's caches against GitHub's 10 GB on the run's page. The artifacts are
+the tools' reports, their console output and the summaries, numbers only, never the stand-in's pictures.
+`tests/test_gpu_checks_workflow.py` checks the workflow without running it.
 
 ## Releases
 

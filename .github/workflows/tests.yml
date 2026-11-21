@@ -2,8 +2,11 @@
 # measurements that need its GPU (the stand-in viewer's timings, the benchmark's translation).
 #
 # It runs for every push to a branch named ci/... and when started by hand. A ci/ branch holds work that is not
-# released yet; it is public like everything here, and is deleted once its run was read. A branch named ci/trial-...
-# is for gpu-checks-trial.yml alone and is left out here.
+# released yet; it is public like everything here, and is deleted once its run was read. The same push starts
+# gpu-checks.yml, the GPU computer's two checks on these runners, with its own jobs (at most 9 at a time beside these 8).
+#
+# It keeps nothing between runs: the models and pip's downloads come from the caches a run of gpu-checks.yml on main
+# makes (a branch may read the default branch's caches), and are downloaded here where main has none.
 #
 # What it does not cover: anything that needs a GPU, the real translator or a real viewer. Tests that want those are
 # skipped here as on any computer without them.
@@ -11,7 +14,7 @@ name: Tests
 
 on:
   push:
-    branches: ['ci/**', '!ci/trial-**']
+    branches: ['ci/**']
   workflow_dispatch:
 
 permissions:
@@ -48,8 +51,14 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-          cache: pip
-          cache-dependency-path: pyproject.toml
+
+      # (main's, made by gpu-checks.yml there: read only, as on any ci branch)
+      - name: pip's downloads from main
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/AppData/Local/pip/Cache
+          key: pip-${{ runner.os }}-py3.13-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-${{ runner.os }}-py3.13-
 
       - name: Install the packages (the CPU build of PyTorch)
         run: |
@@ -65,11 +74,11 @@ jobs:
           & $py -c "import torch, taslation; print('torch', torch.__version__, 'taslation', taslation.__version__)"
           & $py -m pip freeze --exclude-editable > "packages-${{ matrix.shard }}.txt"
 
-      # The OCR, layout and inpainting models and the fonts, about 1.1 GB, at the revisions setup_models.py fixes:
-      # downloaded once and kept for the later runs (the key changes when the script does).
-      - name: The models from an earlier run
+      # The OCR, layout and inpainting models and the fonts, about 1.1 GB, at the revisions setup_models.py fixes: from
+      # main's cache (the key changes when the script does), else downloaded here, and not kept.
+      - name: The models from main
         id: models
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: models
           key: models-${{ hashFiles('setup_models.py') }}

@@ -70,6 +70,136 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
         standin_e2e.wanted("a,q")
 
 
+def _plan(wait_done=None):
+    names = standin_e2e.wanted("all")
+    first = standin_e2e.pages_needed(names)
+    return first, standin_e2e.build_plan(names, first + 6, first, 700, wait_done)
+
+
+def test_without_wait_done_the_script_is_as_written():
+    first, (segments, steps) = _plan()
+    assert standin_e2e.build_plan(standin_e2e.wanted("all"), first + 6, cancel_first=first, soft_ms=700)[1] == steps
+    assert not any(s.op in "hk" for s in steps)  # no hold, no soft frame kept
+    for s in segments:
+        if s.name != "x":
+            assert s.steps == standin_e2e.SCENARIOS[s.name][1]
+    x = next(s for s in segments if s.name == "x")
+    assert x.steps == ["t700", "b2", f"j{first}", "w5000", f"j{first + 2}", "w5000", f"j{first + 4}", "w5000", "t",
+                       "b", "j76", "w4000"]
+
+
+def test_wait_done_holds_the_rests_a_turn_follows_and_keeps_x_soft_until_asked():
+    _first, (plain, _steps) = _plan()
+    _first, (held, held_steps) = _plan(wait_done=60.0)
+    assert [s.screens for s in held] == [s.screens for s in plain]  # the same turns to the same screens
+    holds = [s.a for s in held_steps if s.op == "h"]
+    assert holds == list(range(1, len(holds) + 1))  # numbered through the script
+    for p, h in zip(plain, held):
+        if h.name not in standin_e2e.HOLD_SCENARIOS:  # c, b, t, t2, w, w2: as written
+            assert h.steps == p.steps
+            continue
+        bare = [s for s in h.steps if not s.startswith("h")]
+        if h.name == "x":
+            assert bare[0] == "k15000" and "k" in bare  # (kept until asked, 15 s at most; then as before)
+            bare = [{"k15000": "t700", "k": "t"}.get(s, s) for s in bare]
+        assert bare == p.steps
+        for k, step in enumerate(h.steps):
+            if step.startswith("h"):  # after a rest a reader takes, with a turn, a flash or a spinner after it
+                before = h.steps[k - 1]
+                assert before.startswith("w") and int(before[1:].split("-")[0]) >= standin_e2e.REST_MS
+                assert any(s[0] in "npjfs" for s in h.steps[k + 1:])
+    by = {s.name: s.steps for s in held}
+    assert by["a"][:4] == ["n", "w6000-8000", "h1", "n"] and by["a"][-2:] == ["n", "w6000-8000"]
+    assert [s for s in by["d"] if s.startswith("h")] == ["h9", "h10", "h11", "h12"]
+    assert "w300" in by["d"] and by["d"][by["d"].index("w300") + 1] == "f700"  # (a quick turn: no hold)
+    assert sum(1 for s in by["x"] if s.startswith("h")) == 3
+    _first, (short, _s) = _plan(wait_done=8.0)
+    assert next(s for s in short if s.name == "x").steps[0] == "k8000"  # never longer than the cap
+
+
+def test_a_hold_is_over_once_its_page_is_finished_the_window_rests_without_it_or_the_cap():
+    over = standin_e2e.hold_over
+    shown = {"page": 4, "spread": True, "kind": "translated"}
+    assert over((4, True), "sharp", shown, 0.0, 1.0, 60) == "finished"
+    assert over((4, True), "sharp", {**shown, "kind": "final"}, 0.0, 1.0, 60) == "finished"
+    assert over((4, True), "sharp", {**shown, "kind": "filling"}, 0.0, 1.0, 60) is None
+    assert over((4, True), "sharp", {**shown, "page": 2}, 0.0, 1.0, 60) is None  # another page's picture
+    assert over((4, True), "soft", shown, 9.0, 1.0, 60) is None  # (kept soft: neither finished nor at rest on it)
+    assert over((4, True), "black", shown, 9.0, 1.0, 60) is None
+    assert over((4, True), "sharp", {**shown, "kind": "live"}, standin_e2e.IDLE_S, 1.0, 60) == "idle"
+    assert over((4, True), "sharp", {**shown, "kind": "live"}, standin_e2e.IDLE_S - 0.1, 1.0, 60) is None
+    assert over((4, True), "sharp", None, 0.5, 60.0, 60) == "cap"
+
+
+def test_the_control_file_is_the_go_alone_without_wait_done(tmp_path):
+    me = SimpleNamespace(wait_done=None, control={"go": 0, "hold": 0, "sharp": 0}, standin_dir=tmp_path)
+    standin_e2e.Director.release(me, go=3)
+    control = tmp_path / sv.CONTROL
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3});\n'
+    assert sv.write_control(tmp_path, 3).read_text(encoding="utf-8") == 'standinControl({"go": 3});\n'
+    me.wait_done = 60.0
+    standin_e2e.Director.release(me, hold=2)
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 0});\n'
+    standin_e2e.Director.release(me, sharp=1)
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 1});\n'
+
+
+def test_wait_done_lets_a_hold_go_when_its_page_is_finished_and_a_soft_frame_when_the_window_asked():
+    import threading
+
+    released = []
+    notes = SimpleNamespace(lock=threading.Lock(), displays=[], requests=[], jobs=[])
+    me = SimpleNamespace(wait_done=60.0, holds=[], keeps=[], notes=notes, idle_since=None, screen_now=(4, True),
+                         screen_state="sharp", screen_since=0.0, release=lambda **k: released.append(k))
+    me.holds.append({"id": 1, "segment": "a", "page": 4, "spread": True, "at": 10.0, "why": None, "waited_ms": None})
+    standin_e2e.Director.waits(me, 12.0)
+    assert released == [] and me.holds[0]["why"] is None
+    notes.displays.append({"t": 0, "page": 4, "spread": True, "state": "sharp", "kind": "translated", "lettered": 3})
+    standin_e2e.Director.waits(me, 13.0)
+    assert released == [{"hold": 1}] and me.holds[0]["why"] == "finished" and me.holds[0]["waited_ms"] == 3000
+    # the window at rest with the page untranslated: let go too, and said so
+    me.screen_now, me.idle_since = (6, True), 15.0
+    me.holds.append({"id": 2, "segment": "a", "page": 6, "spread": True, "at": 14.0, "why": None, "waited_ms": None})
+    standin_e2e.Director.waits(me, 16.0)
+    assert released[-1] == {"hold": 1}
+    standin_e2e.Director.waits(me, 17.0)
+    assert released[-1] == {"hold": 2} and me.holds[1]["why"] == "idle"
+    # a soft frame kept: let go at the window's first request on a soft frame of that screen
+    me.keeps.append({"n": 1, "segment": "x", "page": 90, "spread": True, "at": 20.0, "requests_from": 0,
+                     "asked_ms": None, "why": None, "waited_ms": None})
+    notes.jobs += [{"id": 1, "page": 88, "spread": True}, {"id": 2, "page": 90, "spread": True}]
+    notes.requests += [{"job": 1, "frame": "soft"}, {"job": 2, "frame": "sharp"}, {"job": None, "frame": None}]
+    standin_e2e.Director.waits(me, 21.0)
+    assert released[-1] == {"hold": 2}
+    notes.requests.append({"job": 2, "frame": "soft"})
+    standin_e2e.Director.waits(me, 22.5)
+    assert released[-1] == {"sharp": 1} and me.keeps[0]["asked_ms"] == 2500
+    standin_e2e.Director.waits(me, 23.0)
+    assert len(released) == 3  # (once)
+
+
+def test_a_stale_overlay_says_how_long_of_it_came_after_the_window_captured_the_new_screen():
+    line = [(1000.0, (2, True), "sharp"), (5000.0, (4, True), "soft"), (5200.0, (4, True), "sharp")]
+    shown = {"state": "sharp", "from": "sharp", "quick": False}
+    displays = [{"t": 1500.0, "page": 2, "spread": True, "kind": "translated", "lettered": 3, **shown},
+                {"t": 7000.0, "page": 4, "spread": True, "kind": "live", "lettered": 0, **shown}]
+    captures = [{"t": 1100.0, "page": 2, "spread": True, "state": "sharp"},
+                {"t": 6600.0, "page": 4, "spread": True, "state": "sharp"}]
+    spells = standin_e2e.incidents(SimpleNamespace(displays=displays, captures=captures), line, 9000.0)
+    stale = spells["stale_overlays"]
+    assert len(stale) == 1 and stale[0]["ms"] == 2000 and stale[0]["seen_ms"] == 400
+    spells = standin_e2e.incidents(SimpleNamespace(displays=displays, captures=captures[:1]), line, 9000.0)
+    assert spells["stale_overlays"][0]["seen_ms"] is None  # (never captured within it)
+
+
+def test_holds_and_kept_soft_frames_are_steps_of_the_script():
+    steps = sv.parse_script("g1,m1,k15000,n,w6000,h1,k,e")
+    assert steps[2] == sv.Step("k", 15000) and steps[5] == sv.Step("h", 1) and steps[6] == sv.Step("k")
+    assert sv.format_script(steps) == "g1,m1,k15000,n,w6000,h1,k,e"
+    with pytest.raises(ValueError):
+        sv.parse_script("h")  # (a hold needs its number)
+
+
 def test_the_pages_of_little_text_come_from_the_annotation_counts_alone(tmp_path):
     import json
 

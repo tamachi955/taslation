@@ -32,6 +32,9 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
   tN the turns after drawn soft for N ms    t the soft time of the query again
   bN the turns after drawn soft N times smaller    b the factor of the query again
   mN a mark (said in the log)    e the end
+  hN wait until the control file's "hold" is N or more (a rest held until the driver lets it go)
+  kN the turns after kept soft until the control file's "sharp" is their number or more (the turns kept so far,
+     counted from 1), N ms at most    k drawn sharp after the soft time again
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
@@ -125,6 +128,7 @@ const g = view.getContext("2d");
 let index = 0, spread = true, shown = "none", spinning = false, black = false;
 let base = null;  // the screen drawn sharp last (for the spinner's frames)
 let pendingSharp = null, drawToken = 0;
+let keepMs = null, keptTurns = 0, keeping = 0;  // a script's "kN": the turns kept soft until the driver's word
 const dpr = () => window.devicePixelRatio || 1;
 const wide = img => img.naturalWidth || img.width, high = img => img.naturalHeight || img.height;
 
@@ -233,15 +237,36 @@ async function drawScreen(soft, why) {
   return true;
 }
 
+function stopSharp() {  // the sharp draw due no longer comes (a turn kept soft says so)
+  if (pendingSharp !== null) { clearTimeout(pendingSharp); pendingSharp = null; }
+  if (keeping) { say("kept", "n=" + keeping + " why=gone"); keeping = 0; }
+}
+function keepSoft(token) {  // the turn on show kept soft until the control file's "sharp" reaches it, keepMs at most
+  const turn = ++keptTurns, end = now() + keepMs;
+  keeping = turn;
+  say("keep", "n=" + turn + " ms=" + keepMs);
+  const look = () => {
+    pendingSharp = null;
+    if (token !== drawToken) { if (keeping === turn) { say("kept", "n=" + turn + " why=gone"); keeping = 0; } return; }
+    const word = control.sharp >= turn;
+    if (!word && now() < end) { pendingSharp = setTimeout(look, 50); return; }
+    keeping = 0;
+    say("kept", "n=" + turn + " why=" + (word ? "word" : "time"));
+    drawScreen(false, "sharp");
+  };
+  pendingSharp = setTimeout(look, 50);
+}
+
 function turnTo(n, why) {
   if (black) { say("lost", "why=" + why); return; }  // a key in the black: gone
-  if (pendingSharp !== null) { clearTimeout(pendingSharp); pendingSharp = null; }
+  stopSharp();
   spinning = false;
   index = first(Math.max(0, Math.min(entries.length - 1, n)));
   keepNear(index);
   drawScreen(true, why).then(done => {
     if (!done) return;
     const token = drawToken;
+    if (keepMs !== null) { keepSoft(token); return; }
     pendingSharp = setTimeout(() => {
       pendingSharp = null;
       if (token === drawToken) drawScreen(false, "sharp");
@@ -253,7 +278,7 @@ function previous() { turnTo(index - (spread ? 2 : 1), "previous"); }
 
 let blackUntil = 0;
 function flash(ms) {  // the window drew black, as a browser does as it gets the foreground
-  if (pendingSharp !== null) { clearTimeout(pendingSharp); pendingSharp = null; }
+  stopSharp();
   drawToken++;
   spinning = false;
   const again = black;
@@ -307,12 +332,14 @@ function spinner(ms) {  // a spinner over the page on show, for a while
 }
 
 // ------------------------------------------------------------------------------------------------ the control file
-const control = { go: 0 };
+const control = { go: 0, hold: 0, sharp: 0 };  // (each only ever raised)
 let polls = 0;
 window.standinControl = function (c) {
   if (!c || typeof c !== "object") return;
   const bandBefore = cfg.band;
   if (typeof c.go === "number" && c.go > control.go) { control.go = c.go; say("control", "go=" + c.go); }
+  if (typeof c.hold === "number" && c.hold > control.hold) { control.hold = c.hold; say("control", "hold=" + c.hold); }
+  if (typeof c.sharp === "number" && c.sharp > control.sharp) { control.sharp = c.sharp; say("control", "sharp=" + c.sharp); }
   if (typeof c.band === "number" && c.band >= 0 && c.band !== bandBefore) {
     cfg.band = c.band;
     say("control", "band=" + c.band);
@@ -330,7 +357,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfstbme])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbmehk])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -354,6 +381,8 @@ async function run(steps) {
     }
     else if (s.op === "b") { cfg.factor = s.a === null ? factorQuery : Math.max(2, s.a); say("soft", "factor=" + cfg.factor); }
     else if (s.op === "m") say("mark", "id=" + s.a);
+    else if (s.op === "h") { say("hold", "id=" + s.a); await until(() => control.hold >= s.a); say("held", "id=" + s.a); }
+    else if (s.op === "k") { keepMs = s.a; say("soft", "keep=" + (keepMs === null ? "off" : keepMs)); }
     else if (s.op === "e") break;
   }
   say("end");

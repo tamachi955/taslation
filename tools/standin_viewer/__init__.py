@@ -40,8 +40,8 @@ HTML = Path(__file__).resolve().with_name("standin.html")
 TITLE = "Stand-in reader"  # the page's title, the token after it
 PAGE_LIST, CONTROL = "pages.js", "control.js"
 REPLACE_TRIES_S = 2.0  # the control file's rename is tried again so long while the browser holds it open
-OPS = "gwnpjfstbme"  # go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end
-WITH_NUMBER = "gwjm"  # steps that need a number
+OPS = "gwnpjfstbmehk"  # go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep
+WITH_NUMBER = "gwjmh"  # steps that need a number
 CELL, CODE_X, CODE_Y = 6, 12, 12  # the page's code cells (CSS pixels from the content's top left), as standin.html
 LEAD = (1, 0, 1, 0)
 DARK = 16  # a frame no brighter than this at every point looked at is black
@@ -120,15 +120,21 @@ def write_page_list(folder: Path, pictures: Sequence[Path | tuple[Path, str]]) -
     return target
 
 
-def write_control(folder: Path, go: int = 0, band: int | None = None) -> Path:
-    """The control file (`CONTROL`) in the scratch *folder*: how far the page's script may go (*go*) and the height
-    of its band (CSS pixels; None: as it is). Written whole at once (a file beside it renamed over it); while the
-    browser has the file open for a read, Windows refuses the rename, and it is tried again for up to REPLACE_TRIES_S
-    (a run stopped on it at its first release once)."""
+def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int | None = None,
+                  sharp: int | None = None) -> Path:
+    """The control file (`CONTROL`) in the scratch *folder*: how far the page's script may go (*go*), the height
+    of its band (CSS pixels; None: as it is), and, for a script that has them, how far its holds may go (*hold*,
+    ``hN``) and how many of its turns kept soft may be drawn sharp (*sharp*, ``kN``); None: not in the file. Written
+    whole at once (a file beside it renamed over it); while the browser has the file open for a read, Windows refuses
+    the rename, and it is tried again for up to REPLACE_TRIES_S (a run stopped on it at its first release once)."""
     target = _inside(folder, CONTROL)
     data: dict[str, int] = {"go": int(go)}
     if band is not None:
         data["band"] = int(band)
+    if hold is not None:
+        data["hold"] = int(hold)
+    if sharp is not None:
+        data["sharp"] = int(sharp)
     temporary = _inside(folder, CONTROL + ".new")
     temporary.write_text("standinControl(" + json.dumps(data) + ");\n", encoding="utf-8")
     end = time.monotonic() + REPLACE_TRIES_S

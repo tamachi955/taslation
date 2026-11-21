@@ -6,6 +6,7 @@ part of a release.
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
+                                [--wait-done CAP_S]
 
 What runs, all on this computer:
 
@@ -71,6 +72,14 @@ The scenarios, in this order (each released once the window has come to rest aft
      lines, by its annotation's counts) drawn soft for --cancel-soft-ms at half resolution, so that the window reads
      the soft frame and asks on it before the sharp one comes; then back (needs the dataset)
   f  the dark theme, then a narrow window (single pages)
+
+The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
+the OCR on four logical processors, the model on them too): each rest of a, d, e, r, o, z, x, f and f2 that a turn, a
+flash or a spinner follows is held until the page on show is finished - the window shows it translated -, or the
+window has been at rest without it, or CAP_S has gone by (``hN`` in the stand-in's script, let go through its control
+file); x's screens of little text are kept soft until the window asked on the soft frame (``kN``, KEEP_SOFT_S at most)
+instead of --cancel-soft-ms. Each hold and kept frame, why it ended and how long it held, is in the report
+(``run.waits``). Without it the script and the control file are what they always were.
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -203,6 +212,13 @@ TEXT_SIZE = 1.5  # scenario z: TASlation's text size, times the run's
 CANCEL_SCREENS = 3  # scenario x: the screens of little text (spreads of pages with 1 to CANCEL_LINES lines of text)
 CANCEL_LINES = 2
 CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the window can read)
+# --wait-done (a slower computer than the one the rests were written for): the rests of these scenarios held until
+# their page is finished (`held`, `hold_over`), and scenario x's soft frames kept until the window asked on them,
+# KEEP_SOFT_S at most. Not c (turns while the model loads), b (quick turns), t and t2 (a turn each, released by the
+# window's page key), w and w2 (the run reads the pages the stand-in turns to; beside it they wait for the run).
+HOLD_SCENARIOS = ("a", "d", "e", "r", "o", "z", "x", "f", "f2")
+KEEP_SOFT_S = 15.0
+TURNING = ("n", "p", "j", "f", "s")  # the steps that change what the stand-in shows: a turn, a black flash, a spinner
 
 
 @dataclass
@@ -226,26 +242,51 @@ def wanted(text: str) -> list[str]:
     return [n for n in ORDER if n in asked]
 
 
-def cancel_steps(first: int, back: int, soft_ms: int) -> list[str]:
+def cancel_steps(first: int, back: int, soft_ms: int, keep_ms: int | None = None) -> list[str]:
     """Scenario x's steps: the turns drawn soft for *soft_ms* at 1/CANCEL_FACTOR of the resolution, to the screens of
     little text from page *first* on (CANCEL_SCREENS spreads), then the stand-in's own soft time and blur again and
-    back to page *back*, the screen before."""
-    steps = [f"t{soft_ms}", f"b{CANCEL_FACTOR}"]
+    back to page *back*, the screen before. With *keep_ms* (--wait-done) the turns are kept soft until the driver's
+    word instead (``kN``: once the window asked on the soft frame, *keep_ms* at most)."""
+    steps = [f"t{soft_ms}" if keep_ms is None else f"k{keep_ms}", f"b{CANCEL_FACTOR}"]
     for k in range(CANCEL_SCREENS):
         steps += [f"j{first + 2 * k}", "w5000"]
-    return [*steps, "t", "b", f"j{back}", "w4000"]
+    return [*steps, "t" if keep_ms is None else "k", "b", f"j{back}", "w4000"]
 
 
-def build_plan(names: list[str], count: int, cancel_first: int | None = None,
-               soft_ms: int = 700) -> tuple[list[Segment], list[sv.Step]]:
+def held(steps: list[str], first: int) -> list[str]:
+    """--wait-done: *steps* with a hold (``hN``, numbered on from *first*) after each rest a reader takes - a wait of
+    REST_MS or more - that a turn, a black flash or a spinner follows within them; the driver lets it go once the page
+    on show is finished (`hold_over`). The rest at the end is the next scenario's wait for the window at rest."""
+    out, n = [], first
+    for k, step in enumerate(steps):
+        out.append(step)
+        if (step.startswith("w") and int(step[1:].split("-")[0]) >= REST_MS
+                and any(s[0] in TURNING for s in steps[k + 1:])):
+            out.append(f"h{n}")
+            n += 1
+    return out
+
+
+def build_plan(names: list[str], count: int, cancel_first: int | None = None, soft_ms: int = 700,
+               wait_done: float | None = None) -> tuple[list[Segment], list[sv.Step]]:
     """The segments of the stand-in's script (each held at ``gN`` until the driver releases it, ``mN`` to mark it)
     and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window).
-    Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`)."""
+    Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`). With *wait_done*
+    (--wait-done's cap, seconds) the rests of HOLD_SCENARIOS are held (`held`) and x's soft frames kept until the
+    window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever."""
     segments: list[Segment] = []
     index, spread = 0, True
     text: list[str] = []
+    holds = 0
     for go, name in enumerate(names, 1):
-        steps = cancel_steps(cancel_first or 0, index, soft_ms) if name == "x" else SCENARIOS[name][1]
+        if name == "x":
+            keep = None if wait_done is None else round(min(wait_done, KEEP_SOFT_S) * 1000)
+            steps = cancel_steps(cancel_first or 0, index, soft_ms, keep)
+        else:
+            steps = SCENARIOS[name][1]
+        if wait_done is not None and name in HOLD_SCENARIOS:
+            steps = held(steps, holds + 1)
+            holds += sum(1 for s in steps if s.startswith("h"))
         segment = Segment(name, go, steps)
         if name == "f2":
             spread = False
@@ -1655,6 +1696,24 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
 
 # ---------------------------------------------------------------------------------------------------- the director
+def hold_over(screen: tuple[int, bool] | None, state: str, shown: dict[str, Any] | None, rested_s: float,
+              held_s: float, cap_s: float) -> str | None:
+    """--wait-done: why a hold of the stand-in's script is over, or None while it holds. "finished": the stand-in shows
+    *screen* sharp (*state*) and the window's picture (*shown*, the last of `Notes.displays`) is that screen
+    translated - its finished picture, or its result; "idle": the window has been at rest IDLE_S (*rested_s*, counted
+    from LAG_MS after the stand-in last changed what it shows) with the screen sharp and not so; "cap": it has held
+    *cap_s* (*held_s*)."""
+    sharp = state == "sharp" and screen is not None
+    if (sharp and shown is not None and (shown.get("page"), bool(shown.get("spread"))) == tuple(screen)
+            and shown.get("kind") in ("translated", "final")):
+        return "finished"
+    if sharp and rested_s >= IDLE_S:
+        return "idle"
+    if held_s >= cap_s:
+        return "cap"
+    return None
+
+
 class Director:
     """The run on the Tk loop: the guard looked at every TICK_MS, what the stand-in said taken in, the OCR readers'
     place sampled, each scenario released once the window is at rest, the pictures taken; numbers only."""
@@ -1695,6 +1754,14 @@ class Director:
         self._hook_page_keys()
         self.page_rect: tuple[int, int, int, int] | None = None  # the page the stand-in drew last (its canvas's pixels)
         self.band_px = 0  # the height of its band then
+        # --wait-done (its cap, seconds; None: the script has no holds and keeps no soft frame): the control file's
+        # values, the script's holds and kept soft frames as the stand-in said them, what it shows (`waits`)
+        self.wait_done: float | None = getattr(args, "wait_done", None)
+        self.control = {"go": 0, "hold": 0, "sharp": 0}
+        self.holds: list[dict[str, Any]] = []
+        self.keeps: list[dict[str, Any]] = []
+        self.screen_now: tuple[int, bool] | None = None
+        self.screen_state, self.screen_since = "none", time.monotonic()
         self.last_ocr = 0.0
         self.saver: queue.Queue[Any] = queue.Queue()
         self.saver_thread = threading.Thread(target=self._save, name="standin-shots", daemon=True)
@@ -1786,6 +1853,33 @@ class Director:
             elif ev == "spinner" and e.get("on") == "1" and self.current == "d":
                 self.due.append((time.monotonic() + 0.8, f"d_spinner{self.turns_in['d']}"))
             self.events.append(e)
+            if self.wait_done is not None:
+                self.waited(e, mono)
+
+    def waited(self, e: dict[str, Any], mono: float) -> None:
+        """--wait-done: what the stand-in shows (its screen, sharp, soft, black or under a spinner, and since when), and
+        its holds and kept soft frames as it says them (`waits` lets them go)."""
+        ev = e["ev"]
+        with contextlib.suppress(KeyError, ValueError):
+            if ev == "draw":
+                self.screen_now = (int(e["page"]), e.get("spread") == "1")
+                self.screen_state, self.screen_since = e.get("state", "sharp"), mono
+            elif ev in ("black", "spinner") and e.get("on") == "1":
+                self.screen_state, self.screen_since = ev, mono
+            elif ev == "hold":
+                self.holds.append({"id": int(e["id"]), "segment": self.current, "page": int(e["page"]),
+                                   "spread": e.get("spread") == "1", "at": mono, "why": None, "waited_ms": None})
+            elif ev == "keep":
+                with self.notes.lock:
+                    since = len(self.notes.requests)
+                self.keeps.append({"n": int(e["n"]), "segment": self.current, "page": int(e["page"]),
+                                   "spread": e.get("spread") == "1", "at": mono, "requests_from": since,
+                                   "asked_ms": None, "why": None, "waited_ms": None})
+            elif ev == "kept":
+                keep = next((k for k in self.keeps if k["n"] == int(e["n"]) and k["why"] is None), None)
+                if keep is not None:
+                    keep["why"] = {"word": "asked"}.get(e.get("why", ""), e.get("why"))
+                    keep["waited_ms"] = round((mono - keep["at"]) * 1000)
 
     def turned(self, e: dict[str, Any]) -> None:
         """A turn began on the stand-in: the pictures due for it (`SHOTS`)."""
@@ -1807,6 +1901,8 @@ class Director:
         self.idle_since = (self.idle_since or now) if self.idle() else None
         rested = self.idle_since is not None and now - self.idle_since >= IDLE_S
         waited = now - self.phase_at
+        if self.wait_done is not None:
+            self.waits(now)
         if len(self.notes.run_ends) > self.run_ends_seen:  # a whole-book run ended: the window a while after
             self.run_ends_seen = len(self.notes.run_ends)
             self.due.append((time.monotonic() + 4.0, f"run{self.run_ends_seen}_ended"))
@@ -1863,12 +1959,61 @@ class Director:
                 self.released[seg.name] = {"waited_s": round(waited, 1), "timed_out": bool(timed_out and not go),
                                            "t": now_ms()}
                 self.key_for = None
-                sv.write_control(self.standin_dir, seg.go)
+                self.release(go=seg.go)
                 self.phase, self.phase_at = "running", now
             return
         if self.phase == "running" and (self.waiting_go > seg.go or self.ended):
             self.index += 1
             self.phase, self.phase_at = "prepare", now
+
+    def release(self, go: int | None = None, hold: int | None = None, sharp: int | None = None) -> None:
+        """The control file written: the stand-in's script released to *go* (``gN``); with --wait-done, its holds to
+        *hold* (``hN``) and its turns kept soft to *sharp* (``kN``) as well, a value not given as it was. Without the
+        option the file is what it always was (the go alone)."""
+        for key, value in (("go", go), ("hold", hold), ("sharp", sharp)):
+            if value is not None:
+                self.control[key] = int(value)
+        if self.wait_done is None:
+            sv.write_control(self.standin_dir, self.control["go"])
+        else:
+            sv.write_control(self.standin_dir, self.control["go"], hold=self.control["hold"],
+                             sharp=self.control["sharp"])
+
+    def waits(self, now: float) -> None:
+        """--wait-done, at every look: the hold the stand-in is at let go once `hold_over` says why (its page finished,
+        the window at rest without it, or the cap); the soft frame it keeps let go once the window asked on it - a
+        request of a page job on a soft frame of that screen, sent since the stand-in drew it."""
+        hold = self.holds[-1] if self.holds else None
+        if hold is not None and hold["why"] is None:
+            with self.notes.lock:
+                shown = dict(self.notes.displays[-1]) if self.notes.displays else None
+            rested_from = max(self.idle_since if self.idle_since is not None else now,
+                              self.screen_since + LAG_MS / 1000)
+            why = hold_over(self.screen_now, self.screen_state, shown, now - rested_from, now - hold["at"],
+                            float(self.wait_done or 0))
+            if why:
+                hold["why"], hold["waited_ms"] = why, round((now - hold["at"]) * 1000)
+                self.release(hold=hold["id"])
+        keep = self.keeps[-1] if self.keeps else None
+        if keep is not None and keep["why"] is None and keep["asked_ms"] is None:
+            with self.notes.lock:
+                asked = [r["job"] for r in self.notes.requests[keep["requests_from"]:]
+                         if r["frame"] == "soft" and r["job"] is not None]
+                jobs = {j["id"]: j for j in self.notes.jobs if j["id"] in asked}
+            if any((j["page"], bool(j["spread"])) == (keep["page"], keep["spread"]) for j in jobs.values()):
+                keep["asked_ms"] = round((now - keep["at"]) * 1000)
+                self.release(sharp=keep["n"])
+
+    def waits_report(self) -> dict[str, Any]:
+        """--wait-done's holds and kept soft frames, numbers only."""
+        holds = [{k: h[k] for k in ("id", "segment", "page", "spread", "why", "waited_ms")} for h in self.holds]
+        keeps = [{k: h[k] for k in ("n", "segment", "page", "spread", "asked_ms", "why", "waited_ms")}
+                 for h in self.keeps]
+        return {"cap_s": self.wait_done, "keep_soft_s": min(float(self.wait_done or 0), KEEP_SOFT_S),
+                "holds": holds, "holds_by_why": dict(Counter(str(h["why"]) for h in holds)),
+                "held_ms": dist([h["waited_ms"] for h in holds]),
+                "keeps": keeps, "keeps_by_why": dict(Counter(str(k["why"]) for k in keeps)),
+                "kept_ms": dist([k["waited_ms"] for k in keeps])}
 
     def first_page_done(self) -> bool:
         return any(d["kind"] == "translated" for d in self.notes.displays) or (
@@ -1957,7 +2102,7 @@ class Director:
             facts = self.keyed.setdefault(seg.name, {})
             facts["handed_on"] = key if isinstance(key, str) else list(key)
             facts["handed_on_after_ms"] = round((time.monotonic() - facts.get("at", time.monotonic())) * 1000)
-            sv.write_control(self.standin_dir, seg.go)
+            self.release(go=seg.go)
             return True
 
         reading_mod.press_briefly = page_key
@@ -3153,6 +3298,11 @@ def incidents(notes: Notes, line: list[tuple[float, Any, str]], end: float) -> d
         item = {"from_t": round(spell["from"]), "ms": round(length), "window": list(spell["key"][:2]),
                 "standin": list(spell["key"][2]), "lettered": spell["key"][3]}
         if spell["key"][3] and length > STALE_MS:
+            # (how long of it came after the window's first capture of the stand-in's screen: the rest was the
+            # capture's own time; None: no capture of it within the spell)
+            seen = next((c["t"] for c in notes.captures if spell["from"] <= c["t"] <= spell["to"]
+                         and (c["page"], bool(c["spread"])) == tuple(spell["key"][2])), None)
+            item["seen_ms"] = round(spell["to"] - seen) if seen is not None else None
             stale.append(item)
         elif length > LAG_MS:
             lag.append(item)
@@ -3274,7 +3424,7 @@ def run(args: argparse.Namespace) -> int:
             names.remove("x")
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
-    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms)
+    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done)
     sv.write_page_list(standin_dir, pictures)
     sv.write_control(standin_dir, 0)
     report["page_count"] = count
@@ -3683,6 +3833,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                   "log_latency_ms_median": round(statistics.median(lat) - offset, 1) if lat else None},
         "band_top_px": top, "dpr": dpr,
         "released": director.released, "theme": director.theme,
+        **({"waits": director.waits_report()} if director.wait_done is not None else {}),
         "page_keys": {name: {k: v for k, v in facts.items() if k != "at"} for name, facts in director.keyed.items()},
         "segments": table, "turns": rows, "incidents": spells,
         "jobs": {"started": len(started), "on": dict(Counter(j["state"] for j in started)),
@@ -3933,6 +4084,11 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"on soft {cancel['requests_on_soft']}, cancelled while running {cancel['cancelled_in_flight']}; ran on "
               f"after the cancel {cancel['ran_on_after_cancel_ms']}; next real request after "
               f"{cancel['next_real_after_ms']}, its server wait {cancel['next_real_server_wait_ms']}")
+    waits = run_.get("waits")
+    if waits:
+        print(f"--wait-done {waits['cap_s']} s: rests held {len(waits['holds'])} {waits['holds_by_why']}, held ms "
+              f"{waits['held_ms']}; soft frames kept {len(waits['keeps'])} {waits['keeps_by_why']}, kept ms "
+              f"{waits['kept_ms']}")
 
 
 def parse(argv: list[str] | None = None) -> argparse.Namespace:
@@ -3967,6 +4123,12 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="viewer: the window is told the viewer is in front (the reader's case); as-is: as it is")
     ap.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
     ap.add_argument("--timeout", type=float, default=180.0, help="seconds a scenario may wait for the window's rest")
+    ap.add_argument("--wait-done", type=float, metavar="CAP_S",
+                    help="a computer slower than the scenarios' rests were written for: the rests of a, d, e, r, o, z, "
+                         "x, f and f2 that a turn follows held until the page on show is finished (or the window at "
+                         "rest without it), CAP_S at most, and x's soft frames kept until the window asked on them "
+                         f"({KEEP_SOFT_S:g} s at most); the holds in the report (run.waits). Without it the scenarios "
+                         "are as written")
     return ap.parse_args(argv)
 
 
@@ -3976,6 +4138,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse(argv)
     if not 1.0 <= args.scale <= 3.0:
         raise SystemExit("--scale is 1 to 3")
+    if args.wait_done is not None and args.wait_done <= 0:
+        raise SystemExit("--wait-done is a number of seconds above 0")
     return run(args)
 
 
