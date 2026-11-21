@@ -52,6 +52,7 @@ import base64
 import bisect
 import contextlib
 import ctypes
+import faulthandler
 import importlib.util
 import io
 import json
@@ -94,6 +95,7 @@ WINDOW_SIZE = (1240, 860)
 WINDOW_AT = (380, 40)
 VIEWER_RECT = (0, 0, 900, 1000)  # the stand-in at first (TASlation makes it as large as its monitor's work area)
 TICK_MS = 15
+CLOSE_WAIT_S = 60  # the window not closed this long after the scenes: every thread's stack is said (stderr)
 GLIDE_HZ = 30
 KEY_CAP_MS = 1600.0  # a key cap shows this long (as shown)
 MAX_SPEED = 8.0
@@ -1242,6 +1244,7 @@ class Director:
         self.grabber.pause()
         self.grabber.on = False
         self.grabber.wake.set()
+        faulthandler.dump_traceback_later(CLOSE_WAIT_S)  # (where it hangs, should the window not close)
         self.app.after(500, self.app.quit)
 
     def say(self, what: str) -> None:
@@ -1321,6 +1324,13 @@ class Director:
                     yield from self.reset()
             if entry["failed"]:
                 yield from self.reset()
+        yield from self.reset()
+        try:  # (nothing under way as the window closes: a page still read or translated waits for it)
+            yield 1.5
+            yield Until(lambda: not app.busy, 90, "the window idle")
+            yield 1.0
+        except SceneFailed as e:
+            self.say(f"closing while busy: {e}")
         self.say("scenes over")
 
     def prepare(self, scene: Scene) -> Iterator[Any]:
@@ -1969,6 +1979,7 @@ class Director:
             raise SceneFailed("no handle on the region's frame")
         sx, sy = app.canvas.winfo_rootx() + handle[0], app.canvas.winfo_rooty() + handle[1]
         yield from self.drag((sx, sy), (sx + 26, sy + 18), 0.8)
+        yield 0.8  # (a larger frame is read again: that begins a moment after the release)
         yield Until(lambda: not app.busy, self.args.timeout, "the region resized")
         self.note_region("resized", getattr(app, "_chosen_region", None) or region)
         yield 1.0
@@ -2162,6 +2173,7 @@ def record(args: argparse.Namespace) -> int:
     try:
         standin = StandIn(args, VIEWER_RECT, writer)
         meta = run_window(args, standin, writer, url, scenes, term, models)
+        faulthandler.cancel_dump_traceback_later()
     except BaseException as e:  # noqa: BLE001 - said, then everything is closed
         if not isinstance(e, SystemExit):
             traceback.print_exc()
