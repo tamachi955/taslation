@@ -411,6 +411,31 @@ def test_the_watch_tells_what_the_server_answers_on_a_dump(monkeypatch):
     assert standin_e2e.server_says("http://x:1") == "server: not asked (RuntimeError)"
 
 
+def test_the_log_tap_keeps_each_line_of_the_rule_for_no_answer_with_what_the_server_said(monkeypatch):
+    import logging
+    import threading
+    import time
+
+    notes = SimpleNamespace(lock=threading.Lock(), ocr_log=[])
+    monkeypatch.setattr(standin_e2e, "server_says", lambda url: f"server: asked at {url}")
+    tap = standin_e2e.LogTap(notes, "http://127.0.0.1:11435")
+    log = logging.getLogger("taslation.translate.ollama")
+
+    def emit(msg, *args):
+        tap.emit(log.makeRecord(log.name, logging.WARNING, __file__, 1, msg, args, None))
+
+    emit("no answer: %s (%s), %.1f s %s (incident %d, silence %d)", "request", "taslation-worker", 30.0,
+         "without a byte", 1, 1)
+    emit("no answer: %s asked again on a new connection (/api/ps answers)", "request")
+    emit("a line of something else")
+    deadline = time.monotonic() + 2.0
+    while "server_says" not in tap.no_answer[0] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert [n["line"][:28] for n in tap.no_answer] == ["no answer: request (taslatio", "no answer: request asked aga"]
+    assert tap.no_answer[0]["server_says"] == "server: asked at http://127.0.0.1:11435"  # (the silence's line only)
+    assert "server_says" not in tap.no_answer[1] and tap.levels["WARNING taslation.translate.ollama"] == 3
+
+
 def _sized(id_, t, page, spread, size, frame="sharp", stored=0, hits=0, misses=0, requests=0, done=None):
     return {"id": id_, "t_s": t, "page": page, "spread": spread, "frame": frame, "size": size, "requests": requests,
             "cache_hits": hits, "cache_misses": misses, "stored": stored, "stored_at_cancel": None, "done_s": done}

@@ -171,7 +171,9 @@ rows' languages.
   folder (one of them 3 s after each change of the stand-in's size, its page at the new size; there too
   `stacks.txt` when a request to the translator stays under way 20 s without going out, or 60 s at all, or the Tk
   thread is silent 20 s - each thread's stack, its files, lines and functions only, with what the server answers just
-  then to /api/version and /api/ps -, and with `--start-ollama` the server's own log `ollama_server.log`,
+  then to /api/version and /api/ps -, the report's `no_answer` (each line of the rule for a request without an
+  answer and of the backlog's pause for it, a silence with what the server answered just then), and with
+  `--start-ollama` the server's own log `ollama_server.log`,
   at Ollama's default level, with no prompt and no answer in it),
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and

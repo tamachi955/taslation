@@ -109,9 +109,11 @@ the hot keys it held; the whole-book run's decisions on the frames and the frame
 sharp one; one that was not, with who got it and when the run took a sharper one after it: ``run_gets``; a frame whose
 reading was thrown away because a sharper one took its place meanwhile is left out of them and counted,
 ``readings_thrown_away``), how it ended and its requests; the requests of scenario x sent for nothing and what their
-cancel cost. Into *--out*: report.json; stacks.txt when a request to the translator stays under way too long
-(`watch_stuck`: the threads' stacks, files, lines and functions only); with --start-ollama the server's own log,
-ollama_server.log (no prompt or answer in it); and shots/ - pictures of
+cancel cost. Into *--out*: report.json (with the lines of the rule for a request without an answer and of the
+backlog's pause for it, ``no_answer``, each silence with what the server answered just then: `LogTap`); stacks.txt
+when a request to the translator stays under way too long (`watch_stuck`: the threads' stacks, files, lines and
+functions only); with --start-ollama the server's own log, ollama_server.log (no prompt or answer in it); and shots/ -
+pictures of
 TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
 moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
 With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
@@ -1218,14 +1220,32 @@ class LogTap(logging.Handler):
                  ("the OCR readers go to the CPU for the translation model's load", "cpu_for_load"),
                  ("where the OCR runs could not be decided", "undecided"))
 
-    def __init__(self, notes: Notes):
+    # the lines of the rule for a request without an answer (`translate.ollama`, `ollama_start.OllamaStarter.restart`,
+    # `pipeline.LoadAhead`) and of the backlog's pause for it: fixed words, numbers and a thread's name, never a line
+    NO_ANSWER_PREFIXES = ("no answer:", "backlog paused: the translation program", "backlog goes on:")
+
+    def __init__(self, notes: Notes, url: str | None = None):
         super().__init__(logging.INFO)
         self.notes = notes
+        self.url = url
         self.levels: Counter[str] = Counter()
+        self.no_answer: list[dict[str, Any]] = []
+
+    def _no_answer(self, record: logging.LogRecord) -> None:
+        """A line of the rule kept with its time and thread; for the first line of each silence (it names the
+        incident) what the server answers just then (`server_says`, on a thread of the tool's own)."""
+        line = {"t": now_ms(), "line": record.getMessage()[:300], "thread": record.threadName}
+        with self.notes.lock:
+            self.no_answer.append(line)
+        if self.url and "(incident" in line["line"] and ", silence " in line["line"]:
+            threading.Thread(target=lambda: line.__setitem__("server_says", server_says(self.url)),
+                             name="standin-no-answer-probe", daemon=True).start()
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = record.msg if isinstance(record.msg, str) else ""
+            if msg.startswith(self.NO_ANSWER_PREFIXES):
+                self._no_answer(record)
             for template, code in self.TEMPLATES:
                 if msg.startswith(template):
                     args = record.args if isinstance(record.args, tuple) else ()
@@ -4272,7 +4292,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     if getattr(settings, "side_indicator", "off") != "off":
         notes.side = SideCheck(notes)
     errorlog.setup(settings)
-    tap = LogTap(notes)
+    tap = LogTap(notes, url if mode.startswith("real") else None)
     logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer, as the window has it
     app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
@@ -4591,6 +4611,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                 "system_page": director.facts},
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
+        "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
         "guard": {"patched": patched, "refused": guard.refused, "chosen": sorted(set(notes.selected)),
                   "stand_in": browser.hwnd, "reached_the_stand_in": guard.used,
                   "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
@@ -4915,6 +4936,11 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if run_.get("capture_route"):
         route = run_["capture_route"]
         print(f"capture: {route['used']} (looks {route['looks']}; {route['route']}); frames {run_.get('captures')}")
+    said = run_.get("no_answer") or []
+    if said:
+        print(f"no answer: {sum(1 for n in said if ', silence ' in n['line'])} silence(s), "
+              f"{sum(1 for n in said if 'was stopped' in n['line'])} restart(s), "
+              f"{sum(1 for n in said if ' ended (' in n['line'])} request(s) ended with the sentence")
     if "segments" not in run_:
         print(f"report {path}")
         return
