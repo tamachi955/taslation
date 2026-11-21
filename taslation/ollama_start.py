@@ -783,6 +783,7 @@ class _Claim(NamedTuple):
 _claims: dict[Path, _Claim] = {}
 _claims_lock = threading.Lock()
 _exit_hooked = False
+_ends = 0  # how often `finish_all` ran in this process: a start under way across one launches nothing after it
 
 
 def _register_exit() -> None:
@@ -889,8 +890,11 @@ def _finish(path: Path, claim: _Claim) -> str | None:
 def finish_all() -> list[str]:
     """TASlation ends here: every claim of this process given up, and each server stopped that the module's docstring
     says to stop. What came of each (`_finish`); empty when this process held none. Never raises, never waits without
-    a bound."""
+    a bound. A start still under way (`_started`, on a worker thread: the window closed while its server was being
+    started) launches nothing after this, and gives up at once what it adopted or launched meanwhile."""
+    global _ends
     with _claims_lock:
+        _ends += 1
         claims = list(_claims.items())
         _claims.clear()
     said: list[str] = []
@@ -918,7 +922,10 @@ def own_models(settings: Any) -> tuple[str, ...]:
 def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[], None] | None,
              path: Path | None, own: Iterable[str], settings: Any = None) -> Message | None:
     """Ollama, found not to answer at *url*, started with what `server_setup` gives it for *settings* (or the server
-    TASlation started and recorded at *path* adopted) and waited for (see the module's docstring)."""
+    TASlation started and recorded at *path* adopted) and waited for (see the module's docstring). TASlation's end
+    (`finish_all`) while this is under way: nothing launched after it, and what was adopted or launched meanwhile given
+    up at once (a server left running by a window closed during its start, else)."""
+    began = _ends
     if not startable(url) or (cancel is not None and cancel.is_set()):
         return Message("health.ollama_down", url=url)
     with _Lock(path) if path is not None else contextlib.nullcontext():
@@ -927,10 +934,21 @@ def _started(url: str, cancel: threading.Event | None, on_starting: Callable[[],
             _use(path, record, url, own)  # a server TASlation started (by another process, or before a crash)
         elif health.ollama_running(url):
             return None  # one came up meanwhile, not TASlation's
+        elif _ends != began:
+            return Message("health.ollama_down", url=url)  # (TASlation ended meanwhile: nothing launched)
         else:
             failed = _launch(url, on_starting, path, own, settings)
             if failed is not None:
                 return failed
+    if _ends != began:  # (it ended while this was launched or adopted: given up as its end gives up the others)
+        with _claims_lock:
+            claim = _claims.pop(path, None) if path is not None else None
+        if claim is not None:
+            try:
+                _finish(path, claim)
+            except Exception:  # noqa: BLE001 - said; the start ends all the same
+                LOG.exception("stopping the Ollama TASlation started failed")
+        return Message("health.ollama_down", url=url)
     return _wait_answer(url, cancel)
 
 
