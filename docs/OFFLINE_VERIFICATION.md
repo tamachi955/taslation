@@ -4193,3 +4193,191 @@ fifth page (the request then asked again on a new connection); turning every 6 s
 its turn cancelled it and the sixth was ended at once, told 30.1 s. Before the change no request at either pace
 reached its own 30 s, so the rule could not come (the test of it, scaled to 0.6 s and turns of 0.12 s, fails there in
 15 pages). A look at `/api/ps` is no request to the model and changes nothing of the count.
+
+## The viewer kept under TASlation's window, and the pages turned past on 0.9 (2026-11-22)
+
+The work of the sections before, on 0.9.3: pages turned past go on being read (`taslation/backlog.py`) and the
+indicator beside the page, now with the window order, a read of the backlog's allowed in the hold of a page job, and
+a fix to the end of TASlation while its server is being started.
+
+**What changed.**
+
+- *The viewer kept under TASlation's window* (`ui/order.py`, `capture.keep_viewer_under`): while a window of
+  TASlation's is the one in front, a window of another program that lies between it and the viewer is put under the
+  viewer by moving the viewer up (SetWindowPos with SWP_NOACTIVATE: no activation, no change of the foreground, no
+  key, no click), at once when TASlation came to the front, then every 0.5 s, at most 5 times in such a spell. A
+  browser hidden wholly by windows that hide what lies under them stops drawing, and no page turned is seen then.
+  Under a topmost TASlation the viewer goes to HWND_TOP, the top of the windows that are not topmost (after a topmost
+  window it would become topmost itself).
+- *One switch for which windows send the viewer up* (`order.PARTLY_COVERED_TOO`, no setting): True, as built, any
+  window that hides some of the viewer - a note or a dictionary the person laid over a part of it goes under it at
+  each click on TASlation; False, only once other programs' windows that hide what lies under them hide all of it,
+  and one over a part of it stays where the person put it. The log names the windows that went under by class only
+  (and says when one was another window of the viewer's own program), never a title.
+- *The viewer's location change announced* once it is put up (`NotifyWinEvent` EVENT_OBJECT_LOCATIONCHANGE for its
+  window: an event to the programs listening for window events, nothing sent to the viewer). Chromium's occlusion
+  tracking looks again at window events, not at a change of the order alone: on the stand-in, wholly covered and so
+  drawing nothing, then put over the window that covered it with no such event, it once drew nothing for 13.7 s more.
+- *A read of the backlog's in the hold of a page job* (`Pipeline.behind_reads_allowed`): in the 2 s in which the
+  window may still take a page job's confirmation back on a viewer that draws a page soft first, the backlog may read
+  a page turned past from its capture (or make its regions units), which asks the translator nothing and changes
+  nothing that job stored; a translation still waits for the decision, and the read holds the decision off while it
+  runs and stops as the time is up (`steps_in_hold` in the tool's report).
+- *TASlation's end while its Ollama is being started* (`ollama_start`): the end counts (`_ends`), and a start under
+  way across one launches nothing after it and gives up at once what it launched or adopted meanwhile. Seen on the
+  stand-in: a run stopped 1.5 s into its window left the server it had started on its port running. The two tests in
+  `tests/test_ollama_start.py` fail on the code before (checked).
+- *The tool.* `--cover` lays a plain window of the tool's own over the stand-in (`--cover-style noactivate` the old
+  one), `--cover-part F` over the left F of its width only, `--order-partly on/off` sets the switch for the run,
+  `--front-for-order own` lets the window keep the stand-in under it as with TASlation in front, and
+  `--cover-front-s S` puts TASlation's window at the top of the order (no activation) S seconds after the cover came;
+  each look while the cover is up notes what the order said, whether the cover lies over the stand-in, whether the
+  stand-in is topmost, and whether the window was busy with the viewer.
+
+**How it was measured.** The same machine (GTX 1660 Ti, 6 GB), a server of the tool's own on 127.0.0.1:11435
+(the owner's on 11434 untouched), the stand-in viewer with the OpenMantra pages, `--seed 1`, on `046959e` (the code of
+`601f7e0` and the tool's last notes). The covered runs started only after 30 s with no input to the computer, for at
+most 2 min, and the person was at the computer during most of them (idle 0 to 60 s at their starts); the timing runs
+(the stand-in drawing while covered, `--standin-draws-covered`) did not wait. Another agent's short tests (no model)
+overlapped the first covered run and one other; no timing run was overlapped.
+
+**The covered runs.** The tool's cover over the stand-in for 20 to 40 s, TASlation's window counted as in front
+(`--front-for-order own`) and, in the runs marked *own to top*, put at the top of the order 10 to 25 s after the
+cover came (until then the cover's program counts as in front, as when the person has just clicked another program):
+
+| run | turns | cover | switch | TASlation in front from | viewer put up | windows that went under it | frames stood still |
+|---|---|---|---|---|---|---|---|
+| a, own to top | the stand-in's own | whole, plain | on | 33.14 s | 33.22 s | the cover | none |
+| r (TASlation's full screen, topmost), own to top | the stand-in's own | whole, plain | on | 30.83 s | 30.83 s, then 4 more | the cover; another program's Chrome_WidgetWin_1 (5 times, came back each time) | none |
+| k1 by the key, own to top | the window's page key handed on | whole, plain | on | 30.58 s | 30.69 s | the cover | none (22 turns while covered, all shown) |
+| a, own to top | the stand-in's own | whole, noactivate | on | 46.74 s | 46.75 s | the cover | 20.0 s from 26.85 s (2 turns not shown); frames back 0.9 s before the viewer was put up |
+| a, part | the stand-in's own | left 40 %, plain | on | 30.82 s | 30.82 s | the cover | none |
+| a, part | the stand-in's own | left 40 %, plain | off | 30.65 s | never (said "partly" at all 386 looks) | none: the cover stayed over the viewer | none |
+| a, whole | the stand-in's own | whole, plain | off | 31.50 s | 31.51 s | the cover | none |
+
+In the topmost-TASlation run the stand-in was never topmost (0 of 420 looks), nor in any other run: HWND_TOP with
+SWP_NOACTIVATE lifts the viewer under a topmost TASlation, and it stays a window that is not topmost. The other
+program's window that came back between them (in the spell at the start as well, 5 placements in 2.2 s and the cap)
+was not topmost by a read-only look at the order afterwards; most likely the person's own window in front at the
+time, which the tool's `--front-for-order own` keeps out of the count of the window in front - with TASlation really
+in front it would not be. Earlier runs of the round (before the announcement) agreed: placed 50 ms after the cover
+came under a topmost TASlation, the cover under the viewer in all 342 looks; with TASlation really the window in
+front (no `--front-for-order`), placed 450 ms after the cover came.
+
+*The announcement, not settled.* The stand-in drew on under the tool's plain cover in most runs (every turn while
+covered shown), so they show nothing of it. It stopped drawing in three runs: with the announcement twice (frames back
+0.9 s and 0.8 s *before* the viewer was put up: something else made the browser look again, with the person at the
+computer), without it once (`no_announce.py`, a scratch wrapper that leaves the call out: frames back 1.5 to 1.9 s
+after the viewer was put up, a fresh capture 1.3 s after it still showing the old page). The 13.7 s seen before the
+change did not come again. The call is an event of the viewer's own window and changes nothing else; whether it is
+what brings the frames back is not shown by these runs.
+
+*The status line, a false alarm.* In every covered run with a plain cover the window said "The viewer is hidden behind
+other windows and has stopped drawing" 1 to 4 times while the stand-in drew on: the line counts frames that stand
+still for 3 s while the viewer is hidden wholly, and a page that does not change gives no frame at all; each frame
+that came took the line back and started a new spell. Not changed. A proposal: say it only when a page key the window
+handed on to the viewer brought no frame within a few seconds while it was hidden wholly (then it has surely stopped),
+and otherwise not; the wording of the key can stay.
+
+**Scenario k on 0.9.** As in the sections before (20 pages flipped past at 0.5, 1 and 2 s, 10 read back at 8 s, one
+run each with the backlog and with nothing caught, `--k-backlog off`), the stand-in drawing while covered. Two runs
+were overlapped by another agent's short test files (no model): the sharp wide one with the backlog and both sharp
+narrow ones.
+
+| configuration | pace | stayed 0.8 s or more | caught | finished while on show | agree | caught and read back, begun with no new read |
+|---|---|---|---|---|---|---|
+| soft first, wide | 0.5 s | 0 | 0 | 0 | 20 of 20 | none caught |
+| | 1 s | 4 | 1 | 0 | 15 of 20 | none of them read back |
+| | 2 s | 20 | 20 | 0 | 20 of 20 | 9 of 10 (1 its read in part reused) |
+| sharp at once, wide | 0.5 s | 0 | 0 | 0 | 20 of 20 | none caught |
+| | 1 s | 20 | 20 | 0 | 20 of 20 | 3 of 10 (7 still a frame) |
+| | 2 s | 20 | 20 | 0 | 20 of 20 | 9 of 10 (1 still a frame) |
+| soft first, narrow | 0.5 s | 0 | 0 | 0 | 20 of 20 | none caught |
+| | 1 s | 3 | 0 | 0 | 17 of 20 | none caught |
+| | 2 s | 20 | 17 | 3 | 20 of 20 | 10 of 10 |
+| sharp at once, narrow | 0.5 s | 0 | 0 | 0 | 20 of 20 | none caught |
+| | 1 s | 20 | 16 | 3 | 19 of 20 | 8 of 9 (1 in part reused) |
+| | 2 s | 20 | 16 | 4 | 20 of 20 | 9 of 9 |
+
+The pages that disagree are of the kinds the sections before named (soft first at 1 s: pages on show just over
+0.8 s by the stand-in's log and under it from the window's look). Sharp wide at 1 s: 20 caught, and the reader came
+back before the backlog had read 7 of the 10 (each page read back took most of its 8 s on show, the worker idle for
+the backlog a few tenths of a second a page), as in the section before (7 of 30 there).
+
+*Steps in a page job's hold.* 1 to 27 steps per pace began in the hold where pages were caught (sharp wide 21 and 20,
+soft wide 19 at 2 s, soft narrow 21, sharp narrow 19 and 27), most of them stopped as the hold ended (reads 0 to 4 and
+units made 0 to 6 finished there); a stopped read was taken up where it stopped at a later step (`reads_after_a_stop`:
+2 to 16 per pace, finished there 1 to 5 times, stopped again the rest).
+
+*The first bubble of a page read back*, median / p90 in ms:
+
+| configuration | pace | with the backlog | nothing caught | difference |
+|---|---|---|---|---|
+| soft first, wide | 0.5 s | 3,052 / 3,714 | 2,551 / 3,751 | +501 |
+| | 1 s | 2,410 / 3,208 | 2,052 / 3,732 | +358 |
+| | 2 s | 372 / 689 | 1,130 / 2,105 | -758 |
+| sharp at once, wide | 0.5 s | 2,582 / 3,408 | 2,604 / 3,875 | -22 |
+| | 1 s | 2,149 / 3,453 | 2,086 / 3,259 | +63 |
+| | 2 s | 490 / 1,083 | 1,392 / 2,346 | -902 |
+| soft first, narrow | 0.5 s | 1,944 / 3,179 | 2,656 / 3,840 | -712 |
+| | 1 s | 1,504 / 1,921 | 1,928 / 2,366 | -424 |
+| | 2 s | 292 / 449 | 928 / 2,925 | -636 |
+| sharp at once, narrow | 0.5 s | 2,132 / 3,406 | 1,960 / 2,876 | +172 |
+| | 1 s | 247 / 288 | 1,232 / 1,896 | -985 |
+| | 2 s | 253 / 442 | 584 / 1,150 | -331 |
+
+All paces together: wide 2,074 / 3,453 against 2,074 / 3,732 (60 pages each), narrow 523 / 2,451 against 1,542 /
+2,925 (58). The soft wide run at 0.5 and 1 s caught nothing or one page: the pages read again for not being caught
+began in 2,478 and 2,252 ms (median) against 2,551 and 2,004 ms with nothing caught, and 3 against 2 of them (1 against
+1) went through the soft gate, which takes longer; a turn waited for the backlog's step 58 and 85 ms (median), 295 ms
+at most. One run each, ten pages: the median of ten moves by some 300 ms between neighbouring values.
+
+*What a turn waits for.* The worker was free 36 to 157 ms after the backlog's step stopped (median per run and pace),
+295 ms at most; a turn to the very page the backlog was reading 31 to 181 ms (median), 288 ms at most.
+
+*The guarantees.* In all eight runs: 0 stale lettering, 0 results kept from unsettled frames, 0 soft frames left in the
+cache, 0 frames held after their read, 0 bytes held at the end, at most 24.8 MB of frames held; no request of the
+backlog's wasted (the requests "dropped" - 5 with the backlog and 4 with nothing caught in the soft narrow runs, 1 with
+nothing caught in the soft wide - are page jobs' on pages flipped past at 1 s, their gate dropped; one of them had
+lettered two lines on the sharp frame before the turn, and what it stored went back with it). One page job in the
+soft wide run took a page the cache held whole on a frame the stand-in drew soft (no gate, as a page the cache holds
+whole goes): it asked nothing, lettered nothing and stored nothing.
+
+*How long the backlog takes, a screen* (its own steps, per screen held at most), against the whole-book run of
+scenario w on the same code - 37.7 s for its 5 screens in the wide window (7.5 s a screen), 19.5 s in the narrow one
+(3.9 s): wide 4.96 (soft, 2 s), 3.89 and 4.76 s (sharp, 1 and 2 s), 1.55 to 3.8 s with 2 to 5 screens; narrow 3.0 s
+(soft, 2 s), 2.48 and 2.46 s (sharp, 1 and 2 s). Below the whole-book run in every run.
+
+*The soft narrow 0.5 s pace in pairs* (higher with the backlog in both runs of the section before): three runs more
+each way (`--scenario k5`), not overlapped, with the k runs four a side. The medians of the runs with the backlog
+1,944, 2,093, 2,109 and 1,970 ms, with nothing caught 2,656, 1,938, 2,125 and 2,133 ms; pooled 2,052 / 3,084 against
+2,200 / 3,112 ms (36 pages each), -148 ms; page by page (the median of each page's runs, nine pages) -16 ms. Nothing
+was caught at that pace in any of the runs, and the backlog took no step there.
+
+**`--scenario all`** on the same code, not overlapped: 0 wasted requests, 0 stale lettering, 0 soft frames confirmed,
+taken back or left in the cache, 0 lettering on a soft frame, old lettering after a turn 249 ms at most (no job: 227
+ms), the page before after a turn 460 ms at most (1 of 53 over 250 ms), the whole-book run finished its 5 pages, no
+error.
+
+**The benchmark** (`tools/openmantra_eval.py`, all 214 pages, the tool's server on 11435, each with a state folder of
+its own): page by page twice (seeds 1 and 2), page by page with one beginning-of-sequence token instead of two
+(`om_one_bos.py`, a scratch wrapper: the client's `<|plamo:bos|>` taken off the front of every prompt and beginning,
+the server adding its own as the model's file asks), and in the order behind the reader (`--behind 4`):
+
+| arm | chrF, run 1 / run 2 | mean | translation | prompt tokens, run 1 |
+|---|---|---|---|---|
+| page by page, two BOS (as built) | 41.22 / 40.56 | 40.89 | 294.6 / 290.5 s | 1,478,518 |
+| page by page, one BOS | 41.34 / 40.93 | 41.14 | 293.7 / 289.2 s | 1,476,653 |
+| behind the reader (`--behind 4`) | 40.90 | | 316.5 s | |
+
+Detection F1 97.19, CER 1.87 %, 1,586 of 1,586 lines translated in every arm. One BOS is 0.25 above two on the mean,
+inside what two runs of the same arm differ by (0.4 to 0.7), and no faster: not changed. Behind the reader is 0.32
+below page by page's first run (within 0.5).
+
+**The tests.** The whole suite on `046959e`: 5,467 passed, 22 skipped (the real-data tests without their data), in
+32 min 13 s.
+
+**Not verified.** The real viewer (the stand-in only); with TASlation really the window in front, the covered runs
+beyond the one before the announcement; what the announcement does (above); a window between that is itself topmost
+(not met); more than one screen with the viewer on another; a viewer run as administrator (Windows refuses the
+placement: logged, nothing else); Firefox.
