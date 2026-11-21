@@ -396,6 +396,25 @@ def test_a_frame_not_changed_since_the_last_capture_is_the_one_before_the_key(se
     assert v.captures == []  # nothing captured for the frame before the key
 
 
+def test_a_key_passed_on_asks_the_covered_line_for_a_frame_counted_from_before_the_key(setup, monkeypatch):
+    """(`ui.order.turn_asked`: the line for a viewer hidden wholly that has stopped drawing is said only when a key
+    handed on to it brings no frame - from the frame count before the key; with frames not counted nothing is asked)"""
+    from taslation.ui import order
+
+    v = setup.viewer
+    w = setup.make()
+    _started(setup, w)
+    w.forward_key("Left")
+    assert order.state_of(w).asked_at is None  # (frames not counted)
+    _count_frames(setup, monkeypatch)
+    setup.clock.run(5)
+    before = live.frame_count(HWND)
+    v.frames.append((setup.clock.now + 0.25, _page(2)))
+    w.forward_key("Left")
+    state = order.state_of(w)
+    assert state.asked_at is not None and state.asked_for == HWND and state.asked_seq == before
+
+
 @pytest.mark.parametrize("counted", [True, False])
 def test_in_translator_mode_a_cached_page_is_drawn_at_once_and_completed_once_it_settled(setup, monkeypatch, counted):
     """A page the cache holds whole: drawn from the cache at its first frame (nothing read from it), then completed

@@ -27,12 +27,19 @@ front - shown without activation, put there by its program - is what the spell's
 while TASlation is minimised, for a viewer minimised (handled as ever: `viewers`), hidden or topmost, while it is
 raised for a look (`live.LiveViewMixin._raise_viewer`), nor while its window is given a new size.
 
-The second measure (`covered_line`): when the viewer is hidden wholly - a browser by windows that hide what lies under
-them (`capture.fully_covered` with *opaque*), another viewer, seen to draw nothing while covered, by any window - and
-its frames stand still (the capture's frame count unchanged) for COVERED_STILL_S, the status line says so, once in such
-a spell; the line goes when its spell ends (a frame comes, or the viewer is in sight again) and it is still shown.
-Never while TASlation's own window is what the viewer draws nothing behind (`live.LiveViewMixin._set_covered`: its
-band and line say what to do then). Nothing is asked of a window but its place, its size and what covers it."""
+The second measure (`covered_line`): when a page key TASlation handed on to the viewer (`turn_asked`, from
+`reading.ReadingMixin._pass_on`) brought no new frame (the capture's frame count unchanged since the count before the
+key) for COVERED_STILL_S while the viewer is hidden wholly - a browser by windows that hide what lies under them
+(`capture.fully_covered` with *opaque*), another viewer, seen to draw nothing while covered, by any window -, the status
+line says so, once for that key; the line goes at the next frame, or once the viewer is in sight again, while it is
+still shown. A viewer hidden wholly that shows a page that does not change draws no frame either, and is never said to
+have stopped drawing so: only a turn asked for and not drawn says it (before, frames standing still for COVERED_STILL_S
+said it, and a still page under a cover was said to have stopped drawing again and again). A key handed on while the
+viewer is in sight, or while its frames are not counted, asks nothing of the line; nor does a click passed on (it need
+not turn the page). Nothing is looked at while the viewer is raised for a look or given a new size (its frames then are
+the window's own business), and never while TASlation's own window is what the viewer draws nothing behind
+(`live.LiveViewMixin._set_covered`: its band and line say what to do then). Nothing is asked of a window but its place,
+its size and what covers it."""
 
 from __future__ import annotations
 
@@ -55,7 +62,7 @@ PARTLY_COVERED_TOO = True
 ORDER_EVERY_S = 0.5  # while TASlation is in front, the order looked at this often (and at once when it came to it)
 ORDER_MOST = 5  # the viewer put under TASlation's window at most this many times in one spell of TASlation in front
 COVER_EVERY_S = 1.0  # how often the second measure looks whether the viewer is hidden wholly
-COVERED_STILL_S = 3.0  # hidden wholly, its frames standing still this long: the status line says so
+COVERED_STILL_S = 3.0  # hidden wholly, no frame this long after a page key handed on to it: the status line says so
 COVERED_KEY = "The viewer is hidden behind other windows and has stopped drawing: move them off it, or bring the viewer to the front."
 
 
@@ -63,8 +70,8 @@ COVERED_KEY = "The viewer is hidden behind other windows and has stopped drawing
 class OrderState:
     """What the window keeps between two heartbeats: whether TASlation was in front at the last one, when the order
     was looked at and how often the viewer was put under it in this spell (and in all), and of the second measure when
-    the viewer was found hidden wholly with its frames standing still since, the frame count then, and whether the
-    line was said in this spell."""
+    it last looked, the page key no frame has answered yet (when it was handed on, to which window, the frame count
+    before it), and whether the line was said (with the frame count then)."""
 
     front: bool = False
     looked: float = float("-inf")
@@ -73,7 +80,9 @@ class OrderState:
     spells: int = 0
     last: str = ""  # what `capture.keep_viewer_under` said last
     cover_looked: float = float("-inf")
-    cover_since: float | None = None
+    asked_at: float | None = None
+    asked_for: int = 0
+    asked_seq: int | None = None
     cover_seq: int | None = None
     said: bool = False
 
@@ -180,48 +189,73 @@ def hidden_wholly(window: Any, viewer: int) -> bool:
     return fully_covered(viewer)
 
 
+def turn_asked(window: Any, hwnd: int, seq: int | None, now: float | None = None) -> None:
+    """(`reading.ReadingMixin._pass_on`, a page key handed on to the viewer's window *hwnd*) The turn the second measure
+    waits a frame for: *seq*, the viewer's frame count before the key (None: frames not counted - nothing is asked,
+    so a frame drawn already by the time the count is known never goes unseen). A key that comes while one before is
+    still unanswered leaves that one's time and count; one while the line is said changes nothing."""
+    state = state_of(window)
+    if seq is None or not hwnd or state.said:
+        return
+    if state.asked_at is None or state.asked_for != hwnd:
+        state.asked_at = time.monotonic() if now is None else now
+        state.asked_for, state.asked_seq = int(hwnd), seq
+
+
 def covered_line(window: Any, now: float | None = None) -> bool:
-    """(each heartbeat) The second measure (see the module's docstring): the status line once the viewer has been
-    hidden wholly with its frames standing still for COVERED_STILL_S, once a spell; taken back as the spell ends while
-    it is still shown. Whether it was said now."""
+    """(each heartbeat) The second measure (see the module's docstring): the status line once a page key handed on to
+    the viewer (`turn_asked`) has brought no frame for COVERED_STILL_S while the viewer is hidden wholly, once for that
+    key; taken back at the next frame, or once the viewer is in sight, while it is still shown. Whether it was said now."""
     state = state_of(window)
     viewer = _viewer(window)
     now = time.monotonic() if now is None else now
     if not IS_WINDOWS or not viewer or getattr(window, "_covered", False):  # (TASlation's own covering: its band says it)
         _end_cover(window, state)
         return False
-    if now - state.cover_looked < COVER_EVERY_S - 1e-6:
-        return False
+    if state.asked_at is None and not state.said:
+        return False  # (no turn asked for: a page that does not change draws no frame, and nothing is said of it)
+    if state.asked_at is not None and state.asked_for != viewer:  # (asked of a window that is no longer the viewer)
+        state.asked_at, state.asked_seq = None, None
+        if not state.said:
+            return False
+    if now - state.cover_looked < COVER_EVERY_S - 1e-6 or _busy_with_the_viewer(window):
+        return False  # (raised for a look, or being given a new size: looked at once that is over)
     state.cover_looked = now
     try:
         hidden = hidden_wholly(window, viewer)
         count = window._frame_count() if hidden else None
     except Exception:  # noqa: BLE001 - not known: nothing said
         hidden, count = False, None
-    if not hidden or count is None:  # (in sight, or no frame count to tell frames that stand still by)
+    if not hidden or count is None:  # (in sight - it draws for the eye -, or no frame count to tell a frame by)
         _end_cover(window, state)
         return False
-    if state.cover_since is None or count != state.cover_seq:  # (hidden from now on, or a frame came: counted anew)
-        if state.cover_since is not None:
+    if state.said:
+        if count != state.cover_seq:  # (a frame came: it draws)
             _end_cover(window, state)
-        state.cover_since, state.cover_seq = now, count
         return False
-    if state.said or now - state.cover_since < COVERED_STILL_S - 1e-6:
+    if count != state.asked_seq:  # (a frame came after the key: it drew)
+        state.asked_at, state.asked_seq = None, None
         return False
-    state.said = True
-    LOG.info("the viewer is hidden wholly and its frames stand still (%.1f s): the reader is told", now - state.cover_since)
+    waited = now - state.asked_at
+    if waited < COVERED_STILL_S - 1e-6:
+        return False
+    state.said, state.cover_seq = True, count
+    state.asked_at, state.asked_seq = None, None
+    LOG.info("the viewer is hidden wholly and no frame came for %.1f s after a page key handed on to it: the reader is "
+             "told", waited)
     window.say("The viewer is hidden behind other windows and has stopped drawing: move them off it, or bring the viewer to the front.")  # (COVERED_KEY)
     return True
 
 
 def _end_cover(window: Any, state: OrderState) -> None:
-    """A spell of the viewer hidden wholly is over: its line taken back while it is still the one shown."""
+    """The viewer in sight (or not known), or a frame came since the line: the line taken back while it is still the
+    one shown, and a key no frame answered yet forgotten (it was handed on to a viewer that draws for the eye)."""
     if state.said and getattr(window, "_status_key", None) == COVERED_KEY:
         try:
             window.status("")
         except Exception:  # noqa: BLE001
             pass
-    state.cover_since, state.cover_seq, state.said = None, None, False
+    state.asked_at, state.asked_seq, state.cover_seq, state.said = None, None, None, False
 
 
 def beat(window: Any, now: float | None = None) -> None:
