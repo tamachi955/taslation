@@ -24,8 +24,10 @@ Speed
 
 * A page's lines go to the translator as soon as they are read, so the first bubble comes sooner: on a screen showing
   two pages about 1.0 s after the turn instead of 1.6 s (without a GPU 1.8 s instead of 2.9 s; measured on the test
-  computer with a viewer that draws the page sharp at once). The whole page takes as long as before. Once the page is
-  read, a bubble translated that early may be replaced, for example where the reading order turned out different.
+  computer with a viewer that draws the page sharp at once). The whole page takes as long as before. The lines go in
+  the order the page will have once it is read, so a bubble translated that early is rarely replaced afterwards (on
+  the test pages 3 lines in about 90); a line may wait a quarter of a second, a second at most, while a bubble not
+  read yet could come before it.
 * A line the book has already translated is lettered as soon as it is read.
 * A page already translated and on show gives way at once when you turn the page.
 * The GPU's memory is judged once, as the window starts, for everything TASlation puts there (the translation model,
