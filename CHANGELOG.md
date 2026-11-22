@@ -3,6 +3,27 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.7 - 2026-11-22
+
+Reading
+
+* Background translation: a page you turn past before it is finished goes on being read and translated from what was
+  captured while the viewer showed it (a page shown long enough to be confirmed, 0.8 seconds). When the viewer shows
+  that page again, its translation is laid over it without waiting. Nothing is shown from memory: a translation
+  appears only over the viewer's own page. The captures of pages turned past stay in memory only until their
+  lettering is read (256 MB at most) and are never written to disk. On the test computer, turning back through pages
+  passed at one every 2 seconds, the first bubble came 0.16 seconds after the turn instead of 0.46.
+* The margin on the side the pages turn to shows the pages turned past: a column of small thumbnails with a bar for
+  reading and one for translating where the margin is wide enough, a thin rail where it is not. A page whose words
+  changed after you saw it translated carries a mark, and its changed bubbles are marked when you come back. Choose
+  the shape, or none, under Tools → Settings → "Pages turned past" (`side_indicator`).
+* In the Reader role the filling bubbles are the progress display: the badge at the top right is gone there, and the
+  status bar says what is being done only when no bubble is lettered a second after the page came up. The Translator
+  role and a whole-book run keep the badge.
+* While you read with TASlation in front, the viewer's window is kept directly under it, so that another window
+  that comes between them does not cover the page being captured.
+* docs/LEGAL says what happens to a page turned past.
+
 ## 0.9.6 - 2026-11-22
 
 Translating a whole book

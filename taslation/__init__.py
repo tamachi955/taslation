@@ -8,4 +8,4 @@ by page fingerprints and what docs/MANUAL.md lists beside them). See
 while it reads.
 """
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
