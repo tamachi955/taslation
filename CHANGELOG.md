@@ -3,6 +3,19 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 1.0.1 - 2026-11-23
+
+Speed
+
+* A page's first line goes to the translator a little sooner: the slant of the lettering is measured bubble by bubble
+  as each is read, no longer all of a page's first (on the test computer the first bubble of a two-page screen about
+  60 ms sooner; the whole page as before).
+
+Fixes
+
+* When the translation program stopped answering a line sent as it was read, starting it again failed and the pages
+  after it stayed without lettering; it is now started again and waited for as for any other request.
+
 ## 1.0.0 - 2026-11-23
 
 Reading
