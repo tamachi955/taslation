@@ -130,8 +130,7 @@ def _stage_of_code(code: str, params: Mapping[str, Any], filled: int) -> str | N
 def stage_of(progress: Any, filled: int = 0) -> str | None:
     """The stage a pipeline progress message (a Message, by its code; a plain string by its English words) names, in a
     few words of the window's language; while the model's answer comes in, how many of the lines it was asked for
-    are lettered already (*filled*). None for a message it does not know. Every count is of lines (the unit of the
-    band, the strip and the run's messages)."""
+    are lettered already (*filled*). None for a message it does not know. Every count is of lines."""
     code = code_of(progress)
     if code:
         return _stage_of_code(code, progress.params, filled)
@@ -163,13 +162,10 @@ def slow_line() -> str:
     return _("The translation program is slow to answer (it may still be loading). Stop cancels this page.")
 
 
-def busy_line(progress: Any, seconds: float, filled: int = 0, reading: bool = False) -> str:
+def busy_line(progress: Any, seconds: float, filled: int = 0) -> str:
     """The busy band's line: the stage of the pipeline's latest progress message in a few words (a message it
-    does not know as it says it, in the window's language) and the seconds so far. In a run's *reading* pass nothing
-    is translated: the stage alone."""
+    does not know as it says it, in the window's language) and the seconds so far."""
     s = int(seconds)
-    if reading:
-        return stage_of(progress, filled) or rendered(progress).strip()
     if code_of(progress) == SLOW:
         return slow_line()
     if _renders(progress):
@@ -189,13 +185,10 @@ def _finds(progress: Any) -> bool:
     return code == "pipeline.stage_finding" if code else str(progress or "").strip().startswith("Finding bubbles")
 
 
-def progress_line(progress: Any, reading: bool = False) -> str:
+def progress_line(progress: Any) -> str:
     """The status bar's line for a pipeline progress message: its stage in the window's language, as the band
-    says it; a message without a stage as it says it (in the window's language). In a run's *reading* pass: the
-    stage alone. Looking for the text says "Looking at the page...", not "Translating...": a page from the cache
-    is only looked at and drawn."""
-    if reading:
-        return stage_of(progress) or rendered(progress).strip()
+    says it; a message without a stage as it says it (in the window's language). Looking for the text says "Looking
+    at the page...", not "Translating...": a page from the cache is only looked at and drawn."""
     if code_of(progress) == SLOW:
         return slow_line()
     if _renders(progress):

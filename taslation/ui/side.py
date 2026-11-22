@@ -1,7 +1,7 @@
 """The indicator beside the page in the window (a part of `app.App`): the screens turned past in normal reading and how
 far the work on each is, from the engine's events (`backlog`, each with ``reading`` True, by one way only:
-`backlog.reading_event` from `JobsMixin._handle_event` to the ``_on_reading_<kind>`` handlers here), outside a
-whole-book run only (that run keeps its strip under the page, `strip`, and its own ``page_stage`` has no ``reading``):
+`backlog.reading_event` from `JobsMixin._handle_event` to the ``_on_reading_<kind>`` handlers here); it is there
+whenever its setting has it (``side_indicator``):
 
 * ``page_stage`` {seq, fingerprint, stage "read" or "translate", state[, thumb][, into]} - a screen and one of its
   stages (`side_model.SideModel.update`; the thumbnail, at most 96 px tall, with its first event - none for a page
@@ -10,7 +10,7 @@ whole-book run only (that run keeps its strip under the page, `strip`, and its o
   kept in view;
 * ``backlog`` {pages, lines, paused, dropped} - the work still to do on the screens behind; *dropped* the screens
   that went by too fast, not caught or done since, or True: the backlog was dropped (another book, another viewer
-  window, a whole-book run) - everything goes, and the screens are numbered from 1 again.
+  window) - everything goes, and the screens are numbered from 1 again.
 
 `SideView` draws it in the exit-side margin of the page area (`side_model.side_layout`), the picture kept clear of
 that side where the margin is too narrow even for the rail (`side_model.room_kept`, through
@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import status_slot
-from .constants import in_a_run
 from .seen import Seen, words
 from .side_model import SETTINGS, SideLayout, SideModel, room_kept, screen_tip, side_layout
 from .side_view import SideView
@@ -75,11 +74,6 @@ def setting(window: Any) -> str:
     return value if value in SETTINGS else "column"
 
 
-def active(window: Any) -> bool:
-    """Whether the indicator belongs on the page area: not during a whole-book run (its strip does that)."""
-    return not in_a_run(window)
-
-
 def rtl(window: Any) -> bool:
     try:
         return bool(getattr(getattr(window, "pipeline", None), "rtl", True))
@@ -90,7 +84,7 @@ def rtl(window: Any) -> bool:
 def side_room(window: Any, part: tuple[int, int], size: tuple[int, int]) -> tuple[int, int]:
     """The canvas pixels kept clear left and right of the picture (`ImageCanvas.side_room_of`)."""
     canvas = window.canvas
-    return room_kept(setting(window), active(window), part, size, canvas.inset, canvas.enlarge, rtl(window))
+    return room_kept(setting(window), part, size, canvas.inset, canvas.enlarge, rtl(window))
 
 
 def top_clear(window: Any, side: str) -> int:
@@ -111,7 +105,7 @@ def place(window: Any) -> None:
         w, h = canvas.winfo_width(), canvas.winfo_height()
         shown = canvas._shown if getattr(canvas, "_image", None) is not None and not canvas.message else None
         side = "left" if rtl(window) else "right"
-        layout = side_layout(setting(window), active(window), (w, h), shown, rtl(window),
+        layout = side_layout(setting(window), (w, h), shown, rtl(window),
                              bool(getattr(window, "reading", False)), top_clear(window, side)) \
             if w >= 2 and h >= 2 else SideLayout()
         canvas.slot_side = side
@@ -121,7 +115,7 @@ def place(window: Any) -> None:
 
 
 def clear(window: Any) -> None:
-    """Everything of the indicator forgotten: another book, a whole-book run starting."""
+    """Everything of the indicator forgotten: another book, another viewer window."""
     st = state(window)
     if st is None:
         return
@@ -142,10 +136,9 @@ def clear(window: Any) -> None:
 # ------------------------------------------------------------------ the engine's events
 def on_stage(window: Any, data: dict[str, Any]) -> None:
     """``page_stage`` of normal reading: the screen's cell (a new one at its place), the cache's words looked at again
-    once a translation stage moved. None during a whole-book run: the backlog was dropped as it started, and what it
-    still tells then is of the screens dropped (a step that ends after the drop)."""
+    once a translation stage moved."""
     st = state(window)
-    if st is None or in_a_run(window):
+    if st is None:
         return
     model = st.model
     within = _within(window)
@@ -201,8 +194,8 @@ def look_now(window: Any) -> None:
 
 def on_backlog(window: Any, data: dict[str, Any]) -> None:
     """``backlog``: its totals (*dropped*: the screens that went by too fast, not caught or done since); *dropped*
-    True - the backlog was dropped (another book, another viewer window, a whole-book run): everything goes, and the
-    screens are numbered from 1 again."""
+    True - the backlog was dropped (another book, another viewer window): everything goes, and the screens are
+    numbered from 1 again."""
     st = state(window)
     if st is None:
         return
@@ -214,7 +207,7 @@ def on_backlog(window: Any, data: dict[str, Any]) -> None:
 def before(window: Any, kind: str, data: dict[str, Any]) -> Any:
     """What an event needs noted before the window handles it: the frame of the page job an error ends."""
     try:
-        if state(window) is not None and kind == "error" and not in_a_run(window):
+        if state(window) is not None and kind == "error":
             return getattr(window, "_job_frame", None)
     except Exception:  # noqa: BLE001 - never in the way of the event
         pass
@@ -257,12 +250,10 @@ Bubbles = list[tuple[tuple[int, int, int, int], str]]
 def shown_words(window: Any) -> tuple[Bubbles, tuple[int, int], tuple[str, ...]] | None:
     """The bubbles lettered on the page on show and their words ("" for one showing its Japanese), the picture's size
     and its fingerprints; None while no lettering of TASlation's is on show (the original, the translation under
-    the pointer only, a whole-book run's page, the viewer's frame as it is, a page translated again over its old
-    lettering)."""
+    the pointer only, the viewer's frame as it is, a page translated again over its old lettering)."""
     from . import hover
-    from .strip import run_page_on_show
 
-    if window.original_var.get() or run_page_on_show(window) is not None or hover.reverse_on(window):
+    if window.original_var.get() or hover.reverse_on(window):
         return None
     fill = getattr(window, "_fill", None)
     if fill is not None and window._fill_on_show():

@@ -45,7 +45,6 @@ from PIL import Image
 from ..regions import ERASED
 from .hover import reveal_wanted, reverse_on
 from .preview import Patch
-from .strip import run_page_on_show
 from .zoom import FILL_SHOWN, ZOOM_WATCH_MS, fill_on_show, hard_to_read, hover_delays
 
 REVEAL_HOLD_PX = 6  # canvas pixels round a bubble whose other side shows: the pointer there keeps it on show
@@ -186,7 +185,7 @@ class InPlaceMixin:
                     and r.x0 <= ix < r.x1 and r.y0 <= iy < r.y1]
             return Target(self.last_result, min(hits, key=lambda r: r.area), False) if hits else None
         fill = getattr(self, "_fill", None)
-        if fill is None or not reverse_on(self) or run_page_on_show(self) is not None or not fill_on_show(self):
+        if fill is None or not reverse_on(self) or not fill_on_show(self):
             return None
         hits = [i for i, (b, state) in enumerate(zip(fill.boxes, fill.states))
                 if state in FILL_SHOWN and b[0] <= ix < b[2] and b[1] <= iy < b[3]]
@@ -202,8 +201,8 @@ class InPlaceMixin:
             return False
         if target.filling:
             fill = getattr(self, "_fill", None)
-            return (fill is target.source and reverse_on(self) and run_page_on_show(self) is None
-                    and fill_on_show(self) and 0 <= target.key < len(fill.states)
+            return (fill is target.source and reverse_on(self) and fill_on_show(self)
+                    and 0 <= target.key < len(fill.states)
                     and fill.states[target.key] in FILL_SHOWN)
         result = self.last_result
         return (result is target.source and self._result_on_show()

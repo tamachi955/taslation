@@ -24,21 +24,19 @@ memory among it when it held some (`released_line`). The next line to translate 
 are not warmed after it.
 
 Refused with a plain line while the model is in use: a page or a request being translated (``busy``), one waiting for
-the models (``_queued``), a whole-book run (`constants.in_a_run`). Otherwise it is a job of the window's worker, after
+the models (``_queued``). Otherwise it is a job of the window's worker, after
 whatever is queued there, so it never meets a translation; the status line says what was released."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from .constants import in_a_run
-
 RELEASE_ENTRY = "Release the model now"  # the Tools menu's entry
 # (the 16 languages of the tip and the lines that name the OCR: `locales/features/ocr_release.py`)
 RELEASE_TIP = ("Give back the GPU memory of TASlation's models now, for another program: the translation model, the "
                "page models and the OCR readers that run on the GPU (they go on reading on the processor). The next "
                "translation loads the model again.")
-RELEASE_REFUSED = "Not now: a translation or a whole-book run is going on. Release the model once it has ended."
+RELEASE_REFUSED = "Not now: a translation is going on. Release the model once it has ended."
 RELEASING = "Releasing the model..."
 RELEASED_BOTH = "Released the translation model ({model}) and the page models. Each loads again when it is needed."
 RELEASED_MODEL = "Released the translation model ({model}). It loads again for the next translation."
@@ -57,8 +55,8 @@ RELEASED_OCR = ("Released the OCR's GPU memory; it reads on the processor until 
 
 def in_use(window: Any) -> bool:
     """Whether the translation model may be at work now: a job of the window's (a page or a request being translated),
-    a request that waits for the models, or a whole-book run."""
-    return bool(getattr(window, "busy", False) or getattr(window, "_queued", None) is not None or in_a_run(window))
+    or a request that waits for the models."""
+    return bool(getattr(window, "busy", False) or getattr(window, "_queued", None) is not None)
 
 
 def translators(window: Any) -> list[Any]:

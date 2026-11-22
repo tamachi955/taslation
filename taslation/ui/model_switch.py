@@ -7,11 +7,11 @@ keeping it the default. PLaMo's licence is agreed to first (`LicenceDialog`), an
 is and Cancel (`InstallDialog`). A no puts the language back when the one before still has its model, else the
 status line says that translating is off and why.
 
-All of it waits while the window is over the book or on the full screen, or while a whole-book run reads: a check that
-found the model missing then only says so in the status line, once, and asks when the window is back. One offer at a
-time, and one per language: the "To:" box and the setup check that follows it (`JobsMixin._follow_target`) find the
-same missing model, and only the first asks. A setting ``ollama_model`` naming a model of the person's own is theirs:
-nothing is offered then (`translator_install.plan`).
+All of it waits while the window is over the book or on the full screen: a check that found the model missing then only
+says so in the status line, once, and asks when the window is back. One offer at a time, and one per language: the "To:"
+box and the setup check that follows it (`JobsMixin._follow_target`) find the same missing model, and only the first
+asks. A setting ``ollama_model`` naming a model of the person's own is theirs: nothing is offered then
+(`translator_install.plan`).
 
 The setup banner's Download model (`download_model`) makes the same offer for the language in the "To:" box
 whenever it is pressed, after a no too."""
@@ -72,9 +72,8 @@ class ModelSwitchMixin:
         return health.installed_models(self.settings.ollama_url)
 
     def _away(self) -> bool:
-        """The window is not where a box nobody asked for may come up: over the book, on the full screen, in a run."""
-        return bool(getattr(self, "reading", False) or getattr(self, "_over_on", False)
-                    or getattr(self, "batch", None) is not None)
+        """The window is not where a box nobody asked for may come up: over the book, on the full screen."""
+        return bool(getattr(self, "reading", False) or getattr(self, "_over_on", False))
 
     def _translator_ready(self, language: str, before: str | None = None) -> bool:
         """The "To:" box was left with *language* (*before*: the language it had): whether its translator model is

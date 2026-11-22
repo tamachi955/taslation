@@ -26,16 +26,54 @@ from typing import Callable
 
 from PIL import ImageTk
 
-from .side_model import (BAR_GAP_X, BAR_H, BAR_ROW, BAR_W, CELL_H, FRAME, LETTER_W, MARKS_W, NOTCH_W, PAD,
-                         SideLayout, SideModel, bar_line, rail_marks, rail_y, run_tip, screen_tip, summary_lines)
-from .strip import (ANIM_MS, CHOSEN, DONE, EDGE, FAILED, SKIPPED, STRIPE_STEP, STRIPE_W, TEXT, THUMB_BOX, WORKING,
-                    CanvasTip, stage_letter)
+from .side_model import (BAR_GAP_X, BAR_H, BAR_ROW, BAR_W, CELL_H, FRAME, LETTER_W, MARKS_W, NOTCH_W, PAD, THUMB_BOX,
+                         SideLayout, SideModel, bar_line, rail_marks, rail_y, run_tip, screen_tip, stage_letter,
+                         summary_lines)
+from .tooltip import Tooltip
 
+ANIM_MS = 120  # the working stripes move this often (one timer for the whole indicator)
+STRIPE_W = 8
+STRIPE_STEP = 3  # pixels a stripe moves per tick
+# Colours on the indicator's dark ground, from the Okabe-Ito set (told apart with the common colour blindnesses), and
+# every state has its own pattern besides.
+EDGE = "#8a8a8a"  # a bar's outline
+TEXT = "#eeeeee"
+DONE = "#56b4e9"  # sky blue, filled
+WORKING = "#e69f00"  # orange, a moving stripe
+FAILED = "#d55e00"  # vermillion, filled and crossed
+SKIPPED = "#6e6e6e"  # grey, hatched
+CHOSEN = "#ffd400"  # the outline of the screen on show (as a chosen region's handles)
 UPDATED = "#cc79a7"  # reddish purple (Okabe-Ito): a screen whose words changed since it was seen; the page's brackets
 MISSED = EDGE  # a screen that went by too fast: grey, dashed and dotted (the purple is the updated mark's alone)
 DARK = "#000000"  # the edge round a diamond and a notch, seen on any thumbnail
 DIAMOND = 6  # half the updated diamond's width
 ROWS = ("read", "translate")
+
+
+class CanvasTip(Tooltip):
+    """A tooltip whose text depends on where the pointer is over the canvas (`text_at`); moving onto another part of
+    the indicator starts it again."""
+
+    def __init__(self, canvas: tk.Canvas, text_at: Callable[[int, int], str]):
+        self.text_at = text_at
+        self._at: str = ""
+        super().__init__(canvas, "")
+        canvas.bind("<Motion>", self._moved, add="+")
+
+    def current(self) -> str:
+        try:
+            x = self.widget.winfo_pointerx() - self.widget.winfo_rootx()
+            y = self.widget.winfo_pointery() - self.widget.winfo_rooty()
+        except tk.TclError:
+            return ""
+        return self.text_at(x, y)
+
+    def _moved(self, event: tk.Event) -> None:
+        text = self.text_at(event.x, event.y)
+        if text != self._at:
+            self._at = text
+            self._leave()
+            self._enter()
 
 
 def diamond(canvas: tk.Canvas, cx: float, cy: float, r: float, tags: tuple[str, ...], edge: str = DARK) -> None:

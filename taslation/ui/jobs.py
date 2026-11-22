@@ -1,11 +1,11 @@
 """The worker thread and its jobs (`_job_*`: every heavy step runs there; Tk only draws), the events they post and
-how the window takes them (`_handle_event`), and the requests - Translate (F5), a page Auto found, the batch -
-which wait while the models load or a job runs (`_queue`, `_run_queued`).
+how the window takes them (`_handle_event`), and the requests - Translate (F5), a page Auto found - which wait
+while the models load or a job runs (`_queue`, `_run_queued`).
 
 Around them:
 
-* Ollama started when it does not answer (`taslation.ollama_start`), at the start of the window, before a setup check
-  that decides on a whole-book scan, and when a request finds it gone (`_revive_ollama`). At the start a failure is said
+* Ollama started when it does not answer (`taslation.ollama_start`), at the start of the window and when a request
+  finds it gone (`_revive_ollama`). At the start a failure is said
   in a popup, once (the "ollama_failed" event); the window stays usable, and the banner says what stands. An Ollama
   the window started is stopped once the window has closed (`run_app`), unless another TASlation or another program
   still uses it;
@@ -15,33 +15,24 @@ Around them:
 * the setup checks: `health.check` at the start and, while a problem stands, every `HEALTH_RECHECK_MS` in a thread
   of their own (never on the Tk thread); the setup banner shows what they find and loses a line by itself once it is
   fixed (`_set_health`);
-* the start of a book (`_begin_book`, from Auto's first page of a book not in its cache): in whole-book mode the
-  setup is checked first (`batch.preflight`, in the worker) - with a problem nothing is scanned and the window goes
-  on page by page - then the start dialog asks for the book's name (when the window's title gives none) and whether
-  to read the whole book first; a whole-book scan checks the setup once more right before it reads the first page
-  (`_job_batch`). Whole-book mode here is the `scan_mode` setting (`gui --mode book`): the window has no choice of
-  it, and page by page is what Auto and F5 do; the batch's dialog starts a whole-book scan by hand;
+* the start of a book (`_begin_book`, from Auto's first page of a book whose Book box names no book): the start
+  dialog asks for the book's name;
 * the book's name: a Book box that names no book (`bookid.generic_book_name`: a viewer's name, a browser, nothing) never
-  reaches a store - `_ensure_cache` opens none for it, and F5, the batch's Start, Series sheet... and Book
-  settings... ask for the name first (`_ask_name`); the start dialog offers the books whose caches hold the
-  page on screen (`bookid.recognise`, looked for in the worker: `_recognise_then`; the dialog opens once they are
-  known), and the colophon of the book, found on a page with no text to
-  translate (`_look_for_colophon`) or by the whole-book scan (`BatchProgress.colophon`), offers its name once
+  reaches a store - `_ensure_cache` opens none for it, and F5, Series sheet... and Book settings... ask for the
+  name first (`_ask_name`); the start dialog offers the books whose caches hold the page on screen
+  (`bookid.recognise`, looked for in the worker: `_recognise_then`; the dialog opens once they are known), and the
+  colophon of the book, found on a page with no text to translate (`_look_for_colophon`), offers its name once
   (`_offer_colophon`; with files kept under the book's name, Use renames them: `_plan_rename`, where the book's
   series sheet says otherwise than the sheet of the new name's series the review asks first, `RenameReviewDialog`,
   then `_rename_book`) and leaves its details in the cache's header; a name given is the one spelling its Series and
   Volume make, or the older one a cache of the same book is kept under (`book_fields.kept_name`), and a book kept
   under an older spelling is offered once a session to be renamed to the one spelling, the same way
   (`book_fields.offer_standard_name`);
-* the scan band while a scan runs and after it (`ScanState`), with Stop: a whole-book run that holds more than
-  `FEW_PAGES` pages asks first, and Esc in a run always does (`_ask_stop`, `dialogs.stop`: Keep reading, Stop
-  without translating, Translate the pages read), and a stopped run's readings are translated from the band
-  (`translate_readings`);
 * a page translation that Stop and Esc cancel (`Pipeline.process(cancel=...)`; nothing of it is cached), that a new
   page Auto sees meanwhile cancels and replaces (`_watch_page`), and whose silent model turns the badge to say so
   (``on_slow``);
 * a book's stores whose file exists but cannot be opened now (locked, no permission, another book's): said in the
-  status line, and the page or the scan that needed them reads nothing (`_ensure_cache`)."""
+  status line, and the page that needed them reads nothing (`_ensure_cache`)."""
 
 from __future__ import annotations
 
@@ -59,11 +50,10 @@ import numpy as np
 from PIL import Image
 
 from .. import health, linememo, viewerparts
-from ..batch import BatchProgress, BatchReader, Readings, frames_differ, preflight, thumbnail
+from ..frames import frames_differ, thumbnail
 from ..bookid import generic_book_name, identity_of, recognise, same_book_name
-from ..bookname import entry_for
 from ..cache import CacheStore, language_key
-from ..capture import IS_WINDOWS, CaptureError, WindowInfo, is_black
+from ..capture import CaptureError, is_black
 from ..colophon import MAX_READS as COLOPHON_READS
 from ..colophon import Colophon, find_colophon
 from ..colophon import precheck as colophon_precheck
@@ -76,36 +66,21 @@ from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, in_step
                        reading_event, tick as backlog_tick, tracking_for)
 from ..pipeline import keeps_answered, turn_away
 from . import area, name_check, updates
-from .attention import tell_run_ended
-from .banner import ScanState, blocking, busy_title, group_digits
-from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, FULL_SCREEN_NO_RUN, QUEUE_RANK, READING_NOTE_MS, READY,
-                        VIEWER_BLACK, VIEWER_LOADING, VIEWER_RESTORED, in_a_run)
+from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, QUEUE_RANK, READING_NOTE_MS, READY, VIEWER_BLACK,
+                        VIEWER_LOADING)
 from .dialogs import caches as boxes
-from .dialogs.batch import BatchDialog
 from .dialogs.rename_review import RenameReviewDialog
 from .dialogs.review import review_rows
 from .book_fields import kept_name, offer_standard_name
 from .dialogs.start import ColophonOffer, StandardNameOffer, StartDialog
-from .dialogs.stop import ask_stop
 from .trouble import DOWN_CODES, cpu_page_seconds, ollama_compute
 from .progress import LOADING, SLOW, Filling, asks_model, code_of, progress_line, reads_page, rendered
-from .strip import end_follow, hide_strip, new_run
-from .viewers import show_minimised
 
 LOG = logging.getLogger(__name__)
 
 HEALTH_RECHECK_MS = 10_000  # while a setup problem stands, it is looked at again this often
 # what a request without an answer says (`OllamaTranslator`'s rule), in the status line (`JobsMixin._model_status`)
 NO_ANSWER_CODES = frozenset({"ollama.no_answer", "ollama.restarting", "ollama.not_answering"})
-# A whole-book run that holds more pages read than this asks before Stop ends it (`JobsMixin.stop_batch`): a few
-# pages are turned again in a minute, more may be an hour of reading. Esc never ends a run without asking.
-FEW_PAGES = 3
-# ui.json: lines a second of the last whole-book translation per model, where the next run's estimate starts
-PACE_TABLE = "pace"
-PACE_KEPT = 8
-# ui.json: the start dialog's answer per book ("start": read it whole; "page": page by page), the latest kept
-BOOK_STARTS = "book_starts"
-BOOK_STARTS_KEPT = 200
 # ui.json: how many saved files this Windows user cannot open here the window last said in a box ("not_here"), so
 # that the box comes again only when that number changes (`JobsMixin._tell_not_here`)
 SAVED_FILES = "saved_files"
@@ -159,7 +134,7 @@ def keep_page_names(window: Any, result: Any, book: str, model: str, language: s
     kept for the session's name check (`name_variants.PageLines`, *window*'s ``_page_lines``: in memory only, never
     written, at most `PAGE_LINES_MAX`, for one book, model and language at a time), their texts as the cache holds them
     now; when the page brought a line new or changed, the names all of them render in more than one way go to the
-    window (``page_names``, with the lines without their Japanese, as a run's), which offers a name once
+    window (``page_names``, with the lines without their Japanese), which offers a name once
     (`name_check.keep_page_found`). Nothing is said or logged; a failure here leaves the page as it is."""
     pipeline = getattr(window, "pipeline", None)
     if pipeline is None or getattr(pipeline, "cache", None) is None:
@@ -323,8 +298,8 @@ class JobsMixin:
     `App.__init__` and `_init_flow_state`; the other parts are reached through ``self``)."""
 
     def _init_flow_state(self) -> None:
-        """The state of the setup checks, a book's start, the scan band and a page translation that can be cancelled
-        (made by `App.__init__`, and by a test's stand-in)."""
+        """The state of the setup checks, a book's start, the band and a page translation that can be cancelled (made
+        by `App.__init__`, and by a test's stand-in)."""
         self._ollama: OllamaStarter | None = None  # starts Ollama when it does not answer (made by `_job_init`)
         self._before_loading: Any = None  # what the page was doing when Ollama's model began to load
         self._partial_said = False  # the popup about a model partly on the CPU was shown (once a session)
@@ -335,22 +310,15 @@ class JobsMixin:
         self._health: list[Any] = []  # the setup's problems and notices on show (health.check's Messages)
         self._health_after: str | None = None  # the next look at them while one stands
         self._health_checking = False  # a check runs (in a thread of its own)
-        self._scan_held = False  # a whole-book scan waits for the setup (the banner says so after the problems)
         self._ocr_loading = False  # the OCR model, missing at the start and there now, is loaded
         self._ocr_failed = False  # the OCR model is there and could not be loaded: not tried again by itself
-        self._checks: dict[int, Callable[[list[Any]], None]] = {}  # pre-flight checks under way -> what follows
-        self._check_ids = itertools.count(1)
+        self._check_ids = itertools.count(1)  # the books being recognised, by their tokens
         # books being recognised in the worker (`_recognise_then`) -> what was asked and what follows
         self._recognising: dict[int, tuple[Recognition, Callable[[list[str], str], None]]] = {}
         self._start_pending: tuple[Image.Image, np.ndarray | None] | None = None  # a book's start is under way
         self._start_dialog: Any = None  # the start dialog on show (a book's start, or a name asked for: `_ask_name`)
         self._start_first: Image.Image | None = None  # the frame a book's start began with (the later one waits)
-        self._start_whole: bool | None = None  # a book's start that waits for the name being asked for (whole-book?)
-        self._scanned_book = ""  # the book _book_scanned was decided for
-        self._batch_for: tuple[str, str, str] = ("", "", "")  # the book, model and language the batch reads
-        # (book, model, language) a whole-book run finished reading in this session: it read every region of its
-        # pages, so translator mode has nothing left to complete on one the cache holds whole (`_all_cached`)
-        self._run_read: tuple[str, str, str] = ("", "", "")
+        self._start_waits = False  # a book's start waits for the name being asked for
         self._colophon_found: tuple[str, str, str, Colophon] | None = None  # (book, model, language, colophon) to offer
         self._colophon_asked: set[str] = set()  # books whose colophon's name was offered (or said) this session
         self._standard_asked: set[str] = set()  # books under an older spelling offered the one spelling this session
@@ -366,16 +334,10 @@ class JobsMixin:
         self._job_area: np.ndarray | None = None  # the capture area's thumbnail of the frame being translated
         self._slow_before: Any = None  # the stage before the model was found slow
         self._busy_signs = False  # the title and the bar say busy (only after BUSY_SIGNS_S)
-        self._scan: ScanState | None = None  # the whole-book scan that runs
-        # what a whole-book run read and did not store, per (book, model, language): in memory only, for the next run
-        self._readings: tuple[tuple[str, str, str], Readings] | None = None
-        self._band: dict[str, Any] | None = None  # what the scan band shows (None: nothing)
-        self._auto_before_batch: bool | None = None  # Auto before the batch turned it off
-        self._batch_stop_asked = False  # Stop pressed before the batch's reader was made
-        self._stop_asking = False  # the question before Stop is on show (`_ask_stop`)
+        self._band: dict[str, Any] | None = None  # what the band shows (None: nothing)
         # the lines of the pages read one by one, for the name check (the worker's; in memory only: `keep_page_names`)
         self._page_lines = PageLines()
-        # (book, language, name) offered as rendered in more than one way this session, by a run or by the pages
+        # (book, language, name) offered as rendered in more than one way this session, by the pages read
         self._names_offered: set[tuple[str, str, str]] = set()
 
     # ------------------------------------------------------------------ worker
@@ -449,11 +411,6 @@ class JobsMixin:
             self._check_in_background()
 
         threading.Thread(target=run, name="taslation-start-ollama", daemon=True).start()
-
-    def _ollama_back(self) -> None:
-        """Before a setup check that decides on a whole-book scan: Ollama, gone since the start, is started first."""
-        if self._ollama is not None:
-            self._ollama.start()
 
     def _job_init(self) -> None:
         """The start: the OCR model loads in a thread of its own (`load_readers`) while, in this order, Ollama is
@@ -748,9 +705,9 @@ class JobsMixin:
         current = self.pipeline.cache
         if current is not None and current.book != book:
             drop_backlog(self, "another book")
-        release = getattr(self.pipeline, "release_page_images", None)
-        if current is not None and current.book != book and getattr(self, "batch", None) is None and release:
-            release()  # another book: the last run's page pictures go
+            forget = getattr(self.pipeline, "forget_shown", None)
+            if forget is not None:
+                forget()  # another book: this session's lettered pages and erases of the last one go
         if current is None or current.book != book or changed_language or current.language != language:
             try:
                 cache = self.store.open(book, model, language)
@@ -913,89 +870,14 @@ class JobsMixin:
         if self.pipeline is not None and self.pipeline.cache is not None and self.pipeline.cache.book == book:
             self.pipeline.set_cache(None)
 
-    def _left_readings(self, book: str, model: str, language: str) -> Readings | None:
-        """What an earlier run of this book, with this model and language, read and did not store."""
-        held = getattr(self, "_readings", None)
-        return held[1] if held is not None and held[0] == (book, model, language) else None
-
-    def _job_batch(self, hwnd: int, book: str, model: str, language: str, max_pages: int, context_mode: bool,
-                   title: str = "", own_windows: tuple[int, ...] = (), at_once: bool = False,
-                   page_area: Any = None) -> None:
-        """A whole-book scan - after the setup is checked once more, right before the first page is read:
-        with a problem it does not start (the banner says what is missing). Never for a name that names no book:
-        nothing of it could be kept (the batch's Start asks for the name first). Whatever goes wrong before the
-        reader runs ends in "batch_refused", said in the status line: the window never stays busy for a run that is
-        not there. *at_once*: the pages an earlier run read are translated now (`translate_readings`): the run takes
-        the page on show and goes on to the translation (`BatchReader.finish` with *partial*). *page_area*: the capture
-        area the run starts from and widens with the pages it takes (`_run_area`, taken on the Tk thread as it
-        starts); the panels it finds come back as ``page_area`` events (`_run_found`). The translation model stays
-        loaded at the run's end, however it ends, when Auto goes back on (`_reads_on_after_run`): the page the reader
-        turns to next does not wait for its load, and it goes after ``ollama_keep_alive`` as after a page read alone;
-        with Auto staying off it is released at once, as a run from the command line releases it."""
-        try:
-            if generic_book_name(book):
-                self._post("status", key="Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
-                self._post("batch_refused", problems=[])
-                return
-            self._ollama_back()
-            problems = preflight(self.settings)
-            self._post("health", problems=problems)
-            if blocking(problems):
-                self._post("batch_refused", problems=problems)
-                return
-            self._use_model(model, language)
-            if not self._ensure_cache(book, model, language):  # the status line says which file could not be opened
-                self._post("batch_refused", problems=[])
-                return
-            settings = self.settings.with_overrides(context_mode=context_mode)
-
-            def progress(p: BatchProgress, result: Any) -> None:  # what the batch says, as it was when it said it
-                self._post("batch", progress=p, result=result, message=p.message, phase=p.phase, pages=p.pages,
-                           translated=p.translated, found=p.found, checked=p.checked, waiting=p.waiting,
-                           queued=p.queued, answering=p.answering, page_seconds=p.page_seconds)
-
-            reader = BatchReader(self.pipeline, hwnd, settings, on_progress=progress, max_pages=max_pages,
-                                 context_mode=context_mode,
-                                 book=book, series=sheet_key(self.glossary_store, book) if book else "", title=title,
-                                 query=self.window_query, own_windows=own_windows, preflight=problems,
-                                 show=lambda kind, data: self._post(kind, **data),
-                                 readings=self._left_readings(book, model, language), keep_readings=True,
-                                 page_area=page_area, release_at_end=False)
-        except Exception as e:  # noqa: BLE001 - said in the status line; nothing was scanned
-            self._post("status", key="Could not start the batch: {error}", values={"error": f"{type(e).__name__}: {e}"})
-            self._post("batch_refused", problems=[])
-            return
-        self.batch = reader
-        if self._batch_stop_asked:  # Stop came while the setup was checked
-            reader.stop()
-        elif at_once:
-            reader.finish(partial=True)
-        try:
-            reader.run()
-        finally:
-            self.batch = None
-            release = getattr(self.pipeline, "release_translator", None)  # (a stand-in pipeline may have none)
-            if release is not None and not self._reads_on_after_run():
-                release()  # nothing reads on: the GPU memory back at once
-            self._readings = ((book, model, language), reader.left) if reader.left is not None else None
-            self._post("batch_done", progress=reader.progress)
-
-    def _reads_on_after_run(self) -> bool:
-        """(the worker, as the run ends) Whether Auto goes back on once the window has the run's end (`_batch_done`:
-        it was on before the run, or the run is a book's start in whole-book mode), so that the reader reads on from
-        the viewer and the next page untranslated needs the model. Both are set on the Tk thread before the run's job
-        is queued, and `_batch_done` changes them only after this job has posted its end."""
-        return bool(getattr(self, "_resume_auto", False) or getattr(self, "_auto_before_batch", None))
-
     def _warm_when_idle(self) -> None:
         """(the Tk thread, the worker's job done) While nothing of the window's runs - no page job, no job or request
-        waiting, no whole-book run - the beginning of the next page's first request is computed while the reader
+        waiting - the beginning of the next page's first request is computed while the reader
         reads (`Pipeline.warm_soon`, when the server does not hold it: after the pairs were cut back, a load, a
         request with a context of its own). The next page stops it (`_start_translate`, `Pipeline.process`, and the
         worker before any job: `next_job`), and never waits for it."""
         pipeline = self.pipeline
-        if (pipeline is None or not self.ready or self.busy or self.batch is not None
-                or getattr(self, "_batching", False) or getattr(self, "_queued", None) is not None
+        if (pipeline is None or not self.ready or self.busy or getattr(self, "_queued", None) is not None
                 or not self._jobs.empty()):
             return
         if holds_warming(self):
@@ -1063,8 +945,7 @@ class JobsMixin:
         elif kind == "progress":  # the pipeline at work: the busy badge shows once it reads or translates the page
             self._progress = progress = data["text"]
             self._slow_before = None
-            reading = getattr(self._scan, "phase", "") == "read"
-            self._job_line(lambda: progress_line(progress, reading))
+            self._job_line(lambda: progress_line(progress))
             if self._fill is not None and asks_model(progress):
                 self._fill.mark = self._fill.filled  # the badge counts this request's bubbles
             self._busy_shown = self._busy_shown or reads_page(self._progress)
@@ -1073,11 +954,11 @@ class JobsMixin:
         elif kind == "model_status":  # Ollama's model is being loaded
             self._model_status(data["message"], bool(data.get("behind", False)))
         elif kind == "slow":  # the model has said nothing for a while: the badge says so, and that Stop cancels
-            if self._page_cancel is None or self.batch is not None:
+            if self._page_cancel is None:
                 return
             if code_of(self._progress) != SLOW:
                 self._slow_before = self._progress
-            self._progress = slow = Message(SLOW, seconds=round(float(data.get("seconds", 0))))
+            self._progress = slow = Message("ollama.slow", seconds=round(float(data.get("seconds", 0))))  # = SLOW
             self._job_line(lambda: progress_line(slow))
             self._busy_shown = True
             self.canvas.set_busy(self._busy_text)
@@ -1114,11 +995,6 @@ class JobsMixin:
             if data.get("checked"):
                 self._health_checking = False
             self._set_health(data.get("problems"), data.get("models"))
-        elif kind == "preflight":  # the check before a whole-book scan: the banner, then what waited for it
-            then = self._checks.pop(data.get("token"), None)
-            self._set_health(data["problems"])
-            if then is not None:
-                then(list(data["problems"]))
         elif kind == "recognised":  # the books whose caches hold the page on screen: the dialog that waited for them
             waiting = self._recognising.pop(data.get("token"), None)
             if waiting is not None:
@@ -1237,43 +1113,9 @@ class JobsMixin:
                 self._offer_colophon()
             offer_standard_name(self)  # a book kept under an older spelling of its name (`book_fields`)
             self._run_queued()
-        elif kind == "batch_page":
-            self._batch_page(data["image"])
-        elif kind == "viewer_frame":  # a frame of the viewer as a whole-book run's reading saw it come
-            self._run_frame(data["image"])
-        elif kind == "page_area":  # the page panels a run found in the pages it took: into the window's record
-            self._run_found(data)
-        elif kind == "batch":
-            p: BatchProgress = data["progress"]
-            if data.get("result") is not None:  # a page of the run is done: the finished page takes over
-                self._hide_busy()
-                self._fill, self._job_frame = None, None
-                self.last_result = data["result"]
-                self._live, self._live_thumb = self.last_result.original, None  # the batch's capture is the latest frame
-                self._redisplay()
-                self._show_notes()
-            message = data.get("message", p.message)
-            if code_of(message) in ("batch.read_page", "batch.page_cached"):  # read: the badge goes until the next page
-                self._hide_busy()
-            if isinstance(message, Message):
-                self.say(message)
-            elif message:
-                self.status(str(message))
-            if self._scan is not None:
-                self._scan.update(message, data.get("phase", p.phase), data.get("pages", p.pages),
-                                  data.get("translated", p.translated), data.get("found", p.found), time.monotonic(),
-                                  data.get("checked", getattr(p, "checked", 0)), data.get("waiting"),
-                                  data.get("queued", 0), answering=data.get("answering", 0),
-                                  page_seconds=data.get("page_seconds", 0.0))
-                self._band = {"kind": "scan", "scan": self._scan}
-                self._show_band()
-                if self.busy and getattr(self, "_busy_signs", False):  # the run's next pass: the title says so
-                    self.title(busy_title(self._scan))
-        elif kind == "batch_done":
-            self._batch_done(data["progress"])
         elif kind == "compute":  # where Ollama translates, from its log: the processor gets a line on the banner
             if data.get("where") == "cpu":
-                self._on_cpu = cpu_page_seconds(self._pace(self.model_var.get().strip()))
+                self._on_cpu = cpu_page_seconds()
                 self._show_banner()
         elif kind == "translator_restarted":  # Start translator again: Ollama answers, or what stands in the way
             self._restarting = False
@@ -1282,48 +1124,10 @@ class JobsMixin:
                 self.say("The translation program is running again.")
             else:
                 self.say(failed)
-        elif kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading")):
-            reading_event(self, kind, data)  # (normal reading's screens: never the run's page strip, `backlog`)
-        elif kind == "page_stage":  # a page of the run, how far each of its stages is: the page strip
-            self._on_page_stage(data)
-            waits = getattr(self, "_beside_stage", None)  # (the viewer's page beside the run, waiting for it)
-            if waits is not None:
-                waits(data)
-        elif kind == "translation_page":  # the page the run translates, lettered so far: the page area follows it ...
-            held = getattr(self, "_beside_translation_page", None)  # ... until the reader reads beside the run
-            if held is None or not held(data):
-                self._on_translation_page(data)
-                if self._busy_shown:  # (the badge with it, on the very page the viewer shows beside the run)
-                    self._show_badge()
-        elif kind == "beside_page":  # the run's answer for the page the viewer shows while it translates
-            shown = getattr(self, "_beside_shown", None)
-            if shown is not None:
-                shown(data)
-        elif kind == "batch_memory":  # what the run's page pictures take: the line beside the strip
-            self._on_batch_memory(data)
-        elif kind == "page_missed":  # a page went by before the run could take it: its place on the strip in view
-            self._on_page_missed(data)
+        elif kind in ("page_on_show", "backlog", "page_stage"):
+            reading_event(self, kind, data)  # (normal reading's screens: `backlog`)
         elif kind == "start_role":  # the book in the Book box is counted: the role it opens in
             self._start_role_known(data)
-        elif kind == "batch_refused":  # nothing was scanned: the setup is not complete, or a file cannot be opened
-            problems = data.get("problems") or []
-            self._batching = False
-            self.busy = False
-            self._set_busy(False)
-            self._scan = None
-            if self._auto_before_batch is not None:
-                self.auto_var.set(self._auto_before_batch)
-                self._auto_before_batch = None
-            if self._resume_auto:  # the whole-book start: asked again once the setup is complete
-                self._resume_auto = False
-                if problems:
-                    self._book_scanned = False
-            self._band = None
-            self._show_band()
-            if problems:  # (a file that cannot be opened: the status line has said so)
-                self._hold_scan()
-            self._sync_stop()
-            self._run_queued()
         elif kind == "idle":
             self._sync_guard()
             if not self.ready and self._queued is not None:  # the start ended without the models: nothing can run
@@ -1331,76 +1135,6 @@ class JobsMixin:
                 self._hide_busy()
                 self._show_progress(self.busy)
             self._warm_when_idle()
-
-    def _batch_page(self, frame: Image.Image) -> None:
-        """The run has come to the page *frame*: on the page area at once, in place of the page before; it fills in
-        from here as any page does (`_on_page_event`), and the batch's message with the result ends it."""
-        self._hide_busy()
-        if getattr(self, "_ordering", None) is not None:
-            self._end_order()
-        self._fill = self.last_result = self._chosen_region = self._grip_box = None
-        self._job_frame = frame
-        self._live, self._live_thumb = frame, None
-        self._busy_since = time.monotonic()
-        self._redisplay()
-        self._show_notes()  # the page before's go with it
-
-    def _batch_done(self, p: BatchProgress) -> None:
-        """The scan has ended: its summary in the band (in the window's language), and Auto back on when it was on
-        before the run, whoever started it (said in a line of its own). A run that finished with the book translated
-        leaves translator mode for reader mode, unless the reader chose the role for the book (`_reader_after_run`:
-        said in a line of its own too). A reader who is elsewhere is told (`attention.tell_run_ended`: the taskbar
-        button flashes, and the sound plays when chosen), unless they stopped the run themselves. The names the run
-        rendered in more than one way are kept for the session and offered on the band (`name_check.keep_found`)."""
-        self._batching = False
-        self.busy = False
-        self._set_busy(False)
-        self._apply_found_margins()
-        self._job_frame = None
-        self._hide_busy()
-        end_beside = getattr(self, "_end_beside", None)  # (the viewer's pages read beside the run: as without a run)
-        if end_beside is not None:
-            end_beside()
-        # the page the run translated leaves the page area at once (reading is on the viewer: `strip`), however the run
-        # ended: the live view takes over
-        followed = end_follow(self, redisplay=False)
-        if self._fill is not None or followed:  # stopped on a page: its frame stays, as the viewer shows it
-            self._fill = None
-            self._redisplay()
-        self._keep_pace(self._scan)
-        self._scan = None
-        resumed = self._resume_auto or bool(self._auto_before_batch)
-        if resumed:
-            self._resume_auto = False
-            self.auto_var.set(True)
-            self._auto_last = None
-        self._auto_before_batch = None
-        summary = p.summary or p.reason or Message("batch.scan_ended")
-        self._band = {"kind": "summary", "summary": summary, "resumed": resumed}
-        if getattr(p, "names", None):  # the names the run rendered in more than one way: offered on the band
-            book_for = getattr(self, "_batch_for", None) or ("", "", "")
-            language = book_for[2] or self.lang_var.get().strip() or "English"
-            self._band["names"] = name_check.keep_found(self, p, book_for[0], language)
-        self._show_band()
-        if isinstance(summary, Message):
-            self.say(summary)
-        else:
-            self.status(str(summary))
-        self._sync_stop()
-        tell_run_ended(self, summary)
-        if getattr(summary, "code", "") == "batch.finished":  # the page on show is translated now: it shows so
-            self.after_idle(self.translate_now)
-        found = getattr(p, "colophon", None)
-        if found is not None and self._batch_for[0]:  # the scan read the book's colophon: its name is offered
-            self._colophon_found = (*self._batch_for, found)
-            self._offer_colophon()
-        if getattr(summary, "code", "") == "batch.finished":
-            self._run_read = self._batch_for
-        if getattr(summary, "code", "") == "batch.finished" and self._reader_after_run(self._batch_for[0],
-                                                                                        self._batch_for[2]):
-            self._band["reader"] = True  # the band says it too: the status line soon says other things
-            self._show_band()
-        self._run_queued()
 
     def _on_page_event(self, kind: str, data: dict[str, Any]) -> None:
         """The page filling in while it is translated (`pipeline.PageFill`): the regions found are outlined on the
@@ -1418,7 +1152,7 @@ class JobsMixin:
             base = result.image if result is not None and frame is result.original else frame
             self._fill = Filling(frame, base, [tuple(b) for b in data["boxes"]])
             self._busy_shown = True
-            self._show_badge()  # (not on another page the viewer shows meanwhile: `_badge_due`)
+            self._show_badge()
         elif fill is None:
             return
         elif kind == "read":
@@ -1495,8 +1229,6 @@ class JobsMixin:
         `HEALTH_RECHECK_MS`."""
         if problems is not None:
             self._health = list(problems)
-            if not blocking(self._health):
-                self._scan_held = False
             self._show_banner()
             seen = getattr(self, "_model_missing_seen", None)
             if seen is not None:  # the translator model the language needs: offered (ui.model_switch)
@@ -1535,87 +1267,36 @@ class JobsMixin:
         self._ocr_loading = True
         self._jobs.put(self._job_load_ocr)
 
-    def _preflight(self, then: Callable[[list[Any]], None]) -> None:
-        """`batch.preflight` in the worker (never on the Tk thread); *then* gets its Messages on the Tk thread."""
-        token = next(self._check_ids)
-        self._checks[token] = then
-        settings = self.settings
-
-        def job() -> None:
-            try:
-                self._ollama_back()
-                problems = preflight(settings)
-            except Exception:  # noqa: BLE001 - the batch checks again before it starts
-                problems = []
-            self._post("preflight", token=token, problems=problems)
-
-        self._jobs.put(job)
-
     # ------------------------------------------------------------------ the start of a book
     def _name_needed(self) -> bool:
         """Whether the Book box holds a name that names no book (`bookid.generic_book_name`: a viewer's name, a browser,
         nothing), as the window's title gives it or as typed: nothing is kept under such a name, so it is asked for."""
         return generic_book_name(self.book_var.get())
 
-    def _begin_book(self, image: Image.Image, thumb: np.ndarray | None, whole: bool) -> None:
-        """Auto's first page of a book not in its cache: in whole-book mode the setup is checked first, then the
-        reader is asked (`_ask_book`); in page-by-page mode only the book's name is asked for. Meanwhile the latest
-        page Auto finds waits (`_start_pending`), and so does the start while the name is being asked for already
-        (`_ask_name`: it goes on once the name is given)."""
+    def _begin_book(self, image: Image.Image, thumb: np.ndarray | None) -> None:
+        """Auto's first page of a book whose Book box names no book: the book's name is asked for (`_ask_book`).
+        Meanwhile the latest page Auto finds waits (`_start_pending`), and so does the start while the name is being
+        asked for already (`_ask_name`: it goes on once the name is given)."""
         self._start_pending = (image, thumb)
         self._start_first = image
         if self._start_dialog is not None:
-            self._start_whole = whole
+            self._start_waits = True
             return
-        if whole:
-            self._preflight(self._after_preflight)
-        else:
-            self._ask_book(whole=False)
+        self._ask_book()
 
-    def _after_preflight(self, problems: list[Any]) -> None:
-        pending = self._start_pending
-        if pending is None:
-            return
-        if blocking(problems):  # nothing is scanned: the banner says what is missing, the page is read as it is
-            self._start_pending = None
-            self._hold_scan()
-            self._translate_pending(pending)
-            return
-        self._ask_book(whole=True)
-
-    def _hold_scan(self) -> None:
-        """A whole-book scan waits for the setup: said in the status line and, until the setup is complete, after the
-        problems in the banner (the status line soon says other things)."""
-        self._scan_held = True
-        self._show_banner()
-        self.say("The whole book is not read yet: first fix what the lines above the page say. Until then TASlation translates page by page.")
-
-    def _ask_book(self, whole: bool) -> None:
-        """The start dialog: the book's name when the title gives none (offering the books recognised by the page:
-        `_recognise_then`), and in whole-book mode whether to read the whole book first. The answer is kept per book
-        (`BOOK_STARTS`): a book the reader chose to read page by page is not asked about again (the status line says
-        how to read it whole), one they chose to read whole is asked about with Start as Enter's answer - a run
-        never starts without the reader's go. Enter answers page by page otherwise."""
+    def _ask_book(self) -> None:
+        """The start dialog: the book's name, while the Book box names none (offering the books recognised by the
+        page: `_recognise_then`); a book with a name goes on at once."""
         if self._start_dialog is not None:  # the name is being asked for (Series sheet..., F5): the start waits
-            self._start_whole = whole
+            self._start_waits = True
             return
-        generic = self._name_needed()
-        if not whole and not generic:
-            self._book_answer("page", self.book_var.get().strip())
-            return
-        kept = self._book_start(self.book_var.get().strip()) if whole and not generic else ""
-        if kept == "page":
-            self._book_answer("page", self.book_var.get().strip())
-            self.say("This book is translated page by page, as you chose before. To read it whole, press Read whole book...")
+        if not self._name_needed():
+            self._book_answer("ok", self.book_var.get().strip())
             return
 
         def answer(choice: str | None, name: str) -> None:
-            self._book_answer("page" if choice == "ok" else choice, name, generic, asked=whole)
+            self._book_answer(choice, name, True)
 
-        if not generic:
-            self._start_dialog = StartDialog(self, self.book_var.get().strip(), False, whole, answer,
-                                             default=kept or "page")
-            return
         pending = self._start_pending
         waiting = self._start_dialog = Recognising()
 
@@ -1623,9 +1304,8 @@ class JobsMixin:
             if self._start_dialog is not waiting:  # the window was rebuilt meanwhile: the next page asks again
                 return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
-            self._start_dialog = StartDialog(self, name, still, whole, answer, matches=matches if still else (),
-                                             hint=hint if still else "",
-                                             default=(self._book_start(name) if whole else "") or "page")
+            self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),
+                                             hint=hint if still else "")
 
         self._recognise_then(show, pending[0] if pending else None, self._start_first)
 
@@ -1714,7 +1394,7 @@ class JobsMixin:
             self._start_dialog = None
             name = kept_name(self, name)  # the one spelling, or an older one the book's files are kept under
             if choice is None or (generic_book_name(name) and not viewerparts.held(name)):
-                self._start_pending, self._start_whole = None, None  # the start that waited asks at the next page
+                self._start_pending, self._start_waits = None, False  # the start that waited asks at the next page
                 self.say("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
                 return
             before = self.book_var.get().strip()
@@ -1732,39 +1412,33 @@ class JobsMixin:
             if self._start_dialog is not waiting:  # the window was rebuilt meanwhile: nothing follows
                 return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
-            self._start_dialog = StartDialog(self, name, still, False, answer, matches=matches if still else (),
+            self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),
                                              hint=hint if still else "")
 
         self._recognise_then(show, *frames)
 
     def _resume_start(self) -> None:
         """A book's start that waited for the name being asked for goes on with the page Auto found meanwhile."""
-        pending, whole = self._start_pending, self._start_whole
-        self._start_whole = None
-        if pending is None or whole is None:
+        pending, waits = self._start_pending, self._start_waits
+        self._start_waits = False
+        if pending is None or not waits:
             return
         self._start_pending = None
-        self._begin_book(pending[0], pending[1], whole)
+        self._begin_book(pending[0], pending[1])
 
-    def _book_answer(self, answer: str | None, name: str, generic: bool = False, asked: bool = False) -> None:
-        """The start dialog's answer: the name goes into the Book box (the cache uses it), "start" reads the whole
-        book first, "page" translates the page as it is - kept for the book when the dialog asked (*asked*:
-        `BOOK_STARTS`); None (closed: "not now") is page by page for this book until TASlation closes, nothing kept,
-        and the page is translated; closed while the book has no name yet, nothing is read and the next page asks
-        again (nothing can be kept under no name). A name asked for because the title named none (*generic*) is the
+    def _book_answer(self, answer: str | None, name: str, generic: bool = False) -> None:
+        """The start dialog's answer: the name goes into the Book box (the cache uses it) and the page that waited is
+        translated; closed (None) while the book has no name yet, nothing is read and the next page asks again
+        (nothing can be kept under no name). A name asked for because the title named none (*generic*) is the
         viewer's last name from then on (`_remember_viewer_name`)."""
         self._start_dialog = None
         pending, self._start_pending = self._start_pending, None
         if answer is None:
-            book = self.book_var.get().strip()
             if generic or self._name_needed():
                 self.say("Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.")
                 return
             if pending is not None:
                 self._translate_pending(pending)
-            if self.scan_mode() == "book":
-                self._book_scanned, self._scanned_book = True, book
-                self.say("Not now: this book is translated page by page until you close TASlation. To read it whole, press Read whole book...")
             return
         # the one spelling, or an older one the book's files are kept under (`book_fields.kept_name`)
         name = kept_name(self, " ".join(str(name).split()) or self.book_var.get().strip())
@@ -1776,31 +1450,13 @@ class JobsMixin:
             self._carry_colophon(before, name)
         if generic:
             self._remember_viewer_name(name)
-        whole = self.scan_mode() == "book"
-        if whole:
-            self._book_scanned, self._scanned_book = True, name
-        if asked and whole and answer in ("start", "page"):
-            self._keep_book_start(name, answer)
-        if pending is None:
-            return
-        image, _thumb = pending
-        win = self.selected
-        if (answer == "start" and whole and win is not None and not self.reading and self.batch is None
-                and self._page_uncached(image)):
-            self.say("Whole-book mode: this page is not translated yet. Turn the pages at your own pace: TASlation reads each page you turn, and translates the book when you press Finished reading. Stop ends the run.")
-            self._resume_auto = True
-            options = (win, 0, self.settings.context_mode)
-            if self.ready and not self.busy:
-                self._start_batch(*options)
-            else:
-                self._queue("batch", *options)
-            return
-        self._translate_pending(pending)
+        if pending is not None:
+            self._translate_pending(pending)
 
     def _translate_pending(self, pending: tuple[Image.Image, np.ndarray | None]) -> None:
         """The page that waited for a book's start, translated now (or once the job that runs is done)."""
         image, thumb = pending
-        if self.ready and not self.busy and self.batch is None:
+        if self.ready and not self.busy:
             self._start_translate(image, thumb=thumb)
         else:
             self._auto_last = None  # Auto takes the page again once it can
@@ -1816,14 +1472,14 @@ class JobsMixin:
         annotations, series sheet and notes to the new name (`_plan_rename`: where the new name's series has a sheet
         that says otherwise, after the review; `_rename_book`). Keep leaves the name. The colophon's
         details go into the header of the cache of the name the book ends up with (`_keep_details`, or the rename
-        itself), which keeps the offer from being made again in a later session. It waits while the full screen, a
-        dialog of the start or a batch is on."""
+        itself), which keeps the offer from being made again in a later session. It waits while the full screen or a
+        dialog of the start is on."""
         from .banner import break_lines
         from .dialogs.start import WRAP
         from .layout import place_window
 
         found = self._colophon_found
-        if found is None or self.reading or self._start_dialog is not None or self._batching or self.batch is not None:
+        if found is None or self.reading or self._start_dialog is not None:
             return
         self._colophon_found = None
         book, model, language, col = found
@@ -1993,8 +1649,6 @@ class JobsMixin:
                 self._book_named(new)  # the title's name renamed to the colophon's: what that says of the title
                 self.book_var.set(new)
                 self._book_edited = True
-            if self._scanned_book == old:
-                self._scanned_book = new
             self._colophon_asked.add(new)
             self._remember_viewer_name(new)
             counts = {"book": new, "caches": result.caches, "marks": result.annotations, "sheets": result.sheets}
@@ -2028,7 +1682,7 @@ class JobsMixin:
 
     def _kept_under(self, book: str) -> bool:
         """Whether anything is kept under *book* already: a cache with pages (in any language) or the reader's
-        annotations (a whole-book scan keeps the sequence of the pages there)."""
+        annotations."""
         try:
             if any(entry.book == book and entry.pages for entry in self.store.identities()):
                 return True
@@ -2059,19 +1713,18 @@ class JobsMixin:
 
     # ------------------------------------------------------------------ Stop and Esc
     def _set_stop(self, enabled: bool) -> None:
-        """Stop (the toolbar's) works while a batch runs or a page is translated."""
+        """Stop (the toolbar's) works while a page is translated."""
         button = getattr(self, "stop_btn", None)
         if button is not None:
             button["state"] = "normal" if enabled else "disabled"
 
     def _sync_stop(self) -> None:
-        cancel, queued = self._page_cancel, getattr(self, "_queued", None)
-        self._set_stop(bool(self._batching or (cancel is not None and not cancel.is_set())
-                            or (queued is not None and queued[0] == "batch")))
+        cancel = self._page_cancel
+        self._set_stop(bool(cancel is not None and not cancel.is_set()))
 
     def _on_escape(self) -> None:
         """Esc, one thing at a time: a bubble's pinned panel closed, a drag taken back, the reading order cancelled,
-        the selected region let go, then the full screen left; in the window, a run's Stop. In the Reader role the full
+        the selected region let go, then the full screen left; in the window, Stop. In the Reader role the full
         screen has none of the Translator's, so Esc leaves it at once; in the Translator role a region selected on a
         page that is not on show any more (the viewer turned it) holds nothing back."""
         if getattr(self, "_zoom_pinned", False):  # a bubble's Japanese pinned beside it (`bubble_text`): closed first
@@ -2090,125 +1743,17 @@ class JobsMixin:
         if self.reading:
             self.leave_reading()
             return
-        if in_a_run(self):  # a key alone never ends a run: the question comes first, however little was read
-            self._ask_stop()
-            return
-        self.stop_batch()
+        self.stop_page()
 
-    def stop_batch(self, confirmed: bool = False) -> None:
-        """Stop (Esc): the batch ends (a request in progress at once; nothing of it is cached), a batch that waits
-        for the models or for a job does not start, or the page being translated is cancelled (nothing of it is
-        cached). A whole-book run that holds more than `FEW_PAGES` pages read asks first (`_ask_stop`), unless that
-        question was answered already (*confirmed*)."""
-        queued = getattr(self, "_queued", None)
-        if queued is not None and queued[0] == "batch":
-            self._queued = None
-            self._resume_auto = False
-            if not self.busy:  # (the models were loading: nothing waits for them now)
-                self._hide_busy()
-                self._show_progress(False)
-            self.say("The batch that was waiting is cancelled.")
-            self._sync_stop()
-            return
-        if self.batch is not None or self._batching:
-            if not confirmed and self._stop_asks():
-                self._ask_stop()
-                return
-            if self.batch is not None:
-                self.batch.stop()
-            else:
-                self._batch_stop_asked = True  # the batch's reader is not made yet: it stops at once
-            self.say("Stopping the whole-book run...")
-            return
-        pause_backlog(self, "stop")  # (the pages turned past wait for the next page)
+    def stop_page(self) -> None:
+        """Stop (Esc): the page being translated is cancelled (nothing of it is cached), and the pages turned past
+        wait for the next page (`backlog.pause_backlog`)."""
+        pause_backlog(self, "stop")
         cancel = self._page_cancel
         if cancel is not None and not cancel.is_set():
             self._cancel_why = "stop"
             cancel.set()
             self._sync_stop()
-
-    def _run_pages(self) -> int:
-        """The pages the run on show holds read or waiting to be read (none: no run)."""
-        scan = getattr(self, "_scan", None)
-        return int(scan.pages) + int(scan.queued) if scan is not None else 0
-
-    def _stop_asks(self) -> bool:
-        """Whether Stop asks before it ends the run: a whole-book run (read first, translated after) that holds more
-        than `FEW_PAGES` pages read. A page-by-page run has saved every page it translated."""
-        scan = getattr(self, "_scan", None)
-        return scan is not None and scan.context and self._run_pages() > FEW_PAGES
-
-    def _ask_stop(self) -> None:
-        """The question before Stop ends a run (`dialogs.stop.ask_stop`, TASlation's own box over the window): what
-        Stop leaves, and a button for each way on - Keep reading (or translating) first, the answer to Esc and
-        Return. While the pages are read it also offers to translate the pages read so far (`finish_reading` with
-        *partial*: the run goes on to the translation, and a later run reads on from the page on show) instead of
-        dropping them. Nothing happens when the run ended while the box was open."""
-        if self._stop_asking:
-            return
-        scan = getattr(self, "_scan", None)
-        pages = group_digits(self._run_pages())
-        keep = ("keep", _("Keep reading"))
-        if scan is None or not scan.context:
-            text, choices = _("Stop the run? The pages translated so far are saved."), [keep, ("stop", _("Stop"))]
-        elif not scan.scanning:
-            text = _("Stop the translation? {done} of {total} lines are translated and saved; they stay. The rest is kept only until you close TASlation: Read whole book... translates it then.").format(
-                done=group_digits(scan.checked), total=group_digits(max(scan.found, scan.checked)))
-            choices = [("keep", _("Keep translating")), ("stop", _("Stop"))]
-        elif scan.finishing:  # (the translation may have begun beside the pages still read: what it did stays)
-            text = _("Stop the whole-book run? You pressed Finished reading: {pages} page(s) are read, and their translation has begun or comes next. If you stop now, the lines translated so far are stored and stay. The rest of what was read is kept only until you close TASlation: Read whole book... translates it then.").format(pages=pages)
-            choices = [keep, ("stop", _("Stop"))]
-        elif self._run_pages() == 0 or self.batch is None:
-            text, choices = _("Stop the whole-book run? No page is read yet."), [keep, ("stop", _("Stop"))]
-        else:
-            text = _("Stop the whole-book run? {pages} page(s) are read, and nothing is translated yet.\n\nTranslate the pages read: they are translated now, and a later run reads on from the page on show.\nStop without translating: what was read is kept only until you close TASlation.").format(pages=pages)
-            choices = [keep, ("stop", _("Stop without translating")), ("translate", _("Translate the pages read"))]
-        self._stop_asking = True
-        try:
-            answer = ask_stop(self, text, choices)
-        finally:
-            self._stop_asking = False
-        if not in_a_run(self):  # the run ended meanwhile: nothing is left to stop
-            return
-        if answer == "stop":
-            self.stop_batch(confirmed=True)
-        elif answer == "translate":
-            self.finish_reading(partial=True)
-
-    def finish_reading(self, partial: bool = False) -> None:
-        """Finished reading (the band): the reader has come to the end of the book. The run reads the page on show and
-        what waits, then goes on to the translation (`BatchReader.finish`). *partial*: the question before Stop chose
-        to translate the pages read so far, and the reading does not count as the whole book."""
-        if self.batch is None:
-            return
-        if partial:
-            self.batch.finish(partial=True)
-        else:
-            self.batch.finish()
-        if self._scan is not None:
-            self._scan.finishing = True
-            self._show_band()
-        if partial:
-            self.say("The pages read so far are translated now. Afterwards Read whole book... reads on from the page on show.")
-
-    def translate_readings(self) -> None:
-        """The band's Translate the pages read (Translate the rest), after a Stop: a run of the book that goes on from
-        what the stopped run read and did not store (`Readings`), with no page to turn - it takes the page on show and
-        goes on to the translation (`_job_batch` *at_once*); readings of the whole book are translated as they are."""
-        book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
-        readings = self._left_readings(book, model, language)
-        if readings is None or in_a_run(self):
-            return
-        if self.busy:
-            self.say("A job is running: wait for it to end, or press Stop.")
-            return
-        win = self._current_window()
-        if win is None:
-            return
-        if self.ready:
-            self._start_batch(win, 0, True, at_once=not readings.complete)
-        else:  # the models are still loading: the batch starts once they are
-            self._queue("batch", win, 0, True, not readings.complete)
 
     # ------------------------------------------------------------------ actions
     def translate_now(self) -> None:
@@ -2245,9 +1790,9 @@ class JobsMixin:
         self._start_translate(image, thumb=thumb)
 
     def _queue(self, kind: str, *args: Any) -> None:
-        """A request that cannot run yet - "translate" (F5), "auto" (Auto's new page) or "batch" (with its
-        options) - waits, and runs as soon as the models are loaded and no job runs (`_run_queued`); a later one
-        takes its place unless it ranks lower. While the models load, the busy band says so."""
+        """A request that cannot run yet - "translate" (F5) or "auto" (Auto's new page) - waits, and runs as soon as
+        the models are loaded and no job runs (`_run_queued`); a later one takes its place unless it ranks lower.
+        While the models load, the busy band says so."""
         if self._queued is not None and QUEUE_RANK[kind] < QUEUE_RANK[self._queued[0]]:
             return
         self._queued = (kind, args)
@@ -2258,19 +1803,16 @@ class JobsMixin:
             self._busy_shown = True
             self.canvas.set_busy(self._busy_text)  # the badge says the models are loading
             self._show_progress(True)
-        self._sync_stop()  # a batch that waits can be stopped
 
     def _run_queued(self) -> None:
         """The request that waited, carried out now that it can be."""
-        if self._queued is None or not self.ready or self.busy or self.batch is not None:
+        if self._queued is None or not self.ready or self.busy:
             return
-        kind, args = self._queued
+        kind, _args = self._queued
         self._queued = None
         self._hide_busy()
         self._show_progress(False)
-        if kind == "batch":
-            self._start_batch(*args)
-        elif kind == "translate":
+        if kind == "translate":
             self.translate_now()
         else:  # Auto: the page in front is looked at again at once
             self._tick()
@@ -2343,7 +1885,7 @@ class JobsMixin:
         candidate already). Whether a frame shows a new page is `_turned_from_job`'s. With follow = "events" the live
         view watches the page itself, at each new frame (`_look_over_job`), and this looks at nothing."""
         cancel = self._page_cancel
-        if cancel is None or cancel.is_set() or self.batch is not None or not self.auto_var.get():
+        if cancel is None or cancel.is_set() or not self.auto_var.get():
             return
         if self._follows_events() or self._black_open():
             return
@@ -2369,138 +1911,21 @@ class JobsMixin:
             self._sync_stop()
             self._queue("auto")
 
-    def scan_mode(self) -> str:
-        """How Auto starts a book, from the settings (`scan_mode`, `gui --mode`): "book" or, the default, "page"."""
-        return "book" if self.settings.scan_mode == "book" else "page"
-
-    # ------------------------------------------------------------------ the batch
-    def open_batch_dialog(self) -> None:
-        """Batch: read whole book...: its options, then the batch; its Start asks for the book's name first while
-        the Book box names none (`_ask_name`: nothing of the batch could be kept). Not from the full screen, which a run
-        and its band have no place on (its key, the menu being away there: `FULL_SCREEN_NO_RUN`)."""
-        if getattr(self, "reading", False):
-            self.say(FULL_SCREEN_NO_RUN)
-            return
-        if self.busy:
-            self.say("A job is running: wait for it to end, or press Stop.")
-            return
-        win = self._current_window()
-        if win is None:
-            return
-
-        def start(options: tuple[Any, ...]) -> None:
-            if self._name_needed():
-                self._ask_name(lambda _name: start(options), getattr(self, "_live", None))
-                return
-            if self.ready and not self.busy:
-                self._start_batch(*options)
-            else:  # the models are still loading: the batch starts once they are
-                self._queue("batch", *options)
-
-        carried_on, readings = "", None
-        if getattr(self, "_readings", None) is not None:
-            readings = self._left_readings(self.book_var.get().strip(), self.model_var.get().strip(),
-                                           self.lang_var.get().strip())
-        if readings is not None:
-            carried_on = (_("You finished reading the whole book: Start translates the rest.")
-                          if readings.complete else
-                          _("Pages read before you stopped are kept: Start goes on from the page on show."))
-        BatchDialog(self, win, self.settings, on_start=start, carried_on=carried_on)
-
-    def _start_batch(self, win: WindowInfo, max_pages: int, context_mode: bool, at_once: bool = False) -> None:
-        """The run starts on the viewer as the reader has set it: no key goes to it, and its window stays as it is, so
-        that the band and its buttons stay in view - but for a window minimised since it was chosen, which Start (the
-        reader's own action) shows again behind TASlation's window (`viewers.show_minimised`). A window being enlarged
-        for the page on show is waited for. *at_once*: `_job_batch`'s (`translate_readings`)."""
-        if show_minimised(self, win):
-            self.status(lambda: _(VIEWER_RESTORED).format(title=win.title))
-        self._go_busy()
-        drop_backlog(self, "a whole-book run")
-        self._batching = True
-        self._batch_stop_asked = False
-        self._auto_before_batch = bool(self.auto_var.get())
-        self._scan = ScanState(context=context_mode, seed=self._pace(self.model_var.get().strip()))
-        self._band = None  # the band comes with the scan's first message
-        self._show_band()
-        new_run(self)  # the page strip starts empty
-        self._sync_stop()
-        self.auto_var.set(False)
-        book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
-        self._batch_for = (book, model, language)
-        self.say("Whole-book run starting...")
-        own = (self._own_hwnd(),) if IS_WINDOWS else ()  # taken here: the worker must not ask Tk
-
-        def begin() -> None:
-            self._apply_found_margins(starting=True)  # the page as the viewer shows it
-            run_area = self._run_area()  # (the run widens it with the pages it takes: `page_area.JoinedArea`)
-            self._jobs.put(lambda: self._job_batch(win.hwnd, book, model, language, max_pages, context_mode,
-                                                   title=win.title, own_windows=tuple(h for h in own if h),
-                                                   at_once=at_once, page_area=run_area))
-
-        waiting = getattr(self, "_enlarging", None)
-        if waiting is not None:
-            waiting["then"] = begin
-        else:
-            begin()
-
+    # ------------------------------------------------------------------ the names
     def review_names(self) -> None:
-        """The band's Review names... and Tools > Names rendered in more than one way...: the names the latest
-        whole-book run of the book in the boxes, or the pages read one by one, rendered in more than one way, to make
-        one (`name_check`)."""
+        """The band's Review names... and Tools > Names rendered in more than one way...: the names the pages read
+        of the book in the boxes rendered in more than one way, to make one (`name_check`)."""
         name_check.review_names(self)
 
     def _offer_page_names(self, names: int) -> None:
         """*names* names (0: none new) found rendered in more than one way in the pages read one by one: offered
-        quietly on the band, with Review names... (the band of a run that ended keeps what it says and gets the line
-        too; a run's band while it runs is left alone). No box opens, and the focus stays where it is."""
-        if not names or in_a_run(self):
+        quietly on the band, with Review names... No box opens, and the focus stays where it is."""
+        if not names:
             return
-        band = self._band
-        if band is not None and band.get("kind") == "scan":
-            return
-        if band is None:
-            band = self._band = {"kind": "names"}
-        band["page_names"] = names
+        self._band = {"kind": "names", "page_names": names}
         self._show_band()
-
-    def _book_start(self, book: str) -> str:
-        """The start dialog's answer kept for *book* ("start", "page"; "" when none is), under another spelling of
-        the same book too (`bookname.entry_for`: kept before it was renamed to the one spelling)."""
-        try:
-            kept = entry_for(load_ui_table(self.settings.state_dir, BOOK_STARTS), book)
-        except OSError:
-            return ""
-        return kept if kept in ("start", "page") else ""
-
-    def _keep_book_start(self, book: str, answer: str) -> None:
-        try:
-            save_ui_entry(self.settings.state_dir, BOOK_STARTS, book, answer, keep=BOOK_STARTS_KEPT)
-        except OSError:  # (a state folder that cannot be written: the dialog asks again next time)
-            pass
-
-    def _pace(self, model: str) -> float | None:
-        """Lines a second the last whole-book translation with *model* did (ui.json table `PACE_TABLE`): where the
-        band's estimate starts. None when no run measured one."""
-        try:
-            value = float(load_ui_table(self.settings.state_dir, PACE_TABLE).get(model, ""))
-        except (TypeError, ValueError, OSError):
-            return None
-        return value if value > 0 else None
-
-    def _keep_pace(self, scan: Any) -> None:
-        """The rate of the whole-book translation that ended, kept for the next run with its model, when it can be
-        trusted (`ScanState.measured`)."""
-        model = (getattr(self, "_batch_for", None) or ("", "", ""))[1]
-        rate = scan.measured(time.monotonic()) if scan is not None and scan.context else None
-        if not model or rate is None:
-            return
-        try:
-            save_ui_entry(self.settings.state_dir, PACE_TABLE, model, f"{rate:.4f}", keep=PACE_KEPT)
-        except OSError:  # (a state folder that cannot be written: the next run measures again)
-            pass
 
     def close_band(self) -> None:
-        """The scan band's Close: it goes, and the page strip with it."""
+        """The band's Close: it goes."""
         self._band = None
         self._show_band()
-        hide_strip(self)

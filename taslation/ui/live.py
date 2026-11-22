@@ -25,7 +25,7 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   wait comes before its requests: just before the first one (and before the translator's model is loaded for it) it
   asks whether the frame it read is on show still, and the window answers at its next look at the viewer that finds
   it so - the viewer's frame count unchanged since that frame was captured, or a capture of the same picture: no
-  later frame further than SAME_PICTURE from it on the thumbnail, none sharper (`batch.sharper`) - every FRAME_STEP_MS
+  later frame further than SAME_PICTURE from it on the thumbnail, none sharper (`frames.sharper`) - every FRAME_STEP_MS
   with the viewer's frames counted, every FOLLOW_STEP_MS without (`_frame_seen`). The window watches the frame through
   the whole job: one that differs drops it - the request in flight cancelled, everything the job did put back - and
   the page is started again on the new frame, so that nothing lasts from a frame that changed. What the job stores
@@ -68,23 +68,11 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   goes on the page, the capture area is the new size's own, and Auto goes on from there (`_resize_begins`,
   `_look_afresh`).
 
-While a whole-book run reads the pages the reader turns, the run captures the viewer and the window none of it: in the
-whole book each frame the run captures goes on the page as it comes (`_run_frame`), so that a page turned shows as
-without a run, and the page being read shows its rectangles only while the viewer shows it. Once the run translates, it needs the viewer no more (`BatchReader.viewer_free`): the window follows the viewer again as above,
-the reader's keys and clicks going on to it (`constants.viewer_rests`), and a page taken goes not to a page job - the
-worker runs the run, and no request may compete with it - but to the run (`BatchReader.viewer_page`, on a thread of the
-window's own, `_ask_beside`): a page the cache holds is shown lettered from it with no model at all, laid over the
-viewer's frame while it shows that page, and any other says it is not translated yet (`beside_line`). The run's page
-being translated keeps the page area until the reader turns to another page (`Beside.reading`) - from the viewer's
-first frame of it on, not once it is taken (`_run_page_kept`) -; then the viewer's page has it - the run's progress,
-and its busy badge, only while the viewer shows the very page being translated (`_badge_due`) - until the run ends.
-
 Windows tells who is in front and what happens to the viewer's window (`capture.WindowEvents`, whose notes the
 heartbeat takes in: `_beat`), and `follow_decision` decides what each heartbeat does."""
 
 from __future__ import annotations
 
-import threading
 import time
 import tkinter as tk
 from collections import deque
@@ -98,8 +86,7 @@ from PIL import Image
 
 from .. import fingerprint as fp
 from .. import recovery
-from ..batch import (CRISP_KEPT, SharpSeen, crispness, detail, frames_differ, looks_sharp, lower_priority, sharper,
-                     thumbnail)
+from ..frames import CRISP_KEPT, SharpSeen, crispness, detail, frames_differ, looks_sharp, sharper, thumbnail
 from ..capture.windows import BROWSER_CLASSES, covered_by_opaque, window_class
 from ..config import Settings
 from ..capture import (
@@ -132,7 +119,6 @@ from ..capture import (
 )
 from ..detect.page_area import (  # noqa: F401 - panel_inside, TIGHT_PX: as the area dialog and the tests know them
     TIGHT_PX,
-    JoinedArea,
     area_margins,
     find_page_area,
     joined,
@@ -152,23 +138,17 @@ from .constants import (
     FOLLOW_WAITS,
     FRAME_GAP_MS,
     FRAME_STEP_MS,
-    FULL_SCREEN_SCAN_WAITS,
     LIVE_CHANGE,
     NO_VIEWER,
     READING_NOTE_MS,
     RECHECK_MS,
     RETAKE_WITHIN_MS,
-    RUN_AUTO_OFF,
     SETTLE_TRIES,
     TWO_TURNS_S,
     VIEWER_BLACK,
     VIEWER_LOADING,
-    book_read,
-    in_a_run,
-    viewer_rests,
 )
 from .progress import status_word, unsure_art, usual_char
-from .strip import end_follow, run_page_on_show
 
 COVERED_PROBE_MS = 500  # a viewer asked to paint itself anew (`_learn_covered`): a frame within this says it drew
 FACTS_KEPT = 4  # the frames whose `FrameFacts` the window keeps, the latest first ...
@@ -222,7 +202,7 @@ def _same_picture(a: Image.Image | None, b: Image.Image | None) -> bool:
 class FrameFacts:
     """What the live view works out of one frame (a capture of the viewer, a page read), each once: numpy's copy of
     its pixels, whether it is blank or black, its thumbnail, its fine detail and its page units - the very values
-    `capture.is_blank`, `capture.is_black`, `batch.thumbnail`, `batch.detail` and `fingerprint.analyze` give for it,
+    `capture.is_blank`, `capture.is_black`, `frames.thumbnail`, `frames.detail` and `fingerprint.analyze` give for it,
     so that a frame leads to the decisions it led to when every check worked them out anew (and took the pixels out
     of the picture anew: 12 ms a time for a full-screen frame, measured). A frame captured again with the very same
     bytes shares the facts of the capture before it (`_captured_facts`)."""
@@ -312,9 +292,9 @@ def _black(window: Any, image: Image.Image, margins: Any) -> bool:
 
 
 def thumbnail_of(image: Image.Image, pixels: np.ndarray | None = None, size: int = 64) -> np.ndarray:
-    """`batch.thumbnail` of *image*: from its *pixels* (``np.asarray(image)``) when it is an RGB picture - the very
+    """`frames.thumbnail` of *image*: from its *pixels* (``np.asarray(image)``) when it is an RGB picture - the very
     values, with the picture's pixels taken out of it once (tests/test_follow.py holds the two alike) -, else
-    `batch.thumbnail` itself."""
+    `frames.thumbnail` itself."""
     if (pixels is None or image.mode != "RGB" or pixels.dtype != np.uint8 or pixels.ndim != 3
             or pixels.shape[2] != 3):
         return thumbnail(image, size)
@@ -323,20 +303,20 @@ def thumbnail_of(image: Image.Image, pixels: np.ndarray | None = None, size: int
 
 
 def _thumb(window: Any, image: Image.Image) -> np.ndarray:
-    """`batch.thumbnail` of *image*."""
+    """`frames.thumbnail` of *image*."""
     facts = _facts(window, image)
     return facts.get("thumb", lambda: thumbnail_of(image, facts.pixels if image.mode == "RGB" else None))
 
 
 def _detail(window: Any, image: Image.Image, box: Any) -> np.ndarray:
-    """`batch.detail` of *image* in *box*."""
+    """`frames.detail` of *image* in *box*."""
     facts = _facts(window, image)
     box = tuple(box) if box is not None else None
     return facts.get(("detail", box), lambda: detail(image, box))
 
 
 def _crisp(window: Any, image: Image.Image, box: Any) -> float:
-    """`batch.crispness` of *image* in *box*."""
+    """`frames.crispness` of *image* in *box*."""
     facts = _facts(window, image)
     box = tuple(box) if box is not None else None
     return facts.get(("crisp", box), lambda: crispness(image, box))
@@ -463,51 +443,13 @@ class Following:
     taken: Taken | None = None  # the page taken last, while a sharper frame of it may come
     retake: Taken | None = None  # such a sharper frame, read once the job on the softer one is done
     unseen: bool = True  # the viewer chosen has no picture on the page yet: it is looked at whoever is in front
-    # a viewer that has drawn a page soft first (`_drew_soft`): its window, and the `batch.crispness` of the soft
+    # a viewer that has drawn a page soft first (`_drew_soft`): its window, and the `frames.crispness` of the soft
     # pictures it drew and of their sharp ones, what its frames are judged by (`_looks_soft`), and those sharp
     # pictures' by their pages, by which a frame of such a page may be found soft as well
     soft_of: int | None = None
     soft: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
     sharp: deque[float] = field(default_factory=lambda: deque(maxlen=CRISP_KEPT))
     sharp_pages: SharpSeen = field(default_factory=SharpSeen)
-
-
-@dataclass
-class Beside:
-    """Reading on the viewer beside a whole-book run that translates (`reads_beside`): the viewer's page
-    as the translation began (*base*, a thumbnail), whether the reader has turned to another since (*reading*: the page
-    area shows the viewer's page from then on, not the run's), and the page asked of the run (`BatchReader.viewer_page`,
-    on a thread of the window's own: *token* the latest, *pending* the frame waiting to be asked, the latest only). *seq*
-    and *state* say what the run answered for the page on show; *note* the line on the page that says it."""
-
-    base: np.ndarray | None = None
-    reading: bool = False
-    token: int = 0
-    pending: tuple[int, Image.Image] | None = None
-    thread: threading.Thread | None = None
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    seq: int | None = None
-    state: str = ""
-    note: str = ""
-
-
-def reads_beside(window: Any) -> bool:
-    """Whether *window* follows the viewer beside a whole-book run: the run translates and needs the viewer no more
-    (`BatchReader.viewer_free`; never while it reads the pages, which it captures itself)."""
-    batch = getattr(window, "batch", None)
-    return batch is not None and bool(getattr(batch, "viewer_free", False))
-
-
-def beside_line(state: str) -> str:
-    """What the page says, in the window's language, while the viewer shows a page beside the run whose answer was
-    *state* (`batch.ViewerPage`); "" for a page shown translated, or no page."""
-    if state == "waiting":
-        return _("Not translated yet: the whole-book run has not come to this page. It shows translated once it has.")
-    if state == "untranslated":
-        return _("Not translated yet: this page was not read in the whole-book run. It is translated once the run is done.")
-    if state == "later":
-        return _("This page is translated: it shows once the whole-book run is done.")
-    return ""
 
 
 class BlackViewerMixin:
@@ -526,11 +468,8 @@ class BlackViewerMixin:
     def _see_black(self, hwnd: int, image: Image.Image) -> bool:
         """A frame of the viewer judged (`capture.is_black`), and whether it is black: the first one opens a spell
         (`recovery.BlackWatch`), a later one takes the spell a step on. Never while TASlation enlarges the window
-        (`_resizing`): the frames then are of that change. A run has its own wait for a black viewer. No key goes for
-        it."""
+        (`_resizing`): the frames then are of that change. No key goes for it."""
         black = _black(self, image, self._margins_of(image))
-        if in_a_run(self):
-            return black
         watch = getattr(self, "_black_watch", None)
         waiting = getattr(self, "_enlarging", None)
         if waiting is not None and waiting.get("enlarged") is not None:
@@ -570,7 +509,7 @@ class BlackViewerMixin:
     def _black_beat(self) -> bool:
         """The heartbeat while the viewer has stayed black: about once a second, in memory, whether a frame came
         (`BlackWatch.new_frame`), and only such a frame is taken and judged (`_capture`, `_see_black`). A spell ends
-        without a word when the viewer is gone, the window shows something else than the book or a batch takes over.
+        without a word when the viewer is gone or the window shows something else than the book.
         Returns whether a spell is open: the heartbeat does nothing else then."""
         watch = getattr(self, "_black_watch", None)
         if watch is None:
@@ -578,7 +517,7 @@ class BlackViewerMixin:
         win = self.selected
         over = win is None or win.hwnd != watch.hwnd or not window_exists(watch.hwnd)
         if not over:
-            over = self.batch is not None or self._batching or not self._book_in_front()
+            over = not self._book_in_front()
         if over:
             self._black_watch = None
             return False
@@ -621,9 +560,7 @@ class LiveViewMixin(BlackViewerMixin):
         own header, links and page slider in it), joined the same way per viewer, capture size and area
         (`_inner_areas`), and the capture area is what the two have in common - the area alone while nothing is found
         (`_inner_margins`); a page that fills the area within TIGHT_PX joins the area itself (a cover narrower than the
-        spreads the area was drawn around narrows it only until a spread is shown). A whole-book run that follows the
-        reader widens its own area with the pages it takes and tells the window the panels it found (`_run_found`),
-        joined into the same records."""
+        spreads the area was drawn around narrows it only until a spread is shown)."""
         win = self.selected
         if win is None:
             return
@@ -673,72 +610,14 @@ class LiveViewMixin(BlackViewerMixin):
         found_size, _hand, box = known
         return area_margins(box, found_size, hand)
 
-    def _apply_found_margins(self, starting: bool = False) -> None:
+    def _apply_found_margins(self) -> None:
         """The page found so far becomes the capture area - within the reader's own area when there is one
-        (`_inner_margins`) - while no job is running (*starting*: the batch has not begun reading yet, and its window
-        has just been enlarged). A run that follows the reader widens its area with the pages it meets
-        (`page_area.JoinedArea`, started from `_run_area`; the pipeline takes it in between two pages); other jobs keep
-        one area. What the run found joins the window's record as it goes (`_run_found`), so that the area applied here
-        once the run is done holds everything the run read."""
-        if self.selected is None or (self.busy and not starting):
+        (`_inner_margins`) - while no job is running: a job keeps one area."""
+        if self.selected is None or self.busy:
             return
         margins = self._inner_margins() if self._manual_area else self._found_margins()
         if tuple(self.settings.margins) != margins:
             self.settings.margins = margins
-
-    def _run_area(self) -> JoinedArea | None:
-        """The capture area a whole-book run starts from and widens with the pages it takes (`page_area.JoinedArea`):
-        the margins in force now, the reader's own area as the outer bound when there is one (`_hand_set`), and the
-        page panels found so far in the chosen viewer's frames for it (`_page_areas`, `_inner_areas`). None while no
-        viewer is chosen. On the Tk thread, as the run starts."""
-        win = self.selected
-        if win is None:
-            return None
-        key = viewer_key(win)
-        if self._manual_area:
-            hand: tuple[int, int, int, int] | None = self._hand_set()
-            known = getattr(self, "_inner_areas", {}).get(key)
-            size, found = (known[0], known[2]) if known is not None and known[1] == hand else (None, None)
-        else:
-            hand = None
-            size, found = self._page_areas.get(key) or (None, None)
-        return JoinedArea(tuple(self.settings.margins), hand, size, found if size is not None else None)
-
-    def _run_found(self, data: dict[str, Any]) -> None:
-        """A whole-book run that follows the reader found page panels in the pages it took (``page_area`` {hwnd, size,
-        found, hand, margins}: their union in the capture's pixels, inside the reader's area *hand* when there is one,
-        and the run's area now): joined into the window's record for the viewer, as the panels of its own frames are
-        (`_find_page`), so that the capture area the window applies once the run is done (`_apply_found_margins`)
-        holds every page the run read. The run's area is joined in as well: it is what the panels give, unless the run
-        read pages without a panel in a wider area before (it started with no panel known), and then the window keeps
-        that wider area too - never narrower than the run's, whose pages it shows. A record of another viewer, or of
-        another area of the reader's than the window's now, is left alone."""
-        win = self.selected
-        found = data.get("found")
-        if win is None or found is None or win.hwnd != data.get("hwnd", win.hwnd):
-            return
-        key, size = viewer_key(win), tuple(data["size"])
-        read = data.get("margins")
-        if read is not None:  # (the box the run's area leaves: the panels found, or more)
-            found = joined(tuple(int(v) for v in found), area.margins_to_box(tuple(read), size))
-        hand = data.get("hand")
-        if hand is not None:
-            hand = tuple(int(m) for m in hand)
-            if not self._manual_area or hand != self._hand_set():
-                return
-            inner = getattr(self, "_inner_areas", None)
-            if inner is None:
-                inner = self._inner_areas = {}
-            known = inner.get(key)
-            box = known[2] if known is not None and known[:2] == (size, hand) else None
-            inner[key] = (size, hand, joined(box, found))
-        else:
-            if self._manual_area:
-                return
-            known = self._page_areas.get(key)
-            box = known[1] if known is not None and known[0] == size else None
-            self._page_areas[key] = (size, joined(box, found))  # type: ignore[assignment]
-        self._apply_found_margins()
 
     def _area_hint_due(self) -> bool:
         """Once a session: the chosen viewer has no area of the reader's, and its frames were looked at without a
@@ -766,7 +645,7 @@ class LiveViewMixin(BlackViewerMixin):
         moved, self._live_moved = getattr(self, "_live_moved", False), False
         lettered, self._fill_changed = getattr(self, "_fill_changed", None), None
         fill = getattr(self, "_fill", None)
-        self.canvas.moving = bool(moved and image is not None and run_page_on_show(self) is None)
+        self.canvas.moving = bool(moved and image is not None)
         self.canvas.pixels_of = lambda picture: known_pixels(self, picture)
         self.canvas.changed = (lettered[1] if lettered is not None and image is not None and lettered[0] is image
                                and fill is not None and fill.page is image else None)
@@ -780,8 +659,6 @@ class LiveViewMixin(BlackViewerMixin):
     def _picture(self) -> tuple[Image.Image | None, list[Any], list[Any]]:
         """What the page shows, with translator mode's region overlay and the outlines of a page filling in:
 
-        * a page the whole-book run is translating (`strip.run_page_on_show`): the lines answered so far lettered,
-          the others outlined;
         * a page being translated, while the viewer still shows it (`_fill_on_show`): the frame it is read from with
           the regions lettered so far, the others outlined;
         * else the last translated page while the viewer still shows that page - its lettering laid over the
@@ -791,15 +668,10 @@ class LiveViewMixin(BlackViewerMixin):
         pointer (`hover.reverse_on`: `Settings.hover_shows` "translation", in the Reader role), the
         page being translated and the last translated page show as the viewer does too, without the outlines - but
         for the box under the pointer whose translation has not come, where its bubble shows in its place
-        (`in_place.hovered_outline`; the panel beside it says so itself: `zoom`); a whole-book run's page stays as it
-        is. A bubble that shows its other side in its place is laid over this picture (`in_place.refresh`).
-        Reading is on the viewer only: the first is the one page of a whole-book run's memory ever shown, as the
-        run's progress while it translates; outside that, every picture is the viewer's page (`strip`'s docstring),
-        so that TASlation never lets a book be read without the viewer."""
+        (`in_place.hovered_outline`; the panel beside it says so itself: `zoom`). A bubble that shows its other side in
+        its place is laid over this picture (`in_place.refresh`). Reading is on the viewer only: every picture is the
+        viewer's page, so that TASlation never lets a book be read without the viewer."""
         original = self.original_var.get()
-        run = run_page_on_show(self)
-        if run is not None:
-            return (run.frame if original else run.image), [], run.outlines()
         reverse = hover.reverse_on(self)
         fill = self._fill
         if fill is not None and self._fill_on_show():
@@ -832,7 +704,7 @@ class LiveViewMixin(BlackViewerMixin):
         """Whether the page shows the last result (not a page filling in, nor the viewer showing another page)."""
         result = self.last_result
         return ((self._fill is None or not self._fill_on_show()) and result is not None
-                and run_page_on_show(self) is None and (self._live is None or self._same_page(result, self._live)))
+                and (self._live is None or self._same_page(result, self._live)))
 
     def _fill_on_show(self) -> bool:
         """Whether the page filling in (`_fill`, the page a job reads) is the viewer's page still, as its latest frame
@@ -853,7 +725,7 @@ class LiveViewMixin(BlackViewerMixin):
         return live is None or (self._shows_page(live, fill.frame) and not self._sharper_than(fill.frame, live))
 
     def _sharper_than(self, frame: Image.Image, image: Image.Image) -> bool:
-        """Whether the frame *image* is a sharper picture than *frame* (`batch.sharper` on their fine detail in the
+        """Whether the frame *image* is a sharper picture than *frame* (`frames.sharper` on their fine detail in the
         capture area); kept for the last two frames asked about."""
         if image is frame:
             return False
@@ -938,22 +810,6 @@ class LiveViewMixin(BlackViewerMixin):
             self._redisplay()
         elif not filling:
             self._redisplay()  # the viewer back on the page being translated: it shows filling in again
-        if reads_beside(self):
-            self._show_badge()  # (beside a run, its badge goes and comes with its page: `_run_page_kept`)
-
-    def _run_frame(self, image: Image.Image) -> None:
-        """A frame of the viewer as a whole-book run reading the pages saw it come (``viewer_frame``: the run captures
-        the viewer then, the live view does not): on the page as the live view puts a frame there (`_show_live`), so
-        that a page turned shows as soon as the viewer draws it, as without a run, not once the run takes it
-        (``batch_page``); a frame of nothing is left out, as ever. The badge of the page being read is on the page only
-        while that page is (`_badge_due`). Once the run needs the viewer no more the window looks itself."""
-        if self.batch is None or reads_beside(self):
-            return
-        thumb = _thumb(self, image)
-        if self._drew_nothing(thumb):
-            return
-        self._show_live(image, thumb)
-        self._show_badge()
 
     def _quiet_live(self, image: Image.Image, thumb: np.ndarray) -> None:
         """*image* the live frame (`_show_live`), not drawn yet: what is drawn next shows it."""
@@ -964,7 +820,7 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _turn_seen(self, thumb: np.ndarray) -> None:
         """A frame of the viewer's captured with no page job at work (`_poll`, `_look`), before it is drawn: one of
-        another page than the frame on show (``_live_thumb``, `batch.frames_differ`) - a turn - stops the backlog's
+        another page than the frame on show (``_live_thumb``, `frames.frames_differ`) - a turn - stops the backlog's
         step under way at once (`_stop_behind`), not only once the new page's job is queued. On a computer without a
         GPU the model's work behind the reader takes the processor the window needs to follow the turn: on a runner's
         4 cores a request of the backlog's asked from its start right after a page was done (its pairs cut back) kept
@@ -1044,37 +900,25 @@ class LiveViewMixin(BlackViewerMixin):
 
     # ------------------------------------------------------------------ Auto
     def _on_new_page(self, image: Image.Image, thumb: np.ndarray | None = None, complete: bool | None = None) -> None:
-        """Auto mode found a new page: translate it. The first page of a book not in its cache, and not read yet
-        (`_book_read`: a page of a book read already is translated as a page, with no dialog), starts the book first
-        (`_begin_book`): in whole-book mode the setup is checked and the reader asked - the book's name when the
-        window's title gives none, and whether to read the whole book first, so that every later page is instant;
-        in page-by-page mode only the name is asked for when the title gives none. While that is under way the
-        latest page waits for it. A viewer not read yet has its window enlarged first (`_enlarge_first`), and this
-        frame goes: Auto takes the next. *complete*: the page job's own (None: as the role has it; False: a page the
-        cache holds whole, drawn from it alone, `_take_at_once`)."""
+        """Auto mode found a new page: translate it. The first page of a book whose Book box names no book starts the
+        book first (`_begin_book`): its name is asked for. While that is under way the latest page waits for it. A
+        viewer not read yet has its window enlarged first (`_enlarge_first`), and this frame goes: Auto takes the
+        next. *complete*: the page job's own (None: as the role has it; False: a page the cache holds whole, drawn
+        from it alone, `_take_at_once`)."""
         if self._start_pending is not None:
             self._start_pending = (image, thumb)
             return
         if not self._enlarge_first():
             return
-        if self._book_scanned and self._scanned_book != self.book_var.get().strip():
-            self._book_scanned = False  # another book since: it starts as a book of its own
-        whole = self.scan_mode() == "book"
-        if not self._book_scanned and (whole or self._name_needed()) and self._page_uncached(image):
-            if whole and not self._name_needed() and self._book_read():
-                self._start_translate(image, thumb=thumb)  # a page of a book read already: no whole-book start
-                return
-            if self.reading:  # no dialog over the full screen, and the scan would turn the pages under the reader
+        if self._starts_book(image):
+            if self.reading:  # no dialog over the full screen
                 self._start_translate(image, thumb=thumb, complete=complete)
-                if self._name_needed():  # kept nowhere: its name is asked for on leaving (`_ask_name_after_reading`)
-                    self._unkept_reading = getattr(self, "_unkept_reading", 0) + 1
-                if whole and not self._scan_waits_told:
-                    self._scan_waits_told = True
-                    self.say(FULL_SCREEN_SCAN_WAITS)
+                # kept nowhere: its name is asked for on leaving (`_ask_name_after_reading`)
+                self._unkept_reading = getattr(self, "_unkept_reading", 0) + 1
                 return
             if self.selected is None:
                 return
-            self._begin_book(image, thumb, whole)
+            self._begin_book(image, thumb)
             return
         self._start_translate(image, thumb=thumb, complete=complete)
 
@@ -1096,27 +940,15 @@ class LiveViewMixin(BlackViewerMixin):
         return bool(units) and any(
             cache.lookup(u.fingerprint, u.aspect, self.settings.fingerprint_max_distance) is None for u in units)
 
-    def _book_read(self) -> bool:
-        """Whether the book in the Book box has been read (`book_read`: its cache holds `BOOK_READ_PAGES` translated
-        pages or more), a quick check on the Tk thread. Its whole-book start is not offered again then: a page of it
-        that is not translated yet is translated as a page. A name that names no book, the cache off: not read."""
-        if not self.settings.cache_enabled or self._name_needed():
-            return False
-        book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
-        try:
-            return book_read(len(self.store.peek(book, model, language or "English")))
-        except Exception:  # noqa: BLE001 - cannot be told: the start is offered as ever
-            return False
-
     def _all_cached(self, image: Image.Image) -> bool:
         """Whether a page job on *image* can draw all of it from the book's cache (a quick check on the Tk thread, as
         `_page_uncached`): every page unit found in the cache and none marked incomplete (that one is completed in any
-        mode, from a settled frame), the cache on and the book named, the models ready and no whole-book run on. Such
+        mode, from a settled frame), the cache on and the book named, and the models ready. Such
         a page may be taken from a frame that has not settled (`_take_at_once`): what is drawn comes from the cache
         alone; in translator mode, which completes a cached page from what it reads (`_completes`), the completion
         follows once the frame has settled (`_completion`)."""
         s = self.settings
-        if not getattr(s, "cache_enabled", False) or not self.ready or self.batch is not None or self._batching:
+        if not getattr(s, "cache_enabled", False) or not self.ready:
             return False
         try:
             if self._name_needed():
@@ -1136,13 +968,8 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _completes(self) -> bool:
         """Whether a page job completes a page the cache holds from what it reads (regions the cache has no bubble for
-        read and translated): in translator mode, but not for a book a whole-book run finished reading in this session
-        (`_run_read`: the run read every region of its pages)."""
-        if self.role_var.get() != "translator":
-            return False
-        book, model, language = self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip()
-        run = getattr(self, "_run_read", ("", "", ""))
-        return (run[0], run[1], run[2] or "English") != (book, model, language or "English")
+        read and translated): in translator mode."""
+        return self.role_var.get() == "translator"
 
     def _take_at_once(self, hwnd: int, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray,
                       operation: bool = False, shown: bool = True) -> bool:
@@ -1188,7 +1015,6 @@ class LiveViewMixin(BlackViewerMixin):
         is in front the viewer kept directly under its window, and a viewer hidden wholly that drew no frame of a page
         key handed on to it said in the status line (`order.beat`). Returns the ms to the next heartbeat."""
         f = self._follower()
-        self._watch_beside()
         order.beat(self)
         if f.mode != "events":
             if not self._black_beat():
@@ -1254,13 +1080,11 @@ class LiveViewMixin(BlackViewerMixin):
         that comes again sharper is read again (`_check_sharper`), and a new page is followed at once until it settles
         (`_begin_follow`), or taken at once when the cache holds all of it (`_take_at_once`)."""
         win = self.selected
-        beside = reads_beside(self)  # (a run that translates: the window follows the viewer as without one)
         try:
             if win is None or self._black_open():
                 return
-            if (self.busy or self.batch is not None) and not beside:
-                if (self.batch is None and not self._batching and self._follows_events()
-                        and window_exists(win.hwnd) and self._viewer_shows_book(win)):
+            if self.busy:
+                if self._follows_events() and window_exists(win.hwnd) and self._viewer_shows_book(win):
                     self._following.polled = self._frame_count()  # (before the capture, as below)
                     self._look_over_job(win)  # a page job runs: its page watched at each new frame
                 return
@@ -1269,7 +1093,7 @@ class LiveViewMixin(BlackViewerMixin):
                 return
             if not self._viewer_shows_book(win):
                 return
-            auto = bool(self.auto_var.get()) or beside
+            auto = bool(self.auto_var.get())
             events = self._follows_events()
             if events:
                 self._following.polled = self._frame_count()  # (before the capture: a frame that comes during it is new)
@@ -1299,28 +1123,13 @@ class LiveViewMixin(BlackViewerMixin):
                         return
                     self._auto_last = thumb
                     self._auto_candidate = None
-                    if beside:
-                        self._beside_page(image, thumb)
-                    else:
-                        self._on_new_page(image, thumb)
+                    self._on_new_page(image, thumb)
                 else:
                     self._auto_candidate = thumb
             else:
                 self._auto_candidate = None
         except CaptureError as e:
             self._capture_failed(e)
-
-    def _auto_switched(self) -> None:
-        """The Auto box's value was set (a trace on it, `App._build_ui`). A whole-book run turns Auto off as it starts
-        and on again as it ends when it was on (`jobs._start_batch`, `_batch_done`: the run reads each page the reader
-        turns): the first time a session, the run's first line says so (`RUN_AUTO_OFF`, once the run has said its
-        own). The reader's own clicks on the box, and Auto put back, say nothing."""
-        if getattr(self, "_run_auto_told", False) or not getattr(self, "_batching", False):
-            return
-        if self.auto_var.get() or not getattr(self, "_auto_before_batch", None):
-            return
-        self._run_auto_told = True
-        self.after_idle(lambda: self._batching and self.say(RUN_AUTO_OFF))
 
     def _viewer_shows_book(self, win: Any) -> bool:
         """Whether the viewer's window shows the book (a browser window shows its active tab; a minimised window,
@@ -1602,7 +1411,7 @@ class LiveViewMixin(BlackViewerMixin):
         frame of it within COVERED_PROBE_MS says it draws so. When none comes it is raised for a look
         (`_raise_viewer`) and asked again; a frame then says it draws only so. Either is kept (`_note_covered`); no
         frame either way says nothing. Nothing is asked of a viewer not hidden wholly (it draws for the eye then),
-        of a browser (the published rule), of one known already, or during a run or a resize. *done* is called
+        of a browser (the published rule), of one known already, or during a resize. *done* is called
         after, either way."""
         def finish() -> None:
             if done is not None:
@@ -1610,7 +1419,7 @@ class LiveViewMixin(BlackViewerMixin):
 
         selected = getattr(self, "selected", None)
         if (not IS_WINDOWS or selected is None or getattr(selected, "hwnd", None) != hwnd
-                or self._draws_covered(hwnd) is not None or in_a_run(self) or self._resizing()
+                or self._draws_covered(hwnd) is not None or self._resizing()
                 or getattr(self, "_raised", None) is not None or not fully_covered(hwnd)):
             finish()
             return
@@ -1633,7 +1442,7 @@ class LiveViewMixin(BlackViewerMixin):
         it was raised for a look."""
         selected = getattr(self, "selected", None)
         gone = selected is None or getattr(selected, "hwnd", None) != hwnd or not window_exists(hwnd)
-        if gone or in_a_run(self) or self._resizing():
+        if gone or self._resizing():
             if raised:
                 self._lower_viewer()
             finish()
@@ -1728,9 +1537,8 @@ class LiveViewMixin(BlackViewerMixin):
         `_raise_viewer`), when other windows hide it wholly and it is not known to draw so (`_look_raised`): it may
         have turned without drawing. *retried*: a key pressed for real from the start (`pagekeys.KeyWays`): none follows it. Which way the
         page turned is noted for the next keys, and whether the viewer drew while covered (`_seen_turn`). *seq*: the
-        viewer's frame count before the operation (follow = "events": `_begin_follow`). During a run only the change
-        is followed, as with "events": the run takes the page by itself."""
-        if self._follows_events() or in_a_run(self):
+        viewer's frame count before the operation (follow = "events": `_begin_follow`)."""
+        if self._follows_events():
             self._begin_follow(hwnd, reference, key, retried, seq=seq)
             return
         try:
@@ -1894,7 +1702,7 @@ class LiveViewMixin(BlackViewerMixin):
             elif kind == "closed":
                 f.look_at, f.moved = None, None
                 self._viewer_gone()
-                if self.selected is not None:  # still there for a moment, or a run is on: looked at again
+                if self.selected is not None:  # still there for a moment: looked at again
                     f.look_at = now + settle
         if f.moved is not None and now >= f.moved + settle:
             f.moved = None
@@ -1904,7 +1712,7 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _front_as_it_is(self, f: Following, now: float) -> None:
         """Over the book (`overbook`, the full screen too): who is in front as Windows has it now, whatever the notes
-        said. A click on the window there (WS_EX_NOACTIVATE: the Finished reading button, the page strip) gives a
+        said. A click on the window there (WS_EX_NOACTIVATE: a button on it, the side indicator) gives a
         note that TASlation came to the front while the viewer keeps the foreground, and no note follows, for nothing
         changed: from the notes alone TASlation would stay "in front" and no page turned in the viewer would be
         followed. As with a note, a window back in front is looked at once."""
@@ -1937,9 +1745,9 @@ class LiveViewMixin(BlackViewerMixin):
         another size: the margins in force stay the job's until it is done (`_apply_found_margins`; it is cancelled
         once the frame of the new size has stayed, as for a turned page), and the new size's frames are read by that
         size's own area at once (`_inner_margins`, `_found_margins`: `_find_page` looks at every frame captured), not
-        by an area of the old size's. A whole-book run keeps its own area (`page_area.JoinedArea`)."""
+        by an area of the old size's."""
         job = getattr(self, "_job_frame", None)
-        if job is None or job.size == image.size or not self.busy or in_a_run(self):
+        if job is None or job.size == image.size or not self.busy:
             return tuple(self.settings.margins)  # type: ignore[return-value]
         return self._inner_margins(image.size) if self._manual_area else self._found_margins(image.size)
 
@@ -1949,29 +1757,25 @@ class LiveViewMixin(BlackViewerMixin):
         Its frame goes on the page. With Auto on a new page is taken at once when the frame is the one seen last (it
         has settled), else followed until it settles; a sharper frame of a page read from a softer one is read again
         (`_retake`). While the look cannot be had, the viewer is looked at again every auto_interval_ms; while a job
-        or the batch runs, once it is done - unless a page job runs and the viewer has turned to a new page meanwhile
+        runs, once it is done - unless a page job runs and the viewer has turned to a new page meanwhile
         (the wheel over it while TASlation is in front): then the job gives way to it (`_look_over_job`)."""
         f = self._follower()
         win = self.selected
         again = self.settings.auto_interval_ms / 1000
         if win is None or self._black_open():
             return
-        beside = reads_beside(self)  # (a run that translates: looked at as without one)
-        if (self.batch is not None or self._batching) and not beside:
-            f.look_at = time.monotonic() + again  # once the batch is done
-            return
         if not window_exists(win.hwnd):
             self._viewer_gone()
             return
         if not self._viewer_shows_book(win):
             return
-        if self.busy and not beside:
+        if self.busy:
             self._queue("auto")  # looked at again once the job is done ...
             self._look_over_job(win)  # ... which gives way to a new page in the viewer
             return
         if f.op is not None and f.op.over_job:
             return  # (a page seen while a job ran, followed until it settles: its follow takes it, not two looks)
-        if f.op is not None and f.op.phase == "settle" and f.op.turned_at is None and self._early_on() and not beside:
+        if f.op is not None and f.op.phase == "settle" and f.op.turned_at is None and self._early_on():
             self._settle_now(f.op)  # (its frame is its follow's to take: started early on it now, a gate of its own)
             return
         try:
@@ -1992,7 +1796,7 @@ class LiveViewMixin(BlackViewerMixin):
                 self._take_retake(image, thumb)
                 return
             f.retake = None  # the viewer has moved on
-        if not (self.auto_var.get() or beside) or (
+        if not self.auto_var.get() or (
                 self._auto_last is not None and not frames_differ(self._auto_last, thumb)):
             return
         if seen is not None and not frames_differ(seen, thumb, 0.5):
@@ -2060,12 +1864,12 @@ class LiveViewMixin(BlackViewerMixin):
     def _page_job_runs(self) -> bool:
         """Whether a page job runs that the window can cancel (`_cancel_page`)."""
         cancel = getattr(self, "_page_cancel", None)
-        return bool(self.busy) and cancel is not None and not cancel.is_set() and self.batch is None
+        return bool(self.busy) and cancel is not None and not cancel.is_set()
 
     def _page_job_ends(self) -> bool:
         """Whether a page job the window cancelled (a page turned, Stop) is still on its way out."""
         cancel = getattr(self, "_page_cancel", None)
-        return bool(self.busy) and cancel is not None and cancel.is_set() and self.batch is None
+        return bool(self.busy) and cancel is not None and cancel.is_set()
 
     def _on_job_page(self, image: Image.Image) -> bool:
         """Whether the viewer's frame *image* shows the page the running job reads (`_job_frame`; `_shows_page`)."""
@@ -2082,17 +1886,14 @@ class LiveViewMixin(BlackViewerMixin):
     def _take(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None,
               operation: bool = False, complete: bool | None = None) -> str:
         """A settled frame of the viewer taken as the page (follow = "events"). With Auto on a new page is started at
-        once (`_on_new_page`), or - while the models load, a job or the batch runs - as soon as it can be (`_queue`:
-        the viewer is looked at again then). With Auto off a page turned by TASlation's own *operation* is translated,
-        as before. *complete*: the page job's (`_on_new_page`). Beside a run that translates, a new page is asked of
-        the run, whatever Auto says (`_beside_take`). Returns "started", "queued" or "same" (nothing to take)."""
+        once (`_on_new_page`), or - while the models load or a job runs - as soon as it can be (`_queue`: the viewer is
+        looked at again then). With Auto off a page turned by TASlation's own *operation* is translated, as before.
+        *complete*: the page job's (`_on_new_page`). Returns "started", "queued" or "same" (nothing to take)."""
         f = self._following
-        if reads_beside(self):
-            return self._beside_take(image, thumb, frame_detail)
         if self.auto_var.get():
             if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
                 return "same"
-            if not self.ready or self.busy or self.batch is not None or self._batching:
+            if not self.ready or self.busy:
                 f.taken = None
                 self._cancel_page(turned=True)  # the page being read is not on show any more
                 self._queue("auto")
@@ -2101,7 +1902,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._mark_taken(image, thumb, frame_detail)
             self._on_new_page(image, thumb, complete=complete)
             return "started"
-        if not operation or not self.ready or self.busy or self.batch is not None:
+        if not operation or not self.ready or self.busy:
             return "same"
         if not self._enlarge_first(self.translate_now):
             return "same"
@@ -2150,10 +1951,10 @@ class LiveViewMixin(BlackViewerMixin):
         self._take_retake(image, thumb)
 
     def _drew_soft(self, soft: Image.Image, sharp: Image.Image) -> None:
-        """The viewer chosen has drawn a page soft first: *soft*, then its sharp picture *sharp* (`batch.sharper`). The
+        """The viewer chosen has drawn a page soft first: *soft*, then its sharp picture *sharp* (`frames.sharper`). The
         `crispness` of both is kept with the viewer's window, CRISP_KEPT of each at most - what its frames are judged
-        by (`_looks_soft`), and the sharp one's with its page (`batch.SharpSeen`); a window chosen anew starts afresh,
-        as a whole-book run does (`batch.PageWatch`)."""
+        by (`_looks_soft`), and the sharp one's with its page (`frames.SharpSeen`); a window chosen anew starts
+        afresh."""
         win = self.selected
         if win is None:
             return
@@ -2173,8 +1974,8 @@ class LiveViewMixin(BlackViewerMixin):
     def _looks_soft(self, image: Image.Image) -> bool:
         """Whether *image*, a frame of the viewer chosen, is a soft picture of its page by what that viewer has drawn:
         it has drawn a page soft first (`_drew_soft`), and the frame is less crisp than PAGE_SHARP_SHARE of the sharp
-        picture it drew of that very page (`batch.SharpSeen`), or its `crispness` is not nearer that of its sharp
-        pictures than that of its soft ones (`batch.looks_sharp`, as a whole-book run judges its frames). The page's
+        picture it drew of that very page (`frames.SharpSeen`), or its `crispness` is not nearer that of its sharp
+        pictures than that of its soft ones (`frames.looks_sharp`). The page's
         own picture only adds soft frames to those the viewer's pictures find: a soft picture as crisp as
         PAGE_SHARP_SHARE of its page's sharp one stays soft when they call it so. Never so for a viewer not seen to
         draw a page soft first: it pays nothing."""
@@ -2206,13 +2007,7 @@ class LiveViewMixin(BlackViewerMixin):
         job started early whose confirmation `_retake` took back leaves nothing at all (no page unit, no line kept for
         reuse, no line drawn by its requests: `pipeline.Provisional`), so nothing is dropped here."""
         f = self._following
-        if reads_beside(self):  # beside a run that translates: the sharper frame is asked of the run
-            retake, f.retake = f.retake, None
-            self._auto_last, self._auto_candidate = thumb, None
-            self._mark_taken(image, thumb, retake.detail if retake is not None else None)
-            self._beside_page(image, thumb)
-            return
-        if not self.ready or self.busy or self.batch is not None or self._batching:
+        if not self.ready or self.busy:
             self._cancel_page()
             self._queue("auto")  # `_look` takes it once the job is gone
             return
@@ -2253,7 +2048,7 @@ class LiveViewMixin(BlackViewerMixin):
         shows another page - the lines answered by then are kept, the page marked as lacking the rest
         (`pipeline.turn_away`), so that coming back to it asks only for the rest."""
         cancel = getattr(self, "_page_cancel", None)
-        if cancel is None or cancel.is_set() or self.batch is not None:
+        if cancel is None or cancel.is_set():
             return False
         self._cancel_why = "page"
         if turned:
@@ -2296,10 +2091,8 @@ class LiveViewMixin(BlackViewerMixin):
         first), is followed on while a page job holds the worker, rather than taken as settled (`_take`: queued, and
         taken by the look once the job is gone, with no gate): so a frame that has not stayed as it is for KEEP_SETTLES
         times settle_ms is never kept from a job without a gate. Not with early_start off, after a key pressed for
-        real, with a whole-book run, nor once the frame has stayed RETAKE_WITHIN_MS (a job that does not end)."""
+        real, nor once the frame has stayed RETAKE_WITHIN_MS (a job that does not end)."""
         if not self._early_on() or op.turned_at is not None or not self.busy:
-            return False
-        if self.batch is not None or self._batching or reads_beside(self):
             return False
         return now - op.last_at < RETAKE_WITHIN_MS / 1000
 
@@ -2349,22 +2142,17 @@ class LiveViewMixin(BlackViewerMixin):
         """Whether Auto's `_on_new_page` would do more with *image* than translate it: start the book (the start
         dialog, the name asked for: `_begin_book`), or on the full screen count it among the pages kept nowhere - asked
         without changing anything."""
-        scanned = getattr(self, "_book_scanned", False) and getattr(self, "_scanned_book", "") == \
-            self.book_var.get().strip()
-        whole = self.scan_mode() == "book"
-        if scanned or not (whole or self._name_needed()) or not self._page_uncached(image):
-            return False
-        return not (whole and not self._name_needed() and self._book_read())
+        return self._name_needed() and self._page_uncached(image)
 
     def _early_allowed(self, op: Operation, image: Image.Image, thumb: np.ndarray) -> bool:
         """Whether *op*'s frame *image* may be started at once, before it settles (`_early_start`): early_start on,
         no key pressed for real (its two turns are watched for), none started early yet, the models ready, the worker
-        free, no whole-book run; Auto on and the frame a new page whose start asks nothing (no book start, no window
+        free; Auto on and the frame a new page whose start asks nothing (no book start, no window
         being enlarged), or Auto off and a page turned by TASlation's own operation; the viewer enlarged already; and
         a page the cache does not hold whole (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
         if not self._early_on() or op.turned_at is not None or getattr(self, "_early", None) is not None:
             return False
-        if reads_beside(self) or not self.ready or self.busy or self.batch is not None or self._batching:
+        if not self.ready or self.busy:
             return False
         if self._black_open() or getattr(self, "_enlarging", None) is not None:
             return False
@@ -2503,183 +2291,6 @@ class LiveViewMixin(BlackViewerMixin):
         replaced = [] if data.get("discarded") else list(data.get("replaced") or ())
         self._stored_by = (frame, stored, replaced) if frame is not None else None
 
-    # ------------------------------------------------------------------ beside a whole-book run that translates
-    def _watch_beside(self) -> None:
-        """At each heartbeat: a run that has come to its translation starts the reading beside it (`_begin_beside`);
-        one that is over ends it (`_end_beside`)."""
-        if reads_beside(self):
-            if getattr(self, "_beside", None) is None:
-                self._begin_beside()
-        elif getattr(self, "_beside", None) is not None and not in_a_run(self):
-            self._end_beside()
-
-    def _begin_beside(self) -> Beside:
-        """The run has come to its translation: the viewer's page as it is now is the page the reader has not turned
-        from yet (`Beside.base`), taken without a word, so that only a page turned since takes the page area from the
-        run's page being translated. One capture, whoever is in front (the run captures nothing any more)."""
-        b = self._beside = Beside()
-        win = self.selected
-        if win is None or not window_exists(win.hwnd) or not self._book_in_front():
-            return b
-        try:
-            image = self._capture(win.hwnd)
-        except CaptureError:
-            return b
-        thumb = thumbnail(image)
-        if self._drew_nothing(thumb):
-            return b
-        b.base = thumb
-        self._auto_last, self._auto_candidate = thumb, None
-        self._quiet_live(image, thumb)
-        f = getattr(self, "_following", None)
-        if f is not None:
-            f.seen = thumb
-        return b
-
-    def _end_beside(self) -> None:
-        """The run is over (`jobs._batch_done`): the reading beside it ends, and its line on the page with it."""
-        b, self._beside = getattr(self, "_beside", None), None
-        if b is not None:
-            self._beside_unsay(b)
-
-    def _beside_take(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None) -> str:
-        """`_take` beside a run that translates: a new settled page asked of the run (`_beside_page`), "started" so
-        that it is looked at again as a page taken is (a sharper frame of it: `_retake`)."""
-        if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
-            return "same"
-        self._auto_last, self._auto_candidate = thumb, None
-        self._mark_taken(image, thumb, frame_detail)
-        return "started" if self._beside_page(image, thumb) else "same"
-
-    def _beside_page(self, image: Image.Image, thumb: np.ndarray) -> bool:
-        """A page of the viewer taken beside a run that translates. The page on show as the translation began
-        (`Beside.base`) leaves the run's page being translated on the page area; any other page the reader turns to
-        takes it from there on (the run's page goes, `strip.end_follow`), and is asked of the run (`_ask_beside`): no
-        model request, no page job. Whether it was asked."""
-        b = getattr(self, "_beside", None)
-        if b is None:  # (taken before the heartbeat began the reading beside the run: this is the page on show)
-            b = self._beside = Beside()
-        if not b.reading:
-            if b.base is None:
-                b.base = thumb
-                return False
-            if not frames_differ(b.base, thumb):
-                return False
-            b.reading = True
-        b.seq, b.state = None, ""
-        self._beside_unsay(b)
-        end_follow(self, redisplay=False)  # (the run's page being translated, when it was on show ...)
-        self._show_badge()  # (... and the badge of its progress: `_badge_due`)
-        self._redisplay()
-        self._ask_beside(image)
-        return True
-
-    def _beside_unsay(self, b: Beside) -> None:
-        """The line on the page about the page before goes (unless another line took its place meanwhile)."""
-        if b.note and getattr(self.canvas, "note", "") == b.note:
-            self.canvas.set_note("")
-        b.note = ""
-
-    def _ask_beside(self, image: Image.Image) -> None:
-        """The viewer's frame *image* asked of the run (`BatchReader.viewer_page`) on a thread of the window's own, at a
-        lower priority, one at a time: a frame asked for while one is answered waits, and only the latest does. The
-        answer comes as ``beside_page`` (`_beside_shown`). Nothing of it is written anywhere."""
-        b, batch = getattr(self, "_beside", None), getattr(self, "batch", None)
-        if b is None or batch is None:
-            return
-        with b.lock:
-            b.token += 1
-            b.pending = (b.token, image)
-            if b.thread is not None:
-                return  # (the thread asks it next)
-            b.thread = threading.Thread(target=self._beside_loop, args=(b, batch), name="beside-run-page",
-                                        daemon=True)
-            b.thread.start()
-
-    def _beside_loop(self, b: Beside, batch: Any) -> None:
-        lower_priority()
-        while True:
-            with b.lock:
-                job, b.pending = b.pending, None
-                if job is None:
-                    b.thread = None
-                    return
-            token, image = job
-            try:
-                page = batch.viewer_page(image)
-            except Exception:  # noqa: BLE001 - nothing to show of it: the page stays as the viewer shows it
-                page = None
-            self._post("beside_page", token=token, page=page)
-
-    def _beside_shown(self, data: dict[str, Any]) -> None:
-        """The run's answer for the page asked last (``beside_page``; an older one is dropped): a page translated is
-        the page on show - its lettering laid over the viewer's frame while that shows the page (`_picture`,
-        `_same_page`) -, any other shows the viewer's frame as it is, with a line on the page that says why
-        (`beside_line`)."""
-        b = getattr(self, "_beside", None)
-        page = data.get("page")
-        if b is None or not b.reading or data.get("token") != b.token or page is None:
-            return
-        b.seq, b.state = int(getattr(page, "seq", 0) or 0), str(getattr(page, "state", ""))
-        if b.state == "translated" and page.image is not None and page.frame is not None:
-            self.last_result = PageResult(image=page.image, original=page.frame, regions=[])
-        else:
-            self.last_result = None
-        self._redisplay()
-        state = b.state
-        line = beside_line(state)
-        self._beside_unsay(b)
-        b.note = line
-        if line:
-            self.canvas.set_note(line)
-            self._page_status(lambda: beside_line(state), self._live)
-        elif state == "translated":
-            self.say("This page is translated; the whole-book run goes on with the rest of the book.")
-            self._status_page = self._live  # (about the page on show: `_page_status`)
-
-    def _beside_stage(self, data: dict[str, Any]) -> None:
-        """A page of the run has its translation (``page_stage`` translate done or failed): when the viewer shows that
-        page beside the run, waiting for it, it is asked of the run again, and shows translated."""
-        b = getattr(self, "_beside", None)
-        if b is None or not b.reading or data.get("stage") != "translate" or data.get("state") not in ("done", "failed"):
-            return
-        try:
-            seq = int(data.get("seq"))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return
-        if seq == b.seq and b.state == "waiting" and self._live is not None:
-            self._ask_beside(self._live)
-
-    def _beside_translation_page(self, data: dict[str, Any]) -> bool:
-        """Whether the run's picture of the page it translates (``translation_page``) is kept from the page area: once
-        the reader reads beside the run, but for the page the viewer shows (its seq as the run answered it, while it
-        waits for its translation), whose progress is shown then; the run's page on show goes when the run moves on to
-        another."""
-        b = getattr(self, "_beside", None)
-        if b is None or not b.reading:
-            return False
-        if b.seq and b.state == "waiting" and data.get("seq") == b.seq:
-            return False
-        if getattr(self, "_run_view", None) is not None:
-            end_follow(self)
-        return True
-
-    def _run_page_kept(self, view: Any) -> bool:
-        """Beside a run that translates (`Beside`): whether its page being translated (*view*, `strip.RunPage`) keeps
-        the page area, as the viewer's latest frame (`_live`) tells - before the reader has turned, while the viewer
-        shows the page it showed as the translation began (`Beside.base`); once the reader reads beside the run, while
-        it shows that very page (`_shows_page`, against the frame the run read). A page turned to shows as the viewer
-        draws it, not once it is taken (`_beside_page`, settle_ms after it stopped changing: on the browser-type
-        stand-in viewer the run's page stayed 0.5-0.9 s after such a turn), and the badge goes with the run's page
-        (`_show_live`, `_badge_due`)."""
-        b = getattr(self, "_beside", None)
-        live = self._live
-        if b is None or live is None:
-            return True
-        if not b.reading:
-            return b.base is None or not frames_differ(b.base, _thumb(self, live))
-        return self._shows_page(live, view.frame)
-
     # ------------------------------------------------------------------ an operation followed (events)
     def _begin_follow(self, hwnd: int, reference: Any, key: str = "", retried: bool = False, *,
                       phase: str = "change", last: np.ndarray | None = None,
@@ -2809,12 +2420,9 @@ class LiveViewMixin(BlackViewerMixin):
         after a key pressed for real, not before TWO_TURNS_S has passed since the page turned: a page that turns once
         more by then turned twice, `_say_two_turns`); "recheck" - RECHECK_MS after the page was taken: a frame of
         another page is followed until it settles, a sharper frame of the same page is read again, and a page taken at
-        once in translator mode is completed from its frame once that has settled (`_completion`, `_complete_taken`).
-        While a run reads the pages the reader turns only "change" is followed (the key got to the viewer); the run
-        takes the page. Once the run translates, all of it is followed, as without a run (`reads_beside`)."""
+        once in translator mode is completed from its frame once that has settled (`_completion`, `_complete_taken`)."""
         f = self._following
-        if viewer_rests(self) or self._black_open() or (
-                in_a_run(self) and op.phase != "change" and not reads_beside(self)):
+        if self._black_open():
             return  # (a viewer that stays black: the look when it is back takes it from there)
         now = time.monotonic()
         settle_s = self.settings.settle_ms / 1000
@@ -3013,16 +2621,16 @@ class LiveViewMixin(BlackViewerMixin):
         """Translator mode: the page taken at once from the cache, settled now, read again from this frame to complete
         it (`pipeline.process`'s *complete*: the regions the cache has no bubble for read and translated). While the
         job drawing it from the cache still runs it waits for it, every FOLLOW_STEP_MS until RETAKE_WITHIN_MS after the
-        page was taken; with a whole-book run, or the models not ready, the page stays as the cache drew it."""
+        page was taken; with the models not ready, the page stays as the cache drew it."""
         f = self._following
         taken = f.taken
         if taken is None:
             return
-        if self.busy and self.batch is None and not self._batching and now - taken.at < RETAKE_WITHIN_MS / 1000:
+        if self.busy and now - taken.at < RETAKE_WITHIN_MS / 1000:
             self._next_step(op, FOLLOW_STEP_MS)
             return
         taken.complete = False
-        if not self.ready or self.busy or self.batch is not None or self._batching:
+        if not self.ready or self.busy:
             return
         self._auto_last, self._auto_candidate = thumb, None
         self._mark_taken(image, thumb, taken.detail)
@@ -3048,8 +2656,6 @@ class LiveViewMixin(BlackViewerMixin):
             if getattr(self, "_raised", None) is not None:
                 self.after(self.settings.settle_ms, self._lower_viewer)  # drawn: back in its place at once
             self._learned(op.hwnd, op.pressed, bool(op.key) and not op.retried)
-            if in_a_run(self) and not reads_beside(self):
-                return  # (the run reading the pages takes the page)
             self._auto_candidate = None
             f.seen = thumb
             frame_detail = _detail(self, image, self._area_box(image))

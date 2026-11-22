@@ -473,7 +473,7 @@ class CachesDialog(tk.Toplevel):
 
     def __init__(self, master: tk.Misc, store: CacheStore,
                  on_changed: Callable[[str], None] | None = None, on_status: Callable[[str], None] | None = None,
-                 in_use: Callable[[str], bool] | None = None, *, annotations: Any = None, sheets: Any = None,
+                 *, annotations: Any = None, sheets: Any = None,
                  rename: Callable[[str, str, str, str, Any], None] | None = None):
         super().__init__(master)
         self.store = store
@@ -486,7 +486,6 @@ class CachesDialog(tk.Toplevel):
         else:
             self.stores = store  # the caches alone (`backup` takes a CacheStore so)
         self.rename_flow = rename if rename is not None else getattr(master, "_plan_rename", None)
-        self.in_use = in_use or (lambda _book: False)  # a run reads this book: its next save would bring the file back
         self.on_changed = on_changed  # a book's cache was deleted or imported into
         self.on_status = on_status or (lambda _text: None)
         self._entries: dict[str, dict[str, Any]] = {}  # tree item -> the cache it lists
@@ -652,11 +651,6 @@ class CachesDialog(tk.Toplevel):
         if not entries:
             self._say(_("Select one in the list first."))
             return
-        for entry in entries:
-            book = str(entry.get("book", ""))
-            if self.in_use(book):  # the list and its selection stay
-                self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
-                return
         if len(entries) == 1:
             book, language = str(entries[0].get("book", "")), str(entries[0].get("language", "") or "English")
             question = _(DELETE_QUESTION).format(book=book, language=language)
@@ -688,14 +682,11 @@ class CachesDialog(tk.Toplevel):
 
     def _rename(self) -> None:
         """Rename...: the one book chosen gets the name the reader gives (`RenameBookDialog`), by the window's rename
-        - never while a run reads it, nor while the window waits for an answer to a question of its own."""
+        - never while the window waits for an answer to a question of its own."""
         entry = self._selected()
         if entry is None or self.rename_flow is None:
             return
         book = str(entry["book"])
-        if self.in_use(book):
-            self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
-            return
         if getattr(self.master, "_start_dialog", None) is not None:
             self._say(_("Answer the question in the TASlation window first."), error=True)
             return
@@ -864,10 +855,6 @@ class CachesDialog(tk.Toplevel):
             if choice is None or not choice.books:
                 return  # Cancel: nothing is imported
         books = list(dict.fromkeys(opened.held[i].book for i in opened.chosen(choice.books)))
-        for book in books:
-            if self.in_use(book):
-                self._say(_("{book} is being read by a run: press Stop first.").format(book=book), error=True)
-                return
         try:
             result = self._busy(lambda: backup.apply_import(
                 self.stores, opened, choice.books, keep_corrections=choice.keep_corrections,

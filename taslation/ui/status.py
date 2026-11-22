@@ -1,5 +1,5 @@
 """The window's status line (said again in the window's language after a switch; a `taslation.messages.Message` is
-rendered with the message catalog of that language), the strips over the page (the setup banner and the scan band,
+rendered with the message catalog of that language), the strips over the page (the setup banner and the band,
 `banner`), and the signs of a running job:
 the busy badge on the page, the progress bar beside Stop and the title - the bar and the title only once a job has
 run for `BUSY_SIGNS_S`, so a page that comes from the cache at once does not make the window flicker."""
@@ -16,13 +16,11 @@ from ..messages import FOLLOW_UPS, JOINER, Message
 from ..pipeline import summary as page_summary
 from ..regions import PageResult
 from ..render.shaping import letter_by_letter
-from . import status_slot, taskbar, trouble
-from .banner import (BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, band_fraction, band_text,
-                     blocking, busy_title, is_notice)
-from .constants import NOTE_MS_PER_CHAR, READER_AFTER_RUN, READING_NOTE_MS, READY, TRANSLATOR_NOTE_MAX_MS, in_a_run
+from . import status_slot, trouble
+from .banner import BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, busy_title, is_notice
+from .constants import NOTE_MS_PER_CHAR, READING_NOTE_MS, READY, TRANSLATOR_NOTE_MAX_MS
 from .constants import APP_TITLE
 from .progress import busy_line, rendered
-from .strip import run_page_on_show
 
 BUSY_SIGNS_S = 0.3  # a job shows the busy title and bar after this long (a page from the cache is done before)
 
@@ -102,10 +100,10 @@ class StatusMixin:
     def _job_line(self, render: Callable[[], str]) -> None:
         """The status line of the page job at work (its progress, a request that is slow; no note on the full
         screen's page): about the page the job reads (`_job_frame`), so it goes while the viewer shows another page
-        (`_status_follows_page`); a whole-book run's is about the run, whatever the viewer shows."""
+        (`_status_follows_page`)."""
         self.status_var.set(render())
         self._status_render, self._status_key = render, None
-        self._status_page = None if in_a_run(self) else self._job_frame
+        self._status_page = self._job_frame
         self._status_follows_page()
 
     def _font_note(self) -> str:
@@ -145,8 +143,8 @@ class StatusMixin:
 
     # ------------------------------------------------------------------ the strips over the page
     def _build_strips(self) -> None:
-        """Between the toolbar and the page: the setup banner and the scan band, each away while it has nothing to
-        say; the full screen hides them with the toolbar."""
+        """Between the toolbar and the page: the setup banner and the band, each away while it has nothing to say; the
+        full screen hides them with the toolbar."""
         self.strips = ttk.Frame(self)
         self.strips.pack(fill="x")
         self.setup_banner = SetupBanner(self.strips)
@@ -176,9 +174,7 @@ class StatusMixin:
         then what keeps the window from reading the viewer, with its button (`trouble.viewer_trouble`, `_trouble`:
         Choose viewer, Show viewer, Move TASlation aside); the translator on the processor (`_on_cpu`, with Close);
         a target language whose script this computer cannot shape (`render.shaping.letter_by_letter`, with Close:
-        once a session);
-        after them, while a whole-book scan waits for the setup, that it does."""
-        held = self._scan_held and bool(blocking(self._health))
+        once a session)."""
         rows: list[tuple[str, tuple[str, str], Any]] = [
             (trouble.setup_line(m), NOTICE_COLOURS if is_notice(m) else PROBLEM_COLOURS, trouble.setup_button(self, m))
             for m in self._health]
@@ -194,8 +190,6 @@ class StatusMixin:
         if not getattr(self, "_unshaped_closed", False) and letter_by_letter(language):  # (`render.shaping`)
             rows.append((_("Lettering in {language} cannot be shaped on this computer: its letters are drawn one by one, so conjuncts and vowel signs come out wrong. Run install.cmd again to install what is missing.").format(
                 language=_(language)), NOTICE_COLOURS, (_("Close"), self._close_unshaped_line)))
-        if held:
-            rows.append((_("The whole book is not read yet: first fix what the lines above the page say. Until then TASlation translates page by page."), NOTICE_COLOURS, None))
         self.setup_banner.show_rows(rows)
         self._place_strip(self.setup_banner, bool(rows))
 
@@ -223,82 +217,20 @@ class StatusMixin:
             self._show_banner()
 
     def _band_view(self) -> tuple[list[str], list[tuple[str, Callable[[], None]]]]:
-        """What the scan band shows for its state (`_band`): its lines and its buttons."""
-        band = self._band
-        kind = band["kind"]
-        if kind == "scan":
-            scan = band["scan"]
-            buttons = [(_("Stop"), self.stop_batch)]
-            if scan.scanning and not scan.finishing:
-                buttons.insert(0, (_("Finished reading"), self.finish_reading))
-            action = trouble.WAITING_ACTIONS.get(getattr(scan.waiting, "code", "")) if scan.waiting else None
-            if action is not None:  # what the run waits for, where a button does it
-                buttons.insert(0, trouble.action_button(self, action))
-            return [band_text(scan)], buttons
-        if kind == "names":  # names the pages read one by one render in more than one way (`_offer_page_names`)
-            return ([_("{n} name(s) rendered in more than one way in the pages read so far.").format(
-                n=band["page_names"])], [(_("Review names..."), self.review_names), (_("Close"), self.close_band)])
-        lines = [rendered(band["summary"])]
-        if band.get("resumed"):
-            lines.append(_("Auto: follow page turns is on again."))
-        if band.get("reader"):
-            lines.append(_(READER_AFTER_RUN))
-        buttons = [(_("Close"), self.close_band)]
-        if band.get("page_names"):  # ... and the pages read one by one since: what is found now (`_offer_page_names`)
-            lines.append(_("{n} name(s) rendered in more than one way in the pages read so far.").format(
-                n=band["page_names"]))
-        elif band.get("names"):  # the run rendered names in more than one way: one can be chosen for each
-            lines.append(_("{n} name(s) rendered in more than one way across the book.").format(n=band["names"]))
-        if band.get("names") or band.get("page_names"):
-            buttons.insert(0, (_("Review names..."), self.review_names))
-        held = self._held_readings()
-        if held is not None:  # a Stop left pages read and not translated: they can be translated now
-            buttons.insert(0, (_("Translate the rest") if held.complete else _("Translate the pages read"),
-                               self.translate_readings))
-        return lines, buttons
-
-    def _held_readings(self) -> Any:
-        """What the run on the band read and did not store, while the window holds it for the book, model and language
-        in the boxes (`Readings`; None: nothing, or another book's)."""
-        band = self._band or {}
-        code = getattr(band.get("summary"), "code", "")
-        if code not in ("batch.stopped_reading", "batch.stopped_translating"):
-            return None
-        held = getattr(self, "_readings", None)
-        boxes = (self.book_var.get().strip(), self.model_var.get().strip(), self.lang_var.get().strip())
-        return held[1] if held is not None and held[0] == boxes and held[1].units else None
+        """What the band shows for its state (`_band`): the names that the pages read render in more than one way
+        (`_offer_page_names`), with Review names... and Close."""
+        return ([_("{n} name(s) rendered in more than one way in the pages read so far.").format(
+            n=self._band["page_names"])], [(_("Review names..."), self.review_names), (_("Close"), self.close_band)])
 
     def _show_band(self) -> None:
-        """The scan band for its state (`_band`; None: away), with the bar of a whole-book translation, and that bar
-        on the taskbar button too (`_show_taskbar`)."""
+        """The band for its state (`_band`; None: away)."""
         if self._band is None:
             self._place_strip(self.scan_band, False)
             self.scan_band.set([], ())
-            self.scan_band.show_fraction(None)
-            self._show_taskbar(None)
             return
         lines, buttons = self._band_view()
         self.scan_band.set(lines, buttons)
-        scan = self._band.get("scan") if self._band.get("kind") == "scan" else None
-        self.scan_band.show_fraction(band_fraction(scan))
-        self._show_taskbar(scan)
         self._place_strip(self.scan_band, True)
-
-    def _show_taskbar(self, scan: Any) -> None:
-        """The run on the taskbar button (`taskbar.TaskbarProgress`): a green bar while the book is translated, a
-        yellow one while the run waits for the reader, none otherwise (while the pages are read, after the run)."""
-        bar = getattr(self, "_taskbar", None)
-        if bar is None:
-            if scan is None or not hasattr(self, "wm_frame"):
-                return
-            bar = self._taskbar = taskbar.TaskbarProgress(lambda: int(self.wm_frame(), 16))
-        fraction = band_fraction(scan)
-        if scan is not None and scan.waiting:
-            bar.show(taskbar.PAUSED, 1.0 if fraction is None else fraction)
-        elif fraction is not None:
-            bar.show(taskbar.NORMAL, fraction)
-        else:
-            bar.clear()
 
     # ------------------------------------------------------------------ a job running
     def _go_busy(self) -> None:
@@ -322,7 +254,6 @@ class StatusMixin:
             return
         self._busy_signs = False
         self.translate_btn["state"] = "normal"
-        self.batch_btn["state"] = "normal"
         self.title(APP_TITLE)
         self._show_progress(waiting)
         if not waiting:
@@ -341,8 +272,7 @@ class StatusMixin:
 
     def _show_busy_signs(self) -> None:
         self.translate_btn["state"] = "disabled"
-        self.batch_btn["state"] = "disabled"
-        self.title(busy_title(getattr(self, "_scan", None)))
+        self.title(busy_title())
         self._show_progress(True)
 
     def _show_progress(self, shown: bool) -> None:
@@ -358,28 +288,11 @@ class StatusMixin:
     def _busy_text(self) -> str:
         fill = self._fill
         return busy_line(self._progress, time.monotonic() - self._busy_since,
-                         fill.filled - fill.mark if fill is not None else 0,
-                         reading=getattr(getattr(self, "_scan", None), "phase", "") == "read")
-
-    def _badge_due(self) -> bool:
-        """Whether the busy badge belongs on the page area: it tells of the page being worked on, so beside a
-        whole-book run that translates, once it shows a page of its own or the reader has turned to a page of their own
-        (`live.Beside.reading`), only while the page area shows the run's page being translated
-        (`strip.run_page_on_show`: not once the viewer shows another page, `live._run_page_kept`). The run's progress is
-        the band's then. While the run reads the pages, whose frames the page area follows as they come
-        (`live._run_frame`), only while it shows the page being read (`live._fill_on_show`)."""
-        batch = getattr(self, "batch", None)
-        if batch is not None and not getattr(batch, "viewer_free", False) and self._fill is not None:
-            return self._fill_on_show()
-        beside = getattr(self, "_beside", None)
-        if beside is None or (not beside.reading and getattr(self, "_run_view", None) is None):
-            return True  # (no reading beside the run, nor a page of the run on the page area yet)
-        return run_page_on_show(self) is not None
+                         fill.filled - fill.mark if fill is not None else 0)
 
     def _show_badge(self) -> None:
-        """The busy badge on the page area while the busy band is on (`_busy_shown`) and it belongs there
-        (`_badge_due`)."""
-        self.canvas.set_busy(self._busy_text if self._busy_shown and self._badge_due() else None)
+        """The busy badge on the page area while the busy band is on (`_busy_shown`)."""
+        self.canvas.set_busy(self._busy_text if self._busy_shown else None)
 
     def _hide_busy(self) -> None:
         self._busy_shown = False

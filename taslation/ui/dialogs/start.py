@@ -1,10 +1,9 @@
-"""Before a book is read: its name and, in whole-book mode, whether to read the whole book first (`StartDialog`); the
-names a window's title gives that name no book (`generic_book_name`, from `bookid`: a browser-based viewer's tab
-can be titled with the viewer's name, so every book read there would share one cache, one series sheet and one notes
-file; which names are a viewer's is learned on the reader's computer, `viewerparts`); the name
-the book's colophon gives, offered once (`ColophonOffer`); the one spelling of a book's name, offered for a book kept
-under an older one (`StandardNameOffer`). The name is asked and shown as Series and Volume (`book_fields`). Wherever
-whole-book mode is chosen, what a store's terms make of it is said too (`terms_note`)."""
+"""Before a book is read: its name (`StartDialog`); the names a window's title gives that name no book
+(`generic_book_name`, from `bookid`: a browser-based viewer's tab can be titled with the viewer's name, so every book
+read there would share one cache, one series sheet and one notes file; which names are a viewer's is learned on the
+reader's computer, `viewerparts`); the name the book's colophon gives, offered once (`ColophonOffer`); the one spelling
+of a book's name, offered for a book kept under an older one (`StandardNameOffer`). The name is asked and shown as
+Series and Volume (`book_fields`)."""
 
 from __future__ import annotations
 
@@ -26,20 +25,11 @@ WRAP = 470  # pixels: the dialog's text is broken into lines this wide
 HINTS = ("recognised", "several", "colophon", "last")  # what the start dialog says of the names it offers
 
 
-def terms_note() -> str:
-    """What a store's terms make of whole-book mode, in the window's language: said wherever that mode is chosen (the
-    start dialog's question, the whole-book dialog). It says what TASlation does and promises nothing of the terms."""
-    return _("A store's terms of use are a contract between you and the store. In a whole-book run TASlation turns no page: it reads only the pages you turn yourself. That does not settle what your store's terms allow, so check them and use this mode knowing that.")
-
-
 class StartDialog(tk.Toplevel):
     """The start of a book, centred over the window and modal: its name (*name*, prefilled; empty and required when
-    the window's title gives a generic one, *generic*) and, with *ask*, the question whether to read the whole book
-    first, with what a store's terms make of it (`terms_note`), [Start] [Page by page instead]; without *ask* the name
-    alone, with [OK]. The buttons wait for a name, and never take one that names no book (`generic_book_name`).
-    *on_answer(answer, name)* gets "start", "page" or "ok" and the name - or None when the dialog is closed without an
-    answer (Esc, the window's close button). Enter gives *default*: "page" (the lighter choice: nothing runs that the
-    reader did not choose), or "start" when the reader chose to read this book whole before (`JobsMixin._ask_book`).
+    the window's title gives a generic one, *generic*), with [OK], which Enter presses. The button waits for a name,
+    and never takes one that names no book (`generic_book_name`). *on_answer(answer, name)* gets "ok" and the name -
+    or None when the dialog is closed without an answer (Esc, the window's close button).
 
     With a generic title, *matches* are the names the book may have, best first (`bookid.recognise`: books whose
     pages look like the one on screen; or the name its colophon gives; or the name last given in this viewer), and
@@ -53,16 +43,14 @@ class StartDialog(tk.Toplevel):
     make; ``entry`` is the Series field, a list of whole names with several *matches*): a name given is split into
     them, and a volume that is none keeps the dialog from answering, with a line that says why."""
 
-    def __init__(self, master: tk.Misc, name: str, generic: bool, ask: bool,
-                 on_answer: Callable[[str | None, str], None], matches: Sequence[str] = (), hint: str = "",
-                 default: str = "page"):
+    def __init__(self, master: tk.Misc, name: str, generic: bool, on_answer: Callable[[str | None, str], None],
+                 matches: Sequence[str] = (), hint: str = ""):
         super().__init__(master)
         self.title("TASlation")
         self.transient(master)
         self.resizable(False, False)
         self.on_answer = on_answer
         self.answered = False
-        self.ask = ask
         frm = ttk.Frame(self, padding=14)
         frm.pack(fill="both", expand=True)
         offered = [m for m in dict.fromkeys(" ".join(str(m).split()) for m in matches) if m and not generic_book_name(m)]
@@ -102,29 +90,12 @@ class StartDialog(tk.Toplevel):
             self.fields.pack(fill="x")
         self.entry = self.fields.series
         self.refused_label = ttk.Label(frm, justify="left", foreground=theme.colour("error"))  # shown when a volume is refused
-        if ask:
-            question = ttk.Label(frm, justify="left")
-            question.configure(text=break_lines(_("Read the whole book first? Turn the pages at your own pace, in the viewer or with the page keys in this window: TASlation reads each page you turn, and never turns one itself. When you reach the end, press Finished reading, and it translates the whole book with the whole story in view (about an hour for a 190-page volume on a mid-range GPU). Stop ends the run at any time."), WRAP, question))
-            question.pack(anchor="w", pady=(14, 0))
-            self.terms_label = ttk.Label(frm, justify="left")
-            self.terms_label.configure(text=break_lines(terms_note(), WRAP, self.terms_label))
-            self.terms_label.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(frm)
         row.pack(fill="x", pady=(14, 0))
-        if ask:
-            self.default = "start" if default == "start" else "page"
-            page = ttk.Button(row, text=_("Page by page instead"), command=lambda: self._answer("page"),
-                              default="active" if self.default == "page" else "normal")
-            start = ttk.Button(row, text=_("Start"), command=lambda: self._answer("start"),
-                               default="active" if self.default == "start" else "normal")
-            page.pack(side="right")
-            start.pack(side="right", padx=(0, 6))
-            self.buttons = [start, page]
-        else:
-            self.default = "ok"
-            ok = ttk.Button(row, text=_("OK"), default="active", command=lambda: self._answer("ok"))
-            ok.pack(side="right")
-            self.buttons = [ok]
+        self.default = "ok"
+        ok = ttk.Button(row, text=_("OK"), default="active", command=lambda: self._answer("ok"))
+        ok.pack(side="right")
+        self.buttons = [ok]
         self.name_var.trace_add("write", lambda *_args: self._sync())
         self._sync()
         self.bind("<Return>", lambda _e: self._answer(self.default))
@@ -247,7 +218,7 @@ class ColophonOffer(tk.Toplevel):
             self.grab_set()
         except tk.TclError:
             pass
-        if not self._keys_given:  # offered by itself after a run: the keys only when TASlation had them
+        if not self._keys_given:  # offered by itself after a page: the keys only when TASlation had them
             self._keys_given = True
             dialog_keys(self, self.master)
 
@@ -328,4 +299,4 @@ class StandardNameOffer(tk.Toplevel):
 
 
 __all__ = ["ColophonOffer", "GENERIC_NAMES", "HINTS", "StandardNameOffer", "StartDialog", "WRAP",
-           "generic_book_name", "terms_note"]
+           "generic_book_name"]

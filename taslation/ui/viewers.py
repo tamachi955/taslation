@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable, Sequence
 
 from .. import netguard, viewerparts
-from ..batch import frames_differ, thumbnail
+from ..frames import frames_differ, thumbnail
 from ..cache import book_key_from_title
 from ..capture import (
     BROWSER_CLASSES,
@@ -41,7 +41,7 @@ from ..i18n import _
 from ..pagekeys import PageKeys, default_keys, key_ways, own_keys, page_keys_for, passed_on, same_key, viewer_title
 from ..recovery import forget_enlarged, keep_enlarged, put_back_enlarged
 from . import area
-from .constants import READING_NOTE_MS, SETTLE_TRIES, VIEWER_CLOSED, VIEWER_RESTORED, WINDOW_WATCH_MS, in_a_run
+from .constants import READING_NOTE_MS, SETTLE_TRIES, VIEWER_CLOSED, VIEWER_RESTORED, WINDOW_WATCH_MS
 from .dialogs import caches as boxes
 from .dialogs.area import AreaDialog
 
@@ -210,18 +210,13 @@ class ViewerMixin:
         minimised (`show_minimised`) and enlarged at once (`_enlarge_first`: in the background, the first frame read
         once it has settled), and the window followed. What a session before saw of the viewer is taken up (how it
         takes a key: `pagekeys.KeyWays.seed`), and once it has settled whether it draws while covered is found out with
-        no key (`_learn_covered_soon`). A window chosen again keeps what it has; during a run the viewer stays the one
-        the run began with."""
+        no key (`_learn_covered_soon`). A window chosen again keeps what it has."""
         idx = self.window_box.current()
         if idx < 0 or idx >= len(self.windows):
             return
         before, chosen = getattr(self, "selected", None), self.windows[idx]
         same = before is not None and before.hwnd == chosen.hwnd
-        if in_a_run(self) and not same:  # a run reads the viewer it began with to the end
-            self._show_chosen()
-            self.say("The viewer cannot be changed during a run: press Stop first.")
-            return
-        if same and (in_a_run(self) or getattr(self, "busy", False)):
+        if same and getattr(self, "busy", False):
             self.selected = chosen  # (the list again, a language switch: the area of the job under way stays as it is)
             return
         left = before if before is not None else getattr(self, "_viewer_closed", None)
@@ -294,10 +289,9 @@ class ViewerMixin:
     def _viewer_gone(self) -> None:
         """The chosen viewer's window was closed: it is left as when another is chosen (`_viewer_left`), none is chosen
         any more, the status line says what to do, and the watch for a viewer starts again (`_watch_windows`). Nothing
-        while the window is still there; during a run nothing yet: the run ends by itself, and the looks that follow
-        find the window gone."""
+        while the window is still there."""
         win = self.selected
-        if win is None or window_exists(win.hwnd) or in_a_run(self):
+        if win is None or window_exists(win.hwnd):
             return
         waiting = getattr(self, "_enlarging", None)
         if waiting is not None:
@@ -409,12 +403,7 @@ class ViewerMixin:
         with the page panel found inside the rectangle shown dashed (`page_area.panel_inside`: what is read of it);
         once an area is chosen or cleared (its Clear area: `clear_area`), *then()* (the full screen offered it first: the
         full screen opens). The area belongs to the frame that is read, so the viewer's window is enlarged first
-        (`_enlarge_first`). Not during a run: a run that follows the reader widens its area with the pages it meets,
-        within the reader's area it began with, other jobs keep one area; and its waiting for an enlarged window must
-        not give way to this."""
-        if in_a_run(self):
-            self.say("The area cannot be changed during a run: press Stop first.")
-            return
+        (`_enlarge_first`)."""
         win = self._current_window()
         if win is None or not self._enlarge_first(lambda: self.set_area(then)):
             return

@@ -260,8 +260,8 @@ class ReplaceMixin:
         """Replace with *text* the matches of *query* whose keys are in *picked* (None: every one), as one change. In
         the worker, which alone changes the cache, and on what the cache holds then; *also*, in the same job after it,
         makes the change in the other volumes of the series (`_replace_in_series`) and gives the lines that say so.
-        False, and the status line says why, while a page or a batch is at work: nothing was asked."""
-        if self.pipeline is None or self.busy or self.batch is not None or self._batching:
+        False, and the status line says why, while a page is at work: nothing was asked."""
+        if self.pipeline is None or self.busy:
             self.say("TASlation is at work on a page. Try again when it is done.")
             return False
         cache = self._book_cache()
@@ -314,8 +314,8 @@ class ReplaceMixin:
         does (one change that Ctrl+Z takes back, the lines marked as the person's) and, in the same job, in each other
         volume, saved at once with a copy of its file kept beside it (`series_scope.change_volumes`; marked as the
         person's too). A series with no other volume kept in the language: this book's Replace all, and a line says
-        why. False, and the status line says why, while a page or a batch is at work."""
-        if self.pipeline is None or self.busy or self.batch is not None or self._batching:
+        why. False, and the status line says why, while a page is at work."""
+        if self.pipeline is None or self.busy:
             self.say("TASlation is at work on a page. Try again when it is done.")
             return False
         cache = self._book_cache()

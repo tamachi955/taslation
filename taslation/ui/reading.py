@@ -10,7 +10,7 @@ Translator role the pointer and the keys are the Translator's as on the page in 
 selects, a drag moves, resizes, turns or draws, a double click opens the editor, the frames and their marks show; a
 click goes on to the viewer only while the page on show is not the translated one, as in the window), Auto stays as
 the person set it, and a status line stays at the bottom long enough to read (`StatusMixin._note_ms`). Whatever needs the toolbar
-(the role, the Book, Series and Volume fields, a whole-book run) is done after leaving it; should the role change
+(the role, the Book, Series and Volume fields) is done after leaving it; should the role change
 meanwhile (a book's start), the full screen follows it (`_reading_role`).
 
 Ways out: F11; Esc, which in the Translator role first lets go of the selected region (`JobsMixin._on_escape`); and a
@@ -26,7 +26,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
 
-from ..batch import thumbnail
+from ..frames import thumbnail
 from ..capture import (
     BROWSER_CLASSES,
     IS_WINDOWS,
@@ -50,14 +50,11 @@ from .constants import (
     KEY_ARROWS,
     READING_MODE,
     READING_MODE_AUTO,
-    READING_NOTE_MS,
     READING_ONLY,
     WINDOW_ALPHA,
-    viewer_rests,
 )
 from .layout import place_window
 from .order import turn_asked
-from .strip import place_strip
 from .viewers import looks_like_browser
 from .bubble_text import BubbleTextMixin
 from .hover import HoverChoiceMixin
@@ -172,8 +169,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         chosen (`_reading_role`): the page keys turn the viewer's pages, and status lines show at the bottom for a few
         seconds (`_note_ms`); in the Reader role Auto follows the pages turned and clicks go through to the viewer, in
         the Translator role the pointer selects and edits the regions as in the window. F11 leaves it, and Esc too
-        once no region is selected. Not while a batch runs or waits to run: that is said on the page for a few
-        seconds, where the batch's own lines do not take its place. Where the capture would take in a browser's tabs
+        once no region is selected. Where the capture would take in a browser's tabs
         and address bar, Set area... is offered first (`_offer_area`; *offered*: it was); the viewer's window is
         enlarged before either (`_enlarge_first`). Show original rests while it is on: the full screen has no menu to
         turn it off with. A faint close button shows at the top edge (`_top_edge_moved`)."""
@@ -181,12 +177,6 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             return
         if self.selected is None:
             self.say("Pick the viewer window first (open your e-book viewer, then choose it in the Viewer list).")
-            return
-        queued = getattr(self, "_queued", None)
-        if self._batching or (queued is not None and queued[0] == "batch"):
-            self.say("Full screen waits for the whole-book run to finish (Stop ends it).")
-            # on the page for a few seconds: the batch's next line takes the status bar at once
-            self.canvas.set_note(_("Full screen waits for the whole-book run to finish (Stop ends it)."), READING_NOTE_MS)
             return
         if not self._enlarge_first(lambda: self.enter_reading(offered)):
             return
@@ -209,10 +199,8 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         monitor = self._window_monitor()  # taken before: Tk puts a full-screen window on the primary monitor
         self.reading = True
         self._viewer_hidden = False
-        self._scan_waits_told = False
         for widget in (*self._bars, self.notes_label, self.status_bar):
             widget.pack_forget()
-        place_strip(self)  # (away while reading)
         self.config(menu="")
         self.canvas.configure(bg="#000000", cursor="")
         try:
@@ -347,7 +335,6 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
             widget.pack(fill="x", before=self.canvas)
         self.status_bar.pack(fill="x", after=self.canvas)
         self._show_notes()
-        place_strip(self)
         self.canvas.configure(bg="#202020")
         self.canvas.set_note("")
         if restore:
@@ -488,10 +475,9 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         a browser that is not in front reaches nothing (0 of 9, Chrome and Edge 156), and the reader is told to turn
         the page in the viewer. Over a full-screen viewer (`overbook`) the keys go to the viewer itself and none comes
         here. In the Translator role the status line names the key as the reader knows it (`key_label`), in the window
-        and on the full screen; the Reader role sees the page turn and says nothing of it. While a run reads the pages
-        the reader turns the key goes on all the same, one press of the reader one key; once it has gone on to the
-        translation nothing goes. The key goes on as the viewer's own key of the same meaning (`_key_for_viewer`): the window's
-        next and previous keys as the keys saved for the viewer in Page keys..., one press one key."""
+        and on the full screen; the Reader role sees the page turn and says nothing of it. The key goes on as the
+        viewer's own key of the same meaning (`_key_for_viewer`): the window's next and previous keys as the keys saved
+        for the viewer in Page keys..., one press one key."""
         hwnd = self._key_viewer()
         if hwnd is None:
             return
@@ -512,8 +498,8 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
 
     def _key_viewer(self) -> int | None:
         """The viewer's window a key goes to now; None (and the reader told why, where there is something to say)
-        when none goes: no viewer, a run that does not follow the reader, a book not in front."""
-        if self.selected is None or viewer_rests(self):
+        when none goes: no viewer, a book not in front."""
+        if self.selected is None:
             return None
         if not self._book_in_front():
             if window_exists(self.selected.hwnd):

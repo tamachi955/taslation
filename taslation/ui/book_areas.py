@@ -4,8 +4,8 @@ the book's annotations): Page > Ignore this area on all pages of this book makes
 before brings the same question once the drop is stored (`_offer_ignore_everywhere`; a "no" is not asked again in the
 window). Adding one is one change across the book (`BookAreas`, a `history.BookStep` of kind "areas") that Ctrl+Z
 takes back whichever page is on show; the page on show is read again from the stores when the area touches it.
-Detection leaves out what lies mostly inside an area (`Pipeline._annotate`), on a page on show and in a whole-book
-run alike; Book settings lists the areas and removes one, with its Undo (`dialogs.book_settings`). Nothing of a page
+Detection leaves out what lies mostly inside an area (`Pipeline._annotate`), on a page on show and on the pages turned
+past alike; Book settings lists the areas and removes one, with its Undo (`dialogs.book_settings`). Nothing of a page
 is kept: an area is four numbers, a side and the page's shape.
 
 Book settings' Use these areas for the series (`use_areas_for_series`), and the Page menu's entry of that name
@@ -23,7 +23,6 @@ from typing import Any
 from ..annotations import BookAnnotations, BookArea, unit_side
 from ..fingerprint import hamming
 from ..i18n import _
-from .constants import in_a_run
 from .dialogs import caches as boxes
 from .history import OWN_PAGE, BookStep, owner
 from .translator import holds
@@ -34,8 +33,8 @@ IGNORE_TIP = ("Translator mode: what is found mostly inside the selected region'
               "of this book (watermarks, page numbers, banners); Book settings lists these areas.")
 # a region dropped where one was dropped on another page before: the question and its buttons
 AREA_QUESTION = ("You dropped a region at this place on another page of this book too. Ignore this area on all pages "
-                 "of this book? What is found mostly inside it is left as drawn on every page, also in a whole-book "
-                 "run. Book settings lists it, and Ctrl+Z takes it back.")
+                 "of this book? What is found mostly inside it is left as drawn on every page. Book settings lists it, "
+                 "and Ctrl+Z takes it back.")
 AREA_YES = "Ignore on all pages"
 AREA_NO = "Only this page"
 # what the status line says
@@ -43,7 +42,6 @@ AREA_ADDED = "This area is ignored on all pages of this book. Ctrl+Z takes it ba
 AREA_THERE = "This area is ignored on all pages of this book already."
 AREA_BACK = "The area ignored on all pages is taken back: text is looked for there again."
 AREA_AGAIN = "The area is ignored on all pages again."
-AREA_IN_A_RUN = "The area was not added: a run is reading the book. Try again once it is done."
 SELECT_FIRST = "Select a region first (click it)."
 NO_BOOK = "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 SAVE_FAILED = "Could not save the change: {error}"
@@ -139,14 +137,14 @@ class AreaMixin:
     def series_areas_ready(self) -> bool:
         """Whether Page > Use these areas for the series can act now: the book in the Book box is the one whose
         annotations the window holds, it has a series (`BookAnnotations.can_share`: its name has a volume), and no job
-        nor whole-book run is on."""
+        is on."""
         annotations = getattr(getattr(self, "pipeline", None), "annotations", None)
         if annotations is None or not getattr(annotations, "can_share", False):
             return False
         book_var = getattr(self, "book_var", None)
         if book_var is not None and getattr(annotations, "book", None) != book_var.get().strip():
             return False
-        return not getattr(self, "busy", False) and not in_a_run(self)
+        return not getattr(self, "busy", False)
 
     def _sync_series_areas_entry(self) -> None:
         """The Page menu's Use these areas for the series greyed unless it can act (`series_areas_ready`): when the
@@ -176,7 +174,7 @@ class AreaMixin:
     def ignore_area_everywhere(self) -> None:
         """Page > Ignore this area on all pages of this book: the selected region's place (`area_for`) ignored on
         every page from now on, as one change across the book (`_add_book_area`); the page on show is read again, so
-        that the region goes. Not during a run."""
+        that the region goes."""
         if not self._editing() or self.busy:
             return
         region, result, pipeline = self._chosen_region, self.last_result, self.pipeline
@@ -185,9 +183,6 @@ class AreaMixin:
             return
         if pipeline.annotations is None:
             self.say(NO_BOOK)
-            return
-        if in_a_run(self):
-            self.say(AREA_IN_A_RUN)
             return
         area = area_for(result, region)
         if area is None:
@@ -201,8 +196,8 @@ class AreaMixin:
         """A region dropped from the page *result* (`_drop_region`, its change *step*): once the drop is stored and
         the window is free, when a region was dropped inside the same place on another page of the book too
         (`dropped_elsewhere`) and no area holds it yet, the reader is asked whether to ignore that place on all pages
-        (`AREA_QUESTION`); yes adds it (`_add_book_area`). Not for a rectangle of the reader's own, not during a run,
-        and a place the reader said no to is not asked about again in this window."""
+        (`AREA_QUESTION`); yes adds it (`_add_book_area`). Not for a rectangle of the reader's own, and a place the
+        reader said no to is not asked about again in this window."""
         pipeline = self.pipeline
         if pipeline is None or result is None or region.kind.startswith("manual"):
             return
@@ -223,7 +218,7 @@ class AreaMixin:
 
     def _ask_ignore_everywhere(self, pipeline: Any, area: BookArea, fingerprint: str, result: Any) -> None:
         annotations = getattr(pipeline, "annotations", None)
-        if pipeline is not self.pipeline or annotations is None or in_a_run(self):
+        if pipeline is not self.pipeline or annotations is None:
             return
         declined: list[BookArea] | None = getattr(self, "_areas_declined", None)
         if declined is None:
@@ -235,7 +230,7 @@ class AreaMixin:
         if not boxes.ask(self, _(AREA_QUESTION), _(AREA_YES), _(AREA_NO)):
             declined.append(area)
             return
-        if self.pipeline is pipeline and not self.busy and not in_a_run(self):
+        if self.pipeline is pipeline and not self.busy:
             self._add_book_area(area, result)
 
     def _add_book_area(self, area: BookArea, result: Any) -> None:

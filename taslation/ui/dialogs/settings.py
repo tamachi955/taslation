@@ -6,10 +6,9 @@ create_settings_file`, at the place the settings are read from: `config.settings
 What it holds (`KEYS`): the lettering's smallest and largest size and the size under which a translation is listed
 for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book may have its own: `book_settings`), capitals,
 slanted lettering; the window's text size (`ui_scale`, `ui.scaling`), its colours (`theme`, `ui.theme`: as Windows
-is set, light or dark, said to wait while Windows' high contrast is on), always on top, how a book
-starts (page by page or the whole book first, with what a store's terms make of that: `start.terms_note`); the two
-optional page models (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither
-says where its training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
+is set, light or dark, said to wait while Windows' high contrast is on), always on top; the two optional page models
+(`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither says where its
+training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
 GPU, always): "Only with a GPU" is the default, and where the rule (`artwork.runs_here`) finds no GPU on this computer
 the row says it is not used here (`NO_GPU_TEXT`). The layout model has three too (`DETECT_CHOICES`: not used, only
 with the inpainting, always): "Only with the inpainting" is the default, so it goes where the inpainting goes. Save
@@ -67,7 +66,6 @@ from ..tooltip import tip
 from .caches import box_chars, in_lines
 from .shortcuts_page import ShortcutsPage
 from .system_page import SystemPage
-from .start import terms_note
 
 
 
@@ -104,10 +102,6 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
     SettingRow("side_indicator", "Pages turned past:",
                "Beside the page, on the side it turns to: the pages you turned past and how far TASlation is with each. A column of small thumbnails where the margin has room for it, and a narrow bar elsewhere; the narrow bar only; or nothing. A page whose words changed since you saw it gets a diamond, and when you turn back to it, its changed bubbles get corner brackets for a moment.",
                choices=(("column", "Thumbnails where there is room"), ("rail", "A narrow bar"), ("off", "Not shown"))),
-    SettingRow("flash_when_done", "Flash the taskbar button when a whole-book run ends",
-               "When a whole-book run finishes, or stops on a problem, while TASlation is not in front, its taskbar button flashes. TASlation does not take the focus."),
-    SettingRow("sound_when_done", "Also play a sound when a whole-book run ends",
-               "With the flash, the system's default sound plays once."),
     SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
                "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
     SettingRow("size_emphasis", "Set larger what the original sets larger",
@@ -178,7 +172,7 @@ SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # (ollama_num_gpu, load_model_at_start, ocr_runs_on, ollama_window_cache and update_check: on the System page,
 # `system_page.SystemPage.num_gpu`, `load_at_start`, `ocr_runs_on`, `window_cache` and `update_check`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "theme", "always_on_top", "scan_mode", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
+        "theme", "always_on_top", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
         *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
         "ollama_window_cache", "update_check")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
@@ -415,18 +409,7 @@ class SettingsDialog(tk.Toplevel):
         check = ttk.Checkbutton(window, text=_("Always on top"), variable=self.on_top)
         check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
         tip(_("Keep this window above the others."), check)
-        name = ttk.Label(window, text=_("A book starts:"))
-        name.grid(row=4, column=0, sticky="w", pady=(4, 0))
-        modes = ttk.Frame(window)
-        modes.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
-        self.mode = tk.StringVar(self, value="book" if settings.scan_mode == "book" else "page")
-        for value, word in (("page", "Page by page"), ("book", "Whole book first")):
-            ttk.Radiobutton(modes, text=_(word), value=value, variable=self.mode,
-                            command=self._show_terms).pack(side="left", padx=(0, 8))
-        tip(_("Page by page: each page is translated as you turn to it. Whole book first: TASlation reads the pages you turn, then translates the whole book."), name)
-        self.terms_label = ttk.Label(window, justify="left")
-        self.terms_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        self._extra_rows(window, "window", 6)
+        self._extra_rows(window, "window", 4)
 
         models = ttk.LabelFrame(general, text=_("Optional page models"), padding=8)
         models.pack(fill="x", pady=(10, 0))
@@ -482,7 +465,6 @@ class SettingsDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self.destroy())
         self.bind("<MouseWheel>", self._wheel, add="+")
         self.bind("<FocusIn>", self._focus_shown, add="+")
-        self._show_terms()
         self._fit(master)
         place_window(self, master)
         if master.winfo_viewable():  # (a window not on the screen, as the tests' root: it stays out of sight)
@@ -620,16 +602,6 @@ class SettingsDialog(tk.Toplevel):
         else:
             self.gpu_label.grid_remove()
 
-    def _show_terms(self) -> None:
-        """Whole book first chosen: what a store's terms make of that mode, under the choice (as wherever it is
-        chosen)."""
-        text = in_lines(terms_note(), self.text_width) if self.mode.get() == "book" else ""
-        self.terms_label.configure(text=text)
-        if text:
-            self.terms_label.grid()
-        else:
-            self.terms_label.grid_remove()
-
     def values(self) -> dict[str, Any]:
         """What the fields say, by setting; ValueError for a size that is no whole number."""
         out: dict[str, Any] = {key: int(var.get().strip()) for key, var in self.sizes.items()}
@@ -639,7 +611,6 @@ class SettingsDialog(tk.Toplevel):
         out["ui_scale"] = scale_of(self.scale.get())
         out["theme"] = self._value(THEME_CHOICES, self.colours_var.get())
         out["always_on_top"] = bool(self.on_top.get())
-        out["scan_mode"] = self.mode.get()
         out["detect_model"] = self._value(DETECT_CHOICES, self.detect.get())
         out["art_erase"] = self._value(ERASE_CHOICES, self.erase.get())
         for spec in SHOWN_ROWS:

@@ -33,8 +33,8 @@ Translator's, and a press held still or a right click pins nothing there (`reade
 The delays are the panel's in both (`zoom.ZOOM_DELAY_MS`, `zoom.ZOOM_REST_MS`), one bubble at a time. In both, the key
 of "show_japanese" opens the panel of the bubble under the pointer pinned with the bubble's Japanese as text and its
 Copy buttons (`bubble_text`). The translation work is the same whatever is chosen (detection, OCR, translation, the
-cache); only what is drawn differs. A whole-book run's page on show and the page strip are as they always are, in every
-role: nothing shows under the pointer there, nor on a page filling in with the translation on the page."""
+cache); only what is drawn differs. Nothing shows under the pointer on a page filling in with the translation on
+the page."""
 
 from __future__ import annotations
 

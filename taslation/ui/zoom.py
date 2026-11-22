@@ -77,7 +77,6 @@ from ..i18n import _
 from ..render.lettering import strip_marks
 from . import area, layout, shortcuts, theme
 from .hover import hover_usable, reader_pointer, reveal_wanted, reverse_on, translator_window
-from .strip import run_page_on_show
 from .wrap import wrap_text
 
 ZOOM_DELAY_MS = 450  # the pointer on a bubble hard to read where it is, or any with the original on the page: this
@@ -512,11 +511,9 @@ class BubbleZoomMixin:
     def _zoom_filling(self) -> Any:
         """The page filling in on show while it is translated (`progress.Filling`), when the panel may open on its
         boxes: with the original on the page (`hover.reverse_on`), where nothing else says how far a bubble is, and the
-        panel the way chosen; else None. A whole-book run's page on show is not one."""
+        panel the way chosen; else None."""
         fill = getattr(self, "_fill", None)
         if fill is None or not reverse_on(self) or not reveal_wanted(self, "panel") or not fill_on_show(self):
-            return None
-        if run_page_on_show(self) is not None:
             return None
         return fill
 

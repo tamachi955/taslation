@@ -16,8 +16,8 @@ Ctrl or Alt or an F key as in the window. Copy format and Paste format work on t
 (`Action.editor`). Translator mode's tools (`Action.translator`) do nothing in the Reader role, where their buttons are
 not there. Never a key of another action that works in the same place (`meet`), a key passed on to the viewer
 (`constants.FORWARDED_KEYS`, with any modifier) for the window or the page, Esc (`FIXED`: it lets go of the chosen
-box, leaves the full screen, stops a run and closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), nor in the window or
-the editor Ctrl+A, C, V or X (the boxes' editing): `Keymap.problem`. The table's own keys of an action pass those
+box, leaves the full screen and closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), nor in the window or the
+editor Ctrl+A, C, V or X (the boxes' editing): `Keymap.problem`. The table's own keys of an action pass those
 rules for it: Tab and Shift+Tab going through the regions and Alt with an arrow nudging them hold the keys on the page
 themselves ("break"), and Ctrl+C and Ctrl+V copy and paste a region on the page, which has no text to edit.
 
@@ -83,7 +83,6 @@ ACTIONS: tuple[Action, ...] = (
     Action("always_on_top", "Always on top"),
     Action("over_viewer", "Over the full-screen viewer"),
     Action("order_numbers", "Reading-order numbers"),
-    Action("read_whole_book", "Read whole book..."),
     Action("set_area", "Set area..."),
     Action("page_keys", "Page keys..."),
     Action("saved_translations", "Saved translations..."),

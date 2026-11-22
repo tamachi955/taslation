@@ -21,7 +21,6 @@ from ..annotations import BookAnnotations, PageAnnotations, RegionNote, RegionSt
 from ..fingerprint import hamming
 from ..i18n import _
 from ..regions import box_iou
-from .constants import in_a_run
 from .dialogs import caches as boxes
 from .dialogs.review import REGION_KIND_WORDS
 from .history import OWN_PAGE, BookStep, _carry_notes, owner
@@ -43,7 +42,6 @@ KIND_QUESTION = ("Put the copied formatting on every region of the kind {kinds} 
 KIND_APPLY = "Paste on {n} region(s)"
 KIND_NONE = "Every region of this kind in the book already has this formatting."
 KIND_DONE = "Formatting pasted on {n} region(s) on {pages} page(s). Ctrl+Z takes it back."
-KIND_IN_A_RUN = "The formatting was not pasted across the book: a run is reading it. Try again once it is done."
 KIND_BACK = "Formatting across the book taken back on {pages} page(s)."
 KIND_AGAIN = "Formatting across the book made again on {pages} page(s)."
 SAVE_FAILED = "Could not save the change: {error}"
@@ -294,7 +292,7 @@ class FormatMixin:
     def paste_format_on_kind(self) -> None:
         """Page > Paste format on every region of this kind...: the formatting copied last on every region of the
         kinds of `_format_targets` in the whole book (`book_spots`), once the reader said yes to how many; one change
-        across the book (`BookStyles`). Not during a run."""
+        across the book (`BookStyles`)."""
         if not self._editing() or self.busy:
             return
         style = self.format_clip().style
@@ -308,9 +306,6 @@ class FormatMixin:
             return
         if pipeline.annotations is None:
             self.say(NO_BOOK)
-            return
-        if in_a_run(self):
-            self.say(KIND_IN_A_RUN)
             return
         kinds = sorted({r.tag for r in targets})
         min_iou = pipeline.settings.match_min_iou

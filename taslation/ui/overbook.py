@@ -1,8 +1,8 @@
 """Over the book: while the chosen viewer fills its monitor and TASlation's window is on that monitor, the window
-behaves like Windows' on-screen keyboard over the program it types into (`capture.overlay`). It stays topmost and
-never takes the foreground: the viewer keeps it, so the reader's page keys go to the book as they would with nothing
-in between (a key posted to a browser that is not in front reaches nothing, and a foreground taken from it at every
-key stalls it), and clicks on TASlation's buttons and page strip still work. The window stays below alpha 255 the
+behaves like Windows' on-screen keyboard over the program it types into (`capture.overlay`). It stays topmost and never
+takes the foreground: the viewer keeps it, so the reader's page keys go to the book as they would with nothing in
+between (a key posted to a browser that is not in front reaches nothing, and a foreground taken from it at every key
+stalls it), and clicks on TASlation's buttons and the side indicator still work. The window stays below alpha 255 the
 whole time (`constants.WINDOW_ALPHA`, set before it is first shown): a browser covered by an opaque window stops
 drawing.
 

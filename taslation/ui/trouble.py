@@ -1,14 +1,14 @@
-"""What stands in the way, with a button for what fixes it: the lines of the setup banner over the page and the
-waiting lines of a whole-book run's band each get one button, which does what the line asks of the person where
-TASlation can do it for them (never a key or a click to the viewer):
+"""What stands in the way, with a button for what fixes it: the lines of the setup banner over the page each get one
+button, which does what the line asks of the person where TASlation can do it for them (never a key or a click to the
+viewer):
 
-* the viewer (outside a run, `viewer_trouble`, looked at by the event pump every `TROUBLE_LOOK_S`): several windows
+* the viewer (`viewer_trouble`, looked at by the event pump every `TROUBLE_LOOK_S`): several windows
   that look like a viewer equally well, or the viewer closed - Choose viewer opens the Viewer list
   (`choose_viewer`); the viewer's window minimised, or black - Show viewer (`show_viewer`: a minimised window shown
   again behind TASlation's, as choosing it does, `viewers.show_minimised`; else the viewer's window put in front of
   the others, not activated, so that the person can click the book and reload it); the viewer covered by TASlation -
   Move TASlation aside (`move_aside`: un-maximised, then narrowed so that a strip of the viewer shows,
-  `aside_rect`). A run's band has the same buttons for the same waits (`WAITING_ACTIONS`).
+  `aside_rect`).
 * the setup (`health.check`'s Messages): Ollama not running - Start translator again (the window's
   `restart_translator`); the translation model the language needs not installed - Download model
   (`ModelSwitchMixin.download_model`), with the window's own words for the line instead of "run install.cmd"
@@ -27,7 +27,7 @@ from typing import Any, Callable
 from ..capture import (IS_WINDOWS, lower_window, move_window, raise_window, window_exists, window_minimised,
                        window_rect, work_area)
 from ..i18n import _
-from .constants import VIEWER_BLACK, VIEWER_CLOSED, VIEWER_RESTORED, in_a_run
+from .constants import VIEWER_BLACK, VIEWER_CLOSED, VIEWER_RESTORED
 from .progress import code_of, rendered
 from .viewers import show_minimised
 
@@ -35,26 +35,20 @@ TROUBLE_LOOK_S = 0.5  # how often the event pump looks at the viewer for the ban
 ASIDE_STRIP = 160  # px of the viewer left in view when TASlation is moved aside
 ASIDE_MIN_WIDTH = 640  # px: TASlation's window is not made narrower than this
 LINES_PER_PAGE = 8  # a manga page's lines, about: what the seconds a page come from
-CPU_SECONDS_PER_LINE = 4.0  # PLaMo 3 Translate 2B on a laptop's processor, about, before a run measured its own
+CPU_SECONDS_PER_LINE = 4.0  # PLaMo 3 Translate 2B on a laptop's processor, about
 LOG_HEAD = 256 * 1024  # bytes of Ollama's server log read: the devices are written at its start
 
 TIED, CLOSED, MINIMISED, COVERED, BLACK = "tied", "closed", "minimised", "covered", "black"
 CHOOSE, SHOW, ASIDE = "choose", "show", "aside"
 TROUBLE_ACTIONS = {TIED: CHOOSE, CLOSED: CHOOSE, MINIMISED: SHOW, BLACK: SHOW, COVERED: ASIDE}
-# a run's waits with a button (`batch.BatchProgress.waiting`)
-WAITING_ACTIONS = {"batch.waiting_covered": ASIDE, "batch.waiting_viewer_hidden": SHOW, "batch.viewer_black": SHOW,
-                   "batch.waiting_behind": SHOW}
 DOWN_CODES = frozenset({"health.ollama_down", "health.ollama_no_answer"})
 MODEL_CODES = frozenset({"translator.model_missing", "translator.other_model", "health.model_missing",
                          "health.other_model"})
 
 
 def viewer_trouble(window: Any) -> str | None:
-    """What keeps the window from reading the viewer, outside a run (a run's band says its own): `TIED`, `CLOSED`,
-    `MINIMISED`, `COVERED` or `BLACK`; None when nothing does (or no viewer is chosen yet and none was closed: the
-    page says how to choose one)."""
-    if in_a_run(window):
-        return None
+    """What keeps the window from reading the viewer: `TIED`, `CLOSED`, `MINIMISED`, `COVERED` or `BLACK`; None when
+    nothing does (or no viewer is chosen yet and none was closed: the page says how to choose one)."""
     win = getattr(window, "selected", None)
     if win is None:
         if getattr(window, "_tied_said", ()):
@@ -231,11 +225,9 @@ def ollama_compute(log: Path | None = None) -> str:
     return ""
 
 
-def cpu_page_seconds(pace: float | None) -> int:
-    """About how many seconds a page takes on the processor: `LINES_PER_PAGE` lines at the last run's rate with the
-    model (*pace*, lines a second) or at `CPU_SECONDS_PER_LINE`."""
-    per_line = 1.0 / pace if pace else CPU_SECONDS_PER_LINE
-    return max(1, int(round(LINES_PER_PAGE * per_line)))
+def cpu_page_seconds() -> int:
+    """About how many seconds a page takes on the processor: `LINES_PER_PAGE` lines at `CPU_SECONDS_PER_LINE`."""
+    return max(1, int(round(LINES_PER_PAGE * CPU_SECONDS_PER_LINE)))
 
 
 def cpu_line(seconds: int) -> str:

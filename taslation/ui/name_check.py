@@ -1,12 +1,11 @@
-"""The window's side of the name consistency helper: what a whole-book run found (`taslation.name_variants`, kept in
-memory for the session with the run's lines - their translations and where each is stored, never their Japanese),
-offered on the band at the end of the run and from Tools > Names rendered in more than one way..., and the change the
-reader chooses in `dialogs.names.NamesDialog`. The pages read one by one are looked at too (`keep_page_found`: their
-lines kept in the worker's memory only, `jobs.keep_page_names`): a name new to the book in this session joins
-what is found, and the band offers it quietly, once (`JobsMixin._offer_page_names`).
+"""The window's side of the name consistency helper: the names that the pages read in this session rendered in more
+than one way (`taslation.name_variants`; `keep_page_found`: the lines kept in the worker's memory only,
+`jobs.keep_page_names` - their translations and where each is stored, never their Japanese), offered quietly on the
+band, once for a name new to the book in this session (`JobsMixin._offer_page_names`), and from Tools > Names rendered
+in more than one way..., and the change the reader chooses in `dialogs.names.NamesDialog`.
 
 A change is the replace machinery's (`ReplaceMixin`): the lines' texts through `BookCache.put_texts` (only a bubble
-whose text is still what the run stored changes; flags, notes and positions stay), as one `history.BookStep` (Ctrl+Z
+whose text is still what was stored changes; flags, notes and positions stay), as one `history.BookStep` (Ctrl+Z
 in translator mode takes the lines back, and so does the dialog's Take back, `ReplaceMixin._carry_replacement`); the
 cache written and the page on show lettered again (`ReplaceMixin._stored`). The rendering goes to the series sheet as
 the character's (made when the sheet has none of that name), and the sheet as it was comes back with Take back (which
@@ -24,13 +23,12 @@ from ..cache import TextEdit
 from ..i18n import _
 from ..name_variants import NameVariants, RunLine, changes
 from ..notes import sheet_key
-from .constants import in_a_run
 from .history import BookStep, owner
 
 
 @dataclass
 class Found:
-    """What a run found for a book and language: the names (`variants`), the run's lines (no Japanese) they point
+    """What the pages read found for a book and language: the names (`variants`), the lines (no Japanese) they point
     into, and per name the change made (`done`: the rendering, its step, the sheet's rendering before - None when
     the sheet had no such character, "" when nothing went to the sheet - and the renderings before)."""
 
@@ -42,7 +40,7 @@ class Found:
 
 
 def found_for(window: Any) -> Found | None:
-    """What a run found for the book and language in the boxes; None when none did in this session."""
+    """What the pages read found for the book and language in the boxes; None when none did in this session."""
     found = getattr(window, "_names_found", None)
     book, language = window.book_var.get().strip(), window.lang_var.get().strip() or "English"
     if found is None or found.book != book or found.language != language or not found.variants:
@@ -51,12 +49,13 @@ def found_for(window: Any) -> Found | None:
 
 
 def review_names(window: Any) -> None:
-    """The dialog of the names a run of this book found, or a line that there are none (the one open brought up)."""
+    """The dialog of the names the pages read of this book found, or a line that there are none (the one open
+    brought up)."""
     from .dialogs.names import NamesDialog
 
     found = found_for(window)
     if found is None:
-        window.say("Neither a whole-book run nor the pages read one by one in this session rendered a name of this book in more than one way. The Japanese lines are looked at only while TASlation is open.")
+        window.say("The pages read in this session rendered no name of this book in more than one way. The Japanese lines are looked at only while TASlation is open.")
         return
     dialog = getattr(window, "_names_dialog", None)
     if dialog is not None and dialog.winfo_exists():
@@ -106,7 +105,7 @@ def _can_change(window: Any, found: Found | None) -> Any:
     if found is None:
         window.say("Choose the book first (its series in the Series field, and its volume beside it if it has one).")
         return None
-    if window.pipeline is None or window.busy or window.batch is not None or window._batching:
+    if window.pipeline is None or window.busy:
         window.say("TASlation is at work on a page. Try again when it is done.")
         return None
     cache = window._book_cache()
@@ -160,7 +159,7 @@ def apply_name(window: Any, v: NameVariants, chosen: str, to_sheet: bool) -> boo
 
 
 def names_applied(window: Any, data: dict[str, Any]) -> None:
-    """The event of a change made: the run's lines hold the new texts, the name has one rendering now, and the
+    """The event of a change made: the lines kept hold the new texts, the name has one rendering now, and the
     dialog and the status line say so."""
     found = found_for(window)
     if found is None:
@@ -186,7 +185,7 @@ def names_applied(window: Any, data: dict[str, Any]) -> None:
 
 
 def _carry(found: Found, edits: list[TextEdit], back: bool = False) -> None:
-    """The run's lines follow *edits* (made, or taken back with *back*)."""
+    """The lines kept follow *edits* (made, or taken back with *back*)."""
     by_place = {(e.fingerprint, tuple(e.box), e.new if back else e.old): (e.old if back else e.new) for e in edits}
     for i, line in enumerate(found.lines):
         if line.where is None:
@@ -224,17 +223,6 @@ def take_back_name(window: Any, v: NameVariants) -> bool:
     return True
 
 
-def keep_found(window: Any, progress: Any, book: str, language: str) -> int:
-    """A run has ended: the names it found kept for its book and language (the latest run's), how many. The pages
-    read one by one afterwards do not offer them again (`keep_page_found`)."""
-    variants = list(getattr(progress, "names", None) or [])
-    if not variants:
-        return 0
-    window._names_found = Found(book, language, variants, list(getattr(progress, "name_lines", None) or []))
-    _offered(window).update((book, language, v.source) for v in variants)
-    return len(variants)
-
-
 def _offered(window: Any) -> set[tuple[str, str, str]]:
     offered = getattr(window, "_names_offered", None)
     if offered is None:
@@ -245,14 +233,14 @@ def _offered(window: Any) -> set[tuple[str, str, str]]:
 def keep_page_found(window: Any, data: dict[str, Any]) -> int:
     """What the pages read one by one found (``page_names``, `jobs.keep_page_names`: the names, and the lines
     they point into without their Japanese), kept as what is found for the book and language when a name is new to
-    them in this session - none a run or the pages offered before: each name is offered once. The names found before
-    for the book stay as they were (a change made, and what Take back gives back), the new ones join them
-    (`_joined`). Not while a run is on, nor while the names' dialog is open (the next page offers it then). Returns
-    how many names are offered now (0: none)."""
+    them in this session - none the pages offered before: each name is offered once. The names found before for the
+    book stay as they were (a change made, and what Take back gives back), the new ones join them (`_joined`). Not
+    while the names' dialog is open (the next page offers it then). Returns how many names are offered now (0:
+    none)."""
     book, language = str(data.get("book", "")), str(data.get("language", "") or "English")
     variants = list(data.get("variants") or [])
     offered = _offered(window)
-    if not any((book, language, v.source) not in offered for v in variants) or in_a_run(window):
+    if not any((book, language, v.source) not in offered for v in variants):
         return 0
     dialog = getattr(window, "_names_dialog", None)
     if dialog is not None and dialog.winfo_exists():
@@ -294,5 +282,5 @@ def _joined(old: Found | None, book: str, language: str, variants: list[NameVari
     return Found(book, language, out, kept, done)
 
 
-__all__ = ["Found", "apply_name", "found_for", "keep_found", "keep_page_found", "names_applied", "review_names",
+__all__ = ["Found", "apply_name", "found_for", "keep_page_found", "names_applied", "review_names",
            "take_back_name"]

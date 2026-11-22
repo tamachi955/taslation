@@ -2,8 +2,8 @@
 
 Layout: menus for what is used seldom, a toolbar for what is used all the time, whose
 groups of controls flow into as many rows as the window's width needs (the viewer,
-the target language, Translate / Auto / Full screen, the role, the book and the
-batch), translator mode's strip under it while the Translator role is chosen, a
+the target language, Translate / Auto / Full screen, the role, the book and
+Stop), translator mode's strip under it while the Translator role is chosen, a
 canvas and a status bar: every command has one place. The canvas shows the chosen viewer
 live - its latest frame, with the translation laid over it while it shows a
 translated page - and a page being translated fills in on it bubble by bubble.
@@ -36,7 +36,7 @@ from PIL import Image
 from .. import bookname, jurisdictions, notice, protect, viewerparts
 from ..annotations import AnnotationStore, GlossaryStore
 from ..backlog import backlog_of
-from ..batch import BatchReader, keep_awake, release_awake
+from ..threads import keep_awake, release_awake
 from ..cache import CacheStore, viewer_key_from_title
 from ..capture import WindowInfo
 from ..config import Settings
@@ -71,13 +71,11 @@ from .constants import (
     WINDOW_ALPHA,
     WINDOW_TARGETS,
     WINDOW_WATCH_MS,
-    in_a_run,
 )
 from .copy_details import watch_error_boxes
 from .dialogs import caches as boxes
 from .dialogs.area import AreaDialog
-from .dialogs.batch import BatchDialog
-from .dialogs.caches import CachesDialog, PassphraseDialog, WarningBox, import_error_text
+from .dialogs.caches import CachesDialog, PassphraseDialog, import_error_text
 from .dialogs.glossary import GlossaryDialog
 from .dialogs.help import FIRST_STEPS_FLAG, KEYS_TOPIC, FirstSteps, HelpWindow, first_steps_due, modal_up
 from .dialogs.notice import NoticeDialog, notice_due
@@ -131,7 +129,6 @@ from .. import devices
 from . import side
 from .side import SideMixin
 from .status import StatusMixin
-from .strip import StripMixin, close_warning, release_run_images
 from .tooltip import tip, tip_menu
 from .replace import ReplaceMixin
 from .formats import PAGE_FORMAT_TIPS, FormatMixin
@@ -195,7 +192,7 @@ def first_target(state_dir: Path, configured: str, window_language: str, first_s
 
 
 class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, ReplaceMixin, FormatMixin, SelectionMixin,
-          ViewerMixin, StripMixin, SideMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, tk.Tk):
+          ViewerMixin, SideMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, tk.Tk):
     """The reader window. Its state is made here (`__init__`), and its widgets (`_build_ui`, again after a language
     switch); the small dialogs open from here. What it does comes from the mixins: the status line and the busy badge
     (`status`), the capture, the live picture and Auto (`live`), the worker, its events and the requests (`jobs`),
@@ -264,7 +261,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.ready = False
         self.busy = False
         updates.setup(self)  # a newer version an earlier look found, for the Help menu (no request)
-        self.batch: BatchReader | None = None
         self.windows: list[WindowInfo] = []
         self.selected: WindowInfo | None = None
         self.window_query = (window_query or "").strip()
@@ -272,8 +268,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._waiting = False  # the viewer window shows another tab; Auto mode is holding back
         self.annotation_store = AnnotationStore(settings.annotations_dir)
         self.glossary_store = GlossaryStore(settings.glossary_dir)
-        self._book_scanned = False  # whole-book mode: the batch has been started for this book in this session
-        self._resume_auto = False  # turn Auto back on when the automatic whole-book batch finishes
         self._drag_start: tuple[int, int] | None = None
         self._drag_rect: int | None = None
         self._ordering: list[Any] | None = None  # translator mode: regions clicked so far while setting the reading order
@@ -298,8 +292,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._enlarge_asked: int | None = None  # the viewer whose window was enlarged, or looked at for it, once
         self._enlarging: dict[str, Any] | None = None  # the enlarged window being waited for (`_enlarge_wait`)
         self._area_large = False  # the area in use is the one of the enlarged window (`_sync_area`)
-        self._scan_waits_told = False
-        self._batching = False
         self._area_hinted = False
         self._status_render: Callable[[], str] | None = None  # the status line in the window's language, again
         self._status_key: str | None = None  # ... and its key, when it was said with `say`
@@ -421,7 +413,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         if event.type == tk.EventType.KeyPress:
             self._book_before = self.book_var.get()
         elif self.book_var.get() != self._book_before:
-            self._book_edited, self._book_scanned = True, False
+            self._book_edited = True
 
     def _target_typed(self) -> None:
         """The "To:" box changed: the target language follows, by its English name."""
@@ -449,7 +441,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._target_chosen()
         if self._target_kept == before or not self._translator_ready(self._target_kept, before):
             return
-        if self.auto_var.get() and self.last_result is not None and self.batch is None:
+        if self.auto_var.get() and self.last_result is not None:
             self.translate_now()
 
     # ------------------------------------------------------------------ UI
@@ -458,7 +450,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         back by themselves are not among them, and those that hold the window never see a switch)."""
         from .dialogs.pagekeys import PageKeysDialog
 
-        forms = (GlossaryDialog, BookSettingsDialog, BatchDialog, PageKeysDialog)
+        forms = (GlossaryDialog, BookSettingsDialog, PageKeysDialog)
         return [w for w in self.winfo_children() if isinstance(w, forms) and w.winfo_exists()]
 
     def _on_ui_language(self) -> None:
@@ -569,7 +561,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         if self._covered:  # the new canvas says it again
             self._covered = False
             self._set_covered(True)
-        self._show_banner()  # the setup banner and the scan band in the new language
+        self._show_banner()  # the setup banner and the band in the new language
         self._show_band()
         self._status_render, self._status_key = render, key
         self.status_var.set(render() if render is not None else line)
@@ -592,7 +584,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.model_var = tk.StringVar(value=wanted_name(self.settings.ollama_model, self.settings.target_language))
         self.lang_var = tk.StringVar(value=self.settings.target_language)
         self.auto_var = tk.BooleanVar(value=False)
-        self.auto_var.trace_add("write", lambda *_a: self._auto_switched())  # turned off by a run: said once
         self.original_var = tk.BooleanVar(value=False)
         self.top_var = tk.BooleanVar(value=False)
         self.role_var = tk.StringVar(value=self.settings.role)
@@ -602,7 +593,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.role_var.trace_add("write", lambda *_a: self._sync_original_entry())
         self._sync_original_entry()
         self._build_toolbar()
-        self._build_strips()  # the setup banner and the scan band, between the toolbar and the page
+        self._build_strips()  # the setup banner and the band, between the toolbar and the page
 
         self.canvas = ImageCanvas(self, bg="#202020")
         self.canvas.pack(fill="both", expand=True)
@@ -652,7 +643,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         tip(_(MOVE_OFFER), self.move_btn)
         bar.bind("<Configure>", lambda _e: self._wrap_status())
         self._sync_guard()
-        self._build_page_strip()  # a whole-book run's pages, under the page (`strip`)
         self._build_side()  # the pages turned past, beside the page, and the Reader's status slot (`side`)
 
     def _build_menus(self) -> None:
@@ -780,7 +770,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
 
     def _build_toolbar(self) -> None:
         """The toolbar: groups of controls that flow into as many rows as the window's width needs (`FlowBar`), the
-        viewer first, then the target language, Translate / Auto / Full screen, the role, the book and the batch; under
+        viewer first, then the target language, Translate / Auto / Full screen, the role, the book and Stop; under
         it, while the Translator role is chosen, translator mode's strip with its tools and a line on what the pointer
         does (`_build_translator_tools`). Every command has one place: what is used seldom is in the menus only. Every
         control says what it does in a tooltip."""
@@ -850,13 +840,10 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         tip(_("The book's series: what its volumes share, an edition such as 完全版 included. With the volume it names the book its translations are kept under."), fields.series_label, fields.series)
         tip(_("The volume's number (3, 10.5) or 上, 中, 下, 前編, 後編; empty for a book of one volume. 第3巻, Vol. 3 and ③ are taken as 3."), fields.volume_label, fields.volume)
 
-        batch = bar.group()
-        self.batch_btn = ttk.Button(batch, text=_("Read whole book..."), command=self.open_batch_dialog)
-        self.batch_btn.pack(side="left")
-        tip(_("Read the pages you turn, then translate the whole book."), self.batch_btn, disabled=_("TASlation is at work on a page. Try again when it is done."))
-        self.stop_btn = ttk.Button(batch, text=_("Stop (Esc)"), command=self.stop_batch, state="disabled")
-        self.stop_btn.pack(side="left", padx=(4, 0))
-        tip(_("Stop the whole-book run, or the page being translated."), self.stop_btn, disabled=_("Nothing is running to stop."))
+        stop = bar.group()
+        self.stop_btn = ttk.Button(stop, text=_("Stop (Esc)"), command=self.stop_page, state="disabled")
+        self.stop_btn.pack(side="left")
+        tip(_("Stop the page being translated."), self.stop_btn, disabled=_("Nothing is running to stop."))
         self.toolbar = bar
         self._build_translator_tools(top)
         self._bars = (top,)  # hidden on the full screen
@@ -900,8 +887,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
 
     def open_caches(self) -> None:
         CachesDialog(self, self.store,
-                     on_changed=lambda book: self._jobs.put(lambda: self._job_forget_cache(book)), on_status=self.status,
-                     in_use=lambda book: in_a_run(self) and book == self._batch_for[0])
+                     on_changed=lambda book: self._jobs.put(lambda: self._job_forget_cache(book)),
+                     on_status=self.status)
 
     def open_settings(self) -> None:
         """Tools > Settings...: the settings a reader changes most (`dialogs.settings`), or the dialog already open
@@ -940,7 +927,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             "copy_translation": plain(lambda: self.copy_translation()),
             "next_bubble": plain(lambda: self.next_bubble()), "previous_bubble": plain(lambda: self.previous_bubble()),
             "always_on_top": flip(self.top_var, self._apply_on_top), "over_viewer": flip(self.over_var, self.toggle_over),
-            "read_whole_book": plain(self.open_batch_dialog), "set_area": plain(self.set_area),
+            "set_area": plain(self.set_area),
             "page_keys": plain(self.open_page_keys), "saved_translations": plain(self.open_caches),
             "settings": plain(self.open_settings), "how_to_use": plain(self.open_help),
             "keys_help": plain(self.open_keys),
@@ -1032,7 +1019,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._side_setting_changed()
         if set(changed) & PAGE_SETTINGS:
             self._jobs.put(self._job_settings_changed)
-            if self.last_result is not None and not self.busy and self.batch is None:
+            if self.last_result is not None and not self.busy:
                 self._start_translate(self.last_result.original, complete=True)
 
     def _colours_again(self, event: tk.Event | None = None) -> None:
@@ -1078,36 +1065,14 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
 
         UpdateDialog(self, self, on_update=lambda version: updates.update_now(self, version))
 
-    def _close_allowed(self) -> bool:
-        """At closing: with pages read and not translated yet (a run reading them, or what a stopped run left) or
-        pages of the run not finished, whether to close all the same (`strip.close_warning` says what is lost; what is
-        translated is saved). Asked only then, in TASlation's own box (`WarningBox`): a system box takes the words
-        of its buttons from Windows' language, not the window's. Over the full-screen viewer the box is in sight above
-        it, and when the reader keeps TASlation open the viewer gets the foreground back as the box closes
-        (`overbook`)."""
-        text = close_warning(self)
-        if text is not None:
-            box = WarningBox(self, "TASlation", text, go=_("Close anyway"), stay=_("Keep TASlation open"),
-                             stay_first=True)
-            if box.winfo_exists():
-                self.wait_window(box)
-            if not box.answer:
-                return False
-        release_run_images(self)  # (the window closes: the pictures go now)
-        return True
-
-    def _on_close(self, asked: bool = False) -> None:
-        """The window closes. A page started on a frame not confirmed yet is given up before anything is saved
-        (`end_page_job`; what it changed goes back, `Pipeline.drop_unconfirmed`, after the steps between, which give
-        its worker the time to put it back itself): neither the stage times nor the cache written at the close hold
-        anything of it (`Pipeline.to_save`). *asked*: what closing would lose was asked already, and the run's
-        pictures let go (Update now: `updates.update_now`)."""
-        if not asked and not self._close_allowed():  # pages of a run not finished: their pictures would be lost
-            return
+    def _on_close(self) -> None:
+        """The window closes, with nothing asked: what is translated is saved, and the pages turned past and not
+        translated yet are given up with their captures (`close_backlog`). A page started on a frame not confirmed
+        yet is given up before anything is saved (`end_page_job`; what it changed goes back,
+        `Pipeline.drop_unconfirmed`, after the steps between, which give its worker the time to put it back itself):
+        neither the stage times nor the cache written at the close hold anything of it (`Pipeline.to_save`)."""
         updates.stop(self)  # a look for a new version under way ends with the window
         end_page_job(self)
-        if self.batch is not None:
-            self.batch.stop()
         close_backlog(self)
         self._release_model()
         self._target_chosen()
@@ -1181,7 +1146,7 @@ def run_app(settings: Settings, window_query: str | None = None, book: str | Non
         app.destroy()
         return 0
     # the display and the PC stay on while the window is open: left alone for hours it must go on reading, and a viewer
-    # stops repainting once the display is off (this thread's request: the batch's own worker asks separately)
+    # stops repainting once the display is off (this thread's request)
     keep_awake(display=True)
     try:
         app.mainloop()
@@ -1201,7 +1166,7 @@ __all__ = [
     "WORK_STAGES", "Filling", "busy_line", "progress_line", "reads_page", "stage_of", "status_word",
     "BLANK_SPREAD", "FORWARDED_KEYS", "LANGUAGES", "LIVE_CHANGE", "NO_VIEWER", "QUEUE_RANK", "READING_MODE",
     "READING_NOTE_MS", "READING_ONLY", "READY", "WINDOW_ALPHA", "WINDOW_WATCH_MS", "NOT_VIEWERS",
-    "choose_viewer", "looks_like_viewer", "AreaDialog", "BatchDialog", "BookSettingsDialog", "CachesDialog",
+    "choose_viewer", "looks_like_viewer", "AreaDialog", "BookSettingsDialog", "CachesDialog",
     "EditBubbleDialog", "GlossaryDialog", "NoticeDialog", "PassphraseDialog", "ReviewDialog",
     "import_error_text", "notice_due", "review_rows",
 ]

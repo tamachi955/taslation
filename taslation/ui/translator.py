@@ -41,7 +41,7 @@ from ..review import rendering_changes, sheet_item_for
 from ..translate import TranslationError
 from ..translate.base import HINT_FOLLOWS, hint_support
 from . import area, shortcuts, theme
-from .constants import FIRST_PAGE, FORWARDED_KEYS, READER_AFTER_RUN, THIS_PAGE, book_read, in_a_run, viewer_rests
+from .constants import FIRST_PAGE, FORWARDED_KEYS, THIS_PAGE
 from .dialogs import caches as boxes
 from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, review_rows
 from .history import BookStep, Step, carry, owner, page_units, put_back, stores_differ, unit_states
@@ -110,7 +110,7 @@ REREAD_KINDS = frozenset({"add", "skip", "order", "again"})
 PREVIEW_POLL_MS = 40  # how often the window looks for the editor's preview, while one is being lettered
 NO_REGION = "This region is no longer on the page: nothing was changed."
 # a rendering changed in the series sheet: the offer to give the lines already translated the new one, its buttons,
-# what is said once it is done, and why it is not offered during a run
+# and what is said once it is done
 SHEET_OFFER = "{n} line(s) already translated use the series sheet's earlier rendering ({changes}). Give them the new one? Ctrl+Z takes it back."
 SHEET_APPLY = "Apply to the {n} line(s)"
 SHEET_LEAVE = "Leave them as they are"
@@ -120,7 +120,6 @@ SHEET_APPLIED = "Applied to {n} translated line(s) on {pages} page(s). Ctrl+Z ta
 AGAIN_KEEPS = ("Translate this page again? Its present translations are replaced, but for the {n} line(s) you "
                "corrected: they stay as they are.")
 REPLACE_MINE_TOO = "Replace the lines I corrected too"
-SHEET_IN_A_RUN = "The lines already translated were not changed: a run is reading the book. Find and replace can change them once it is done."
 # ... and when other volumes of the series use the earlier rendering too (`_ask_sheet_renames`): under the offer, the
 # volumes with their lines and the box that takes them too (with its button); or the offer for them alone
 SHEET_OTHERS_TOO = ("Other volumes of the series use it too:\n{volumes}\n\nTick the box to give them the new one as "
@@ -360,16 +359,11 @@ class TranslatorMixin:
         lines of the other volumes of the series kept in the language are counted first, in the worker
         (`series_scope`, as `taslation glossary apply` finds the volumes), and the question offers them too
         (`_ask_sheet_renames`: this book unless its box is ticked). The book's cache is opened by the worker first
-        when the window holds another one; while a page is at work the question waits until it is done; during a run
-        nothing is offered, and a line says why."""
+        when the window holds another one; while a page is at work the question waits until it is done."""
         pairs = [(old, new) for old, new in pairs if old and new and old != new]
         pipeline = self.pipeline
         if not pairs or pipeline is None or not book or generic_book_name(book):
             return
-        if in_a_run(self):
-            self.say(SHEET_IN_A_RUN)
-            return
-
         def later() -> None:
             self._offer_sheet_renames(pairs, book, language, parent, waited=True)
 
@@ -409,7 +403,7 @@ class TranslatorMixin:
             return books, count_in_volumes(store, books, volume_language, edits_of)
 
         def moved_on() -> bool:
-            return self.pipeline is not pipeline or getattr(pipeline, "cache", None) is not cache or in_a_run(self)
+            return self.pipeline is not pipeline or getattr(pipeline, "cache", None) is not cache
 
         def then(found: tuple[list[str], list[VolumeCount]]) -> None:
             if moved_on():
@@ -726,26 +720,6 @@ class TranslatorMixin:
             return
         self._apply_role(start_role(int(pages) > 0), chosen=False)
 
-    def _reader_after_run(self, book: str, language: str) -> bool:
-        """A whole-book run has finished: with the book translated now (`book_read`: its cache holds enough pages) the
-        window goes to reader mode, the role a translated book opens in - unless the reader chose a role for this
-        book (`chosen_role`: their choice wins) or another book is in the Book box by now. Said in the status line.
-        Whether it switched."""
-        if (self.role_var.get() != "translator" or not book or generic_book_name(book)
-                or book != self.book_var.get().strip() or chosen_role(self.settings.state_dir, book)):
-            return False
-        try:
-            pages = self.store.page_count(book, language or "English")
-        except Exception:  # noqa: BLE001 - cannot be told: the role stays
-            pages = None
-        if not book_read(pages):
-            return False
-        self._role_book = book  # decided for this book: the Book box's own decision does not come back on it
-        self.role_var.set("reader")
-        self._on_role_changed(chosen=False)
-        self.say(READER_AFTER_RUN)
-        return True
-
     def _apply_role(self, role: str, chosen: bool) -> None:
         if self.role_var.get() == role:
             return
@@ -782,13 +756,13 @@ class TranslatorMixin:
 
     def _complete_on_show(self) -> None:
         """Translator mode came on over a page taken from the cache in reader mode: the regions found on it that the
-        cache has no bubble for were never read ("unmatched"; most are pieces of the drawing a run judged no text,
+        cache has no bubble for were never read ("unmatched"; most are pieces of the drawing judged no text,
         whose judgement the cache does not keep). The page is read again as translator mode reads a page
         (`translate_now`: those regions read and judged, a line among them translated), so that they are outlined
-        and labelled for what they are - or not at all (`_page_regions`). Not while a run is on or a job runs."""
+        and labelled for what they are - or not at all (`_page_regions`). Not while a job runs."""
         result = self.last_result
-        if (result is None or self.batch is not None or getattr(self, "_batching", False)
-                or not self.ready or self.busy or not any(r.status == "unmatched" for r in result.regions)):
+        if (result is None or not self.ready or self.busy
+                or not any(r.status == "unmatched" for r in result.regions)):
             return
         self.after_idle(self.translate_now)
 
@@ -1509,7 +1483,6 @@ class TranslatorMixin:
             setattr(self, attr, make())
         book, language = self.book_var.get().strip(), self.lang_var.get().strip() or "English"
         if (self.pipeline is not None and book and not generic_book_name(book) and not self.busy
-                and getattr(self, "batch", None) is None and not getattr(self, "_batching", False)
                 and self._book_cache() is None):
             model = self.model_var.get().strip()
             self._jobs.put(lambda: (self._ensure_cache(book, model, language), self._post("find")))
@@ -1545,8 +1518,7 @@ class TranslatorMixin:
 
     def _refresh_corrections(self) -> None:
         """The translations may have changed (a page's result, an edit, a replacement, its undo): the open lists of
-        the book's lines - "My corrections", "Lines to review" - are made again, and the page strip marks again the
-        pages with lines worth a look (`strip.mark_pages_to_review`)."""
+        the book's lines - "My corrections", "Lines to review" - are made again."""
         for attr in ("_corrections", "_to_review"):
             shown = getattr(self, attr, None)
             try:
@@ -1554,9 +1526,6 @@ class TranslatorMixin:
                     shown.fill()
             except tk.TclError:
                 pass
-        from .strip import mark_pages_to_review
-
-        mark_pages_to_review(self)
 
     # ------------------------------------------------------------------ undo and redo
     def undo_edit(self) -> None:
@@ -1822,7 +1791,7 @@ class TranslatorMixin:
         the pages). On the full screen in the Translator role no click goes on (`hover.clicks_kept`). It is followed as
         a page-turn key is (`_follow_change`): from the frame Auto took last, else from the frame on show - also before
         Auto has taken any page. In the Translator role the status line says so, as it does for a key."""
-        if self.selected is None or (self.last_result is None and self._live is None) or viewer_rests(self):
+        if self.selected is None or (self.last_result is None and self._live is None):
             return
         if clicks_kept(self):
             return

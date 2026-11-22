@@ -10,9 +10,9 @@ what the page cannot show itself, in fixed words, with no seconds and nothing tu
 * the page has nothing to read: "Nothing to read on this page." for `NOTHING_S` seconds.
 
 Nothing else is said there. In the window the slot is at the status line's left end (`SlotLabel`); on the full screen
-at the bottom of the page's exit-side margin (`ImageCanvas.set_slot`). The Translator role keeps the badge as it was,
-and so does a whole-book run, whose band and strip are its progress (`badge_allowed`). The slot is looked at whenever
-the event pump runs (`tick`, from `StatusMixin._flush_busy`): no timer of its own."""
+at the bottom of the page's exit-side margin (`ImageCanvas.set_slot`). The Translator role keeps the badge as it was
+(`badge_allowed`). The slot is looked at whenever the event pump runs (`tick`, from `StatusMixin._flush_busy`): no
+timer of its own."""
 
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from tkinter import ttk
 from typing import Any
 
 from ..i18n import _
-from .constants import in_a_run
 from .progress import LOADING, code_of
 
 LOOK_S = 1.0  # no bubble lettered this long after the look: the slot says what the page waits for
@@ -67,8 +66,8 @@ def reader_role(window: Any) -> bool:
 
 
 def badge_allowed(window: Any) -> bool:
-    """Whether the busy badge shows on the page area: in the Translator role, and during a whole-book run."""
-    return not reader_role(window) or in_a_run(window)
+    """Whether the busy badge shows on the page area: in the Translator role."""
+    return not reader_role(window)
 
 
 def stage_key(window: Any) -> str:
@@ -99,7 +98,7 @@ def job_on_show(window: Any) -> bool:
 
 def wanted(window: Any, state: SlotState, now: float) -> tuple[str, bool] | None:
     """What the slot says now (its key, and whether it is the orange "!" one), or None."""
-    if not reader_role(window) or in_a_run(window):
+    if not reader_role(window):
         return None
     result = getattr(window, "last_result", None)
     if state.error_frame is not None:

@@ -8,17 +8,17 @@ translation - from the engine's ``page_stage`` events, the screen on show (``pag
 Where it goes. The indicator sits in the page's exit-side margin, the side a page is turned towards: left of a book
 read right to left (`Pipeline.rtl`), right of one read left to right. Where that margin has room for it
 (`COLUMN_NEEDS`, 141 px: the column of `COLUMN_W` 125 px with 10 px to the page and 6 px to the edge) it is a column of
-thumbnails, the whole-book strip's format stood up (`ui.strip`); else a rail `RAIL_W` px wide (`RAIL_W_FULL` on the full
-screen) beside the page, with the updated diamonds and the notch of the screen on show in a column `MARKS_W` px wide
-outside it. Where the exit margin is under `RAIL_ROOM` (24 px) the picture is drawn `RESERVE` px clear of that side
-(`room_kept`: 16 px, as the rail and its marks need), so that nothing of the indicator ever covers the page. What
-decides it is the canvas's size, the part of the frame drawn, the setting (``side_indicator``) and whether a
-whole-book run is on: a page turned never changes it, so the page never changes size while one reads (it does on a
-resize, on the full screen in or out, a run's start and end, and a change of the setting).
+thumbnails (`THUMB_BOX`, the viewer's ground trimmed off: `fit_thumb`), each with its stage bars; else a rail `RAIL_W`
+px wide (`RAIL_W_FULL` on the full screen) beside the page, with the updated diamonds and the notch of the screen on
+show in a column `MARKS_W` px wide outside it. Where the exit margin is under `RAIL_ROOM` (24 px) the picture is drawn
+`RESERVE` px clear of that side (`room_kept`: 16 px, as the rail and its marks need), so that nothing of the indicator
+ever covers the page. What decides it is the canvas's size, the part of the frame drawn and the setting
+(``side_indicator``): a page turned never changes it, so the page never changes size while one reads (it does on a
+resize, on the full screen in or out, and a change of the setting).
 
-The column gives way to the rail under 141 px of exit margin. The thumbnail needs its 58 px (the strip's `THUMB_BOX`; a
+The column gives way to the rail under 141 px of exit margin. The thumbnail needs its 58 px (`THUMB_BOX`; a
 spread's comes out 58 x 41 or so), and a bar narrower than about 34 px no longer shows its working stripe moving
-(8 px wide, `strip.STRIPE_W`) nor a cross on a failed stage; with the stage letter, the notch that points at the
+(8 px wide, `side_view.STRIPE_W`) nor a cross on a failed stage; with the stage letter, the notch that points at the
 page from the screen on show, the gaps and the pads that is 125 px, and the 16 px round it keep the column off the page
 and off the window's edge."""
 
@@ -28,11 +28,66 @@ import bisect
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 from .. import fingerprint as fp
 from ..i18n import _
-from .strip import MERGED, THUMB_BOX, fit_thumb, stage_name, state_word
+
+MERGED = "merged"  # read "merged": a screen that went by was taken all the same, under another seq: its own goes
+THUMB_BOX = (58, 80)  # a thumbnail is fitted into this many pixels (the engine sends them up to 96 px tall)
+# the viewer's even ground around the page is cut off a thumbnail (`trim_ground`): a line of it belongs to the page
+# once more than TRIM_SHARE of its pixels differ from the corners' colour by more than TRIM_LEVELS grey levels (a
+# page number, a viewer's small marks do not make a line of the page)
+TRIM_LEVELS, TRIM_SHARE = 16, 0.04
+PAPER = 224  # grey level: corners this light are the page's paper (it fills the frame), not a viewer's ground
+
+
+def stage_letter(stage: str) -> str:
+    """A stage's letter beside its bar, in the window's language."""
+    return {"read": _("R"), "erase": _("E"), "translate": _("T")}[stage]
+
+
+def stage_name(stage: str) -> str:
+    return {"read": _("Reading the text"), "erase": _("Erasing the Japanese"), "translate": _("Translation")}[stage]
+
+
+def state_word(state: str) -> str:
+    return {"waiting": _("not started yet"), "working": _("under way"), "done": _("done"),
+            "failed": _("did not work"), "skipped": _("not needed"),
+            "missed": _("went by before it could be taken: turn back to it")}[state]
+
+
+def trim_ground(image: Image.Image) -> Image.Image:
+    """*image* - a frame of the viewer - without the even ground around the page: the rows and columns at its edges
+    that are of the colour its four corners share (see TRIM_LEVELS). A frame whose corners differ (the viewer's bars
+    reach them) or are as light as paper (the page fills the frame; on a white viewer the page's edge cannot be
+    told) is left whole, and so is one that would keep less than a tenth of either side."""
+    grey = np.asarray(image.convert("L"), dtype=np.int16)
+    if grey.shape[0] < 4 or grey.shape[1] < 4:
+        return image
+    corners = np.array([grey[0, 0], grey[0, -1], grey[-1, 0], grey[-1, -1]])
+    if int(corners.max()) - int(corners.min()) > TRIM_LEVELS or int(np.median(corners)) >= PAPER:
+        return image
+    differs = np.abs(grey - int(np.median(corners))) > TRIM_LEVELS
+    rows = np.flatnonzero(differs.mean(axis=1) > TRIM_SHARE)
+    cols = np.flatnonzero(differs.mean(axis=0) > TRIM_SHARE)
+    if not len(rows) or not len(cols):
+        return image
+    box = (int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1)
+    if box[2] - box[0] < image.width / 10 or box[3] - box[1] < image.height / 10:
+        return image
+    return image.crop(box) if box != (0, 0, image.width, image.height) else image
+
+
+def fit_thumb(image: Image.Image) -> Image.Image:
+    """*image* without the viewer's ground around the page (`trim_ground`), made to fit `THUMB_BOX` (a copy; the
+    engine's own thumbnail is not kept)."""
+    thumb = trim_ground(image)
+    thumb = thumb.convert("RGB") if thumb.mode not in ("RGB", "L") else thumb.copy()
+    thumb.thumbnail(THUMB_BOX, Image.BILINEAR)
+    return thumb
+
 
 SIDE_STAGES = ("read", "translate")  # normal reading has no erase of its own: a page is erased as it is shown
 STATES = ("waiting", "working", "done", "failed", "skipped", "missed")
@@ -68,8 +123,8 @@ RAIL_PAGE_PX = 8  # with this many px a screen or more, every screen has a mark 
 RUN_LEAST_PX = 2  # a run merged is drawn at least this tall ...
 ON_SHOW_LEAST_PX = 6  # ... and the screen on show, a run of its own, at least this tall
 
-# the band's rule for an estimate of the time left (`banner.TRUST_LINES`, `banner.TRUST_S`): trusted from 8 lines over
-# 15 seconds of work, counted from the first line done (the model's loading is left out)
+# the rule for an estimate of the time left: trusted from 8 lines over 15 seconds of work, counted from the first line
+# done (the model's loading is left out)
 TRUST_LINES = 8
 TRUST_S = 15.0
 
@@ -132,7 +187,7 @@ class Backlog:
 class BacklogPace:
     """How fast the backlog's lines go, for "about X min more": the lines done (the totals going down) over the time
     worked (paused time left out), counted from the first line done; trusted from `TRUST_LINES` lines over `TRUST_S`
-    seconds, as the band's estimate is (`banner.ScanState`)."""
+    seconds."""
 
     def __init__(self) -> None:
         self.lines: int | None = None  # the lines last told
@@ -264,7 +319,7 @@ def _count(value: Any) -> int:
 
 # ------------------------------------------------------------------ what it says
 def duration(seconds: float) -> str:
-    """About how long *seconds* are, as the band says it (`banner.duration_text`)."""
+    """About how long *seconds* are, in the window's language (`banner.duration_text`)."""
     from .banner import duration_text
 
     return duration_text(seconds)
@@ -312,7 +367,7 @@ def screen_tip(model: SideModel, seq: int) -> str:
 
 
 def bar_line(stage: str, state: str) -> str:
-    """A bar's hover text: its stage and its state (the strip's words)."""
+    """A bar's hover text: its stage and its state (`stage_name`, `state_word`)."""
     return _("{stage}: {state}").format(stage=stage_name(stage), state=state_word(state))
 
 
@@ -435,29 +490,29 @@ def natural_margin(part: tuple[int, int], canvas: tuple[int, int], inset: int, e
     return min(x, canvas[0] - x - w)
 
 
-def room_kept(setting: str, active: bool, part: tuple[int, int], canvas: tuple[int, int], inset: int = 0,
+def room_kept(setting: str, part: tuple[int, int], canvas: tuple[int, int], inset: int = 0,
               enlarge: bool = False, rtl: bool = True) -> tuple[int, int]:
     """The canvas pixels kept clear on its left and right of a picture of *part* (`ImageCanvas.side_room_of`):
-    `RESERVE` on the exit side where the indicator is on (*setting* not "off", *active*: no whole-book run) and the
-    exit margin a picture drawn without it would leave is under `RAIL_ROOM`; (0, 0) otherwise. It depends on these
-    alone, never on what the indicator shows, so the page keeps its size from page to page."""
-    if setting == "off" or not active or canvas[0] < 4 * RESERVE:
+    `RESERVE` on the exit side where the indicator is on (*setting* not "off") and the exit margin a picture drawn
+    without it would leave is under `RAIL_ROOM`; (0, 0) otherwise. It depends on these alone, never on what the
+    indicator shows, so the page keeps its size from page to page."""
+    if setting == "off" or canvas[0] < 4 * RESERVE:
         return (0, 0)
     if natural_margin(part, canvas, inset, enlarge) >= RAIL_ROOM:
         return (0, 0)
     return (RESERVE, 0) if exit_side(rtl) == "left" else (0, RESERVE)
 
 
-def side_layout(setting: str, active: bool, canvas: tuple[int, int], shown: Box | None, rtl: bool, full: bool,
+def side_layout(setting: str, canvas: tuple[int, int], shown: Box | None, rtl: bool, full: bool,
                 top: int = 0) -> SideLayout:
     """Where the indicator goes beside the picture drawn at *shown* (canvas pixels) on a canvas of *canvas*: the
     column where *setting* is "column" and the exit margin is `COLUMN_NEEDS` or more, its middle in the margin's
     middle, from `COLUMN_TOP` down to the canvas's bottom (on the full screen *full*, `SLOT_ROOM` above it); the rail
     otherwise, as tall as the picture, `RAIL_GAP` px from the page where the margin has room for that, nearer in the
     room kept for it (`room_kept`); both below *top* (on the right, the busy badge's and the full screen's close
-    button's place); nothing with *setting* "off", in a whole-book run (not *active*), with no picture, or with no room
-    at all (a margin under `RAIL_W` + `MARKS_W` + `RAIL_GAP_LEAST`)."""
-    if setting not in ("column", "rail") or not active or shown is None:
+    button's place); nothing with *setting* "off", with no picture, or with no room at all (a margin under `RAIL_W` +
+    `MARKS_W` + `RAIL_GAP_LEAST`)."""
+    if setting not in ("column", "rail") or shown is None:
         return SideLayout()
     side = exit_side(rtl)
     width, height = canvas

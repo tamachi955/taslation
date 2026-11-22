@@ -1,4 +1,4 @@
-"""The names a whole-book run rendered in more than one way (`NamesDialog`, from the band at the end of the run or
+"""The names rendered in more than one way in the pages read (`NamesDialog`, from the band above the page or
 Tools > Names rendered in more than one way...): each name as the Japanese writes it, its renderings and how many
 lines hold each (`taslation.name_variants`). The reader picks one rendering, or types one, and Apply changes the
 lines with another rendering to it (only lines whose Japanese has the name) and keeps it in the series sheet when

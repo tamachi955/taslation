@@ -1,10 +1,8 @@
 """What several parts of the reader window share: the target languages offered, the keys passed on
-to the viewer and their names, the timings, the status lines said by key (in English: the keys of the window's
-catalogs), and whether a whole-book run is on (`in_a_run`)."""
+to the viewer and their names, the timings and the status lines said by key (in English: the keys of the window's
+catalogs)."""
 
 from __future__ import annotations
-
-from typing import Any
 
 LANGUAGES = [
     "English", "Spanish", "Portuguese (Brazil)", "French", "German", "Italian", "Russian", "Polish", "Dutch",
@@ -57,7 +55,7 @@ TRANSLATOR_NOTE_MAX_MS = 12000
 WINDOW_ALPHA = 0.99  # not quite opaque (Windows, and the full screen): a Chromium viewer that an opaque window covers entirely stops drawing
 LIVE_CHANGE = 0.0  # the live view draws a frame whose thumbnail differs at all from the one on show
 BLANK_SPREAD = 8  # a frame whose thumbnail spans fewer grey levels is blank (as capture.is_blank judges a frame)
-QUEUE_RANK = {"auto": 0, "translate": 1, "batch": 2}  # a waiting request gives way to one ranked higher
+QUEUE_RANK = {"auto": 0, "translate": 1}  # a waiting request gives way to one ranked higher
 APP_NAME = "TASlation"
 APP_EXPANSION = "Tool Assisting Self-translation of manga"  # TAS as in the tool-assisted speedrun: the tool assists, you translate
 APP_TITLE = f"{APP_NAME} - {APP_EXPANSION}"  # the main window's title; dialogs keep the short name
@@ -71,12 +69,7 @@ READING_MODE = "Full screen: page keys turn the viewer's pages; F11 or Esc leave
 READING_MODE_AUTO = "Full screen: page keys turn the viewer's pages, and Auto is on until you leave, so each page is translated as you turn it. F11 or Esc leaves it."
 # ... and in the Translator role, whose pointer and keys work there as in the window
 FULL_SCREEN_TRANSLATOR = "Full screen, Translator role: click a region to select it, double-click to edit it; page keys turn the viewer's pages. Esc lets go of the selection, then leaves; F11 leaves at once."
-FULL_SCREEN_SCAN_WAITS = "The full screen translates page by page; the whole-book scan waits until you leave it (F11)."
-# a whole-book run asked for on the full screen (its key: the menu and the toolbar are away there)
-FULL_SCREEN_NO_RUN = "A whole-book run starts from the window: leave the full screen first (F11)."
-READING_ONLY = (READING_MODE, READING_MODE_AUTO, FULL_SCREEN_TRANSLATOR, FULL_SCREEN_SCAN_WAITS, FULL_SCREEN_NO_RUN)
-# The first time in a session that a whole-book run turns Auto off (the run reads the pages turned; Auto comes back)
-RUN_AUTO_OFF = "Whole-book run starting... Auto is off while the run reads each page you turn, and on again when it ends."
+READING_ONLY = (READING_MODE, READING_MODE_AUTO, FULL_SCREEN_TRANSLATOR)
 # Leaving the full screen after pages were translated there under a name that names no book: the name given since
 KEPT_FROM_NOW = "The pages are kept under {book} from now on (F5 keeps the page on show too)."
 CLOSE_READING = "Leave full screen (F11)"  # the faint button at the top edge of the full screen
@@ -86,30 +79,3 @@ VIEWER_RESTORED = "Viewer: {title}  (restored from the taskbar)"  # the viewer c
 VIEWER_CLOSED = "The viewer was closed. Open your book again; TASlation finds it by itself."
 FIRST_PAGE = "Translate a page first: press F5."  # the page tools with no page translated
 THIS_PAGE = "Translate this page first: press F5."  # ... and with another page on show than the one translated
-# A book whose cache holds this many translated pages has been read: Auto no longer offers to read the whole book
-# first, and a page of it not translated yet (a cover with no lines, a page skipped) is translated as a page. Fewer
-# - a cover, a page or two tried with F5 - are a book not read yet.
-BOOK_READ_PAGES = 4
-# said once a whole-book run has translated the book and the window leaves translator mode by itself
-READER_AFTER_RUN = "The book is translated, so TASlation switches to reader mode. Choose Translator mode to check the translations on the page."
-
-
-def book_read(pages: int | None) -> bool:
-    """Whether a book whose cache holds *pages* translated pages has been read (`BOOK_READ_PAGES`; None: cannot be
-    told, so not)."""
-    return pages is not None and pages >= BOOK_READ_PAGES
-
-
-def in_a_run(window: Any) -> bool:
-    """Whether a whole-book run is on: from its start (the viewer's window may still be enlarged, the reader not made
-    yet) until it has ended."""
-    return bool(getattr(window, "_batching", False) or getattr(window, "batch", None) is not None)
-
-
-def viewer_rests(window: Any) -> bool:
-    """Whether a run is on that does not follow the reader just now (it starts, or has done the reading and not begun
-    the translation yet): while it reads the pages the reader turns their keys and clicks go on to the viewer, and
-    again once it translates and needs the viewer no more (`BatchReader.viewer_free`: the window follows the viewer
-    then as without a run, `live`)."""
-    batch = getattr(window, "batch", None)
-    return in_a_run(window) and not (batch is not None and (batch.following or getattr(batch, "viewer_free", False)))

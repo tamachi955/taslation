@@ -16,10 +16,10 @@ normal priority, and reads the one line of JSON it prints (`Check`, `parse_answe
 The state file (`STATE_FILE` in the state folder) keeps the time of the last look, whoever asked for it, and the
 newest version seen with its date: nothing else (`load_state`, `save_state`).
 
-Update now (`update_now`) asks what closing asks (`strip.close_warning`), starts update.cmd in a console window of
-its own (`update_command`: ``-Download -Version X.Y.Z -WaitFor <this process> -Confirmed -Restart``; the
-environment as Windows keeps it for the user, not the offline guard's: `update_env`), and closes the window as
-closing does; when update.cmd cannot be started the window says so and stays open. update.ps1 then waits for this
+Update now (`update_now`) starts update.cmd in a console window of its own (`update_command`: ``-Download -Version
+X.Y.Z -WaitFor <this process> -Confirmed -Restart``; the environment as Windows keeps it for the user, not the
+offline guard's: `update_env`), and closes the window as closing does; when update.cmd cannot be started the window
+says so and stays open. update.ps1 then waits for this
 process to end, downloads that version's ZIP with check_update.py, runs the update and starts TASlation again.
 """
 
@@ -38,7 +38,6 @@ from typing import Any, Callable
 
 from ..config import REPO_DIR
 from ..i18n import _
-from .constants import in_a_run
 
 LOG = logging.getLogger(__name__)
 
@@ -321,10 +320,9 @@ def relabel(window: Any) -> None:
 
 
 def idle(window: Any) -> bool:
-    """Whether nothing is read or translated just now: the window is ready, no page job, no page waiting, no
-    whole-book run."""
+    """Whether nothing is read or translated just now: the window is ready, no page job, no page waiting."""
     jobs = getattr(window, "_jobs", None)
-    return bool(getattr(window, "ready", False) and not getattr(window, "busy", False) and not in_a_run(window)
+    return bool(getattr(window, "ready", False) and not getattr(window, "busy", False)
                 and getattr(window, "_queued", None) is None and (jobs is None or jobs.empty()))
 
 
@@ -461,25 +459,14 @@ def launch_update(version: str, root: Path | None = None, pid: int | None = None
 
 
 def update_now(window: Any, version: str, launch: Callable[..., str | None] = launch_update) -> bool:
-    """Update now: what closing would lose of a whole-book run asked first, as closing asks it; update.cmd started
-    (`launch_update`); the window closed as closing closes it. Whether it closed: when update.cmd could not be started
-    the window says so and stays open, its run's pictures kept."""
-    from .dialogs.caches import WarningBox, tell
-    from .strip import close_warning, release_run_images
+    """Update now: update.cmd started (`launch_update`); the window closed as closing closes it. Whether it closed:
+    when update.cmd could not be started the window says so and stays open."""
+    from .dialogs.caches import tell
 
-    text = close_warning(window)
-    if text is not None:
-        box = WarningBox(window, "TASlation", text, go=_("Close anyway"), stay=_("Keep TASlation open"),
-                         stay_first=True)
-        if box.winfo_exists():
-            window.wait_window(box)
-        if not box.answer:
-            return False
     problem = launch(version)
     if problem is not None:
         tell(window, _("The update did not start: {reason} TASlation stays open.").format(reason=problem))
         return False
     stop(window)
-    release_run_images(window)  # (the window closes: the pictures go now)
-    window._on_close(asked=True)
+    window._on_close()
     return True
