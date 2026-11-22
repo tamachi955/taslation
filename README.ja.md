@@ -6,7 +6,7 @@ English: [README.md](README.md)
 
 TASlation（Tool Assisting Self-translation of manga）のウィンドウは、お使いのビューアに表示されている漫画のページを読み取り、このパソコン上で翻訳して、訳文をページに重ねて表示します。日本では、著作権法が私的使用のための複製（第30条）と、その目的での翻訳（第47条の6）を認めています。ほかの国については、[docs/LEGAL.ja.md](docs/LEGAL.ja.md) に30か国の扱いをまとめています。
 
-https://github.com/user-attachments/assets/a99d3445-bd31-4dd2-be83-ff3702f4959c
+https://github.com/user-attachments/assets/04b17420-58c0-4362-a92a-64e0dc060dae
 
 動画に映っているページは [OpenMantra データセット](https://github.com/mantra-inc/open-mantra-dataset)（Mantra Inc. 公開。Hinami, Ishiwatari, Yasuda, Matsui「Towards Fully Automated Manga Translation」AAAI 2021）に収録されている『バルーンドリーム』（朽鷹みつき 作）のもので、データセットは [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)（表示・非営利）で提供されています（動画では改変あり）。
 
