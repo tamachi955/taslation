@@ -101,11 +101,11 @@ def test_the_layout_model_on_a_full_gpu_goes_on_on_the_cpu_after_letting_go(tmp_
 @pytest.mark.parametrize("error", [torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB"),
                                    RuntimeError("CUDA error: out of memory"),
                                    RuntimeError("CUDA error: CUBLAS_STATUS_ALLOC_FAILED when calling `cublasCreate`")])
-def test_the_layout_model_out_of_memory_finds_the_page_s_boxes_on_the_cpu_and_the_gpu_again_once_let_go(
+def test_the_layout_model_out_of_memory_finds_the_page_s_boxes_on_the_cpu_for_the_rest_of_the_session(
         tmp_path, monkeypatch, error):
     """The GPU runs out of memory (Ollama's load, another program): this page's boxes are found on the CPU, and the
-    next pages too until the model is let go (before the translation model's next load, Tools > Release the model
-    now); the next page then loads it on the GPU again, where the memory came back."""
+    next pages too, also after the model was let go (Tools > Release the model now): a part that fails on the GPU
+    stays on the processor for the rest of the session (`ocr.place`), nothing decides again."""
     model = LayoutModel(tmp_path)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -130,8 +130,8 @@ def test_the_layout_model_out_of_memory_finds_the_page_s_boxes_on_the_cpu_and_th
     assert model.boxes(page, [(0, 0, 200, 200)]) and loads == ["cuda", "cpu"] and runs == ["cuda", "cpu", "cpu"]
     full[0] = False  # the memory came back
     model.release()
-    assert model._net is None and model.uses_gpu()
-    assert model.boxes(page, [(0, 0, 200, 200)]) and loads == ["cuda", "cpu", "cuda"] and runs[-1] == "cuda"
+    assert model._net is None and not model.uses_gpu()
+    assert model.boxes(page, [(0, 0, 200, 200)]) and loads == ["cuda", "cpu", "cpu"] and runs[-1] == "cpu"
     assert not model.failed
 
 
