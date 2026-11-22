@@ -4498,3 +4498,72 @@ frame of another page cancels a running job once it has stayed 150 ms (`LEFT_PAG
 at the job's next check. With soft first that wait falls within the soft picture's 166 to 418 ms. In the sharp runs
 the stand-in drew nothing soft and the window never learnt that it does (`App._drew_soft`: 0); in the soft runs it
 learnt it once each, at the first soft picture.
+
+## The backlog's translation computed below the desktop (2026-11-22)
+
+**What failed.** On GitHub's runners (Windows, 4 logical processors, no GPU: the OCR and the server on the
+processor), the stand-in group c-a-b on 1.0.0's tree failed 2 of 3 runs: scenario b's 10 quick turns (one every
+0.4 s) were drawn 4 and 7 times, and in the second run a page the stand-in had left on show stayed lettered 1222 ms
+after the window captured the new one (at 127.63 s). The code on the way from a turn to the window is the same as
+in version 0.9.7.
+
+**What the reports show.** The tool counts b's turns from the stand-in's own "draw" events, which it logs once a
+page's pictures have loaded; a draw that the next turn supersedes before they load is never logged. The stand-in
+was told every turn on time (its 12 control events, as in a run that passes) and the pages missing fit the 0.4 s
+steps, so the stand-in's draws were dropped, not its turns. The window pressed no key of its own (no page key in
+either run) and started one job a turn it saw: no turn was doubled, by the app or by the tool. What the two runs had
+in common: 2 to 3 s before b began (at 292.8 s and 290.8 s), after a's last page was finished, the backlog started a
+request of a page turned past in c whose prompt the server computed afresh ("history cut", about 720 new tokens),
+which ran 7.0 and 6.2 s on the processor until the backlog was stopped for b's pages. Each step of the window over
+900 ms around b (six in the two runs, 0.9 to 3.0 s with 31 to 172 ms of processor time, most of it waiting in the
+capture) came while that request ran, and the 1222 ms page of the second run came during another such request of the
+backlog's (984 new tokens, at 127.8 s). With four logical processors taken by the server's computation, the window's
+captures waited, and so did the browser's loading of the pictures. In a run of 0.9.7 on the runners (which stopped
+later on a fault of the tool's driver) the backlog had no such request at that point: the page jobs of c's two pages
+turned past were not confirmed there (the first had no gate, the second was taken back within TAKE_BACK_MS), so the
+backlog had none of them; on 1.0.0 the window learnt the stand-in's soft pictures 2.5 s in and both were confirmed -
+timing, not a change of the code.
+
+**What changed.** While the backlog translates (`backlog.Backlog._translate`), the server TASlation started computes
+at below-normal priority (`ollama_start.asking_behind`: BELOW_NORMAL_PRIORITY_CLASS for the server and the processes
+it started, its runner), and it is set back to the class it had at the next request to /api/generate or /api/chat
+made from anywhere else (`ollama_start.before_request`, called by the translator's `_request_once` and `_stream_once`):
+set back then, not when the backlog's request ends, because a request cancelled still computes to the end of its
+prompt's batch. A runner started while the server is low is low from its start (it inherits the class), and the
+next request sets it back with the server. Only a server this process started and alone uses (`own_server`), only
+on Windows; one that is at below normal or idle already is left as it is, and so is an Ollama that was there
+before, like a person's own. The page job's requests and the warming are not lowered.
+
+**Tests.** `tests/test_server_yields.py`: lowered until a request of another's and set back by it, a late runner set
+back, the class it had put back and a low one never raised, a foreign URL or none untouched, refusals and failures
+of the change, a request of another thread sets it back and one of the backlog's own thread does not, the backlog's
+step asks behind, the translator tells each path, and on real stand-in processes: lowered and set back, a child
+started while it is low, a server another TASlation uses left as it is. The other tests may change no priority
+(`tests/conftest.py`). The tool's report has `server_priority` (lowered, not lowered, set back, the time low, the
+backlog's requests and those computed low, any other request computed wholly while the server was low), and the
+runners' summary reports the first two and fails a run on the third.
+
+**Runs on this computer** (i7-9700F, 8 cores; `--scenario c,a,b --start-ollama 11435 --wait-done 120 --ocr-runs-on
+cpu --ollama-num-gpu 0` with `CUDA_VISIBLE_DEVICES=-1`, as on the runners; "3": the tool, the browser and the
+server held to three of the eight processors by their affinity):
+
+| Tree, processors | Criteria | b's quick turns drawn | Backlog's requests (computed low) | A large one of them | Window steps over 900 ms |
+|---|---|---|---|---|---|
+| With the change, 8 | 27 of 27 | 10 of 10 | 33 (33) | at 212.5 s, 1882 new tokens, cancelled after 115 ms | none |
+| 1.0.0, 3 | 26 of 26 | 10 of 10 | 18 | none | none |
+| With the change, 3 | 27 of 27 | 10 of 10 | 19 (19) | at 351.9 s, 0.15 s before b's first turn, 707 new tokens, cancelled after 215 ms | none |
+
+The failure did not come back here, nor did it come on 1.0.0 with three processors: there the backlog had no large
+request near b. In the third run it had one at b's start, and b's turns were all drawn and no step of the window took
+over 900 ms. What the server still computed of that request after its cancel (a cancelled request computes to the
+end of its prompt's batch) waited, at the lower priority, until the page's OCR was done, and the page's first request
+then waited 3.8 s at the server (its first request 7.7 s after the turn, against 2.4 s on 1.0.0 with three
+processors, where the backlog had nothing under way); at the normal priority the same work would have been done
+during the OCR, which it would have slowed. Scenario a's times were the same on both trees with three processors
+(first request median 2961 and 2968 ms, a page finished 31.9 and 32.2 s). The proof of the change is the group on
+the runners, run several times.
+
+**Left as it is.** A server kept low while other programs keep every processor busy could stay silent for the
+no-answer rule's 60 s on the processor (`NO_ANSWER_CPU_S`) and be restarted; the page job's own large prompts (a
+history cut, a context block) still compete at normal priority; and the backlog's reads (the OCR, in TASlation's own
+process) are not lowered.
