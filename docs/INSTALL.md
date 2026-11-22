@@ -18,9 +18,8 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 | One screen showing one page (about 12 lines) | about 4 s (2 to 6) | about 10 s (7 to 13) |
 | One screen showing two pages (about 20 lines) | about 8 s (5 to 13) | about 23 s (14 to 47) |
 | The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 6 s from the start); with Load the translation model at start off, 4 to 5 s more | the same |
-| Reading and translating a whole book (190 pages) | about 15 to 20 min | about 35 min to 1 h |
 
-The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. The whole-book times are estimates, calculated from 100 pages actually measured with the GPU and 16 pages without. The time you take to turn the pages is not included. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). These figures were measured with the reading of the pages (OCR) on the CPU (about 3 s for one two-page screen). On an NVIDIA GPU that has room for them, two of the three OCR readers run on the GPU (`ocr_runs_on`, docs/MANUAL.md, "The OCR models and their licence"). On the measuring computer, a page's OCR then took a median of 564 ms, against 1,104 ms with the readers on the CPU (docs/OFFLINE_VERIFICATION.md, "Where a page's time goes in the window").
+The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). These figures were measured with the reading of the pages (OCR) on the CPU (about 3 s for one two-page screen). On an NVIDIA GPU that has room for them, two of the three OCR readers run on the GPU (`ocr_runs_on`, docs/MANUAL.md, "The OCR models and their licence"). On the measuring computer, a page's OCR then took a median of 564 ms, against 1,104 ms with the readers on the CPU (docs/OFFLINE_VERIFICATION.md, "Where a page's time goes in the window").
 
 ## Installation
 
@@ -87,14 +86,14 @@ docs/OFFLINE_VERIFICATION.md, "The full-size window cache"):
 
 | | Without (`LLAMA_ARG_CACHE_RAM=0`) | With (`LLAMA_ARG_SWA_FULL=1`, `LLAMA_ARG_CACHE_RAM=256`) |
 |---|---|---|
-| Translating the whole book | 401 s | 296 s |
+| Translating all 214 pages in one pass (as the whole-book run of earlier versions did) | 401 s | 296 s |
 | Translating page by page | 412 s | 299 s |
 | Without a GPU, per line | 1.28 s | 0.98 s |
 | GPU memory of the loaded model, `OLLAMA_KV_CACHE_TYPE=q8_0` | 1,933 MB | 2,065 MB |
 | GPU memory of the loaded model, Ollama's default KV cache (f16) | 2,009 MB | 2,229 MB |
-| RAM of the model's server at its peak (whole book) | 2.0 GB | 0.9 GB |
+| RAM of the model's server at its peak (all pages in one pass) | 2.0 GB | 0.9 GB |
 
-The translations scored the same (chrF 41.18 and 40.99 for the whole book; the difference is within what one run to the next varies).
+The translations scored the same (chrF 41.18 and 40.99 for all pages in one pass; the difference is within what one run to the next varies).
 For a model with windowed layers and a long context, the full window cache can take much more GPU memory than it does here.
 
 When a download fails, it is tried again after 15 seconds, three times in all (it says what failed, which attempt it was and how long it waits).
@@ -138,7 +137,7 @@ Nothing about you, this computer, the installed version or your books is sent; G
 It shows this version and the new one with their dates, and what changed. "Update now" closes TASlation, and `update.cmd` runs in a window of its own:
 it downloads the new version's ZIP (about 5 MB) from GitHub, keeps the files it replaces or deletes in the folder `.previous`, copies the new files,
 goes on with the same installation as `install.cmd` (if the new version needs anything more, it asks before downloading), and starts TASlation again once that has got to its end.
-The window of `update.cmd` stays open so that you can read what it did (Enter closes it). "Update now" during a whole-book run asks what closing asks.
+The window of `update.cmd` stays open so that you can read what it did (Enter closes it).
 When `update.cmd` cannot be started, the window says so and TASlation stays open.
 
 When you install, the installer asks once whether TASlation should look for a new version when it starts (the default is No). With Yes, it asks at most once a day,

@@ -4416,3 +4416,52 @@ only. The whole suite on the same code: 5,478 passed, 22 skipped, in 26 min 34 s
 beyond the one before the announcement; what the announcement does (above); a window between that is itself topmost
 (not met); more than one screen with the viewer on another; a viewer run as administrator (Windows refuses the
 placement: logged, nothing else); Firefox.
+
+## The whole-book run removed (2026-11-22)
+
+On the owner's decision there is one way of reading: each page is read and translated when it is on show (Auto, F5),
+and the pages turned past go on being read and translated behind the reader ("Pages turned past go on being read"
+and the sections after it), which does what the whole-book run was for. The run is gone with what served it alone:
+"Read whole book..." and its dialog, "Finished reading", the band and the page strip under the page, the run's view
+of the page it worked on, its taskbar progress and sound, its questions at Stop and at closing, `taslation batch`
+(with `--retranslate` and `--wait`) and `gui --mode`, and the settings `context_mode`, `chunk_bubbles`,
+`lookahead_bubbles`, `batch_max_pages`, `batch_memory_mb`, `scan_mode`, `flash_when_done` and `sound_when_done` (a
+taslation.toml that still holds them loads without a word; they do nothing). Stop (Esc) stops the page being
+translated, as before; the indicator beside the page is shown by its setting at all times. Translations a run cached
+stay valid and show as any cached page. The sections above stay as they were written.
+
+**What no longer has a counterpart.** The measurements above taken with the run or with its way of translating:
+
+- *The batch of October 2026* (`taslation batch` on the viewer, the pages read first and translated in chunks with
+  the story so far as context): "Live window test" and "Context-aware batch" (2026-10-24 and 2026-10-25: the fake
+  viewer read by the batch, in context mode), "A real book" (2026-10-25: the volume read by the batch, its chunks
+  timed), the batch in a second process of "Stale cache entries and the shared cache file" (2026-10-25), `batch
+  --wait` in "The book's tab switched away" (2026-10-26), `batch --retranslate`, one batch per viewer window and the
+  stop when pages change shape in "A translator's pass over the real volume" and "The volume translated again with a
+  checked series sheet" (2026-10-27), the batch runs of "Lettering against the outline", "One translation per text"
+  and "The rest of the list" (2026-10-28: what a batch run would send or drop, where the batch stopped), and the end
+  of the book in a whole-book read in "A viewer raised for a look" (2026-10-31).
+- *The size and the context of a run's requests*: `chunk_bubbles` at 100 or 40 against a 16K or an 8K context in
+  "Lighter models compared" (2026-10-28), the 4B models translating as the batch did with its 16K context in "A
+  knockout among the 4B models" (2026-10-29), the batch's longer context in "A larger context for the 4B"
+  (2026-10-30), and the runs of 100, 12 and 30 lines that set `chunk_bubbles` to 30 in "Read first, translate all at
+  once" (2026-11-02). No trial of `lookahead_bubbles` is in this log.
+- *The memory a run held*: what a scanned page unit kept, 22.6 KiB a page and 4.4 MiB per 200 pages, in "Read first,
+  translate all at once" (2026-11-02).
+- *Whole-book run times*: the five series read in the window in "OpenMantra through the window" (2026-11-01); the
+  translation pass of a read-first batch (100 pages with the GPU, 16 without) with and without the server's prompt
+  cache in RAM in "Ollama's prompt cache in RAM" (2026-11-14, the runs of 2026-11-13 the README's hardware figures
+  came from among them); the whole-book table and row of "Line reuse" (2026-11-15); the whole-book columns of "What a PLaMo request costs the server" and the "whole book"
+  rows of "The full-size window cache" (2026-11-20), whose page-by-page rows stay comparable.
+- *The benchmark's book mode*: `tools/openmantra_eval.py` translated as the whole-book batch did from "OpenMantra as
+  the sample dataset" (2026-10-30) on, through `BatchReader._translation_pass` itself from 2026-11-02, so every
+  official chrF, share of lines flagged and translation time in this log is that mode's, from "OpenMantra after the
+  quality round" (2026-10-30) to the "book mode (official)" rows of the sections on pages turned past (2026-11-20 and
+  2026-11-21). The benchmark now translates page by page (`--mode page`, `Pipeline._translate_regions`). Detection F1
+  and the OCR's CER do not depend on the mode (F1 97.2 and CER 1.9 % in every arm on 2026-11-21); chrF does (41.22
+  page by page and 40.99 in book mode on the same code that day).
+- *Stand-in scenarios w and w2* (`tools/standin_e2e.py`): in "Where a page's time goes in the window" and "The first
+  page at the start, soft frames, and the first request before the OCR ends" (2026-11-20), in the runs of every
+  scenario on 2026-11-21, and as the yardstick of how long the backlog takes in the sections on pages turned past
+  (2026-11-20 to 2026-11-22: 36.2 to 37.7 s for the 5 screens of scenario w in the wide window). On GitHub's runners
+  the third group of stand-in scenarios is now t, t2 and k's three paces ("t-t2-k5-k1-k2").

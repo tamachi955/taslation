@@ -77,7 +77,7 @@ python tools/compare_runs.py a.json b.json
 A fixed seed makes a run repeatable, but any setting that changes a prompt (a different detector changes the
 geometry and so the room hints) still draws a different series, so several seeds are still the better measure. With
 only five series the series bootstrap is coarse, and `--geometry gold` keeps detection changes out of a translation
-comparison altogether. `--mode page --warm` translates with the warming the window does between pages
+comparison altogether. `--warm` translates with the warming the window does between pages
 (`Pipeline.warm_soon`): the prompts stay the same, but the server computes their beginnings in other batches, so a
 fixed seed can still draw some answers otherwise.
 
@@ -86,7 +86,7 @@ of the dataset (`--series`: a title or several a part, say each in a job of its 
 rows are pooled and scored again as the eval scores them, so the "all" row is the pooled one, never a mean of the
 parts', and `compare_runs.py` reads the joined file as a run of the whole. Parts that share a title or were run
 otherwise (the options but `--series`, the model, the settings, the dataset) are refused; `--force` joins them and
-the file lists what differs. In book mode a title's context never reaches another title; what still differs from one
+the file lists what differs. A title's context never reaches another title; what still differs from one
 run of the whole is that a line asked for before in another title is drawn anew there, and that each part's server
 starts without the caches of the titles before it.
 
@@ -113,26 +113,24 @@ rows' languages.
   runs.
 * `tools/premises_eval.py` measures the effect of the series sheet on the translations (`tools/premises_eval_set.json`); `--long-sheet 200` measures the entries the premises block cuts, block alone against those entries after the bubbles.
 * `tools/hint_eval.py` measures whether PLaMo 3 Translate follows a region's hint for the model, its kind or its room put in its PFML3 ``context`` block, on lines written for the test (in several wordings, ``bare`` being the one the app sends; against the prompt without a hint; seeds 1 to 3; the answers kept in a JSON file to go on from).
-* `tools/prompt_replay.py` replays OpenMantra's pages through PLaMo's two ways of translating, page by page and the
-  whole-book run, and counts for every request whether its prompt extends the last request's prompt and answer, and
+* `tools/prompt_replay.py` replays OpenMantra's pages through PLaMo's way of translating page by page, and counts
+  for every request whether its prompt extends the last request's prompt and answer, and
   where and why it parts from it (the context block, a joined run, a pair changed or gone, the glossary, a cut, a
   request beside the page, a line asked again), with the tokens that then have to be computed again, numbers only.
   A stand-in model answers with the gold English (no Ollama, about 30 s); `--answers live --url` asks a server of
   the developer's own instead and adds Ollama's own counters per reason (`--start-ollama PORT`: the server
-  TASlation's own starter starts on a spare port, stopped at the end). `--warm` (page mode) does after every page
+  TASlation's own starter starts on a spare port, stopped at the end). `--warm` does after every page
   what the window does while the reader reads (`Pipeline.warm_soon`) and says whether the page requests' prompts
   are the very same with it and without it (their number and a digest of them in their order).
 * `tools/make_icon.py` draws the window's icon with Pillow alone.
-* `tools/strip_demo.py` runs the page strip in the real window with a made-up whole-book run (`tests/fake_strip.FakeRun`)
-  and measures the Tk loop's lateness and the strip's memory; no viewer is chosen and no other window is touched.
-* `tools/demo_video.py` makes a recording of a whole-book run (`docs/media/whole-book-demo.gif` by default; the README's
+* `tools/demo_video.py` made a recording of a whole-book run (`docs/media/whole-book-demo.gif` by default; the README's
   recording until November 15, 2026): the real window, the real OCR and the real translator over OpenMantra pages in a
   stand-in viewer of its own, pictures of TASlation's own window only, a scratch state folder, no other window touched.
   From then to November 21, 2026 the README's recording, `docs/media/taslation-intro.gif`, was made with this tool's
   guard and scratch state by a longer script that is not in the repository; since then it is made by
   `tools/intro_video.py` (the next entry), the first time with version 0.9.0. Each of these recordings holds
   CC BY-NC 4.0 material. Since version 0.9.4 the README shows a video instead (an attachment kept by GitHub) and the
-  repository holds no recording.
+  repository holds no recording. With the whole-book run gone (2026-11-22) the tool only says so and ends (exit code 2).
 * `tools/intro_video.py` records the README's introduction again from the code its checkout holds (a dev tool, never
   part of a release). `record --out FILE` runs the real window in English beside a stand-in viewer of its own (a Tk
   window of a child process showing OpenMantra pages, turned only by the page key the window passes on to it), with
@@ -147,7 +145,7 @@ rows' languages.
   follows, or is marked as the tool's own words; `tests/test_intro_video.py` fails when one of those sentences no
   longer stands word for word, so change the line with the document.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
-  the page drawn, on a stand-in viewer in memory (`--ahead`: erased ahead first, as a whole-book run leaves them).
+  the page drawn, on a stand-in viewer in memory.
 * `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
   (`tools/standin_viewer/`: a local page the browser shows in an app window of its own, with a scratch profile; it
   fetches nothing and turns its pages by its own script: soft first, spreads, black frames, a spinner, a band whose
@@ -162,8 +160,7 @@ rows' languages.
   apart; each page unit looked for in the cache, with the frame's size, the capture area and the distance of the page
   found and of the nearest one, and the capture areas in force; each look for a page the cache did not hold as found,
   as it reads at other sizes, with the readings it went through, their time and what they found; how long after a turn
-  the page before stayed on the page area, and its lettering, by what a whole-book run did then - reading the pages,
-  translating, none; how long lettering showed on a soft picture of the page, and how far the boxes of a page read from
+  the page before stayed on the page area, and its lettering; how long lettering showed on a soft picture of the page, and how far the boxes of a page read from
   a soft frame lie from those its sharp frame gives, in pixels; for the pages the cache held, drawn soft first or sharp
   at once, when their lettering came after the turn, when the lettering read from the sharp frame did, and how often
   and how long lettering left the page and came back; each frame the window judged soft or sharp, by the page's own
@@ -196,9 +193,7 @@ rows' languages.
   turn released by it -, the full screen left by Esc and the Reader role chosen again; t and t2 come together); o,
   over the book (the stand-in
   made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Full screen
-  button, the full screen left by the F11 hot key); z, TASlation's text size at 150 %; w, a whole-book run on a short
-  stretch, started as the dialog's Start starts it, then Finished reading, with w2, the window beside the run as the
-  stand-in turns back to the run's pages and on past them (w and w2 come together); x, a request cancelled in flight
+  button, the full screen left by the F11 hot key); z, TASlation's text size at 150 %; x, a request cancelled in flight
   at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
   at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
   dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
@@ -214,7 +209,7 @@ rows' languages.
   how long each such job went on after showing its page; and for the run (`told`) the screens left told at work at
   the end (`left_working`: none should be) and how often a stage told done was told at work again.
   `--k-soft off` draws every page sharp at once, `--k-narrow` places the stand-in at the narrow size first (single
-  pages; with scenario w too, the whole-book run to set beside it), `--k-backlog off` catches nothing (the baseline of
+  pages), `--k-backlog off` catches nothing (the baseline of
   the same turns), `--k-keys` releases each turn by the window's next page key once the window hands it on (the reader
   turning by TASlation's keys: pressed on its page, the window's raise of the viewer before a key left out, with
   `--standin-draws-covered`; per pace, the keys handed on and after how long), `--k-stay-ms` keeps the last page
@@ -231,10 +226,9 @@ rows' languages.
   of its script until the tool's word), and x's soft frames stay on show until the window has asked on them (15 s and
   CAP_S at most); the report keeps the holds and their reasons (`waits`). Without it the script and the stand-in's
   control file are the same as ever. A turn's rest ends at the next turn or where the tool changed the window for the
-  next scenario (a mode left or entered, the theme, the text size, the stand-in's size, Finished reading: the report's
+  next scenario (a mode left or entered, the theme, the text size, the stand-in's size: the report's
   `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
-  window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`); the
-  whole-book run's frames are told by who got them, its reading or its erase ahead. Its global hot keys are never
+  window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). Its global hot keys are never
   registered with Windows: the tool holds them, notes which the window held, and hands it a press as Windows would.
   Over the book the window gives the stand-in the foreground from its own window, as the mode does; the tool itself
   never changes it. `--scale 1.5` draws the stand-in as on a display
@@ -337,8 +331,8 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then four stand-in jobs (the scenarios in groups: c, a and b; d, e, r and x, e turning back to d's pages; t and w with
-t2 and w2, then k's three paces; o, z and f with f2; each with `--wait-done`, which holds no rest of k) and five
+Then four stand-in jobs (the scenarios in groups: c, a and b; d, e, r and x, e turning back to d's pages; t with
+t2, then k's three paces; o, z and f with f2; each with `--wait-done`, which holds no rest of k) and five
 benchmark jobs (a title a job, `--series`) run, at most nine at a time beside `tests.yml`'s eight, each restoring the
 caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
 start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at
@@ -349,7 +343,7 @@ run went through, the window chose the stand-in alone, nothing was kept or shown
 one where the sharp frame came in time, no request was sent for nothing outside x and k - in k only page jobs' asked
 before their frame was confirmed and dropped as the page was flipped past, none on a soft frame, none of the
 backlog's -, a page translated at rest came back without a request, no rested page was left unfinished with the
-window at rest, each scenario's mode was entered and left, its page keys handed on, the whole-book run ended, the
+window at rest, each scenario's mode was entered and left, its page keys handed on, the
 backlog held no frame after its read and, the window at rest at the end, nothing at all and no screen told at work,
 ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
 cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first bubble, the

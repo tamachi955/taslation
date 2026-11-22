@@ -56,7 +56,7 @@ In the Reader role the bubbles filling in are the progress. Only when no bubble 
 (on the full screen, the bottom of the margin on the side the page turns to) say "Loading the model...", "Reading the page..." or "Translating...",
 and it goes when the first bubble is lettered. No seconds are shown and nothing turns. A page that could not be translated shows an orange "!" and
 "This page could not be translated. F5 tries again." in the same place while that page is on show, and a page with nothing to read shows "Nothing to read on this page." for 4 seconds.
-Nothing else is said there. In the Translator role and during a whole-book run, the badge at the top right shows what it is doing and how many seconds have passed, as before,
+Nothing else is said there. In the Translator role, the badge at the top right shows what it is doing and how many seconds have passed, as before,
 and the status bar shows the same.
 
 ### Pages you turn past
@@ -88,7 +88,6 @@ dashed frame of a bubble found and the solid frame of one read). They go, and so
 characters changed (1 second and 60 milliseconds a character, from 2 to 8 seconds), or once the pointer rests on that bubble. Turn away before that, and the
 diamond stays. The words you saw are kept in memory only and never written anywhere; they go with the book.
 
-During a whole-book run this is not shown: the strip under the page shows the run's progress, as before.
 Choose its form in "Tools > Settings...", "Pages turned past:": "Thumbnails where there is room" (the default), "A narrow bar" or "Not shown" (`side_indicator` in `taslation.toml`).
 
 ### With a single screen
@@ -125,7 +124,7 @@ on the same monitor as TASlation, TASlation behaves like Windows' on-screen keyb
 It always stays on top, but clicking it does not bring it to the foreground (where key presses go). The viewer stays in the foreground,
 so the page keys reach the viewer directly as usual, and TASlation follows to the new page. Browsers go on drawing too.
 
-* TASlation's buttons, checkboxes, the page strip and so on work with a click as usual.
+* TASlation's buttons, checkboxes and so on work with a click as usual.
 * F5 (translate) goes to TASlation even while the viewer is in the foreground (it does not reload the browser). On TASlation's full screen,
   F11 and Esc also belong to TASlation and leave it (in the Translator role Esc first lets go of a selected region).
   Otherwise F11 and Esc, and the page keys, belong to the viewer (you can use them to switch the viewer's own full screen). TASlation takes these keys only in this mode, and only while the viewer or TASlation is in the foreground.
@@ -140,7 +139,7 @@ so the page keys reach the viewer directly as usual, and TASlation follows to th
 
 "Full screen" (the toolbar button, or F11) shows the page alone on the whole screen, in the role you chose. It puts a black full screen over the viewer,
 enlarges the capture area to fill the screen, and shows only the translated page. Fit the area exactly to the page first.
-The toolbar, the menus, the page strip and the status bar are away while it lasts; the status is shown at the bottom of the screen instead.
+The toolbar, the menus and the status bar are away while it lasts; the status is shown at the bottom of the screen instead.
 The pages you turn past (see "Pages you turn past") show in the margin on the side the page turns to, and the Reader role's status at the bottom of that margin.
 It opens on the monitor the window is on, and for a browser window where neither an area nor the page part is known, F11 first asks whether to "Set area..." or "Read as it is".
 
@@ -149,7 +148,7 @@ It opens on the monitor the window is on, and for a browser window where neither
   F5, Undo, Delete, Tab and the other keys of translator mode work, and the regions' frames, numbers and flags show as in the window. Clicks stay TASlation's whatever the page shows:
   none goes to the viewer (a click on a page that is not translated yet says to press F5), and the page keys still turn the viewer's pages. Auto stays as you set it.
   The region editor and the other dialogs open above the full screen, and closing them brings you back to it. A status line stays longer there, by its length (up to 12 seconds).
-  Changing the role, the Series and Vol. fields, and starting a whole-book run need the toolbar: leave the full screen for them (a key you gave "Read whole book..." says so there).
+  Changing the role and the Series and Vol. fields need the toolbar: leave the full screen for them.
 
 F11 takes you back to the window, and so does Esc (in the Translator role Esc first lets go of a selected region). To go back with the mouse, move the pointer to the top edge of the screen: a faint "✕ Leave full screen (F11)" appears at the top right,
 and you click it (it disappears when you move the pointer down; clicks anywhere else go on as before). With `taslation gui --full-screen`,
@@ -157,8 +156,7 @@ the full screen starts as soon as the viewer is chosen (`--reading`, its earlier
 When you translate a book that has no name yet (in a browser viewer whose tab title is only the viewer's name, for example) on the full screen, those translations are not saved anywhere.
 When you leave the full screen, the book's name is asked for once; once you name it, the pages from then on are saved under that name (the page on show can be saved with F5).
 
-Once you have read the whole book with the whole-book reading, every page is shown at once, which makes reading comfortable. The full screen translates untranslated pages one page at a time,
-and a whole-book reading waits until you leave the full screen (the full screen does not start while a batch is running). The full-screen window covers the viewer,
+The full screen translates untranslated pages one page at a time, as the window does. The full-screen window covers the viewer,
 so the page can be taken only from what the viewer itself draws. Chromium-based viewers, such as the viewers read in a browser, do draw;
 with a viewer that does not, the page says so: press F11 and read in the normal window.
 
@@ -202,7 +200,6 @@ so even over a full-screen viewer, keys reach the viewer. The enlargement of the
 and its key does nothing (the full screen turns Show original off as it starts). "Enlarge the bubble under the pointer" in Tools > Settings...
 (`bubble_zoom`) off shows nothing under the pointer while the translation is on the page. With the original on the page the pointer is the way to the translation,
 so the setting does not count there.
-The page a whole-book run shows while it translates, and the page strip, are as they always were in either role: nothing shows under the pointer there.
 
 **In the Translator role**: the page is always the translated page with the regions' frames, in the window and on the full screen, whatever "On the page" says
 (the original on the page is a choice of the Reader role; View > Show original works as before).
@@ -241,16 +238,12 @@ On a touch screen, where a tap goes to the viewer and nothing rests on the page,
 Windows turns a touch held still into a right click while its "press and hold" setting is on, so a right click on a bubble pins its panel too.
 Pinning by a press held still or a right click is the Reader role's only: in the Translator role a press held is the start of a drag, and a right click only closes a panel that shows.
 
-### Two ways to read
+### Starting a book: the setup and the book's name
 
-**Page by page** (the default; what "Auto" and F5 do): each page is translated when you open it, with only the few pages just before it as context.
-This is the way of reading that sits most easily with stores' terms of use.
+Each page is translated when you open it (what "Auto" and F5 do), with only the few pages just before it as context, and the pages you turn past go on being read and translated in the background ("Pages you turn past" above).
 
-**Translating the whole book first** (optional): the whole book is read only when you choose it in a dialog, and the dialog shows this note:
-"A store's terms of use are a contract between you and the store. In a whole-book run TASlation turns no page: it reads only the pages you turn yourself. That does not settle what your store's terms allow, so check them and use this mode knowing that." (The usual consequence of breaking the terms is a suspended account, not a crime.)
-
-In this mode, the first time Auto meets a page that is not in the book's cache, TASlation first checks that it is ready to translate (that Ollama is running, and that the model and the OCR models are installed). If something is missing,
-the banner above the page says what is missing and how to fix it, and until it is fixed, nothing is read and pages are translated one at a time (it checks again every 10 seconds).
+When something translating needs is missing (Ollama not running, the model or the OCR models not installed),
+the banner above the page says what is missing and how to fix it, and checks again every 10 seconds until it is fixed.
 
 **The buttons in the banner above the page.** Each line of the banner has a button when it is something TASlation can fix for you.
 
@@ -263,11 +256,10 @@ the banner above the page says what is missing and how to fix it, and until it i
 | The viewer stays black | Show viewer | Brings the viewer's window in front of the other windows. Click the book and reload it |
 | TASlation covers the viewer completely | Move TASlation aside | Moves only TASlation's window, so that a little of the viewer shows |
 
-While a whole-book reading is waiting for the viewer, the banner above the page has the same buttons.
 If, at start, translation turns out to run on the processor (CPU) (judged by whether Ollama's log names a graphics card),
 the banner shows once roughly how many seconds a page takes to translate. "Close" removes it for the rest of that session.
 
-Next, a small dialog asks for the book's name (in page-by-page mode too, if the book has no name yet, the same is asked on the first page).
+When the window's title gives the book no name, a small dialog asks for the book's name on its first page.
 The cache and the series sheet are saved under this name. Some viewers read in a browser have a tab title that is only the viewer's name, whatever book is open,
 and with such a title it always asks (a viewer's or a browser's name is never used as the book's name).
 Which part of a title is the viewer's name is learned on this computer: when you choose a second book in the same viewer, or type the book's name without the viewer's part in the "Series" and "Vol." fields. From then on that part is left out of the book's name. For the first book the whole title may show in the "Series" field; correct the name there. A browser-based viewer whose tab shows only its own name asks for the book's name first, and your answer teaches it that the title names no book.
@@ -275,18 +267,10 @@ What is learned (the titles and program file names of the windows you chose as t
 A book you have named once is recognised from its translated pages, whatever capture area you read it with, and its name is filled in. If several books look alike, the candidates are offered in the box's list,
 and if it cannot tell, the name last given with the same viewer is filled in ("Last time with this viewer: ...").
 Even after you resize the viewer's window, the book is recognised from its pages the next time you open it (if the two pages of a spread are both close to different pages of the same book, it is taken to be that book). Old caches are matched the way pages were cut out at the time, so they still work as they are.
+Closing the dialog without a name reads nothing, and it asks again on the next page, since nothing can be kept without a name.
 
-The same dialog also asks, with the note above, whether to read the whole book first. Enter chooses "Page by page instead" (so that the heavier way does not start without you choosing it). The answer is remembered per book (ui.json in the state folder). For a book you answered "page by page", it does not ask again, and the status line shows how to read it whole. For a book you answered "Start", it asks again next time, and then Enter is "Start" (the run is always your decision). Closing the dialog means "Not now": until you close TASlation, that book is translated page by page and not asked about again (nothing is remembered). Only if you close it while the book has no name yet does it ask again on the next page, since nothing can be kept without a name. If you do read the whole book, turn the pages at your own pace, in the viewer or with the page keys in the TASlation window. TASlation only reads the pages that are turned; it never turns a page itself.
-When you have read to the end, press "Finished reading" in the banner, and everything is translated together with the whole story in view (reading and translating 190 pages takes about 15 to 20 minutes with a 6 GB GPU and about 35 minutes to an hour without one, estimated from the measurements in "Requirements" in docs/INSTALL.md; the time you spend turning the pages is not included). While the translation runs, you can read on in the viewer: a page it has translated already shows translated in TASlation's window (drawn from the cache; nothing is asked of the model), and a page it has not come to yet shows as it is, with a line that says so. The banner above the page shows the number of pages read and waiting,
-the time a page takes to read, the translation's progress (how many lines of how many) with its bar, and the time left, with a "Stop" button. The translation's progress also shows as a green bar on TASlation's taskbar button (yellow while the reading is held up and waiting). During the reading, "Auto" is off (the reading reads the pages you turn;
-the first time, the status line says so); when it is over, Auto is on again, and from then on every page is shown at once.
-When the translation has finished, or has stopped on a problem, and TASlation is not in front, TASlation's taskbar button flashes to tell you
-(the focus does not move, and the window is not brought forward; the button stays lit until you open TASlation; when you stopped it with "Stop", it does not tell you).
-The setting `flash_when_done = false` stops the flashing, and `sound_when_done = true` also plays Windows' default sound (by default: flashing, no sound).
-
-When the translation has finished, it also checks whether the same character's name is written more than one way in the translations ("竜司" split into "Ryuji" and "Ryūji", for example).
-If it finds any, the banner shows how many, with a "Review names..." button (it also opens from "Names rendered in more than one way..." in the "Tools" menu).
-The pages you translate one by one are checked the same way: when a name in them is written in two ways, the banner says so with the same button, quietly (no window opens, and each name is offered once a session).
+The pages you translate are also checked for the same character's name written more than one way in the translations ("竜司" split into "Ryuji" and "Ryūji", for example).
+When a name is written in two ways, the banner says so quietly, with a "Review names..." button (no window opens, and each name is offered once a session; it also opens from "Names rendered in more than one way..." in the "Tools" menu).
 Each name is listed with its spellings and how many lines use each; choose the spelling to keep, or type one in "Other:", and press "Apply": the lines with the other spellings are changed to it.
 If "Keep it in the series sheet" is ticked (the default), it also goes into the character's rendering in the series sheet, and later translations use that spelling.
 Nothing is changed until you press "Apply". Only the name itself is changed, and only in the lines whose Japanese has that name; the rest of the line, the review flags, the notes to the reader and the positions stay as they are.
@@ -294,77 +278,13 @@ Nothing is changed until you press "Apply". Only the name itself is changed, and
 The names are found by fixed rules; no model is used. Only names that carry an honorific such as "さん", "くん" or "様" in the Japanese (2 or more katakana, or 2 to 4 kanji) are considered,
 and a name is shown only when the translations write it in two or more ways, each in separate lines, that look like spellings of the same name (missing a case is preferred to making a wrong suggestion).
 It does not appear for translations in languages without capital letters (Chinese, Korean, Thai and so on).
-The Japanese lines are only kept in memory while TASlation is open, and are written nowhere. So it covers only the lines translated in this session: by the last whole-book translation, and on the pages translated one by one (at most some 3,000 lines, the oldest going first; a page shown from the cache has no Japanese to look at).
+The Japanese lines are only kept in memory while TASlation is open, and are written nowhere. So it covers only the lines of the pages translated in this session (at most some 3,000 lines, the oldest going first; a page shown from the cache has no Japanese to look at).
 
-Both modes use the same cache.
-
-### Reading the whole book (optional; check the terms first)
-
-The default is page by page. To read the whole book, press "Read whole book..." in the toolbar. The most pages read in one run is `batch_max_pages` in the settings file.
-`--no-context` is available only on the command line. The batch dialog, too, shows the note about stores' terms of use, above "Start".
-
-Translating one page alone means translating without knowing who is speaking, what came before and what comes next. "Read whole book..."
-reads the pages you turn and translates them all together once you have finished reading, in two stages. During the reading, no request at all is made to the model.
-
-1. **Reading**: starting from the page shown when you press "Start", each time you turn a page the new page is taken in and its bubbles are read (OCR). TASlation sends no keys to the viewer.
-   You may turn the pages in the viewer, with the page keys in the TASlation window (as many presses as you make are passed on to the viewer), or by clicking the page.
-   Reading takes about 2 seconds a screen, but turning quickly is fine. Turned pages wait their turn in memory (up to about 24 screens). If more pile up, the banner asks you to wait a little, and as soon as there is room, the page on show at that moment is taken in.
-   If a page was turned before it could be taken in (it was shown too briefly, or you moved on while it was still a blurred provisional picture), the banner above the page says so at once,
-   and a dotted frame with "?" appears at its place in the page strip. Go back to that page in the viewer, and it is read like the other pages, at its place in the book's order
-   (with the test viewer, no page was missed even at 2 pages a second).
-   Going back to an earlier page does not read it twice, and the order does not change. Page images are not written to disk: they are kept in memory only, while TASlation is open.
-   They are used only to erase the Japanese ahead and to show the page being translated. The text read and its positions are also kept
-   only in memory at this stage (about 5 MB for 200 pages). At this stage, no page can be read yet.
-   The window shows the page now on show and the regions read. No text is put on it yet.
-   TASlation never decides where the book ends. When you have read to the end, press "Finished reading" in the banner (Enter on the command line). Once the waiting pages are read, it moves on to the next stage.
-   You may stop for a while. If no page is turned for an hour, it only stops keeping the screen from switching off, and it reads on from where you were. It never starts translating on its own.
-2. **Translation**: after "Finished reading", it translates 3 to 5 pages at a time (`chunk_bubbles`, 30 lines by default), with the series sheet and the whole story (the translations of the earlier lines;
-   with Qwen, also the Japanese that follows) as clues, and puts each part into the cache as it is done. From here on, the viewer is not touched.
-   Names spelled differently from the series sheet are made consistent mechanically; then the renderings and the lettering sizes are checked and review flags are set (no extra requests to the model).
-   Lines that a run of an older version left as draft translations are not sent to the model: at the same stage, they are checked against the series sheet and saved as translations.
-   The banner shows "Translating: m of n lines" with its bar, and moves on each time the model translates a line (PLaMo line by line, Qwen as its reply arrives).
-   The page area shows the page being translated. Each time the model translates a line, its translation is lettered in its bubble; the lines not translated yet stay as in the original, outlined.
-   Once the translations go into the cache, the page shows as the cache has it (until then they are provisional, and nothing of them is saved anywhere).
-   When the translation moves on to the next page, so does the page area, and the page strip below outlines that page. The strip only shows how far each page has come: clicking a thumbnail does not show that page.
-   A page with lines worth a look (as "Lines to review..." lists them) gets a small pennant with "!" in its thumbnail's top right corner once it is translated, and its tooltip says how many.
-   To read it, open the page in the viewer, and the translation is shown over it. When a page's picture is no longer in memory, only the banner and the strip move on.
-   When the translation ends (also when you stop it, or when it fails), the page area goes back to the viewer's page at once.
-   The time left is computed from the speed since the first line was done, so the time to load the model is not included. It is not shown until the speed can be trusted: 8 lines or more, and 15 seconds or more.
-   If the speed of the last translation with the same model is kept (ui.json in the state folder, only the speed per line), it starts from that and replaces it bit by bit with this run's speed.
-   Under a minute, it says "less than a minute left"; with 10 minutes or more left, it also shows when it will be done ("done at about 13:40").
-   The model does not write notes on the volume or review its translations (removed on 2026-11-06). All the model knows of the book is the series sheet you write.
-   `--no-context` (command line) does not use this flow: it translates the pages you turn one page at a time.
-
-**Stopping partway.** If up to 3 pages have been read, "Stop" in the reading stage simply ends it. If more have been read,
-you are asked before it stops, and you choose among "Keep reading" (Esc and Enter choose this one), "Stop without translating" and "Translate the pages read".
-"Translate the pages read", like "Finished reading", first finishes reading the waiting pages, then translates the pages read so far. It does not count as having read the book to the end,
-so if you run "Read whole book..." later, it reads on from the page on show. Esc alone never stops the run: pressing Esc partway brings up this question,
-however many pages have been read.
-"Stop without translating" translates nothing, and the banner shows the number of pages read and a "Translate the pages read" button ("Translate the rest" if you had finished reading the book).
-What was read stays in memory only while the window is open, so this button, or running "Read whole book..." again, lets you go on translating or reading from where you were.
-If you try to close the window while pages that were read remain untranslated, or partway through a reading, you are asked before it closes ("Keep TASlation open" is the default).
-If you close the window, or on the command line, what was read is lost, and pages not cached yet have to be turned and read again (go back to the page where the reading began before you run it).
-If you "Stop" in the translation stage (you are asked first here too; the default is "Keep translating"), the translations already saved stay as they are, and only what the request under way would have brought is lost. If the window stays open,
-running it again translates the rest without reading. If you closed the window, or on the command line, the reading is needed again,
-but pages already translated are not translated again. Pages translated or corrected after the stop, by Auto or otherwise, are not overwritten by the rest of the translation. What was read is never written to disk.
-After "Finished reading", the translation may begin while the waiting pages are still read. "Stop" then works as in the translation stage (the question offers "Keep reading" and "Stop"): the lines translated so far are saved and stay.
-
-The model's reply is read as far as it can be read, even when it is broken. Only the lines with no usable translation are asked again, a few lines at a time with the lines around them as context, and, if still missing, one line at a time;
-a line that still gets no translation is left untranslated, and the translations of the other lines are saved in the cache. The lines left over are translated on their own when you read that page, or at the next run. A line of punctuation only is taken as its own translation.
-
-"Stop" stops it at any time (the result of the request under way is not cached; the question, and how to go on after stopping, are as above). A one-page translation can also be cancelled with Esc, and translated again with F5.
-If the model returns nothing for 20 seconds, the badge at the top right says so. When requests fail, the summary shows how many and why,
-and if Ollama is not running or the model is missing, it does not keep retrying. During the reading, you are the one who turns the pages. TASlation never turns a page itself,
-and never stops on its own at the last page. When you have read to the end, press "Finished reading". Once the reading is over, the viewer is no longer needed, and the screen may switch off.
+If the model returns nothing for 20 seconds, the badge at the top right says so.
 While the TASlation window is open, the screen does not switch off and the computer does not sleep (because the viewer stops redrawing when the screen switches off).
 It cannot prevent closing the lid, putting the computer to sleep by hand, or locking it. Closing the window puts this back as it was.
 
-After that, each page you turn is recognised by its page fingerprint and the saved translations are laid over the live page, so you can read it at once. A page that was not in the batch
-is translated on the spot and added to the cache. To go on with an unfinished batch after closing the window, just run it again from the first page.
-Cached pages are checked again against the current detection (a bubble that no longer matches a text region is dropped), and only text that is not in the cache is translated, so
-running it again after the detection has improved tidies an old cache without translating it again. A cached bubble
-is drawn only when there is a text region at the same place on the live page. The app and a batch may have the same cache open at the same time.
-Every save merges with what is in the file, so neither overwrites the other's translations, and the translations a batch adds show in the app at once.
+The translations an earlier version saved by reading a whole book first stay in the cache, and show as any page translated before.
 
 ### How the viewer is read
 
@@ -376,18 +296,14 @@ When you choose the viewer, if its window is smaller than the monitor's work are
 changing only its position and size. No key is pressed and the focus does not move (a maximised window is left as it is, and so is a window you made smaller afterwards).
 When you choose another viewer or close TASlation, the window is put back if it still has the size TASlation gave it. For the case where TASlation ends without closing (a crash and the like),
 the position and size before enlarging are kept in `ui.json` in the state folder, and at the next start, if the same window still has the enlarged size, it is put back.
-During a whole-book reading, the viewer is not moved or resized, so that the banner and the buttons stay visible. A minimised viewer is shown again
-by "Start". The larger the viewer's window, the better it is read (the "Read whole book..." dialog says so too).
-
-In a whole-book reading, everything shown is counted in "lines". Pages translated before are shown as "N lines already translated", and the "Read" count in the banner
-is the same number of pages as the status bar and the page strip show. When a page in the cache is shown, it says "Looking at the page..." rather than "Translating...".
+The larger the viewer's window, the better it is read. When a page in the cache is shown, the status line says "Looking at the page..." rather than "Translating...".
 
 Some viewers stop drawing while they are hidden. When you choose the viewer, and when the full screen starts, if the viewer is completely hidden by other windows,
 TASlation asks it to redraw without pressing any key (the same request Windows makes when another window is moved away), checks whether it draws while still hidden,
 and records that per viewer in `profiles.json`. Only a viewer that did not draw is brought to the front for a moment at each page when reading page by page
 (with no key press and no change of focus), and put back in its place in the order at once. A viewer that is even partly visible goes on drawing, so it is not brought to the front.
 Browsers follow a published rule: they stop drawing only when they are completely covered by an opaque window. So browsers are not checked. A viewer read in a browser does not draw the next page while it is behind, even when it gets the key, so each time a key you pressed in the TASlation window is passed on, the viewer is brought to the front for a moment, the key is pressed for real, and once it has drawn, it is put back in its place in the order.
-The focus moves for that moment. In a whole-book reading too, the keys you press are passed on the same way, but the viewer is not brought to the front otherwise. If drawing stops, the banner says so: move the window aside.
+The focus moves for that moment. If drawing stops, the banner says so: move the window aside.
 
 ### When the viewer stays black
 
@@ -399,8 +315,6 @@ A viewer read in a browser can get stuck on its loading screen, or stay black. W
    (F5 in a browser). In the TASlation window, F5 is the translate key, so pressing it there does not reload.
 
 TASlation goes on waiting, and when a page appears, it continues from the page shown at that moment. It never translates or caches a black screen. A page that really is all black cannot be told from a stalled loading screen, so it is treated the same way.
-
-The same goes for a whole-book reading. The banner shows the same guidance and it waits; when the page comes back, it reads on from there. If it comes back on a page already read, that page is skipped.
 
 ### Page keys
 
@@ -447,7 +361,7 @@ Translations saved before this version under a spelling such as "Some Title 3巻
 (the same series and the same volume make the same book). Nothing is renamed by itself. For such a book, once each time TASlation starts,
 it offers to rename the book to the one spelling. "Rename" moves the translations, the information attached to pages and the series sheet, as the colophon's rename does (next section;
 if the series sheets disagree, the table to answer comes first). With "Not now" the old name stays, and everything works as before.
-The answer kept per book about how to start it, and its role, carry over after the rename. A series sheet that an earlier version kept under a whole name with a kanji volume
+The role kept per book carries over after the rename. A series sheet that an earlier version kept under a whole name with a kanji volume
 ("第一巻" and the like) as its series is found and used too, and moves along when the book is renamed.
 
 On the command line, `--series` and `--volume` name the book the same way. A name given with `--book` is split as one string by the same rules
@@ -507,7 +421,7 @@ and the page can be edited.
   "Paste format on every region of this kind..." in the "Page" menu applies the copied formatting to every region of this book of the same kind as the selected region
   (it shows how many and asks first; the kinds are held by the book's premises, so it also applies to regions on pages not shown yet;
   when the kind is "(not set)", the regions of translated pages are the ones covered). Whatever page is shown, one Ctrl+Z takes back the whole of it.
-  It cannot be used while a batch is running. Ctrl+C remembers the selected region itself (frame and formatting), and Ctrl+V on another page with the same layout
+  Ctrl+C remembers the selected region itself (frame and formatting), and Ctrl+V on another page with the same layout
   adds a region at the same place, then reads and translates it (it does not add one where there already is a region, or when the page's size differs).
   All the keys are gathered under "Keys" in "How to use", which "Help" > "Keys..." (Shift+F1) opens (the mouse actions are there too),
   and "How to use..." opens with F1. All the keys written here are the initial ones, and can be changed in "Shortcuts" in "Settings".
@@ -517,7 +431,7 @@ and the page can be edited.
   and "..." where a sentence continues, are shown too. Frames, the selection frame, handles, the rotation handle and the rectangle being dragged are drawn in two-colour lines, a dark line under the coloured one,
   so they show on white pages and black pages alike. Labels such as the speaker are placed, where there is room, where they do not cover a neighbouring region (above, below, then left or right).
   Draw a rectangle around text that was not detected, and it is read, translated
-  and added to the page (later readings and batches use it too). On the drawing, only the lettering inside it is erased and the drawing under it filled in (by the inpainting model where it runs, otherwise from the drawing around the strokes);
+  and added to the page (later readings use it too). On the drawing, only the lettering inside it is erased and the drawing under it filled in (by the inpainting model where it runs, otherwise from the drawing around the strokes);
   in a bubble or on a flat box, the rectangle is wiped on its paper, and the outline and the drawing beyond it stay. Like shapes in office software, a region is selected with a click, moved by dragging,
   and resized with its handles, and it is read again only when the new frame covers a larger area. Drag the round handle that sticks out from the middle of the selected frame's top edge,
   and the frame rotates around its centre, as a shape in Word does, and is lettered again where you let go (with Shift held, in 15° steps;
@@ -540,11 +454,11 @@ and the page can be edited.
   choose "Ignore this area on all pages of this book" in the "Page" menu: that place (the region's frame, slightly widened) is then ignored on every page of the book.
   When you remove a region at the same place as one you removed on another page, the same is asked after the removal is saved (a place you answered "Only this page" for
   is not asked about again until you close the window; removing a region you added yourself does not ask). A detection that falls almost entirely (70% or more of its area) inside such an area
-  is treated as not found, on the page on show and in whole-book processing alike, and left as drawn. Regions you added yourself stay, even inside the area.
+  is treated as not found, and left as drawn. Regions you added yourself stay, even inside the area.
   An area set on a page of a spread applies to the pages on that side (right or left) and to pages shown one at a time; an area set on a page shown one at a time applies to every
   page; neither applies to pages of a very different shape (a spread made into a single image and the like). Adding one can be taken back with one Ctrl+Z,
   whatever page is shown. The translations inside the area stay in the cache, so taking it back brings them back as they were. All that is saved is the area's four numbers,
-  the side of the spread and the page's aspect ratio. Areas cannot be added while a batch is running.
+  the side of the spread and the page's aspect ratio.
 * **Editing a region**: opens with a double-click (or Enter while a region is selected). The formatting fields are folded into the "Formatting" button when the region has no formatting of its own. You can change the **speaker** (chosen from the series sheet's names), the **kind** (Speech,
   Thought, Shout, Narration, Sound effect, Handwritten, Erase only), whether the **sentence continues in the next bubble**, the **hint for the model** (a pun, who is addressed),
   and the translation. Enter starts a new line (the lettering keeps that line break too), and Ctrl+Enter saves.
@@ -552,7 +466,7 @@ and the page can be edited.
   it works best for how a name or a term is read and for who or how many are meant; names and terms that must always come out the same belong in the series sheet. Qwen3.5 4B and a model of your own are given the hint with the bubble.
   A hint can change the wording of its own line even where it does not need to, but it never reaches another line: the request that translates a bubble together with the next one as one sentence carries no hint, and "Ask again" asks the bubble alone, with its hint.
   With the kind set to "Erase only", the region's original lettering is only erased, and nothing is lettered there (as soon as you choose it, the page behind shows it erased).
-  It is not sent for translation (in whole-book processing either), and it is counted neither as flagged for review nor as untranslated. The earlier translation stays in the cache, so setting the kind back letters it again.
+  It is not sent for translation, and it is counted neither as flagged for review nor as untranslated. The earlier translation stays in the cache, so setting the kind back letters it again.
   The change can be taken back with Ctrl+Z.
   Where the original letters part of the bubble larger than the rest and that part was found in the translation ("Settings", `size_emphasis`), those words show larger in the translation's box.
   They follow your typing; an edit that touches them letters the bubble at one size again. "Set larger" and "One size" on the formatting bar set and clear them.
@@ -561,7 +475,7 @@ and the page can be edited.
   A page shown from the cache has no Japanese (the cache keeps only translations), so "Read the Japanese" reads it again there and then;
   "Read as:" then appears, and "Ask again" can be used too (if you press "Ask again" without having read it, it reads first).
   Where the Japanese was misread, correct it in the "Read as:" field: "Ask again" translates your reading, and so does everything that reads that bubble again in this session
-  ("Translate again", reading it again from the cache, moving it, a whole-book run). Where nothing was read, the field appears after a reading, to type the Japanese in.
+  ("Translate again", reading it again from the cache, moving it). Where nothing was read, the field appears after a reading, to type the Japanese in.
   Your reading stays in memory only and is never saved; "Save" keeps only the translation, and Ctrl+Z takes back the translation, not the reading.
   "Previous (Alt+↑)" and "Next (Alt+↓)" move to editing the region before or after in reading order (the keys can be changed in "Shortcuts"). If you changed something, it is saved before moving, as "Save" does
   (Ctrl+Z takes it back as one change); if you changed nothing, nothing is written.
@@ -595,7 +509,7 @@ and the page can be edited.
   (the reasons are those of "Review...", as `taslation review` lists them) and those with a note to the reader. For the page on show it also lists what the checks of its lettering found
   (those are worked out as a page is lettered and are not saved, so other pages show only their flags). "Show:" narrows the list to one reason, and a click on the
   "Page" or "Why" heading sorts it. Selecting a line says which page it is on; nothing is sent to the viewer, so you turn to that page yourself and edit it there with "Review...".
-  The list follows each translated page and each change. In the page strip of a whole-book run, a page with such lines has a pennant with "!" on its thumbnail.
+  The list follows each translated page and each change.
 * "Review..." lists the regions on that page worth a look (flagged for review, untranslated, or with a note to the reader).
   It also lists the regions whose automatic lettering could not be set well: letters touching the bubble's edge, the text
   off the bubble's centre (as when one translation for two joined bubbles is set in one of them), a word split with a
@@ -632,7 +546,7 @@ and the page can be edited.
 
   The series sheet does not change on its own. Only when the words replaced with "Replace all" were a rendering in the series sheet does it ask, once, as for a region edit,
   whether to use the new rendering. When only some lines were replaced, it does not ask. Undoing does not take back a change to the series sheet.
-  Nothing can be replaced during a batch or while a page is being processed. Press it again once that is over.
+  Nothing can be replaced while a page is being processed. Press it again once that is over.
 
   "Look in:" says where "Replace all" replaces: "This book" (what the window starts with every time it opens) or "All volumes of the series".
   With the second, the list still shows this book, and "Replace all" first counts the matches in the other volumes of the book's series kept in the same language
@@ -668,7 +582,7 @@ and the page can be edited.
   When you change the rendering or spelling of a term or character (also when you bring one back with "Undo"), it shows how many translated lines use the old rendering,
   and asks whether to give them the new one. "Apply to the {n} line(s)" replaces it, word by word, in that book's translations in that language in the cache (changing "Miyu"
   leaves "Miyuki" alone; the page on show is lettered again at once). The replacement is one change as a whole, and Ctrl+Z takes it back, as with Find and replace.
-  If a page is being processed, it asks once that is over; during a whole-book run it replaces nothing, and says so (you can correct it with "Find and replace" once the run is over).
+  If a page is being processed, it asks once that is over.
   When other volumes of the series kept in the same language use the old rendering too, the question lists them with their lines, and its box
   "All volumes of the series" (unticked at first) gives them the new one as well; when only other volumes use it, it asks about them alone.
   The other volumes are saved at once and Ctrl+Z does not reach them; a copy of each file as it was is kept beside it (`<file>.before-replace.<date>.json`).
@@ -697,8 +611,7 @@ The page cannot be rebuilt from its fingerprint. Similar pages (blank pages, an 
 ### Reading in a browser: give the book's tab its own window
 
 A Chrome (or Edge) window is recognised by its title, but a browser window's title is that of its active tab.
-If the book's tab shares a window with other tabs, TASlation can see the book only while that tab is in front, and a batch started from the command line
-loses the window when you switch tabs.
+If the book's tab shares a window with other tabs, TASlation can see the book only while that tab is in front.
 
 The fix is needed only once. Drag the reader's tab out of the window (or right-click the tab and choose "Move tab to new window")
 to give it a window of its own. Leave that window open behind your other work. It may be hidden, but do not minimise it.
@@ -706,20 +619,8 @@ A desktop viewer is an app of its own, so it does not need this. A window other 
 changes with every page you turn, and a change of title does not make it wait. Only when the window is hidden or minimised
 does the status line say so and wait for it to come back.
 
-If the window shows another tab even so, Auto and the batch notice the change of title, say so on the status line and wait for the book to come back.
-They never read the wrong page. `taslation batch` also waits for the viewer's window to appear (`--wait`, 10 minutes by default), so
-you can start it before you open the book. The translation stage does not touch the viewer.
-
-A batch has three safeguards.
-
-* Only one batch at a time can work with a given viewer window (a second one does not start, and says which process is using it).
-* A screen that does not look like a page of the book is not read. A store page opened by a stray click, recommendations, or another book have a different shape, so the banner says so and it waits. Go back to the book, or press "Finished reading".
-  A page of text only, such as an afterword, is judged by the paper at the place where the page always is, and when a panel opens over the page, the paper seems to spread beyond that place, so the two can be told apart.
-* A batch clicks nothing and sends no keys. You are the one who turns the pages.
-
-After you change premises such as the series sheet, `taslation batch --retranslate` reads every page again and translates it again,
-so the change reaches the whole volume (cached pages are replaced, but for the translations you corrected yourself;
-add `--replace-corrections` to have those translated again too).
+If the window shows another tab even so, Auto notices the change of title, says so on the status line and waits for the book to come back.
+It never reads the wrong page.
 
 When the reading reaches the end of the volume, some viewers show an end-of-book panel (ratings, the next volume). The arrow keys may not get you out of this panel,
 so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers:
@@ -822,13 +723,13 @@ series sheet goes by: the Series field, so a volume still kept under a name type
 * A translation you corrected in translator mode wins: later identical lines get your text. "Ask again" in the editor
   asks the model; its answer, once saved, counts as your correction here (not in "My corrections"). When a translation
   was reused from an earlier identical line, the editor says so. Ctrl+Z on a correction also takes back the line it kept.
-* "Translate again" and reading the whole book again ask the model for every line but those you corrected (unless you
+* "Translate again" asks the model for every line but those you corrected (unless you
   ask for them to go too), and the new answers replace the model's earlier ones (never your corrections).
 * What is kept is spelt as the series sheet spells, as the page shows it. Before it is reused, a kept translation is
   held to the series sheet as it is now: a name spelt another way is put right, as in a translation just made, and a
   translation that still misses a rendering the sheet asks for is not reused (the model is asked).
 * On OpenMantra's five short works, the lines this rule reuses were 3.5 % of the lines and saved about 3.5 % of the
-  translation time in a whole-book run (4.0 % and 3.8 % page by page). Translated afresh, those lines came no
+  translation time with all pages translated in one pass (4.0 % and 3.8 % page by page). Translated afresh, those lines came no
   measurably closer to the professional translations than the reused ones, and the other lines of their pages were
   translated as well as without reuse (`docs/OFFLINE_VERIFICATION.md`, "Line reuse"). A longer book has more repeats.
   What reuse risks: a first translation that misses comes back wherever the line does, until you correct it once (or
@@ -867,12 +768,11 @@ taslation notice [--country CODE] [--reset]   show the legal notice of the start
 taslation cache export <book> --out FILE [--force] [--confirm]   export the book's translations, page information, series sheet and series' defaults to a file encrypted with your own passphrase (a backup for yourself, or for another computer of yours); --force overwrites an existing FILE
 taslation cache export --series NAME | --all --out FILE   every cached volume of a series in the target language, or every book, in one file
 taslation cache import FILE [--list] [--book NAME] [--take-file] [--replace] [--confirm]   read that file back (merged with what is there, your corrections, page information, series' defaults and sheet values kept unless --take-file; --replace replaces the cache); --list only lists the books it holds
-taslation batch --window "<title>" --book "My Book 1" [--max-pages N] [--no-context]   read the pages you turn; Enter when you have finished reading, Ctrl+C to stop
 taslation read --window "<title>" --book "My Book 1"   capture once, translate and preview
-    (both take the book's name from the viewer window's title; a title with no book's name in it, such as
+    (it takes the book's name from the viewer window's title; a title with no book's name in it, such as
      "<viewer> - Google Chrome" with only the viewer's name, is refused, so give --book NAME)
 taslation read --window "<title>" --series "My Book" --volume 1   the book's name as its series and volume (--volume 第1巻, ① and 一 are 1 too; a book of one volume: --series alone)
-    (batch, read, gui, review and translate take them; --volume goes with --series, never with --book)
+    (read, gui, review and translate take them; --volume goes with --series, never with --book)
 taslation translate page.png --show    translate an image file of your own (writes nothing)
 taslation translate page.png --translator echo --no-translate   detection and OCR only
 taslation review --book <book> | --series S --volume V [--notes] [--corrections]   cached translations flagged for review (could only be set small, a rendering missing, much longer or shorter than the Japanese, the OCR unsure, a word not in the dictionary); --notes also lists the notes to the reader; --corrections lists the translations you corrected yourself instead
@@ -882,8 +782,7 @@ taslation glossary list | show <series> | set <series> <term> <rendering> [--not
 taslation glossary apply <series> --rename OLD=NEW [..] [--dry-run]   replace OLD with NEW in what is already translated
 taslation glossary font <series> "Comic Neue" | --clear   the lettering font the series suggests (checks whether this PC has it)
 taslation glossary lettering <series> thought|shout|narration|handwritten|sfx [--family NAME] [--italic|--no-italic] [--bold|--no-bold] [--reset]
-taslation batch --window "<title>" --retranslate [--replace-corrections]   translate every page again with the current premises (your corrections stay, unless --replace-corrections)
-taslation gui --mode book --role translator   start in the mode that translates the whole book first (the default is page), as translator
+taslation gui --role translator   start as translator
 taslation audit page.png       run the processing and show every network connection made (and at the end, whether any saved file is left unprotected)
 taslation annotations list [--json]          list the books that have a notes file on this PC (pages, frames, memos, skipped pages, reading orders; no text is shown)
 ```
@@ -909,7 +808,7 @@ PLaMo 3 Translate is a model made only for translation. TASlation builds its PFM
 (the form the model's card recommends for production use; the model's own chat template is not used: the template in the earlier revision's file could not be told
 the target language through Ollama, and ended up translating back into Japanese, and the one in the current file builds the same prompt as TASlation). Each line is one request,
 which carries the earlier lines and their translations, the series sheet as reference information (for a line with a speaker set, that speaker too), and, as a glossary, the series sheet's renderings that appear in that line.
-The earlier lines grow from page to page (from run to run in a whole-book run) and are cut back to the newest 20 only once they pass 60, so that each request's prompt begins with the one before it and Ollama does not compute that part again
+The earlier lines grow from page to page and are cut back to the newest 20 only once they pass 60, so that each request's prompt begins with the one before it and Ollama does not compute that part again
 (when they moved on by a page at every page, the first request of each page took about 1,050 ms instead of 142).
 A region's hint for the model goes into the reference information of that line alone: in a test with invented lines it was followed in 38 of 78 answers (17 without it) and spoilt none,
 but never for the register or for who is addressed, and hints that should change nothing changed the wording of 5 of 30 answers (docs/OFFLINE_VERIFICATION.md); the region editor says so.
@@ -928,7 +827,7 @@ TASlation installs only one translation model at a time. For a model TASlation d
 it asks separately whether to remove it, and keeps it by default. The first time PLaMo is installed, it first asks for your agreement to its licence (the PLaMo Community License as revised on November 9, 2026;
 the main points are in `docs/THIRD_PARTY.md`). A PLaMo installed after agreeing to the earlier text goes on working as it is; agreement to the revised text is asked the next time PLaMo is installed.
 When the publisher's server refused the download or no longer has the file, trying again will not help, so it tells you to update TASlation or to see the project's issues page.
-While it lies over the book, on the full screen, and during a whole-book run, it does not ask; it asks when you are back in the window.
+While it lies over the book and on the full screen, it does not ask; it asks when you are back in the window.
 On the command line, `--language` asks the same, and `python setup_models.py --translator-for "Turkish"` installs it too.
 When `ollama_model` names a model of your own, nothing is offered.
 When PLaMo is not installed but Qwen is, it translates with Qwen meanwhile, and the banner above the page says so.
@@ -943,7 +842,7 @@ What follows is the record of how Qwen3.5 4B, the default until November 2026, w
 
 The OCR models read the lettering, so what the language model sees is text. No pixels at all are sent to the language model. A text-only model will do. The vision weights of the models that take images (Gemma 4,
 Qwen 3.5/3.6, Ministral 3) are a small burden at 4B and a large one at 9B and above. Besides translation quality,
-a batch needs a long context, support for a wide range of languages, and the ability to follow a glossary.
+translation needs a long context, support for a wide range of languages, and the ability to follow a glossary.
 
 The candidates are open, text-only models that run on an ordinary PC, chosen from
 [JP-TL-Bench](https://github.com/shisa-ai/jp-tl-bench), the only public benchmark that specialises in scoring Japanese-to-English translation (pairwise comparison by an LLM,
@@ -960,16 +859,16 @@ an "LT" score from 0 to 10; the figures are for the JA→EN direction in [the pa
 
 `qwen3.5:4b` won a knockout among 4B-class
 models on a real volume ("Lighter models compared" and "A knockout among the 4B models" in `docs/OFFLINE_VERIFICATION.md`).
-Translated the way a batch translates, its translations are as close to the 30B's as those of the best build of Qwen3 4B (chrF 45.7 over 401 lines;
+Translated the way the whole-book run of earlier versions translated, its translations are as close to the 30B's as those of the best build of Qwen3 4B (chrF 45.7 over 401 lines;
 Qwen3 4B 46.2 at Q6_K, 44.5 at Q4_K_M), it follows the series sheet about as well (39 of 45 checks; the 30B 41),
 and it is the fastest model among them. With Ollama's KV cache quantised (see "Installation"), it generates 60 tokens a second on a 6 GB
-GPU while keeping the batch's 16K context, about four times as fast as the 30B on the same machine. Its vision weights are not used,
+GPU while keeping a 16K context, about four times as fast as the 30B on the same machine. Its vision weights are not used,
 and thinking mode is turned off for every request. In a blind evaluation with the 30B as judge,
 Qwen3 4B came out slightly below the 30B (of 162 lines, the 30B's translation was preferred for 89, Qwen3 4B's for 63).
 
 For the highest quality, use `qwen3:30b-a3b-instruct-2507-q4_K_M`. It is an MoE with 3B active parameters, and
 needs about 20 GB of RAM, but uses little GPU memory. On the development machine it generates 17 tokens a second with a short context,
-and 11 tokens a second with the batch's 32K context. If you have RAM to spare, fetch it and set `ollama_model` and
+and 11 tokens a second with a 32K context. If you have RAM to spare, fetch it and set `ollama_model` and
 `ollama_num_ctx = 32768`. The other candidates fared as follows.
 
 * Shisa V2.1 8B (tuned for Japanese-English; other target languages are not intended) matches the 30B in quality, but it is a dense model,
@@ -991,8 +890,8 @@ Switch models with `--model NAME` or `ollama_model` in the settings file (`"auto
 The settings you change often can be changed in the window under "Tools > Settings...": the smallest and largest lettering size; the size below which a translation is put on the list for a second look (Review);
 the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
-in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; the window's colours (light, dark, or as Windows is set); whether to stay always on top; how a book starts (page by page, or the whole book first);
-and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, the flashing and sound of the taskbar button when a whole-book reading ends, reusing the translation of a short line seen before, setting larger what the original sets larger) are listed here too.
+in the settings file it is `text_scale`, and a book's own value is in translator mode's "Book settings..."); whether to letter in capitals; whether to set slanted lettering at the same slant; the size of the window's text; the window's colours (light, dark, or as Windows is set); whether to stay always on top;
+and whether to use the optional page models (the layout model and the inpainting). The settings of other features (the enlarged view of the bubble under the pointer, reusing the translation of a short line seen before, setting larger what the original sets larger) are listed here too.
 "Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
 that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
 where it is not found, the bubble's line is asked once more with the part marked, and the answer only points at the words in the translation (kept only where their share of the translation fits the Japanese part's share and the part's own translation bears them out).
@@ -1018,7 +917,7 @@ Running `python setup_models.py` by hand asks the same way, and what Enter means
 The size of the window's text changes when you save, but it reaches every part of the window only after a restart.
 The window's colours are "As Windows is set" (the default: the app mode in Windows' colour settings, looked at when TASlation starts and whenever its window comes to the front), "Light" (Windows' own look, as before) or "Dark"
 (dark grounds with light text in the window, its dialogs and their title bars; the menu bar keeps Windows' colours). They change as soon as you save.
-The page, the frames drawn on it and the page list keep their own colours in either. While Windows' high contrast is on, TASlation uses Windows' colours whatever this setting says (the row says so).
+The page and the frames drawn on it keep their own colours in either. While Windows' high contrast is on, TASlation uses Windows' colours whatever this setting says (the row says so).
 In the settings file it is `theme` (`"system"`, `"light"` or `"dark"`).
 
 "Open settings file" opens `taslation.toml`, with every setting in it, in a text editor. If there is no file, it first makes one from `taslation.toml.example`.
@@ -1070,7 +969,7 @@ A `taslation.toml` placed in the working directory or in this folder is read (op
 
 ```toml
 ollama_model = "auto"        # "auto": PLaMo 3 Translate 2B, or Qwen3.5 4B for Brazilian Portuguese and Turkish; or a model of your own
-ollama_num_ctx = 16384       # the chat translator's context window (a batch request needs ~10K); PLaMo has its own (8192)
+ollama_num_ctx = 16384       # the chat translator's context window; PLaMo has its own (8192)
 target_language = "English"
 uppercase = false            # scanlation-style capitals (Latin script only)
 size_emphasis = true         # the part the original letters larger is set larger in the translation too, where it is found there
@@ -1080,8 +979,6 @@ enforce_terms = true         # a translation that misses a rendering from the se
 spellcheck = false           # flag a word the dictionary does not know; its word lists (the pyspellchecker package) are an optional extra that TASlation does not install
 take_columns_beyond = false  # dark bubbles: also read a column that goes on past the interior on the bubble's own black (a book setting too)
 next_page_key = "Left"       # key that shows the next page in your viewer
-context_mode = true          # batch: read the whole book first, then translate it with the whole story as context
-chunk_bubbles = 30           # lines per translation request in context mode (3-5 pages)
 erase_mode = "fill"          # "fill": the bubble's own paper, flat or along its shading, within its outline;
                              # "inpaint": the same way, inpainted; "classic": the erase before 2026-10-30, byte for byte
 art_erase = "auto"           # with "fill", lettering on the drawing is inpainted by LaMa once installed: "auto" only where PyTorch has a CUDA GPU (else as "off"), "lama" also on the CPU, "off"
@@ -1096,8 +993,6 @@ ocr_threads = 0              # CPU threads for the OCR model (0 = torch's defaul
 ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
-flash_when_done = true       # a whole-book run that ends while TASlation is not in front flashes its taskbar button
-sound_when_done = false      # ... and plays the system's default sound
 hover_shows = "original"     # the Reader role: the translation on the page ("original" under the
                              # pointer), or the page as the viewer shows it ("translation" under the pointer)
 hover_reveal = "panel"       # ... shown in a panel beside the bubble, or "in_place": in the bubble itself
@@ -1110,7 +1005,7 @@ update_check = "off"         # "daily": at the start, look for a new version at 
 
 The size of the window's text can be changed with `ui_scale` (1.0 follows Windows' scaling; 0.5 to 3.0).
 At start it is multiplied by the scaling of the monitor the window is on, and when you move the window to a monitor with different scaling, the text size changes to suit that monitor.
-Parts drawn in pixels (the page, the frames of the page list and so on) keep their original size.
+Parts drawn in pixels (the page and so on) keep their original size.
 
 Every key is a field of `taslation/config.py:Settings`, and
 `taslation.toml.example` lists all of them with their defaults. Settings that were removed (`review_pass`, `series_notes`,
@@ -1167,18 +1062,16 @@ and when Ollama is not running or the model is not installed it does nothing (th
 With the setting off, and for the `taslation` commands, the model is loaded when a line that needs translating comes up
 (this takes a few seconds and shows in the status). It is not loaded for a page whose translations are in the cache. A loaded model stays for
 `ollama_keep_alive` ("5m" by default) after the last request (or after the load at start), then is released automatically; with `ollama_keep_alive = "0"` nothing is loaded at start. While you read on through untranslated pages, each request
-extends this, so it is not loaded again for every page. In a whole-book run, the model is not loaded while you are still turning pages,
-but after you press "Finished reading", when the translation begins (which can be while the pages still waiting are read). When the window closes, and at the end of a run of a `taslation` command, it is released at once.
-At the end of a run in the window (a stop or a failure included) it stays, as after a page translated one by one, when Auto goes back on, so the next untranslated page you turn to does not wait for its load; when Auto stays off, it is released at once.
+extends this, so it is not loaded again for every page. When the window closes, and at the end of a run of a `taslation` command, it is released at once.
 While you read a page and nothing is being translated, the window has Ollama compute the beginning of the next page's first request (the series sheet and the earlier lines that request starts from) when Ollama does not hold it already, as after the earlier lines were cut back to the newest: the next untranslated page you turn to does not wait for it (a second or so).
-It sends what that request would send and keeps nothing of the answer, so the requests are what they are without it; as when Ollama computes a request from another starting point, the model can word a line slightly otherwise (on a test set about one line in ten, with about the same score). It shows nothing, is done only while the model is loaded wholly on the graphics card, stops as soon as you turn, and is not done during a whole-book run.
+It sends what that request would send and keeps nothing of the answer, so the requests are what they are without it; as when Ollama computes a request from another starting point, the model can word a line slightly otherwise (on a test set about one line in ten, with about the same score). It shows nothing, is done only while the model is loaded wholly on the graphics card, and stops as soon as you turn.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
 When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
 To free the GPU memory at once for a game or another program, use "Tools > Release the model now". It releases the translation model TASlation loaded or used this session
 with a normal request of Ollama's API (`keep_alive` 0 for that model), and the page models (the layout model and LaMa) give their memory back too. It does so with `ollama_keep_alive = "-1"` as well.
 A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. OCR models on the GPU go back to the processor (the next page decides again where they read),
 and what stays is the CUDA context PyTorch made once a page model or the OCR ran on the GPU (a few hundred MB), until the window closes.
-The status line says what was released (the OCR's GPU memory too, when it held some). While a page is being translated, while a translation waits to start, and during a whole-book run it releases nothing and says so in the status line.
+The status line says what was released (the OCR's GPU memory too, when it held some). While a page is being translated and while a translation waits to start it releases nothing and says so in the status line.
 If the model is still loading at start, it waits for that load and then releases it. The next line that needs translating loads the model again as usual.
 Ollama runs only while TASlation uses it. When it translates and Ollama is not running, TASlation starts Ollama's server (`ollama serve`)
 in a window that is never shown (never Ollama's app), and writes down that it did in `ollama-started.json` in the state folder
@@ -1192,7 +1085,7 @@ and only when there is none, its own; a value that is set is never changed.
 On an NVIDIA GPU with 6 GB of memory or less, `OLLAMA_KV_CACHE_TYPE` is `q8_0` (Ollama then uses less GPU memory).
 `LLAMA_ARG_SWA_FULL=1` makes llama.cpp keep the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
 and `LLAMA_ARG_CACHE_RAM=256` keeps 256 MB of earlier requests in RAM (without the variable Ollama uses up to 8 GB for them).
-In TASlation's measurements on a 6 GB GPU, translating took about a quarter less time with them (296 s instead of 401 s for a whole book of 214 pages,
+In TASlation's measurements on a 6 GB GPU, translating took about a quarter less time with them (296 s instead of 401 s for 214 pages translated in one pass,
 0.98 s instead of 1.28 s a line without a GPU), and the model took 130 MB more GPU memory (220 MB with Ollama's default KV cache).
 The setting "Translator's window cache" (`ollama_window_cache`) decides: with "On, unless the OCR then leaves the GPU" (the default) TASlation looks, each time it starts Ollama,
 where the OCR readers would run (`ocr_runs_on`, below) with the model at its size without the window cache and with it. When only those 130 MB would move them to the processor,
@@ -1206,7 +1099,7 @@ For an Ollama that was there before, `install.cmd` sets `LLAMA_ARG_CACHE_RAM=0` 
 ### Trying it without a book
 
 `.\.venv\Scripts\python.exe tools\fake_viewer.py`, run in PowerShell in the folder that holds `install.cmd` (`python tools/fake_viewer.py` in a source checkout), opens a stand-in viewer that shows synthetic test pages (left arrow for the next page).
-Choose the window titled "Fake Viewer" in TASlation, and you can check that capture, the whole-book reading
+Choose the window titled "Fake Viewer" in TASlation, and you can check that capture, translation
 and the passing of page keys all work.
 
 ### The error log and "Copy details"
@@ -1265,7 +1158,7 @@ and `python -m pytest tests/test_protect.py -q` (with Windows' data protection, 
 See `docs/ARCHITECTURE.md` for the details. In outline: a page on the screen is identified by a 320-bit perceptual page fingerprint (one page at a time for a spread; the fingerprint is taken over the inked area on that page's paper, and in a viewer with a dark background, the page's large bright part and what lines up with it are taken as paper; any text in the area is treated as belonging to the page above, below or beside it),
 and if it is in the cache, the saved translations are laid over the live page. If not, it detects the text (with the layout model and OpenCV's classical detection where the inpainting runs, with OpenCV alone elsewhere), runs the OCR,
 translates with the Ollama model (with the series sheet and the pages just before as context; PLaMo one line at a time, Qwen once per page), erases and letters, and saves the translations in the cache.
-A batch does the same for a whole book, in the two stages described above. The window's icon is drawn by `tools/make_icon.py`
+The window's icon is drawn by `tools/make_icon.py`
 with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change the drawing.
 
 ## Limitations
@@ -1294,11 +1187,11 @@ with Pillow alone and kept in `taslation/ui/assets/`. Run it again if you change
 * Capture only the page part (for a viewer read in Chrome,
   leaving out the browser's tabs and address bar is enough; the reader's own toolbar is ignored automatically). A spread is split into two pages. In a viewer with a dark background, even on a page whose lower half is a black panel, the bubbles and panels lined up with the bright part are taken as one page, and the reader's slider, buttons and bars are not captured. Where the page's edge is the same black as the viewer, that part falls outside the page, but its text is read as part of the neighbouring page. Text in the area that belongs to no page is read as part of the nearest page, so keep the reader's own bars out of the area. While the reader shows a header or page slider over the page, it is read together with its bar, so the page fingerprint changes.
 * Bubbles with screentone or a dark colour inside, and bubbles with a broken outline, may be missed.
-* The quality of the translation depends on the Ollama model. Larger models do better, and are slower for it. The batch is there
-  so that speed does not matter when you read. In languages the model is weak in, the translations are worse.
+* The quality of the translation depends on the Ollama model. Larger models do better, and are slower for it.
+  In languages the model is weak in, the translations are worse.
 * Names are rendered consistently only when they are written in the series sheet. A name not written there is read by the model line by line, so its rendering may vary.
   Find such names with the review flags or "Find and replace...", and add them to the series sheet.
 * Page fingerprints stand up to differences in window size and viewer background,
-  but not to switching between single-page and two-page display (a spread is split into two pages, so pages batch-processed as spreads are recognised in single-page display too,
+  but not to switching between single-page and two-page display (a spread is split into two pages, so pages translated as spreads are recognised in single-page display too,
   but not the other way round).
 * Capture is Windows only. On other operating systems, the `translate` command processes image files.
