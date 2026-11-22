@@ -962,6 +962,29 @@ class LiveViewMixin(BlackViewerMixin):
             f.unseen = False
         self._live, self._live_thumb = image, thumb
 
+    def _turn_seen(self, thumb: np.ndarray) -> None:
+        """A frame of the viewer's captured with no page job at work (`_poll`, `_look`), before it is drawn: one of
+        another page than the frame on show (``_live_thumb``, `batch.frames_differ`) - a turn - stops the backlog's
+        step under way at once (`_stop_behind`), not only once the new page's job is queued. On a computer without a
+        GPU the model's work behind the reader takes the processor the window needs to follow the turn: on a runner's
+        4 cores a request of the backlog's asked from its start right after a page was done (its pairs cut back) kept
+        the server's prompt at work 3 s, and the window drew the turned page 2.6 s after it had captured it."""
+        if getattr(getattr(self, "pipeline", None), "behind_stop", None) is None:
+            return
+        live = getattr(self, "_live_thumb", None)
+        if live is not None and frames_differ(live, thumb):
+            self._stop_behind()
+
+    def _stop_behind(self) -> bool:
+        """The backlog's step under way stopped (`backlog.Preempt`, as a page job's start stops it: the request in
+        flight given up, the lines answered by then stored; the step comes again once the window is idle, which it
+        is not while it follows the viewer - `backlog.Backlog.tick`). Whether one was under way."""
+        stop = getattr(getattr(self, "pipeline", None), "behind_stop", None)
+        if stop is None:
+            return False
+        stop.set()
+        return True
+
     def _noted_regions(self) -> list[Any]:
         """The page's regions that carry a note for the reader, in reading order (numbered as the daggers)."""
         if self.last_result is None:
@@ -1254,6 +1277,7 @@ class LiveViewMixin(BlackViewerMixin):
             thumb = _thumb(self, image)
             if self._drew_nothing(thumb):  # one flat colour, or black: the viewer drew nothing
                 return
+            self._turn_seen(thumb)  # (a turned page: the work behind the reader stopped before it is drawn)
             self._show_live(image, thumb)
             if events:
                 self._following.seen = thumb
@@ -1960,6 +1984,7 @@ class LiveViewMixin(BlackViewerMixin):
         if self._drew_nothing(thumb):  # the viewer drew nothing: again soon
             f.look_at = time.monotonic() + again
             return
+        self._turn_seen(thumb)
         self._show_live(image, thumb)
         seen, f.seen = f.seen, thumb
         if f.retake is not None:
@@ -2666,7 +2691,9 @@ class LiveViewMixin(BlackViewerMixin):
         changed: *last* is the frame seen, *image* its capture; *operation*: after TASlation's own operation;
         *over_job*: a frame of another page than the running job's, `_look_over_job`) or, *fast*, "recheck" (a page
         just taken at once: `_take_at_once`). A posted key that comes while the one before is still awaited with
-        nothing changed goes with it (`_held_keys`)."""
+        nothing changed goes with it (`_held_keys`). The backlog's step under way stops (`_stop_behind`), and none
+        begins while the viewer is followed (`backlog.Backlog.tick`): the page it goes to comes first."""
+        self._stop_behind()
         f = self._follower()
         held = self._held_keys(f.op, hwnd) if phase == "change" and key and not retried else None
         self._end_follow()

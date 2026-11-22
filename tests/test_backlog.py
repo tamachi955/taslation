@@ -809,6 +809,24 @@ def test_another_book_a_run_and_another_viewer_window_drop_it_stop_auto_and_a_re
     assert not b.entries and p.cache.pages  # (what is stored stays)
 
 
+def test_no_step_begins_while_the_window_follows_the_viewer(settings, sample_page):
+    """While the window follows the viewer's frames (a turned page until it settles, the page a key goes to, a page
+    from the cache looked at again: ``_following.op``) no step of the backlog's is queued; once the follow is over, it
+    is (the window idle again)."""
+    posted, post = _events()
+    b = Backlog(post)
+    p = _pipeline(settings, Turning(EN_TEXTS, answer=1))
+    _job(p, b, sample_page, _confirmed())
+    window = _window(b, p)
+    window._following = SimpleNamespace(op=SimpleNamespace(phase="settle"))
+    for _ in range(3):
+        backlog_tick(window)
+    assert window._jobs.empty() and b.entries and not b.step_queued
+    window._following.op = None
+    backlog_tick(window)
+    assert window._jobs.qsize() == 1 and b.step_queued
+
+
 class Silent(DictTranslator):
     """A translator whose server does not answer, as `translate.ollama`'s rule leaves it: each request ends with
     ``ollama.not_answering`` (asked again and, for the server TASlation started, the server started again, before),

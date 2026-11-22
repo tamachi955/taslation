@@ -662,6 +662,45 @@ def test_a_page_turned_in_the_viewer_is_followed_at_its_first_frame(setup, monke
     assert len(v.captures) <= captures + 1 + 30 // 0.7  # no new frame: polled every auto_interval_ms, as before
 
 
+def test_a_turn_stops_the_backlog_s_step_before_the_turned_page_is_drawn(setup, monkeypatch):
+    """A step of the backlog's under way (``pipeline.behind_stop``) stops at the window's first capture of a turned
+    page, before that page is drawn - not only once the page's job is queued (on a runner's 4 cores the server's work
+    for the step kept the window from drawing the captured page for 2.6 s) -, and no step begins while the window
+    follows that page (`backlog.follows_viewer`). A frame of the page on show drawn again stops nothing; a key passed
+    on to the viewer stops the step as it is passed on, before any frame of the page it goes to."""
+    from taslation import backlog
+
+    _count_frames(setup, monkeypatch)
+    v = setup.viewer
+    w = setup.make(owner="viewer")
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    setup.clock.run(3)
+    assert not backlog.follows_viewer(w)
+    stop = backlog.Preempt()
+    w.pipeline.behind_stop = stop
+    drawn: list = []
+    show = w._show_live
+    w._show_live = lambda image, thumb=None: (drawn.append((image, stop.is_set())), show(image, thumb))[1]
+    v.frames.append((setup.clock.now + 0.1, v.frames[0][1].copy()))  # the page on show drawn again
+    setup.clock.run(0.3)
+    assert drawn and not stop.is_set() and not backlog.follows_viewer(w)
+    page2 = _page(2)
+    v.frames.append((setup.clock.now + 0.1, page2))  # the reader turns the page in the viewer
+    setup.clock.run(0.15)
+    assert drawn[-1] == (page2, True)  # stopped before it was drawn
+    assert backlog.follows_viewer(w) and w._following.op.phase == "settle" and not w.new_pages[1:]
+    setup.clock.run(2)
+    assert [p for _t, p in w.new_pages][1:] == [page2]
+    w.job_done()
+    setup.clock.run(3)
+    stop = backlog.Preempt()
+    w.pipeline.behind_stop = stop
+    _turn(setup, w, (0.15, _page(3)))
+    assert stop.is_set() and backlog.follows_viewer(w)  # (at the key, before the viewer drew anything of it)
+
+
 def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_on_its_sharp_frame(setup, monkeypatch):
     """The viewer in front, its frames counted, the book's cache holding every page: the first page drawn soft first
     is taken on its soft frame, as nothing says yet that this viewer draws so, and read again from its sharp one -

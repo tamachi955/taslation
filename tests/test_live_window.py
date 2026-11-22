@@ -99,6 +99,8 @@ class Window(BlackViewerMixin):
     _lettering = app_mod.App._lettering
     _settle_live = app_mod.App._settle_live
     _show_live = app_mod.App._show_live
+    _turn_seen = app_mod.App._turn_seen
+    _stop_behind = app_mod.App._stop_behind
     _tick = app_mod.App._tick
     _poll = app_mod.App._poll
     _follows_events = app_mod.App._follows_events

@@ -69,7 +69,8 @@ a stage told done is never told at work again while the page is on show).
 
 The order of work on the window's single worker (`Backlog.tick`, `Backlog.step`): the page on show first, always - a
 step of the backlog is queued only while no page job runs or waits, nothing of a page job is held for its frame
-(`Pipeline.behind_allowed`) and the window is idle (not busy, no whole-book run, nothing queued); in the hold of a page
+(`Pipeline.behind_allowed`) and the window is idle (not busy, no whole-book run, nothing queued, no page of the
+viewer's followed: `follows_viewer`); in the hold of a page
 job kept for now (the 2 s in which the window may still take its confirmation back on a viewer that draws a page soft
 first: `Pipeline.behind_reads_allowed`) a read only, of the nearest page that needs one - it asks the translator
 nothing and changes nothing a take-back puts back -, the decision held off while it runs (`Pipeline.holding_decision`;
@@ -79,7 +80,11 @@ nearest the reader ahead of it, one page at a time (`_next`, chosen anew at each
 `Screen.sight` past the screen on show, or the one last on show, else the smallest of all - the page the reader is
 likeliest to turn to next), all it needs in order - its read, then its translation - before the next page; then the
 warming of the next page's first request (`Pipeline.warm_soon`). A step is small and stops as soon as a page
-or any job comes (`Preempt`: `Pipeline.stop_warm` sets it, and the job queue not being empty does): a read stops between
+or any job comes (`Preempt`: `Pipeline.stop_warm` sets it, and the job queue not being empty does) - a turn from the
+window's first capture of the turned page, before it is drawn, and any follow of the viewer as it begins
+(`ui.live._turn_seen`, `_stop_behind`): on a computer without a GPU the server's work for a step takes the processor
+the window needs to follow the turn (a request asked from its start, its pairs cut back, kept a runner's 4 cores
+busy 3 s, and the window drew the turned page 2.6 s after it had captured it). A read stops between
 two regions (between the detectors too), a translation between two line requests - the request in flight is given up,
 its connection closed -, and the lines answered by then are stored as a page turned away from stores them (the
 sequence's host `keeps_answered`: `translate.sequence`). A turn waits for no more than the step under way.
@@ -152,6 +157,13 @@ def in_step() -> bool:
     return bool(getattr(_STEP, "on", False))
 
 
+def follows_viewer(window: Any) -> bool:
+    """Whether *window* follows the viewer's frames now (`ui.live.Following.op`: a turned page until it settles, the
+    page a key of TASlation's goes to, a page taken from the cache while it is looked at again): no step of the
+    backlog's begins meanwhile, and the one under way was stopped as the follow began (`ui.live._stop_behind`)."""
+    return getattr(getattr(window, "_following", None), "op", None) is not None
+
+
 def _allowed(pipeline: Any) -> tuple[bool, bool]:
     """Whether the backlog may work now at all, and whether a translation too: everything while nothing of a page
     job is held (`Pipeline.behind_allowed`), a read only in the hold of a page job kept for now
@@ -162,8 +174,9 @@ def _allowed(pipeline: Any) -> tuple[bool, bool]:
 
 
 class Preempt:
-    """The cancel of a step of the backlog: set by `Pipeline.stop_warm` (a page to read, any job: `ui.jobs.next_job`)
-    and by Stop; and set by itself while *waiting*() says a job waits for the worker. Taken where a
+    """The cancel of a step of the backlog: set by `Pipeline.stop_warm` (a page to read, any job: `ui.jobs.next_job`),
+    by the window at a turn and as it begins to follow the viewer (`ui.live._stop_behind`) and by Stop; and set by
+    itself while *waiting*() says a job waits for the worker. Taken where a
     `threading.Event` is (`is_set`, `wait`): the translator's requests and its restart (`ollama_start._wait_answer`)."""
 
     def __init__(self, waiting: Callable[[], bool] | None = None) -> None:
@@ -841,7 +854,7 @@ class Backlog:
         if (self.paused or self.fatal is not None or pipeline is None or not getattr(window, "ready", False)
                 or getattr(window, "busy", False) or getattr(window, "batch", None) is not None
                 or getattr(window, "_batching", False) or getattr(window, "_queued", None) is not None
-                or not window._jobs.empty()):
+                or not window._jobs.empty() or follows_viewer(window)):
             return
         allowed, full = _allowed(pipeline)
         if not allowed or getattr(pipeline, "translator", None) is None:
