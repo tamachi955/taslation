@@ -23,6 +23,8 @@ Reading
 * While you read with TASlation in front, the viewer's window is kept directly under it, so that another window
   that comes between them does not cover the page being captured.
 * docs/LEGAL says what happens to a page turned past.
+* README and the installation guide give the times measured again with this version: a screen of one page about
+  4 s with the GPU and about 10 s without, a screen of two pages about 8 s and about 23 s.
 
 ## 0.9.6 - 2026-11-22
 
