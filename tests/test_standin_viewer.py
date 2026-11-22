@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -677,6 +678,47 @@ def test_the_looks_for_a_page_as_read_at_other_sizes_are_told_with_their_time():
     assert (told["looks"], told["with_readings"], told["found"]) == (3, 2, 1)
     assert told["ms"]["max"] == 41.0 and told["ms_when_found"]["n"] == 1 and told["readings"]["min"] == 2
     assert [r["job"] for r in told["list"]] == [2, 3] and told["list"][1]["t_s"] == 0.3
+
+
+def test_a_long_look_at_the_viewer_is_told_with_each_call_in_it_and_the_requests_under_way(monkeypatch):
+    """A look (`STEP_CALLS`) over LONG_STEP_MS is noted with each call made in it timed apart (how often, wall ms,
+    the Tk thread's CPU ms), the CPU of the process in it, and the requests under way then; a short one, and a call
+    made outside any look, are not."""
+    notes = standin_e2e.Notes(0, 1.0)
+    clock = [1000.0]
+    monkeypatch.setattr(standin_e2e, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(standin_e2e, "LONG_STEP_MS", 30)
+
+    def show(self, image):
+        time.sleep(0.04)
+
+    def poll(self, draws):
+        for _ in range(draws):
+            self.show(None)
+
+    class Looker:
+        busy = False
+
+    Looker.show = standin_e2e.part_call(notes, "_show_live", show)
+    Looker.poll = standin_e2e.step_call(notes, "_poll", poll)
+    w = Looker()
+    w.show(None)  # (outside a look: nothing noted)
+    w.poll(0)  # (a short look: nothing noted)
+    assert not notes.long_steps
+    w.poll(1)
+    assert len(notes.long_steps) == 1 and notes.long_steps[0]["parts"]["_show_live"][0] == 1
+    w.poll(2)
+    requests = [{"t": 900.0, "end_t": 1500.0, "job": None, "side": "backlog", "why": "history cut"},
+                {"t": 1010.0, "end_t": None, "job": 3, "side": None, "why": "extends"},
+                {"t": 5000.0, "end_t": 5100.0, "job": 4, "side": None, "why": "extends"}]
+    told = standin_e2e.long_steps_report(notes, requests, lambda t: round(t / 1000, 2))
+    assert told["count"] == 2 and told["over_ms"] == 30
+    first = told["longest"][0]
+    assert first["call"] == "_poll" and first["ms"] >= 80 and not first["job_running"]
+    assert first["parts"]["_show_live"][0] == 2 and first["parts"]["_show_live"][1] >= 80
+    assert {"cpu_ms", "process_cpu_ms"} <= set(first)
+    assert first["requests"] == [{"t_s": 0.9, "side": "backlog", "why": "history cut"},
+                                 {"t_s": 1.01, "side": "page", "why": "extends"}]
 
 
 def test_a_turn_is_told_with_what_a_whole_book_run_did_then():

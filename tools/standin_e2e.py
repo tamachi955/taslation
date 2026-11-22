@@ -131,6 +131,7 @@ import contextlib
 import ctypes
 import hashlib
 import http.client
+import importlib
 import json
 import logging
 import math
@@ -689,6 +690,7 @@ class Notes:
         self.tk_cpu: list[tuple[float, float, bool]] = []  # (monotonic, the Tk thread's CPU time, a job running)
         self.status_lines: list[dict[str, Any]] = []  # the status line's kind and the page it speaks of, from when
         self.long_captures: list[tuple[float, float]] = []  # (when, ms): the captures that took over LONG_CAPTURE_MS
+        self.long_steps: list[dict[str, Any]] = []  # the looks at the viewer that took over LONG_STEP_MS (`step_call`)
         self.soft_looks: list[dict[str, Any]] = []  # each frame the window judged soft or sharp (`soft_look`)
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
         self.modes: list[dict[str, Any]] = []  # reading, over the book, a run, beside it, text size, as changed
@@ -1593,6 +1595,81 @@ def timed_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callabl
 
     call.__name__ = name
     return call
+
+
+# A look at the viewer on the Tk thread (`STEP_CALLS`) that took over LONG_STEP_MS is noted whole (`long_steps`): each
+# call made in it (`STEP_PARTS` of the window's, `STEP_FUNCS` elsewhere) timed apart - how often, wall ms, the Tk
+# thread's CPU ms; a call within another counts in both -, the CPU ms of the whole process in it (all its threads: with
+# the wall long and both low, the window waited for the processor, not for a thread of its own) and the requests to
+# the translator under way then; the LONG_STEPS_KEPT longest are reported
+STEP_CALLS = ("_poll", "_look", "_follow_step")
+STEP_PARTS = ("_viewer_shows_book", "_frame_count", "_capture", "_drew_nothing", "_turn_seen", "_show_live",
+              "_redisplay", "_check_sharper", "_take_at_once", "_all_cached", "_looks_soft", "_take", "_begin_follow",
+              "_early_start", "_look_over_job")
+STEP_FUNCS = (("ui.live", "window_exists"), ("ui.live", "_thumb"), ("ui.live", "_detail"), ("ui.side", "on_picture"),
+              ("ui.preview", "ImageCanvas.set_image"))
+LONG_STEP_MS = 300
+LONG_STEPS_KEPT = 12
+
+
+def step_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callable[..., Any]:
+    def call(self: Any, *a: Any, **k: Any) -> Any:
+        if getattr(notes.local, "step", None) is not None:
+            return original(self, *a, **k)  # (within another look: its parts are that one's)
+        step: dict[str, Any] = {"call": name, "t": now_ms(), "busy": bool(getattr(self, "busy", False)), "parts": {}}
+        notes.local.step = step
+        wall, cpu, process = time.perf_counter(), time.thread_time(), time.process_time()
+        try:
+            return original(self, *a, **k)
+        finally:
+            notes.local.step = None
+            step["ms"] = (time.perf_counter() - wall) * 1000
+            if step["ms"] > LONG_STEP_MS:
+                step["cpu_ms"] = (time.thread_time() - cpu) * 1000
+                step["process_cpu_ms"] = (time.process_time() - process) * 1000
+                with notes.lock:
+                    notes.long_steps.append(step)
+
+    call.__name__ = name
+    return call
+
+
+def part_call(notes: Notes, name: str, original: Callable[..., Any]) -> Callable[..., Any]:
+    def call(*a: Any, **k: Any) -> Any:
+        step = getattr(notes.local, "step", None)
+        if step is None:
+            return original(*a, **k)
+        wall, cpu = time.perf_counter(), time.thread_time()
+        try:
+            return original(*a, **k)
+        finally:
+            part = step["parts"].setdefault(name, [0, 0.0, 0.0])
+            part[0] += 1
+            part[1] += (time.perf_counter() - wall) * 1000
+            part[2] += (time.thread_time() - cpu) * 1000
+
+    call.__name__ = name.rsplit(".", 1)[-1]
+    return call
+
+
+def long_steps_report(notes: Notes, requests: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The longest looks at the viewer (`STEP_CALLS` over LONG_STEP_MS, the longest first): when, which, how long, a
+    page job running, the Tk thread's and the whole process's CPU ms, each call in it ([how often, wall ms, CPU ms]),
+    and the requests under way then (their side - "page" for a page job's own -, why the server computed what it did,
+    when each began)."""
+    with notes.lock:
+        steps = sorted(notes.long_steps, key=lambda s: -s["ms"])
+    out = []
+    for s in steps[:LONG_STEPS_KEPT]:
+        t0, t1 = s["t"], s["t"] + s["ms"]
+        under = [{"t_s": rel(r["t"]), "side": r.get("side") or ("page" if r.get("job") is not None else "none"),
+                  "why": r.get("why")} for r in requests if r["t"] <= t1 and (r.get("end_t") or t1) >= t0]
+        parts = sorted(s["parts"].items(), key=lambda kv: -kv[1][1])
+        out.append({"t_s": rel(t0), "call": s["call"], "ms": round(s["ms"]), "job_running": s["busy"],
+                    "cpu_ms": round(s["cpu_ms"]), "process_cpu_ms": round(s["process_cpu_ms"]),
+                    "parts": {name: [n, round(w, 1), round(c, 1)] for name, (n, w, c) in parts},
+                    "requests": under})
+    return {"over_ms": LONG_STEP_MS, "count": len(steps), "longest": out}
 
 
 FULL_MS_PER_TOKEN = 1.0  # a request whose prompt took the server this long per prompt token was computed from its start
@@ -2561,6 +2638,19 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     for name in TIMED:  # the Tk thread's time in the live view's calls, a job running or not
         if hasattr(App, name):
             setattr(App, name, timed_call(notes, name, getattr(App, name)))
+    for name in STEP_PARTS:  # ... and, in a look that took long, each call made in it (`step_call`)
+        if hasattr(App, name):
+            setattr(App, name, part_call(notes, name, getattr(App, name)))
+    for module_name, name in STEP_FUNCS:
+        holder: Any = importlib.import_module(f"taslation.{module_name}")
+        *owner, attr = name.split(".")
+        for part in owner:
+            holder = getattr(holder, part, None)
+        if holder is not None and hasattr(holder, attr):
+            setattr(holder, attr, part_call(notes, name, getattr(holder, attr)))
+    for name in STEP_CALLS:
+        if hasattr(App, name):
+            setattr(App, name, step_call(notes, name, getattr(App, name)))
     leave_reading = App.leave_reading
 
     def left(self: Any, *a: Any, **k: Any) -> Any:
@@ -5230,6 +5320,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                                              and not d["lettered"] and d["from"] not in ("sharp", None)),
         "tk_thread": tk_share(notes.tk_cpu),
         "timings": timing_table(notes.timings, notes.tk_cpu),
+        "long_steps": long_steps_report(notes, [*requests, *notes.warms], rel),
         "displays": {"columns": ["t_s", "page", "spread", "state", "kind", "lettered", "from", "quick"],
                      "rows": displays},
         "ready_s": rel(ready_at), "app_events": dict(Counter(e["kind"] for e in notes.app_events)),
