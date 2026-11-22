@@ -233,6 +233,70 @@ def test_a_rest_ends_where_the_driver_changed_the_window_for_the_next_scenario()
     assert standin_e2e.turn_rows(turns, notes, 12000.0)[0]["rest_ms"] == 6900
 
 
+def test_a_turn_is_timed_from_the_turn_and_from_the_sharp_draw_and_the_way_to_its_job_is_parted():
+    turns = [{"segment": "a", "screen": (4, True), "why": "next", "soft_t": 1000.0, "sharp_t": 1250.0,
+              "next_t": 9000.0}]
+    job = {"id": 1, "t": 1300.0, "work_t": 1320.0, "page": 4, "spread": True, "state": "sharp", "started": True,
+           "result_t": 6000.0, "done_t": 6100.0, "discarded": False, "requests": 1}
+    captures = [{"t": 1040.0, "page": 4, "spread": True, "state": "soft"},
+                {"t": 1290.0, "page": 4, "spread": True, "state": "sharp"}]
+    displays = [_on_show(1050.0, 4, "live", state="soft"), _on_show(3650.0, 4, "filling", 3),
+                _on_show(6050.0, 4, "final", 9)]
+    notes = SimpleNamespace(jobs=[job], displays=displays, captures=captures, requests=[{"t": 1900.0, "job": 1}],
+                            status_lines=[], acts=[])
+    (row,) = standin_e2e.turn_rows(turns, notes, 9000.0)
+    assert (row["soft_to_sharp_ms"], row["captured_from_turn_ms"], row["captured_sharp_ms"]) == (250, 40, 40)
+    assert (row["job_after_sharp_capture_ms"], row["job_queued_ms"], row["job_from_turn_ms"]) == (10, 20, 300)
+    assert (row["first_request_from_turn_ms"], row["first_request_ms"]) == (900, 650)
+    assert (row["lettered_from_turn_ms"], row["first_lettered_ms"]) == (2650, 2400)
+    assert (row["finished_from_turn_ms"], row["finished_ms"]) == (5050, 4800)
+
+
+def test_the_timing_figures_take_the_rested_turns_to_pages_not_cached_by_screen_and_say_the_viewer_s_mode():
+    def row(segment, spread, cached=False, rest=5000, **times):
+        return {**dict.fromkeys(standin_e2e.TIMING_KEYS), "segment": segment, "spread": spread, "cached": cached,
+                "rest_ms": rest, **times}
+
+    rows = [row("a", True, lettered_from_turn_ms=2400, first_lettered_ms=2400, finished_ms=7000),
+            row("a", True, lettered_from_turn_ms=2600, first_lettered_ms=2600, finished_ms=8000),
+            row("a", True, cached=True, first_lettered_ms=90),  # (a page the cache held: left out, counted)
+            row("c", True, first_lettered_ms=9000),  # (the model still loading)
+            row("a", True, rest=900, first_lettered_ms=40),  # (flipped past: no rest)
+            row("f2", False, lettered_from_turn_ms=1500, first_lettered_ms=1500, finished_ms=4000)]
+    said = [{"ev": "ready", "soft_first": "0"}, {"ev": "draw", "state": "sharp"}, {"ev": "draw", "state": "sharp"}]
+    t = standin_e2e.timing_summary(rows, False, [], said, lambda v: v)
+    assert (t["soft_first"], t["standin_said_soft_first"], t["standin_draws"]) == ("off", "0", {"sharp": 2})
+    assert t["window_learnt_soft_first"] == 0 and t["learnt"] == [] and t["cached_turns_left_out"] == 1
+    two, one = t["two_pages"], t["one_page"]
+    assert two["turns"] == 2 and two["first_lettered_ms"] == {"n": 2, "median": 2500, "p90": 2600, "max": 2600}
+    assert two["finished_ms"]["median"] == 7500 and two["soft_to_sharp_ms"] == {"n": 0}
+    assert one["turns"] == 1 and one["lettered_from_turn_ms"]["median"] == 1500
+    assert set(t["by_segment"]) == {"a", "f2"}
+    learnt = [{"t": 5.0, "soft": {"page": 4, "spread": True, "state": "soft"},
+               "sharp": {"page": 4, "spread": True, "state": "sharp"}}]
+    assert standin_e2e.timing_summary(rows, True, learnt, [], lambda v: v)["window_learnt_soft_first"] == 1
+
+
+def test_without_soft_first_the_stand_in_draws_every_turn_sharp_at_once_and_x_is_left_out(tmp_path):
+    steps = sv.parse_script("g1,n,e")
+    plain = sv.page_url("t1234", steps, tmp_path)
+    assert "soft_first=" not in plain  # (on: the URL as it always was)
+    sharp = sv.page_url("t1234", steps, tmp_path, soft_first=False)
+    assert sharp.split("#")[0] == plain.split("#")[0] + "&soft_first=0" and sharp.endswith("#s=g1,n,e")
+    html = sv.HTML.read_text(encoding="utf-8")
+    assert 'softFirst: query.get("soft_first") !== "0"' in html
+    assert "drawScreen(cfg.softFirst, why)" in html and "if (!done || !cfg.softFirst) return;" in html
+    everything = standin_e2e.wanted("all")
+    assert standin_e2e.soft_first_scenarios(everything, "all", True) == (everything, None)
+    names, why = standin_e2e.soft_first_scenarios(standin_e2e.wanted("all"), "all", False)
+    assert names == [n for n in everything if n != "x"] and "soft frames" in why
+    assert standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,f"), "a,f", False) == (["a", "f", "f2"], None)
+    with pytest.raises(SystemExit):
+        standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,x"), "a,x", False)
+    args = standin_e2e.parse(["--scenario", "a,f", "--soft-first", "off"])
+    assert args.soft_first == "off" and standin_e2e.parse([]).soft_first == "on"
+
+
 def test_a_job_whose_page_went_on_at_a_new_size_was_not_cancelled_with_its_page_on_show():
     # scenario o on a runner: the stand-in back from its monitor's size at 77.06 s, the window's first capture of the
     # new size 0.93 s later, the job on the old size's frame cancelled at 79.33 s, a job on the new frame after it

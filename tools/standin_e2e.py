@@ -6,7 +6,7 @@ part of a release.
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
-                                [--wait-done CAP_S]
+                                [--wait-done CAP_S] [--soft-first on|off]
 
 What runs, all on this computer:
 
@@ -78,6 +78,16 @@ has gone by (``hN`` in the stand-in's script, let go through its control file); 
 soft until the window asked on the soft frame (``kN``, KEEP_SOFT_S at most) instead of --cancel-soft-ms. Each hold and
 kept frame, why it ended and how long it held, is in the report (``run.waits``). Without it the script and the
 control file are what they always were.
+
+*--soft-first off* is for the timing figures: the stand-in draws every turn sharp at once and nothing after it
+(``soft_first=0`` in its page's query), so that no wait of the viewer's is in what is timed. The window starts in a
+process of its own on a scratch state with a browser window it has never seen, and what it learns of a viewer that
+draws soft first (`App._drew_soft`) is held for that window in memory only, so it starts not knowing; the report says
+what the stand-in drew (no soft draw) and how often the window learnt it all the same (``run.timing``: must be never).
+Scenario x (a request cancelled on a soft frame) is left out of all and refused by name; c, a, b, f, f2, t and k are
+timed from the sharp draw, which is the turn; d's flashes and spinners, e's turns back to cached pages, r, o and z
+change only in that their turns have no soft time; --k-soft changes nothing. The default, on, keeps the scenarios and
+the runners' checks exactly as they are.
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -254,6 +264,17 @@ def wanted(text: str) -> list[str]:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
     asked |= {other for one, other in PAIRS if one in asked}
     return [n for n in [*ORDER, *K_PACES] if n in asked]
+
+
+def soft_first_scenarios(names: list[str], text: str, soft_first: bool) -> tuple[list[str], str | None]:
+    """The scenarios *names* (`wanted` of *text*) as a run with the stand-in's soft first drawing (*soft_first*) or
+    without it can have them, and why x was left out (None: it was not). Without soft frames scenario x (a request
+    cancelled on a soft frame) has nothing to do: left out of all, refused when named."""
+    if soft_first or "x" not in names:
+        return names, None
+    if "x" in {p.strip().lower() for p in text.split(",")}:
+        raise SystemExit("scenario x needs the stand-in's soft frames: not with --soft-first off")
+    return [n for n in names if n != "x"], "needs the stand-in's soft frames (--soft-first off)"
 
 
 def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool,
@@ -691,6 +712,9 @@ class Notes:
         self.long_captures: list[tuple[float, float]] = []  # (when, ms): the captures that took over LONG_CAPTURE_MS
         self.long_steps: list[dict[str, Any]] = []  # the looks at the viewer that took over LONG_STEP_MS (`step_call`)
         self.soft_looks: list[dict[str, Any]] = []  # each frame the window judged soft or sharp (`soft_look`)
+        # each time the window learnt that the viewer draws a page soft first (`App._drew_soft`): when, and what the
+        # stand-in drew on the two frames it took for the soft and the sharp picture
+        self.drew_soft: list[dict[str, Any]] = []
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
         self.modes: list[dict[str, Any]] = []  # reading, over the book, text size, the role, as changed
         self.hotkeys: list[dict[str, Any]] = []  # the hot keys the window held, as they changed, and the presses
@@ -2461,6 +2485,18 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return out
 
     App._looks_soft, frames.SharpSeen.judge, live.looks_sharp = soft_look, judged, by_viewer
+    drew_soft = App._drew_soft
+
+    def learnt_soft(self: Any, soft: Any, sharp: Any) -> Any:  # the window learns that the viewer draws soft first
+        try:
+            rec = {"t": now_ms(), "soft": notes.code(notes.shown(soft)), "sharp": notes.code(notes.shown(sharp))}
+            with notes.lock:
+                notes.drew_soft.append(rec)
+        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
+            notes.error("drew soft hook", type(e).__name__)
+        return drew_soft(self, soft, sharp)
+
+    App._drew_soft = learnt_soft
     units_of, lookup = pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup
 
     def fingerprinted(self: Any, rgb: Any) -> Any:  # the page units, by the capture area in force as they are found
@@ -4323,6 +4359,8 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
         jobs = [j for j in notes.jobs if j["started"] and lo <= j["t"] < hi and (j["page"], j["spread"]) == scr]
         seen_sharp = next((c["t"] for c in notes.captures if c["t"] >= lo and (c["page"], c["spread"]) == scr
                            and c["state"] == "sharp"), None)
+        seen = next((c["t"] for c in notes.captures if c["t"] >= lo and (c["page"], c["spread"]) == scr
+                     and c["state"] in ("soft", "sharp")), None)
         last = finishing_job(notes.jobs, scr, lo, hi)
         first_request = min((r["t"] for r in notes.requests if last is not None and r["job"] == last["id"]),
                             default=None)
@@ -4358,6 +4396,15 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "reuse": [j.get("reuse") for j in jobs], "sights": [j.get("sight") for j in jobs],
             "job_ids": [j["id"] for j in jobs],
             "lettered_from_turn_ms": ms(lettered, lo), "lettered_sharp_from_turn_ms": ms(lettered_sharp, lo),
+            # the same from the turn (the stand-in's first draw of it), and what lies between the turn and the
+            # finishing job's start: the window's first capture of the screen (soft or sharp), its first capture of
+            # the sharp picture, from there to the job's start (the window's decision) and the job's wait for its
+            # worker (`timing_summary`)
+            "first_request_from_turn_ms": ms(first_request, lo), "finished_from_turn_ms": ms(finished, lo),
+            "captured_from_turn_ms": ms(seen, lo),
+            "job_after_sharp_capture_ms": ms(last["t"], seen_sharp) if last is not None else None,
+            "job_queued_ms": ms(last.get("work_t"), last["t"]) if last is not None else None,
+            "job_from_turn_ms": ms(last["t"], lo) if last is not None else None,
             "lettering_gone_ms": lettering_gone_ms(notes.displays, scr, lo, hi),
             "status_old_page_ms": status_stayed, "status_old_page_kind": status_kind_,
             "status_other_page_ms": status_other,
@@ -4372,6 +4419,45 @@ def tail(values: list[Any]) -> dict[str, Any]:
         return {"n": 0}
     return {"n": len(kept), "median": round(statistics.median(kept)),
             "p90": round(kept[min(len(kept) - 1, math.ceil(0.9 * len(kept)) - 1)]), "max": round(kept[-1])}
+
+
+# the timing figures: per rested turn to a page the cache did not hold whole, from the turn and from the sharp
+# picture's appearance, and the parts of the way from the turn to the finishing job's start
+TIMING_KEYS = ("lettered_from_turn_ms", "first_lettered_ms", "finished_from_turn_ms", "finished_ms",
+               "first_request_from_turn_ms", "first_request_ms", "job_from_turn_ms", "soft_to_sharp_ms",
+               "captured_from_turn_ms", "captured_sharp_ms", "job_after_sharp_capture_ms", "job_queued_ms")
+TIMING_LEFT_OUT = ("start", "c")  # the start's page is no turn; c's turns come while the model loads
+
+
+def timing_summary(rows: list[dict[str, Any]], soft_first: bool, drew_soft: list[dict[str, Any]],
+                   said: list[dict[str, str]], rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The timing figures of a run (`--soft-first`): the turns the reader rested on (`REST_MS`) but the start's and
+    c's, to a page the cache did not hold whole, on screens of one page and of two, and per scenario: the first
+    lettered bubble and the finished page from the turn (the stand-in's first draw of it) and from its sharp picture's
+    draw, the first request, and what lay between the turn and the finishing job's start (`turn_rows`). In sharp mode
+    the turn is the sharp picture's draw, and the window must never have learnt that this viewer draws a page soft
+    first: the stand-in's draws by state (none soft) and the times the window learnt it (`App._drew_soft`: none)
+    say whether it did."""
+    rested = [r for r in rows if (r["rest_ms"] or 0) >= REST_MS and r["segment"] not in TIMING_LEFT_OUT]
+    fresh = [r for r in rested if not r["cached"]]
+
+    def block(mine: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"turns": len(mine), **{k: tail([r[k] for r in mine]) for k in TIMING_KEYS}}
+
+    draws = Counter(s.get("state") for s in said if s.get("ev") == "draw")
+    ready = next((s for s in said if s.get("ev") == "ready"), {})
+    return {
+        "soft_first": "on" if soft_first else "off",
+        "standin_said_soft_first": ready.get("soft_first"),
+        "standin_draws": dict(draws),
+        "window_learnt_soft_first": len(drew_soft),
+        "learnt": [{"t_s": rel(d["t"]), "soft": d["soft"], "sharp": d["sharp"]} for d in drew_soft[:10]],
+        "cached_turns_left_out": len(rested) - len(fresh),
+        "one_page": block([r for r in fresh if not r["spread"]]),
+        "two_pages": block([r for r in fresh if r["spread"]]),
+        "by_segment": {s: block([r for r in fresh if r["segment"] == s])
+                       for s in dict.fromkeys(r["segment"] for r in fresh)},
+    }
 
 
 # a page job's stages as `job_stages` tells them, in the order of the job
@@ -4721,11 +4807,15 @@ def run(args: argparse.Namespace) -> int:
         raise SystemExit("set TASLATION_MODELS_DIR (or --models) to the folder of the installed models")
     os.environ["TASLATION_MODELS_DIR"] = models
 
-    names = wanted(args.scenario)
+    soft_first = getattr(args, "soft_first", "on") == "on"
+    names, x_out = soft_first_scenarios(wanted(args.scenario), args.scenario, soft_first)
     count = pages_needed(names, args.k_turns)
     report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale,
                               "front_for_order": getattr(args, "front_for_order", "as-is"),
-                              "order_partly": getattr(args, "order_partly", "as-built")}
+                              "order_partly": getattr(args, "order_partly", "as-built"),
+                              "soft_first": "on" if soft_first else "off"}
+    if x_out:
+        report["x_left_out"] = x_out
     pictures: list[Any] | None = None if args.synthetic else dataset_pages(args.series, args.first, count)
     report["pages"] = "dataset" if pictures else "synthetic"
     if not pictures:
@@ -4742,7 +4832,8 @@ def run(args: argparse.Namespace) -> int:
             report["x_left_out"] = "needs the dataset's pages of little text"
     count = len(pictures)
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
-              "soft": args.k_soft == "on", "narrow": bool(args.k_narrow), "backlog": args.k_backlog == "on",
+              "soft": args.k_soft == "on" and soft_first, "narrow": bool(args.k_narrow),
+              "backlog": args.k_backlog == "on",
               "read_ms": args.k_read_ms, "keys": bool(args.k_keys), "stay_ms": args.k_stay_ms}
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
     if any(n in K_PACES for n in names):
@@ -4795,7 +4886,7 @@ def run(args: argparse.Namespace) -> int:
     standin_rect, app_rect = Monitors().places()
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
-    page = sv.page_url(token, steps, standin_dir, seed=args.seed)
+    page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first)
     report["standin_draws_covered"] = bool(args.standin_draws_covered)
     browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale,
                                 draws_covered=args.standin_draws_covered)
@@ -5132,6 +5223,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     return {
         **({"scenario_k": k_facts} if k_facts else {}),
         "side_indicator": side_facts,
+        "timing": timing_summary(rows, getattr(director.args, "soft_first", "on") == "on", notes.drew_soft,
+                                 [s for _t, s in browser.said()], rel),
         "latency_rested": latency,
         "stage_split": split,
         "status_line_of_the_page_before": status_summary,
@@ -5626,6 +5719,16 @@ def print_table(report: dict[str, Any], path: Path) -> None:
             s["stale"], s["not_following"])))
     for key, value in run_["latency_rested"]["all"].items():
         print(f"rested turns, {key}: {value}")
+    timing = run_.get("timing")
+    if timing:
+        print(f"timing with the stand-in {'soft first' if timing['soft_first'] == 'on' else 'sharp at once'} (it said "
+              f"soft_first={timing['standin_said_soft_first']}, drew {timing['standin_draws']}); the window learnt it "
+              f"draws soft first {timing['window_learnt_soft_first']} time(s); cached turns left out "
+              f"{timing['cached_turns_left_out']}")
+        for kind in ("one_page", "two_pages"):
+            b = timing[kind]
+            cut = {k: (v["median"], v["p90"], v["max"]) for k, v in b.items() if isinstance(v, dict) and v.get("n")}
+            print(f"  {kind.replace('_', ' ')}: {b['turns']} turns (median, p90, max ms) {cut}")
     for name, k in (run_.get("scenario_k") or {}).get("paces", {}).items():
         print(f"{name}: flips {k['flips']}, stayed {K_STAYED_MS} ms {k['stayed']}, caught {k['caught']} "
               f"(agree {k['agree']}/{k['flips']}), told gone by {k['told_gone_by']}, drain {k['drain_s']} s, "
@@ -5791,6 +5894,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "page read afresh on show while the pages turned past wait")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
+    ap.add_argument("--soft-first", default="on", choices=("on", "off"),
+                    help="on (default): the stand-in draws every turn soft first and sharp a while later, as the "
+                         "correctness runs have it; off: every turn sharp at once and nothing after it, for the timing "
+                         "figures (what TASlation takes, with no wait of the viewer's in it); x is left out of all and "
+                         "refused by name, and --k-soft changes nothing")
     ap.add_argument("--standin-draws-covered", action="store_true",
                     help="the stand-in browser goes on drawing while other windows hide it wholly (its occlusion "
                          "tracking off): a run that does not depend on the windows of a person at the machine")

@@ -153,13 +153,15 @@ def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int 
 
 
 def page_url(token: str, steps: Sequence[Step], folder: Path, seed: int = 1, band: int = 54,
-             soft: tuple[int, int] = (150, 400), factor: int = 6, flash_ms: int = 800, layout: str = "auto") -> str:
+             soft: tuple[int, int] = (150, 400), factor: int = 6, flash_ms: int = 800, layout: str = "auto",
+             soft_first: bool = True) -> str:
     """The stand-in page's URL: the page itself (`HTML`), its token, the page list and the control file in the
-    scratch *folder*, its draws; the script in the hash."""
+    scratch *folder*, its draws; the script in the hash. Without *soft_first* (``soft_first=0`` in the query) the page
+    draws every turn sharp at once and nothing after it; with it the URL is what it always was."""
     folder = Path(folder).resolve()
     query = urlencode({"token": token, "pages": file_url(folder / PAGE_LIST), "control": file_url(folder / CONTROL),
                        "seed": seed, "band": band, "soft_min": soft[0], "soft_max": soft[1], "factor": factor,
-                       "flash_ms": flash_ms, "layout": layout})
+                       "flash_ms": flash_ms, "layout": layout, **({} if soft_first else {"soft_first": 0})})
     return file_url(HTML) + "?" + query + "#s=" + format_script(steps)
 
 

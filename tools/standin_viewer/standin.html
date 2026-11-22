@@ -18,7 +18,9 @@ A page of its own, run in a throwaway browser window, that draws sample pages th
 does: a band at the top that is not the page, a dark ground round the page or the spread (right to left: the first
 page of a spread on the right), a small page counter; every turn drawn SOFT first (the page drawn into a canvas six
 times smaller and enlarged again, as the browser itself scales a canvas) and sharp a while later; BLACK for a while
-when the window gets the focus, a key pressed meanwhile lost; now and then a spinner over the page.
+when the window gets the focus, a key pressed meanwhile lost; now and then a spinner over the page. With
+``soft_first=0`` in the query every turn is drawn sharp at once and nothing is drawn after it (the script's t, b and k
+steps change nothing then): a viewer that never draws a page soft, for timing what TASlation itself takes.
 
 Nothing is fetched from anywhere: no network, no external resource. The query names two files in a scratch folder,
 both loaded as scripts: the page list (`pages`, `standinPages({...})`: file URLs of the pictures, read where they
@@ -63,6 +65,7 @@ const cfg = {
   flashMs: num("flash_ms", 800),
   band: num("band", 54),
   layout: query.get("layout") || "auto",  // "auto" (spreads while the window is wider than high), "spread", "single"
+  softFirst: query.get("soft_first") !== "0",  // false: every turn drawn sharp at once, nothing after it
   script: hashed.get("s") || "",
 };
 const softQuery = [cfg.softMin, cfg.softMax], factorQuery = cfg.factor;  // (a script's "t" and "b" put them back)
@@ -265,8 +268,8 @@ function turnTo(n, why) {
   spinning = false;
   index = first(Math.max(0, Math.min(entries.length - 1, n)));
   keepNear(index);
-  drawScreen(true, why).then(done => {
-    if (!done) return;
+  drawScreen(cfg.softFirst, why).then(done => {
+    if (!done || !cfg.softFirst) return;  // (sharp at once: nothing comes after it)
     const token = drawToken;
     if (keepMs !== null) { keepSoft(token); return; }
     pendingSharp = setTimeout(() => {
@@ -419,7 +422,8 @@ function begin() {
   keepNear(0);
   drawScreen(false, "start").then(() => {
     say("ready", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +
-        " count=" + entries.length + " cell=" + CELL + " x=" + CODE_X + " y=" + CODE_Y);
+        " count=" + entries.length + " cell=" + CELL + " x=" + CODE_X + " y=" + CODE_Y +
+        " soft_first=" + (cfg.softFirst ? 1 : 0));
     setInterval(poll, CONTROL_MS);
     poll();
     let steps = [];

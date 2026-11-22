@@ -236,6 +236,18 @@ rows' languages.
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
   its times are not comparable with runs of earlier versions there.
+  `--soft-first off` makes the stand-in draw every turn sharp at once and nothing after it, so that no wait of the
+  viewer's is in what is timed: the published timing figures (the README's and the installation guide's table of a
+  screen's time and the first bubble) are measured with it, `--scenario a,f --wait-done 120` on a quiet computer
+  (screens of two pages from a and f, of one page from f2), from the report's `timing`: per screen of one page and of
+  two, over the turns rested on to a page the cache did not hold, the first lettered bubble and the finished page from
+  the turn and from the sharp picture's draw (the same in this mode), the first request, and the way from the turn to
+  the finishing job's start (the window's first capture, its first capture of the sharp picture, from there to the
+  job, the job's wait for its worker). The window starts in a process of its own on a scratch state and a browser
+  window it has never seen, and what it learns of a viewer that draws soft first is held for that window in memory
+  only; `timing` says that the stand-in drew nothing soft and how often the window learnt it all the same (never, or
+  the figures are not sharp mode's). x needs soft frames: it is left out of all and refused by name. The correctness
+  runs, here and on the runners (`.github/gpu-checks`), keep the default, `on`.
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
   window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is
