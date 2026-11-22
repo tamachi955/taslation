@@ -1306,6 +1306,51 @@ class _HeldSizes:
         self.samples.extend(samples)
 
 
+class _UsualLater:
+    """A page unit's usual character size (`usual_size`) as `Pipeline._usual` gives it, taken only once a gate needs it
+    (`JUDGE_AT_READ`; called: `charspot_accepts`), so that a region read surely is judged - and settled by the other
+    readers - right after its own reading, not after all the page's regions were read. Each region gives its sample
+    as it begins to be judged (`sample`: as it was before any region was judged, for a judgement changes only its own
+    region); the size takes the rest as they are then (none judged yet), in the order of *regions*, and adds them to
+    the book's sizes as `_usual` does. The same samples, in the same order, the same size and the same book's sizes as
+    reading them all first: no region's fate changes, only when it is decided. Taken at the latest before the regions'
+    shapes change (`Pipeline._ocr_regions`). On the thread that reads the unit only (a unit read beside has its own
+    book's sizes there, `_HeldSizes`)."""
+
+    def __init__(self, pipeline: "Pipeline", rgb: np.ndarray, regions: Sequence[TextRegion],
+                 cancel: threading.Event | None = None):
+        self.pipeline, self.rgb, self.regions, self.cancel = pipeline, rgb, list(regions), cancel
+        self.samples: dict[int, float | None] = {}  # id(region) -> its sample (None: too short or unsure)
+        self.value: float | None = None
+
+    def sample(self, r: TextRegion) -> None:
+        """*r*'s sample taken now, unless taken already or the size is known."""
+        if self.value is not None or id(r) in self.samples:
+            return
+        check_cancel(self.cancel)
+        p = self.pipeline
+        size = size_sample(p._read(self.rgb, r, r.text_box, p._ocr_view(self.rgb, r)))
+        self.samples[id(r)] = size
+        if size is not None:
+            ahead = getattr(_ON_SHOW, "ahead", None)
+            if ahead is not None:
+                ahead.start()  # (a line read surely: the model loads while the rest is read, `LoadAhead`)
+
+    def __call__(self) -> float:
+        if self.value is None:
+            for r in self.regions:
+                self.sample(r)
+            samples = [size for r in self.regions if (size := self.samples[id(r)]) is not None]
+            self.value = usual_size(samples, self.pipeline._sizes_seen())
+            self.pipeline._add_sizes(samples)
+        return self.value
+
+
+def _taken(usual: "float | _UsualLater") -> float:
+    """The usual size *usual* gives (`_UsualLater` taken now)."""
+    return usual() if callable(usual) else usual
+
+
 class _Either:
     """Set once either of two events is (`check_cancel` asks it)."""
 
@@ -3392,26 +3437,62 @@ class Pipeline:
                      read: Sequence[TextRegion] = (), unit_box: Box | None = None) -> list[TextRegion]:
         """Read *regions*. Where the layout model found some, those first and together (one that repeats another of
         them read as text before it is left out); then the classical ones, each read only if it does not repeat what
-        was read as text so far (or *read*, regions read before), all judged on the page's usual size. The model's
+        was read as text so far (or *read*, regions read before), all judged on the page's usual size - each as soon
+        as it is read, the size taken only when a gate needs it (`JUDGE_AT_READ`, `_UsualLater`: the same size, the
+        same fates as reading all the regions first). The model's
         regions then take their classical shape, and of two that took the same one only the first stays. Lettering set
         across that was read in pieces, or within a region that holds more, is read again a paragraph a region
         (`_prose`). What was left out leaves *regions* and is returned (each with the region it repeats in
         ``repeats``). A region the reader made "erase only" is read too (its reading shapes its erase) and then takes
         the status `ERASED`."""
         self._measure_slants(rgb, regions)
-        usual = self._usual(rgb, regions, cancel) if self.ocr is not None else 0.0  # (from all its regions)
+        usual: float | _UsualLater
+        if self.ocr is None:
+            usual = 0.0
+        elif JUDGE_AT_READ:  # (from all its regions, each judged as soon as it is read: `_UsualLater`)
+            usual = _UsualLater(self, rgb, regions, cancel)
+        else:
+            usual = self._usual(rgb, regions, cancel)  # (from all its regions, read first)
         first = [r for r in regions if r.from_model]
         among = [*regions, *read]  # (what a short line may lie on: `_on_lettering`)
         if not first:
-            self._read_regions(rgb, regions, report, fill, cancel, usual=usual, among=among)
+            if JUDGE_AT_READ:
+                for i, r in enumerate(regions):
+                    self._read_regions(rgb, [r], report, fill, cancel, done=i, total=len(regions), usual=usual,
+                                       among=among)
+            else:
+                self._read_regions(rgb, regions, report, fill, cancel, usual=usual, among=among)
+            usual = _taken(usual)
             left = self._prose(rgb, regions, usual, report, fill, cancel, among, read)
             self._titles(regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
             self._erase_only(regions, fill)
             return left
         total = len(regions)
-        self._read_regions(rgb, first, report, fill, cancel, total=total, usual=usual, among=among)
         got = list(read)
         repeated: list[TextRegion] = []
+
+        def twin_of(r: TextRegion) -> None:
+            """The model's boxes of one lettering (two texts, a bubble and its text): the first read stays. Decided on
+            *r* and the regions before it alone, as read: the same whenever it is asked."""
+            if r.status != "untranslated" or not r.source_text:
+                return
+            same = next((q for q in got if q.from_model and _same_lettering(q, r)), None)
+            if same is not None:
+                r.status, r.repeats = "repeated", same
+                repeated.append(r)
+                if fill is not None:
+                    fill.read(r)
+                return
+            got.append(r)
+
+        if JUDGE_AT_READ:
+            for i, r in enumerate(first):
+                self._read_regions(rgb, [r], report, fill, cancel, done=i, total=total, usual=usual, among=among)
+                twin_of(r)
+        else:
+            self._read_regions(rgb, first, report, fill, cancel, total=total, usual=usual, among=among)
+            for r in first:
+                twin_of(r)
 
         def repeats(r: TextRegion) -> bool:
             r.repeats = cover_of(r, got)
@@ -3423,17 +3504,6 @@ class Pipeline:
                 fill.read(r)
             return True
 
-        for r in first:  # the model's boxes of one lettering (two texts, a bubble and its text): the first read stays
-            if r.status != "untranslated" or not r.source_text:
-                continue
-            twin = next((q for q in got if q.from_model and _same_lettering(q, r)), None)
-            if twin is not None:
-                r.status, r.repeats = "repeated", twin
-                repeated.append(r)
-                if fill is not None:
-                    fill.read(r)
-                continue
-            got.append(r)
         for i, r in enumerate(r for r in regions if not r.from_model):
             if repeats(r):
                 continue
@@ -3441,6 +3511,7 @@ class Pipeline:
                                among=among)
             if r.status == "untranslated" and r.source_text:
                 got.append(r)
+        usual = _taken(usual)  # (all read: before the shapes change, as `_usual` took it before any reading)
         for r in first:
             take_shape(r)
         lettered: list[TextRegion] = []
@@ -3893,9 +3964,11 @@ class Pipeline:
 
     def _read_regions(self, rgb: np.ndarray, regions: list[TextRegion], report: ProgressFn,
                       fill: PageFill | None = None, cancel: threading.Event | None = None, done: int = 0,
-                      total: int = 0, usual: float | None = None, among: Sequence[TextRegion] = ()) -> None:
-        """Read *regions*: all of them first, for the page's usual character size (`usual_size`; *usual* when given),
-        then each is judged on it, so that a region's fate does not hang on the order of reading. *done* of *total*
+                      total: int = 0, usual: "float | _UsualLater | None" = None,
+                      among: Sequence[TextRegion] = ()) -> None:
+        """Read *regions*: all of them first, for the page's usual character size (`usual_size`; *usual* when given,
+        a `_UsualLater` too: each region gives it its sample as it begins), then each is judged on it, so that a region's
+        fate does not hang on the order of reading. *done* of *total*
         went before them; *among* are the page unit's regions, read or not, that a short line may lie on
         (`_on_lettering`). A model region without a measured glyph size takes its reading's (what its lettering is sized
         from)."""
@@ -3911,6 +3984,8 @@ class Pipeline:
         for i, r in enumerate(regions):
             check_cancel(cancel)
             report(Message("pipeline.stage_reading", done=done + i + 1, total=n))
+            if isinstance(usual, _UsualLater):
+                usual.sample(r)  # (as it is before its judgement changes it)
             if r.beyond_box is not None and r.before_beyond is not None:
                 # a column the detector took in past a dark bubble's interior is kept when the reading with it is the
                 # reading without it plus more text; a drawing adds nothing, or garbles the rest
@@ -4158,16 +4233,18 @@ class Pipeline:
             self._unanimous_memo[key] = memo
         return memo
 
-    def _verdict(self, r: TextRegion, reading: CharspotReading, pieces: int, usual: float,
+    def _verdict(self, r: TextRegion, reading: CharspotReading, pieces: int, usual: "float | _UsualLater",
                  unanimous: bool = False) -> str:
         """`_judge` of *reading*, and a reading that passed held to the page's lettering (`charspot_accepts`), but for
         a region the reader added and a short line all the readers read (*unanimous*, `_short_line`): one character
-        is too short for the gate, and its size says nothing about a bubble's single word."""
+        is too short for the gate, and its size says nothing about a bubble's single word. (The short line is looked
+        at first: a page's usual size still to take, `_UsualLater`, is taken only where it decides.)"""
         status = self._judge(r, reading.text, reading.score, pieces, unanimous)
         if status != "untranslated" or not reading.chars or r.kind.startswith("manual"):
             return status
-        if not charspot_accepts(reading, usual) and not (
-                unanimous and self._short_line(r, reading.text, reading.score, pieces, unanimous=True)):
+        if unanimous and self._short_line(r, reading.text, reading.score, pieces, unanimous=True):
+            return status
+        if not charspot_accepts(reading, usual):
             return "ocr-noise"
         return status
 
@@ -5203,6 +5280,9 @@ def _measure_key(region: TextRegion, held: list[Any]) -> tuple[Any, ...]:
 DRAFTS_BESIDE = True  # the drafts of a page are lettered on a thread of their own while the model writes (`PageFill`)
 DRAFT_SIZES_KEPT = True  # the sizes the drafts of a page measure are kept for its next drafts (`Pipeline.cap_sizes`)
 SPREAD_READ = True  # a spread's next page unit is read while the one before it is translated (`ReadBeside`)
+# each region of a page unit is judged (and settled by the other readers) as soon as it is read, the page's usual size
+# taken only when a gate needs it (`_UsualLater`); False: all its regions read for that size first (the same fates)
+JUDGE_AT_READ = True
 _SIZES = threading.local()  # the book's sizes as a unit read beside sees them (`_HeldSizes`), on its thread
 _DRAFTS: list[ThreadPoolExecutor] = []
 
