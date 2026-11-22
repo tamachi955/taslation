@@ -3,6 +3,12 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 0.9.8 - 2026-11-22
+
+Documents
+
+* The README shows the new introduction video, with background translation in it.
+
 ## 0.9.7 - 2026-11-22
 
 Reading
