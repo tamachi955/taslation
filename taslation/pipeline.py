@@ -654,7 +654,9 @@ class PageFill:
 
     def wait(self, drop: bool = False) -> None:
         """Every draft handed to the drafts' thread lettered and every task done; with *drop* (the page stops), those
-        not begun are dropped and nothing is raised; else the first error of a task is raised here."""
+        not begun are dropped and nothing is raised; else the first error of a task is raised here. A page that stops
+        ends its drafts layer here (`early_end`, whose task may have been among those dropped): nothing it lettered
+        stays on show that the page's own lettering does not show."""
         pending, self._pending = self._pending, []
         if drop:
             for job in pending:
@@ -667,6 +669,8 @@ class PageFill:
                 job.result()
             except BaseException as e:  # noqa: BLE001 - a draft raises nothing (`_draft`): a task's, said below
                 error = error or e
+        if drop:
+            self._early_end()  # (the drafts' thread has nothing left of the page: done on this one)
         if error is not None and not drop:
             raise error
 

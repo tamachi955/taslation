@@ -80,6 +80,17 @@ def _read(p: Pipeline, page, streamed: bool, monkeypatch, gate=None, cancel=None
     return events, result
 
 
+def _read_stopped(p: Pipeline, page, monkeypatch, cancel=None) -> list[tuple[str, dict]]:
+    """*page* read with its lines streamed, as `_read`, by a page job that stops (Cancelled): its events."""
+    monkeypatch.setattr(streaming, "STREAM_LINES", True)
+    events: list[tuple[str, dict]] = []
+    with pytest.raises(Cancelled):
+        with p.page_on_show(None):
+            p.process(page.copy(), events=lambda kind, data: events.append((kind, dict(data))),
+                      cancel=cancel or threading.Event())
+    return events
+
+
 def _kept_requests(p: Pipeline) -> list[tuple[str, int]]:
     """The requests that count: those of runs not taken back."""
     gone = {t for log in p.stream_log for t in log["tokens_taken_back"]}
@@ -208,11 +219,36 @@ def test_a_page_stopped_while_it_is_read_puts_back_what_its_lines_changed(settin
         return out
 
     monkeypatch.setattr(p, "_ocr_regions", stopped_late)
-    with pytest.raises(Cancelled):
-        _read(p, sample_page, True, monkeypatch, cancel=cancel)
+    events = _read_stopped(p, sample_page, monkeypatch, cancel=cancel)
     assert p.translator.asked  # (lines were asked while the page was read)
     assert lasting() == before
-    assert p.stream_log[-1]["outcome"] == "stopped" and p.stream_log[-1]["why_taken_back"] == "stopped"
+    log = p.stream_log[-1]
+    assert log["outcome"] == "stopped" and log["why_taken_back"] == "stopped"
+    # (and nothing they lettered stays on show: the stopped page shows what it lettered itself - here nothing)
+    assert log["early_lettered"] > 0 and log["early_left"] == 0 and _shown_early_at_end(events) == []
+
+
+def test_a_page_stopped_after_its_request_leaves_nothing_on_the_drafts_layer(settings, sample_page, monkeypatch):
+    # (the unit's request made through the stream, and the page stopped right after it - while the drafts' thread was
+    # still lettering the layer, before it came to the layer's end: the drafts not begun are dropped with the page)
+    import taslation.pipeline as pipeline_module
+
+    early_draft = pipeline_module.PageFill._early_draft
+
+    def slow_draft(self, *a):
+        time.sleep(0.05)
+        return early_draft(self, *a)
+
+    def stopped(*a, **k):
+        raise Cancelled()
+
+    monkeypatch.setattr(pipeline_module.PageFill, "_early_draft", slow_draft)
+    monkeypatch.setattr(pipeline_module, "ask_again_romanised", stopped)  # (the step after the request)
+    p = _pipeline(settings, "Stopped after", delay=0.01)
+    events = _read_stopped(p, sample_page, monkeypatch)
+    log = p.stream_log[-1]
+    assert log["outcome"] == "done" and log["early_lettered"] > 0  # (the unit was asked, lines lettered early)
+    assert log["early_left"] == 0 and _shown_early_at_end(events) == []  # (nothing of the layer still on show)
 
 
 def test_nothing_is_asked_before_the_frame_was_seen_on_show(settings, sample_page, monkeypatch):
