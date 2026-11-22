@@ -23,7 +23,6 @@ from taslation.ui import area, zoom
 from taslation.ui.live import LiveViewMixin
 from taslation.ui.progress import Filling
 from taslation.ui.selection import BADGE_TAG
-from taslation.ui.strip import RunPage
 from taslation.ui.zoom import HOLD_MS, ZOOM_DELAY_MS, ZOOM_GAP, ZOOM_REST_MS
 
 A = app_mod.App
@@ -406,7 +405,7 @@ def test_the_bubble_keys_work_in_the_translator_role_and_a_press_closes_their_pa
     assert w.added == []  # (a click, no drag: nothing drawn)
 
 
-def test_a_page_filling_in_and_a_whole_book_run_s_page_show_nothing_under_the_pointer_as_in_the_reader_role(desk):
+def test_a_page_filling_in_shows_nothing_under_the_pointer_as_in_the_reader_role(desk):
     for reveal in ("panel", "in_place"):
         for role in ("translator", "reader"):
             w = desk(reveal)
@@ -417,11 +416,6 @@ def test_a_page_filling_in_and_a_whole_book_run_s_page_show_nothing_under_the_po
             w.move(*w.at(150, 200))
             assert w.pending() == [], (reveal, role)
             w._fill = None
-            w._run_view = RunPage(seq=1, frame=result.original, image=result.image)
-            w._redisplay()
-            w.move(*w.at(151, 201))
-            assert w.pending() == [], (reveal, role)
-            w._run_view = None
             w._redisplay()
             w.move(*w.at(152, 202))
             assert w.pending() == ["_zoom_due" if reveal == "panel" else "_reveal_due"], (reveal, role)

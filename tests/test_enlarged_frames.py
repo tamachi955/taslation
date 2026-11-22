@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from taslation.batch import thumbnail
+from taslation.frames import thumbnail
 from taslation.capture import CaptureError, Enlarged, Raised, WindowInfo, is_blank
 from taslation.config import Settings
 from taslation.pagekeys import PageKeys
@@ -49,14 +49,13 @@ class Window(LiveViewMixin, ViewerMixin):
         self.selected = WindowInfo(HWND, "Yomizuq - Google Chrome", "Chrome_WidgetWin_1", 123, SMALL)
         self.jobs, self.said, self.shown, self.books = [], [], [], []
         self.auto_var, self.book_var = Var(True), Var("Yomizuq")
-        self.ready, self.busy, self.reading, self.batch, self._batching = True, False, False, None, False
+        self.ready, self.busy, self.reading = True, False, False
         self._page_areas, self._manual_area, self._hand_area, self._area_hinted = {}, False, None, False
         self._enlarged = self._enlarging = self._enlarge_asked = None
         self._area_large, self._covered = False, False
         self._live = self._live_thumb = self._fill = self._auto_last = self._auto_candidate = None
         self._start_pending = None
         self.canvas = SimpleNamespace(set_note=lambda *_a: None)
-        self._book_scanned, self._scanned_book = False, ""
         self._following = Following(mode=mode, owner=owner, look_at=0.0,
                                     events=SimpleNamespace(take=lambda: [], viewer=HWND))
 
@@ -65,7 +64,6 @@ class Window(LiveViewMixin, ViewerMixin):
     _page_keys = lambda self, win=None: PageKeys()
     _name_needed = lambda self: True
     _page_uncached = lambda self, image: True
-    scan_mode = lambda self: "page"
 
     def _set_covered(self, covered):
         self._covered = covered
@@ -87,7 +85,7 @@ class Window(LiveViewMixin, ViewerMixin):
     def _redisplay(self):
         self.shown.append(self._live)
 
-    def _begin_book(self, image, thumb, whole):
+    def _begin_book(self, image, thumb):
         self.books.append((image, tuple(self.settings.margins)))
 
     def run(self, until, steps=60):

@@ -104,7 +104,7 @@ def test_the_hot_keys_wanted():
     assert wanted_hotkeys(True, True, "viewer") == {"F5", "F11", "Escape"}
     assert wanted_hotkeys(True, False, "own") == {"F5"}
     assert wanted_hotkeys(True, True, "other") == frozenset()  # a third program in front keeps its keys
-    # no page of a whole-book run is shown from the strip (reading is on the viewer): Esc has nothing to go back from
+    # reading is on the viewer: Esc has nothing to go back from
     assert list(inspect.signature(wanted_hotkeys).parameters) == ["on", "reading", "owner"]
     page_keys = {"Left", "Right", "Up", "Down", "Prior", "Next", "Home", "End", "space"}
     assert not page_keys & set(overbook.OVER_HOTKEYS)  # the page keys are never registered

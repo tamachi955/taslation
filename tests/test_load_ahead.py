@@ -2,7 +2,7 @@
 (`pipeline.LoadAhead`, within `Pipeline.page_on_show`): one load (`OllamaTranslator.ensure_loaded` takes turns), the
 GPU models let go once before it and warmed again only after it, the page's cancel ends it, and the page never lets go
 of the worker with its load under way. A page from the cache, one with nothing to translate, a translator set to
-unload at once and a page outside the window (a whole-book run, a command) load nothing ahead. A fake Ollama keeps the
+unload at once and a page outside the window (a command) load nothing ahead. A fake Ollama keeps the
 model as the real one does; the translations are what they are without it."""
 from __future__ import annotations
 
@@ -149,7 +149,7 @@ def test_outside_the_window_and_with_keep_alive_0_nothing_loads_ahead(ollama, se
     loaders: list[str] = []
     real = p.translator.ensure_loaded
     p.translator.ensure_loaded = lambda *a, **k: (loaders.append(threading.current_thread().name), real(*a, **k))[1]
-    p.process(sample_page, cancel=threading.Event())  # (a whole-book run, a command)
+    p.process(sample_page, cancel=threading.Event())  # (a command)
     assert loaders and "taslation-load-ahead" not in loaders
 
     q, said, released, _w = _pipeline(settings, ollama.url, book="At once", keep_alive="0")

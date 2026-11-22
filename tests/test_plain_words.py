@@ -13,7 +13,7 @@ from taslation.cache import CacheStore
 from taslation.config import Settings
 from taslation.i18n import CATALOGS, set_language
 from taslation.message_texts import LANGUAGES, catalog
-from taslation.messages import TEMPLATES, Message, render
+from taslation.messages import TEMPLATES, Message
 from taslation.pipeline import summary
 from taslation.regions import PageResult
 from taslation.rename import RenameRefused
@@ -25,7 +25,7 @@ from taslation.ui.status import StatusMixin
 from taslation.ui.tooltip import menu_tip, tip_menu
 
 ALL = ("en", *LANGUAGES)
-SEEN_BY_EVERY_READER = ("batch.finished", "batch.failures", "batch.locked", "pipeline.from_cache", "pipeline.translated",
+SEEN_BY_EVERY_READER = ("pipeline.from_cache", "pipeline.translated",
                         "pipeline.to_review", "pipeline.no_content", "pipeline.no_text", "ollama.unreachable", "ollama.http_error",
                         "ollama.timeout", "ollama.connection_failed", "ollama.bad_json", "ollama.reported_error", "ollama.broke_off",
                         "ollama.bad_answer", "ollama.slow", "ollama.loaded", "ocr.model_missing", "health.ocr_missing", "health.ollama_down",
@@ -45,14 +45,6 @@ def test_the_english_says_what_to_do_next():
     for code in ("ollama.http_error", "ollama.timeout", "ollama.connection_failed", "ollama.bad_answer"):
         assert "Press F5 to try again" in TEMPLATES[code]
     assert "F5" in TEMPLATES["ollama.unreachable"] and "install.cmd" in TEMPLATES["ocr.model_missing"]
-
-
-@pytest.mark.parametrize("lang", ALL)
-def test_a_whole_book_run_is_told_in_minutes(lang):
-    done = Message("batch.finished", pages=3, bubbles=12, seconds=125.0, minutes=2, failed=0, error="",
-                   reason=Message("batch.finished_reading"))
-    text = render(done, catalog(lang))
-    assert "125" not in text and "2" in text
 
 
 def test_the_legal_notice_names_no_command_and_no_program_in_any_language():

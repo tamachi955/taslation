@@ -64,7 +64,6 @@ class Renames(Window):
 
     def __init__(self, pipeline, result, glossary_store=None):
         super().__init__(pipeline, result)
-        self.batch, self._batching = None, False
         self.glossary_store = glossary_store
         self.later = []
 
@@ -127,14 +126,6 @@ def test_leave_them_and_no_line_to_change_change_nothing(renames, monkeypatch):
     asked.clear()
     w._offer_sheet_renames([("Nowa", "Nowe")], "Book", "English")
     assert not asked and not w.history.done  # nothing translated with it: nothing asked
-
-
-def test_during_a_run_nothing_is_offered_and_a_line_says_why(renames, monkeypatch):
-    w = renames
-    asked = _answer(monkeypatch, True)
-    w._batching = True
-    w._offer_sheet_renames([("Piyo", "Pyo")], "Book", "English")
-    assert not asked and w.said[-1] == translator.SHEET_IN_A_RUN
 
 
 def test_the_offer_waits_for_a_page_at_work_and_for_the_books_cache(renames, monkeypatch):
@@ -202,8 +193,7 @@ def test_the_editors_rename_of_a_rendering_is_one_change_for_ctrl_z(renames, mon
 
 
 def test_the_offers_lines_are_in_every_language():
-    keys = [translator.SHEET_OFFER, translator.SHEET_APPLY, translator.SHEET_LEAVE, translator.SHEET_APPLIED,
-            translator.SHEET_IN_A_RUN]
+    keys = [translator.SHEET_OFFER, translator.SHEET_APPLY, translator.SHEET_LEAVE, translator.SHEET_APPLIED]
     for code, catalog in CATALOGS.items():
         if code != "en":
             assert all(k in catalog for k in keys), (code, [k for k in keys if k not in catalog])

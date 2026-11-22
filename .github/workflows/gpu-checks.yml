@@ -7,7 +7,7 @@
 # form, and the benchmark's five titles a job each. A stand-in job fails when a criterion of correctness fails
 # (summarise.py's `correctness`: the run went through, nothing kept or shown from a frame that was not the sharp one, no
 # request sent for nothing, a page translated before came back without a request, the modes entered and left, the page
-# keys handed on, the whole-book run ended, no frame held behind the reader after its read and nothing at the end, ...)
+# keys handed on, no frame held behind the reader after its read and nothing at the end, ...)
 # and only then: what depends on the computer's speed is reported beside it. A benchmark job fails when a title's F1,
 # CER or chrF leaves its tolerance around the runners' own figures (.github/gpu-checks/benchmark-expected.json). The GPU
 # computer keeps only the timing figures.
@@ -37,7 +37,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,d-e-r-x,t-t2-w-w2-k5-k1-k2,o-z-f-f2"
+        description: "The stand-in's groups: all, or some of c-a-b,d-e-r-x,t-t2-k5-k1-k2,o-z-f-f2"
         type: string
         default: all
       titles:
@@ -90,11 +90,11 @@ env:
   # files keeps its key until the pin moves (here and in the input's default); another release only by hand
   OLLAMA_PINNED: v0.40.17
   OLLAMA_PINNED_ZIP_SHA256: 3dd80f6e3a9699f2eadf4ac418f00529cee594df9557541806eda1f1f3f5588a
-  # The stand-in's groups, a job each: its scenarios in the tool's order (t, w and f bring t2, w2 and f2: its PAIRS;
-  # e turns back to d's pages; k is its three paces, k5, k1 and k2, on pages no scenario before turned to), the short
-  # ones together, about five minutes of run each with --wait-done (k with t and w, the shortest group, which it makes
-  # some eight)
-  STANDIN_GROUPS: '{"c-a-b": "c,a,b", "d-e-r-x": "d,e,r,x", "t-t2-w-w2-k5-k1-k2": "t,w,k", "o-z-f-f2": "o,z,f"}'
+  # The stand-in's groups, a job each: its scenarios in the tool's order (t and f bring t2 and f2: its PAIRS; e turns
+  # back to d's pages; k is its three paces, k5, k1 and k2, on pages no scenario before turned to), the short ones
+  # together, some three to seven minutes of run each with --wait-done (k with t, the shortest scenario, some five to
+  # nine: the backlog emptied after k's 2 s pace is its longest wait)
+  STANDIN_GROUPS: '{"c-a-b": "c,a,b", "d-e-r-x": "d,e,r,x", "t-t2-k5-k1-k2": "t,k", "o-z-f-f2": "o,z,f"}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}

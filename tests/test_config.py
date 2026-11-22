@@ -79,3 +79,19 @@ def test_a_settings_file_with_the_prompt_style_of_an_older_version_still_loads(t
     s = Settings.load(path)
     s.validate()
     assert s.ollama_model == "mine:7b" and not hasattr(s, "ollama_prompt_style")
+
+
+RUN_SETTINGS = {"scan_mode": '"sequential"', "context_mode": '"chunk"', "chunk_bubbles": "12", "lookahead_bubbles": "4",
+                "batch_max_pages": "300", "batch_memory_mb": "1024", "flash_when_done": "true",
+                "sound_when_done": "false"}
+
+
+def test_a_settings_file_of_the_whole_book_run_of_earlier_versions_loads_without_a_word(tmp_path):
+    path = tmp_path / "taslation.toml"
+    path.write_text('ollama_model = "mine:7b"\ncontext_pairs = 6\n'
+                    + "".join(f"{key} = {value}\n" for key, value in RUN_SETTINGS.items()), encoding="utf-8")
+    s = Settings.load(path)
+    s.validate()
+    assert s.ollama_model == "mine:7b" and s.context_pairs == 6
+    assert s.ignored_keys == ()  # dropped silently: nothing for the window or the command line to tell
+    assert not any(hasattr(s, key) for key in RUN_SETTINGS) and set(RUN_SETTINGS) <= config.DROPPED_SETTINGS

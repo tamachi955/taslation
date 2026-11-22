@@ -1,6 +1,6 @@
 """Earlier pairs that only grow, cut back rarely (`taslation.translate.base.GrowingContext`): for PLaMo, whose server
 reuses the beginning of a prompt only when the next prompt extends the one before byte for byte, the pairs a page's
-(or a whole-book run's) request starts from grow from page to page and are cut back to the newest 20 once they pass
+request starts from grow from page to page and are cut back to the newest 20 once they pass
 60, earlier when a request would not fit after them. Checked on the final prompt strings against a stand-in server
 that keeps what a server keeps (the last prompt and its answer): every request extends the one before it but the
 first after a cut. The chat translator keeps the last pages' pairs as before, and what resets the pairs (another book,
@@ -16,8 +16,7 @@ import numpy as np
 import pytest
 
 from taslation import netguard
-from taslation.batch import BatchReader
-from taslation.pipeline import Pipeline, ScannedRegion, ScannedUnit, mask_polygon
+from taslation.pipeline import Pipeline
 from taslation.regions import PageResult, TextRegion
 from taslation.translate.base import (CONTEXT_CUT_TO, CONTEXT_GROWS_TO, GrowingContext, SentPair, grown_pairs,
                                      grows_context)
@@ -249,64 +248,6 @@ def test_a_line_reused_without_a_request_is_left_out_of_pairs_that_only_grow(ser
     assert [src for src, _dst in p._context[-1]] == [line(0, 0), line(0, 1), line(0, 2)]  # (the chat's: all of them)
 
 
-# ------------------------------------------------------------------------------------------------ the whole book
-def _units(pages: int, n: int = LINES_A_PAGE) -> list[ScannedUnit]:
-    units = []
-    for page in range(pages):
-        regions = []
-        for k in range(n):
-            mask = np.full((300, 400), 255, np.uint8)
-            regions.append(ScannedRegion(bbox=(0, 300 * k, 400, 300 * k + 300), text_box=(100, 100, 300, 200),
-                                         poly=mask_polygon(mask), source_text=line(page, k), status="untranslated",
-                                         order=k, kind="speech"))
-        units.append(ScannedUnit(index=0, box=(0, 0, 400, 300 * n), fingerprint=f"book#{page}", aspect=1.0,
-                                 regions=regions))
-    return units
-
-
-def _book_pipeline(settings, translator):
-    class Kept(Pipeline):
-        def commit_unit(self, unit, translations, flags=None):
-            return len(translations) == len(unit.japanese())
-
-    return Kept(settings, ocr=None, translator=translator, cache=None)
-
-
-def test_a_whole_book_runs_first_prompt_extends_the_run_befores_last(server, settings):
-    srv, url = server
-    settings.chunk_bubbles = 2 * LINES_A_PAGE  # runs of two pages
-    pipeline = _book_pipeline(settings, PlamoTranslator(url=url, seed=1))
-    reader = BatchReader(pipeline, 0, settings, context_mode=True, book="book")
-    import time
-
-    reader._translation_pass(_units(12), time.monotonic())
-    assert len(srv.prompts) == 12 * LINES_A_PAGE
-    # runs of 14 lines: the fifth run starts from 56 pairs, the sixth from 70 (> 60): cut back to 20, a new prompt
-    cut_at = 5 * 2 * LINES_A_PAGE
-    assert [i for i, extends in enumerate(srv.extends) if not extends] == [0, cut_at]
-    assert srv.prompts[cut_at].count("<|plamo:tag|>input") == CONTEXT_CUT_TO + 1
-
-
-def test_a_whole_book_run_with_the_chat_translator_keeps_the_last_40_pairs(settings):
-    class Chat:
-        name = "chat"
-
-        def __init__(self):
-            self.contexts: list[int] = []
-
-        def translate_page(self, texts, context=(), notes="", upcoming=(), meta=None):
-            self.contexts.append(len(context))
-            return [english(t) for t in texts]
-
-    tr = Chat()
-    settings.chunk_bubbles = 2 * LINES_A_PAGE
-    reader = BatchReader(_book_pipeline(settings, tr), 0, settings, context_mode=True, book="book")
-    import time
-
-    reader._translation_pass(_units(8), time.monotonic())
-    assert tr.contexts == [0, 14, 28, 40]  # the deque of 40, as before
-
-
 # ------------------------------------------------------------------------------------------------ what the server computed
 def open_regions(page: int, n: int = LINES_A_PAGE) -> list[TextRegion]:
     """A page whose first line goes on in the second (a joined run, one request), and whose third has a star (its
@@ -335,22 +276,6 @@ def test_a_joined_run_and_an_answer_set_otherwise_leave_the_next_pages_prompt_ex
     assert pairs[-LINES_A_PAGE + 1] == ("頁2の行0で、\n頁2の行1です。", "Line 2 0.\nLine 2 1.")
     assert pairs[-LINES_A_PAGE + 2] == ("頁2の星2です。", "Line 2 2.*")
     assert all(isinstance(pair, SentPair) for pair in pairs)
-
-
-def test_a_whole_book_run_holds_what_the_server_computed_too(server, settings):
-    srv, url = server
-    settings.chunk_bubbles = 2 * LINES_A_PAGE
-    pipeline = _book_pipeline(settings, PlamoTranslator(url=url, seed=1))
-    reader = BatchReader(pipeline, 0, settings, context_mode=True, book="book")
-    import time
-
-    units = _units(4)
-    for page, unit in enumerate(units):
-        unit.regions[0].source_text = f"頁{page}の行0で、"
-        unit.regions[2].source_text = f"頁{page}の星2です。"
-    reader._translation_pass(units, time.monotonic())
-    assert len(srv.prompts) == 4 * (LINES_A_PAGE - 1)
-    assert srv.extends == [False] + [True] * (len(srv.prompts) - 1)
 
 
 def test_a_request_beside_a_page_that_took_the_pairs_past_their_bound_extends_its_last_prompt(server, settings):

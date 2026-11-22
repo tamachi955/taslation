@@ -1,6 +1,6 @@
 """Where a translation's counterpart of a bubble's larger lettering is (`taslation.locate_large`), and how the part
 found goes with the translation: found once the page's translations are final, by requests beside the page's that
-change no word of it (`Pipeline.large_part`, `_locate_large`; the whole-book run's `settle`), kept in the cache as the
+change no word of it (`Pipeline.large_part`, `_locate_large`), kept in the cache as the
 optional bubble key ``large`` (offsets into the translation, never the Japanese), taken back from it without a request,
 following an edit of the text that leaves it be and dropped by one that touches it. Versions 0.1.0 and 0.2.0 read a
 file with the key (their readers, copied below as they were, ignore keys they do not know). Invented lines only."""
@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import math
 import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,10 +18,9 @@ import pytest
 from taslation import fingerprint as fp
 from taslation import linememo
 from taslation import locate_large as ll
-from taslation.batch import BatchReader
 from taslation.cache import BookCache, CacheStore, CachedBubble, CachedPage, TextEdit
 from taslation.messages import Cancelled, Message
-from taslation.pipeline import Pipeline, ScannedRegion, ScannedUnit
+from taslation.pipeline import Pipeline
 from taslation.regions import PageResult, TextRegion
 from taslation.size_mix import SizeMix
 from taslation.translate import DictTranslator, TranslationError
@@ -475,20 +473,3 @@ def test_plamos_request_beside_a_page_keeps_nothing(settings):
         netguard.uninstall()
         srv.shutdown()
         srv.server_close()
-
-
-# ------------------------------------------------------------------------------------------------ a whole-book run
-def test_a_whole_book_run_finds_the_part_after_settling_and_stores_it(settings):
-    tr = Aside(MAPPING, FOUND_ALONE)
-    p = _pipeline(settings, tr)
-    regions = [ScannedRegion((10, 10, 200, 100), (10, 10, 200, 100), [(0.0, 0.0), (190.0, 0.0), (190.0, 90.0)],
-                             PLAIN, "untranslated"),
-               ScannedRegion((10, 110, 200, 200), (10, 110, 200, 200), [(0.0, 0.0), (190.0, 0.0), (190.0, 90.0)],
-                             SOURCE, "untranslated", order=1, size_mix=MIX)]
-    unit = ScannedUnit(0, (0, 0, 400, 600), FP, 0.67, regions)
-    reader = BatchReader(p, 0, settings, context_mode=True, book="Large")
-    reader._translation_pass([unit], time.monotonic())
-    stored = p.cache.pages[0].bubbles
-    assert [(b.text, b.large) for b in stored] == [(PLAIN_EN, None), (TRANSLATION, (5, 12, 1.6))]
-    assert [a[0] for a in tr.asides] == [PART]
-    assert tr.asides[0][1][-2:] == [(PLAIN, PLAIN_EN), (SOURCE, TRANSLATION)]  # after the run's pairs

@@ -11,8 +11,7 @@ import tkinter as tk
 from types import SimpleNamespace
 
 import pytest
-from fake_side import Cache, bubble_boxes, fingerprint, page, result, stage, story
-from fake_strip import thumb
+from fake_side import Cache, bubble_boxes, fingerprint, page, result, stage, story, thumb
 
 from taslation.capture import windows as capture_windows
 from taslation.config import ConfigError, Settings
@@ -31,7 +30,6 @@ from taslation.ui.side import SideMixin
 from taslation.ui.side_model import (CELL_H, COLUMN_NEEDS, COLUMN_W, FRAME, RAIL_ROOM, RAIL_W, RAIL_W_FULL, RESERVE,
                                      BacklogPace, SideModel, natural_margin, rail_marks, room_kept, screen_tip,
                                      side_layout, summary_lines)
-from taslation.ui.strip import StripMixin
 
 SPREAD, SINGLE = (1200, 860), (600, 860)
 
@@ -49,7 +47,7 @@ def drawn(part, canvas, room=(0, 0), enlarge=False):
 def test_the_indicator_goes_on_the_exit_side_as_a_column_where_the_margin_holds_one(rtl, side):
     canvas = (1560, 900)
     shown = drawn(SPREAD, canvas)
-    layout = side_layout("column", True, canvas, shown, rtl, full=False)
+    layout = side_layout("column", canvas, shown, rtl, full=False)
     assert layout.kind == "column" and layout.side == side
     x0, y0, x1, y1 = layout.box
     assert x1 - x0 == COLUMN_W
@@ -63,47 +61,45 @@ def test_the_column_gives_way_to_the_rail_under_its_width():
     assert COLUMN_NEEDS == 141
     for margin, kind in ((COLUMN_NEEDS, "column"), (COLUMN_NEEDS - 1, "rail"), (60, "rail"), (RAIL_ROOM, "rail")):
         shown = (margin, 20, margin + 600, 880)
-        assert side_layout("column", True, (2 * margin + 600, 900), shown, True, False).kind == kind, margin
+        assert side_layout("column", (2 * margin + 600, 900), shown, True, False).kind == kind, margin
     shown = (300, 20, 900, 880)
-    assert side_layout("rail", True, (1200, 900), shown, True, False).kind == "rail"  # the rail only, as set
+    assert side_layout("rail", (1200, 900), shown, True, False).kind == "rail"  # the rail only, as set
 
 
 def test_the_rail_is_narrow_beside_the_page_and_wider_on_the_full_screen():
     shown = (60, 20, 660, 880)
-    window = side_layout("column", True, (720, 900), shown, True, full=False)
-    full = side_layout("column", True, (720, 900), shown, True, full=True)
+    window = side_layout("column", (720, 900), shown, True, full=False)
+    full = side_layout("column", (720, 900), shown, True, full=True)
     assert window.rail_w == RAIL_W == 6 and full.rail_w == RAIL_W_FULL == 8
     for layout in (window, full):
         x0, y0, x1, y1 = layout.box
         assert x0 + layout.rail_x + layout.rail_w == shown[0] - 10  # the rail 10 px from the page ...
         assert x1 == shown[0] - 10 + FRAME and (y0, y1) == (20, 880)  # ... its on-show outline too; as tall as the page
-    right = side_layout("rail", True, (720, 900), shown, False, full=False)
+    right = side_layout("rail", (720, 900), shown, False, full=False)
     assert right.box[0] + right.rail_x == shown[2] + 10 and right.box[0] == shown[2] + 10 - FRAME
 
 
 def test_a_margin_too_narrow_for_the_rail_is_widened_on_the_exit_side_only_and_never_by_the_screens():
     canvas = (610, 900)
     assert natural_margin(SINGLE, canvas, 0, False) < RAIL_ROOM
-    assert room_kept("column", True, SINGLE, canvas, rtl=True) == (RESERVE, 0)
-    assert room_kept("rail", True, SINGLE, canvas, rtl=False) == (0, RESERVE)
-    assert room_kept("off", True, SINGLE, canvas) == (0, 0)  # off: the page as before
-    assert room_kept("column", False, SINGLE, canvas) == (0, 0)  # in a whole-book run: as before
-    assert room_kept("column", True, SINGLE, (900, 900)) == (0, 0)  # room enough: nothing kept
+    assert room_kept("column", SINGLE, canvas, rtl=True) == (RESERVE, 0)
+    assert room_kept("rail", SINGLE, canvas, rtl=False) == (0, RESERVE)
+    assert room_kept("off", SINGLE, canvas) == (0, 0)  # off: the page as before
+    assert room_kept("column", SINGLE, (900, 900)) == (0, 0)  # room enough: nothing kept
     shown = drawn(SINGLE, canvas, (RESERVE, 0))
-    layout = side_layout("column", True, canvas, shown, True, False)
+    layout = side_layout("column", canvas, shown, True, False)
     assert layout.kind == "rail" and layout.box[2] <= shown[0] and layout.box[0] >= 0  # beside the page, not on it
 
 
-def test_nothing_shows_when_off_in_a_run_or_without_a_picture():
+def test_nothing_shows_when_off_or_without_a_picture():
     shown = drawn(SINGLE, (1200, 900))
-    assert side_layout("off", True, (1200, 900), shown, True, False).kind == ""
-    assert side_layout("column", False, (1200, 900), shown, True, False).kind == ""
-    assert side_layout("column", True, (1200, 900), None, True, False).kind == ""
+    assert side_layout("off", (1200, 900), shown, True, False).kind == ""
+    assert side_layout("column", (1200, 900), None, True, False).kind == ""
 
 
 def test_on_the_right_the_indicator_stays_below_the_badge_and_the_close_button():
     shown = drawn(SINGLE, (1200, 900))
-    layout = side_layout("column", True, (1200, 900), shown, False, True, top=48)
+    layout = side_layout("column", (1200, 900), shown, False, True, top=48)
     assert layout.side == "right" and layout.box[1] == 48
 
 
@@ -111,9 +107,9 @@ def test_on_the_right_the_indicator_stays_below_the_badge_and_the_close_button()
 @pytest.mark.parametrize("part", [SINGLE, SPREAD])
 def test_window_and_full_screen_one_page_and_spread(full, part):
     canvas = (1920, 1040) if full else (1000, 900)
-    room = room_kept("column", True, part, canvas, 0, full, True)
+    room = room_kept("column", part, canvas, 0, full, True)
     shown = drawn(part, canvas, room, enlarge=full)
-    layout = side_layout("column", True, canvas, shown, True, full)
+    layout = side_layout("column", canvas, shown, True, full)
     margin = shown[0]
     assert layout.kind == ("column" if margin >= COLUMN_NEEDS else "rail")
     assert layout.box[2] <= shown[0]  # never over the page
@@ -315,10 +311,10 @@ def no_way_to_the_viewer(monkeypatch):
     return trap
 
 
-class Window(SideMixin, StripMixin, tk.Frame):
-    """The window's parts the indicator lives with: the page area, the strip, the status bar, and the window's own
-    event handler (`App._handle_event`, through `JobsMixin._handle_event`: normal reading's events to the indicator,
-    a run's ``page_stage`` to the strip) with its event queue (`_post`, `pump`)."""
+class Window(SideMixin, tk.Frame):
+    """The window's parts the indicator lives with: the page area, the status bar, and the window's own event handler
+    (`App._handle_event`, through `JobsMixin._handle_event`: normal reading's events to the indicator) with its event
+    queue (`_post`, `pump`)."""
 
     _picture = LiveViewMixin._picture
     _result_on_show = LiveViewMixin._result_on_show
@@ -330,11 +326,8 @@ class Window(SideMixin, StripMixin, tk.Frame):
         tk.Frame.__init__(self, master, width=size[0], height=size[1] + 30)
         self.settings = SimpleNamespace(side_indicator=setting, hover_shows="original", fingerprint_max_distance=36)
         self.cache = Cache()
-        self.pipeline = SimpleNamespace(rtl=rtl, cache=self.cache, settings=self.settings,
-                                        release_page_images=lambda: None)
+        self.pipeline = SimpleNamespace(rtl=rtl, cache=self.cache, settings=self.settings)
         self.reading = False
-        self.batch = None
-        self._batching = False
         self._fill = self.last_result = self._live = None
         self._ordering = self._editor = self._job_frame = None
         self._fill_dirty = False
@@ -352,7 +345,6 @@ class Window(SideMixin, StripMixin, tk.Frame):
         self.status_label.pack(side="left")
         self.said: list = []
         self._events: queue.Queue = queue.Queue()
-        self._build_page_strip()
         self._build_side()
 
     def pump(self):
@@ -520,18 +512,6 @@ def test_the_hover_text_says_what_is_under_the_pointer(window):
     assert view.text_at(5, view.layout.box[3] - view.layout.box[1] - 5).startswith("Done: ")
 
 
-def test_in_a_run_the_strip_takes_the_events_and_the_indicator_is_away(window):
-    w = window(size=(1560, 900))
-    story(w.post, pages=4, on_show=4)
-    w._batching = True
-    stage(w.post, 9, read="working", with_thumb=True, reading=False)  # the run's own: no ``reading``
-    assert 9 in w._strip_model.pages and 9 not in w._side.model.screens
-    stage(w.post, 3, translate="done")  # normal reading's, told late (a step that ended after the drop): not taken
-    assert 3 not in w._strip_model.pages and w._side.model.screens[3].stages["translate"] == "waiting"
-    w.show(page(4))
-    assert not w._side.view.shown and w.canvas._shown[0] == (1560 - 600) // 2  # nothing kept clear in a run
-
-
 def test_the_updated_mark_and_the_brackets_through_the_window(window, monkeypatch):
     w = window(size=(1560, 900))
     clock = [100.0]
@@ -600,8 +580,6 @@ def test_the_slot_says_what_the_page_waits_for_from_one_second_and_goes_with_the
     assert status_slot.badge_allowed(w)
     w.role_var.set("reader")
     assert not status_slot.badge_allowed(w)
-    w._batching = True
-    assert status_slot.badge_allowed(w) and status_slot.wanted(w, state, 53.0) is None  # a run: as before
 
 
 def test_the_slot_shows_in_the_status_bar_and_on_the_full_screen(window):

@@ -142,8 +142,8 @@ def test_the_store_files_contain_no_text(tmp_path):
 
 
 def test_settings_modes_are_validated():
-    Settings(scan_mode="page", role="translator").validate()
-    for bad in ({"scan_mode": "all"}, {"role": "editor"}):
+    Settings(role="translator").validate()
+    for bad in ({"role": "editor"},):
         try:
             Settings(**bad).validate()
         except ConfigError:

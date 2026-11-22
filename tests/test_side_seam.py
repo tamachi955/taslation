@@ -2,7 +2,7 @@
 `show`, `totals`, `catch`, `drop`, `merge_missed`, `close`) posting into the window's own event handler
 (`App._handle_event` through `JobsMixin._handle_event` and `backlog.reading_event` to the ``_on_reading_<kind>``
 handlers), the events drained as the window's event pump drains them. The window is `test_side_indicator.Window`
-(the page area, the strip and the status bar of the window, with the indicator built as `App` builds it); the pages
+(the page area and the status bar of the window, with the indicator built as `App` builds it); the pages
 are made-up ones (`fake_side`); no viewer, no model, nothing sent to any window."""
 
 from __future__ import annotations
@@ -11,13 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 from fake_side import fingerprint, page, result
-from fake_strip import thumb
 from test_side_indicator import Window, no_way_to_the_viewer  # noqa: F401 - the window, and its fixture
 
-from taslation.backlog import Backlog, backlog_of, drop_backlog, merge_missed
+from taslation.backlog import Backlog, backlog_of, merge_missed
 from taslation.ui import app as app_mod
 from taslation.ui.side_model import summary_lines
-from taslation.ui.strip import new_run
 
 WITHIN = 4  # the fingerprint distance the backlog is given here (the window's own is 36: another book is far)
 
@@ -95,7 +93,6 @@ def test_a_screen_told_its_stages_the_page_on_show_and_the_totals(seam):
     assert model.order == [1, 2] and model.on_show == 2 and model.screens[1].mark == "waiting"
     assert model.backlog.pages == 1
     assert "Working on the others: 1 page(s), 0 line(s) to go." in summary_lines(model, 0.0)
-    assert w._strip_model.pages == {}  # normal reading's screens never reach the run's strip
 
 
 def test_the_work_behind_finishing_a_page_seen_marks_it_updated_from_the_cache(seam):
@@ -204,28 +201,6 @@ def test_a_drop_told_as_such_clears_and_the_totals_after_it_count(seam):
     w._post("backlog", pages=2, lines=9, paused=True, dropped=1, reading=True)  # (the totals after it)
     w.pump()
     assert (model.backlog.pages, model.backlog.lines, model.backlog.paused, model.backlog.dropped) == (2, 9, True, 1)
-
-
-def test_a_whole_book_run_starting_puts_the_indicator_away_and_its_stages_go_to_the_strip(seam):
-    w, b, _posted = seam(size=(1560, 900))
-    screens = [b.screen_for([unit(fingerprint(n))], WITHIN) for n in (1, 2)]
-    for n, s in zip((1, 2), screens):
-        tell_on_show(b, s, page(n))
-    w.pump()
-    w.show(page(2))
-    assert w._side.view.shown and len(w._side.model) == 2
-    # as `JobsMixin._start_batch` starts a run
-    drop_backlog(w, "a whole-book run")
-    w._batching = True
-    new_run(w)
-    w._post("page_stage", seq=1, fingerprint=fingerprint(201), stage="read", state="working",
-            thumb=thumb(page(201)))  # the run's own: no ``reading``
-    b.tell(screens[0], "translate", "done")  # a step of the backlog that ended after the drop: a dropped screen
-    w.pump()
-    w.show(page(201))
-    assert 1 in w._strip_model.pages and w._strip_model.pages[1].stages["read"] == "working"
-    assert len(w._side.model) == 0 and not w._side.view.shown
-    assert w.canvas._shown[0] == (1560 - 600) // 2  # nothing kept clear during the run
 
 
 def test_the_window_closing_closes_its_backlog_and_never_fails_for_it(seam):

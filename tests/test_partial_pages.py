@@ -1,18 +1,15 @@
 """What was translated is always kept: a page unit with one real translation or more enters the cache, marked
-(`CachedPage.incomplete`) while a bubble lacks one, and the next reading or whole-book run asks for that alone."""
+(`CachedPage.incomplete`) while a bubble lacks one, and the next reading asks for that alone."""
 from __future__ import annotations
 
 import json
 import threading
-from collections import deque
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr, JA_TEXTS, read_book, store_json, store_text
-from test_batch import _fake_viewer
+from helpers import EN_TEXTS, FakeOcr, JA_TEXTS, store_json, store_text
 
 from taslation import fingerprint as fp
-from taslation.batch import BatchReader
 from taslation.cache import BookCache, CacheStore, CachedBubble, CachedPage
 from taslation.messages import Message
 from taslation.pipeline import Cancelled, Pipeline, ScannedRegion, ScannedUnit
@@ -285,73 +282,7 @@ def test_an_edit_on_a_marked_page_keeps_the_mark_until_the_line_is_there(sample_
     assert len(tr.calls) == calls and not pipeline.cache.pages[0].incomplete
 
 
-# --- a whole-book run ----------------------------------------------------------------------------------------------
-
-def _run(settings, translator, cache):
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=translator, cache=cache)
-    reader = BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True)
-    return read_book(reader), pipeline
-
-
-def test_a_line_the_model_never_answers_leaves_the_rest_stored_and_the_page_lettered(sample_page, sample_page2, settings,
-                                                                                     monkeypatch):
-    viewer = _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    never = JA_TEXTS[0]
-    tr = Unreliable(EN_TEXTS, never=[never])
-    cache = CacheStore(settings.cache_dir).open("Never", "fake")
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr, cache=cache)
-    shown: list[tuple[str, dict]] = []
-    reader = BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True,
-                         show=lambda kind, data: shown.append((kind, data)))
-    progress = read_book(reader)
-    assert progress.finished and len(cache) == 3 and cache.bubble_count == 15
-    assert all(page.incomplete for page in cache.pages)
-    assert progress.translated == 15 and progress.checked == 15
-    codes = [n.code for n in progress.notes]
-    assert codes.count("batch.note_unit_incomplete") == 3
-    # the page as the window gets it: the page's translations lettered, the line left as drawn
-    viewer.index = 0
-    shown = pipeline.process(sample_page, translate=False)
-    assert len(shown.translated) == 5 and not np.array_equal(np.asarray(shown.image), np.asarray(sample_page))
-    assert sum(1 for r in shown.regions if r.status != "translated") == 1
-    # the next run is asked for that line alone
-    viewer.index = 0
-    tr2 = DictTranslator(EN_TEXTS)
-    again, _pipeline_ = _run(settings, tr2, cache)
-    assert all(set(call) == {never} for call in tr2.calls)
-    assert again.translated == 3
-    assert cache.bubble_count == 18 and not any(page.incomplete for page in cache.pages)
-
-
-def test_a_partly_stored_page_is_counted_once_and_completed_by_the_next_commit(settings):
-    pipeline = _pipeline(settings, Unreliable({"一": "One.", "二": "Two.", "三": "Three."}, never=["三"]))
-    reader = BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True)
-    unit = _unit()
-    reader._translate_units([unit], deque(maxlen=5), "", [], "English")
-    p = reader.progress
-    assert (p.translated, p.bubbles, p.checked) == (2, 2, 2) and pipeline.cache.pages[0].incomplete
-    assert [n.code for n in p.notes] == ["batch.note_incomplete", "batch.note_unit_incomplete"]
-    assert "translated when its page is read" in str(p.notes[-1])
-    # the next run has the two kept, the third to do
-    hit = pipeline.cache.pages[0]
-    rest = _unit()
-    rest.kept, rest.regions, rest.stored_fingerprint = list(hit.bubbles), rest.regions[2:], hit.fingerprint
-    pipeline.translator.never.clear()
-    reader._translate_units([rest], deque(maxlen=5), "", [], "English")
-    assert (p.translated, p.bubbles, p.checked) == (3, 3, 3)
-    assert pipeline.cache.bubble_count == 3 and not pipeline.cache.pages[0].incomplete
-
-
-def test_a_kept_page_a_request_failed_for_is_marked_so_reading_translates_the_rest(settings):
-    pipeline = _pipeline(settings, Unreliable({}, fail=True))
-    reader = BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True)
-    unit = _unit()
-    unit.kept, unit.regions = [CachedBubble((0.1, 0.1, 0.2, 0.2), "Kept.")], unit.regions[1:]
-    reader._translate_units([unit], deque(maxlen=5), "", [], "English")
-    assert [n.code for n in reader.progress.notes][-1] == "batch.note_unit_failed"
-    page = pipeline.cache.pages[0]
-    assert [b.text for b in page.bubbles] == ["Kept."] and page.incomplete
-
+# --- a page read behind the reader ---------------------------------------------------------------------------------
 
 def test_a_marked_page_that_a_scan_finds_whole_loses_the_mark(sample_page, settings):
     pipeline = _pipeline(settings, DictTranslator(EN_TEXTS))

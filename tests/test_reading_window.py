@@ -59,7 +59,6 @@ class Window(BlackViewerMixin):
     _go_busy = app_mod.App._go_busy
     _set_busy = app_mod.App._set_busy
     _busy_text = app_mod.App._busy_text
-    _badge_due = app_mod.App._badge_due
     _show_badge = app_mod.App._show_badge
     _hide_busy = app_mod.App._hide_busy
     _summary = staticmethod(app_mod.App._summary)
@@ -103,9 +102,9 @@ class Window(BlackViewerMixin):
 
     def __init__(self, root):
         self._init_flow_state()
-        self.pipeline, self._batching = None, False
+        self.pipeline = None
         self.canvas = _sized(ImageCanvas(root))
-        self.translate_btn, self.batch_btn = {}, {}
+        self.translate_btn = {}
         self.progress_bar = Bar()
         self.titles: list[str] = []
         self.statuses: list[str] = []
@@ -118,7 +117,7 @@ class Window(BlackViewerMixin):
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = None
         self._ordering = None
-        self.ready, self.batch, self._bar_shown = True, None, False
+        self.ready, self._bar_shown = True, False
         self._live = self._live_thumb = self._job_frame = self._job_thumb = self._fill = self._queued = None
         self._fill_dirty = self._covered = False
         self._thumbs, self._lettered_memo, self._mask_memo = [], None, None
@@ -372,9 +371,6 @@ class Shapes:
 
     def status(self, text):
         self.statuses.append(text() if callable(text) else text)
-
-    def stop_batch(self):
-        pass
 
     def click(self, x, y, to=None, via=None):
         self._on_press(SimpleNamespace(x=x, y=y))

@@ -1,7 +1,7 @@
 """The colophon (奥付) read off a page: a synthetic colophon drawn with the Noto font of the models folder beside an
 "artwork" half, cut into columns and read whole (a stand-in reader, and the real OCR when it is installed); an
 ordinary page stopped at the cheap pre-check; what the columns say parsed into the title, the volume, the ISBN and
-the rest; the whole-book scan recording the colophon it meets."""
+the rest."""
 from __future__ import annotations
 
 import random
@@ -9,17 +9,11 @@ import time
 
 import pytest
 from conftest import requires_ocr
-from helpers import EN_TEXTS, FakeOcr, read_book
 from PIL import Image, ImageDraw, ImageFont
 
-from taslation import batch as batch_mod
 from taslation import colophon
-from taslation.batch import BatchReader
-from taslation.cache import CacheStore
 from taslation.colophon import Colophon, find_colophon, find_isbn, parse, precheck
 from taslation.config import Settings
-from taslation.pipeline import Pipeline
-from taslation.translate import DictTranslator
 
 ISBN = "978-4-06-123456-7"
 COLUMNS = [("見本の物語 第3巻", 30), ("2024年5月10日 初版第1刷発行", 22), ("著者 仮野みのり", 22),
@@ -172,32 +166,3 @@ def test_the_real_ocr_reads_the_title_the_volume_and_the_isbn():
     assert (found.title, found.volume, found.isbn) == ("見本の物語", "3", ISBN)
     assert found.publisher == "株式会社見本出版" and found.date == "2024年5月10日" and found.confidence > 0.3
     assert seconds < 60  # an OCR read per column (about 0.3 s each on a CPU)
-
-
-def test_the_whole_book_scan_records_the_colophon(sample_page, settings, monkeypatch):
-    framed = Image.new("RGB", (1300, 1400), (24, 24, 24))
-    framed.paste(sample_page.resize((900, 1300)), (200, 50))
-    pages = [framed, colophon_page()]
-
-    class Viewer:
-        index = 0
-
-        def capture(self, hwnd):
-            return pages[self.index]
-
-    viewer = Viewer()
-    viewer.pages = pages
-    monkeypatch.setattr(batch_mod, "capture_window", viewer.capture)
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    settings.settle_ms, settings.page_turn_wait_ms = 10, 300
-    checked, real_precheck, real_find = [], colophon.precheck, colophon.find_colophon
-    monkeypatch.setattr(colophon, "precheck", lambda frame, margins: checked.append(frame) or real_precheck(frame, margins))
-    read = Reader([text.replace(" ", "") for text, _size in COLUMNS], rotated="ISBN" + ISBN)
-    monkeypatch.setattr(colophon, "find_colophon", lambda frame, ocr, margins: real_find(frame, ocr, margins, read=read))
-    cache = CacheStore(settings.cache_dir).open("Star Road 3", "fake")
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=cache)
-    progress = read_book(BatchReader(pipeline, hwnd=1, settings=settings, context_mode=False))
-    assert progress.pages == 2 and len(checked) == 2  # the cheap test on every page read
-    assert len(read.sizes) == len(COLUMNS)  # the OCR on the colophon only
-    assert progress.colophon is not None and progress.colophon.name == "見本の物語 3"
-    assert progress.colophon.isbn == ISBN

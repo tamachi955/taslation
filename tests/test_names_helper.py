@@ -1,5 +1,5 @@
-"""The window's side of the name helper (`ui.name_check`, `ui.dialogs.names`): what a run found kept for its book and
-offered on the band and in the Tools menu; a rendering chosen changes the name's other lines through the replace
+"""The window's side of the name helper (`ui.name_check`, `ui.dialogs.names`): what the pages read found kept for its
+book and offered on the band and in the Tools menu; a rendering chosen changes the name's other lines through the replace
 machinery (one step: the dialog's Take back and Ctrl+Z take it back) and goes to the series sheet, which Take back
 gives back as it was; the dialog lists the renderings and says what Apply changes. Synthetic lines only."""
 from __future__ import annotations
@@ -19,7 +19,7 @@ from taslation.i18n import CATALOGS
 from taslation.locales.features import names_helper
 from taslation.name_variants import RunLine, find_variants
 from taslation.ui import app as app_mod
-from taslation.ui import name_check, status
+from taslation.ui import jobs, name_check, status
 from taslation.ui.dialogs.names import NamesDialog, labels, list_line
 from taslation.ui.history import EditHistory
 
@@ -58,8 +58,6 @@ class Jobs:
 class Window:
     """The parts of the App the name helper uses."""
 
-    _batching = False
-    batch = None
     _names_dialog = None
     _names_found = None
     _ordering = None
@@ -129,8 +127,9 @@ def sheets(tmp_path):
 def window(cache, sheets):
     w = Window(cache, sheets)
     lines = [RunLine(ja, en, (fingerprint(i // 5), box(i))) for i, (ja, en) in enumerate(PAIRS)]
-    progress = SimpleNamespace(names=find_variants(lines), name_lines=[line._replace(source="") for line in lines])
-    assert name_check.keep_found(w, progress, "Book", "English") == 1
+    found = {"book": "Book", "language": "English", "variants": find_variants(lines),
+             "lines": [line._replace(source="") for line in lines]}
+    assert name_check.keep_page_found(w, found) == 1
     return w
 
 
@@ -146,17 +145,17 @@ BEFORE = [en for _ja, en in PAIRS]
 AFTER = ["Morning, Ryūji-san.", "Where's Ryūji-san?", "Ryūji-san!", "Ryūji is here.", "Ryūji, huh.", *BEFORE[5:]]
 
 
-def test_what_a_run_found_is_for_its_book_and_language_only(window):
+def test_what_was_found_is_for_its_book_and_language_only(window):
     assert name_check.found_for(window) is not None
     window.lang_var.set("German")
     assert name_check.found_for(window) is None
     window.lang_var.set("English")
     window.book_var.set("Another book")
     window.review_names()
-    assert window.said[-1].startswith("Neither a whole-book run nor the pages read one by one in this session")
-    nothing = SimpleNamespace(names=[], name_lines=[])
-    assert name_check.keep_found(window, nothing, "Another book", "English") == 0
-    assert window._names_found.book == "Book"  # (a run that found nothing keeps what the last one found)
+    assert window.said[-1].startswith("The pages read in this session rendered no name of this book")
+    nothing = {"book": "Another book", "language": "English", "variants": [], "lines": []}
+    assert name_check.keep_page_found(window, nothing) == 0
+    assert window._names_found.book == "Book"  # (pages that found nothing keep what was found)
 
 
 def test_a_rendering_chosen_changes_the_other_lines_and_goes_to_the_sheet(window, cache, sheets, tmp_path):
@@ -167,7 +166,7 @@ def test_a_rendering_chosen_changes_the_other_lines_and_goes_to_the_sheet(window
     assert not window.busy and window.events[-1] == "translate_done"
     assert window.lines[-1] == '竜司 is "Ryūji" now: changed in 3 line(s).'
     assert v.renderings == [("Ryūji", [0, 1, 2, 3, 4])] and len(window.history) == 1
-    assert [line.text for line in window._names_found.lines] == AFTER  # the run's lines follow
+    assert [line.text for line in window._names_found.lines] == AFTER[:5]  # the name's own lines, kept, follow
     assert not name_check.apply_name(window, v, "Ryuji", True)
     assert window.said[-1] == "Take back the change made first, then choose again."
 
@@ -175,7 +174,7 @@ def test_a_rendering_chosen_changes_the_other_lines_and_goes_to_the_sheet(window
     assert texts(cache) == BEFORE and character(sheets) is None  # the sheet had no such character
     assert texts(CacheStore(tmp_path / "cache").open("Book", "m")) == BEFORE
     assert v.counts() == [("Ryuji", 3), ("Ryūji", 2)] and not window._names_found.done
-    assert [line.text for line in window._names_found.lines] == BEFORE
+    assert [line.text for line in window._names_found.lines] == BEFORE[:5]
     assert window.lines[-1] == "竜司: the change is taken back (3 line(s))."
 
 
@@ -227,11 +226,11 @@ def test_nothing_is_asked_while_the_window_is_at_work(window, cache):
     assert not name_check.apply_name(window, v, "Ryūji", True)
 
 
-def test_the_band_offers_the_names_after_a_run():
+def test_the_band_offers_the_names_the_pages_found():
     source = inspect.getsource(status)
-    assert '"{n} name(s) rendered in more than one way across the book."' in source
+    assert '"{n} name(s) rendered in more than one way in the pages read so far."' in source
     assert '_("Review names..."), self.review_names' in source
-    assert "name_check.keep_found" in inspect.getsource(app_mod.App._batch_done)
+    assert "keep_page_found" in inspect.getsource(jobs)
     assert 'command=self.review_names' in inspect.getsource(app_mod.App)
 
 

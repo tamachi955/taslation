@@ -453,14 +453,16 @@ def test_the_summary_reads_the_tools_own_lines():
     assert s.console_facts("x\nrun stopped: the stand-in browser ended\n")["stopped"] == "the stand-in browser ended"
     ev = (ROOT / "tools" / "openmantra_eval.py").read_text("utf-8")
     assert "f\"  {page.series} p{page.index}: gold {row['gold']}, candidates" in ev
-    assert "log(f\"  {series}: run {params['chunk']}/{params['chunks']}, {params['bubbles']} lines so far, " in ev
+    assert ('log(f"  {series}: page {done}/{len(pages)} translated, {lines} lines so far, '
+            '{time.monotonic() - t0:.0f} s")') in ev
     console = ("OCR model loaded in 3.1 s\n"
                "  some_title p1: gold 9, candidates 12 (9 matched), read as text 10 (9 matched)  [4.5 s]\n"
                "  some_title p2: gold 3, candidates 4 (3 matched)  [2.0 s]\n"
-               "run 1/1, official arm, seed 1\n  some_title: run 2/8, 61 lines so far, 300 s\n")
+               "run 1/1, official arm, seed 1\n  some_title: page 1/8 translated, 9 lines so far, 70 s\n"
+               "  some_title: page 2/8 translated, 12 lines so far, 300 s\n")
     progress = s.bench_progress(console)
     assert progress == {"pages_read": 2, "detection_ocr_s": 6.5,
-                        "translation": {"runs_done": 2, "runs": 8, "lines": 61, "seconds": 300,
+                        "translation": {"pages_done": 2, "pages": 8, "lines": 12, "seconds": 300,
                                         "seconds_all_at_this_pace": 1200}}
     assert s.bench(None, console, {}, "3")["verdict"] == "no results"
 
@@ -572,7 +574,7 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
         "a page translated at rest came back without a request": {"turns": [
             *_report()["run"]["turns"][:4],
             {"n": 4, "segment": "x", "t_s": 40.0, "rest_ms": 5000, "page": 2, "spread": True, "why": "previous",
-             "run": "no run", "requests": 2, "at_rest": "translated", "at_rest_from": "sharp"}]},
+             "requests": 2, "at_rest": "translated", "at_rest_from": "sharp"}]},
     }
     for criterion, run in fails.items():
         out = s.standin(_report(**run), "", {}, "c", 600)
@@ -639,22 +641,6 @@ def test_a_job_that_gave_its_page_over_to_a_new_size_is_no_cancel_with_its_page_
         assert next(c for c in out["failed"] if c["criterion"] == criterion)["seen"] == [79.33]
 
 
-def test_a_soft_frame_the_run_read_fails_with_who_got_it():
-    s = _summarise()
-    whole = {"ends": [{"code": "done", "pages": 5}], "pages_got": 5, "frames_got_not_sharp": ["2"],
-             "frames_got_not_sharp_list": [{"key": "2", "by": "read", "t_s": 40.2, "sharper_taken_after_ms": 1500}]}
-    report = _report(whole_book_run=whole, turns=[*_report()["run"]["turns"], {
-        "n": 5, "segment": "w", "t_s": 50.0, "rest_ms": 2700, "page": 2, "spread": True, "why": "next",
-        "run": "run reading"}])
-    report["scenarios"] = ["c", "a", "x", "w"]
-    out = s.standin(report, "", {}, "t", 600)
-    failed = [c for c in out["failed"] if c["scenario"] == "w"]
-    assert [c["criterion"] for c in failed] == ["every frame the run read was a sharp one"]
-    assert failed[0]["seen"] == [["2", "read", 1500]]  # (the page's key, who got it, the sharper frame after it)
-    report["run"]["whole_book_run"] = {**whole, "frames_got_not_sharp": [], "frames_got_not_sharp_list": []}
-    assert not [c for c in s.standin(report, "", {}, "t", 600)["failed"] if c["scenario"] == "w"]
-
-
 def _k_report(**run) -> dict:
     """`_report` with scenario k's three paces after it: each a turn to a fresh page, two pages flipped past and two
     read back, as the tool tells them; at 1 s a page two requests of a page job asked before its frame was confirmed
@@ -695,7 +681,7 @@ def _k_report(**run) -> dict:
 
 def test_scenario_k_is_judged_on_what_the_pages_turned_past_guarantee_and_its_figures_are_reported():
     s = _summarise()
-    out = s.standin(_k_report(), "", {}, "t-t2-w-w2-k5-k1-k2", 600)
+    out = s.standin(_k_report(), "", {}, "t-t2-k5-k1-k2", 600)
     assert out["verdict"] == "pass", _failed(out)
     k_criteria = [c for c in s.correctness(_k_report(), 600) if c["scenario"] in ("k5", "k1", "k2")]
     assert len(k_criteria) == 3 * 5 + 2  # (each pace: drawn, last page, told, requests, frames; at the end: two more)

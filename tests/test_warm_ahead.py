@@ -305,7 +305,7 @@ class Idle:
     def __init__(self):
         import queue
 
-        self.ready, self.busy, self.batch, self._batching, self._queued = True, False, None, False, None
+        self.ready, self.busy, self._queued = True, False, None
         self._jobs = queue.Queue()
         self.warmed = 0
         self.pipeline = SimpleNamespace(warm_soon=self.warm, stop_warm=self.stop)
@@ -319,15 +319,11 @@ class Idle:
         self.stops += 1
 
 
-@pytest.mark.parametrize("busy", ["", "busy", "batch", "_batching", "_queued", "job", "not ready", "no pipeline"])
+@pytest.mark.parametrize("busy", ["", "busy", "_queued", "job", "not ready", "no pipeline"])
 def test_the_window_warms_only_while_nothing_of_it_runs(busy):
     w = Idle()
     if busy == "busy":
         w.busy = True
-    elif busy == "batch":
-        w.batch = object()
-    elif busy == "_batching":
-        w._batching = True
     elif busy == "_queued":
         w._queued = ("auto",)
     elif busy == "job":

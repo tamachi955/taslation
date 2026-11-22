@@ -83,8 +83,6 @@ class Window:
 
     _find = None
     _find_asked = None
-    _batching = False
-    batch = None
     open_find_replace = app_mod.App.open_find_replace
     _find_kept = app_mod.App._find_kept
     _close_find = app_mod.App._close_find
@@ -312,12 +310,10 @@ def test_a_file_that_cannot_be_written_is_said_and_the_change_stays_in_memory(wi
     assert not window.busy and cache.touched
 
 
-def test_it_waits_while_a_page_or_a_batch_is_at_work(window, cache):
+def test_it_waits_while_a_page_is_at_work(window, cache):
     window.busy = True
     assert not window._replace_in_book(Query("Anna"), "Hana", None)
-    window.busy, window._batching = False, True
-    assert not window._replace_in_book(Query("Anna"), "Hana", None)
-    assert window.said == ["TASlation is at work on a page. Try again when it is done."] * 2
+    assert window.said == ["TASlation is at work on a page. Try again when it is done."]
     assert texts_of(cache)[0] == "Anna runs." and not window.history.done
 
 

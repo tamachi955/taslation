@@ -156,6 +156,14 @@ def test_a_damaged_file_or_a_key_that_cannot_be_is_left_out(tmp_path):
     assert keymap.of("review") == () and keymap.of("undo") == ("Control-z",)
 
 
+def test_a_key_saved_for_the_whole_book_run_of_earlier_versions_is_left_out(tmp_path):
+    (tmp_path / shortcuts.SHORTCUTS_FILE).write_text(json.dumps({"keys": {
+        "read_whole_book": ["Control-b"], "translate_now": ["F6"]}}), encoding="utf-8")
+    keymap = Keymap.load(tmp_path)
+    assert "read_whole_book" not in BY_NAME and keymap.owner("Control-b") is None
+    assert keymap.of("translate_now") == ("F6",) and keymap == Keymap().with_key("translate_now", "F6")
+
+
 # ------------------------------------------------------------------ the bindings
 def test_the_bindings_move_with_the_keys_and_what_the_parts_bound_is_let_go(hidden_root):
     window, page = tk.Frame(hidden_root), tk.Canvas(hidden_root)
@@ -190,7 +198,7 @@ def _fake_window(hidden_root, role="reader"):
                         _edit_key=lambda e, step: step(), _nudge_key=lambda e, d: done.append(f"nudge {d}"),
                         _tab_region=lambda step: done.append(f"tab {step}"))
     for name in ("translate_now", "toggle_reading", "undo_edit", "redo_edit", "_redisplay", "_apply_on_top", "toggle_over",
-                 "open_batch_dialog", "set_area", "open_page_keys", "open_caches", "review_names", "open_settings", "open_help",
+                 "set_area", "open_page_keys", "open_caches", "review_names", "open_settings", "open_help",
                  "open_keys", "toggle_order_numbers", "_edit_chosen", "_drop_chosen", "_turn_direction", "toggle_order",
                  "toggle_skip", "retranslate_page", "open_book_settings", "open_glossary", "open_review", "open_find_replace",
                  "copy_format", "paste_format", "copy_region", "paste_region", "ignore_area_everywhere",

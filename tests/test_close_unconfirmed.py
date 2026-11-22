@@ -139,14 +139,12 @@ class Window:
     _say_failed_save = jobs.JobsMixin._say_failed_save
     _use_model = jobs.JobsMixin._use_model
     _on_close = A._on_close
-    _close_allowed = lambda self: True  # noqa: E731 - no run's pages to ask about
     _release_model = lambda self: None  # noqa: E731 - Ollama's model is not this test's (`end_page_job` cancels)
     _target_chosen = _restore_enlarged = _lower_viewer = _over_close = lambda self: None  # noqa: E731
 
     def __init__(self, pipeline, settings):
         self.pipeline, self.settings = pipeline, settings
         self.translator = SimpleNamespace(model="m")
-        self.batch = None
         self._jobs = SimpleNamespace(put=lambda job: None)
         self.posted: list[tuple[str, dict]] = []
         self.closed = False

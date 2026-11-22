@@ -453,7 +453,7 @@ class _Built(Exception):
     pass
 
 
-def test_batch_and_audit_load_in_that_order(cli_env, monkeypatch, tmp_path):
+def test_audit_loads_in_that_order(cli_env, monkeypatch, tmp_path):
     from taslation import cli
 
     seen: list[dict] = []
@@ -465,14 +465,8 @@ def test_batch_and_audit_load_in_that_order(cli_env, monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "build_pipeline", build)
     monkeypatch.setattr(cli, "_notice_once", lambda settings: None)
     monkeypatch.setattr("taslation.capture.enable_dpi_awareness", lambda: None)  # the test process stays as it is
-    monkeypatch.setattr(cli, "_pick_window", lambda query, wait=0.0: SimpleNamespace(title="My book 1 - Viewer", hwnd=1,
-                                                                                    label=lambda: "viewer"))
     s = Settings(state_dir=tmp_path / "state")
-    batch = argparse.Namespace(window="Viewer", book="My book 1", series=None, key=None, max_pages=None, manual=True,
-                               wait=0.0, no_context=False, no_notes=False, retranslate=False, translator="ollama")
-    with pytest.raises(_Built):
-        cli.cmd_batch(batch, s)
     netguard.install(audit_hook=False)  # audit lists the calls the guard let through
     with pytest.raises(_Built):
         cli.cmd_audit(argparse.Namespace(image=tmp_path / "page.png", translator="ollama"), s)
-    assert seen == [{"kind": "ollama", "warm_first": True}, {"kind": "ollama", "warm_first": True}]
+    assert seen == [{"kind": "ollama", "warm_first": True}]

@@ -20,12 +20,10 @@ def test_a_page_nothing_can_read_does_not_say_it_has_no_text():
     assert summary(page()).code == "pipeline.no_text"
 
 
-def test_the_reading_pass_of_a_run_is_not_called_translating():
+def test_a_page_s_reading_stage_is_part_of_its_translation():
     reading = Message("pipeline.stage_reading", done=2, total=7)
     assert "Translating" in busy_line(reading, 3)
-    assert "Translating" not in busy_line(reading, 3, reading=True) and busy_line(reading, 3, reading=True)
     assert "Translating" in progress_line(reading)
-    assert "Translating" not in progress_line(reading, True) and progress_line(reading, True)
 
 
 def test_the_preview_window_has_the_applications_icon(monkeypatch):

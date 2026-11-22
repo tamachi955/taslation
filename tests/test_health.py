@@ -8,7 +8,6 @@ import pytest
 from fake_ollama import FakeOllama, free_port
 
 from taslation import health, netguard
-from taslation.batch import preflight
 from taslation.config import OCR_REQUIRED_FILES, OCR_MODEL_DIRNAME, Settings
 
 
@@ -141,8 +140,3 @@ def test_ollama_down_and_the_model_asked_for(server, tmp_path):
     assert problems[1].params["url"] == dead
     assert str(problems[1]).startswith("The translation program is not running,")
     assert health.check(s, model="gemma3:4b", url=server.url)[1:] == []  # another model, another URL
-
-
-def test_preflight_is_the_batch_s_view_of_the_same(server, tmp_path):
-    s = _settings(tmp_path, server.url)
-    assert preflight(s) == [] and [p.code for p in preflight(s, model="llama3:8b")] == ["health.chosen_other_model"]

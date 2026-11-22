@@ -2,7 +2,7 @@
 
 Left arrow = next page, Right arrow = previous page (right-to-left book), like
 most Japanese e-book viewers. Used to exercise window capture, page turning and
-batch reading end to end without any real book.
+reading end to end without any real book.
 
     python tools/fake_viewer.py [--title "Fake Viewer - Test Book"]
 """

@@ -253,41 +253,39 @@ def viewer(monkeypatch, tmp_path):
     return state
 
 
-@pytest.mark.parametrize("command", ["batch", "read"])
-def test_batch_and_read_refuse_a_window_title_that_names_no_book_unless_given_one(viewer, command):
+def test_read_refuses_a_window_title_that_names_no_book_unless_given_one(viewer):
     with pytest.raises(SystemExit) as refused:  # a browser-based viewer's tab names the viewer, whatever book it shows
-        main([command, "--window", "Yomizuq"])
+        main(["read", "--window", "Yomizuq"])
     assert refused.value.code == ("error: the window is titled 'Yomizuq - Google Chrome', which names no book; pass "
                                   "--book NAME")
     assert viewer.books == []  # nothing was read under it
     with pytest.raises(Reached):
-        main([command, "--window", "Yomizuq", "--book", "Star Road 1"])
+        main(["read", "--window", "Yomizuq", "--book", "Star Road 1"])
     assert viewer.books == ["Star Road 1"]
     with pytest.raises(SystemExit) as refused:  # nor a --book that names none
-        main([command, "--window", "Yomizuq", "--book", " yomizuq"])
+        main(["read", "--window", "Yomizuq", "--book", " yomizuq"])
     assert refused.value.code == "error: --book ' yomizuq' names no book; pass the book's own name"
     viewer.title = "Star Road 2 - Google Chrome"  # a title that names the book: its name, as before
     with pytest.raises(Reached):
-        main([command, "--window", "Star"])
+        main(["read", "--window", "Star"])
     assert viewer.books == ["Star Road 1", "Star Road 2"]
 
 
-@pytest.mark.parametrize("command", ["batch", "read"])
-def test_series_and_volume_name_the_book_as_the_windows_two_fields_do(viewer, command):
+def test_series_and_volume_name_the_book_as_the_windows_two_fields_do(viewer):
     with pytest.raises(Reached):
-        main([command, "--window", "Yomizuq", "--series", " Star  Road ", "--volume", "第3巻"])
+        main(["read", "--window", "Yomizuq", "--series", " Star  Road ", "--volume", "第3巻"])
     with pytest.raises(Reached):
-        main([command, "--window", "Yomizuq", "--series", "Star Road 外伝"])  # a book of one volume
+        main(["read", "--window", "Yomizuq", "--series", "Star Road 外伝"])  # a book of one volume
     with pytest.raises(Reached):
-        main([command, "--window", "Yomizuq", "--book", "Star Road (4)"])  # one string: in the one spelling
+        main(["read", "--window", "Yomizuq", "--book", "Star Road (4)"])  # one string: in the one spelling
     assert viewer.books == ["Star Road 3", "Star Road 外伝", "Star Road 4"]
     with pytest.raises(SystemExit) as refused:
-        main([command, "--window", "Yomizuq", "--series", "Star Road", "--volume", "完全版"])
+        main(["read", "--window", "Yomizuq", "--series", "Star Road", "--volume", "完全版"])
     assert refused.value.code == ("error: --volume '完全版' is no volume: give its number (3, ３, 三, 第3巻), or 上, 中, "
                                   "下, 前編, 後編; an edition such as 完全版 belongs to the series")
     for given in (["--volume", "3"], ["--book", "Star Road 3", "--volume", "3"]):
         with pytest.raises(SystemExit) as refused:
-            main([command, "--window", "Yomizuq", *given])
+            main(["read", "--window", "Yomizuq", *given])
         assert refused.value.code == "error: --volume goes with --series (the book's series), not alone nor with --book"
     assert len(viewer.books) == 3  # nothing was read under a refused name
 

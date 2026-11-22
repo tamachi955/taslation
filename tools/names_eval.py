@@ -1,12 +1,13 @@
 """DEVELOPER TOOL, NOT PART OF THE APPLICATION: the name consistency helper (`taslation.name_variants`) on OpenMantra.
 
 Per series of OpenMantra (``~/.taslation/datasets/openmantra``, CC BY-NC 4.0, fetched by ``fetch_openmantra.py``),
-the gold Japanese lines with a translation are handed to `find_variants` as a whole-book run hands its lines over:
+the gold Japanese lines with a translation are handed to `find_variants` as the window hands it the lines of the
+pages read (`ui.jobs.keep_page_names`):
 
 * by default: the professional English. A translation kept consistent by its editor: what the helper
   offers here is mostly what it should not offer.
-* ``--translate``: the app's translator (as ``openmantra_eval.py --mode book --geometry gold`` translates: the
-  whole-book batch's own translation pass), the run whose inconsistencies the helper is for.
+* ``--translate``: the app's translator (as ``openmantra_eval.py --geometry gold`` translates: page by page, as
+  reading does, `translate_series_page`), the translation whose inconsistencies the helper is for.
 
 It prints counts: the names found before an honorific, the names offered (rendered in more than one way) and their
 renderings, per series. ``--show`` also prints, to this console only, each name offered with its renderings and
@@ -61,10 +62,10 @@ def gold_lines(pages: list[openmantra.Page]) -> list[RunLine]:
 
 
 def model_lines(settings: Settings, translator: Any, series: str, pages: list[openmantra.Page]) -> list[RunLine]:
-    from openmantra_eval import _Stats, ja_line, translate_series_book
+    from openmantra_eval import _Stats, ja_line, translate_series_page
 
     geos = [[None] * len(p.bubbles) for p in pages]
-    outs = translate_series_book(settings, translator, series, pages, geos, _Stats(), lambda m: print(m, flush=True))
+    outs = translate_series_page(settings, translator, series, pages, geos, _Stats(), lambda m: print(m, flush=True))
     return [RunLine(ja_line(b), out[i][0], (p.index, i)) for p, out in zip(pages, outs)
             for i, b in enumerate(p.bubbles) if i in out and ja_line(b)]
 

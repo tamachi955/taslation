@@ -1,4 +1,4 @@
-"""Where the window stands: a viewer changed, closed or kept during a run, the page a tool would act on, the lines that
+"""Where the window stands: a viewer changed or closed, the page a tool would act on, the lines that
 say why nothing happened, the "To:" box kept between starts, the keys left with the page. The window's parts are borrowed
 onto stand-ins; a hidden root where a real widget is wanted. No window of the reader's, no key."""
 from __future__ import annotations
@@ -83,12 +83,9 @@ class Chooser:
             self.window_box.index = next(i for i, w in enumerate(self.windows) if w.hwnd == selected.hwnd)
         self.book_var = Var(book)
         self._book_edited, self._book_given = edited, given
-        self._book_scanned = True
         self._book_before = ""
         self.window_query = ""
         self.busy = False
-        self.batch = None
-        self._batching = False
         self.reading = self._reading_at_start = False
         self.profiles = SimpleNamespace(margins_for=lambda win, large=False: self.hand)
         self.hand = None
@@ -189,7 +186,7 @@ def test_only_a_key_that_changes_the_book_box_makes_it_the_readers(before, after
     w._book_key(SimpleNamespace(type=tk.EventType.KeyPress))
     w.book_var.set(after)
     w._book_key(SimpleNamespace(type=tk.EventType.KeyRelease))
-    assert w._book_edited is edited and w._book_scanned is not edited
+    assert w._book_edited is edited
 
 
 # ------------------------------------------------------------------ the viewer closed
@@ -204,14 +201,6 @@ def test_a_viewer_closed_is_said_and_watched_for_again(gone):
     assert w.said == [constants.VIEWER_CLOSED] and w.watching == [w._watch_windows] and w.window_box.text == ""
     w._viewer_gone()  # said once
     assert w.said == [constants.VIEWER_CLOSED]
-
-
-def test_a_viewer_closed_during_a_run_waits_for_the_end_of_the_run(gone):
-    w = Chooser([BOOK_A], selected=BOOK_A)
-    w._batching = True
-    gone.discard(1)
-    w._viewer_gone()
-    assert w.selected is BOOK_A and not w.said and not w.left
 
 
 def test_a_key_or_a_request_finds_the_viewer_closed(gone, monkeypatch):
@@ -236,8 +225,6 @@ class Looks:
     def __init__(self):
         self.selected = BOOK_A
         self.busy = False
-        self.batch = None
-        self._batching = False
         self.gone = 0
         self.settings = SimpleNamespace(auto_interval_ms=500, settle_ms=100)
         self.following = SimpleNamespace(look_at=None, owner="other",
@@ -262,42 +249,20 @@ def test_every_look_at_the_viewer_finds_it_closed(gone):
     w = Looks()
     w._take_notes(w.following)
     assert w.gone == 1 and w.following.look_at is None
-    w = Looks()
-    w._batching = True  # during a run: looked at again until it has ended
-    w._look()
-    assert w.gone == 0 and w.following.look_at is not None
 
 
-# ------------------------------------------------------------------ what waits for the end of a run
-def test_the_viewer_list_stays_during_a_run(gone):
-    w = Chooser([BOOK_A, BOOK_B], selected=BOOK_A, book="Book A")
-    w._batching = True
-    w.pick(BOOK_B)
-    assert w.selected is BOOK_A and w.window_box.current() == 0 and not w.left and w.book_var.get() == "Book A"
-    assert w.said == ["The viewer cannot be changed during a run: press Stop first."]
-
-
+# ------------------------------------------------------------------ a job under way; the saved translations
 def test_the_viewer_chosen_again_during_a_job_keeps_the_area_it_reads(gone):
     """A language switch chooses the same viewer again: a hand-set area must not replace the panel found inside it."""
     w = Chooser([BOOK_A], selected=BOOK_A)
     w.hand = (0, 85, 0, 0)
     w.settings.margins = (100, 120, 100, 40)  # the page panel found inside the reader's area
-    for running in ("batch", "busy"):
-        w.batch, w.busy = ("reader", False) if running == "batch" else (None, True)
-        w.pick(BOOK_A)
-        assert w.settings.margins == (100, 120, 100, 40) and not w.said
-    w.batch, w.busy = None, False
+    w.busy = True
+    w.pick(BOOK_A)
+    assert w.settings.margins == (100, 120, 100, 40) and not w.said
+    w.busy = False
     w.pick(BOOK_A)
     assert w.settings.margins == (0, 85, 0, 0)  # no job: as it always did
-
-
-def test_set_area_waits_for_the_end_of_a_run(gone):
-    w = Chooser([BOOK_A], selected=BOOK_A)
-    w._batching = True
-    w._enlarging = {"then": "the batch's start"}
-    w.set_area()
-    assert w.said == ["The area cannot be changed during a run: press Stop first."]
-    assert w._enlarging["then"] == "the batch's start"  # the run's start is not dropped: the window cannot hang on it
 
 
 def _store(tmp_path, *books):
@@ -307,20 +272,6 @@ def _store(tmp_path, *books):
         cache.set_details(title=book)
         cache.save()
     return store
-
-
-def test_the_cache_a_run_reads_cannot_be_deleted(hidden_root, tmp_path, monkeypatch):
-    asked = []
-    monkeypatch.setattr(caches, "ask", lambda *a, **k: asked.append(a) or True)
-    store = _store(tmp_path, "Book")
-    d = caches.CachesDialog(hidden_root, store, in_use=lambda book: book == "Book")
-    d.withdraw()
-    item = d.tree.get_children()[0]
-    d.tree.selection_set(item)
-    d._delete()
-    assert d.backup_var.get() == "Book is being read by a run: press Stop first." and not asked
-    assert d.tree.selection() == (item,) and store.list()
-    d.destroy()
 
 
 def test_delete_with_nothing_selected_says_so(hidden_root, tmp_path):
@@ -580,63 +531,6 @@ def test_ctrl_z_in_a_box_leaves_the_pages_edits_alone(hidden_root):
 
 
 # ------------------------------------------------------------------ what waits, and what is said
-def test_reading_mode_refuses_a_queued_batch():
-    class Entering:
-        enter_reading = A.enter_reading
-        reading = _batching = False
-        selected = BOOK_A
-        _queued = ("batch", ())
-        said: list[str] = []
-        notes: list[str] = []
-        canvas = SimpleNamespace(set_note=lambda text, ms: Entering.notes.append(text))
-
-        def say(self, key, **values):
-            self.said.append(key)
-
-        def _enlarge_first(self, then):
-            raise AssertionError("the full screen must not start")
-
-    w = Entering()
-    w.enter_reading()
-    assert w.said == ["Full screen waits for the whole-book run to finish (Stop ends it)."] and len(w.notes) == 1
-
-
-def test_the_batch_dialog_says_why_it_does_not_open_while_busy():
-    class Busy:
-        open_batch_dialog = A.open_batch_dialog
-        busy = True
-        said: list[str] = []
-
-        def say(self, key, **values):
-            self.said.append(key)
-
-    w = Busy()
-    w.open_batch_dialog()
-    assert w.said == ["A job is running: wait for it to end, or press Stop."]
-
-
-def test_the_full_screen_and_a_whole_book_run_exclude_each_other_also_by_the_run_s_key(monkeypatch):
-    from taslation.ui import jobs
-
-    opened = []
-    monkeypatch.setattr(jobs, "BatchDialog", lambda *a, **k: opened.append(a))
-
-    class OnFullScreen:  # the key of Read whole book... pressed there, where the menu is away
-        open_batch_dialog = A.open_batch_dialog
-        reading, busy = True, False
-        said: list[str] = []
-
-        def say(self, key, **values):
-            self.said.append(key)
-
-        def _current_window(self):
-            raise AssertionError("no dialog over the full screen")
-
-    w = OnFullScreen()
-    w.open_batch_dialog()
-    assert w.said == ["A whole-book run starts from the window: leave the full screen first (F11)."] and not opened
-
-
 def test_closing_puts_the_enlarged_window_back_with_no_key_and_no_box(monkeypatch):
     class Closing:
         _restore_enlarged = A._restore_enlarged

@@ -156,7 +156,6 @@ def test_the_windows_own_choice_takes_the_remembered_viewer_and_never_guesses():
 # ------------------------------------------------------------------ the command line
 def _screen(monkeypatch, windows):
     monkeypatch.setattr(capture_mod, "list_windows", lambda include_own=False: list(windows))
-    monkeypatch.setattr(cli_mod, "WINDOW_POLL_S", 0.01)
 
 
 def test_the_command_line_drives_the_readers_tab_in_the_incident(monkeypatch):
@@ -169,8 +168,8 @@ def test_several_matching_windows_end_the_command_with_their_titles(monkeypatch,
     twin = _win(8, "Yomizuq - Google Chrome", size=700)
     _screen(monkeypatch, [READER, twin, NOTEPAD])
     with pytest.raises(SystemExit) as stop:
-        cli_mod._pick_window("Yomizuq", wait=5.0)  # no waiting: more windows will not make it fewer
+        cli_mod._pick_window("Yomizuq")
     assert stop.value.code == 2
     out = capsys.readouterr().out
     assert out.startswith("several windows match 'Yomizuq':") and READER.label() in out and twin.label() in out
-    assert NOTEPAD.label() not in out and "fuller title" in out and "waiting" not in out
+    assert NOTEPAD.label() not in out and "fuller title" in out

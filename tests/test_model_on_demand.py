@@ -10,11 +10,9 @@ from types import SimpleNamespace
 
 import pytest
 from fake_ollama import FakeOllama, free_port
-from helpers import FakeOcr, read_book
-from test_batch import _fake_viewer
+from helpers import FakeOcr
 
 from taslation import i18n, netguard
-from taslation.batch import BatchReader
 from taslation.cache import CacheStore
 from taslation.config import Settings
 from taslation.message_texts import catalog
@@ -333,110 +331,6 @@ def test_a_translator_without_a_model_has_nothing_to_release(settings):
 
 
 # ---------------------------------------------------------------------------- a batch
-def _batch(ollama, settings, keep_alive="5m", context_mode=True, **kw):
-    tr, said = _translator(ollama, keep_alive=keep_alive)
-    cache = CacheStore(settings.cache_dir).open("Book", MODEL)
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr, cache=cache)
-    return BatchReader(pipeline, hwnd=1, settings=settings, context_mode=context_mode, book="Book", **kw), said
-
-
-def test_a_whole_book_run_reads_without_the_model_loads_at_the_notes_and_releases(ollama, sample_page, sample_page2,
-                                                                                  settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    while_reading: list = []
-    reader, said = _batch(ollama, settings, on_progress=lambda p, r: while_reading.append(
-        (len(ollama.requests), set(ollama.loaded))) if p.message.code == "batch.read_page" else None)
-    order: list = []
-    reader.pipeline.gpu_releases.append(lambda: order.append(("hook", ollama.loads)))
-    progress = read_book(reader)
-    assert progress.finished and progress.pages == 3
-    assert len(while_reading) == 3 and all(n == 0 and not loaded for n, loaded in while_reading)
-    first = next(r for r in ollama.requests if r["messages"])
-    assert first["options"]["num_predict"] == 1  # the load comes before the notes' first request ...
-    asked = [r for r in ollama.requests if r["messages"] and r["messages"][-1]["content"] != "Hi"]
-    assert "translator's notes" in asked[0]["messages"][0]["content"]  # ... and that request is the notes'
-    assert order == [("hook", 0)]  # the GPU models went before it, once
-    assert ollama.loads == 1 and ollama.loaded == set() and len(_unloads(ollama)) == 1
-    assert ollama.requests[-1] == _unloads(ollama)[0]  # the last thing the run does with Ollama
-    assert _codes(said) == ["ollama.loading", "ollama.loaded"]
-
-
-def test_page_by_page_loads_at_the_first_page_and_releases_at_the_end(ollama, sample_page, sample_page2, settings,
-                                                                       monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    reader, said = _batch(ollama, settings, context_mode=False)
-    progress = read_book(reader)
-    assert progress.pages == 3 and ollama.loads == 1 and ollama.loaded == set() and len(_unloads(ollama)) == 1
-    assert _codes(said) == ["ollama.loading", "ollama.loaded"]
-
-
-@pytest.mark.parametrize("context_mode", [True, False])
-def test_a_batch_over_a_book_in_the_cache_never_loads_it(ollama, sample_page, sample_page2, settings, monkeypatch,
-                                                         context_mode):
-    viewer = _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    reader, _said = _batch(ollama, settings, context_mode=context_mode)
-    read_book(reader)
-    assert ollama.loaded == set()
-    ollama.requests.clear()
-    ollama.loads = 0
-    viewer.index = 0
-    again, _said = _batch(ollama, settings, context_mode=context_mode)
-    assert read_book(again).pages == 3
-    assert ollama.requests == [] and ollama.loads == 0
-
-
-def test_stop_during_the_reading_loads_nothing(ollama, sample_page, sample_page2, settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    reader, _said = _batch(ollama, settings, on_progress=lambda p, r: reader.stop()
-                           if p.message.code == "batch.read_page" else None)
-    reader.run()
-    assert ollama.requests == [] and ollama.loads == 0
-
-
-def test_stop_during_the_translation_releases_too(ollama, sample_page, sample_page2, settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    settings.chunk_bubbles = 8  # a run a page: Stop after the first one, which loaded the model
-    reader, _said = _batch(ollama, settings, on_progress=lambda p, r: reader.stop()
-                           if p.message.code == "batch.translated_chunk" else None)
-    read_book(reader)
-    assert ollama.loads == 1 and ollama.loaded == set() and len(_unloads(ollama)) == 1
-
-
-def test_a_failed_translation_releases_too(ollama, sample_page, sample_page2, settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = lambda items, request: (500, {"error": "boom"}) if items else None
-    reader, _said = _batch(ollama, settings)
-    progress = read_book(reader)
-    assert progress.errors and ollama.loads == 1 and ollama.loaded == set()
-
-
-def test_a_batch_on_a_keep_for_good_setting_leaves_the_model(ollama, sample_page, sample_page2, settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    reader, _said = _batch(ollama, settings, keep_alive="-1", context_mode=False)
-    read_book(reader)
-    assert ollama.loaded == {MODEL} and _unloads(ollama) == []
-
-
-@pytest.mark.parametrize("context_mode", [True, False])
-def test_a_run_whose_caller_keeps_the_model_leaves_it_loaded(ollama, sample_page, sample_page2, settings,
-                                                            monkeypatch, context_mode):
-    """`release_at_end` False (the window's run, which decides itself: `jobs._job_batch`): the run ends with the model
-    as its last request left it, for the ``keep_alive`` of that request; a later release lets it go as ever."""
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    ollama.answer = _english
-    reader, _said = _batch(ollama, settings, context_mode=context_mode, release_at_end=False)
-    assert read_book(reader).pages == 3
-    assert ollama.loads == 1 and ollama.loaded == {MODEL} and _unloads(ollama) == []
-    assert ollama.requests[-1]["keep_alive"] == "5m"
-    reader.pipeline.release_translator()
-    assert ollama.loaded == set() and len(_unloads(ollama)) == 1
-
-
 # ---------------------------------------------------------------------------- the window
 class Window:
     """The parts of the App that say a load and release the model."""

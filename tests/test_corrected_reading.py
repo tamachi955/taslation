@@ -1,6 +1,6 @@
 """A misreading corrected in the region editor ("Read as:"): Ask again translates the person's reading, and so does
 whatever reads that region again this session (the page translated again, read again from the cache, the region
-moved, a whole-book run's scan); Save keeps the translation, and the line memo keys it by the corrected reading,
+moved, the page read behind the reader); Save keeps the translation, and the line memo keys it by the corrected reading,
 never by the misread one. The reading itself stays in memory: nothing of it reaches the cache, the line memo, the
 annotations, the log or any other file of the state folder. Ctrl+Z takes back the translation, not the reading."""
 from __future__ import annotations
@@ -124,10 +124,10 @@ def test_the_corrected_reading_is_written_nowhere(window, settings, sample_page,
                        w.last_result)
         w._edit_region(region, _data(region, text=TYPED), w.last_result)  # a typed translation on top of it
         p = w.pipeline
-        p.forget_page(w.last_result)  # translated again, read from the cache, scanned by a run
+        p.forget_page(w.last_result)  # translated again, read from the cache, read behind the reader
         again = p.process(sample_page, complete=True, reuse=False)
         p.process(sample_page, complete=True)
-        p.scan(sample_page, skip_cached=True, fresh=True)
+        p.scan(sample_page, skip_cached=False, behind=True)
         p.cache.save()
         p.save_annotations()
         logging.getLogger("taslation").warning("a line of the session's log")
@@ -163,7 +163,7 @@ def test_undo_takes_back_the_translation_and_leaves_the_corrected_reading(window
 
 
 # ------------------------------------------------------------------ the rest of the session reads it as corrected
-def test_translate_again_and_a_run_read_the_region_as_corrected(window, sample_page):
+def test_translate_again_and_a_read_behind_the_reader_take_the_region_as_corrected(window, sample_page):
     w = window
     p = w.pipeline
     region = _region(w)
@@ -175,7 +175,7 @@ def test_translate_again_and_a_run_read_the_region_as_corrected(window, sample_p
     hit = next(r for r in again.regions if r.bbox == box)
     assert hit.source_text == CORRECTED and hit.ocr_reading == MISREAD and hit.translated_text == ANSWER
     assert CORRECTED in _sent(p.translator)[asked:] and MISREAD not in _sent(p.translator)[asked:]
-    scan = p.scan(sample_page, skip_cached=True, fresh=True)  # a whole-book run that translates again
+    scan = p.scan(sample_page, skip_cached=False, behind=True)  # the page read again behind the reader
     assert any(r.source_text == CORRECTED for u in scan.units for r in u.regions)
     assert not any(r.source_text == MISREAD for u in scan.units for r in u.regions)
 

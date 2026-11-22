@@ -11,13 +11,31 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 import numpy as np
-from fake_strip import PAGE_SIZE, picture, thumb
 from PIL import Image, ImageDraw
 
 from taslation.cache import CachedBubble, CachedPage
 from taslation.regions import PageResult, TextRegion
 
 Post = Callable[[str, dict[str, Any]], None]
+PAGE_SIZE = (600, 860)
+
+
+def picture(seq: int) -> Image.Image:
+    """A made-up page: light grey, its number large, a few white ovals as bubbles."""
+    image = Image.new("RGB", PAGE_SIZE, (200 + seq % 5 * 8, 200, 196))
+    draw = ImageDraw.Draw(image)
+    for i in range(3):
+        x, y = 60 + (seq * 37 + i * 170) % 380, 80 + i * 240
+        draw.ellipse((x, y, x + 150, y + 110), fill="white", outline="black", width=3)
+    draw.text((PAGE_SIZE[0] // 2 - 20, PAGE_SIZE[1] - 120), str(seq), fill="black", font_size=72)
+    return image
+
+
+def thumb(image: Image.Image) -> Image.Image:
+    """As the events carry it: at most 96 pixels tall."""
+    out = image.copy()
+    out.thumbnail((96 * image.width // image.height + 1, 96))
+    return out
 
 
 def fingerprint(seq: int) -> str:
@@ -36,7 +54,7 @@ def page(seq: int, spread: bool = False) -> Image.Image:
 
 
 def bubble_boxes(seq: int, spread: bool = False) -> list[tuple[int, int, int, int]]:
-    """The made-up bubbles of screen *seq*, as `fake_strip.picture` draws them (inside each oval)."""
+    """The made-up bubbles of screen *seq*, as `picture` draws them (inside each oval)."""
     def one(n: int, dx: int) -> list[tuple[int, int, int, int]]:
         return [(dx + 60 + (n * 37 + i * 170) % 380 + 25, 80 + i * 240 + 25,
                  dx + 60 + (n * 37 + i * 170) % 380 + 125, 80 + i * 240 + 85) for i in range(3)]
@@ -81,12 +99,10 @@ def result(seq: int, texts: list[str], spread: bool = False, error: str = "") ->
 
 
 def stage(post: Post, seq: int, read: str | None = None, translate: str | None = None, spread: bool = False,
-          with_thumb: bool = False, reading: bool = True) -> None:
+          with_thumb: bool = False) -> None:
     """The ``page_stage`` events for screen *seq*: its reading stage *read*, its translation stage *translate*; as
-    normal reading tells them (``reading`` True, `taslation.backlog`), or with *reading* False as a whole-book run's."""
-    first: dict[str, Any] = {"seq": seq, "fingerprint": fingerprint(seq)}
-    if reading:
-        first["reading"] = True
+    normal reading tells them (`taslation.backlog`)."""
+    first: dict[str, Any] = {"seq": seq, "fingerprint": fingerprint(seq), "reading": True}
     if with_thumb:
         first["thumb"] = thumb(scribbled(page(seq, spread), bubble_boxes(seq, spread)))
     if read is not None:
@@ -144,4 +160,4 @@ def pipeline(cache: Cache | None = None, rtl: bool = True) -> SimpleNamespace:
     distance."""
     return SimpleNamespace(rtl=rtl, cache=cache if cache is not None else Cache(),
                            settings=SimpleNamespace(fingerprint_max_distance=36), font_status=lambda: ("", None),
-                           release_page_images=lambda: None, shown_pages=set())
+                           shown_pages=set())

@@ -1,6 +1,5 @@
 """The full screen and the viewer's messages: on the window's own monitor, the keys named as the reader knows them
-in the Translator role (in a note on the full screen too) and nothing said in the Reader's, F11's refusal during a
-batch kept on the page, Set area... offered first where a browser's tabs and address bar would be read, the area set
+in the Translator role (in a note on the full screen too) and nothing said in the Reader's, Set area... offered first where a browser's tabs and address bar would be read, the area set
 said in words, the line while the browser shows another tab. Parts of the App are borrowed onto stand-ins on the
 shared hidden root (never mapped)."""
 from __future__ import annotations
@@ -17,7 +16,7 @@ from taslation.capture import CaptureError, WindowInfo
 from taslation.config import Settings
 from taslation.ui import app as app_mod
 from taslation.ui import reading, viewers
-from taslation.ui.constants import READING_NOTE_MS, WINDOW_ALPHA
+from taslation.ui.constants import WINDOW_ALPHA
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.reading import key_label
 from taslation.ui.viewers import looks_like_browser
@@ -25,14 +24,13 @@ from taslation.ui.viewers import looks_like_browser
 CHROME = WindowInfo(hwnd=7, title="Yomizuq - Google Chrome", class_name="Chrome_WidgetWin_1", pid=7, rect=(0, 0, 960, 540))
 VIEWER_APP = WindowInfo(hwnd=8, title="Yomizuq for PC", class_name="Qt5QWindowIcon", pid=8, rect=(0, 0, 960, 540))
 WAITING = ("Waiting: the browser shows another tab. Bring the book's tab back, or drag that tab out into a window of its own.")
-REFUSED = "Full screen waits for the whole-book run to finish (Stop ends it)."
 
 
 def test_keys_are_named_as_the_reader_knows_them():
     assert [key_label(k) for k in ("Left", "Right", "Up", "Down")] == ["←", "→", "↑", "↓"]
     assert [key_label(k) for k in ("PageUp", "PageDown", "Home", "End", "Space")] == [
         "Page Up", "Page Down", "Home", "End", "Space"]
-    assert key_label("F7") == "F7"  # a key of the batch's choosing: as it is
+    assert key_label("F7") == "F7"  # a key of the viewer's own: as it is
     i18n.set_language("de")
     try:
         assert [key_label(k) for k in ("Left", "PageDown", "Home", "Space")] == ["←", "Bild ab", "Pos1", "Leertaste"]
@@ -65,7 +63,7 @@ class Keys:
         self.canvas = ImageCanvas(root)
         self.canvas.winfo_width, self.canvas.winfo_height = (lambda: 400), (lambda: 300)
         self.status_var = tk.StringVar(master=root)
-        self.selected, self.batch, self.reading, self.in_front = CHROME, None, False, True
+        self.selected, self.reading, self.in_front = CHROME, False, True
         self.followed: list[tuple[str, bool]] = []
 
     def _book_in_front(self):
@@ -175,7 +173,7 @@ class Reading(tk.Toplevel):
         self.original_var, self.auto_var, self.top_var = tk.BooleanVar(self), tk.BooleanVar(self), tk.BooleanVar(self)
         self.role_var = tk.StringVar(self, value="reader")
         self.selected, self.last_result = CHROME, None
-        self.reading = self._batching = self._viewer_hidden = self._scan_waits_told = self._restoring = False
+        self.reading = self._viewer_hidden = self._restoring = False
         self._ordering = self._chosen_region = self._status_render = self._status_key = None
         self._normal_geometry = ""
         self.settings = Settings()
@@ -244,24 +242,6 @@ def test_reading_mode_opens_full_screen_on_the_windows_own_monitor(hidden_root, 
     moved.clear()
     w.enter_reading()
     assert w.reading and not moved and [c[2] for c in w.calls if c[1] == "-alpha"] == [WINDOW_ALPHA]
-
-
-def test_f11_during_a_batch_says_so_on_the_page_for_a_few_seconds(hidden_root):
-    w = Reading(hidden_root)
-    w._batching = True
-    w.enter_reading()
-    assert not w.reading and w.status_var.get() == REFUSED and w.canvas.note == REFUSED
-    assert w.canvas._note_job is not None  # it goes by itself after READING_NOTE_MS
-    w.say("Batch {phase}- {message}  ({pages} pages, {bubbles} bubbles, {hits} already cached)", phase="[scan] ",
-          message="page 3", pages=3, bubbles=12, hits=0)  # the batch's next line, 0.3 s later
-    assert w.canvas.note == REFUSED and w.status_var.get().startswith("Batch [scan]")
-    assert READING_NOTE_MS >= 3000
-    i18n.set_language("ja")
-    try:
-        w.enter_reading()
-        assert w.canvas.note == i18n.tr(REFUSED) and w.canvas.note != REFUSED  # in the window's language
-    finally:
-        i18n.set_language("en")
 
 
 def _buttons(box):

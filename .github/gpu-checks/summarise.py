@@ -11,8 +11,8 @@ own reports, and their verdicts: no line of the dataset, read or translated, and
 ``standin`` (tools/standin_e2e.py's report.json) and ``bench`` (tools/openmantra_eval.py's results file) write
 summary.json and summary.md into DIR. A report that is not there, as after a run stopped by the step's time limit, is
 said, and what the console shows of the run is counted instead: its tracebacks and exception types, the tool's own
-words on why a run stopped, and for the benchmark the pages read and the translation's runs so far (their seconds, and
-the time all of them would take at that pace). Nothing else is read out of the console. ``table`` prints the run's
+words on why a run stopped, and for the benchmark the pages read and the pages translated so far (their seconds, and
+the time all of the series' pages would take at that pace). Nothing else is read out of the console. ``table`` prints the run's
 tables in Markdown for the summary job's page: each job's waiting, setting up, run and the rest by GitHub's own step
 times (*JOBS*: the jobs API's jobs, one JSON object a line), the repository's caches against GitHub's limit
 (*CACHES*: its list of them, one a line), the stand-in's verdicts and scenarios, the benchmark's titles and, with
@@ -23,7 +23,7 @@ A stand-in run is judged by what it must show on any computer however slow (`cor
 window followed the stand-in and nothing else, nothing was kept or shown from a frame that was not the sharp one, no
 request was sent for nothing, no job was cancelled with its page on show (but for one that gave its page over to the
 frame of a new size, `_resized_away`), a page translated before came back without a request, each scenario did what
-it is for - the modes entered and left, the page keys handed on, the whole-book run ended, ...). What depends on the
+it is for - the modes entered and left, the page keys handed on, ...). What depends on the
 computer's speed - the rested turns translated within their rest, the holds of ``--wait-done`` that reached their
 cap, lettering left on a page until the window's next capture, pages left half done in the cache - is reported beside
 it and never fails a run (`speed`); so is what each scenario was meant to show and whether it still did (`meanings`).
@@ -64,10 +64,9 @@ TRACEBACK = "Traceback (most recent call last):"
 EXCEPTION = re.compile(r"^((?:[A-Za-z_]\w*\.)*[A-Z]\w*(?:Error|Exception|Interrupt|Exit))\b")
 STOPPED = re.compile(r"^run stopped: (.+)$")  # standin_e2e's Director.stop (its reasons name no window and no page)
 PAGE_LINE = re.compile(r"^\s+\S.* p(\d+): gold (\d+), .*\[([0-9.]+) s\]\s*$")  # openmantra_eval, a page read
-CHUNK_LINE = re.compile(r"^\s+\S.*: run (\d+)/(\d+), (\d+) lines so far, (\d+) s\s*$")  # ... a run of lines translated
+TRANSLATED_LINE = re.compile(r"^\s+\S.*: page (\d+)/(\d+) translated, (\d+) lines so far, (\d+) s\s*$")  # ... a page
 OTHER_STATES = ("black", "spinner", "unknown")
-AT_REST = ("a", "d", "r", "o", "z", "w2", "f", "f2")  # the scenarios whose rests are for reading translated pages
-RUN_SCENARIOS = ("w", "w2")  # a whole-book run reads or translates their pages, not the window's page jobs
+AT_REST = ("a", "d", "r", "o", "z", "f", "f2")  # the scenarios whose rests are for reading translated pages
 TURNED = ("next", "previous", "jump")
 K_PACES = ("k5", "k1", "k2", "k3")  # standin_e2e.K_PACES: scenario k, pages flipped past at a pace, then read back
 K_STAYED_MS = 800  # standin_e2e.K_STAYED_MS: a page flipped past whose sharp frame stayed so long is one to catch
@@ -267,12 +266,6 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
             keyed = name in (run.get("page_keys") or {})
             out[name] = (("holds: its turn came by the window's page key; " if keyed
                           else "lost: no turn came by the window's page key; ") + at_rest(name))
-        elif name == "w":
-            whole = run.get("whole_book_run") or {}
-            ends = whole.get("ends") or []
-            out[name] = (f"holds: the run read {whole.get('pages_got')} pages and ended "
-                         f"({', '.join(str(e.get('code')) for e in ends)})" if ends
-                         else f"lost: the run read {whole.get('pages_got')} pages and did not end")
         elif name == "x":
             cancel = run.get("cancel_in_flight") or {}
             soft, cut = cancel.get("requests_on_soft") or 0, cancel.get("cancelled_in_flight") or 0
@@ -475,8 +468,7 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     again: list[list[Any]] = []
     for t in turns:
         screen = (t.get("page"), t.get("spread"))
-        if (screen in done and t.get("why") in TURNED and t.get("segment") not in RUN_SCENARIOS
-                and t.get("run") in (None, "no run") and (t.get("requests") or 0) > 0):
+        if screen in done and t.get("why") in TURNED and (t.get("requests") or 0) > 0:
             again.append([t.get("segment"), t.get("page"), t.get("requests")])
         if t.get("at_rest") == "translated" and t.get("at_rest_from") == "sharp":
             done.add(screen)
@@ -490,7 +482,7 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     for name in names:
         mine = by_name.get(name) or []
         check(name, "the stand-in drew its turns", bool(mine), len(mine))
-        if mine and name not in RUN_SCENARIOS:
+        if mine:
             last = mine[-1]
             check(name, "its last page was translated once the window came to rest",
                   last.get("at_rest") == "translated" or last.get("finished_ms") is not None,
@@ -517,17 +509,6 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             check(name, "over the book entered and left by the hot key",
                   facts.get("over_before_reading") is True and facts.get("left_by_hot_key") is True,
                   {k: facts.get(k) for k in ("over_before_reading", "left_by_hot_key")})
-        elif name == "w":
-            whole = run.get("whole_book_run") or {}
-            check(name, "the whole-book run read pages and ended", bool(whole.get("ends")) and (whole.get("pages_got") or 0) > 0,
-                  {"pages_got": whole.get("pages_got"), "ends": len(whole.get("ends") or [])})
-            listed = [[f.get("key"), f.get("by"), f.get("sharper_taken_after_ms")]
-                      for f in whole.get("frames_got_not_sharp_list") or [] if isinstance(f, dict)]
-            check(name, "every frame the run read was a sharp one", not whole.get("frames_got_not_sharp"),
-                  listed or whole.get("frames_got_not_sharp"))  # (the page's key, who got it, a sharper one after)
-        elif name == "w2":
-            facts = entered.get("w2") or {}
-            check(name, "Finished reading", facts.get("finished_reading") is True, facts.get("finished_reading"))
         elif name == "x":
             cancel = run.get("cancel_in_flight") or {}
             ran_on = (cancel.get("ran_on_after_cancel_ms") or {}).get("max")
@@ -706,23 +687,24 @@ def standin_md(s: dict[str, Any]) -> str:
 
 # ------------------------------------------------------------------------------------------------- the benchmark
 def bench_progress(console: str) -> dict[str, Any]:
-    """How far openmantra_eval's console got: the pages read (and their seconds) and the translation's last run of
-    lines, with the time all its runs would take at that pace."""
-    pages, seconds, chunk = 0, 0.0, None
+    """How far openmantra_eval's console got: the pages read (and their seconds) and the last page translated
+    (`translate_series_page`'s line: of its series, the lines so far and the seconds), with the time all of the
+    series' pages would take at that pace."""
+    pages, seconds, last = 0, 0.0, None
     for line in console.splitlines():
         m = PAGE_LINE.match(line)
         if m:
             pages += 1
             seconds += float(m.group(3))
             continue
-        m = CHUNK_LINE.match(line)
+        m = TRANSLATED_LINE.match(line)
         if m:
-            chunk = tuple(int(g) for g in m.groups())
+            last = tuple(int(g) for g in m.groups())
     out: dict[str, Any] = {"pages_read": pages, "detection_ocr_s": round(seconds, 1)}
-    if chunk:
-        done, runs, lines, spent = chunk
-        out["translation"] = {"runs_done": done, "runs": runs, "lines": lines, "seconds": spent,
-                              "seconds_all_at_this_pace": round(spent * runs / done) if done else None}
+    if last:
+        done, of, lines, spent = last
+        out["translation"] = {"pages_done": done, "pages": of, "lines": lines, "seconds": spent,
+                              "seconds_all_at_this_pace": round(spent * of / done) if done else None}
     return out
 
 
@@ -823,8 +805,8 @@ def bench_md(b: dict[str, Any]) -> str:
             lines.append(f"* translation error: {b['error']}")
     progress = b.get("progress") or {}
     lines.append(f"* console: {progress.get('pages_read')} pages read in {progress.get('detection_ocr_s')} s"
-                 + (f"; translation run {progress['translation']['runs_done']} of {progress['translation']['runs']} "
-                    f"after {progress['translation']['seconds']} s (all of them at that pace: "
+                 + (f"; page {progress['translation']['pages_done']} of {progress['translation']['pages']} "
+                    f"translated after {progress['translation']['seconds']} s (all of them at that pace: "
                     f"{progress['translation']['seconds_all_at_this_pace']} s)" if progress.get("translation") else ""))
     lines.append(f"* exit code {b.get('exit_code')}, the run's step {b.get('run_step_s')} s")
     return "\n".join(lines) + "\n"
@@ -982,7 +964,7 @@ def table(artifacts: Path, jobs_file: Path | None, merged: Any, caches_file: Pat
             so_far = f"{prog.get('pages_read')} pages"
             if prog.get("translation"):
                 t = prog["translation"]
-                so_far += f", run {t['runs_done']}/{t['runs']} (all ~{t['seconds_all_at_this_pace']} s)"
+                so_far += f", translated {t['pages_done']}/{t['pages']} (all ~{t['seconds_all_at_this_pace']} s)"
             out.append(f"| {b.get('title')} {', '.join(b.get('series') or [])} | {str(b.get('verdict')).upper()} | "
                        f"{b.get('pages', '-')} | {s.get('detection_ocr', '-')} | {s.get('translation', '-')} | "
                        f"{s.get('total', '-')} | {(b.get('detection') or {}).get('f1', '-')} | "

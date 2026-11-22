@@ -172,15 +172,11 @@ def test_paste_format_on_every_region_of_a_kind_across_the_book_and_take_it_back
     assert next(r for r in shown.regions if r.tag == "shout").style == RED
 
 
-def test_not_during_a_run_and_not_without_a_book(two_pages, monkeypatch):
+def test_not_without_a_book(two_pages, monkeypatch):
     w, _second = two_pages
     monkeypatch.setattr(formats.boxes, "ask", lambda *a, **kw: pytest.fail("asked"))
     w._chosen_region = w.last_result.regions[0]
     w.format_clip().style = RED
-    w._batching = True
-    w.paste_format_on_kind()
-    assert w.said[-1] == formats.KIND_IN_A_RUN
-    w._batching = False
     w.pipeline.annotations = None
     w.paste_format_on_kind()
     assert w.said[-1] == formats.NO_BOOK
@@ -281,7 +277,7 @@ def test_the_keys_and_every_word_in_every_language():
     assert "Ctrl+Shift+C: Copy format" in lines and "Ctrl+V: Paste region" in lines
     words = [formats.FORMAT_COPIED, formats.NOTHING_COPIED, formats.FORMAT_PASTED, formats.FORMAT_SAME,
              formats.SELECT_FIRST, formats.NO_BOOK, formats.KIND_QUESTION, formats.KIND_APPLY, formats.KIND_NONE,
-             formats.KIND_DONE, formats.KIND_IN_A_RUN, formats.KIND_BACK, formats.KIND_AGAIN, formats.SAVE_FAILED,
+             formats.KIND_DONE, formats.KIND_BACK, formats.KIND_AGAIN, formats.SAVE_FAILED,
              formats.REGION_COPIED, formats.NO_REGION_COPIED, formats.REGION_THERE, formats.REGION_ELSEWHERE,
              *formats.PAGE_FORMAT_TIPS, translator_mod.TAKEN_BACK["paste"], translator_mod.MADE_AGAIN["paste"],
              *review.FORMAT_TIPS.values(), "Copy format", "Paste format",

@@ -356,9 +356,9 @@ def test_health_says_which_model_the_language_needs(monkeypatch, tmp_path):
     monkeypatch.setattr(health, "installed_models", lambda url, timeout=1.0: [QWEN.ollama_name])
     notice = health.check(s)
     assert [m.code for m in notice] == ["translator.other_model"]
-    from taslation.ui.banner import blocking
+    from taslation.ui.banner import is_notice
 
-    assert not blocking(notice) and health.check(s, language="Turkish") == []  # Qwen writes Turkish
+    assert all(is_notice(m) for m in notice) and health.check(s, language="Turkish") == []  # Qwen writes Turkish
     monkeypatch.setattr(health, "installed_models", lambda url, timeout=1.0: [])
     assert health.check(s)[0].code == "translator.model_missing"
 

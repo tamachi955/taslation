@@ -1,5 +1,5 @@
 """A name or term the model spelt another way, put right as the series sheet spells it (`terms.spelt_right`, no model
-request): in a page translated alone as in a whole-book run, by the same rules and the same guards (only what the
+request): in a page translated, by these rules and guards (only what the
 Japanese line names, never another of the sheet's renderings, never a name with an honorific after it). A page shown
 from the cache keeps what is stored. Invented names only."""
 
@@ -81,39 +81,6 @@ def test_the_page_stores_the_sheets_spelling_and_a_cached_page_stays_as_stored(s
     again = later.process(sample_page)
     assert again.cache_hits == 1 and len(tr.calls) == asked  # from the cache: no request, nothing respelt
     assert "Ryuji is here." in [r.translated_text for r in again.translated]
-
-
-class _Viewer:
-    """A book of two pages: the person at the viewer moves `index` (`helpers.read_book`)."""
-
-    def __init__(self, pages):
-        self.pages = pages
-        self.index = 0
-
-    def capture(self, hwnd):
-        return self.pages[self.index]
-
-
-def test_a_whole_book_run_and_a_page_by_page_run_spell_alike(sample_page, sample_page2, settings, monkeypatch):
-    from helpers import read_book
-
-    from taslation import batch as batch_mod
-    from taslation.batch import BatchReader
-
-    settings.settle_ms, settings.page_turn_wait_ms = 10, 300
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    stored = {}
-    for whole in (True, False):
-        viewer = _Viewer([sample_page, sample_page2])
-        monkeypatch.setattr(batch_mod, "capture_window", viewer.capture)
-        cache = CacheStore(settings.cache_dir).open(f"Book {whole}", "dict")
-        p = Pipeline(settings, ocr=FakeOcr([NAMED, *JA_TEXTS[1:]]),
-                     translator=DictTranslator({**EN_TEXTS, NAMED: "Ryuji is here."}), cache=cache)
-        p.glossary = sheet()
-        progress = read_book(BatchReader(p, hwnd=1, settings=settings, context_mode=whole))
-        assert progress.finished and progress.pages == 2, progress
-        stored[whole] = sorted(b.text for page in cache.pages for b in page.bubbles)
-    assert stored[True] == stored[False] and "Ryūji is here." in stored[True] and "Ryuji is here." not in stored[True]
 
 
 def test_asking_again_is_spelt_as_the_sheet_spells(settings):

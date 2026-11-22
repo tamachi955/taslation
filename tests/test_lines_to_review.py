@@ -2,20 +2,14 @@
 note for the reader), page by page, built from the cache alone (`dialogs.review_list`), the reasons in the words of
 "Review this page" with the checks of the lettering of the page on show, narrowed to one reason or sorted by it, a
 row selected only saying its page (nothing is sent to the viewer); the list made again after a page's result and a
-change of the translations; and the page strip's pennant on a page with such lines (`strip.mark_pages_to_review`),
-which says it by its shape and its "!" as well as its colour. Invented lines."""
+change of the translations. Invented lines."""
 from __future__ import annotations
 
 import random
-import time
-from types import SimpleNamespace
 
 import pytest
-from fake_strip import FakeRun
 from helpers import EN_TEXTS, FakeOcr
 from test_find_replace import Window as FindWindow
-from test_page_strip import Window as StripWindow
-from test_page_strip import _click, no_way_to_the_viewer  # noqa: F401 - (a fixture)
 from test_translator_mode import Window as TranslatorWindow
 
 from taslation.cache import CachedBubble, CachedPage, CacheStore
@@ -25,12 +19,10 @@ from taslation.i18n import CATALOGS, set_language
 from taslation.pipeline import Pipeline
 from taslation.translate import DictTranslator
 from taslation.ui import app as app_mod
-from taslation.ui import strip as strip_mod
 from taslation.ui.dialogs import page_list
 from taslation.ui.dialogs import review_list as review_mod
 from taslation.ui.dialogs.review_list import (LinesToReviewDialog, book_lines, lines_on_page, reason_words,
                                               with_lettering, worth_a_look)
-from taslation.ui.strip import CELL_W, REVIEW_TAG, mark_pages_to_review, page_tip
 
 A = app_mod.App
 BOX = (0.1, 0.1, 0.3, 0.2)
@@ -227,87 +219,8 @@ def test_the_window_opens_the_books_cache_and_makes_the_list_again_after_a_chang
 
 def test_the_lists_strings_are_in_every_language():
     keys = [review_mod.TITLE, review_mod.EMPTY, review_mod.COUNTED, review_mod.FILTERED, review_mod.SHOW,
-            review_mod.ALL_REASONS, review_mod.SHOW_TIP, review_mod.EXPLAIN, review_mod.NOTE_WORDS, strip_mod.REVIEW_LINE,
+            review_mod.ALL_REASONS, review_mod.SHOW_TIP, review_mod.EXPLAIN, review_mod.NOTE_WORDS,
             "Lines to review...", "List the lines of the whole book that are worth a look, page by page."]
     for code, catalog in CATALOGS.items():
         if code != "en":
             assert all(k in catalog for k in keys), (code, [k for k in keys if k not in catalog])
-
-
-# ------------------------------------------------------------------ the page strip
-class Strip(StripWindow):
-    """The strip's stand-in window with the pipeline's cache and the status line."""
-
-    def __init__(self, master, batch, cache):
-        super().__init__(master, batch=batch)
-        self.pipeline = SimpleNamespace(cache=cache, settings=SimpleNamespace(fingerprint_max_distance=6))
-
-    def status(self, render):
-        self.lines.append(render())
-
-
-def _run_cache(settings, name="Book"):
-    cache = CacheStore(settings.cache_dir).open(name, "m")
-    run_fp = lambda seq: f"{seq:080x}"  # noqa: E731 - (as the fake run gives them)
-    cache.pages = [CachedPage(run_fp(1), 0.7, [CachedBubble(BOX, "Fine.")], seq=0),
-                   CachedPage(run_fp(2), 0.7, [CachedBubble(BOX, "Tiny.", flags=["small"]),
-                                               CachedBubble(BOX2, "Long.", flags=["long"])], seq=1),
-                   CachedPage(run_fp(3), 0.7, [CachedBubble(BOX, "A pun.", note="A play on a name.")], seq=2)]
-    return cache
-
-
-def _marks(w):
-    c = w.page_strip.canvas
-    return {seq: sorted(c.type(i) for i in c.find_withtag(f"p{seq}") if i in c.find_withtag(REVIEW_TAG))
-            for seq in w._strip_model.order}
-
-
-def test_the_strip_marks_the_pages_with_lines_worth_a_look_by_shape_and_mark_too(hidden_root, settings,
-                                                                                no_way_to_the_viewer):
-    set_language("en")
-    run = FakeRun(lambda kind, data: None, pages=4, skip_every=99)
-    cache = _run_cache(settings)
-    w = Strip(hidden_root, run, cache)
-    run.post = lambda kind, data: A._handle_event(w, kind, data) if kind in ("page_stage", "batch_memory") else None
-    for seq in range(1, 5):
-        run.read_page(seq)
-    assert {seq: cell.review for seq, cell in w._strip_model.pages.items()} == {1: 0, 2: 0, 3: 0, 4: 0}
-    run.translate_all()  # each page's lines are in the cache once its translation is done
-    assert {seq: cell.review for seq, cell in w._strip_model.pages.items()} == {1: 0, 2: 2, 3: 1, 4: 0}
-    assert _marks(w) == {1: [], 2: ["polygon", "text"], 3: ["polygon", "text"], 4: []}
-    c = w.page_strip.canvas
-    assert {c.itemcget(i, "text") for i in c.find_withtag(REVIEW_TAG) if c.type(i) == "text"} == {"!"}
-    w.page_strip.canvas.xview_moveto(0)
-    tip = w.page_strip.text_at(CELL_W + CELL_W // 2, 20)
-    assert tip == page_tip(2, False, 2) and "2 line(s) on this page are worth a look" in tip
-    assert w.page_strip.text_at(CELL_W // 2, 20) == page_tip(1)  # no line to look at: the tip as it was
-    drawn = w.drawn
-    _click(w, 3)
-    assert w.lines[-1] == page_tip(3, False, 1) and w.drawn == drawn  # said, and nothing shown
-    cache.pages[1].bubbles[0].flags = []  # looked at in the editor: the window's refresh marks it again
-    mark_pages_to_review(w)
-    assert w._strip_model.pages[2].review == 1
-    cache.pages[1].bubbles[1].flags = []
-    w.page_strip.redraw()
-    mark_pages_to_review(w)
-    assert _marks(w)[2] == []
-    w.pipeline.cache = _run_cache(settings, "Other")  # another book's cache now: its pages are not these
-    mark_pages_to_review(w)
-    assert [w._strip_model.pages[s].review for s in (1, 2, 3, 4)] == [0, 0, 1, 0]
-
-
-def test_an_open_list_is_made_again_once_the_runs_pages_are_translated(hidden_root, settings, monkeypatch):
-    run = FakeRun(lambda kind, data: None, pages=2, skip_every=99)
-    cache = _run_cache(settings)
-    w = Strip(hidden_root, run, cache)
-    filled: list[int] = []
-    w._to_review = SimpleNamespace(winfo_exists=lambda: True, fill=lambda: filled.append(1))
-    monkeypatch.setattr(strip_mod, "REVIEW_REFRESH_MS", 1)
-    run.post = lambda kind, data: A._handle_event(w, kind, data) if kind == "page_stage" else None
-    for seq in (1, 2):
-        run.read_page(seq)
-    run.translate_all()
-    deadline = time.monotonic() + 2
-    while not filled and time.monotonic() < deadline:
-        hidden_root.update()
-    assert filled == [1]  # once for the group of pages translated together

@@ -455,7 +455,7 @@ def _recorder(name: str):
 
 
 for _name in ("translate_now", "set_area", "clear_area", "open_page_keys",
-              "open_batch_dialog", "stop_batch", "open_glossary", "open_caches", "_on_role_changed",
+              "open_glossary", "open_caches", "_on_role_changed",
               "toggle_order", "toggle_skip", "retranslate_page",
               "open_book_settings", "open_review", "open_find_replace", "undo_edit", "redo_edit", "_redisplay", "_apply_on_top",
               "_on_ui_language", "open_help", "open_keys", "open_notice", "open_updates", "open_about", "toggle_over",

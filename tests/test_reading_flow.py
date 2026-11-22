@@ -1,6 +1,6 @@
 """The full screen's ways out and what it changes: the faint close button at the top edge (a click on it leaves the
-full screen, the page's other pointer handling stays bound), Auto turned on by the Reader's full screen and off by a
-whole-book run said once a session, the Translator's full screen keeping Auto as set and following a role change, its
+full screen, the page's other pointer handling stays bound), Auto turned on by the Reader's full screen said once a
+session, the Translator's full screen keeping Auto as set and following a role change, its
 notes long enough to read, and a book read on the full screen under a name that names no book named once on leaving.
 Parts of the App are borrowed onto stand-ins on the shared hidden root (never mapped); Windows' side is a fake."""
 from __future__ import annotations
@@ -8,13 +8,12 @@ from __future__ import annotations
 import queue
 from types import SimpleNamespace
 
-from test_enlarge import _batch_window, desk  # noqa: F401 - desk is test_enlarge's fixture
 from test_reading_messages import Reading
 from test_start_flow import _frame, flow  # noqa: F401 - flow is test_start_flow's fixture
 
 from taslation.ui import app as app_mod
 from taslation.ui.constants import (FULL_SCREEN_TRANSLATOR, KEPT_FROM_NOW, NOTE_MS_PER_CHAR, READING_MODE,
-                                    READING_MODE_AUTO, READING_NOTE_MS, RUN_AUTO_OFF, TRANSLATOR_NOTE_MAX_MS)
+                                    READING_MODE_AUTO, READING_NOTE_MS, TRANSLATOR_NOTE_MAX_MS)
 from taslation.ui.reading import TOP_BAND_PX, TOP_EDGE_PX
 
 A = app_mod.App
@@ -150,43 +149,6 @@ def test_the_translator_s_notes_stay_long_enough_to_read_and_the_reader_s_as_eve
     w.say("Translate a page first: press F5.")  # what the window's status line says, on the page
     assert w.canvas.note == "Translate a page first: press F5." and w.canvas._note_job is not None
     w.leave_reading()
-
-
-def _run_window(hidden_root, tmp_path):
-    w = _batch_window(hidden_root, tmp_path)
-    w._auto_switched = lambda: A._auto_switched(w)
-    w.auto_var.trace_add("write", lambda *_a: w._auto_switched())  # as App._build_ui has it
-    w.idle = []
-    w.after_idle = w.idle.append
-    return w
-
-
-def _idle(w):
-    while w.idle:
-        w.idle.pop(0)()
-
-
-def test_a_whole_book_run_says_once_a_session_that_it_turned_auto_off(hidden_root, tmp_path, desk):
-    w = _run_window(hidden_root, tmp_path)
-    w.auto_var.set(True)  # the reader's own: nothing said
-    assert w.idle == []
-    w._start_batch(w.selected, 0, True)
-    assert not w.auto_var.get() and w.status_var.get() == "Whole-book run starting..."
-    _idle(w)
-    assert w.status_var.get() == RUN_AUTO_OFF  # in place of the run's first line
-    w._batching = False  # the run ended: Auto back on (`jobs._batch_done`), nothing said here
-    w.auto_var.set(True)
-    assert w.idle == []
-    w._start_batch(w.selected, 0, True)  # the next run: said once a session
-    _idle(w)
-    assert w.status_var.get() == "Whole-book run starting..."
-
-
-def test_a_run_with_auto_off_before_says_nothing_of_it(hidden_root, tmp_path, desk):
-    w = _run_window(hidden_root, tmp_path)
-    w._start_batch(w.selected, 0, True)
-    _idle(w)
-    assert w.status_var.get() == "Whole-book run starting..." and not getattr(w, "_run_auto_told", False)
 
 
 # ------------------------------------------------------------------ a book with no name read on the full screen

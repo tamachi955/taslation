@@ -18,10 +18,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from taslation import batch as batch_mod
 from taslation import capture as capture_mod
 from taslation import cli
-from taslation.batch import BatchReader
 from taslation.cli import enlarge_viewer
 from taslation.capture import wgc, windows
 from taslation.capture.windows import Raised
@@ -423,28 +421,6 @@ def test_a_window_topmost_of_its_own_is_left_alone(desk):
     assert desk.calls == []
 
 
-def _reader(monkeypatch, tmp_path, frames_come=False):
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "behind_others", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "frames_come", lambda hwnd: frames_come)
-    return BatchReader(SimpleNamespace(), 1, Settings(state_dir=tmp_path, settle_ms=1))
-
-
-def test_a_blank_page_of_a_viewer_whose_frames_come_is_a_page(monkeypatch, tmp_path):
-    r = _reader(monkeypatch, tmp_path, frames_come=True)
-    blank = Image.new("RGB", (400, 600), "white")
-    monkeypatch.setattr(batch_mod, "capture_window", lambda hwnd, **_: blank)
-    assert r._capture_once() is blank
-
-
-def test_a_blank_frame_with_no_frames_coming_is_no_page_and_the_viewer_is_never_raised(monkeypatch, tmp_path):
-    r = _reader(monkeypatch, tmp_path)
-    blank = Image.new("RGB", (400, 600), "white")
-    monkeypatch.setattr(batch_mod, "capture_window", lambda hwnd, **_: blank)
-    monkeypatch.setattr(windows, "raise_window", lambda hwnd: pytest.fail("the batch raises no window"))
-    assert r._capture_once() is None
-
-
 # ------------------------------------------------------------------ the window: raised for a look
 class Live(BlackViewerMixin):
     _raise_viewer = App._raise_viewer
@@ -820,4 +796,3 @@ def test_a_real_window_of_the_image_viewer():
         assert image.size == (width, height - rows) and rows > 0
     finally:
         wgc.close(wait=True)
-

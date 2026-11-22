@@ -10,15 +10,12 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image, ImageDraw
 
-from taslation import batch as batch_mod
 from taslation import capture as capture_mod
 from taslation import cli, i18n
-from taslation.batch import BatchReader
 from taslation.cli import enlarge_viewer
 from taslation.capture import windows
 from taslation.capture.windows import Enlarged, behind_others, enlarge_window, restore_window, smaller_than
 from taslation.config import ConfigError, Settings
-from taslation.messages import Message
 from taslation.pagekeys import PageKeys, Profiles, own_keys, page_keys_for
 from taslation.ui import app as app_mod
 from taslation.ui import viewers
@@ -169,9 +166,9 @@ class Win(tk.Toplevel):
     _apply_found_margins = A._apply_found_margins
     _area_hint_due = A._area_hint_due
     _on_close = A._on_close
-    _close_allowed = A._close_allowed
     _target_chosen = lambda self: None  # (the "To:" box kept: tests/test_window_state.py)
     _on_new_page = A._on_new_page
+    _starts_book = A._starts_book
     translate_now = A.translate_now
     status = A.status
     _note_ms = A._note_ms
@@ -192,7 +189,7 @@ class Win(tk.Toplevel):
         self.book_var = tk.StringVar(master=root, value="Book")
         self.canvas = SimpleNamespace(note="", set_note=lambda text, ms=0: setattr(self, "note", text))
         self.note = ""
-        self.reading = self.busy = self._batching = self._manual_area = self._area_hinted = False
+        self.reading = self.busy = self._manual_area = self._area_hinted = False
         self.ready = True
         self._book_edited, self._reading_at_start = True, False
         self._status_render = self._status_key = self._auto_last = self._auto_candidate = self._hand_area = None
@@ -200,9 +197,7 @@ class Win(tk.Toplevel):
         self._enlarged = self._enlarging = self._enlarge_asked = None
         self._area_large = False
         self._start_pending = None
-        self._book_scanned, self._scanned_book = True, "Book"
         self._ordering = None
-        self.batch = None
         self.frames = [_frame()]
         self.later: list = []
         self.read: list = []
@@ -227,9 +222,6 @@ class Win(tk.Toplevel):
 
     def _current_window(self):
         return self.selected
-
-    def scan_mode(self):
-        return "page"
 
     def _name_needed(self):
         return False
@@ -489,54 +481,6 @@ def test_the_area_set_on_a_window_not_enlarged_stays_in_margins(hidden_root, tmp
     assert w.profiles.margins_for(w.selected) == (0, 24, 0, 0) and w.profiles.margins_for(w.selected, large=True) is None
 
 
-class Batch(Win):
-    _start_batch = A._start_batch
-    _run_area = A._run_area
-    _pace = A._pace
-
-    def _go_busy(self):
-        self.busy = True
-
-    def _show_band(self):
-        pass
-
-    def _sync_stop(self):
-        pass
-
-
-def _batch_window(hidden_root, tmp_path):
-    w = Batch(hidden_root, tmp_path)
-    w.auto_var, w.model_var, w.lang_var = tk.BooleanVar(master=hidden_root), tk.StringVar(master=hidden_root), tk.StringVar(master=hidden_root)
-    w._jobs = SimpleNamespace(put=lambda job: w.jobs.append(job))
-    w.jobs = []
-    w._own_hwnd = lambda: 99
-    w.margins = []
-    w._apply_found_margins = lambda starting=False: w.margins.append(starting)
-    return w
-
-
-def test_a_batch_in_the_window_leaves_the_viewer_as_the_reader_has_set_it(hidden_root, tmp_path, desk):
-    w = _batch_window(hidden_root, tmp_path)
-    w._start_batch(w.selected, 0, True)
-    assert desk.enlarged == [] and len(w.jobs) == 1 and w.busy and True in w.margins  # no key, no new size: it starts
-
-
-def test_a_batch_waits_for_a_window_being_enlarged_for_the_page_on_show(hidden_root, tmp_path, desk):
-    w = _batch_window(hidden_root, tmp_path)
-    w._enlarge_first()
-    w._start_batch(w.selected, 0, True)
-    assert w.jobs == [] and w.busy  # nothing can start meanwhile
-    w.run_later()
-    assert len(w.jobs) == 1
-
-
-def test_start_shows_a_viewer_minimised_since_it_was_chosen_behind_taslation(hidden_root, tmp_path, unminimise):
-    w = _batch_window(hidden_root, tmp_path)
-    unminimise.minimised.add(7)
-    w._start_batch(w.selected, 0, True)
-    assert unminimise.unminimised == [(7, 99)] and len(w.jobs) == 1 and unminimise.enlarged == []
-
-
 # ------------------------------------------------------------------ the profile and the settings of older versions
 def test_what_older_versions_kept_about_full_screen_with_reading_mode_is_ignored(tmp_path):
     path = tmp_path / "profiles.json"
@@ -595,7 +539,7 @@ def test_the_cli_says_a_fixed_window_once_and_restores_only_a_changed_one(tmp_pa
     monkeypatch.setattr(capture, "enable_dpi_awareness", lambda: None)
     monkeypatch.setattr(capture, "capture_window", lambda hwnd: order.append("captured") or _frame())
     monkeypatch.setattr(cli, "_notice_once", lambda s: None)
-    monkeypatch.setattr(cli, "_pick_window", lambda window, wait=0.0: _win())
+    monkeypatch.setattr(cli, "_pick_window", lambda window: _win())
     monkeypatch.setattr(cli, "_print_result", lambda result, as_json: None)
     monkeypatch.setattr(cli, "build_pipeline", lambda *a, **k: SimpleNamespace(
         process=lambda image, progress=None: SimpleNamespace(image=image, error=""),
@@ -607,47 +551,5 @@ def test_the_cli_says_a_fixed_window_once_and_restores_only_a_changed_one(tmp_pa
     assert cli.cmd_read(args, settings) == 0
     assert order == ["captured", "restored"] and restored == [7]  # read first, then put back
 
-    ran = []
-
-    class Reader:
-        progress = SimpleNamespace(notes=[], proposals=[])
-
-        def __init__(self, *a, **k):
-            pass
-
-        def finish(self):
-            ran.append("finish")
-
-        def run(self):
-            ran.append("run")
-            raise KeyboardInterrupt
-
-        def stop(self):
-            ran.append("stop")
-
-    monkeypatch.setattr(batch_mod, "BatchReader", Reader)
-    monkeypatch.setattr(cli, "_finish_at_enter", lambda reader: None)
-    args = SimpleNamespace(window="x", wait=0, no_notes=False, book="B", series="S", translator=None, no_context=False,
-                           max_pages=None, retranslate=False)
-    assert cli.cmd_batch(args, settings) == 0
-    assert ran == ["run", "stop"] and restored == [7]  # a batch touches no window of the viewer's
-
 
 # ------------------------------------------------------------------ the batch and a covered viewer
-def test_a_viewer_that_draws_nothing_behind_another_window_is_waited_for(tmp_path, monkeypatch):
-    settings = Settings(state_dir=tmp_path)
-    said = []
-    reader = BatchReader(SimpleNamespace(), 1, settings, lambda p, result: said.append(p.message))
-    blank = Image.new("RGB", (320, 240), "white")
-    page = _frame(100)
-    frames = iter([blank, blank, page])
-    reader.wait_poll_s = 0
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "capture_window", lambda hwnd: next(frames))
-    monkeypatch.setattr(batch_mod, "behind_others", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "frames_come", lambda hwnd: False)
-    assert reader._capture() is page
-    assert said == [Message("batch.waiting_behind"), Message("batch.viewer_draws_again")]
-    monkeypatch.setattr(batch_mod, "capture_window", lambda hwnd: blank)
-    monkeypatch.setattr(batch_mod, "behind_others", lambda hwnd: False)
-    assert reader._capture() is blank  # a white page of a viewer nothing lies over is a page

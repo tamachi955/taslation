@@ -131,8 +131,8 @@ def test_the_seed_reaches_the_payload_only_when_set():
         assert fake.requests[-1]["options"]["seed"] == 41
 
 
-# ------------------------------------------------------------------------------------- book mode and runs
-def test_a_series_is_translated_as_the_batch_does_it(tmp_path, settings):
+# ------------------------------------------------------------------------------------- page by page and runs
+def test_a_series_is_translated_page_by_page_as_reading_does_it(tmp_path, settings):
     from taslation.translate.simple import DictTranslator
 
     write_dataset(tmp_path / "om")
@@ -140,8 +140,11 @@ def test_a_series_is_translated_as_the_batch_does_it(tmp_path, settings):
     geos = [[None] * len(p.bubbles) for p in pages]
     tr = DictTranslator({"こんにちは": "Hello"}, default="X")
     stats = openmantra_eval._Stats()
-    out = openmantra_eval.translate_series_book(settings, tr, "series_a", pages, geos, stats, lambda _m: None)
+    said = []
+    out = openmantra_eval.translate_series_page(settings, tr, "series_a", pages, geos, stats, said.append)
     assert tr.calls and len(out) == len(pages) and stats.requests_failed == 0
+    assert [line.split(" translated,")[0] for line in said] == [f"  series_a: page {k}/{len(pages)}"
+                                                                for k in range(1, len(pages) + 1)]  # (one a page)
     assert all(kw["notes"] == "" for kw in tr.kwargs)  # no series sheet, and no notes of the model's
 
 

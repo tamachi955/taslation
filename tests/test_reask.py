@@ -1,7 +1,7 @@
 """Lines a reply left without a usable translation are asked for again, a few consecutive ones at a time with their
 neighbours as context, then each on its own (`taslation.translate.base.ask_for_missing`); a reply that is almost JSON is
 repaired rather than thrown away (`taslation.translate.ollama.parse_translations`); a line of punctuation
-alone is its own translation. Through the fake Ollama for the live page and the whole-book batch: every failure
+alone is its own translation. Through the fake Ollama for the live page: every failure
 kind a reply can have, a line the model never translates, a Stop while a line is asked for again."""
 from __future__ import annotations
 
@@ -11,11 +11,9 @@ import time
 
 import pytest
 from fake_ollama import FakeOllama
-from helpers import EN_TEXTS, JA_TEXTS, FakeOcr, read_book
-from test_batch import _fake_viewer
+from helpers import EN_TEXTS, JA_TEXTS, FakeOcr
 
 from taslation import netguard
-from taslation.batch import BatchReader
 from taslation.cache import CacheStore
 from taslation.messages import Cancelled, Message
 from taslation.pipeline import Pipeline, is_real_translation
@@ -367,91 +365,6 @@ def test_a_cancel_while_a_line_is_asked_again_ends_at_once_and_caches_nothing(se
     assert len(cache) == 0 and not cache.path.exists() and "page" not in events
 
 
-def _batch(server, settings, monkeypatch, sample_page, sample_page2, book):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    settings.chunk_bubbles = 100  # the three pages in one request
-    cache = CacheStore(settings.cache_dir).open(book, "fake")
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=OllamaTranslator(server.url, timeout=10), cache=cache)
-    return BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True), cache
-
-
-def test_the_batch_asks_again_only_for_the_lines_a_reply_left_out(server, settings, monkeypatch, sample_page,
-                                                                   sample_page2):
-    asked: list[int] = []
-
-    def answer(items, payload):
-        if not _translations(payload):
-            return None
-        asked.append(len(items))
-        rows = _english(items)
-        if len(asked) == 1:  # the run: one id left out early, a line copied, the last line empty
-            rows = [{**r, "text": items[3]["ja"]} if r["id"] == 4 else {**r, "text": ""} if r["id"] == 6 else r
-                    for r in rows if r["id"] != 2]
-        return _reply(rows)
-
-    server.answer = answer
-    reader, cache = _batch(server, settings, monkeypatch, sample_page, sample_page2, "Gaps")
-    progress = read_book(reader)
-    assert progress.finished and progress.pages == 3 and progress.errors == 0
-    # the run of three pages, then each line left out (no page asked again whole)
-    assert asked == [18, 1, 1, 1]
-    assert len(cache) == 3 and cache.bubble_count == 18  # every page complete
-    assert any(n.code == "batch.note_incomplete" for n in progress.notes)
-    assert not any(n.code in ("batch.note_unit_incomplete", "batch.note_retry_unusable") for n in progress.notes)
-
-
-def test_a_batch_unit_the_model_gives_nothing_for_is_translated_when_read(server, settings, monkeypatch, sample_page,
-                                                                        sample_page2):
-    never = JA_TEXTS[4]
-    requests: list[list[str]] = []
-
-    def answer(items, payload):
-        if not _translations(payload):
-            return None
-        requests.append([it["ja"] for it in items])
-        return _reply([{"id": it["id"], "text": ""} if it["ja"] == never else r
-                       for it, r in zip(items, _english(items))])
-
-    server.answer = answer
-    reader, cache = _batch(server, settings, monkeypatch, sample_page, sample_page2, "Nothing")
-    progress = read_book(reader)
-    codes = [n.code for n in progress.notes]
-    assert codes.count("batch.note_unit_incomplete") == 3
-    assert progress.finished and len(cache) == progress.pages == 3 and cache.bubble_count == 15
-    assert all(page.incomplete for page in cache.pages) and progress.translated == 15  # read live, the line comes
-    # every run, then the line left out, asked for alone, once
-    whole = [r for r in requests if len(r) > 1]
-    assert len(whole) == 1 and sum(r.count(never) for r in whole) == 3
-    assert [r for r in requests if len(r) == 1] == [[never]] * 3
-    assert progress.errors == 0
-
-
-def test_stop_while_a_batch_asks_again_ends_the_request_and_keeps_the_pages_done(server, settings, monkeypatch,
-                                                                               sample_page, sample_page2):
-    holder: dict[str, BatchReader] = {}
-    asked: list[int] = []
-
-    def answer(items, payload):
-        if not _translations(payload):
-            return None
-        asked.append(len(items))
-        if len(asked) == 1:
-            return _reply(_english(items)[1:])  # the first line left out
-        threading.Timer(0.3, holder["reader"].stop).start()  # Stop pressed while the line is asked for again
-        server.between, server.endless = 0.05, True
-        return None
-
-    server.answer = answer
-    reader, cache = _batch(server, settings, monkeypatch, sample_page, sample_page2, "Stopped again")
-    holder["reader"] = reader
-    started = time.monotonic()
-    progress = read_book(reader)
-    assert time.monotonic() - started < 10.0 and asked[1:] == [1]
-    assert progress.summary.code == "batch.stopped_translating" and progress.errors == 0 and server.gone.wait(2.0)
-    # the first run lacked a line: what came is stored, and the Stop came before the page was done
-    assert len(cache) == 3 and sum(page.incomplete for page in cache.pages) == 1 and progress.pages == 3
-
-
 def test_a_live_request_that_timed_out_is_not_asked_again(server, sample_page, settings):
     server.before_headers = 2.0  # nothing comes within the client's timeout
     cache = CacheStore(settings.cache_dir).open("Timed out", "fake")
@@ -459,26 +372,3 @@ def test_a_live_request_that_timed_out_is_not_asked_again(server, sample_page, s
     result = pipeline.process(sample_page)
     assert result.error.code == "ollama.timeout" and len(cache) == 0
     assert len(server.requests) == 1  # a timeout is not fanned out into more requests that would wait as long
-
-
-def test_a_batch_page_whose_reply_could_not_be_read_is_asked_for_a_few_lines_at_a_time(server, settings, monkeypatch,
-                                                                                     sample_page, sample_page2):
-    sizes: list[int] = []
-
-    def answer(items, payload):
-        if not _translations(payload):
-            return None
-        sizes.append(len(items))
-        if len(sizes) == 1:
-            return "Here is the translation you asked for."  # nothing that reads: a bad answer
-        return _reply(_english(items))
-
-    server.answer = answer
-    reader, cache = _batch(server, settings, monkeypatch, sample_page, sample_page2, "One page a request")
-    reader.settings.chunk_bubbles = 1  # every page on its own: the one that fails is a single page unit
-    progress = read_book(reader)
-    assert progress.finished and len(cache) == 3 and progress.errors == 1  # the failed request, counted
-    first = sizes[0]
-    assert first > 4 and sizes[1:3] == [4, first - 4]  # the page's lines, four and the rest
-    assert len(sizes) == 3 + 2  # the first page's three requests, then one for each of the other two
-    assert progress.first_error.code == "ollama.bad_answer"

@@ -1,6 +1,6 @@
 """Other parts' settings in the Settings dialog, one line each (`settings.EXTRA_ROWS`): every row's words in the 16
 languages, a row shown only where `Settings` has its key, a checkbox and a list of choices shown, saved and handed on
-as the dialog's own rows are, and the bubble zoom and the whole-book run's flash and sound listed wherever this version has them."""
+as the dialog's own rows are, and the bubble zoom listed wherever this version has it."""
 
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ def test_every_row_s_words_are_in_every_language():
         assert row.section in ("lettering", "window")
 
 
-@pytest.mark.parametrize("key", ["bubble_zoom", "flash_when_done", "sound_when_done"])
-def test_the_other_parts_settings_are_listed_where_this_version_has_them(key):
+def test_the_bubble_zoom_is_listed_where_this_version_has_it():
+    key = "bubble_zoom"
     row = next(row for row in dlg.EXTRA_ROWS if row.key == key)
     assert row.section == "window" and not row.page and not row.choices  # a checkbox that leaves the page alone
     assert (key in dlg.KEYS) == (key in dlg.FIELDS)

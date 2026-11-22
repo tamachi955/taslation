@@ -131,8 +131,8 @@ def no_real_book_names_remembered(monkeypatch):
 @pytest.fixture(autouse=True)
 def real_window_settings_left_alone(monkeypatch):
     """No test writes into ui.json of this machine's own state folder (some stand-ins' settings have the default, real
-    state folder: a whole-book run that ends there would keep its translation's pace in the reader's own file, as one
-    did): there the write does nothing; a test's own folder gets the real thing."""
+    state folder: a test that writes there would change the reader's own file, as one did): there the write does
+    nothing; a test's own folder gets the real thing."""
     from taslation import i18n
 
     real_save = i18n._save_ui_settings

@@ -6,9 +6,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from taslation.batch import BatchProgress, BatchReader
 from taslation.name_variants import RunLine, changes, find_variants, romaji_like, unify_text
-from taslation.pipeline import ScannedRegion, ScannedUnit
 
 
 def _lines(*pairs):
@@ -105,21 +103,3 @@ def test_unify_keeps_honorifics_possessives_and_capitals():
 
 
 # ------------------------------------------------------------------ the run's lines
-def test_a_run_keeps_its_lines_and_offers_the_names_without_the_japanese():
-    reader = BatchReader.__new__(BatchReader)
-    reader._said = {}
-    reader.progress = BatchProgress()
-    reader.pipeline = SimpleNamespace(check_sheet=lambda: None, real_translation=lambda ja, text: bool(text))
-    pairs = [("竜司さん、おはよう", "Morning, Ryuji-san."), ("竜司さんは？", "Where's Ryuji-san?"),
-             ("竜司さん！", "Ryūji-san!"), ("竜司が来た", "Ryuji is here."), ("竜司くんか", "Ryūji, huh."), *FILLER]
-    regions = [ScannedRegion(bbox=(10, 10 + 30 * i, 60, 30 + 30 * i), text_box=(10, 10 + 30 * i, 60, 30 + 30 * i),
-                             poly=[], source_text=ja, status="untranslated", order=i) for i, (ja, _en) in enumerate(pairs)]
-    unit = ScannedUnit(index=0, box=(0, 0, 400, 600), fingerprint="ab" * 8, aspect=0.66, regions=regions)
-    reader._keep_said(unit, {i: f" {en} " for i, (_ja, en) in enumerate(pairs)})
-    assert len(reader._said) == len(pairs)
-    reader._find_names()
-    p = reader.progress
-    assert [v.source for v in p.names] == ["竜司"] and p.names[0].counts() == [("Ryuji", 3), ("Ryūji", 2)]
-    assert all(line.source == "" for line in p.name_lines)  # no Japanese leaves the run
-    assert p.name_lines[0].text == "Morning, Ryuji-san." and p.name_lines[0].where[0] == "ab" * 8
-    assert p.name_lines[0].where[1] == unit.normalize(regions[0].bbox)

@@ -1,5 +1,5 @@
 """The "erase only" kind of a region: its lettering is erased and nothing is set in its place, on a page read anew, a
-page from the cache, a whole-book scan (and the page a run shows from it) alike; it never reaches the translator, is
+page from the cache alike; it never reaches the translator, is
 never flagged or counted as untranslated, and the editor's Kind list makes it (the page behind the editor shows it)
 as one change that Ctrl+Z takes back. Every other kind letters as before (`test_ink.py`'s golden hashes)."""
 
@@ -85,24 +85,6 @@ def test_a_page_read_anew_erases_it_sets_nothing_and_asks_the_translator_nothing
     shown = fresh.process(sample_page, complete=True)
     assert _at(shown.regions).status == ERASED and np.array_equal(np.asarray(shown.image), np.asarray(again.image))
     assert not fresh.translator.calls
-
-
-def test_a_whole_book_scan_neither_translates_it_nor_counts_it_and_erases_it_ahead(marked, sample_page):
-    p, text_box = marked
-    scan = p.scan(sample_page, keep_regions=True)
-    regions = [r for u in scan.units for r in u.regions]
-    region = _at(regions)
-    assert region.status == ERASED and not region.is_japanese
-    assert all(r.source_text != JAPANESE for u in scan.units for r in u.japanese())  # the run never sends it
-    assert scan.bubbles == len(regions) - 1
-    assert _at(scan.erasable).tag == ERASE_ONLY  # erased ahead with the others
-    # the page the run shows once the others are translated: erased there too
-    p.process(sample_page, complete=True)
-    shown = p.translated_page(sample_page, scan.erasable)
-    assert shown is not None and _ink(shown, text_box) == 0
-    # a page whose only region is "erase only" is still shown erased
-    alone = [r for r in scan.erasable if r.tag == ERASE_ONLY]
-    assert _ink(p.translated_page(sample_page, alone), text_box) == 0
 
 
 def test_the_kind_set_and_taken_off_in_the_pipeline(sample_page, settings):

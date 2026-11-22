@@ -120,7 +120,7 @@ class Switched:
 
     def __init__(self, statuses):
         self.last_result = SimpleNamespace(regions=[SimpleNamespace(status=s) for s in statuses])
-        self.reading, self.batch, self._batching, self.ready, self.busy = False, None, False, True, False
+        self.reading, self.ready, self.busy = False, True, False
         self.idle = []
 
     def after_idle(self, func):
@@ -131,12 +131,12 @@ class Switched:
 
 
 def test_translator_mode_over_a_cached_page_reads_what_the_cache_has_no_bubble_for():
-    """In reader mode a cached page's other regions are never read ("unmatched": mostly the drawing a run judged no
-    text); translator mode coming on reads the page again, so they are judged and the drawing is left out."""
+    """In reader mode a cached page's other regions are never read ("unmatched": mostly the drawing an earlier
+    reading judged no text); translator mode coming on reads the page again, so they are judged and the drawing is left out."""
     w = Switched(["translated", "unmatched"])
     w._complete_on_show()
     assert w.idle == [w.translate_now]
-    for change in ({"busy": True}, {"batch": object()}, {"ready": False}):
+    for change in ({"busy": True}, {"ready": False}):
         w = Switched(["translated", "unmatched"])
         w.__dict__.update(change)
         w._complete_on_show()

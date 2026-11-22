@@ -5,12 +5,10 @@ that a request extends the last one's prompt."""
 from __future__ import annotations
 
 import pytest
-from helpers import EN_TEXTS, JA_TEXTS, FakeOcr, read_book
-from test_batch import _fake_viewer
+from helpers import EN_TEXTS, FakeOcr
 from test_reask import Scripted
 
 from taslation.annotations import CharacterSheet, Glossary, GlossaryEntry
-from taslation.batch import BatchReader
 from taslation.cache import CacheStore
 from taslation.pipeline import Pipeline, foreign_script, is_real_translation, looping_reply
 from taslation.translate import DictTranslator
@@ -131,31 +129,3 @@ class Recording(DictTranslator):
         self.contexts.append(list(context))
         out = super().translate_page(texts, context, notes, upcoming, meta=meta, **kwargs)
         return ["没事的" if self.bad and self.bad(t) else o for t, o in zip(texts, out)]
-
-
-def test_the_translation_pass_carries_the_last_pairs(sample_page, sample_page2, settings, monkeypatch):
-    viewer = _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    settings.chunk_bubbles = 6  # a run a page
-    settings.context_pairs = 4
-    tr = Recording(EN_TEXTS)
-    cache = CacheStore(settings.cache_dir).open("Steps", "fake")
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr, cache=cache)
-    assert read_book(BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True)).finished
-    assert [len(c) for c in tr.contexts[:3]] == [0, 4, 4]
-    settings.context_pairs, viewer.index = 40, 0
-    tr = Recording(EN_TEXTS)
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr, cache=CacheStore(settings.cache_dir).open("Grows", "fake"))
-    assert read_book(BatchReader(pipeline, hwnd=1, settings=settings, context_mode=True)).finished
-    assert [len(c) for c in tr.contexts[:3]] == [0, 6, 12] and tr.contexts[2][:6] == tr.contexts[1]
-
-
-def test_a_refused_line_of_the_batch_stays_unstored_and_marks_its_page(sample_page, sample_page2, settings, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    line = JA_TEXTS[0]
-    tr = Recording(EN_TEXTS, bad=lambda t: t == line)
-    cache = CacheStore(settings.cache_dir).open("Refused", "fake")
-    pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr, cache=cache)
-    assert read_book(BatchReader(pipeline, hwnd=1, settings=settings, context_mode=False)).finished
-    assert any(page.incomplete for page in cache.pages)
-    assert not any("没" in b.text for page in cache.pages for b in page.bubbles)
-    assert sum(1 for call in tr.contexts) > len(cache.pages)  # it was asked for again

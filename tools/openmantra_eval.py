@@ -18,12 +18,13 @@ Inc.; CC BY-NC 4.0) is fetched by ``fetch_openmantra.py`` into ``~/.taslation/da
   one the target language chooses, PLaMo 3 Translate 2B for English and Chinese; the default settings, no series
   sheet) on the gold Japanese, against the professional English (``--target zh``: into Traditional Chinese, against
   the professional Chinese, compared without spaces): chrF as the model knockouts scored it (character n-grams 1-6,
-  beta 2), and the share of lines the review flags (``taslation.review``). ``--mode book`` (the default, as the app's
-  whole-book batch does it, `BatchReader._translation_pass` itself): every line known first, then runs of about 30
-  lines with the 40 previous pairs (and, for the chat translator, the next 60 lines) as context, the renderings and
-  size checks; ``--mode page``: the live path, one page per request with the last two pages as context. Every line is set in the geometry the
-  app would have: the detected region that matched its gold box, else the gold box (``--geometry gold``: always
-  the gold box, so detection changes cannot move the translation scores). This is the *official* arm: gold text in
+  beta 2), and the share of lines the review flags (``taslation.review``). The lines are translated as reading
+  translates them (`Pipeline._translate_regions`, what `Pipeline.process` asks for each page unit): a page at a time,
+  the series' pages in their order (``--behind N``: in the order of work of a reader who flips N pages past at a time,
+  `behind_order`), each request with the pairs of the pages before as context (`Pipeline.context_pairs`), the
+  renderings and size checks; a line on the console per page translated (`translate_series_page`). Every line is set
+  in the geometry the app would have: the detected region that matched its gold box, else the gold box (``--geometry
+  gold``: always the gold box, so detection changes cannot move the translation scores). This is the *official* arm: gold text in
   gold order, so that it measures the translation alone.
 * end to end (``--arm e2e`` or ``both``, needs the OCR): what the app itself hands the translator, the regions the
   pipeline reads as Japanese text, in its reading order, with the OCR's text, translated the same way; each gold line
@@ -49,7 +50,7 @@ every line's Japanese, translation and reference to FILE (JSON lines, for a pers
     python tools/openmantra_eval.py                          # all 214 pages (detection and OCR ~10 min, translation ~45)
     python tools/openmantra_eval.py --pages 4                # the first 4 pages of every series
     python tools/openmantra_eval.py --no-translate           # detection and OCR only (no Ollama needed)
-    python tools/openmantra_eval.py --no-ocr --series balloon_dream --mode page
+    python tools/openmantra_eval.py --no-ocr --series balloon_dream
     python tools/openmantra_eval.py --out results.json
     python tools/openmantra_eval.py --no-ocr --geometry gold --runs 3 --seed 1 --out a.json   # one arm of a comparison
     python tools/openmantra_eval.py --no-ocr --geometry gold --runs 3 --seed 1 --model qwen3.5:4b --out b.json
@@ -103,7 +104,7 @@ from taslation import netguard  # noqa: E402
 from taslation.config import Settings  # noqa: E402
 
 IOU = 0.5
-MODES = ("book", "page")
+MODES = ("page",)  # --mode: as reading translates, the only way (the option stays for the commands written with it)
 GEOMETRIES = ("detected", "gold")
 ARMS = ("official", "e2e", "both")
 REASONS = ("small", "rendering", "long", "short", "ocr", "spelling")  # taslation.review.REASONS
@@ -571,7 +572,7 @@ def make_sheet(series: str, language: str, entry: dict[str, Any] | None) -> Any:
 
 
 def _eval_pipeline(settings: Settings, translator: Any, sheet: Any = None) -> Any:
-    """The pipeline with `commit_unit` keeping the batch's translations and flags in memory (there is no cache),
+    """The pipeline with `commit_unit` keeping the pages' translations and flags in memory (there is no cache),
     and *sheet* as the book's series sheet, as the window gives it (`Pipeline.glossary` and its text)."""
     from taslation.pipeline import Pipeline
 
@@ -599,48 +600,6 @@ def page_size(page: openmantra.Page, page_items: Sequence[dict[str, Any]]) -> tu
     return max(xs), max(ys)
 
 
-def translate_series_book(settings: Settings, translator: Any, series: str, pages: list[openmantra.Page],
-                          geos: list[list[Any]], stats: _Stats, log: Any,
-                          items: list[list[dict[str, Any]]] | None = None,
-                          sheet: Any = None) -> list[dict[int, tuple[str, list[str]]]]:
-    """One series translated as the whole-book batch does it (`BatchReader._translation_pass`, after the reading);
-    per page, item index -> (translation, flags). *items*: what each page hands the translator (`gold_items`, the
-    default, or `e2e_items`); *sheet*: the series sheet (`make_sheet`)."""
-    from taslation.batch import BatchReader
-    from taslation.pipeline import ScannedRegion, ScannedUnit, mask_polygon, translation_room
-
-    if items is None:
-        items = [gold_items(page, geo) for page, geo in zip(pages, geos)]
-    pipeline = _eval_pipeline(settings, translator, sheet)
-    units = []
-    for page, page_items in zip(pages, items):
-        regions = []
-        for it in page_items:
-            bbox, mask, text_box, letter_box, kind = it["geo"]
-            anchor = letter_box or text_box
-            room = translation_room(mask, anchor, it["text"], settings, kind, bbox[0], bbox[1], pipeline.suggested_font)
-            regions.append(ScannedRegion(bbox=bbox, text_box=anchor, poly=mask_polygon(mask), source_text=it["text"],
-                                         status="untranslated", order=len(regions), kind=kind, room=room))
-        units.append(ScannedUnit(index=0, box=(0, 0, *page_size(page, page_items)),
-                                 fingerprint=f"{series}#{page.index}", aspect=1.0, regions=regions))
-
-    def told(p: Any, _result: Any) -> None:
-        if getattr(p.message, "code", "") == "batch.translated_chunk":
-            params = p.message.params
-            log(f"  {series}: run {params['chunk']}/{params['chunks']}, {params['bubbles']} lines so far, {params['seconds']:.0f} s")
-
-    reader = BatchReader(pipeline, 0, settings, on_progress=told, context_mode=True, book=series)
-    reader._translation_pass([u for u in units if u.japanese()], time.monotonic())
-    stats.requests_failed += reader.progress.errors
-    out = []
-    for unit, page_items in zip(units, items):
-        kept = pipeline.kept.get(unit.fingerprint, {})
-        if len(kept) < len(page_items):
-            stats.left_incomplete += 1
-        out.append(dict(kept))
-    return out
-
-
 def behind_order(count: int, behind: int) -> list[tuple[int, bool]]:
     """The order of work of *count* pages read as a reader who flips *behind* pages past at a time and reads the page
     after them does, the pages turned past then translated behind the reader (`backlog`: with nothing after the page
@@ -665,7 +624,8 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
     as context); per page, item index -> (translation, flags). *between*(pipeline), when given, after every page: what
     the window does while the reader reads (``--warm``: `Pipeline.warm_soon`). *behind* (``--behind``): the pages in
     the order of work of a reader who flips that many pages past at a time (`behind_order`), each request given every
-    pair so far in the order of work, as the app gives them."""
+    pair so far in the order of work, as the app gives them. After every page a line to *log*: ``SERIES: page N/M
+    translated, L lines so far, S s`` (the benchmark's progress on the runners, `summarise.bench_progress`)."""
     from taslation.regions import TextRegion
 
     if items is None:
@@ -673,7 +633,8 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
     pipeline = _eval_pipeline(settings, translator, sheet)
     outs: dict[int, dict[int, tuple[str, list[str]]]] = {}
     t0 = time.monotonic()
-    for index, _back in behind_order(len(pages), behind):
+    lines = 0
+    for done, (index, _back) in enumerate(behind_order(len(pages), behind), 1):
         page, page_items = pages[index], items[index]
         regions = []
         for it in page_items:
@@ -688,14 +649,15 @@ def translate_series_page(settings: Settings, translator: Any, series: str, page
         if any(r.status != "translated" for r in regions):
             stats.left_incomplete += 1
         outs[index] = {k: (r.translated_text, list(r.flags)) for k, r in enumerate(regions) if r.status == "translated"}
+        lines += len(outs[index])
         if between is not None:
             between(pipeline)
-    log(f"  {series}: {len(pages)} pages in {time.monotonic() - t0:.0f} s")
+        log(f"  {series}: page {done}/{len(pages)} translated, {lines} lines so far, {time.monotonic() - t0:.0f} s")
     return [outs[i] for i in range(len(pages))]
 
 
 def translate_all(settings: Settings, translator: Any, groups: dict[str, list[openmantra.Page]],
-                  rows: list[dict[str, Any]], geos: dict[tuple[str, int], list[Any]], mode: str,
+                  rows: list[dict[str, Any]], geos: dict[tuple[str, int], list[Any]],
                   stats: _Stats, log: Any, arm: str = "official",
                   e2e: dict[tuple[str, int], list[dict[str, Any]]] | None = None,
                   sheets: dict[str, Any] | None = None, names: dict[str, dict[str, Any]] | None = None,
@@ -703,26 +665,27 @@ def translate_all(settings: Settings, translator: Any, groups: dict[str, list[op
     """One run of the translation over every series in the *arm* "official" (the rows' ``lines``) or "e2e" (their
     ``e2e_lines``, from *e2e*: the regions of each page, `e2e_items`): copies of *rows* with their scored lines.
     *sheets*: a series sheet per series; *names*: the names of each series (`load_names`); *dump*: a file every
-    line's text goes to (``--dump``); *warm* (page mode): after every page, the warming the window does while the
-    reader reads (`Pipeline.warm_soon`, waited for)."""
+    line's text goes to (``--dump``); *warm*: after every page, the warming the window does while the reader reads
+    (`Pipeline.warm_soon`, waited for); *behind*: `translate_series_page`'s. Every series page by page
+    (`translate_series_page`)."""
     out_rows = [dict(r) for r in rows]
     by_row = {(r["series"], r["page"]): r for r in out_rows}
-    translate = translate_series_book if mode == "book" else translate_series_page
     extra: dict[str, Any] = {}
-    if warm and mode == "page":
+    if warm:
         def warmed(pipeline: Any) -> None:
             if pipeline.warm_soon() and pipeline._warm_thread is not None:
                 pipeline._warm_thread.join()
 
         extra["between"] = warmed
-    if behind and mode == "page":
+    if behind:
         extra.update(behind=behind)
     for name, group in groups.items():
         group = [p for p in group if (p.series, p.index) in by_row]
         g = [geos[(p.series, p.index)] for p in group]
         items = ([gold_items(p, geo) for p, geo in zip(group, g)] if arm == "official"
                  else [(e2e or {}).get((p.series, p.index), []) for p in group])
-        outs = translate(settings, translator, name, group, g, stats, log, items, (sheets or {}).get(name), **extra)
+        outs = translate_series_page(settings, translator, name, group, g, stats, log, items, (sheets or {}).get(name),
+                                     **extra)
         series_names = (names or {}).get(name)
         for page, page_items, out in zip(group, items, outs):
             row = by_row[(page.series, page.index)]
@@ -886,7 +849,7 @@ def scan_key(root: Path, s: Settings, args: Any, pages: Sequence[openmantra.Page
     """What a ``--scan`` file must have been made with to be read again: the dataset, the pages, and the settings
     and options the detection and the OCR depend on."""
     detect = {k: v for k, v in _settings_record(s).items()
-              if not k.startswith(("ollama", "translat", "chunk", "context", "lookahead", "target", "batch"))}
+              if not k.startswith(("ollama", "translat", "context", "target"))}
     return {"version": SCAN_VERSION, "archive": _archive_sha(root), "annotation": _file_sha(root / "annotation.json"),
             "pages": [[p.series, p.index] for p in pages], "ocr": not args.no_ocr, "geometry": args.geometry,
             "iou": args.iou, "settings": detect}
@@ -932,12 +895,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pages", type=int, default=0, help="only the first N pages of every series")
     ap.add_argument("--no-ocr", action="store_true", help="no OCR: detection candidates only, no CER")
     ap.add_argument("--no-translate", action="store_true", help="no translation (Ollama is not needed)")
-    ap.add_argument("--mode", choices=MODES, default="book", help="book: as the whole-book batch (default); page: as live reading")
+    ap.add_argument("--mode", choices=MODES, default="page", help="page: as reading translates, a page at a time (the only one)")
     ap.add_argument("--arm", choices=ARMS, default="official",
                     help="official: gold text in gold order (default); e2e: the pipeline's regions, order and OCR text; both")
     ap.add_argument("--geometry", choices=GEOMETRIES, default="detected",
                     help="where each line is set: the matched detected region, else the gold box (default); or always the gold box")
-    ap.add_argument("--chunk-bubbles", type=int, help="the setting of that name: lines per request in book mode (default: TASlation's)")
     ap.add_argument("--model", help="the Ollama model (default: the one the target language chooses, as the app)")
     ap.add_argument("--url", help="the Ollama server, on this machine (default: the app's, 127.0.0.1:11434): a "
                                   "second server of the developer's own, on another port")
@@ -954,10 +916,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int,
                     help="Ollama's sampling seed (run k uses SEED + k - 1); default none, a fresh draw every time, as the app")
     ap.add_argument("--warm", action="store_true",
-                    help="page mode: after every page, the warming the window does while the reader reads "
+                    help="after every page, the warming the window does while the reader reads "
                          "(`Pipeline.warm_soon`, waited for)")
     ap.add_argument("--behind", type=int, default=0,
-                    help="page mode: the pages in the order of work of a reader who flips N pages past at a time and "
+                    help="the pages in the order of work of a reader who flips N pages past at a time and "
                          "reads the page after them, those turned past translated behind the reader (`backlog`)")
     ap.add_argument("--iou", type=float, default=IOU, help="least overlap for a region to count as a gold box")
     ap.add_argument("--scan", type=Path, help="keep the detection and the OCR in this file and reuse them (no image)")
@@ -1000,8 +962,6 @@ def main(argv: list[str] | None = None) -> int:
         s.ollama_url = args.url
         s.validate()  # (loopback only)
         netguard.install(allowed_ports={s.ollama_port})
-    if args.chunk_bubbles:
-        s.chunk_bubbles = args.chunk_bubbles
     if args.detect_model:
         s.detect_model = args.detect_model
     if args.no_slant:
@@ -1144,8 +1104,8 @@ def _main(args: argparse.Namespace, s: Settings, arms: list[str], scan_path: Pat
                     stats = _Stats()
                     t_run = time.monotonic()
                     first_request = len(tr.stats_log)
-                    run_rows = translate_all(s, tr, groups, rows, geos, args.mode, stats, log, arm, e2e, sheets, names,
-                                             dump, k + 1, warm=args.warm, behind=args.behind)
+                    run_rows = translate_all(s, tr, groups, rows, geos, stats, log, arm, e2e, sheets, names, dump, k + 1,
+                                             warm=args.warm, behind=args.behind)
                     speed = speed_of(tr.stats_log[first_request:])
                     speed["ps"] = _loaded(tr, model_name)
                     speed["s_per_page"] = round((time.monotonic() - t_run) / max(1, len(rows)), 2)

@@ -66,7 +66,7 @@ def test_write_settings_changes_the_lines_of_its_settings_alone(tmp_path):
     path = tmp_path / "taslation.toml"
     before = EXAMPLE.read_text(encoding="utf-8")
     path.write_text(before, encoding="utf-8")
-    values = {"min_font_size": 10, "uppercase": True, "ui_scale": 1.25, "scan_mode": "book", "always_on_top": True,
+    values = {"min_font_size": 10, "uppercase": True, "ui_scale": 1.25, "always_on_top": True,
               "detect_model": "on", "art_erase": "lama"}
     assert write_settings(path, values) == path
     old, new = before.splitlines(), path.read_text(encoding="utf-8").splitlines()
@@ -191,10 +191,6 @@ def test_the_dialog_shows_the_settings_in_force(hidden_root, in_force):
     assert d.path == in_force.config_path and d.path_field.get() == str(in_force.config_path)
     assert d.models_line == "Not installed on this computer: run install.cmd again and agree to them."
     assert d.scale.get() == "100 %" and dlg.scale_of("125 %") == 1.25 and dlg.scale_label(1.75) == "175 %"
-    assert d.terms_label.winfo_manager() == ""  # page by page: no note on a store's terms
-    d.mode.set("book")
-    d._show_terms()
-    assert d.terms_label.winfo_manager() == "grid" and str(d.terms_label.cget("text"))
 
 
 def test_save_writes_what_changed_and_hands_it_on(hidden_root, in_force):
@@ -208,12 +204,10 @@ def test_save_writes_what_changed_and_hands_it_on(hidden_root, in_force):
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=saved)
     d.sizes["min_font_size"].set("10")
     d.uppercase.set(True)
-    d.mode.set("book")
     d.on_top.set(True)
     d.detect.set(_("Always used"))
     assert d.save() is True
-    changed = {"min_font_size": 10, "uppercase": True, "scan_mode": "book", "always_on_top": True,
-               "detect_model": "on"}
+    changed = {"min_font_size": 10, "uppercase": True, "always_on_top": True, "detect_model": "on"}
     assert got == [changed] and d.message_var.get() == "Saved. The changes apply now."
     text = in_force.config_path.read_text(encoding="utf-8")
     assert text.startswith(NEW_FILE_HEADER) and '# ollama_url = "http://127.0.0.1:11434"' in text
@@ -444,7 +438,7 @@ def _window(hidden_root, tmp_path):
         settings=Settings(state_dir=tmp_path), top_var=tk.BooleanVar(hidden_root, value=False),
         _apply_on_top=lambda: done.append("on top"), _dpi_watch=SimpleNamespace(rescale=lambda: done.append("scale")),
         _jobs=SimpleNamespace(put=lambda job: done.append(("job", job))), _job_settings_changed="rebuild",
-        last_result=SimpleNamespace(original="the page"), busy=False, batch=None,
+        last_result=SimpleNamespace(original="the page"), busy=False,
         _start_translate=lambda original, complete=False: done.append(("again", original, complete)))
     return w, done
 
@@ -455,8 +449,8 @@ def test_saved_settings_are_set_on_the_window_and_applied_at_once(hidden_root, t
     assert w.settings.always_on_top and w.settings.ui_scale == 1.25 and w.settings.uppercase and w.top_var.get()
     assert done == ["on top", "scale", ("job", "rebuild"), ("again", "the page", True)]
     done.clear()
-    app_mod.App._settings_saved(w, {"scan_mode": "book"})  # nothing on the page changes
-    assert w.settings.scan_mode == "book" and done == []
+    app_mod.App._settings_saved(w, {"hover_delay_ms": 900})  # nothing on the page changes
+    assert w.settings.hover_delay_ms == 900 and done == []
     w.busy = True
     app_mod.App._settings_saved(w, {"detect_model": "on"})
     assert done == [("job", "rebuild")]  # a page under way: the next one is made with the new models

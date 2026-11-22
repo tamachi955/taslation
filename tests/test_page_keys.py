@@ -18,7 +18,6 @@ from taslation.config import ConfigError, Settings
 from taslation.pagekeys import BUILTIN_PRESETS, DEFAULT_KEYS, KEY_PRESETS, PageKeys, Profiles, page_keys_for, valid_key
 from taslation.ui import app as app_mod
 from taslation.ui.dialogs.pagekeys import PRESET_LABELS, PageKeysDialog, check_keys
-from taslation.ui.live import BlackViewerMixin
 from test_follow import _page, setup  # noqa: F401 - setup is test_follow's fixture
 
 A = app_mod.App
@@ -154,86 +153,6 @@ def test_apply_to_all_viewers_writes_every_profile_and_the_defaults(tmp_path):
     assert p.viewers() == ["An Image Viewer", "Another Reader"]
     assert page_keys_for(p, settings, "A viewer never seen") == BUILTIN_PRESETS["left-to-right"]
     assert settings.next_page_key == "Left"  # the settings are not rewritten
-
-
-class Band(BlackViewerMixin, tk.Toplevel):
-    """What the scan band uses, as `test_start_flow.Flow` borrows them."""
-
-    _init_flow_state = A._init_flow_state
-    _batch_done = A._batch_done
-    _sync_stop = A._sync_stop
-    _set_stop = A._set_stop
-    stop_batch = A.stop_batch
-    close_band = A.close_band
-    _page_keys = A._page_keys
-    open_batch_dialog = A.open_batch_dialog
-    say = A.say
-    status = A.status
-    _note_ms = A._note_ms
-    _build_strips = A._build_strips
-    _place_strip = A._place_strip
-    _band_view = A._band_view
-    _show_band = A._show_band
-    _show_banner = A._show_banner
-    _fill = _job_frame = None
-    _hide_busy = lambda self: None  # noqa: E731
-    _set_busy = lambda self, busy: None  # noqa: E731
-    _apply_found_margins = lambda self: None  # noqa: E731
-    _run_queued = _offer_colophon = lambda self: None  # noqa: E731
-
-    def __init__(self, root, tmp_path, profiles=None):
-        super().__init__(root)
-        self.withdraw()
-        self._init_flow_state()
-        self.settings = Settings(state_dir=tmp_path / "state")
-        self.settings.settle_ms = 0
-        self.profiles = profiles if profiles is not None else Profiles(tmp_path / "state" / "profiles.json")
-        self.status_var = tk.StringVar(self)
-        self.auto_var = tk.BooleanVar(self, value=False)
-        self.stop_btn, self.batch_btn, self.translate_btn = {}, {}, {}
-        self.selected, self.batch, self.busy, self.reading, self.ready = VIEWER, None, False, False, True
-        self._batching = self._resume_auto = False
-        self._status_render = self._status_key = self._auto_last = None
-        self._health, self._scan_held = [], False
-        self.canvas = SimpleNamespace(set_note=lambda *a: None, set_busy=lambda *a: None)
-        self.frames = [_frame()]
-        self.later: list = []
-        self._build_strips()
-
-    def title(self, text=None):
-        pass
-
-    def after(self, ms, func=None, *args):
-        self.later.append(func)
-        return f"after#{len(self.later)}"
-
-    def after_cancel(self, _id):
-        pass
-
-    def run_later(self, limit=200):
-        for _ in range(limit):
-            if not self.later:
-                return
-            self.later.pop(0)()
-        raise AssertionError("still running")
-
-    def _capture(self, hwnd):
-        return self.frames[-1]
-
-    def _book_in_front(self):
-        return True
-
-    def _current_window(self):
-        return self.selected
-
-    def _own_hwnd(self):
-        return None
-
-    def _hide_busy(self):
-        pass
-
-    def _name_needed(self):
-        return False
 
 
 # ------------------------------------------------------------------ the command line

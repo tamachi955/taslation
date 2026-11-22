@@ -21,7 +21,6 @@ from taslation.ui import app as app_mod
 from taslation.ui import tooltip
 from taslation.ui.dialogs import help as help_mod
 from taslation.ui.dialogs.area import AreaDialog
-from taslation.ui.dialogs.batch import BatchDialog
 from taslation.ui.dialogs.book_settings import BookSettingsDialog
 from taslation.ui.dialogs.caches import CachesDialog
 from taslation.ui.dialogs.glossary import GlossaryDialog
@@ -97,11 +96,11 @@ def _guide_keys() -> list[str]:
     return [key for heading, paragraphs in TOPICS for key in (heading, *paragraphs)] + list(FIRST_LINES)
 
 
-def test_eight_topics_of_about_forty_lines_each_in_every_language():
-    assert [heading for heading, _p in TOPICS] == ["Getting started", "Full screen", "Reading a whole book", "Page keys",
-                                                   "The Translator role", "Keys", "When something goes wrong", "Your data"]
-    # (+2: the page strip of a run; +2: over a full-screen viewer; +1: a page gone by; +1: the viewer's own full screen
-    # is the person's to switch; +1: Tab, Alt with the arrows and Help > Keys...; +1: the full screen in each role)
+def test_seven_topics_of_about_forty_lines_each_in_every_language():
+    assert [heading for heading, _p in TOPICS] == ["Getting started", "Full screen", "Page keys", "The Translator role",
+                                                   "Keys", "When something goes wrong", "Your data"]
+    # (+2: over a full-screen viewer; +1: a page gone by; +1: the viewer's own full screen is the person's to switch;
+    # +1: Tab, Alt with the arrows and Help > Keys...; +1: the full screen in each role)
     assert 36 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 54
     for key in _guide_keys() + ["How to use...", "How to use TASlation"]:
         for code in FEATURE_LANGUAGES:
@@ -137,8 +136,6 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
     """The menus and buttons named in the topics are the window's own words in that language."""
     catalog = CATALOGS[code]
     named = {
-        "Open the book at the first page you want, then choose Read whole book... and Start.":
-            (catalog["Read whole book..."], catalog["Start"]),
         "Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.":
             (catalog["Page"], catalog["Page keys..."]),
         "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings, an error log with no text of a book and the time of the last look for a new version, with the newest version found, are kept too, in the folder named in Help > About TASlation.":
@@ -151,7 +148,7 @@ def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
             (catalog["Full screen"],),
         "In the Reader role the page keys and clicks on the page go to the viewer, and Auto is on until you leave, so each page you turn is translated.":
             (catalog["Reader"],),
-        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, or to start a whole-book run, leave the full screen first.":
+        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, leave the full screen first.":
             (catalog["Translator"],),
         "A bubble stays untranslated: press F5. If it is still empty, choose the Translator role and drag from outside the text to draw a rectangle round it; if an orange box is already there, drag or resize that box instead.":
             (catalog["Translator"],),
@@ -361,7 +358,7 @@ def test_the_popup_waits_for_the_legal_notice(tmp_path, hidden_root, monkeypatch
 
 def test_the_popup_waits_for_a_books_start_and_gives_way_to_a_dialog_that_holds_the_window(tmp_path, hidden_root,
                                                                                             monkeypatch):
-    """One window at a time: the start dialog ("Read the whole book first?") comes first and the popup after it, for
+    """One window at a time: the start dialog (the book's name) comes first and the popup after it, for
     the popup's last step is what follows the answer; a dialog that comes while the popup is up puts it away,
     unclosed, until the dialog is answered."""
     w = Window(hidden_root, tmp_path)
@@ -672,30 +669,6 @@ def test_a_long_explanation_is_broken_into_lines(hidden_root):
     shown = str(box.label.cget("text"))
     assert shown.count("\n") >= 2 and shown.replace("\n", "") == _(key) * 3
     box.destroy()
-
-
-def test_the_batch_dialog_keeps_what_to_do_and_the_stores_terms_in_view(hidden_root, tmp_path):
-    from taslation.ui.dialogs.start import terms_note
-
-    d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path), on_start=lambda options: None)
-    d.withdraw()
-    explanation = next(iter(_explained(d)))
-    assert explanation.startswith("Turn the pages at your own pace") and "No page image is written to disk" in explanation
-    labels = _labels(d)
-    assert "Open the book at the first page you want translated, then press Start and turn the pages." in labels
-    assert not any("never turns a page" in text for text in labels)
-    assert " ".join(terms_note().split()) in labels  # legal: stays in view, whole
-    d.destroy()
-
-
-def test_the_batch_dialog_asks_for_no_number_and_the_settings_limit_the_run(hidden_root, tmp_path):
-    started = []
-    settings = Settings(state_dir=tmp_path, batch_max_pages=123)
-    d = BatchDialog(hidden_root, VIEWER, settings, on_start=started.append)
-    d.withdraw()
-    assert not [c for c in _widgets(d) if c.winfo_class() == "TSpinbox"]
-    next(c for c in _widgets(d) if c.winfo_class() == "TButton" and str(c.cget("text")) == "Start").invoke()
-    assert started[0][1] == 123
 
 
 def test_the_area_dialogs_instructions_are_behind_the_question_mark(hidden_root):

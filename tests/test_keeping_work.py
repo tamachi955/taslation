@@ -4,17 +4,15 @@ order on a cached page."""
 from __future__ import annotations
 
 import errno
-import json
 import threading
 from types import SimpleNamespace
 
 import pytest
-from helpers import EN_TEXTS, FakeOcr, read_book, store_json
-from test_batch import _fake_viewer
+from helpers import EN_TEXTS, FakeOcr, store_json
 
 from taslation import cache as cachemod
 from taslation.annotations import AnnotationStore
-from taslation.batch import BatchReader, fatal
+from taslation.translate.sequence import fatal
 from taslation.cache import CachedBubble, CachedPage, CacheStore, TextEdit
 from taslation.config import Settings
 from taslation.messages import Message
@@ -68,14 +66,6 @@ def test_a_run_keeps_a_typed_translation_of_a_manual_region_the_ocr_cannot_read(
     assert unit.dropped == 0 and TYPED in [b.text for b in unit.kept]
     assert TYPED in on_disk(cache)
     assert any(r.translated_text == TYPED for r in p.process(sample_page).regions)
-
-
-def test_a_run_that_translates_again_keeps_it_too(settings, sample_page):
-    p, cache = manual_page(settings, sample_page)
-    scan = p.scan(sample_page, skip_cached=True, fresh=True)
-    assert TYPED in [b.text for b in scan.units[0].kept]
-    p.commit_unit(scan.units[0], {})
-    assert TYPED in on_disk(cache)
 
 
 def test_a_gate_on_a_second_pass_drops_no_stored_translation(settings, sample_page, monkeypatch):
@@ -312,35 +302,6 @@ def test_a_failed_save_is_said(settings, sample_page, sample_page2, monkeypatch)
     assert "status" not in w.kinds()
 
 
-@pytest.mark.parametrize("context_mode", [False, True])
-def test_a_run_on_a_full_disk_ends_and_says_why(context_mode, settings, sample_page, sample_page2, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    cache = CacheStore(settings.cache_dir).open("Full run", "m")
-    p = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS, default="ok"), cache=cache)
-    monkeypatch.setattr(cachemod, "write_atomic", full_disk)
-    progress = read_book(BatchReader(p, hwnd=1, settings=settings, context_mode=context_mode))
-    assert progress.reason == Message("batch.save_failed", error="No space left on device")
-    assert progress.pages == (3 if context_mode else 0)  # not one page more; a whole-book run stores after the last
-    assert progress.summary.code == "batch.finished" and "cannot be saved" in str(progress.summary)
-
-
-def test_stop_does_not_hide_a_failed_save(settings, sample_page, sample_page2, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    cache = CacheStore(settings.cache_dir).open("Full stop", "m")
-    p = Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS, default="ok"), cache=cache)
-    reader = BatchReader(p, hwnd=1, settings=settings, context_mode=False)
-    monkeypatch.setattr(cachemod, "write_atomic", full_disk)
-    real = p.process
-
-    def process(*a, **k):
-        out = real(*a, **k)
-        reader.stop()
-        return out
-
-    p.process = process
-    assert "cannot be saved" in str(read_book(reader).summary)
-
-
 def test_annotations_that_cannot_be_saved_are_said_too(settings, sample_page, monkeypatch):
     annotations = AnnotationStore(settings.annotations_dir).open("Locked")
     p = Pipeline(settings, ocr=FakeOcr(), translator=None, annotations=annotations)
@@ -389,12 +350,3 @@ def test_a_model_of_the_readers_gets_the_pull_command(settings):
 def test_the_default_model_goes_to_install_cmd(settings):
     error = OllamaTranslator(model="qwen3.5:4b")._http_failure(404, MISSING, "/api/chat").message
     assert error.code == "ollama.model_missing" and "install.cmd" in str(error) and fatal(error)
-
-
-def test_batch_save_failed_reads_in_every_language():
-    from taslation.message_texts import LANGUAGES, catalog
-    from taslation.messages import render
-
-    for lang in LANGUAGES:
-        text = render(Message("batch.save_failed", error="E!"), catalog(lang))
-        assert "E!" in text and "{" not in text, lang

@@ -3,9 +3,9 @@ request before it, on the OpenMantra pages (``fetch_openmantra.py``), counted wi
 
 The PLaMo translator's server keeps the tokens of the last request it computed, its prompt and the answer it wrote,
 and reuses them for the next request as far as that one begins with them (`translate.base`, "earlier pairs that only
-grow"). This tool runs the gold Japanese of the pages through the app's own translating paths, as
-``openmantra_eval.py`` does in its official arm: ``--mode page`` page by page (`Pipeline._translate_regions`, what a
-reader runs), ``--mode book`` as the whole-book run (`BatchReader._translation_pass`), ``--mode both`` (the default).
+grow"). This tool runs the gold Japanese of the pages through the app's own translating path, as
+``openmantra_eval.py`` does in its official arm: page by page (`Pipeline._translate_regions`, what a reader runs;
+``--mode page``, the only one, is still taken).
 The model's call is a stand-in (`Recorder`) that answers every line with the professional English of OpenMantra
 (``--answers gold``), so that nothing needs Ollama, or the real model through the server (``--answers live``: Ollama's
 own counters of every request are read then, and set beside the counts; nothing else changes). For every request it
@@ -26,7 +26,7 @@ element that differs):
 * ``re-ask``, ``romanised``, ``aside``: a request beside the main ones (`ask_for_missing`, `ask_again_romanised`,
   `PlamoTranslator.translate_aside`), with a history of its own; and ``after re-ask`` (and so on): a main request that
   would have extended the main request before it, had the request beside it not come in between;
-* ``warm`` (``--warm``, page mode): a step of the warming the window does while the reader reads
+* ``warm`` (``--warm``): a step of the warming the window does while the reader reads
   (`Pipeline.warm_soon`, `PlamoTranslator.warm_prefix`), done here after every page; it is never one of the main
   requests, and ``main_prompts`` says whether those are the very same with it and without it (their number and a
   digest of their prompts in their order; with ``--answers gold`` they must be).
@@ -41,10 +41,10 @@ pairs, the whole for one that parts further back or in its ``context``.
 Prints counts and token estimates only; ``--out`` writes the same numbers as JSON. No text of a page is written or
 printed anywhere: the prompts and answers stay in memory, the last two at a time.
 
-    python tools/prompt_replay.py                                  # both modes, every series, gold answers
-    python tools/prompt_replay.py --mode page --series balloon_dream
+    python tools/prompt_replay.py                                  # every series, gold answers
+    python tools/prompt_replay.py --series balloon_dream
     python tools/prompt_replay.py --answers live --pages 4 --seed 1 --url http://127.0.0.1:11435 --out live.json
-    python tools/prompt_replay.py --mode page --warm                # the warming between pages: the same prompts?
+    python tools/prompt_replay.py --warm                           # the warming between pages: the same prompts?
 """
 
 from __future__ import annotations
@@ -464,12 +464,11 @@ def report(name: str, s: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------------------------- the runs
-def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Page]], answers: str, url: str,
-             seed: int | None, lines_most: int, sheets: dict[str, Any] | None = None,
-             warm: bool = False) -> dict[str, Any]:
-    """Every series through *mode*'s path with a `Recorder`; the tally's summary. *warm* (page mode): after every
-    page, the warming the window does while the reader reads (`Pipeline.warm_soon`, waited for)."""
-    import taslation.batch as batch_mod
+def run_pages(settings: Settings, groups: dict[str, list[openmantra.Page]], answers: str, url: str,
+              seed: int | None, lines_most: int, sheets: dict[str, Any] | None = None,
+              warm: bool = False) -> dict[str, Any]:
+    """Every series page by page (`openmantra_eval.translate_series_page`) with a `Recorder`; the tally's summary.
+    *warm*: after every page, the warming the window does while the reader reads (`Pipeline.warm_soon`, waited for)."""
     import taslation.pipeline as pipe_mod
 
     gold: dict[str, str] = {}
@@ -486,17 +485,15 @@ def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Pa
     def stand_in(source: str) -> str:
         return "\n".join(gold.get(" ".join(line.split()), "") for line in source.split("\n"))
 
-    for module in (pipe_mod, batch_mod):
-        _beside(module, "ask_for_missing", "re-ask")
-        _beside(module, "ask_again_romanised", "romanised")
+    _beside(pipe_mod, "ask_for_missing", "re-ask")
+    _beside(pipe_mod, "ask_again_romanised", "romanised")
     rec = Recorder(stand_in if answers == "gold" else None, tally.add, where.get, url=url, seed=seed,
                    target_language=settings.target_language)
     CURRENT.append(rec)
     if answers == "live":
         ev._keep_stats(rec)
-    translate = ev.translate_series_book if mode == "book" else ev.translate_series_page
     extra: dict[str, Any] = {}
-    if warm and mode == "page":
+    if warm:
         def warmed(pipeline: Any) -> None:
             if pipeline.warm_soon() and pipeline._warm_thread is not None:
                 pipeline._warm_thread.join()
@@ -511,7 +508,8 @@ def run_mode(mode: str, settings: Settings, groups: dict[str, list[openmantra.Pa
         tally.new_book(name)
         rec._asked.clear()  # (each series drawn as a book of its own)
         geos = [[None] * len(p.bubbles) for p in pages]
-        translate(settings, rec, name, pages, geos, stats, lambda _m: None, None, (sheets or {}).get(name), **extra)
+        ev.translate_series_page(settings, rec, name, pages, geos, stats, lambda _m: None, None,
+                                 (sheets or {}).get(name), **extra)
         done += sum(1 for p in pages for b in p.bubbles if ev.ja_line(b))
     out = summarise(tally.rows)
     out["main_prompts"] = {"requests": tally.main_n, "digest": tally.main_digest.hexdigest()[:16]}
@@ -533,7 +531,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=openmantra.DEFAULT_ROOT, help="the dataset folder")
     ap.add_argument("--series", action="append", help="only this series (repeatable)")
     ap.add_argument("--pages", type=int, default=0, help="only the first N pages of every series")
-    ap.add_argument("--mode", choices=("page", "book", "both"), default="both")
+    ap.add_argument("--mode", choices=("page",), default="page",
+                    help="page: page by page, as reading translates (the only one)")
     ap.add_argument("--answers", choices=("gold", "live"), default="gold",
                     help="gold: the professional English, no server (default); live: the model through the server")
     ap.add_argument("--url", default="http://127.0.0.1:11434", help="the Ollama server (--answers live)")
@@ -541,7 +540,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lines", type=int, default=0, help="stop after the series that reach about N lines")
     ap.add_argument("--glossary", type=Path, help="a series sheet per series, as openmantra_eval.py takes it")
     ap.add_argument("--out", type=Path, help="the numbers as JSON")
-    ap.add_argument("--warm", action="store_true", help="page mode: the warming between pages (`Pipeline.warm_soon`)")
+    ap.add_argument("--warm", action="store_true", help="the warming between pages (`Pipeline.warm_soon`)")
     ap.add_argument("--start-ollama", type=int, metavar="PORT",
                     help="--answers live from the Ollama TASlation's own starter starts on this spare port, stopped at "
                          "the end (as `openmantra_eval.py --start-ollama`); --url is left out")
@@ -571,17 +570,15 @@ def _run(args: argparse.Namespace, s: Settings, groups: dict[str, list[openmantr
     results: dict[str, Any] = {"tool": "prompt_replay", "answers": args.answers, "warm": args.warm,
                                "series": list(groups),
                                "pages": sum(len(v) for v in groups.values()), "sheets": sorted(sheets), "modes": {}}
-    for mode in (("page", "book") if args.mode == "both" else (args.mode,)):
-        got = run_mode(mode, s, groups, args.answers, args.url, args.seed, args.lines, sheets, warm=args.warm)
-        results["modes"][mode] = got
-        print(report(f"{mode} mode", got), flush=True)
-        print(f"  main requests {got['main_prompts']['requests']}, their prompts' digest "
-              f"{got['main_prompts']['digest']}", flush=True)
-        if got.get("first_of_page_prompt_ms"):
-            print(f"  a page's first request, the server's prompt time (ms): {got['first_of_page_prompt_ms']}",
-                  flush=True)
-        print(f"  ({got['lines']} lines, {got['seconds']} s, {got['requests_failed']} requests failed, "
-              f"{got['pages_incomplete']} pages incomplete)\n", flush=True)
+    got = run_pages(s, groups, args.answers, args.url, args.seed, args.lines, sheets, warm=args.warm)
+    results["modes"]["page"] = got  # (the place of the numbers as before, when a second mode stood beside it)
+    print(report("page mode", got), flush=True)
+    print(f"  main requests {got['main_prompts']['requests']}, their prompts' digest "
+          f"{got['main_prompts']['digest']}", flush=True)
+    if got.get("first_of_page_prompt_ms"):
+        print(f"  a page's first request, the server's prompt time (ms): {got['first_of_page_prompt_ms']}", flush=True)
+    print(f"  ({got['lines']} lines, {got['seconds']} s, {got['requests_failed']} requests failed, "
+          f"{got['pages_incomplete']} pages incomplete)\n", flush=True)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(results, indent=1), encoding="utf-8")

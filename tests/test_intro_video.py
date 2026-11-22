@@ -1,7 +1,7 @@
 """The README's introduction tool (tools/intro_video.py) without a window, a model or a manga page: the scenes'
 table (ids, order, what this checkout has, texts that fit a 960x540 frame, headers on one line), the scenes picked and
 numbered as the GIF is made, every card line and step following sentences that still stand word for word in README.md,
-docs/MANUAL.md or docs/THIRD_PARTY.md (or marked as the tool's own words), the cards' facts against the code's
+docs/MANUAL.md, docs/THIRD_PARTY.md or docs/LEGAL.md (or marked as the tool's own words), the cards' facts against the code's
 constants and with nothing that compares or boasts, the version on the
 title card and the credit on every frame with a page, the 5 MB limit, a GIF of made-up frames and one of a recording
 (deleted once the GIF is written), no page text in a recording's facts, and the guard that refuses another
@@ -26,7 +26,7 @@ import intro_video as iv  # noqa: E402
 import promo_video as pv  # noqa: E402
 
 ORDER = ("viewer", "next_page", "original", "turned_past", "language", "sheet", "edit", "region", "undo", "add_region",
-         "full_screen", "whole_book")
+         "full_screen")
 
 
 def quick(**kw) -> iv.Options:
@@ -138,15 +138,14 @@ def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypat
     assert here["turned_past"] == ((ROOT / "taslation" / "backlog.py").is_file()
                                    and (ROOT / "taslation" / "ui" / "side.py").is_file())
     assert all(present for scene_id, present in here.items() if scene_id != "turned_past")
-    absent = {"taslation.backlog", "taslation.ui.dialogs.batch"}
-    monkeypatch.setattr(iv, "has_module", lambda name: name not in absent)
+    monkeypatch.setattr(iv, "has_module", lambda name: name != "taslation.backlog")
     rows = {row["id"]: row["present"] for row in iv.scene_rows()}
-    assert rows["turned_past"] is False and rows["whole_book"] is False
+    assert rows["turned_past"] is False
     assert rows["viewer"] is True and rows["undo"] is True
     picked = [s.id for s in iv.pick_scenes(None)]
-    assert "turned_past" not in picked and "whole_book" not in picked and len(picked) == len(ORDER) - 2
+    assert "turned_past" not in picked and len(picked) == len(ORDER) - 1
     with pytest.raises(SystemExit, match="not in this checkout"):
-        iv.pick_scenes("viewer,whole_book")
+        iv.pick_scenes("viewer,turned_past")
 
 
 def test_scenes_are_picked_in_the_tables_order_and_an_unknown_one_ends_the_run():

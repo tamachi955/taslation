@@ -232,8 +232,8 @@ class Window(SimpleNamespace):
 
     def __init__(self, translator=None, pipeline=None, **state):
         said, jobs, posted = [], [], []
-        super().__init__(translator=translator, pipeline=pipeline, busy=False, _queued=None, _batching=False,
-                         batch=None, said=said, jobs=jobs, posted=posted,
+        super().__init__(translator=translator, pipeline=pipeline, busy=False, _queued=None,
+                         said=said, jobs=jobs, posted=posted,
                          say=lambda key, **values: said.append((key, values)),
                          _jobs=SimpleNamespace(put=jobs.append),
                          _post=lambda kind, **data: posted.append((kind, data)))
@@ -251,9 +251,8 @@ class FakeTranslator:
         return names
 
 
-@pytest.mark.parametrize("state", [{"busy": True}, {"_queued": ("translate", ())}, {"_batching": True},
-                                   {"batch": object()}])
-def test_it_is_refused_while_a_translation_or_a_run_is_on(state):
+@pytest.mark.parametrize("state", [{"busy": True}, {"_queued": ("translate", ())}])
+def test_it_is_refused_while_a_translation_is_on_or_waits(state):
     translator = FakeTranslator([MODEL])
     w = Window(translator, **state)
     assert gpu_release.release_now(w) is False
@@ -354,7 +353,7 @@ def test_the_system_page_shows_saves_and_checks_the_layers(hidden_root, in_force
 def test_saved_layers_are_set_on_the_window_s_translators(tmp_path):
     translator, other = FakeTranslator([]), FakeTranslator([])
     w = SimpleNamespace(settings=Settings(state_dir=tmp_path), translator=translator,
-                        pipeline=SimpleNamespace(translator=other), last_result=None, busy=False, batch=None)
+                        pipeline=SimpleNamespace(translator=other), last_result=None, busy=False)
     app_mod.App._settings_saved(w, {"ollama_num_gpu": "0"})
     assert w.settings.ollama_num_gpu == "0" and translator.num_gpu == 0 and other.num_gpu == 0
     app_mod.App._settings_saved(w, {"ollama_num_gpu": ""})

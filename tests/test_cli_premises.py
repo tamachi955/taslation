@@ -1,4 +1,4 @@
-"""`taslation glossary` on the command line, and the gui mode/role options."""
+"""`taslation glossary` on the command line, and the gui role option."""
 from __future__ import annotations
 
 import pytest
@@ -16,9 +16,8 @@ def isolated_state(tmp_path, monkeypatch):
 
 
 def test_gui_options_parse():
-    args = build_parser().parse_args(["gui", "--mode", "page", "--role", "translator"])
-    assert args.mode == "page" and args.role == "translator"
-    assert build_parser().parse_args(["gui"]).mode is None
+    assert build_parser().parse_args(["gui", "--role", "translator"]).role == "translator"
+    assert build_parser().parse_args(["gui"]).role is None
 
 
 def test_glossary_set_show_list_and_delete(capsys):

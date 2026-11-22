@@ -27,7 +27,6 @@ from taslation import netguard
 from taslation.config import ConfigError, Settings
 from taslation.i18n import UI_LANGUAGES, _, set_language
 from taslation.ui import layout, updates
-from taslation.ui.dialogs import updates as dialog_mod
 from taslation.ui.dialogs.updates import (BULLET, CHANGES_MIN_LINES, CHANGES_SIZE, UpdateDialog, change_blocks,
                                           change_lines, reason_text)
 
@@ -231,7 +230,7 @@ class Window:
     def __init__(self, root, state_dir, update_check="daily"):
         self.root = root
         self.settings = Settings(state_dir=state_dir, update_check=update_check)
-        self.ready, self.busy, self.reading, self.batch = True, False, False, None
+        self.ready, self.busy, self.reading = True, False, False
         self._jobs: queue.Queue = queue.Queue()
         self._queued = None
         self.status_var = tk.StringVar(root, value="Ready.")
@@ -827,62 +826,32 @@ class Closing:
         self.closed = []
         self._update_check = None
 
-    def _on_close(self, asked=False):
-        self.closed.append(asked)
+    def _on_close(self):
+        self.closed.append(True)
 
 
-def test_update_now_closes_the_window_once_update_cmd_started(monkeypatch):
-    from taslation.ui import strip
-
-    released = []
-    monkeypatch.setattr(strip, "close_warning", lambda window: None)
-    monkeypatch.setattr(strip, "release_run_images", lambda window: released.append(window))
+def test_update_now_closes_the_window_once_update_cmd_started():
     w = Closing()
     asked = []
     assert updates.update_now(w, "0.9.0", launch=lambda version: asked.append(version))
-    assert asked == ["0.9.0"] and released == [w] and w.closed == [True]
+    assert asked == ["0.9.0"] and w.closed == [True]
 
 
 def test_update_now_that_cannot_start_keeps_the_window_open(monkeypatch):
-    from taslation.ui import strip
     from taslation.ui.dialogs import caches
 
-    told, released = [], []
-    monkeypatch.setattr(strip, "close_warning", lambda window: None)
-    monkeypatch.setattr(strip, "release_run_images", lambda window: released.append(window))
+    told = []
     monkeypatch.setattr(caches, "tell", lambda parent, text, **kw: told.append(text))
     w = Closing()
     assert not updates.update_now(w, "0.9.0", launch=lambda version: "update.ps1 is not in the TASlation folder.")
     assert told == ["The update did not start: update.ps1 is not in the TASlation folder. TASlation stays open."]
-    assert w.closed == [] and released == []  # the run's pictures stay
+    assert w.closed == []
 
 
-def test_update_now_asks_first_what_closing_would_lose(monkeypatch):
-    from taslation.ui import strip
-    from taslation.ui.dialogs import caches
-
-    boxes = []
-
-    class Box:
-        def __init__(self, master, title, text, **kw):
-            boxes.append((text, kw))
-            self.answer = False
-
-        def winfo_exists(self):
-            return False
-
-    monkeypatch.setattr(strip, "close_warning", lambda window: "The whole-book run has read 3 page(s)...")
-    monkeypatch.setattr(caches, "WarningBox", Box)
-    w, started = Closing(), []
-    assert not updates.update_now(w, "0.9.0", launch=lambda version: started.append(version))
-    assert started == [] and w.closed == []
-    assert boxes[0][1]["go"] == "Close anyway" and boxes[0][1]["stay"] == "Keep TASlation open"
-
-
-def test_the_close_asked_already_is_not_asked_again():
+def test_closing_asks_nothing_and_stops_the_look_for_updates():
     from taslation.ui import app as app_mod
 
     import inspect
 
     source = inspect.getsource(app_mod.App._on_close)
-    assert "if not asked and not self._close_allowed()" in source and "updates.stop(self)" in source
+    assert "_close_allowed" not in source and "updates.stop(self)" in source

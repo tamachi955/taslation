@@ -9,10 +9,9 @@ person turning back to it would: that second pass is timed. Nothing touches a wi
 image is written anywhere, no text of a book is printed; the temporary folder goes at the end.
 
     python tools/cached_turn_profile.py [--pages 8] [--detect auto|off] [--art auto|lama|off] [--synthetic]
-                                        [--frame 1920x1080] [--window 960x1000] [--ahead] [--whole]
+                                        [--frame 1920x1080] [--window 960x1000] [--whole]
 
-``--ahead``: the pages are erased ahead first, as a whole-book run leaves them (`Pipeline.erased_ahead`), so that the
-render takes their erase from memory. The table gives the median and the largest time of every stage in ms.
+The table gives the median and the largest time of every stage in ms.
 """
 
 from __future__ import annotations
@@ -37,7 +36,6 @@ from taslation import fingerprint as fp  # noqa: E402
 from taslation.cache import BookCache  # noqa: E402
 from taslation.config import Settings  # noqa: E402
 from taslation.detect.page_area import find_page_area, page_area_margins  # noqa: E402
-from taslation.pageimages import PageImages, pack  # noqa: E402
 from taslation.pipeline import Pipeline  # noqa: E402
 from taslation.render import typeset  # noqa: E402
 
@@ -120,7 +118,6 @@ def main() -> None:
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--frame", default="1920x1080")
     ap.add_argument("--window", default="960x1000")
-    ap.add_argument("--ahead", action="store_true")
     ap.add_argument("--whole", action="store_true", help="draw the whole frame (no trim to the page)")
     ap.add_argument("--models", default=os.environ.get("TASLATION_MODELS_DIR", str(ROOT / "models")))
     args = ap.parse_args()
@@ -144,13 +141,6 @@ def main() -> None:
               f"{sum(len([r for r in res.regions if r.status == 'translated']) for res in firsts)} lines; "
               f"margins {tuple(settings.margins)}; layout {'on' if pipe.layout else 'off'}, "
               f"LaMa {'on' if pipe.art_eraser else 'off'}")
-        if args.ahead:
-            store = PageImages(1 << 33)
-            for seq, f in enumerate(frames, 1):  # as the whole-book run erases a page it has read
-                erasable = pipe.scan(f.copy(), skip_cached=False, keep_regions=True).erasable
-                erased, records = pipe.erase_page(f, erasable)
-                store.put_erased(seq, pack(Image.fromarray(erased)), records, erased.shape[:2])
-            pipe.erased_ahead = store
 
         for owner, name, label in [
             (fp, "analyze", "fingerprint (analyze)"),
@@ -162,7 +152,6 @@ def main() -> None:
             (pipe, "_ocr_regions", "OCR"),
             (pipe, "_translate_regions", "translate"),
             (pipe, "_render", "render (all)"),
-            (pipe, "_erased_for", "  render: erase-ahead lookup"),
             (pipe, "_erase", "  render: erase live"),
             (pipe, "cap_sizes", "  render: size caps"),
             (pipe, "_set_text", "  render: typeset (incl. caps)"),
@@ -229,14 +218,10 @@ def main() -> None:
             passes[name] = (times, shown_w)
         root.destroy()
 
-    store = pipe.erased_ahead
-    if store is not None:
-        print(f"erase ahead: {store.reused} region(s) reused, {store.erased_live} erased live")
     print(f"cached passes: OCR calls {ocr.calls}, translator calls {translator.calls}; detect {args.detect}, "
-          f"art {args.art}, erase ahead {'yes' if args.ahead else 'no'}; {len(frames)} pages")
+          f"art {args.art}; {len(frames)} pages")
     order = ["fingerprint (analyze)", "detect (all)", "  detect: classical", "  detect: layout model", "annotate",
-             "cache lookup", "apply cached", "OCR", "translate", "render (all)", "  render: erase-ahead lookup",
-             "  render: erase live", "  render: LaMa", "  render: size caps", "  render: typeset (incl. caps)",
+             "cache lookup", "apply cached", "OCR", "translate", "render (all)", "  render: erase live", "  render: LaMa", "  render: size caps", "  render: typeset (incl. caps)",
              "pipeline total", "draw (fit + PhotoImage + canvas)", "settled frame -> early look sent",
              "settled frame -> first page drawn", "settled frame -> finished page drawn"]
     for name, (times, shown_w) in passes.items():

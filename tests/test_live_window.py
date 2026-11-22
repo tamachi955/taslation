@@ -77,7 +77,6 @@ class Window(BlackViewerMixin):
     _set_busy = app_mod.App._set_busy
     _show_progress = app_mod.App._show_progress
     _busy_text = app_mod.App._busy_text
-    _badge_due = app_mod.App._badge_due
     _show_badge = app_mod.App._show_badge
     _hide_busy = app_mod.App._hide_busy
     _summary = staticmethod(app_mod.App._summary)
@@ -137,10 +136,10 @@ class Window(BlackViewerMixin):
 
     def __init__(self, root, own=()):
         self._init_flow_state()
-        self.pipeline, self._batching = None, False
+        self.pipeline = None
         self.canvas = ImageCanvas(root)
         self.canvas.winfo_width, self.canvas.winfo_height = (lambda: 400), (lambda: 300)  # as if on screen
-        self.translate_btn, self.batch_btn = {}, {}
+        self.translate_btn = {}
         self.progress_bar = Bar()
         self.titles: list[str] = []
         self.statuses: list[str] = []
@@ -156,7 +155,7 @@ class Window(BlackViewerMixin):
         self.selected = VIEWER
         self.own = list(own)  # where this program's windows are on the screen
         self.busy = self.reading = self._viewer_hidden = self._busy_shown = self._waiting = False
-        self.ready, self.batch, self._bar_shown = True, None, False
+        self.ready, self._bar_shown = True, False
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = self._ordering = None
         self._live = self._live_thumb = self._job_frame = self._job_thumb = self._fill = self._queued = None
@@ -166,7 +165,6 @@ class Window(BlackViewerMixin):
         self._manual_area, self._page_areas, self._area_hinted = True, {}, False  # the area (0, 20, 0, 0) is the reader's
         self._jobs: queue.Queue = queue.Queue()
         self.new_pages: list[Image.Image] = []
-        self.batches: list[tuple] = []
 
     def title(self, text):
         self.titles.append(text)
@@ -186,9 +184,6 @@ class Window(BlackViewerMixin):
     def _on_new_page(self, image, thumb=None):  # as the App's in page-by-page mode
         self.new_pages.append(image)
         self._start_translate(image, thumb=thumb)
-
-    def _start_batch(self, *options):
-        self.batches.append(options)
 
     def _show_notes(self):
         pass
@@ -477,17 +472,6 @@ def test_in_the_reading_window_the_note_of_a_page_goes_with_its_page(hidden_root
     assert w.canvas.note == "" and w.status_var.get() == "Viewer: Yomizuq - Google Chrome"  # no note of its own
 
 
-def test_a_whole_book_runs_line_is_about_the_run_whatever_the_viewer_shows(hidden_root, viewer):
-    w = Said(hidden_root)
-    w._tick()
-    w._start_translate(w._live, thumb=w._live_thumb)
-    w._batching = True
-    w._handle_event("progress", {"text": "Reading text 3/7..."})
-    line = w.status_var.get()
-    w._show_live(_frame(ink=(120, 80, 170, 130)))
-    assert w.status_var.get() == line and w._status_page is None
-
-
 def test_a_frame_of_a_new_size_is_read_by_its_own_area_while_the_job_keeps_the_old_one(hidden_root, viewer):
     """The viewer's window resized while a page job runs: the frames of the new size are read by that size's own
     capture area at once; the margins in force stay the job's until it is gone."""
@@ -577,11 +561,11 @@ def test_requests_wait_for_the_models_and_run_once_they_are_loaded(hidden_root, 
     w._tick()
     w._tick()
     assert w._queued == ("auto", ()) and not w.new_pages and w._auto_last is None
-    w._queue("batch", "options")  # the batch's Start in the meantime: it outranks the page
+    w.translate_now()  # F5 in the meantime: it outranks Auto's look
     w._queue("auto")
-    assert w._queued == ("batch", ("options",))
+    assert w._queued == ("translate", ())
     w._handle_event("ready", {"ocr": True})
-    assert w.batches == [("options",)] and w._queued is None
+    assert w._queued is None and w._jobs.qsize() == 1 and w.busy
 
     w = Window(hidden_root)
     w.ready = False

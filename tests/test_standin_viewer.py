@@ -47,7 +47,7 @@ def test_the_page_knows_every_step_the_script_has():
 
 def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     names = standin_e2e.wanted("all")
-    assert names == ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
+    assert names == ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
     count = standin_e2e.pages_needed(names)
     segments, steps = standin_e2e.build_plan(names, count + 6, cancel_first=count, soft_ms=700)
     text = sv.format_script(steps)
@@ -59,14 +59,12 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
     # t: on the Translator's full screen the next page by the window's page key, t2 back by its previous one
     assert turns["t"] == [(56, True)] and turns["t2"] == [(54, True)]
-    assert turns["w2"][:2] == [(70, True), (68, True)]  # back to pages of the run, which read 64 to 72
     # x: the screens of little text added after the others, soft long and half as sharp, then back where it was
-    assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (76, True)]
-    assert f"t700,b2,j{count},w5000," in text and ",t,b,j76,w4000," in text
-    assert turns["f2"] == [(81, False), (82, False)]  # single pages once the window is narrow
+    assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (64, True)]
+    assert f"t700,b2,j{count},w5000," in text and ",t,b,j64,w4000," in text
+    assert turns["f2"] == [(69, False), (70, False)]  # single pages once the window is narrow
     assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
-    assert standin_e2e.wanted("w2") == standin_e2e.wanted("w") == ["w", "w2"]  # a run and the reading beside it
     assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
         standin_e2e.wanted("a,q")
@@ -87,7 +85,7 @@ def test_without_wait_done_the_script_is_as_written():
             assert s.steps == standin_e2e.SCENARIOS[s.name][1]
     x = next(s for s in segments if s.name == "x")
     assert x.steps == ["t700", "b2", f"j{first}", "w5000", f"j{first + 2}", "w5000", f"j{first + 4}", "w5000", "t",
-                       "b", "j76", "w4000"]
+                       "b", "j64", "w4000"]
 
 
 def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
@@ -97,7 +95,7 @@ def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
     holds = [s.a for s in held_steps if s.op == "h"]
     assert holds == list(range(1, len(holds) + 1))  # numbered through the script
     for p, h in zip(plain, held):
-        if h.name not in standin_e2e.HOLD_SCENARIOS:  # c, b, t, t2, w, w2: as written
+        if h.name not in standin_e2e.HOLD_SCENARIOS:  # c, b, t, t2: as written
             assert h.steps == p.steps
             continue
         bare = [s for s in h.steps if not s.startswith("h")]
@@ -213,16 +211,16 @@ def _on_show(t, page, kind, lettered=0, state="sharp"):
 
 
 def test_a_rest_ends_where_the_driver_changed_the_window_for_the_next_scenario():
-    # t2's page came back from the cache at once; then, as the stand-in waited for w, the driver left the full screen
-    # and started the whole-book run, whose live frame of the same page came before w's first turn (a runner)
+    # t2's page came back from the cache at once; then, as the stand-in waited for o, the driver left the full screen
+    # and went over the book, whose live frame of the same page came before o's first turn
     turns = [{"segment": "t2", "screen": (0, True), "why": "previous", "soft_t": 1000.0, "sharp_t": 1100.0,
               "next_t": 8000.0},
-             {"segment": "w", "screen": (2, True), "why": "next", "soft_t": 8000.0, "sharp_t": 8300.0,
+             {"segment": "o", "screen": (2, True), "why": "next", "soft_t": 8000.0, "sharp_t": 8300.0,
               "next_t": 12000.0}]
     displays = [_on_show(1300.0, 0, "translated", 6), _on_show(6000.0, 0, "live"), _on_show(8500.0, 2, "reading")]
-    notes = SimpleNamespace(jobs=[], displays=displays, captures=[], requests=[], status_lines=[], modes=[],
+    notes = SimpleNamespace(jobs=[], displays=displays, captures=[], requests=[], status_lines=[],
                             acts=[{"t": 5000.0, "segment": "t2", "act": "left"},
-                                  {"t": 5050.0, "segment": "w", "act": "entered"}])
+                                  {"t": 5050.0, "segment": "o", "act": "entered"}])
     rows = standin_e2e.turn_rows(turns, notes, 12000.0)
     assert (rows[0]["at_rest"], rows[0]["rest_ms"], rows[0]["rest_ended_by"]) == ("translated", 3900, "t2 left")
     assert (rows[1]["at_rest"], rows[1]["rest_ms"], rows[1]["rest_ended_by"]) == ("being read", 3700, None)
@@ -247,52 +245,6 @@ def test_a_job_whose_page_went_on_at_a_new_size_was_not_cancelled_with_its_page_
     assert not standin_e2e.resized_away(job, [77060.0], captures[:1])  # the new size not captured by the cancel
     assert not standin_e2e.resized_away({**job, "cancelled_t": None}, [77060.0], captures)
     assert not standin_e2e.resized_away({**job, "size": None}, [77060.0], captures)
-
-
-def test_the_runs_frames_are_told_by_who_got_them_and_a_soft_one_with_the_sharper_frame_after_it():
-    import threading
-
-    notes = standin_e2e.Notes(31, 1.0)
-    notes.run_read(1, None)
-    eraser = threading.Thread(target=notes.run_read, args=(2, None), name="batch-erase-ahead")
-    eraser.start()
-    eraser.join()
-    assert [r["by"] for r in notes.run_reads] == ["read", "erase"]
-    batch = (ROOT / "taslation" / "batch.py").read_text(encoding="utf-8")
-    # (its only callers: the reading loop - a page's frame, and the one that took its place while it was read - and
-    # the erase ahead)
-    assert 'name="batch-erase-ahead"' in batch and batch.count("self.images.frame(") == 3
-    reads = [{"t": 500.0, "key": 0, "by": "read", "page": 0, "spread": True, "state": "sharp"},
-             {"t": 1000.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "soft"},
-             {"t": 3000.0, "key": 2, "by": "erase", "page": 2, "spread": True, "state": "sharp"}]
-    frames = [{"t": 900.0, "kind": "take", "page": 2, "spread": True, "state": "soft"},
-              {"t": 1800.0, "kind": "sharper", "page": 2, "spread": True, "state": "sharp"}]
-    got = standin_e2e.run_gets(reads, frames, lambda t: round(t / 1000, 2))
-    assert got["frames_got_by"] == {"read": {"sharp": 1, "soft": 1}, "erase": {"sharp": 1}}
-    assert got["frames_got_not_sharp_list"] == [{"key": "2", "by": "read", "t_s": 1.0, "page": 2, "spread": True,
-                                                 "state": "soft", "sharper_taken_after_ms": 800}]
-    assert standin_e2e.run_gets(reads, frames[:1], lambda t: t)["frames_got_not_sharp_list"][0][
-        "sharper_taken_after_ms"] is None
-
-
-def test_a_soft_frame_whose_reading_was_thrown_away_for_the_sharper_one_is_no_frame_the_run_read():
-    import threading
-
-    notes = standin_e2e.Notes(31, 1.0)
-    for key in (1, 2):
-        notes.run_read(key, None)
-    eraser = threading.Thread(target=notes.run_read, args=(2, None), name="batch-erase-ahead")
-    eraser.start()
-    eraser.join()
-    notes.run_read_again(2)  # the reading loop's frame of page 2, not the erase's
-    assert [r.get("thrown_away", False) for r in notes.run_reads] == [False, True, False]
-    reads = [{"t": 1000.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "soft", "thrown_away": True},
-             {"t": 1900.0, "key": 2, "by": "read", "page": 2, "spread": True, "state": "sharp"}]
-    frames = [{"t": 1800.0, "kind": "sharper", "page": 2, "spread": True, "state": "sharp"}]
-    got = standin_e2e.run_gets(reads, frames, lambda t: t)
-    assert got["frames_got_by"] == {"read": {"soft": 1, "sharp": 1}} and got["frames_got_not_sharp_list"] == []
-    tool = (ROOT / "tools" / "standin_e2e.py").read_text(encoding="utf-8")
-    assert "pageimages.PageImages.read = run_marked" in tool and 'not f.get("thrown_away")' in tool
 
 
 def test_holds_and_kept_soft_frames_are_steps_of_the_script():
@@ -719,14 +671,6 @@ def test_a_long_look_at_the_viewer_is_told_with_each_call_in_it_and_the_requests
     assert {"cpu_ms", "process_cpu_ms"} <= set(first)
     assert first["requests"] == [{"t_s": 0.9, "side": "backlog", "why": "history cut"},
                                  {"t_s": 1.01, "side": "page", "why": "extends"}]
-
-
-def test_a_turn_is_told_with_what_a_whole_book_run_did_then():
-    modes = [{"t": 0, "run": False, "beside": False}, {"t": 100, "run": True, "beside": False},
-             {"t": 500, "run": True, "beside": True}, {"t": 900, "run": False, "beside": False}]
-    assert [standin_e2e.run_state(modes, t) for t in (50, 100, 499, 700, 950)] == [
-        "no run", "run reading", "run reading", "run translating", "no run"]
-    assert standin_e2e.run_state([], 10) == "no run"
 
 
 def _shown(t, page, state, kind="translated", lettered=3, from_="soft"):

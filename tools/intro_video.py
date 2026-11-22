@@ -36,8 +36,8 @@ scratch one (TASLATION_STATE_DIR, the legal notice dismissed, the window in Engl
 ``render`` makes a GIF of the recording, 960x540 by default and about 90 to 140 s long: a title card, the scenes
 numbered in their order (the window on the right, the stand-in viewer and the step on the left, the key pressed in a
 key cap), then the cards "How a page is translated", "The models", "On your own computer" and "Before you use it" -
-their figures from the code's constants (`code_facts`), their sentences those of README.md, docs/MANUAL.md and
-docs/THIRD_PARTY.md. Long waits are cut; a stretch marked as waiting for the models is shown faster, with a badge and
+their figures from the code's constants (`code_facts`), their sentences those of README.md, docs/MANUAL.md,
+docs/THIRD_PARTY.md and docs/LEGAL.md. Long waits are cut; a stretch marked as waiting for the models is shown faster, with a badge and
 "shown at N.Nx speed" under it. The GIF costs each visitor of the page as little as it can: one palette of 64
 colours with the window's own colours kept apart, no dither; each frame stores only what changed; where only the
 window's picture changes (a bubble lettered, a word typed, a wait) at most 4 frames a second; a card is one frame.
@@ -145,13 +145,8 @@ def backlog_present() -> bool:
     return has_module("taslation.backlog") and has_module("taslation.ui.side")
 
 
-def whole_book_present() -> bool:
-    """The whole-book command (Read whole book...) is there."""
-    return has_module("taslation.batch") and has_module("taslation.ui.dialogs.batch")
-
-
-README, MANUAL, THIRD_PARTY = "README.md", "docs/MANUAL.md", "docs/THIRD_PARTY.md"
-DOCS = (README, MANUAL, THIRD_PARTY)  # the documents a line of the recording may follow
+README, MANUAL, THIRD_PARTY, LEGAL = "README.md", "docs/MANUAL.md", "docs/THIRD_PARTY.md", "docs/LEGAL.md"
+DOCS = (README, MANUAL, THIRD_PARTY, LEGAL)  # the documents a line of the recording may follow
 
 
 @dataclass(frozen=True)
@@ -255,7 +250,7 @@ SCENES: tuple[Scene, ...] = (
           "Text that was not found: draw a rectangle around it, and it is read and translated.", 8.0,
           role="translator",
           follows=cites(MANUAL, "Draw a rectangle around text that was not detected, and it is read, translated and "
-                                "added to the page (later readings and batches use it too).")),
+                                "added to the page (later readings use it too).")),
     Scene("full_screen", "Full screen",
           "Full screen (F11) shows the page alone on the whole screen, in the role you chose. F11 takes you back to "
           "the window.", 6.0, role="translator",
@@ -263,13 +258,6 @@ SCENES: tuple[Scene, ...] = (
                                 "screen, in the role you chose.",
                         "F11 takes you back to the window, and so does Esc (in the Translator role Esc first lets go "
                         "of a selected region).")),
-    Scene("whole_book", "The whole book",
-          "Read whole book... reads the pages you turn, then translates them all together. Turn back, and every page "
-          "is shown at once.", 14.0, present=whole_book_present,
-          follows=cites(MANUAL, "\"Read whole book...\" reads the pages you turn and translates them all together "
-                                "once you have finished reading, in two stages.",
-                        "Once you have read the whole book with the whole-book reading, every page is shown at once, "
-                        "which makes reading comfortable.")),
 )
 SCENE_IDS = tuple(s.id for s in SCENES)
 
@@ -420,9 +408,8 @@ CARDS: dict[str, tuple[str, tuple[Line, ...]]] = {
              "it for that use (Article 47-6).", "bullet", cites(README, JAPAN_LAW)),
         Line("docs/LEGAL.md sums up what {countries} countries allow.", "bullet", cites(README, JAPAN_LAW)),
         Line("A store's terms of use are a contract between you and the store, so check them.", "bullet",
-             cites(MANUAL, "A store's terms of use are a contract between you and the store.",
-                   "That does not settle what your store's terms allow, so check them and use this mode knowing "
-                   "that.")),
+             cites(LEGAL, "the terms of use of the large e-book stores are a contract between the reader and the store.",
+                   "Terms differ from store to store, so check them yourself.")),
         Line("It is free, with no advertising, no donations and no paid version.", "bullet",
              cites(README, "It is free, with no advertising, no donations and no paid version.")),
         Line("Windows 10 / 11 (64-bit). An NVIDIA GPU with 6 GB of memory is enough; it runs without one too.",
@@ -1393,7 +1380,6 @@ class Director:
     def reset(self) -> Iterator[Any]:
         """The lists put away, the panel beside a bubble hidden, the dialogs this tool opens closed as their own
         Close closes them (from Tk's loop), the full screen left, the selection let go."""
-        from taslation.ui.dialogs.batch import BatchDialog
         from taslation.ui.dialogs.caches import WarningBox
         from taslation.ui.dialogs.glossary import GlossaryDialog
         from taslation.ui.dialogs.review import EditBubbleDialog
@@ -1412,7 +1398,7 @@ class Director:
                     self.later(top.cancel_btn.invoke)
                 elif isinstance(top, GlossaryDialog):
                     self.later(top._close)
-                elif isinstance(top, (EditBubbleDialog, BatchDialog)) and top.winfo_exists():
+                elif isinstance(top, EditBubbleDialog) and top.winfo_exists():
                     self.later(top.destroy)
         yield 0.5
         if getattr(app, "reading", False):
@@ -2135,59 +2121,6 @@ class Director:
         self.pointer.at = self.park_point()
         yield 1.5
 
-    def act_whole_book(self) -> Iterator[Any]:
-        from taslation.ui.dialogs.batch import BatchDialog
-
-        app = self.app
-        yield from self.role_shown("reader")
-        yield from self.click_widget(app.batch_btn, 0.9)
-        yield Until(lambda: self.toplevel(BatchDialog) is not None, 10, "the whole-book dialog")
-        dialog = self.toplevel(BatchDialog)
-        yield 1.0
-        start = find_widget(dialog, "TButton", "Start")
-        if start is None:
-            raise SceneFailed("the dialog has no Start")
-        first = self.standin.index
-        yield from self.click_widget(start, 0.7)
-        yield Until(lambda: app.batch is not None and bool(getattr(app, "_strip_model").pages), 20, "the run begun")
-        yield from self.glide(app.canvas.winfo_rootx() + app.canvas.winfo_width() * 0.85,
-                              app.canvas.winfo_rooty() + app.canvas.winfo_height() * 0.5, 0.6)
-        last = min(self.standin.screens - 1, first + max(1, self.args.book_pages) - 1)
-
-        def read_over() -> bool:
-            cell = getattr(app, "_strip_model").pages.get(self.standin.index - first + 1)
-            return cell is not None and cell.stages.get("read") in ("done", "skipped", "failed")
-
-        while True:
-            self.fast(True)
-            yield Until(read_over, self.args.timeout, "the screen on show read")
-            self.fast(False)
-            yield 0.5
-            if self.standin.index >= last:
-                break
-            yield from self.press_page_key("next", may_fail=True)
-        band = getattr(app, "scan_band", None)
-        button = find_widget(band, "TButton", "Finished reading") if band is not None else None
-        if button is None:
-            raise SceneFailed("no Finished reading")
-        yield from self.click_widget(button, 0.8)
-        yield from self.glide(*self.park_point(), seconds=0.6)
-        self.fast(True)
-        yield Until(lambda: app.batch is None and not app._batching, max(self.args.timeout, 600), "the run over")
-        yield Until(lambda: not app.busy, 30, "the page on show")
-        self.fast(False)
-        yield 1.5
-        for _ in range(min(3, last - first)):  # (read on: each page there at once)
-            count, before = self.results(), app.last_result
-            try:
-                yield from self.press_page_key("prev")
-                yield Until(self.page_after(count, before), 15, "a page of the book")
-            except SceneFailed as e:
-                self.say(f"reading on stopped: {e}")
-                break
-            yield 1.0
-
-
 # ---------------------------------------------------------------------------------------------------- record
 def parse_term(text: str | None) -> tuple[str, str] | None:
     if not text:
@@ -2312,9 +2245,9 @@ def run_window(args: argparse.Namespace, standin: StandIn, writer: Any, url: str
     from taslation.ui import app as app_mod
 
     # every module in place before the guard replaces what they import
-    from taslation import batch, pipeline, translation_view  # noqa: F401
-    from taslation.ui import jobs, live, overbook, reading, strip, trouble, viewers  # noqa: F401
-    from taslation.ui.dialogs import batch as batch_dialog, caches, start, stop  # noqa: F401
+    from taslation import frames, pipeline  # noqa: F401
+    from taslation.ui import jobs, live, overbook, reading, trouble, viewers  # noqa: F401
+    from taslation.ui.dialogs import caches, start  # noqa: F401
 
     hwnd, pid = standin.hwnd, standin.pid
     guard = dv.Guard(hwnd)
@@ -2336,8 +2269,7 @@ def run_window(args: argparse.Namespace, standin: StandIn, writer: Any, url: str
 
         remember_role(state, BOOK, "reader")
     settings = pv.settings_for(Settings, state_dir=state, ui_language="en", target_language="English",
-                               over_book=False, flash_when_done=False, sound_when_done=False, always_on_top=False,
-                               models_dir=Path(models), ollama_url=url)
+                               over_book=False, always_on_top=False, models_dir=Path(models), ollama_url=url)
     settings.validate()
     errorlog.setup(settings)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer
@@ -2527,7 +2459,7 @@ def sample_source(scene_ids: Sequence[str] | None = None, seconds: float = 4.0, 
             t += step * (SAMPLE_WAIT if wait else 1.0)
         if k == 0:
             meta["moments"].update(original=t0, translated=round(t - step, 1))
-        if scene.id in ("next_page", "turned_past", "whole_book"):
+        if scene.id in ("next_page", "turned_past"):
             meta["keys"].append({"t": round(t0 + step, 1), "key": "Left", "passed_on": True, "posted": 1, "taken": 1})
         elif scene.id in ("full_screen", "add_region"):
             meta["keys"].append({"t": round(t0 + step, 1), "key": "F11" if scene.id == "full_screen" else "Delete",
@@ -3298,7 +3230,6 @@ def parse(argv: Sequence[str] | None = None) -> argparse.Namespace:
     rec.add_argument("--first", type=int, default=4, help="the first page (the dataset's page number, from 1)")
     rec.add_argument("--pages", type=int, default=12)
     rec.add_argument("--spread", action="store_true", help="two pages a screen, right to left (default: one)")
-    rec.add_argument("--book-pages", type=int, default=5, help="the pages the whole-book scene reads")
     rec.add_argument("--start-ollama", type=int, default=DEFAULT_PORT, metavar="PORT",
                      help="TASlation's own starter starts Ollama on this loopback port, where nothing may answer; "
                           "stopped at the end (11434 to 11437 are refused)")

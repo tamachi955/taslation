@@ -378,7 +378,7 @@ class _Window(book_areas.AreaMixin):
         self.saved = 0
         self.pipeline = SimpleNamespace(annotations=ann, save_annotations=self._save)
         self.book_var = SimpleNamespace(get=lambda: ann.book if book is None else book)
-        self.busy, self.batch, self.said = False, None, []
+        self.busy, self.said = False, []
 
     def _save(self):
         self.saved += 1
@@ -417,11 +417,9 @@ def test_the_page_menu_entry_is_greyed_while_it_cannot_act(hidden_root, store, m
     w = _Window(ann)
     menu = _entry(hidden_root, w)
     for change, back in ((lambda: setattr(w, "busy", True), lambda: setattr(w, "busy", False)),
-                         (lambda: setattr(w, "batch", object()), lambda: setattr(w, "batch", None)),
-                         (lambda: setattr(w, "_batching", True), lambda: setattr(w, "_batching", False)),
                          (lambda: setattr(w, "book_var", SimpleNamespace(get=lambda: f"{SERIES} 17")),
                           lambda: setattr(w, "book_var", SimpleNamespace(get=lambda: f" {SERIES} 16 ")))):
-        change()  # a job, a whole-book run (also while it starts), another book typed in the Book box
+        change()  # a job, another book typed in the Book box
         w._sync_series_areas_entry()
         assert menu.entrycget(0, "state") == "disabled"
         w.use_areas_for_series_now()

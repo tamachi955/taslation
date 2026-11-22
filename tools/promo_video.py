@@ -2211,9 +2211,9 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     from taslation.ui.translator import remember_role
 
     # every module in place before the guard replaces what they import
-    from taslation import batch, pipeline, translation_view  # noqa: F401
-    from taslation.ui import jobs, live, overbook, reading, strip, trouble, viewers  # noqa: F401
-    from taslation.ui.dialogs import batch as batch_dialog, caches, start, stop  # noqa: F401
+    from taslation import frames, pipeline  # noqa: F401
+    from taslation.ui import jobs, live, overbook, reading, trouble, viewers  # noqa: F401
+    from taslation.ui.dialogs import caches, start  # noqa: F401
 
     guard = demo_video.Guard(hwnd)
     if guard.is_own(hwnd) or sv.find_window(browser.tree, browser.token) != hwnd:
@@ -2244,8 +2244,8 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     chosen = {k: v for k, v in (("ollama_window_cache", args.ollama_window_cache), ("ocr_runs_on", args.ocr_runs_on))
               if v is not None}
     settings = settings_for(Settings, asked=list(chosen), state_dir=state, ui_language="en", target_language="English",
-                            over_book=False, flash_when_done=False, sound_when_done=False, always_on_top=False,
-                            models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url, **chosen)
+                            over_book=False, always_on_top=False, models_dir=Path(os.environ["TASLATION_MODELS_DIR"]),
+                            ollama_url=url, **chosen)
     settings.validate()
     errorlog.setup(settings)
     tap = e2e.LogTap(notes)  # (where the OCR readers went, by the log's templates: codes and numbers only)

@@ -319,3 +319,8 @@ def test_item_stream_gives_only_what_is_complete_and_never_a_wrong_object():
     assert _fed('{"translations": [{"id": 1, "text": "a"]}, {"id": 2, "text": "b"}]}') == []  # brackets that do not match
     assert _fed('["Hello", "Bye"]') == [] and _fed('{"1": "Hello", "2": "Bye"}') == [] and _fed("1. Hello") == []
     assert [pos for pos, _o, _n in _fed('[{"text": "a"}, {"text": "b"}]')] == [0, 1]  # no ids: their places
+
+
+def test_output_budget_scales_with_input():
+    assert OllamaTranslator.output_budget(["x"]) == 512
+    assert OllamaTranslator.output_budget(["あ" * 15] * 60) == 12 * 60 + 2 * 900

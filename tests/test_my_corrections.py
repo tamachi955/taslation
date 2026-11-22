@@ -1,8 +1,8 @@
 """The translations a person wrote (`CachedBubble.edited`): marked by the region editor's Save and by Find and replace
 (Ctrl+Z takes the mark back with the text), cleared by the model's answer to Ask again saved as it came, left as they
 are by a spelling made consistent (the series sheet's "Apply to the n lines", a name's fix); kept through a merging
-save, a refresh, a backup's export and import and a file of an earlier version; kept by "Translate again" and by a
-whole-book run that translates again unless the person asks for them to go too; listed in "My corrections" (from the
+save, a refresh, a backup's export and import and a file of an earlier version; kept by "Translate again" unless
+the person asks for them to go too; listed in "My corrections" (from the
 cache alone: a row selected sends nothing to the viewer) and by `taslation review --corrections`. Invented lines."""
 from __future__ import annotations
 
@@ -10,13 +10,11 @@ import argparse
 import random
 
 import pytest
-from helpers import EN_TEXTS, FakeOcr, read_book, store_json
-from test_batch import _fake_viewer
+from helpers import EN_TEXTS, FakeOcr, store_json
 from test_find_replace import Window as FindWindow
 from test_translator_mode import Window
 
 from taslation import cli
-from taslation.batch import BatchReader
 from taslation.cache import CachedBubble, CachedPage, CacheStore, TextEdit
 from taslation.capture import windows as capture_windows
 from taslation.fingerprint import FINGERPRINT_HEX_LEN
@@ -191,42 +189,6 @@ def test_translate_again_keeps_the_corrected_lines_and_puts_the_page_back_when_n
     assert sorted(b.text for b in p.cache.pages[0].bubbles) == whole and not p.cache.pages[0].incomplete
     p.forget_page(result)  # the box ticked: theirs go too
     assert not p.cache.pages and p.corrections_on(result) == 0
-
-
-def test_a_run_that_translates_again_keeps_the_corrected_lines_unless_told(settings, sample_page):
-    p = _pipeline(settings)
-    result = p.process(sample_page, complete=True)
-    region = result.regions[1]
-    p.set_translation(result, region, TYPED)
-    scan = p.scan(sample_page, skip_cached=True, fresh=True)
-    unit = scan.units[0]
-    assert TYPED in [b.text for b in unit.kept] and region.source_text not in [r.source_text for r in unit.japanese()]
-    p.commit_unit(unit, {i: "New." for i in range(len(unit.japanese()))})
-    assert marked_on_disk(p.cache) == [TYPED]
-    replaced = p.scan(sample_page, skip_cached=True, fresh=True, keep_edited=False).units[0]
-    assert TYPED not in [b.text for b in replaced.kept]
-    assert region.source_text in [r.source_text for r in replaced.japanese()]
-
-
-@pytest.mark.parametrize("replace", [False, True])
-def test_a_whole_book_run_passes_the_choice_on(replace, settings, sample_page, sample_page2, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    p = _pipeline(settings, "Run")
-    asked: list[object] = []
-    real = p.scan
-    p.scan = lambda *a, **k: asked.append(k.get("keep_edited")) or real(*a, **k)
-    read_book(BatchReader(p, hwnd=1, settings=settings, context_mode=True, retranslate=True,
-                          replace_corrections=replace))
-    assert asked and set(asked) == {not replace}
-
-
-def test_the_command_line_flag_goes_with_retranslate(settings):
-    parser = cli.build_parser()
-    args = parser.parse_args(["batch", "--window", "Yomizuq", "--retranslate", "--replace-corrections"])
-    assert args.retranslate and args.replace_corrections
-    assert parser.parse_args(["batch", "--window", "Yomizuq"]).replace_corrections is False
-    with pytest.raises(SystemExit, match="goes with --retranslate"):
-        cli.cmd_batch(parser.parse_args(["batch", "--window", "Yomizuq", "--replace-corrections"]), settings)
 
 
 def test_review_lists_the_corrections(settings, capsys):

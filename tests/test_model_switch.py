@@ -45,7 +45,6 @@ class Window(ms.ModelSwitchMixin):
         self.later: list = []
         self.reading = False
         self._over_on = False
-        self.batch = None
 
     def _models_now(self):
         return self.models
@@ -243,16 +242,16 @@ def test_the_setup_check_leads_to_the_offer_once(tmp_path, boxes):
     assert w.later == []  # asked once: the status line says the rest
 
 
-@pytest.mark.parametrize("away", ["reading", "_over_on", "batch"])
+@pytest.mark.parametrize("away", ["reading", "_over_on"])
 def test_over_the_book_the_check_only_says_so_once(tmp_path, boxes, away):
     w = Window(tmp_path, ["gemma3:4b"], "English")
-    setattr(w, away, True if away != "batch" else object())
+    setattr(w, away, True)
     w._model_missing_seen([_missing("English")])
     w._model_missing_seen([_missing("English")])
     assert w.later == [] and boxes.asked == []
     assert w.statuses == ["Translation is off: English needs PLaMo 3 Translate 2B, which is not installed. "
                           "TASlation asks about it when you are back in its window."]
-    setattr(w, away, False if away != "batch" else None)  # back in the window: the next check offers it
+    setattr(w, away, False)  # back in the window: the next check offers it
     w._model_missing_seen([_missing("English")])
     w.later.pop()()
     assert len(boxes.asked) == 1

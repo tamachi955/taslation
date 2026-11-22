@@ -41,8 +41,6 @@ class Window:
     _look_for_colophon = app_mod.App._look_for_colophon
     _offer_page_names = app_mod.App._offer_page_names
     _band_view = app_mod.App._band_view
-    batch = None
-    _batching = False
     _names_dialog = None
     _names_found = None
 
@@ -75,9 +73,6 @@ class Window:
 
     def close_band(self):
         self._band = None
-
-    def _held_readings(self):
-        return None
 
     def offers(self):
         return [data for kind, data in self.events if kind == "page_names"]
@@ -194,22 +189,23 @@ def test_the_memory_is_bounded_and_for_one_book_at_a_time(desk, sample_page, sam
     assert len(memo) == 0  # (a line no longer stored goes)
 
 
-def test_a_run_s_names_are_not_offered_again_and_a_change_made_stays(desk, sample_page, sample_page2):
+def test_names_found_before_are_not_offered_again_and_a_change_made_stays(desk, sample_page, sample_page2):
     w = desk.window
     pairs = PAGE1 + PAGE2
-    run_lines = [RunLine(ja, en, (f"run{i // 6}", (0.1, 0.05 * (i % 6), 0.3, 0.05 * (i % 6) + 0.04)))
-                 for i, (ja, en) in enumerate(pairs)]
-    progress = SimpleNamespace(names=find_variants(run_lines), name_lines=[line._replace(source="") for line in run_lines])
-    assert name_check.keep_found(w, progress, "Book", "English") == 1
-    run_found = w._names_found
-    (run_v,) = run_found.variants
-    run_found.done["竜司"] = ("Ryuji", object(), "", [(s, list(at)) for s, at in run_v.renderings], False)
+    first_lines = [RunLine(ja, en, (f"first{i // 6}", (0.1, 0.05 * (i % 6), 0.3, 0.05 * (i % 6) + 0.04)))
+                   for i, (ja, en) in enumerate(pairs)]
+    first = {"book": "Book", "language": "English", "variants": find_variants(first_lines),
+             "lines": [line._replace(source="") for line in first_lines]}
+    assert name_check.keep_page_found(w, first) == 1
+    first_found = w._names_found
+    (first_v,) = first_found.variants
+    first_found.done["竜司"] = ("Ryuji", object(), "", [(s, list(at)) for s, at in first_v.renderings], False)
     read(w, sample_page)
     read(w, sample_page2)
-    assert len(w.offers()) == 1 and w._band is None  # the run offered 竜司 already
-    assert w._names_found is run_found
+    assert len(w.offers()) == 1 and w._band is None  # 竜司 was offered already
+    assert w._names_found is first_found
 
-    # a name new to the book joins what the run found: the run's, and what was made of it, stay
+    # a name new to the book joins what was found: those names, and what was made of them, stay
     chihiro = [RunLine(ja.replace("竜司", "千尋"), en.replace("Ryuji", "Chihiro").replace("Ryūji", "Chihíro"),
                        (f"pg{i}", (0.1, 0.1, 0.2, 0.2))) for i, (ja, en) in enumerate(pairs)]
     other = find_variants(chihiro)
@@ -226,18 +222,13 @@ def test_a_run_s_names_are_not_offered_again_and_a_change_made_stays(desk, sampl
     assert len(joined.lines) == 10  # only the names' own lines are kept
 
 
-def test_the_band_of_a_run_that_ended_gets_the_line_and_a_run_s_band_is_left_alone(desk):
+def test_the_names_the_pages_found_are_offered_on_the_band(desk):
     w = desk.window
-    w._band = {"kind": "summary", "summary": "The run is done.", "names": 2}
+    w._offer_page_names(0)  # none new: no band
+    assert w._band is None
     w._offer_page_names(3)
     lines, buttons = w._band_view()
-    assert lines[-1] == "3 name(s) rendered in more than one way in the pages read so far."
-    assert [label for label, _do in buttons].count("Review names...") == 1
-    w._band = {"kind": "scan", "scan": None}
-    w._offer_page_names(3)
-    assert "page_names" not in w._band
-    w._band, w.batch = None, object()
-    w._offer_page_names(3)
-    assert w._band is None
+    assert lines == ["3 name(s) rendered in more than one way in the pages read so far."]
+    assert [label for label, _do in buttons] == ["Review names...", "Close"]
     assert "keep_page_names(self, result" in inspect.getsource(app_mod.App._job_translate)
     assert '"{n} name(s) rendered in more than one way in the pages read so far."' in inspect.getsource(status)

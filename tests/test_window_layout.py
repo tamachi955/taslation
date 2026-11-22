@@ -68,7 +68,7 @@ class Bars(tk.Toplevel):
 
     open_page_keys = _noop
     set_area = clear_area = translate_now = enter_reading = _on_role_changed = toggle_order = toggle_skip = _noop
-    retranslate_page = open_book_settings = open_review = open_corrections = open_find_replace = undo_edit = redo_edit = _turn_direction = open_batch_dialog = stop_batch = _noop
+    retranslate_page = open_book_settings = open_review = open_corrections = open_find_replace = undo_edit = redo_edit = _turn_direction = stop_page = _noop
     open_lines_to_review = _noop
     _redisplay = _apply_on_top = open_glossary = open_caches = review_names = _rescan_windows = _noop
     _on_window_selected = open_notice = _on_ui_language = toggle_over = _noop
@@ -173,7 +173,7 @@ def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
                                            "About TASlation"]
     shown = [text for _kind, text in _texts(w.toolbar)]
     assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Full screen (F11)", "Reader", "Translator",
-                                    "Read whole book...", "Stop (Esc)"])
+                                    "Stop (Esc)"])
     set_language("en")
 
 
@@ -394,7 +394,7 @@ class Reading(tk.Toplevel):
         self.original_var, self.auto_var, self.top_var = tk.BooleanVar(self), tk.BooleanVar(self), tk.BooleanVar(self)
         self.role_var = tk.StringVar(self, value="reader")
         self.selected, self.last_result = VIEWER, None
-        self.reading = self._batching = self._viewer_hidden = self._scan_waits_told = self._restoring = False
+        self.reading = self._viewer_hidden = self._restoring = False
         self._ordering = self._chosen_region = self._status_render = self._status_key = None
         self._normal_geometry = ""
         self._manual_area = True  # an area of the reader's: Set area... is not offered first

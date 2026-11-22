@@ -11,7 +11,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_follow import VIEWER, _count_frames, _page, setup  # noqa: F401 - setup is test_follow's fixture
+from test_follow import _count_frames, _page, setup  # noqa: F401 - setup is test_follow's fixture
 
 from taslation.capture import Raised, WindowInfo, windows
 from taslation.pagekeys import KeyWays, Profiles, key_ways
@@ -153,7 +153,6 @@ class Looks(BlackViewerMixin):
         self.selected = selected
         self.jobs, self.said = [], []
         self.seq = 10
-        self.batch, self._batching = None, False
 
     def after(self, ms, job):
         self.jobs.append(job)

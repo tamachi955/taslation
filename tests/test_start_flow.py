@@ -1,14 +1,12 @@
-"""Before and around a whole-book scan: the names a window's title gives that name no book, the start dialog, the
-setup check before the scan (nothing is scanned with a problem), the setup banner (checked
-again off the Tk thread until fixed), every Message in the window's language, the scan band (the page, the bubbles
-and the time left; the summary), Stop that cancels a page translation (and a new
-page that does), the slow model's badge, and no busy title for a page from the cache. Parts of the App are borrowed
-onto a stand-in on a withdrawn window of the shared hidden root."""
+"""A book's start: the names a window's title gives that name no book, the start dialog and the book's name (recognised,
+asked for, the colophon's, a rename), the setup banner (checked again off the Tk thread until fixed), every Message
+in the window's language, Stop that cancels a page translation (and a new page that does), the slow model's badge,
+and no busy title for a page from the cache. Parts of the App are borrowed onto a stand-in on a withdrawn window of
+the shared hidden root."""
 from __future__ import annotations
 
 import json
 import queue
-import re
 import threading
 import time
 import tkinter as tk
@@ -17,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from taslation.ui.constants import APP_TITLE, BOOK_READ_PAGES, READER_AFTER_RUN
+from taslation.ui.constants import APP_TITLE
 from taslation import health, i18n
 from taslation.annotations import AnnotationStore, GlossaryStore
 from taslation.bookid import last_name
@@ -30,10 +28,9 @@ from taslation.pagekeys import opposite_key
 from taslation.regions import PageResult
 from taslation import viewerparts
 from taslation.ui import app as app_mod
-from taslation.ui import banner, jobs, progress, taskbar, trouble
+from taslation.ui import banner, jobs, progress
 from taslation.ui import status as status_module
 from taslation.ui.dialogs import caches
-from taslation.ui.dialogs.batch import BatchDialog
 from taslation.ui.dialogs.start import StartDialog, generic_book_name
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.live import BlackViewerMixin
@@ -43,7 +40,6 @@ from conftest import FIXTURES
 VIEWER = WindowInfo(hwnd=7, title="Yomizuq - Google Chrome", class_name="Chrome_WidgetWin_1", pid=7, rect=(0, 0, 800, 600))
 URL = "http://127.0.0.1:11434"
 DOWN = Message("health.ollama_down", url=URL)
-OTHER = Message("health.other_model", wanted="qwen3.5:4b", used="gemma3:4b")
 SLOW_JA = "翻訳プログラムの応答が遅れています（読み込み中かもしれません）。「停止」でこのページを取り消せます。"
 
 
@@ -72,34 +68,18 @@ class Bar:
 A = app_mod.App
 
 
-def button_texts(band) -> list[str]:
-    """The labels of *band*'s buttons, left to right."""
-    return [str(b.cget("text")) for b in band.buttons]
-
-
-class TaskbarSeen:
-    """A stand-in for ITaskbarList3: what the button was given."""
-
-    def __init__(self):
-        self.shown = []
-
-    def set(self, hwnd, state, fraction):
-        self.shown.append((state, round(fraction, 3)))
-
-
 class Flow(BlackViewerMixin, tk.Toplevel):
     _raise_for_key = lambda self, hwnd: None  # (the viewer raised for a look: tests/test_wgc.py)
 
-    """The parts of the App that a book's start, the setup checks and their banner, the scan band, Stop, a slow
-    model and the busy signs use. What it would start elsewhere (a batch, Auto's next look) is recorded; `after`
-    keeps its callbacks for the test to run."""
+    """The parts of the App that a book's start, the setup checks and their banner, Stop, a slow model and the busy
+    signs use. What it would start elsewhere (Auto's next look) is recorded; `after` keeps its callbacks for the test
+    to run."""
 
     _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
     _init_flow_state = A._init_flow_state
     _handle_event = A._handle_event
     _warn_unasked = A._warn_unasked
     _on_page_event = A._on_page_event
-    _batch_done = A._batch_done
     _take_models = A._take_models
     _choose_model = A._choose_model
     _set_health = A._set_health
@@ -107,13 +87,8 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _check_in_background = A._check_in_background
     _check_setup = A._check_setup
     _load_ocr_if_due = A._load_ocr_if_due
-    _preflight = A._preflight
-    _ollama_back = A._ollama_back
     _name_needed = A._name_needed
-    _left_readings = A._left_readings
     _begin_book = A._begin_book
-    _after_preflight = A._after_preflight
-    _hold_scan = A._hold_scan
     _ask_book = A._ask_book
 
     def _recognised(self, *frames):
@@ -143,30 +118,16 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _keep_details = A._keep_details
     _look_for_colophon = A._look_for_colophon
     translate_now = A.translate_now
-    open_batch_dialog = A.open_batch_dialog
     open_glossary = A.open_glossary
     open_book_settings = A.open_book_settings
     _after_book_settings = A._after_book_settings
     _set_stop = A._set_stop
     _sync_stop = A._sync_stop
-    stop_batch = A.stop_batch
-    _stop_asks = A._stop_asks
-    _run_pages = A._run_pages
-    _ask_stop = A._ask_stop
-    finish_reading = A.finish_reading
-    translate_readings = A.translate_readings
-    _held_readings = A._held_readings
-    _show_taskbar = A._show_taskbar
-    _pace = A._pace
-    _keep_pace = A._keep_pace
-    _book_start = A._book_start
-    _keep_book_start = A._keep_book_start
+    stop_page = A.stop_page
     _queue = A._queue
     _run_queued = A._run_queued
     _start_translate = A._start_translate
     _job_translate = A._job_translate
-    _job_batch = A._job_batch
-    _reads_on_after_run = A._reads_on_after_run
     _use_model = A._use_model
     _loaded_line = A._loaded_line
     _tell_protection = A._tell_protection
@@ -176,15 +137,13 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _watch_page = A._watch_page
     _follows_events = A._follows_events
     _say_waiting = A._say_waiting
-    scan_mode = A.scan_mode
     close_band = A.close_band
     _page_keys = A._page_keys
     _on_new_page = A._on_new_page
-    _book_read = A._book_read
+    _starts_book = A._starts_book
     _all_cached = A._all_cached
     _completes = A._completes
     _warm_page_models = A._warm_page_models
-    _reader_after_run = A._reader_after_run
     _post = A._post
     say = A.say
     status = A.status
@@ -211,7 +170,6 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _show_busy_signs = A._show_busy_signs
     _show_progress = A._show_progress
     _busy_text = A._busy_text
-    _badge_due = A._badge_due
     _show_badge = A._show_badge
     _hide_busy = A._hide_busy
 
@@ -219,11 +177,9 @@ class Flow(BlackViewerMixin, tk.Toplevel):
         super().__init__(root)
         self.withdraw()
         self._init_flow_state()
-        self.settings = Settings(state_dir=tmp_path / "state", scan_mode="book")
+        self.settings = Settings(state_dir=tmp_path / "state")
         viewerparts.change(lambda memory: memory.learn(LEARNED))  # this computer knows the viewers (`viewers_learned`)
         self.settings.settle_ms = 0
-        self.taskbar_seen = TaskbarSeen()  # the taskbar button's bar, as the window would show it
-        self._taskbar = taskbar.TaskbarProgress(lambda: 1, factory=lambda: self.taskbar_seen)
         self.store = CacheStore(self.settings.cache_dir)
         self.annotation_store = AnnotationStore(self.settings.annotations_dir)
         self.glossary_store = GlossaryStore(self.settings.glossary_dir)
@@ -236,12 +192,11 @@ class Flow(BlackViewerMixin, tk.Toplevel):
                             ("lang_var", "English"), ("role_var", "reader")):
             setattr(self, name, tk.StringVar(self, value=value))
         self.auto_var = tk.BooleanVar(self, value=True)
-        self.translate_btn, self.batch_btn, self.stop_btn, self.model_box = {}, {}, {}, {}
+        self.translate_btn, self.stop_btn, self.model_box = {}, {}, {}
         self.progress_bar = Bar()
-        self.ready, self.busy, self.reading, self.batch, self.pipeline = True, False, False, None, None
+        self.ready, self.busy, self.reading, self.pipeline = True, False, False, None
         self.selected = VIEWER
-        self._book_scanned = self._book_edited = self._resume_auto = self._scan_waits_told = False
-        self._batching = self._busy_shown = self._bar_shown = self._fill_dirty = False
+        self._book_edited = self._busy_shown = self._bar_shown = self._fill_dirty = False
         self._queued = self._fill = self.last_result = self._auto_last = self._auto_candidate = None
         self._job_frame = self._job_thumb = self._status_render = self._status_key = None
         self._chosen_region = self._grip_box = self._review = None
@@ -249,7 +204,6 @@ class Flow(BlackViewerMixin, tk.Toplevel):
         self._events: queue.Queue = queue.Queue()
         self._jobs: queue.Queue = queue.Queue()
         self.titles: list[str] = []
-        self.batches: list[tuple] = []
         self.ticks = 0
         self.uncached = True
         self.frame = _frame()
@@ -276,9 +230,6 @@ class Flow(BlackViewerMixin, tk.Toplevel):
             _ms, func = self.later.pop(0)
             func()
         raise AssertionError("still running")
-
-    def _start_batch(self, *options):
-        self.batches.append(options)
 
     def _tick(self):
         self.ticks += 1
@@ -338,10 +289,10 @@ class Flow(BlackViewerMixin, tk.Toplevel):
         self.pump()
 
     def asked(self):
-        """The start dialog once what it waits for is in: the set-up check (whole-book mode) and the book on screen
-        recognised (`_recognise_then`), both in the worker, with their events; the last dialog (None: none)."""
+        """The start dialog once what it waits for is in: the book on screen recognised (`_recognise_then`), in the
+        worker, with its events; the last dialog (None: none)."""
         for _ in range(4):
-            if not (self._checks or self._recognising):
+            if not self._recognising:
                 break
             self.run_jobs()
         return self.dialogs[-1] if self.dialogs else None
@@ -358,9 +309,9 @@ def flow(hidden_root, tmp_path, monkeypatch):
     dialogs = []
 
     class Recorded:
-        def __init__(self, master, name, generic, ask, on_answer, matches=(), hint="", default="page"):
-            self.name, self.generic, self.ask, self.on_answer = name, generic, ask, on_answer
-            self.default = default
+        def __init__(self, master, name, generic, on_answer, matches=(), hint=""):
+            self.name, self.generic, self.on_answer = name, generic, on_answer
+            self.default = "ok"
             self.matches, self.hint = list(matches), hint
             dialogs.append(self)
 
@@ -381,12 +332,6 @@ def viewers_learned():
     viewerparts.change(lambda memory: memory.learn(LEARNED))
 
 
-def _no_problems(monkeypatch, problems=()):
-    asked = []
-    monkeypatch.setattr(jobs, "preflight", lambda settings, model=None: asked.append(settings) or list(problems))
-    return asked
-
-
 # ------------------------------------------------------------------ names, keys, numbers, remembered choices
 def test_generic_names_name_no_book():
     for name in ("untitled", "", "  ", "Google Chrome", "Microsoft Edge", "Microsoft\u200b Edge", "Firefox",
@@ -402,14 +347,10 @@ def test_generic_names_name_no_book():
     assert generic_book_name("Google Chrome") and generic_book_name("")
 
 
-def test_the_opposite_key_and_the_numbers_of_the_band():
+def test_the_opposite_key_and_the_durations():
     assert opposite_key("Left") == "Right" and opposite_key("right") == "Left"
     assert opposite_key("PageDown") == "PageUp" and opposite_key("Space") is None
     assert opposite_key("") is None and opposite_key(None) is None
-    assert banner.group_digits(1900, "en") == "1,900" and banner.group_digits(1900, "ja") == "1,900"
-    assert banner.group_digits(1900, "de") == "1.900" and banner.group_digits(1900, "fr") == "1 900"
-    assert banner.group_digits(1900, "es") == "1900" and banner.group_digits(19000, "es") == "19.000"
-    assert banner.group_digits(23, "en") == "23" and banner.group_digits(1234567, "ru") == "1 234 567"
     assert banner.duration_text(35 * 60) == "35 min" and banner.duration_text(10) == "1 min"
     assert banner.duration_text(65 * 60) == "1 h 5 min"
     set_language("ja")
@@ -433,26 +374,25 @@ def test_an_old_kept_answer_stays_in_ui_json_and_means_nothing(tmp_path):
 # ------------------------------------------------------------------ the start dialog
 def test_the_start_dialog_asks_for_a_name_when_the_title_gives_none(hidden_root):
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=True, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()
-    start, page = d.buttons
-    assert d.name_var.get() == "" and str(start.cget("state")) == "disabled" == str(page.cget("state"))
-    d._answer("start")  # no name: nothing happens
+    (ok,) = d.buttons
+    assert d.name_var.get() == "" and str(ok.cget("state")) == "disabled"
+    d._answer("ok")  # no name: nothing happens
     assert not answers and d.winfo_exists()
     d.name_var.set("  見本の冒険   1 ")
-    assert str(start.cget("state")) == "normal" and str(start.cget("text")) == "Start"
-    assert str(page.cget("text")) == "Page by page instead"
-    d._answer("start")
-    assert answers == [("start", "見本の冒険 1")] and not d.winfo_exists()
+    assert str(ok.cget("state")) == "normal" and str(ok.cget("text")) == "OK"
+    d._answer("ok")
+    assert answers == [("ok", "見本の冒険 1")] and not d.winfo_exists()
 
-    d = StartDialog(hidden_root, "My Story 2", generic=False, ask=True, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "My Story 2", generic=False, on_answer=lambda *a: answers.append(a))
     d.withdraw()
     assert d.name_var.get() == "My Story 2" and str(d.buttons[0].cget("state")) == "normal"
     d._close()  # Esc or the close button: no answer
     assert answers[-1] == (None, "My Story 2")
 
     set_language("ja")
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()
     texts = [str(w.cget("text")) for w in d.winfo_children()[0].winfo_children() if w.winfo_class() == "TLabel"]
     assert "".join(texts[0].split("\n")).startswith("この本の名前は何ですか？")
@@ -460,93 +400,6 @@ def test_the_start_dialog_asks_for_a_name_when_the_title_gives_none(hidden_root)
     d.name_var.set("鋼の錬金術師 3")
     d._answer(d.default)  # what Enter does
     assert answers[-1] == ("ok", "鋼の錬金術師 3")
-
-
-def test_the_batch_dialog_has_no_choice_but_how_far_and_presses_nothing(hidden_root, tmp_path):
-    started = []
-    d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path), on_start=started.append)
-    d.withdraw()
-    assert not [w for w in _widgets(d) if w.winfo_class() in ("TCheckbutton", "TEntry")]
-    assert not hasattr(d, "key_line") and "reads better" in str(d.size_line.cget("text")).replace("\n", " ")
-    next(w for w in _widgets(d) if w.winfo_class() == "TButton" and str(w.cget("text")) == "Start").invoke()
-    assert started == [(VIEWER, Settings().batch_max_pages, True)]  # read, then translated
-
-    # taken off in the config file: the dialog goes by it, as the start of a book does
-    d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path, context_mode=False), on_start=started.append)
-    d.withdraw()
-    next(w for w in _widgets(d) if w.winfo_class() == "TButton" and str(w.cget("text")) == "Start").invoke()
-    assert started[-1][1:] == (Settings().batch_max_pages, False)
-
-
-TERMS_EN = "A store's terms of use are a contract between you and the store. In a whole-book run TASlation turns no page: it reads only the pages you turn yourself. That does not settle what your store's terms allow, so check them and use this mode knowing that."
-TERMS_JA = 'ストアの利用規約は、あなたとストアの契約です。1冊まるごと読むときも TASlation はページをめくらず、あなたがめくったページだけを読み取ります。ただし、それでストアの規約上問題がないと決まるわけではありません。規約を確認し、そのことを承知のうえで使ってください。'
-
-
-def _label_texts(top):
-    """The dialog's labels as read, their lines joined again (`break_lines` wraps them: a space at an English break)."""
-    texts = [str(w.cget("text")) for w in _widgets(top) if w.winfo_class() == "TLabel"]
-    return [" ".join(t.split("\n")) for t in texts], ["".join(t.split("\n")) for t in texts]
-
-
-def _label_shows(top, note: str) -> bool:
-    """Whether one of the dialog's labels is *note* as `break_lines` wraps it: each break between its lines stands for
-    a space or for nothing (a break at a space drops the space: in a Japanese sentence too, where it has one, as after
-    "TASlation"; elsewhere a Japanese sentence breaks between two characters). Where the breaks fall is the window
-    font's: another computer's breaks the same note elsewhere."""
-    texts = [str(w.cget("text")) for w in _widgets(top) if w.winfo_class() == "TLabel"]
-    return any(re.fullmatch(" ?".join(re.escape(line) for line in t.split("\n")), note) for t in texts)
-
-
-def test_page_by_page_is_the_default_and_whole_book_mode_an_opt_in():
-    from pathlib import Path
-
-    from taslation.cli import build_parser
-
-    assert Settings().scan_mode == "page" and Settings(scan_mode="book").scan_mode == "book"
-    assert Settings.from_toml(Path(__file__).resolve().parent.parent / "taslation.toml.example").scan_mode == "page"
-    assert build_parser().parse_args(["gui"]).mode is None  # the setting's: page by page
-    assert build_parser().parse_args(["gui", "--mode", "book"]).mode == "book"
-    for setting in ("book", "page"):  # the settings say, `gui --mode book` among them: the window has no choice of it
-        assert app_mod.App.scan_mode(SimpleNamespace(settings=Settings(scan_mode=setting))) == setting
-
-
-def test_the_whole_book_question_says_what_a_stores_terms_make_of_it(hidden_root):
-    for code, note in (("en", TERMS_EN), ("ja", TERMS_JA)):
-        set_language(code)
-        try:
-            for generic in (False, True):
-                d = StartDialog(hidden_root, "Yomizuq" if generic else "My Story 2", generic=generic, ask=True,
-                                on_answer=lambda *a: None)
-                d.withdraw()
-                spaced, _joined = _label_texts(d)
-                assert (note in spaced) if code == "en" else _label_shows(d, note), (code, generic)
-                labels = [w for w in d.winfo_children()[0].winfo_children() if w.winfo_class() == "TLabel"]
-                assert labels[-1] is d.terms_label  # under the question
-                question = "".join(str(labels[-2].cget("text")).split("\n"))
-                assert question.startswith("Read the whole book first?" if code == "en" else "先に本全体を読みますか？")
-                # the one box there is, with a generic title, is the colophon's
-                assert len([w for w in _widgets(d) if w.winfo_class() == "TCheckbutton"]) == (1 if generic else 0)
-                d.destroy()
-            d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: None)
-            d.withdraw()  # the name alone (page-by-page mode): no question, no note
-            assert note not in _label_texts(d)[0] and note not in _label_texts(d)[1] and not _label_shows(d, note)
-            d.destroy()
-        finally:
-            set_language("en")
-
-
-def test_the_batch_dialog_says_it_above_start(hidden_root, tmp_path):
-    for code, note in (("en", TERMS_EN), ("ja", TERMS_JA)):
-        set_language(code)
-        try:
-            d = BatchDialog(hidden_root, VIEWER, Settings(state_dir=tmp_path), on_start=lambda options: None)
-            d.withdraw()
-            spaced, _joined = _label_texts(d)
-            assert (note in spaced) if code == "en" else _label_shows(d, note), code
-            assert max(len(line) for line in str(d.terms_label.cget("text")).split("\n")) < len(note)  # wrapped
-            d.destroy()
-        finally:
-            set_language("en")
 
 
 def _widgets(top):
@@ -559,195 +412,30 @@ def _widgets(top):
 
 
 # ------------------------------------------------------------------ a book's start
-def test_whole_book_mode_checks_the_setup_then_asks_then_reads_the_whole_book(flow, monkeypatch):
-    asked = _no_problems(monkeypatch)
-    page = _frame()
-    flow._on_new_page(page, "thumb")
-    assert flow._start_pending == (page, "thumb") and not flow.dialogs and not asked  # the check runs in the worker
-    later = _frame(ink=(100, 30, 150, 70))
-    flow._on_new_page(later, "later")  # a page turned meanwhile waits for the start, nothing else happens
-    assert flow._start_pending == (later, "later") and flow._jobs.qsize() == 1
-    flow.run_jobs()
-    assert len(asked) == 1 and not flow.dialogs and flow._jobs.qsize() == 1  # the page recognised in the worker
-    flow.run_jobs()
-    assert len(flow.dialogs) == 1
-    d = flow.dialogs[0]
-    assert d.generic and d.ask and d.name == "Yomizuq"
-    d.on_answer("start", "見本の冒険 1")
-    assert flow.book_var.get() == "見本の冒険 1" and flow._book_edited and flow._book_scanned
-    assert flow._resume_auto and flow._start_pending is None
-    assert flow.batches == [(VIEWER, 0, True)]
-    flow._on_new_page(page, "thumb")  # decided for this book: Auto's pages are translated as they come
-    assert flow.busy and flow._jobs.qsize() == 1 and len(flow.dialogs) == 1
-
-
-def _translated_pages(flow, book, count):
-    cache = flow.store.open(book, flow.model_var.get(), "English")
-    for i in range(count):
-        cache.add(CachedPage(f"{i:02x}" * 40, 0.7, [CachedBubble((0.1, 0.1, 0.2, 0.2), f"Line {i}")], seq=i))
-    cache.save()
-
-
-def test_a_book_read_already_translates_a_page_it_lacks_as_a_page_with_no_start_dialog(flow, monkeypatch):
-    """Reopening a book read through: the cover (lines, none translated) or a page skipped is not in the cache, yet
-    no whole-book start is offered over the translated pages - the page is translated as a page."""
-    asked = _no_problems(monkeypatch)
-    flow.book_var.set("My Story 2")
-    _translated_pages(flow, "My Story 2", BOOK_READ_PAGES)
-    flow._on_new_page(_frame(), None)
-    assert flow.busy and flow._jobs.qsize() == 1 and not flow.dialogs and not asked and flow._start_pending is None
-    assert not flow.batches
-
-
-def test_a_book_with_only_a_few_pages_translated_is_offered_the_whole_book_start(flow, monkeypatch):
-    _no_problems(monkeypatch)
-    flow.book_var.set("My Story 2")
-    _translated_pages(flow, "My Story 2", 3)  # a cover and a page or two tried with F5
-    flow._on_new_page(_frame(), None)
-    d = flow.asked()
-    assert d is not None and d.ask and not d.generic
-    flow.settings.cache_enabled = False  # nothing can be told: offered as ever
-    assert not flow._book_read()
-
-
-def test_a_setup_problem_stops_the_scan_and_the_window_goes_page_by_page(flow, monkeypatch):
-    _no_problems(monkeypatch, [DOWN, OTHER])
-    set_language("ja")
-    flow._on_new_page(_frame(), None)
-    flow.run_jobs()
-    assert not flow.dialogs and not flow.batches  # nothing is scanned
-    assert flow.busy and flow._jobs.qsize() == 1  # this page is translated as it is
-    held = "まだ1冊まるごとは読み取りません。先にページの上の表示に従って問題を解決してください。それまでは1ページずつ翻訳します。"
-    lines = flow.setup_banner.texts()  # the problems, then why the window goes page by page (it stays there)
-    assert lines == [progress.rendered(DOWN), trouble.setup_line(OTHER), held]  # (Download model: not install.cmd)
-    assert lines[0].startswith("翻訳プログラムが動いていないため")
-    colours = [str(label.cget("bg")) for label in flow.setup_banner.labels]
-    assert colours == [banner.PROBLEM_COLOURS[0], banner.NOTICE_COLOURS[0], banner.NOTICE_COLOURS[0]]
-    assert flow.setup_banner.winfo_manager() == "pack" and not flow._book_scanned  # asked again once fixed
-    flow._handle_event("health", {"problems": [OTHER], "checked": True})  # Ollama runs now
-    assert flow.setup_banner.texts() == [trouble.setup_line(OTHER)] and not flow._scan_held
-
-
-def test_the_notice_alone_does_not_stop_the_scan(flow, monkeypatch):
-    _no_problems(monkeypatch, [OTHER])
-    flow._on_new_page(_frame(), None)
-    flow.asked()
-    assert len(flow.dialogs) == 1 and flow.setup_banner.texts() == [trouble.setup_line(OTHER)]
-
-
-def test_whole_book_mode_asks_for_every_book_and_ignores_an_old_kept_answer(flow, monkeypatch):
-    _no_problems(monkeypatch)
-    ui = flow.settings.state_dir / "ui.json"
-    ui.parent.mkdir(parents=True, exist_ok=True)
-    ui.write_text('{"whole_book": "page"}', encoding="utf-8")  # "Don't ask again", once
-    flow._on_new_page(_frame(), None)
-    d = flow.asked()
-    assert d.ask and d.generic
-    d.on_answer("page", "My Story 2")
-    assert flow.busy and not flow.batches and flow.book_var.get() == "My Story 2"  # this page, as it is
-    flow._handle_event("translate_done", {})
-    flow._jobs = queue.Queue()
-
-    # the next book (its name typed into the Book box): asked again
-    flow.book_var.set("My Story 3")
-    flow._on_new_page(_frame(), None)
-    flow.run_jobs()
-    assert len(flow.dialogs) == 2 and flow.dialogs[-1].ask and not flow.dialogs[-1].generic
-    flow.dialogs[-1].on_answer("page", "My Story 3")
-    flow._handle_event("translate_done", {})
-    flow._jobs = queue.Queue()
-    assert flow._book_scanned and flow._scanned_book == "My Story 3"
-
-    # a book whose tab title gives only the viewer's name: the name and the question, an old "start" or not
-    ui.write_text('{"whole_book": "start"}', encoding="utf-8")
-    flow.book_var.set("Yomizuq")
-    flow._book_edited = False
-    flow._on_new_page(_frame(), None)
-    d = flow.asked()
-    assert len(flow.dialogs) == 3 and d.generic and d.ask
-    d.on_answer("start", "Vagabond 4")
-    assert flow.book_var.get() == "Vagabond 4" and flow.batches == [(VIEWER, 0, True)]
-
-
-def test_page_by_page_mode_asks_only_for_a_missing_name(flow, monkeypatch):
-    asked = _no_problems(monkeypatch)
-    flow.settings.scan_mode = "page"
+def test_a_book_s_start_asks_only_for_a_missing_name(flow):
     flow.book_var.set("My Story 2")  # a real name: the page is translated at once
     flow._on_new_page(_frame(), None)
-    assert flow.busy and not flow.dialogs and not asked
+    assert flow.busy and not flow.dialogs
     flow._handle_event("translate_done", {})
     flow._jobs = queue.Queue()
     flow.book_var.set("Yomizuq")
     flow._on_new_page(_frame(), None)
     assert flow._jobs.qsize() == 1 and not flow.dialogs  # the page recognised in the worker first
     flow.run_jobs()
-    assert not flow._jobs.qsize() and len(flow.dialogs) == 1 and not flow.dialogs[0].ask and not asked
+    assert not flow._jobs.qsize() and len(flow.dialogs) == 1
     flow.dialogs[0].on_answer("ok", "Vagabond 4")
-    assert flow.book_var.get() == "Vagabond 4" and flow.busy and not flow.batches and not flow._book_scanned
+    assert flow.book_var.get() == "Vagabond 4" and flow.busy
 
 
 def test_closing_the_start_dialog_reads_nothing_and_asks_again(flow, monkeypatch):
-    _no_problems(monkeypatch)
     flow._on_new_page(_frame(), None)
     flow.asked()
     flow.dialogs[0].on_answer(None, "")
-    assert not flow.busy and not flow.batches and flow.book_var.get() == "Yomizuq" and flow._start_pending is None
+    assert not flow.busy and flow.book_var.get() == "Yomizuq" and flow._start_pending is None
     assert flow.status_var.get().startswith("Nothing was read yet: TASlation asks again at the next page.")
     flow._on_new_page(_frame(), None)
     flow.asked()
     assert len(flow.dialogs) == 2
-
-
-def test_the_scan_checks_the_setup_again_and_does_not_start_with_a_problem(flow, monkeypatch):
-    _no_problems(monkeypatch, [Message("health.ocr_missing", path="/models/manga-ocr")])
-    monkeypatch.setattr(jobs, "BatchReader", lambda *a, **k: pytest.fail("no batch may start"))
-    flow._batching, flow.busy, flow._resume_auto = True, True, True
-    flow._auto_before_batch = True
-    flow.auto_var.set(False)
-    flow._job_batch(VIEWER.hwnd, "Book", "m", "English", 0, True, True)
-    kinds = [kind for kind, _data in list(flow._events.queue)]
-    assert kinds == ["health", "batch_refused"]
-    flow.pump()
-    assert not flow._batching and not flow.busy and flow.auto_var.get() and not flow._resume_auto
-    assert flow.setup_banner.texts()[0].startswith("The part that reads Japanese is missing") and flow._band is None
-    assert flow.setup_banner.texts()[1].startswith("The whole book is not read yet")
-    assert flow.status_var.get().startswith("The whole book is not read yet")
-
-
-@pytest.mark.parametrize("auto_before, resume, released", [(True, False, False), (False, True, False),
-                                                           (False, False, True), (None, False, True)])
-def test_the_run_s_end_keeps_the_model_while_auto_goes_back_on(flow, monkeypatch, auto_before, resume, released):
-    """The window's run never lets the translation model go itself (`release_at_end` False): at its end the window
-    keeps it loaded when Auto goes back on (it was on before the run, or the run is a book's start in whole-book mode),
-    so the next untranslated page the reader turns to does not wait for its load, and lets it go at once when Auto
-    stays off - before the run's end is posted, as the run's own release came before it, and however the run ends."""
-    _no_problems(monkeypatch)
-    made: list[dict] = []
-
-    class Reader:
-        left = None
-
-        def __init__(self, *_a, **k):
-            made.append(k)
-            self.progress = SimpleNamespace(summary=None)
-
-        def run(self):
-            raise Cancelled()  # (a stop or a failure ends it the same way)
-
-    monkeypatch.setattr(jobs, "BatchReader", Reader)
-    flow._use_model = lambda model, language: None
-    order: list[str] = []
-    flow.pipeline = SimpleNamespace(release_translator=lambda: order.append("released"))
-    posted = flow._post
-    flow._post = lambda kind, **data: (order.append(kind), posted(kind, **data))
-    flow._batching = flow.busy = True
-    flow._batch_stop_asked, flow.window_query = False, ""
-    flow._auto_before_batch, flow._resume_auto = auto_before, resume
-    with pytest.raises(Cancelled):
-        flow._job_batch(VIEWER.hwnd, "Book", "m", "English", 0, True)
-    assert len(made) == 1 and made[0]["release_at_end"] is False
-    assert order[-2:] == (["released", "batch_done"] if released else ["health", "batch_done"])
-    assert order.count("released") == (1 if released else 0)
 
 
 # ------------------------------------------------------------------ a book's files that cannot be opened now
@@ -792,7 +480,7 @@ class BookState:
         raise AssertionError("nothing may be translated")
 
 
-def test_a_book_file_that_cannot_be_opened_is_said_and_nothing_is_read(flow, monkeypatch):
+def test_a_book_file_that_cannot_be_opened_is_said_and_nothing_is_read(flow):
     flow._ensure_cache = A._ensure_cache.__get__(flow)  # the real one, not the stand-in's
     flow._job_refresh_premises = A._job_refresh_premises.__get__(flow)
     flow.pipeline, flow.translator = BookState(), SimpleNamespace(model="", target_language="English")
@@ -805,16 +493,6 @@ def test_a_book_file_that_cannot_be_opened_is_said_and_nothing_is_read(flow, mon
     assert "何も翻訳していません" in flow.status_var.get() and flow.pipeline.cache is None
     set_language("en")
     assert flow._status_render().startswith("Could not open the files TASlation keeps for Book: [Errno 13]")
-
-    _no_problems(monkeypatch)  # a whole-book scan: refused before the first page is turned, not asked again
-    monkeypatch.setattr(jobs, "BatchReader", lambda *a, **k: pytest.fail("no batch may start"))
-    flow._batching = flow.busy = flow._resume_auto = flow._book_scanned = True
-    flow._job_batch(VIEWER.hwnd, "Book", "m", "English", 0, True, True)
-    assert [kind for kind, _data in list(flow._events.queue)] == ["health", "status", "batch_refused"]
-    flow.pump()
-    assert not flow._batching and not flow.busy and flow._book_scanned and not flow._scan_held
-    assert flow.status_var.get().startswith("Could not open the files TASlation keeps for Book:")
-    assert flow.setup_banner.texts() == []
 
     flow.store = Opens()  # the premises after a change in the series sheet: another book's file in the way
     flow.glossary_store = Locked(FileExistsError("glossary.json holds the sheet of 'Other', not that of 'Book'"))
@@ -886,12 +564,13 @@ def test_a_target_language_this_computer_cannot_shape_is_said_until_closed(flow,
 # ------------------------------------------------------------------ Messages in the window's language
 def test_every_message_in_the_status_line_is_in_the_windows_language(flow):
     set_language("ja")
-    flow.say(Message("batch.scanning_page", page=3))
-    assert flow.status_var.get() == "3 ページ目を読み取り中..."
+    flow.say(Message("pipeline.translated", bubbles=3, seconds=4.0))
+    assert flow.status_var.get() == "3 行を翻訳しました（4 秒）。"
     set_language("de")
-    assert flow._status_render() == "Seite 3 wird eingelesen..."  # said again after a switch
-    flow.say("Viewer: {error}", error=jobs.CaptureError(Message("viewer.closed")))  # an error's Message too
-    assert flow.status_var.get() == i18n.tr("Viewer: {error}").format(error="das Viewer-Fenster wurde geschlossen")
+    assert flow._status_render() == "3 Zeilen in 4 s übersetzt."  # said again after a switch
+    flow.say("Viewer: {error}", error=jobs.CaptureError(Message("viewer.gone")))  # an error's Message too
+    assert flow.status_var.get() == i18n.tr("Viewer: {error}").format(
+        error="TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.")
     set_language("ja")
     assert progress.stage_of(Message("pipeline.stage_reading", done=1, total=3)) == "3 行を読み取り中"
     assert progress.busy_line(Message("pipeline.stage_translating", bubbles=5, translator="t"), 3, filled=2) == (
@@ -928,111 +607,7 @@ def test_the_page_summary_reads_as_the_review_asked(flow):
     flow.role_var.set("reader")
 
 
-# ------------------------------------------------------------------ the scan band
-def _batch_event(flow, message, phase, pages=0, translated=0, found=0, checked=0, waiting=None, queued=0):
-    p = SimpleNamespace(message=message, phase=phase, pages=pages, translated=translated, found=found, checked=checked,
-                        waiting=waiting, queued=queued)
-    flow._handle_event("batch", {"progress": p, "result": None, "message": message, "phase": phase, "pages": pages,
-                                 "translated": translated, "found": found, "checked": checked, "waiting": waiting,
-                                 "queued": queued})
-
-
-def test_the_band_says_which_page_is_read_then_the_bubbles_and_the_time_left(flow, monkeypatch):
-    clock = [1000.0]
-    monkeypatch.setattr(jobs.time, "monotonic", lambda: clock[0])
-    set_language("ja")
-    flow._scan = banner.ScanState(context=True)
-    _batch_event(flow, Message("batch.scanning_page", page=23), "read", pages=22)
-    assert flow.scan_band.texts()[0].startswith("めくったページを読み取っています。読み取り済み: 22、待ち: 0。")
-    assert button_texts(flow.scan_band) == ["読み終えた", "停止"] and flow.scan_band.winfo_manager() == "pack"
-    assert flow.status_var.get() == "23 ページ目を読み取り中..."
-    covered = Message("batch.waiting_covered")
-    _batch_event(flow, covered, "read", pages=23, waiting=covered)  # waiting for the reader: what to do
-    assert flow.scan_band.texts() == [progress.rendered(covered)]
-    read = Message("batch.read_page", page=24, lines=10, pages=24, bubbles=240, cached=0, seconds=300.0, dropped=0)
-    _batch_event(flow, read, "read", pages=24, found=240, waiting=covered)  # ... as long as it lasts
-    assert flow.scan_band.texts() == [progress.rendered(covered)]
-    _batch_event(flow, read, "read", pages=24, found=240, queued=3)
-    assert flow.scan_band.texts()[0].startswith("めくったページを読み取っています。読み取り済み: 24、待ち: 3。")
-    read_all = "全ページを読み取りました。これから翻訳します。この間はビューアを操作しません。"
-    _batch_event(flow, Message("batch.pages_read", pages=190, bubbles=1900), "read", pages=190, found=1900)
-    assert flow.scan_band.texts() == [read_all] and button_texts(flow.scan_band) == ["停止"]
-    _batch_event(flow, Message("batch.translating_chunk", chunk=1, chunks=19, bubbles=100), "translate", pages=190,
-                 found=1900)
-    assert flow.scan_band.texts() == ["翻訳中: 全1,900行中0行。この間はビューアを操作しません。"]
-    assert flow.scan_band.fraction() == 0.0
-    clock[0] += 420.0  # the first lines done: the model has loaded, the rate is measured from here
-    _batch_event(flow, Message("batch.translated_chunk", chunk=4, chunks=19, bubbles=400, seconds=420.0), "translate",
-                 pages=190, translated=400, found=1900, checked=400)
-    assert flow.scan_band.texts() == ["翻訳中: 全1,900行中400行。この間はビューアを操作しません。"]
-    clock[0] += 420.0  # 400 more lines in 7 minutes: 1,100 more take about 19 minutes
-    wall = 1_800_000_000.0
-    monkeypatch.setattr(banner.time, "time", lambda: wall)
-    at = banner.time.strftime("%H:%M", banner.time.localtime(wall + 1100 / (400 / 420)))
-    _batch_event(flow, Message("batch.translated_chunk", chunk=8, chunks=19, bubbles=800, seconds=840.0), "translate",
-                 pages=190, translated=800, found=1900, checked=800)
-    assert flow.scan_band.texts() == [f"翻訳中: 全1,900行中800行（残り約19分、{at}ごろ終了）。この間はビューアを操作しません。"]
-    assert abs(flow.scan_band.fraction() - 800 / 1900) < 0.001
-    set_language("en")
-    flow._show_band()  # after a language switch
-    assert flow.scan_band.texts() == [f"Translating: 800 of 1,900 lines, about 19 min left (done at about {at}). The "
-                                      "viewer is not used during this step."]
-    flow._batching = True
-    asked = []
-    monkeypatch.setattr(jobs, "ask_stop", lambda master, text, choices: asked.append(choices) or "stop")
-    flow.scan_band.press("Stop")  # the band's Stop asks first (190 pages read), then stops the batch (at once: its
-    assert [a for a, _label in asked[0]] == ["keep", "stop"]  # reader not made yet); translating: keep or stop
-    assert flow._batch_stop_asked and flow.status_var.get() == "Stopping the whole-book run..."
-
-
-def test_the_band_follows_a_page_by_page_scan(flow):
-    flow._scan = banner.ScanState(context=False)
-    _batch_event(flow, Message("batch.translated_page", page=4, bubbles=6, seconds=12.0, error=""), "translate",
-                 pages=3, translated=20)
-    assert flow.scan_band.texts()[0].startswith("Translating the pages you turn. Done: 3. Waiting: 0.")
-    assert button_texts(flow.scan_band) == ["Finished reading", "Stop"]
-
-
-def test_after_the_scan_the_band_sums_it_up_and_only_closes(flow):
-    set_language("ja")
-    flow._scan = banner.ScanState(context=True)
-    flow._batching = flow.busy = flow._resume_auto = True
-    flow.auto_var.set(False)
-    summary = Message("batch.finished", pages=3, bubbles=12, seconds=40.0, minutes=1, failed=0, error="",
-                      reason=Message("batch.finished_reading"))
-    flow._handle_event("batch_done", {"progress": SimpleNamespace(summary=summary, reason="")})
-    assert flow.scan_band.texts() == [progress.rendered(summary), "「自動: ページ送りに追従」が再び ON になりました。"]
-    assert flow.scan_band.texts()[0].endswith(" - 読み終えました。")
-    assert button_texts(flow.scan_band) == ["閉じる"] and flow.stop_btn["state"] == "disabled"
-    assert flow.auto_var.get() and flow._auto_last is None and not flow._batching and not flow.busy
-    assert flow.status_var.get() == progress.rendered(summary)
-
-    flow.scan_band.press("閉じる")
-    assert flow._band is None and flow.scan_band.winfo_manager() == ""
-
-
-def test_a_run_that_translated_the_book_switches_to_reader_mode_and_the_band_says_so(flow):
-    """The first whole-book run of a book opened in translator mode (no translations yet): once it has finished with
-    the book translated, the window is in reader mode, said in the band (the status line soon says other things)."""
-    roles = []
-    flow._on_role_changed = lambda chosen=True: roles.append((flow.role_var.get(), chosen))
-    flow.book_var.set("My Story 2")
-    flow.role_var.set("translator")
-    flow._batch_for = ("My Story 2", flow.model_var.get(), "English")
-    _translated_pages(flow, "My Story 2", 30)
-    summary = Message("batch.finished", pages=31, bubbles=253, seconds=300.0, minutes=5, failed=0, error="",
-                      reason=Message("batch.finished_reading"))
-    flow._handle_event("batch_done", {"progress": SimpleNamespace(summary=summary, reason="")})
-    assert flow.role_var.get() == "reader" and roles == [("reader", False)]
-    assert flow.scan_band.texts()[-1] == READER_AFTER_RUN and flow.status_var.get() == READER_AFTER_RUN
-
-    # a run stopped before its end leaves the role as it is
-    flow.role_var.set("translator")
-    stopped = Message("batch.stopped", page=3, pages=3, bubbles=12, seconds=40.0)
-    flow._handle_event("batch_done", {"progress": SimpleNamespace(summary=stopped, reason="")})
-    assert flow.role_var.get() == "translator" and READER_AFTER_RUN not in flow.scan_band.texts()
-
-
+# ------------------------------------------------------------------ the cache at the frames of a page turn
 def _cached_page(flow, image, incomplete=False):
     import numpy as np
     from taslation import fingerprint as fp
@@ -1044,21 +619,15 @@ def _cached_page(flow, image, incomplete=False):
     cache.save()
 
 
-def test_in_translator_mode_a_cached_page_is_taken_at_its_first_frame_and_completed_unless_a_run_read_it(flow):
+def test_in_translator_mode_a_cached_page_is_taken_at_its_first_frame_and_completed(flow):
     """Translator mode takes a page the cache holds whole at its first frame too, drawn from the cache alone, and
-    completes it from what it reads once the frame has settled (`_completes`; tests/test_follow.py) - except for a
-    book a whole-book run finished reading in this session: the run read every region of its pages."""
+    completes it from what it reads once the frame has settled (`_completes`; tests/test_follow.py)."""
     flow.book_var.set("My Story 2")
     page = Image.open(FIXTURES / "sample_page.png")
     _cached_page(flow, page)
     assert flow._all_cached(page) and not flow._completes()
     flow.role_var.set("translator")
     assert flow._all_cached(page) and flow._completes()  # drawn at once, completed from what it reads after
-    flow._run_read = ("My Story 2", flow.model_var.get(), "English")  # a run of this book finished in this session
-    assert flow._all_cached(page) and not flow._completes()
-    flow._run_read = ("Other Book", flow.model_var.get(), "English")
-    assert flow._completes()
-    flow._run_read = ("My Story 2", flow.model_var.get(), "English")
     _cached_page(flow, page, incomplete=True)  # a page that lacks a translation is completed in any mode, settled
     assert not flow._all_cached(page)
 
@@ -1133,7 +702,7 @@ def test_stop_cancels_the_page_being_translated(flow):
     flow.pump()  # the stage, then the slow model: the badge says so, and that Stop cancels this page
     assert flow._busy_text() == SLOW_JA and flow.status_var.get() == SLOW_JA and flow._busy_shown
     started = time.monotonic()
-    flow.stop_batch()
+    flow.stop_page()
     worker.join(5)
     assert time.monotonic() - started < 2 and not worker.is_alive()
     assert [kind for kind, _data in list(flow._events.queue)] == ["page_cancelled", "translate_done"]
@@ -1174,19 +743,6 @@ def test_a_new_page_seen_by_auto_cancels_the_page_and_is_taken_next(flow, monkey
     clock[0] += 5.0
     flow._watch_page()
     assert not flow._page_cancel.is_set()
-
-
-def test_the_title_names_the_pass_a_whole_book_run_is_in(flow):
-    flow._scan = banner.ScanState(context=True)
-    flow.busy = True
-    flow._busy_since = 0.0
-    flow._flush_busy(1.0)  # the run has gone on for a while: the title shows it
-    assert flow.titles[-1] == "TASlation - reading..."  # the reading pass: nothing is translated yet
-    _batch_event(flow, Message("batch.read_page", page=1, lines=3, pages=1, bubbles=3, cached=0, seconds=2.0, dropped=0), "read", pages=1)
-    assert flow.titles[-1] == "TASlation - reading..."
-    _batch_event(flow, Message("batch.translated_chunk", chunk=1, chunks=2, bubbles=6, seconds=12.0), "translate",
-                 pages=3, translated=6)
-    assert flow.titles[-1] == "TASlation - translating..."
 
 
 def test_a_page_from_the_cache_shows_no_busy_title_and_no_badge(flow):
@@ -1235,20 +791,20 @@ def _said(dialog, text: str) -> bool:
 
 def test_the_start_dialog_fills_in_a_recognised_name_or_offers_several(hidden_root):
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=True, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["Yomizuq", "Star Road 1"], hint="recognised")  # a generic name is never offered
     d.withdraw()
     assert d.name_var.get() == "Star Road 1" and str(d.buttons[0].cget("state")) == "normal"
     assert _said(d, "Recognised as Star Road 1 from a page already translated; change it if that is wrong.")
     d.name_var.set("yomizuq ")  # a name that names no book is never taken
     assert str(d.buttons[0].cget("state")) == "disabled"
-    d._answer("start")
+    d._answer("ok")
     assert not answers
     d.name_var.set("Star Road 1")
-    d._answer("start")
-    assert answers == [("start", "Star Road 1")]
+    d._answer("ok")
+    assert answers == [("ok", "Star Road 1")]
 
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["Star Road 1", "Star Road 2"], hint="several")
     d.withdraw()
     assert d.entry.winfo_class() == "TCombobox" and tuple(d.entry.cget("values")) == ("Star Road 1", "Star Road 2")
@@ -1260,36 +816,34 @@ def test_the_start_dialog_fills_in_a_recognised_name_or_offers_several(hidden_ro
     assert answers[-1] == ("ok", "Star Road 2")
 
     set_language("ja")
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["見本の物語 3"], hint="colophon")
     d.withdraw()
     assert d.name_var.get() == "見本の物語 3" and _said(d, "本の最後のページによると、この本は『見本の物語 3』です。違っていれば変更してください。")
     assert not [w for w in _widgets(d) if w.winfo_class() == "TCheckbutton"]  # the colophon gave the name already
     d.destroy()
     set_language("en")
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()  # nothing recognised: empty and required, as before
     assert d.name_var.get() == "" and d.entry.winfo_class() == "TEntry" and d.hint_label is None
 
 
 def test_a_books_start_offers_the_books_whose_caches_hold_its_page(flow, monkeypatch):
-    _no_problems(monkeypatch)
     _cache(flow.store, "Star Road 1", [_page(1), _page(2), DUP])
     _cache(flow.store, "Star Road 2", [_page(11), DUP_TOO])
     _cache(flow.store, "Yomizuq", [_page(3)])  # kept before the name was asked for: never offered
     flow._on_new_page(_viewer(_page(2), noise=3.0), None)
     d = flow.asked()
-    assert d.generic and d.ask and d.matches == ["Star Road 1"] and d.hint == "recognised"
-    d.on_answer("page", "Star Road 1")
+    assert d.generic and d.matches == ["Star Road 1"] and d.hint == "recognised"
+    d.on_answer("ok", "Star Road 1")
     assert flow.book_var.get() == "Star Road 1" and flow.busy
     flow._handle_event("translate_done", {})
     flow._jobs = queue.Queue()
 
-    flow.settings.scan_mode = "page"  # a near-duplicate page in two books: both offered, the exact one first
-    flow.book_var.set("Yomizuq")
+    flow.book_var.set("Yomizuq")  # a near-duplicate page in two books: both offered, the exact one first
     flow._on_new_page(_viewer(DUP), None)
     d = flow.asked()
-    assert not d.ask and d.matches == ["Star Road 1", "Star Road 2"] and d.hint == "several"
+    assert d.matches == ["Star Road 1", "Star Road 2"] and d.hint == "several"
     d.on_answer(None, "")
     flow._live = _viewer(_page(11))  # the frame on show counts too
     flow._on_new_page(_viewer(_page(3)), None)
@@ -1309,9 +863,7 @@ def test_the_start_dialog_waits_for_the_book_recognised_in_the_worker(flow, monk
     against 2,000 cached pages) runs in the worker: the dialog opens once the books are in. A page turned and F5
     meanwhile wait for it; a name typed into the Book box meanwhile is the dialog's, not the recognised one; a
     window rebuilt meanwhile opens nothing; with the cache off the dialog opens at once."""
-    _no_problems(monkeypatch)
     _cache(flow.store, "Star Road 1", [_page(1), _page(2)])
-    flow.settings.scan_mode = "page"
     flow._on_new_page(_viewer(_page(2)), None)
     assert not flow.dialogs and isinstance(flow._start_dialog, jobs.Recognising) and flow._jobs.qsize() == 1
     flow._on_new_page(_viewer(_page(1)), "later")  # a page turned meanwhile waits for the start
@@ -1351,9 +903,7 @@ def test_the_name_last_given_in_a_viewer_is_offered_when_nothing_is_recognised(f
     """The capture area changed since the book was read (no page recognised): the name given last time in this
     viewer is filled in, said as such; recognised books and the colophon's name come first; every name given for a
     title that names none is the viewer's last name from then on (in ui.json, by viewer)."""
-    _no_problems(monkeypatch)
     state = flow.settings.state_dir
-    flow.settings.scan_mode = "page"
     flow._on_new_page(_viewer(_page(60)), None)  # nothing kept yet: empty and required
     d = flow.asked()
     assert d.matches == [] and d.hint == ""
@@ -1381,7 +931,7 @@ def test_the_name_last_given_in_a_viewer_is_offered_when_nothing_is_recognised(f
 
     flow.translate_now()  # F5 asks for the name with the last one filled in; the name given is the last one now
     prompt = flow.asked()
-    assert not prompt.ask and prompt.matches == ["Star Road 3"] and prompt.hint == "last"
+    assert prompt.matches == ["Star Road 3"] and prompt.hint == "last"
     prompt.on_answer("ok", "Star Road 4")
     assert flow.book_var.get() == "Star Road 4"
     assert json.loads((state / "ui.json").read_text(encoding="utf-8"))["last_book"] == {"Google Chrome": "Star Road 4"}
@@ -1389,12 +939,9 @@ def test_the_name_last_given_in_a_viewer_is_offered_when_nothing_is_recognised(f
     flow._jobs = queue.Queue()
 
     # a title that names the book: its name is not asked for, and not kept as the viewer's last name
-    flow.settings.scan_mode = "book"
     flow.book_var.set("My Story 2")
     flow._on_new_page(_viewer(_page(64)), None)
-    d = flow.asked()
-    assert d.ask and not d.generic
-    d.on_answer("page", "My Story 2")
+    assert flow.asked() is prompt and flow.busy  # no dialog: the page is translated under that name
     assert json.loads((state / "ui.json").read_text(encoding="utf-8"))["last_book"] == {"Google Chrome": "Star Road 4"}
     # nor offered while the title names a book (the Book box emptied by hand)
     from taslation.bookid import remember_name
@@ -1408,7 +955,7 @@ def test_the_name_last_given_in_a_viewer_is_offered_when_nothing_is_recognised(f
 
 def test_the_start_dialog_says_the_name_is_the_one_read_last_time_with_the_viewer(hidden_root):
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["Star Road 3"], hint="last")
     d.withdraw()
     assert d.name_var.get() == "Star Road 3" and str(d.buttons[0].cget("state")) == "normal"
@@ -1416,7 +963,7 @@ def test_the_start_dialog_says_the_name_is_the_one_read_last_time_with_the_viewe
     d._answer(d.default)
     assert answers == [("ok", "Star Road 3")]
     set_language("ja")
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=True, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["見本の物語 3"], hint="last")
     d.withdraw()
     assert d.name_var.get() == "見本の物語 3"
@@ -1439,7 +986,7 @@ def test_the_openers_ask_for_the_name_first_and_go_on_with_it(flow, monkeypatch)
     assert not opened and not flow.dialogs  # the page recognised in the worker first
     prompt = flow.asked()
     assert len(flow.dialogs) == 1
-    assert prompt.generic and not prompt.ask and prompt.matches == ["Star Road 1"] and prompt.hint == "recognised"
+    assert prompt.generic and prompt.matches == ["Star Road 1"] and prompt.hint == "recognised"
     prompt.on_answer("ok", "Star Road 1")
     assert opened == [("sheet", "Star Road", "English")] and flow.book_var.get() == "Star Road 1"
     flow.open_glossary()  # a real name now: at once
@@ -1465,46 +1012,28 @@ def test_the_openers_ask_for_the_name_first_and_go_on_with_it(flow, monkeypatch)
     assert len(told) == 2 and opened[-1] == ("settings", "Star Road 2")
 
 
-def test_f5_and_the_batchs_start_ask_for_the_name_first(flow, monkeypatch):
+def test_f5_asks_for_the_name_first(flow):
     flow.translate_now()
     flow.asked()
-    assert not flow.busy and len(flow.dialogs) == 1 and not flow.dialogs[0].ask  # the name first, nothing read
+    assert not flow.busy and len(flow.dialogs) == 1  # the name first, nothing read
     flow.dialogs[0].on_answer("ok", "Star Road 1")
     assert flow.busy and flow.book_var.get() == "Star Road 1" and flow._jobs.qsize() == 1  # then the page
     flow._handle_event("translate_done", {})
     flow._jobs = queue.Queue()
 
-    starts = []
-    monkeypatch.setattr(jobs, "BatchDialog", lambda master, win, settings, on_start, carried_on="": starts.append(on_start))
-    flow.book_var.set("Yomizuq")
-    flow.open_batch_dialog()
-    options = (VIEWER, 0, True, True)
-    starts[0](options)  # Start: the name first, no batch yet
-    flow.asked()
-    assert not flow.batches and len(flow.dialogs) == 2
-    flow.dialogs[-1].on_answer(None, "")
-    assert not flow.batches  # closed: no batch
-    starts[0](options)
-    flow.asked().on_answer("ok", "Star Road 2")
-    assert flow.batches == [options] and flow.book_var.get() == "Star Road 2"
-
     # Auto's page while the name is asked for waits, and the book's start goes on once it is given
-    _no_problems(monkeypatch)
     flow.book_var.set("Yomizuq")
     flow.translate_now()
     flow._on_new_page(_frame(), "thumb")  # while the page is recognised for the name, too
-    assert len(flow.dialogs) == 3 and flow._start_pending is not None and flow._start_whole is True
+    assert len(flow.dialogs) == 1 and flow._start_pending is not None
     flow.asked()
-    assert len(flow.dialogs) == 4 and flow._start_pending is not None and flow._start_whole is True
+    assert len(flow.dialogs) == 2 and flow._start_pending is not None
     flow.dialogs[-1].on_answer("ok", "Star Road 3")
-    assert flow._jobs.qsize() == 2  # the book's setup check, then the page F5 asked for
-    flow._jobs.get()()
-    flow.pump()
-    d = flow.dialogs[-1]
-    assert len(flow.dialogs) == 5 and d.ask and not d.generic and d.name == "Star Road 3"  # the whole-book question
+    assert flow._start_pending is None and flow.busy and flow._jobs.qsize() == 1  # Auto's page, under the name given
+    assert flow._queued == ("translate", ())  # then the page F5 asked for
 
 
-def test_a_name_that_names_no_book_reaches_no_store(flow, monkeypatch, tmp_path):
+def test_a_name_that_names_no_book_reaches_no_store(flow, tmp_path):
     flow._ensure_cache = A._ensure_cache.__get__(flow)  # the real one
     flow._job_refresh_premises = A._job_refresh_premises.__get__(flow)
     flow.pipeline, flow.translator = BookState(), SimpleNamespace(model="", target_language="English")
@@ -1513,12 +1042,6 @@ def test_a_name_that_names_no_book_reaches_no_store(flow, monkeypatch, tmp_path)
     assert flow.pipeline.cache is None and flow.pipeline.annotations is None and flow.pipeline.glossary is None
     assert flow.pipeline.glossary_text == ""  # ... with nobody's premises
     flow._job_refresh_premises("Yomizuq", "English")
-    monkeypatch.setattr(jobs, "BatchReader", lambda *a, **k: pytest.fail("no batch for a name that names no book"))
-    flow._batching = flow.busy = True
-    flow._job_batch(VIEWER.hwnd, "Yomizuq", "m", "English", 0, True, True)
-    assert [kind for kind, _data in list(flow._events.queue)] == ["status", "batch_refused"]
-    flow.pump()
-    assert not flow._batching and flow.status_var.get() == "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
     state = tmp_path / "state"
     assert not any(p.is_file() for p in state.rglob("*.json") if p.name != "ui.json")  # nothing kept
 
@@ -1597,13 +1120,9 @@ MOVED = ("This book is now called 見本の物語 3. Moved along: 1 translation 
 
 def test_with_files_kept_under_the_name_the_colophon_offers_to_rename_them_and_use_moves_them(flow, monkeypatch):
     made = _offers(monkeypatch)
-    _keep_book(flow, "Star Road 3", _page(1))  # the whole book translated under the name typed at the start
+    _keep_book(flow, "Star Road 3", _page(1))  # pages translated under the name typed at the start
     flow.book_var.set("Star Road 3")
-    flow._batch_for = ("Star Road 3", "m", "English")
-    flow._book_scanned, flow._scanned_book = True, "Star Road 3"
-    summary = Message("batch.scan_ended")
-    flow._handle_event("batch_done", {"progress": SimpleNamespace(summary=summary, reason="",
-                                                                    colophon=COLOPHON)})
+    flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Star Road 3", "model": "m", "language": "English"})
     assert len(made) == 1 and flow._start_dialog is made[0] and flow.book_var.get() == "Star Road 3"
     assert _question(made[0]) == "".join("The last page of the book says this is 見本の物語 (3). Rename Star Road 3 to it? Its "
                                          "translations, notes and sheet move along.".split())
@@ -1612,7 +1131,7 @@ def test_with_files_kept_under_the_name_the_colophon_offers_to_rename_them_and_u
     assert flow.status_var.get() == "Renaming Star Road 3 to 見本の物語 3..."
     flow.run_jobs()  # the files move in the worker; the Book box follows once they have
     assert not flow.busy and flow.book_var.get() == "見本の物語 3" and flow._book_edited
-    assert flow._scanned_book == "見本の物語 3" and flow.status_var.get() == MOVED
+    assert flow.status_var.get() == MOVED
     assert last_name(flow.settings.state_dir, flow.selected.title) == "見本の物語 3"  # the viewer's last book too
     assert [(e["book"], e["pages"]) for e in flow.store.list()] == [("見本の物語 3", 1)]
     assert identity_of(flow.store, "見本の物語 3", "English") == COLOPHON.details()
@@ -1674,11 +1193,10 @@ def test_a_rename_that_cannot_be_made_says_why_and_the_book_keeps_its_name(flow,
 def test_an_old_cache_kept_under_the_viewers_name_is_renamed_and_the_start_that_waited_goes_on(flow, monkeypatch):
     made = _offers(monkeypatch)
     _cache(flow.store, "Yomizuq", [_page(3), _page(4)])  # kept before the name was asked for
-    flow.settings.scan_mode = "page"
     flow.reading = True  # read behind the full screen: offered once it is left
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"})
     flow.reading = False
-    flow._start_pending, flow._start_whole = (_viewer(_page(70)), None), False  # a book's start waits meanwhile
+    flow._start_pending, flow._start_waits = (_viewer(_page(70)), None), True  # a book's start waits meanwhile
     flow._handle_event("translate_done", {})
     assert _question(made[0]) == "".join("The last page of the book says this is 見本の物語 (3). Rename Yomizuq to it? Its "
                                          "translations, notes and sheet move along.".split())
@@ -1703,10 +1221,9 @@ def test_a_book_kept_under_an_older_spelling_is_read_under_it_and_offered_the_on
 
     monkeypatch.setattr(jobs, "StandardNameOffer", offer)
     _keep_book(flow, "Star Road 第3巻", _page(1))  # kept before the Series and Volume fields
-    flow._keep_book_start("Star Road 第3巻", "start")
     # the start dialog's answer, as the two fields make it: the book's files under the old spelling are found
-    flow._book_answer("page", "Star Road 3", generic=True)
-    assert flow.book_var.get() == "Star Road 第3巻" and flow._book_start("Star Road 3") == "start"
+    flow._book_answer("ok", "Star Road 3", generic=True)
+    assert flow.book_var.get() == "Star Road 第3巻"
     flow._handle_event("translate_done", {})  # a page done: the one spelling offered, once a session
     assert len(offers) == 1 and flow._start_dialog is offers[0]
     assert "Star Road 第3巻" in str(offers[0].label.cget("text")) and "Star Road 3?" in str(offers[0].label.cget("text"))
@@ -1724,7 +1241,6 @@ def test_a_book_kept_under_an_older_spelling_is_read_under_it_and_offered_the_on
     assert flow.status_var.get().startswith("This book is now called Star Road 3. Moved along: 1 translation file(s), 1 ")
     assert [e["book"] for e in flow.annotation_store.list()] == ["Star Road 3"]
     assert [e["series"] for e in flow.glossary_store.list()] == ["Star Road"]  # the series' sheet stays its own
-    assert flow._book_start("Star Road 3") == "start"  # what was kept under the old spelling still holds
     flow._handle_event("translate_done", {})
     assert len(offers) == 2
 
@@ -1802,8 +1318,7 @@ def test_a_sheet_that_says_otherwise_than_the_new_series_is_reviewed_then_joins_
     _keep_book(flow, "Star Road 3", _page(1))
     _the_colophons_series(flow)
     flow.book_var.set("Star Road 3")
-    flow.settings.scan_mode = "page"
-    flow._start_pending, flow._start_whole = (_viewer(_page(70)), None), False  # a book's start waits meanwhile
+    flow._start_pending, flow._start_waits = (_viewer(_page(70)), None), True  # a book's start waits meanwhile
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Star Road 3", "model": "m", "language": "English"})
     made[0].buttons[0].invoke()  # Use: the review first, nothing renamed yet
     assert len(reviews) == 1 and flow._start_dialog is reviews[0] and not flow.busy and flow._jobs.empty()
@@ -1853,8 +1368,7 @@ def test_cancel_in_the_review_keeps_the_name_and_a_start_that_waits_goes_on(flow
     finally:
         set_language("en")
     flow._colophon_asked.clear()  # a later session: offered again; this time a book's start waits meanwhile
-    flow.settings.scan_mode = "page"
-    flow._start_pending, flow._start_whole = (_viewer(_page(70)), None), False
+    flow._start_pending, flow._start_waits = (_viewer(_page(70)), None), True
     flow._handle_event("colophon", event)
     made[1].buttons[0].invoke()
     assert flow._start_pending is not None
@@ -1938,7 +1452,6 @@ def test_the_rename_review_shows_both_values_answers_once_and_speaks_the_windows
 
 
 def test_under_a_name_that_names_no_book_every_page_counts_as_uncached(flow, monkeypatch):
-    _no_problems(monkeypatch)
     flow._page_uncached = A._page_uncached.__get__(flow)  # the real one
     _cache(flow.store, "Yomizuq", [_page(3)])  # an old cache kept under "Yomizuq" holds the page
     _cache(flow.store, "Star Road 1", [_page(1)])
@@ -1983,14 +1496,13 @@ def test_f5_while_the_browser_shows_another_tab_says_the_live_views_line(flow):
 
 
 def test_a_colophon_read_under_a_generic_name_names_the_book_at_its_start(flow, monkeypatch):
-    _no_problems(monkeypatch)
     flow.reading = True
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"})
     flow.reading = False
     flow._on_new_page(_viewer(_page(70)), None)  # the start dialog comes first: the colophon's name filled in
     d = flow.asked()
     assert d.matches == ["見本の物語 3"] and d.hint == "colophon"
-    d.on_answer("page", "見本の物語 3")
+    d.on_answer("ok", "見本の物語 3")
     assert flow._jobs.qsize() == 2  # the colophon's details kept under the name, then the page translated
     flow._jobs.get()()
     assert identity_of(flow.store, "見本の物語 3")["isbn"] == COLOPHON.isbn and flow._colophon_found is None
@@ -2026,7 +1538,7 @@ def test_a_page_with_no_text_to_translate_is_read_as_a_colophon(flow, monkeypatc
 
 def test_the_colophon_box_rests_the_name_field_and_a_temporary_name_holds_the_book(hidden_root):
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()
     ok = d.buttons[0]
     assert str(ok.cget("state")) == "disabled" and str(d.entry.cget("state")) == "normal"
@@ -2043,52 +1555,7 @@ def test_the_colophon_box_rests_the_name_field_and_a_temporary_name_holds_the_bo
     assert answers[0][0] == "ok" and answers[0][1].startswith("Untitled book 20")
 
 
-# ------------------------------------------------------------------ a run's end, its start, what waits for it
-def _ended(summary="batch.scan_ended"):
-    return SimpleNamespace(summary=Message(summary), reason="", colophon=None)
-
-
-def test_auto_comes_back_after_a_run_started_from_the_dialog(flow):
-    flow.auto_var.set(True)
-    flow._auto_before_batch = bool(flow.auto_var.get())  # as `_start_batch` notes it, then turns Auto off
-    flow.auto_var.set(False)
-    flow._auto_last = object()
-    flow._batch_done(_ended())
-    assert flow.auto_var.get() is True and flow._auto_last is None and flow._band["resumed"] is True
-    assert flow._auto_before_batch is None
-    flow._auto_before_batch = False  # Auto was off before the run: it stays off, and nothing says it is on
-    flow.auto_var.set(False)
-    flow._batch_done(_ended())
-    assert flow.auto_var.get() is False and flow._band["resumed"] is False
-
-
-def test_a_head_of_the_batch_that_fails_leaves_no_run_behind(flow, monkeypatch):
-    def boom(_settings):
-        raise RuntimeError("no such thing")
-
-    monkeypatch.setattr(jobs, "preflight", boom)
-    flow.busy, flow._batching = True, True
-    flow.book_var.set("Book")
-    flow._job_batch(1, "Book", "m", "English", 0, True, True)
-    flow.pump()
-    assert not flow.busy and not flow._batching and flow.batch is None
-    assert flow.status_var.get() == "Could not start the batch: RuntimeError: no such thing"
-
-
-def test_stop_cancels_a_queued_batch_and_the_stop_button_says_it_can(flow):
-    flow.ready, flow.busy = True, True  # a page runs: the batch waits behind it
-    flow._page_cancel = None
-    flow._queue("batch", "options")
-    assert flow.stop_btn["state"] == "normal"
-    flow._resume_auto = True
-    flow.stop_batch()
-    assert flow._queued is None and not flow._resume_auto and flow.stop_btn["state"] == "disabled"
-    assert flow.status_var.get() == "The batch that was waiting is cancelled."
-    flow.busy = False
-    flow._run_queued()
-    assert not flow.batches
-
-
+# ------------------------------------------------------------------ an OCR model that fails to load; a page's order, a save
 class _Boom:
     def __init__(self, *_args):
         raise RuntimeError("the model file is damaged")
@@ -2143,9 +1610,6 @@ def test_the_stale_order_goes_when_another_page_comes(flow):
     flow._handle_event("result", {"result": second})
     assert flow._ordering is None and labels == ["Reading order"]
     assert flow.status_var.get() == "Reading order cancelled: another page came."
-    flow._ordering = ["a region of the second page"]
-    app_mod.App._batch_page(flow, page)
-    assert flow._ordering is None and flow.last_result is None
 
 
 def test_a_save_on_another_page_leaves_the_page_on_show(flow):

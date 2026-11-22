@@ -98,52 +98,52 @@ def test_every_template_renders_with_its_params():
 
 
 def test_a_message_is_the_string_it_says():
-    m = Message("batch.scanning_page", page=3)
-    assert isinstance(m, str) and m == "Scanning page 3..." and m.code == "batch.scanning_page"
-    assert dict(m.params) == {"page": 3}
-    assert m.startswith("Scanning") and m.strip() == "Scanning page 3..." and "page 3" in m
-    assert "[" + m + "]" == "[Scanning page 3...]" and f"{m}" == "Scanning page 3..." and "{}".format(m) == m
-    assert type(str(m)) is str and json.dumps(m) == '"Scanning page 3..."'
-    assert repr(m) == "Message('batch.scanning_page', {'page': 3})"
+    m = Message("rename.same_name", book="Vol 3")
+    text = "The book is called Vol 3 already."
+    assert isinstance(m, str) and m == text and m.code == "rename.same_name"
+    assert dict(m.params) == {"book": "Vol 3"}
+    assert m.startswith("The book") and m.strip() == text and "Vol 3" in m
+    assert "[" + m + "]" == f"[{text}]" and f"{m}" == text and "{}".format(m) == m
+    assert type(str(m)) is str and json.dumps(m) == f'"{text}"'
+    assert repr(m) == "Message('rename.same_name', {'book': 'Vol 3'})"
     with pytest.raises(AttributeError):
         m.code = "x"  # type: ignore[misc]
     with pytest.raises(TypeError):
-        m.params["page"] = 4  # type: ignore[index]
+        m.params["book"] = "Vol 4"  # type: ignore[index]
     for again in (pickle.loads(pickle.dumps(m)), copy.deepcopy(m), copy.copy(m)):
         assert isinstance(again, Message) and again.code == m.code and again == m
 
 
 def test_rendering_never_breaks():
-    assert str(Message("batch.continuing", lines=1)) == "Going on with the pages read earlier: 1 line to translate"
-    assert "3 lines to translate" in Message("batch.continuing", lines=3)
-    assert str(Message("batch.scanning_page")) == "Scanning page {page}..."  # a missing param shows as it is
+    assert str(Message("batch.note_retry_unusable", bubbles=1)) == (
+        "request for 1 line came back unusable; retrying in two halves")
+    assert "3 lines came back" in Message("batch.note_retry_unusable", bubbles=3)
+    assert str(Message("rename.same_name")) == "The book is called {book} already."  # a missing param shows as it is
     assert str(Message("pipeline.translated", bubbles=1, seconds="soon", review=0, error="")) == "1 line(s) translated in soon s."  # wrong type: as text
     assert str(Message("no.such_code", a=1)) == "no.such_code (a=1)" and str(Message("no.such_code")) == "no.such_code"
-    assert str(Message("batch.waiting_other_tab", title="Store - Browser")).startswith(
-        "Waiting: the viewer window shows 'Store - Browser' now")
+    assert str(Message("ollama.not_loopback", url="http://x")) == (
+        "Ollama URL must be a loopback http(s) address, got 'http://x'")  # a conversion
 
 
 def test_follow_ups_come_only_when_their_param_is_set():
     error = Message("ollama.timeout", seconds=900.0)
-    done = dict(pages=3, bubbles=12, seconds=40.0, minutes=1, error="", reason=Message("batch.finished_reading"))
-    clean = Message("batch.finished", failed=0, **done)
-    assert str(clean) == ("Whole-book scan done: 3 pages, 12 lines translated in 1 minute - you finished reading.")
-    assert [s.code for s in clean.sentences()] == ["batch.finished"]
-    failed = Message("batch.finished", failed=2, **{**done, "error": error})
-    assert [s.code for s in failed.sentences()] == ["batch.finished", "batch.failures"]
-    assert dict(failed.sentences()[1].params) == {"failed": 2, "error": error}
-    assert str(failed) == str(clean) + JOINER + (
-        "2 part(s) could not be translated. They are done when you read those pages, or in the next "
-        "whole-book run.")
+    page = dict(bubbles=6, seconds=2.1, cached=0, new=1)
+    clean = Message("pipeline.translated", review=0, error="", **page)
+    assert str(clean) == "6 line(s) translated in 2 s."
+    assert [s.code for s in clean.sentences()] == ["pipeline.translated"]
+    failed = Message("pipeline.translated", review=2, error=error, **page)
+    assert [s.code for s in failed.sentences()] == ["pipeline.translated", "pipeline.to_review", "pipeline.page_error"]
+    assert dict(failed.sentences()[1].params) == {"review": 2} and dict(failed.sentences()[2].params) == {"error": error}
+    assert str(failed) == str(clean) + JOINER + "2 worth a look (Translator role, Review...)." + JOINER + (
+        "The translation took too long. Press F5 to try again.")
 
 
 def test_a_window_renders_with_its_own_catalog():
-    catalog = {"batch.finished": "Fertig: {pages} Seite(n) - {reason}", "batch.finished_reading": "Ende des Buchs",
-               "batch.failures": "{failed} Anfrage(n) fehlgeschlagen ({error})"}
-    m = Message("batch.finished", pages=3, bubbles=12, seconds=40.0, failed=1,
-                error=Message("ollama.unreachable", url="http://127.0.0.1:11434"), reason=Message("batch.finished_reading"))
-    assert render(m, catalog) == ("Fertig: 3 Seite(n) - Ende des Buchs - 1 Anfrage(n) fehlgeschlagen "
-                                  "(TASlation could not reach the translation program. Press F5 in a moment; it starts it by itself.)")  # no entry: English
+    catalog = {"pipeline.translated": "{bubbles} Zeile(n) übersetzt", "pipeline.to_review": "{review} ansehen"}
+    m = Message("pipeline.translated", bubbles=3, seconds=4.0, cached=0, new=1, review=1,
+                error=Message("ollama.unreachable", url="http://127.0.0.1:11434"))
+    assert render(m, catalog) == ("3 Zeile(n) übersetzt - 1 ansehen - TASlation could not reach the translation program. "
+                                  "Press F5 in a moment; it starts it by itself.")  # no entry: English
     assert render(m) == str(m) and render("plain") == "plain"
 
 

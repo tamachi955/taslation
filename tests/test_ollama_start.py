@@ -3,7 +3,7 @@ stopped, and the Ollama that may run on this computer is never asked. Where it i
 server itself, hidden, with its environment) and waited for, the record of the server TASlation started and of who
 uses it, the end (stopped; left to another TASlation, to another program's model, to a person's own Ollama; adopted
 after a crash; a reused process number; a stop that does not come), the window's start and close, a request that finds
-Ollama gone, the commands and doctor, and a whole-book run that stops rather than spins. The process functions
+Ollama gone, and the commands and doctor. The process functions
 themselves run on Windows on stand-ins of this test's own (``python -c``), never on Ollama."""
 from __future__ import annotations
 
@@ -22,15 +22,11 @@ from typing import Any
 
 import pytest
 from conftest import windows_only
-from test_batch import _fake_viewer
-from test_batch_messages import _reader
 from test_devices import start, worker  # noqa: F401 - the fixture of the window's start
 
-from helpers import read_book
 from taslation import cli, devices, health, ollama_start
 from taslation import translator_install as ti
-from taslation.batch import fatal
-from taslation.cache import CacheStore
+from taslation.translate.sequence import fatal
 from taslation.config import Settings
 from taslation.message_texts import LANGUAGES, catalog
 from taslation.messages import Cancelled, Message, render
@@ -997,14 +993,6 @@ def test_the_window_starts_its_server_again_for_a_request_without_an_answer(mach
     assert jobs.JobsMixin._restart_ollama(SimpleNamespace(_ollama=None)) is None
 
 
-def test_before_a_scan_s_check_ollama_is_started(machine, tmp_path):
-    _install(tmp_path)
-    machine.after_start = 0
-    jobs.JobsMixin._ollama_back(SimpleNamespace(_ollama=OllamaStarter(URL)))
-    assert len(machine.started) == 1
-    jobs.JobsMixin._ollama_back(SimpleNamespace(_ollama=None))  # the start has not got that far: nothing to do
-
-
 # ------------------------------------------------------------------------------------------ a request finds it gone
 class Gone:
     """`_request_once` / `_stream_once` of a translator: refused *refusals* times, then an answer."""
@@ -1097,22 +1085,6 @@ def test_the_real_gate_lets_one_try_through_for_many_requests(machine, tmp_path,
         with pytest.raises(TranslationError):
             tr._request("/x")
     assert len(machine.started) == 1 and gone.calls == 5
-
-
-def test_a_whole_book_run_stops_rather_than_spins(machine, sample_page, sample_page2, settings, monkeypatch, tmp_path):
-    """Ollama gone during a run, and it does not come back: one start at most, one request more, and the run ends
-    with the reason it always ended with."""
-    _install(tmp_path)
-    _fake_viewer(sample_page, sample_page2, settings, monkeypatch)
-    settings.chunk_bubbles = 8
-    tr = _translator(OllamaStarter(URL).revive)
-    gone, looks = Gone(refusals=999), Gone(refusals=999)
-    monkeypatch.setattr(tr, "_stream_once", gone)
-    monkeypatch.setattr(tr, "_request_once", looks)  # /api/ps before a request, the release at the end
-    progress = read_book(_reader(settings, tr, CacheStore(settings.cache_dir).open("Gone", "fake"), context_mode=True,
-                       preflight=[]))
-    assert progress.reason == GONE and progress.pages == 3  # (no request while the pages turn)
-    assert len(machine.started) == 1 and gone.calls <= 2 and looks.calls <= 2
 
 
 # ------------------------------------------------------------------------------------------ the commands

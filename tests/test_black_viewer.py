@@ -1,32 +1,22 @@
 """A viewer that stays black (`taslation.recovery`): it is only waited for, with nothing pressed and no capture made but
 of a frame the session delivered; then the person is told, once and in plain words, to reload the book in its own
-window, and TASlation goes on waiting - no key goes to the viewer, ever, in the window or in a batch. A black frame is
+window, and TASlation goes on waiting - no key goes to the viewer, ever. A black frame is
 never read or cached. Stand-ins for the viewer: no window, no key."""
 from __future__ import annotations
 
-import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from helpers import EN_TEXTS, FakeOcr, read_book
 from PIL import Image, ImageDraw
-from test_batch import FakeViewer
 
-from taslation import batch as batch_mod
 from taslation import capture, recovery
-from taslation.batch import BatchReader
-from taslation.cache import CacheStore
 from taslation.capture import is_black, wgc
 from taslation.config import ConfigError, Settings
 from taslation.i18n import UI_LANGUAGES, _, set_language
-from taslation.message_texts import catalog
-from taslation.messages import Message, render
-from taslation.pipeline import Pipeline
 from taslation.recovery import GAVE_UP, LOADING, RECOVERED, BlackWatch
-from taslation.translate import DictTranslator
 from taslation.ui import jobs, live, reading, viewers
 from taslation.ui.constants import VIEWER_BLACK, VIEWER_LOADING
 
@@ -201,87 +191,9 @@ def test_the_window_lines_in_every_language():
         set_language("en")
 
 
-def test_the_batch_lines_in_every_language():
-    for lang in UI_LANGUAGES:
-        text = render(Message("batch.viewer_black"), catalog(lang))
-        assert "TASlation" in text and "F5" in text and "{" not in text, lang
-
-
-# ------------------------------------------------------------------ the batch
-class Spell:
-    """How the viewer goes black: at the frame after page *page* was left (the key that turned it arrives on black), it
-    stays black until *cure* says so: None (never: the reader brings it back) or "wait" (by itself after *frames*)."""
-
-    def __init__(self, page: int, cure: str | None, frames: int = 2):
-        self.page, self.cure, self.frames = page, cure, frames
-
-
-class BlackingViewer(FakeViewer):
-    """A `FakeViewer` that goes black as a `Spell` says, as the reader turns to the page. Every capture counts."""
-
-    def __init__(self, pages, spell: Spell, frame=None, screen: Screen | None = None):
-        self.spell, self.frame = spell, frame if frame is not None else spinner(pages[0].size)
-        self.black = False
-        self.spent = False
-        self.captures = 0
-        self.screen = screen
-        super().__init__(pages)
-
-    @property
-    def index(self):
-        return self._index
-
-    @index.setter
-    def index(self, value):
-        self._index = value
-        if self.spell.page is not None and value == self.spell.page and not self.spent:
-            self.black, self.spent = True, True
-
-    def capture(self, hwnd):
-        self.captures += 1
-        if self.black:
-            if self.spell.cure == "wait":
-                self.spell.frames -= 1
-                if self.spell.frames <= 0:
-                    self.black = False
-            if self.black:
-                return self.frame
-        return super().capture(hwnd)
-
-
-def wire(viewer, settings, monkeypatch, screen):
-    monkeypatch.setattr(batch_mod, "capture_window", viewer.capture)
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "window_rect", lambda hwnd: (0, 0, 800, 600))
-    monkeypatch.setattr(batch_mod, "window_title", lambda hwnd: "Book - Browser")
-    screen.seq = None  # no session: every look is a capture ...
-    monkeypatch.setattr(recovery, "FALLBACK_LOOK_S", 0)
-    monkeypatch.setattr(BlackWatch, "fallback_look_s", 0.0)  # ... and looks are as quick as the test
-    monkeypatch.setattr(BlackWatch, "say_after_s", 0.02)
-    monkeypatch.setattr(BlackWatch, "step_s", 0.005)
-    settings.settle_ms = 5
-    settings.page_turn_wait_ms = 60
-    settings.black_wait_s = 0.05
-    cache = CacheStore(settings.cache_dir).open("Book", "fake")
-    return Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=cache), cache
-
-
-def reader_for(pipeline, settings, **kwargs):
-    said: list[str] = []
-    kwargs.setdefault("context_mode", False)
-    reader = BatchReader(pipeline, hwnd=HWND, settings=settings, on_progress=lambda p, r: said.append(p.message), title="Book - Browser", **kwargs)
-    reader.viewer_class = "Chrome_WidgetWin_1"
-    return reader, said
-
-
+# ------------------------------------------------------------------ helpers
 def codes(said) -> list[str]:
     return [getattr(m, "code", "") for m in said]
-
-
-def in_hand(reader):
-    thread = threading.Thread(target=reader.run, daemon=True)
-    thread.start()
-    return thread
 
 
 def until(condition, seconds=10.0):
@@ -289,120 +201,6 @@ def until(condition, seconds=10.0):
     while time.monotonic() < end and not condition():
         time.sleep(0.002)
     return condition()
-
-
-def black_after_first_page(reader, viewer):
-    """The first page is read, the reader turns, the viewer stays black, and the run says so."""
-    assert until(lambda: reader.progress.pages == 1)
-    viewer.index = 1
-    assert until(lambda: getattr(reader.progress.waiting, "code", "") == "batch.viewer_black")
-
-
-def test_a_batch_waits_out_a_slow_page_and_presses_nothing(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, "wait", frames=2), screen=screen)
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    reader, said = reader_for(pipeline, settings)
-    p = read_book(reader, viewer)
-    assert p.pages == 2 and len(cache) == 2
-    assert p.reason == Message("batch.finished_reading")
-    assert screen.keys == [] and "batch.viewer_black" not in codes(said)
-
-
-def test_a_black_viewer_is_said_and_the_run_waits_for_the_reader_with_no_key(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, None), screen=screen)
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    reader, said = reader_for(pipeline, settings)
-    thread = in_hand(reader)
-    black_after_first_page(reader, viewer)
-    time.sleep(0.1)
-    assert thread.is_alive() and screen.keys == []
-    assert "batch.viewer_loading" in codes(said)
-    assert len(cache) == 1  # the page done is kept; the black frame is not in it
-    viewer.black = False  # the reader brought it back
-    assert until(lambda: reader.progress.pages == 2)
-    assert reader.progress.waiting is None
-    reader.finish()
-    thread.join(10)
-    assert reader.progress.reason == Message("batch.finished_reading") and screen.keys == []
-
-
-def test_a_flat_black_viewer_is_waited_for_too(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    black = Image.new("RGB", sample_page.size, (0, 0, 0))
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, None), frame=black, screen=screen)
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    monkeypatch.setattr(batch_mod, "behind_others", lambda hwnd: False)
-    reader, _said = reader_for(pipeline, settings)
-    thread = in_hand(reader)
-    black_after_first_page(reader, viewer)
-    reader.stop()
-    thread.join(10)
-    assert len(cache) == 1 and screen.keys == []
-
-
-def test_black_from_the_start_and_finished_reading_says_no_page_was_seen(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(None, None), screen=screen)
-    viewer.black = True
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    reader, _said = reader_for(pipeline, settings)
-    thread = in_hand(reader)
-    assert until(lambda: getattr(reader.progress.waiting, "code", "") == "batch.viewer_black")
-    reader.finish()
-    thread.join(10)
-    p = reader.progress
-    assert p.pages == 0 and len(cache) == 0 and p.reason == Message("batch.no_page_seen") and screen.keys == []
-
-
-def test_finished_reading_while_black_goes_on_to_the_translation(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, None), screen=screen)
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    pipeline.translator = translator = DictTranslator(EN_TEXTS)
-    reader, _said = reader_for(pipeline, settings, context_mode=True, book="Book")
-    thread = in_hand(reader)
-    black_after_first_page(reader, viewer)
-    reader.finish()
-    thread.join(20)
-    p = reader.progress
-    assert p.pages == 1 and p.reason == Message("batch.finished_reading") and p.phase == "done"
-    assert translator.calls and p.checked > 0 and screen.keys == []
-    assert p.summary.code == "batch.finished"
-
-
-def test_a_stop_while_black_ends_the_run_with_nothing_translated(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, None), screen=screen)
-    pipeline, cache = wire(viewer, settings, monkeypatch, screen)
-    pipeline.translator = translator = DictTranslator(EN_TEXTS)
-    reader, _said = reader_for(pipeline, settings, context_mode=True)
-    thread = in_hand(reader)
-    black_after_first_page(reader, viewer)
-    reader.stop()
-    thread.join(10)
-    assert reader.progress.summary.code == "batch.stopped_reading" and translator.calls == [] and len(cache) == 0
-
-
-def test_no_capture_while_no_frame_comes(sample_page, sample_page2, settings, monkeypatch):
-    screen = Screen(monkeypatch)
-    viewer = BlackingViewer([sample_page, sample_page2], Spell(1, None), screen=screen)
-    pipeline, _cache = wire(viewer, settings, monkeypatch, screen)
-    screen.seq = 1  # a session, whose counter stands still: the viewer shows the same black frame
-    monkeypatch.setattr(recovery, "frame_count", lambda hwnd: 1)
-    settings.black_wait_s = 0.15
-    reader, _said = reader_for(pipeline, settings)
-    seen: list[int] = []
-    original = reader._through_black
-
-    def through(image):
-        seen.append(viewer.captures)
-        return original(image)
-
-    reader._through_black = through
-    read_book(reader, viewer, patience_s=0.5)
-    assert len(seen) == 1 and viewer.captures == seen[0]
 
 
 # ------------------------------------------------------------------ the window
@@ -413,8 +211,6 @@ class Window(live.LiveViewMixin):
         self.settings = settings
         self.selected = SimpleNamespace(hwnd=HWND, title="Book - Browser")
         self.reading = False
-        self.batch = None
-        self._batching = False
         self.busy = False
         self._enlarged = None
         self._enlarging = None
@@ -582,14 +378,6 @@ def test_another_tab_ends_the_spell_with_no_key(settings, stage):
     window._capture(HWND)
     beats(window, stage, 10)
     window._book_in_front = lambda: False
-    beats(window, stage, 40)
-    assert not window._black_open() and stage.screen.keys == []
-
-
-def test_a_batch_takes_over_from_the_window(settings, stage):
-    window = Window(settings)
-    window._capture(HWND)
-    window.batch = object()
     beats(window, stage, 40)
     assert not window._black_open() and stage.screen.keys == []
 

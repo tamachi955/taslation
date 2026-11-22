@@ -19,8 +19,8 @@ import pytest
 from conftest import windows_only
 from PIL import Image, ImageDraw
 
-from taslation import batch, capture, i18n
-from taslation.batch import DETAIL_GRID, detail, frames_differ, sharper, thumbnail
+from taslation import capture, frames, i18n
+from taslation.frames import DETAIL_GRID, detail, frames_differ, sharper, thumbnail
 from taslation.capture import WindowInfo, windows
 from taslation.config import ConfigError, Settings
 from taslation.pagekeys import key_ways
@@ -73,8 +73,7 @@ def test_the_decision_from_who_is_in_front_and_the_last_operation():
 
 
 def test_a_soft_picture_is_told_from_the_sharp_one_though_their_thumbnails_are_alike():
-    assert live.detail is batch.detail and live.sharper is batch.sharper  # one test of sharpness: the live view's ...
-    # ... and the whole-book scan's (`batch.PageWatch`)
+    assert live.detail is frames.detail and live.sharper is frames.sharper  # one test of sharpness, `frames`'
     for seed in (1, 2):
         sharp, soft = _page(seed), _page(seed, soft=3)
         assert not frames_differ(thumbnail(sharp), thumbnail(soft))  # the same page to every look Auto had
@@ -302,7 +301,7 @@ class Window(BlackViewerMixin):
                                         page_turn_wait_ms=3000, follow=follow)
         self.selected = VIEWER
         self.busy = self.reading = self._viewer_hidden = self._busy_shown = self._waiting = False
-        self.ready, self.batch, self._batching, self._bar_shown = True, None, False, False
+        self.ready, self._bar_shown = True, False
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = self._ordering = None
         self._live = self._live_thumb = self._job_frame = self._job_thumb = self._fill = self._queued = None
@@ -462,8 +461,8 @@ def test_nothing_while_neither_is_in_front_and_one_look_when_one_comes_back(setu
 
 
 def test_over_the_book_a_click_on_the_window_leaves_the_viewer_in_front_and_its_turns_followed(setup, monkeypatch):
-    """Over a full-screen viewer the window never takes the foreground, but a click on it (Finished reading, the page
-    strip) gives Windows' note that it came to the front, and no note follows: who is in front is what Windows says
+    """Over a full-screen viewer the window never takes the foreground, but a click on it (one of its buttons, a
+    thumbnail beside the page) gives Windows' note that it came to the front, and no note follows: who is in front is what Windows says
     now, and the pages turned in the viewer are followed - on the full screen too."""
     v = setup.viewer
     monkeypatch.setattr(live, "foreground_window", lambda: BROWSER)  # the viewer keeps the foreground throughout
@@ -474,7 +473,7 @@ def test_over_the_book_a_click_on_the_window_leaves_the_viewer_in_front_and_its_
         setup.clock.run(3)
         w.job_done()
         pages = len(w.new_pages)
-        w.events.notes.append(("front", OWN))  # Finished reading clicked
+        w.events.notes.append(("front", OWN))  # a button of the window clicked
         setup.clock.run(0.15)
         assert w._following.owner == "viewer"
         v.frames.append((setup.clock.now + 0.3, _page(10 + reading_mode)))  # the reader turns the page in the viewer
@@ -704,7 +703,7 @@ def test_a_turn_stops_the_backlog_s_step_before_the_turned_page_is_drawn(setup, 
 def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_on_its_sharp_frame(setup, monkeypatch):
     """The viewer in front, its frames counted, the book's cache holding every page: the first page drawn soft first
     is taken on its soft frame, as nothing says yet that this viewer draws so, and read again from its sharp one -
-    what the window learns the viewer's soft and sharp pictures by (`batch.crispness`). From then on a soft frame of a
+    what the window learns the viewer's soft and sharp pictures by (`frames.crispness`). From then on a soft frame of a
     page the cache holds is not lettered: the page is taken on its sharp frame as that comes, which the window learns
     by as well; a page drawn sharp at once is taken at once, as ever. Another viewer chosen has learnt nothing."""
     _count_frames(setup, monkeypatch)
@@ -754,7 +753,7 @@ def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_
 def test_a_page_the_window_saw_sharp_is_judged_by_its_own_sharp_picture(setup):
     """The soft picture of a page with much fine detail, part of it drawn sharp already, is as crisp as the viewer's
     sharp pictures of other pages: by those alone it would be taken for sharp, and what the cache holds of it
-    lettered on it. Once the window has seen that page's own sharp picture (`batch.SharpSeen`, kept as the page came
+    lettered on it. Once the window has seen that page's own sharp picture (`frames.SharpSeen`, kept as the page came
     sharper) such a frame of it is soft, the sharp one is not; a page not seen sharp is judged as before."""
     w = setup.make(owner="viewer")
     w._drew_soft(_page(7, soft=3), _page(7))  # the viewer draws soft first (as `_retake` and the settle learn it)
@@ -784,20 +783,19 @@ def test_the_pages_own_picture_only_adds_soft_frames(setup):
     crisp = live._crisp(w, frame, w._area_box(frame))
     units = live._units(w, frame, w._margins_of(frame))
     assert f.sharp_pages.judge(units[0].fingerprint, frame.size, crisp, 36) is True  # its own page passes it
-    assert not batch.looks_sharp(crisp, f.soft, f.sharp)  # the viewer's pictures do not
+    assert not frames.looks_sharp(crisp, f.soft, f.sharp)  # the viewer's pictures do not
     assert w._looks_soft(frame)
     assert not w._looks_soft(_page(8, size=size))  # its sharp picture: sharp by both
 
 
-def test_a_frames_thumbnail_from_its_pixels_is_the_batchs_own():
+def test_a_frames_thumbnail_from_its_pixels_is_the_one_frames_gives():
     """The live view takes a frame's pixels out of the picture once (`live.FrameFacts`) and makes its thumbnail from
-    them (`live.thumbnail_of`): the very values `batch.thumbnail` gives, which the whole-book run and the pages kept
-    compare with."""
+    them (`live.thumbnail_of`): the very values `frames.thumbnail` gives, which the pages seen are compared with."""
     pictures = [_page(1), _page(2, soft=3), _page(3, size=(333, 517)), Image.new("RGB", (7, 5), (3, 200, 9))]
     for picture in pictures:
         assert np.array_equal(live.thumbnail_of(picture, np.asarray(picture)), thumbnail(picture))
         assert np.array_equal(live.thumbnail_of(picture, np.asarray(picture), 32), thumbnail(picture, 32))
-    for other in (_page(4).convert("RGBA"), _page(5).convert("L")):  # not RGB: the batch's own, as it is
+    for other in (_page(4).convert("RGBA"), _page(5).convert("L")):  # not RGB: `frames`' own, as it is
         assert np.array_equal(live.thumbnail_of(other, np.asarray(other)), thumbnail(other))
 
 
@@ -925,18 +923,6 @@ def test_a_page_that_settles_while_a_job_runs_is_taken_after_it(setup):
     assert len(w.new_pages) == 2 and w._queued == ("auto", ()) and w.canvas.find_withtag("busy")
     w._handle_event("ready", {"ocr": True})
     assert len(w.new_pages) == 3
-
-
-def test_nothing_is_captured_while_the_batch_drives_the_viewer(setup):
-    v = setup.viewer
-    w = setup.make()
-    w._batching = True
-    w.start()
-    setup.clock.run(30)
-    assert v.captures == []
-    w._batching = False  # done: looked at again
-    setup.clock.run(1)
-    assert len(v.captures) >= 1
 
 
 def test_a_key_the_viewer_ignores_is_pressed_for_real(setup, monkeypatch):

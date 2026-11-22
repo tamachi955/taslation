@@ -131,13 +131,13 @@ def test_the_warm_up_runs_below_normal(settings):
 
     if sys.platform != "win32":
         pytest.skip("Windows thread priorities")
-    from taslation import batch
+    from taslation import threads
 
     seen = []
 
     class Seen(Model):
         def warm(self):
-            seen.append(batch.thread_priority())
+            seen.append(threads.thread_priority())
             return True
 
     stand_ins(settings, layout=Seen(), eraser=Seen()).warm_page_models().join(5)

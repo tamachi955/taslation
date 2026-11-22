@@ -2,7 +2,7 @@
 stand-in viewer (`tools/standin_viewer`), with no real book and no real viewer - a developer's debugging aid, never
 part of a release.
 
-    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,w,x,f,f2] [--canned] [--scale 1.0]
+    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,x,f,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
@@ -65,9 +65,6 @@ The scenarios, in this order (each released once the window has come to rest aft
      Move TASlation there, the Full screen button; turns as in r; the full screen left by the F11 hot key, the mode
      turned off, both windows put back
   z  TASlation's text size at 150 % of the run's (Settings), turns, back
-  w  a whole-book run (as the dialog's Start starts it) on a short stretch: the run reads the screens the stand-in
-     turns to, then Finished reading (the band's); w2 then turns back to pages of the run and on past them, the
-     window beside the run (w brings w2, w2 brings w)
   x  a request cancelled in flight at the translator: screens of little text (the dataset's pages with one or two
      lines, by its annotation's counts) drawn soft for --cancel-soft-ms at half resolution, so that the window reads
      the soft frame and asks on it before the sharp one comes; then back (needs the dataset)
@@ -104,13 +101,9 @@ cancelled with its page on show, ``resized_away``); overlays left on a page the 
 the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
-stand-in rested on; the window's modes as they changed (reading, over the book, a run, beside it, the text size) and
-the hot keys it held; the whole-book run's decisions on the frames and the frames it read or erased (each must be a
-sharp one; one that was not, with who got it and when the run took a sharper one after it: ``run_gets``; a frame whose
-reading was thrown away because a sharper one took its place meanwhile is left out of them and counted,
-``readings_thrown_away``), how it ended and its requests; the requests of scenario x sent for nothing and what their
-cancel cost. Into *--out*: report.json (with the lines of the rule for a request without an answer and of the
-backlog's pause for it, ``no_answer``, each silence with what the server answered just then: `LogTap`); stacks.txt
+stand-in rested on; the window's modes as they changed (reading, over the book, the text size, the role) and the
+hot keys it held; the requests of scenario x sent for nothing and what their cancel cost. Into *--out*: report.json
+(with the lines of the rule for a request without an answer and of the backlog's pause for it, ``no_answer``, each silence with what the server answered just then: `LogTap`); stacks.txt
 when a request to the translator stays under way too long (`watch_stuck`: the threads' stacks, files, lines and
 functions only); with --start-ollama the server's own log, ollama_server.log (no prompt or answer in it); and shots/ -
 pictures of
@@ -198,8 +191,6 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "t2": ("its page key back", ["p", "w4000"]),
     "o": ("over the book", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000"]),
     "z": ("text size", ["n", "w6000", "p", "w3000", "n", "w4000"]),
-    "w": ("whole-book run", ["w1500", "n", "w2500-3000", "n", "w2500-3000", "n", "w2500-3000", "n", "w3000"]),
-    "w2": ("beside the run", ["p", "w3000", "p", "w3000", "n", "w3000", "n", "w3000", "n", "w3000", "n", "w4000"]),
     "x": ("cancelled in flight", []),  # (its steps: `cancel_steps`, on the screens of little text added for it)
     "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
@@ -209,13 +200,13 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "k2": ("flipped past at 2 s a page, read back", []),
     "k3": ("flipped past at 3 s a page, read back (by its name only)", []),
 }
-ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "w", "w2", "x", "f", "f2"]
+ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
 K_READ_MS = 8000  # ... the pages read back at this pace
 K_KEY_GIVE_UP_S = 3.0  # --k-keys: a key the window has not handed on so long after it was pressed releases its turn
 K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
-PAIRS = (("f", "f2"), ("w", "w2"), ("w2", "w"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
+PAIRS = (("f", "f2"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
 KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
 ACTS_WAIT_S = 90.0  # scenario t: the Translator's acts begin at rest on a translated page, or after this long at most
 FULL_SCREEN_SETTLE_S = 2.0  # ... and once the full screen has had this long to lay the page out at its size
@@ -227,7 +218,6 @@ SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5)
          ("r", 1): (5.2, "r_rest"), ("r", 4): (5.0, "r_after_flipping"), ("r", 5): (1.5, "r_back_cached"),
          ("t", 1): (5.2, "t_rest_after_the_key"), ("t2", 1): (1.5, "t2_back_cached"),
          ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
-         ("w", 2): (2.0, "w_reading"), ("w2", 1): (2.0, "w2_page_of_the_run"), ("w2", 5): (2.0, "w2_page_not_read"),
          ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
          ("f2", 2): (5.0, "f_narrow_rest")}
 RESIZE_SHOT_S = 3.0  # the picture of the window this long after the stand-in drew its page at a new size
@@ -238,7 +228,7 @@ CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the wi
 # --wait-done (a slower computer than the one the rests were written for): the rests of these scenarios held until
 # their page is finished (`held`, `hold_over`), and scenario x's soft frames kept until the window asked on them,
 # KEEP_SOFT_S at most. Not c (turns while the model loads), b (quick turns), t and t2 (a turn each, released by the
-# window's page key), w and w2 (the run reads the pages the stand-in turns to; beside it they wait for the run).
+# window's page key).
 HOLD_SCENARIOS = ("a", "d", "e", "r", "o", "z", "x", "f", "f2")
 KEEP_SOFT_S = 15.0
 
@@ -253,7 +243,7 @@ class Segment:
 
 def wanted(text: str) -> list[str]:
     """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it, "f2" alone is the narrow window
-    without the dark theme; "w" and "w2" come together: `PAIRS`)."""
+    without the dark theme; "t" and "t2" come together: `PAIRS`)."""
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
@@ -319,8 +309,8 @@ def held(steps: list[str], first: int) -> list[str]:
     """--wait-done: *steps* with a hold (``hN``, numbered on from *first*) after each rest a reader takes - a wait of
     REST_MS or more -, the rest at their end too; the driver lets it go once the page on show is finished
     (`hold_over`). (The rest at the end is held as well because the driver changes the window as soon as the stand-in
-    waits for the next scenario - a mode left, the theme, the text size or the stand-in's size changed, Finished
-    reading -, before the window is at rest: a page still being translated then was cut short, as scenario f's last on
+    waits for the next scenario - a mode left, the theme, the text size or the stand-in's size changed -, before the
+    window is at rest: a page still being translated then was cut short, as scenario f's last on
     a runner, by f2's narrow window.)"""
     out, n = [], first
     for step in steps:
@@ -702,13 +692,10 @@ class Notes:
         self.long_steps: list[dict[str, Any]] = []  # the looks at the viewer that took over LONG_STEP_MS (`step_call`)
         self.soft_looks: list[dict[str, Any]] = []  # each frame the window judged soft or sharp (`soft_look`)
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
-        self.modes: list[dict[str, Any]] = []  # reading, over the book, a run, beside it, text size, as changed
+        self.modes: list[dict[str, Any]] = []  # reading, over the book, text size, the role, as changed
         self.hotkeys: list[dict[str, Any]] = []  # the hot keys the window held, as they changed, and the presses
-        self.run_frames: list[dict[str, Any]] = []  # a whole-book run's decisions on the viewer's frames, and ...
-        self.run_reads: list[dict[str, Any]] = []  # ... the frames it got from its store to read or erase
-        self.run_ends: list[dict[str, Any]] = []
         # what the driver changed in the window between scenarios (a mode entered or left, the theme, the text size,
-        # the stand-in's size, Finished reading), and when: a rest on the page before ends there (`turn_rows`)
+        # the stand-in's size), and when: a rest on the page before ends there (`turn_rows`)
         self.acts: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []  # each page unit a page job looked for in the cache, and what it found
         self.resolves: list[dict[str, Any]] = []  # ... and each look for the page as read at other sizes
@@ -1007,14 +994,11 @@ class Notes:
                 self.margins.append(rec)
 
     def mode(self, app: Any) -> None:
-        """The window's modes, noted as they change: the full screen, over the book, a whole-book run on, the window
-        beside it (`live.reads_beside`), TASlation's text size, the role."""
-        from taslation.ui.constants import in_a_run
-        from taslation.ui.live import reads_beside
-
+        """The window's modes, noted as they change: the full screen, over the book, TASlation's text size, the
+        role."""
         rec = {"t": now_ms(), "reading": bool(getattr(app, "reading", False)),
-               "over": bool(getattr(app, "_over_on", False)), "run": in_a_run(app), "beside": reads_beside(app),
-               "text_size": float(app.settings.ui_scale), "role": str(app.role_var.get())}
+               "over": bool(getattr(app, "_over_on", False)), "text_size": float(app.settings.ui_scale),
+               "role": str(app.role_var.get())}
         with self.lock:
             last = self.modes[-1] if self.modes else None
             if last is None or any(last[k] != rec[k] for k in rec if k != "t"):
@@ -1054,34 +1038,9 @@ class Notes:
             self.resolves.append({"t": now_ms(), "job": self.current["id"] if self.current else None,
                                   "ms": round(ms, 1), "readings": readings, "replaced": replaced})
 
-    def run_frame(self, kind: Any, image: Any) -> None:
-        with self.lock:
-            self.run_frames.append({"t": now_ms(), "kind": str(kind), **self.code(self.shown(image))})
-
-    def run_read(self, key: Any, image: Any) -> None:
-        """A frame a whole-book run got from its store (`PageImages.frame`), and who got it: its reading loop ("read")
-        or its erase ahead ("erase", the thread `batch.BatchReader._start_erasing` names), the only two callers."""
-        by = "erase" if threading.current_thread().name == "batch-erase-ahead" else "read"
-        with self.lock:
-            self.run_reads.append({"t": now_ms(), "key": key, "by": by, **self.code(self.shown(image))})
-
-    def run_read_again(self, key: Any) -> None:
-        """The reading of the frame of *key* the run's reading loop got last was thrown away: a sharper picture of the
-        page took its place meanwhile, and the page is read again from it (`batch.BatchReader._scan_sharp`)."""
-        with self.lock:
-            got = next((f for f in reversed(self.run_reads) if f["key"] == key and f["by"] == "read"), None)
-            if got is not None:
-                got["thrown_away"] = True
-
     def act(self, segment: str, what: str) -> None:
         with self.lock:
             self.acts.append({"t": now_ms(), "segment": segment, "act": what})
-
-    def run_end(self, progress: Any) -> None:
-        ended = getattr(progress, "summary", None) or getattr(progress, "reason", None)
-        with self.lock:
-            self.run_ends.append({"t": now_ms(), "code": str(getattr(ended, "code", type(ended).__name__)),
-                                  "pages": getattr(progress, "pages", None)})
 
     def soft_look(self, image: Any, own: Any, viewer: Any, soft: bool) -> None:
         """The window judged *image* soft or not (`_looks_soft`): its page's own sharp picture's verdict (*own*: True
@@ -1165,16 +1124,14 @@ class HotKeys:
 
 # status lines said with `say` that speak of a page: of the page the job read, of the viewer's page on show
 JOB_KEYS = ("Stopped: this page was not translated",)
-VIEWER_KEYS = ("This page is translated; the whole-book run",)
 
 
 def status_kind(render: Any, key: str | None) -> tuple[str, str | None, Any]:
     """What a status line is, from the window's record of it (*render*, the callable that says it again in the
     window's language, and *key*, its template when it was said with `say`): its kind - "page_summary" (a page's
-    summary), "progress" (a page job at work), "beside" (beside a whole-book run), "say:" and the template's first
-    words, "message:" and a Message's code, "other" -, never its text; which page it speaks of ("result": the page in
-    its words, "job": the page the running job reads, "viewer": the viewer's frame on show, None: no page); and the
-    page's result for "result"."""
+    summary), "progress" (a page job at work), "say:" and the template's first words, "message:" and a Message's
+    code, "other" -, never its text; which page it speaks of ("result": the page in its words, "job": the page the
+    running job reads, None: no page); and the page's result for "result"."""
     cells = []
     for cell in getattr(render, "__closure__", None) or ():
         with contextlib.suppress(ValueError):
@@ -1185,10 +1142,8 @@ def status_kind(render: Any, key: str | None) -> tuple[str, str | None, Any]:
         return "page_summary", "result", result
     if "progress_line" in names:
         return "progress", "job", None
-    if "beside_line" in names:
-        return "beside", "viewer", None
     if key:
-        about = "job" if key.startswith(JOB_KEYS) else "viewer" if key.startswith(VIEWER_KEYS) else None
+        about = "job" if key.startswith(JOB_KEYS) else None
         return "say:" + "_".join(re.findall(r"[A-Za-z]+", key)[:4]), about, None
     message = next((c for c in cells if type(c).__name__ == "Message"), None)
     if message is not None:
@@ -1351,7 +1306,6 @@ class SideCheck:
     # what was told
     def told_event(self, app: Any, kind: str, data: dict[str, Any]) -> None:
         from taslation import fingerprint as fp
-        from taslation.ui.constants import in_a_run
         from taslation.ui.side_model import MERGED, SIDE_STAGES, STATES
 
         self.kinds[kind] += 1
@@ -1368,8 +1322,6 @@ class SideCheck:
                 self.on_show = None if data.get("seq") is None else int(data["seq"])
             except (TypeError, ValueError):
                 self.on_show = None
-            return
-        if in_a_run(app):
             return
         try:
             seq = int(data.get("seq"))  # type: ignore[arg-type]
@@ -1490,8 +1442,7 @@ class SideCheck:
                 self.missed_drawn.add((seq, self.prints.get(seq, "")))
 
     def _bar_state(self, view: Any, box: tuple[int, int, int, int], seq: int) -> str:
-        from taslation.ui.side_view import MISSED
-        from taslation.ui.strip import DONE, EDGE, FAILED, SKIPPED
+        from taslation.ui.side_view import DONE, EDGE, FAILED, MISSED, SKIPPED
 
         x0, y0, x1, y1 = box
         items = [i for i in view.find_overlapping(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
@@ -1517,7 +1468,7 @@ class SideCheck:
 
     def _check_column(self, view: Any, model: Any) -> None:
         from taslation.ui.side_model import SIDE_STAGES
-        from taslation.ui.strip import CHOSEN
+        from taslation.ui.side_view import CHOSEN
 
         for index, seq in enumerate(model.order):
             screen = model.screens[seq]
@@ -2393,10 +2344,8 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     import taslation.capture.overlay as overlay
     import taslation.capture.wgc as wgc
     import taslation.capture.windows as windows
-    from taslation import batch as batch_mod
-    from taslation import fingerprint
+    from taslation import fingerprint, frames
     from taslation import linememo
-    from taslation import pageimages
     from taslation import pipeline as pipeline_mod
     from taslation.ocr import place
     from taslation.translate import ollama as ollama_mod
@@ -2429,7 +2378,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     App = app_mod.App
     start_translate, job_translate = App._start_translate, App._job_translate
     handle_event, redisplay, capture, chosen = App._handle_event, App._redisplay, App._capture, App._on_window_selected
-    batch_done = App._batch_done
 
     def started(self: Any, image: Any, *a: Any, **k: Any) -> Any:
         job = notes.new_job(image)
@@ -2490,14 +2438,9 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.selected.append(int(self.selected.hwnd))
         return out
 
-    def run_done(self: Any, progress: Any) -> Any:
-        notes.run_end(progress)
-        return batch_done(self, progress)
-
     App._start_translate, App._job_translate, App._handle_event = started, worked, handled
     App._redisplay, App._capture, App._on_window_selected = drawn, captured, selected
-    App._batch_done = run_done
-    looks_soft, judge, viewer_sharp = App._looks_soft, batch_mod.SharpSeen.judge, live.looks_sharp
+    looks_soft, judge, viewer_sharp = App._looks_soft, frames.SharpSeen.judge, live.looks_sharp
     asked: dict[str, Any] = {}
 
     def judged(self: Any, *a: Any, **k: Any) -> Any:  # the page's own sharp picture's verdict, as `_looks_soft` asks it
@@ -2517,28 +2460,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.soft_look(image, asked.get("own", "-"), asked.get("viewer", "-"), bool(out))
         return out
 
-    App._looks_soft, batch_mod.SharpSeen.judge, live.looks_sharp = soft_look, judged, by_viewer
-    decided, stored = batch_mod.BatchReader._decided, pageimages.PageImages.frame
-    marked = pageimages.PageImages.read
-
-    def run_decided(self: Any, decisions: Any) -> Any:  # a whole-book run's decisions on the viewer's frames
-        for kind, image in decisions:
-            notes.run_frame(kind, image)
-        return decided(self, decisions)
-
-    def run_stored(self: Any, key: Any) -> Any:  # ... and each frame it gets from its store, to read or letter
-        image = stored(self, key)
-        notes.run_read(key, image)
-        return image
-
-    def run_marked(self: Any, key: Any, *a: Any, **k: Any) -> Any:  # ... and a reading of one thrown away
-        done = marked(self, key, *a, **k)
-        if done is False:
-            notes.run_read_again(key)
-        return done
-
-    batch_mod.BatchReader._decided, pageimages.PageImages.frame = run_decided, run_stored
-    pageimages.PageImages.read = run_marked
+    App._looks_soft, frames.SharpSeen.judge, live.looks_sharp = soft_look, judged, by_viewer
     units_of, lookup = pipeline_mod.Pipeline.units_of, pipeline_mod.Pipeline._lookup
 
     def fingerprinted(self: Any, rgb: Any) -> Any:  # the page units, by the capture area in force as they are found
@@ -2895,7 +2817,6 @@ class Director:
         self.narrow_rect, self.app_rect, self.hotkeys = narrow_rect, app_rect, hotkeys
         self.entered: dict[str, dict[str, Any]] = {}  # per scenario of a mode: what was done to enter it, and when
         self.standin_before: tuple[int, int, int, int] | None = None  # the stand-in's rect before scenario o
-        self.run_ends_seen = 0
         self.resized_at, self.resizes_seen = float("-inf"), 0  # the stand-in's last draw at a new size, pictured after
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
         self.cover: CoverWindow | None = None  # (`cover_step`)
@@ -3141,7 +3062,7 @@ class Director:
     def idle(self) -> bool:
         app = self.app
         f = getattr(app, "_following", None)
-        return bool(app.ready and not app.busy and app._queued is None and app.batch is None
+        return bool(app.ready and not app.busy and app._queued is None
                     and (f is None or f.op is None) and getattr(app, "_early", None) is None
                     and getattr(app, "_enlarging", None) is None)
 
@@ -3152,9 +3073,6 @@ class Director:
         waited = now - self.phase_at
         if self.wait_done is not None:
             self.waits(now)
-        if len(self.notes.run_ends) > self.run_ends_seen:  # a whole-book run ended: the window a while after
-            self.run_ends_seen = len(self.notes.run_ends)
-            self.due.append((time.monotonic() + 4.0, f"run{self.run_ends_seen}_ended"))
         if self.index >= len(self.segments):
             if self.phase != "end":
                 if self.index:
@@ -3177,8 +3095,7 @@ class Director:
             return
         if self.phase == "settle":
             ready_go = self.waiting_go >= seg.go
-            if (seg.name in ("r", "t", "o", "z", "w") and seg.name not in self.entered and ready_go and rested
-                    and not (seg.name == "w" and self.args.k_narrow and not self.resized())):
+            if seg.name in ("r", "t", "o", "z") and seg.name not in self.entered and ready_go and rested:
                 self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
                 return
             app = self.app
@@ -3194,14 +3111,6 @@ class Director:
             elif seg.name in ("r", "o", "z"):
                 go = ready_go and rested and mode is not None and now - mode["at"] >= 1.0 and (
                     seg.name == "z" or bool(app.reading) and (seg.name == "r" or bool(app._over_on)))
-            elif seg.name == "w":  # the run reads the pages the stand-in turns to
-                batch = getattr(app, "batch", None)
-                go = (ready_go and mode is not None and batch is not None and bool(getattr(batch, "following", False))
-                      and now - mode["at"] >= 1.0)
-            elif seg.name == "w2":  # Finished reading: the run translates, and the window follows the viewer beside it
-                from taslation.ui.live import reads_beside
-
-                go = ready_go and reads_beside(app)
             elif seg.name in KEYED:  # the turn released by the page key the window hands on (`page_key`)
                 go = self.keyed_turn(seg, ready_go, rested, now)
             else:
@@ -3314,22 +3223,16 @@ class Director:
             if hwnd and self.guard.is_viewer(hwnd):
                 self.notes.act(seg.name, "narrow window")
                 place_own(hwnd, self.narrow_rect)
-        elif (seg.name in K_PACES and self.args.k_narrow and seg is next(x for x in self.segments
-                                                                             if x.name in K_PACES)
-              or seg.name == "w" and self.args.k_narrow):  # (the whole-book run in the narrow window: single pages)
+        elif seg.name in K_PACES and self.args.k_narrow and seg is next(x for x in self.segments if x.name in K_PACES):
             self.resize_from = len(self.events)
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
                 place_own(hwnd, self.narrow_rect)
-        elif seg.name == "w2":
-            self.notes.act(seg.name, "finished reading")
-            self.app.finish_reading()  # the band's Finished reading: the stand-in has come to the stretch's end
-            self.entered["w2"] = {"at": time.monotonic(), "finished_reading": True}
 
     def enter(self, name: str) -> None:
         """The mode of scenario *name* entered, as a reader does: r - F11 (`toggle_reading`, the key's own handler);
         t - the toolbar's Translator, then F11's handler; o - over the book (`over_begin`); z - TASlation's text size
-        TEXT_SIZE times the run's (Settings); w - a whole-book run started as the dialog's Start starts it."""
+        TEXT_SIZE times the run's (Settings)."""
         app = self.app
         self.entered[name] = {"at": time.monotonic()}
         self.notes.act(name, "entered")
@@ -3357,8 +3260,6 @@ class Director:
             self.over_begin()
         elif name == "z":
             app._settings_saved({"ui_scale": round(self.args.scale * TEXT_SIZE, 2)})
-        elif name == "w":
-            app._start_batch(app.selected, app.settings.batch_max_pages, app.settings.context_mode)
 
     def after(self, seg: Segment) -> None:
         """The stand-in has gone through scenario *seg*: its mode left (r: F11's handler; o: `over_end`; z: the run's
@@ -3952,23 +3853,6 @@ def spread_of(values: list[int]) -> dict[str, Any]:
             "over_1000": sum(1 for v in values if v > 1000)}
 
 
-RUN_STATES = ("no run", "run reading", "run translating")
-
-
-def run_state(modes: list[dict[str, Any]], t: float) -> str:
-    """What a whole-book run did at *t*, as the window's modes tell (`Notes.mode`): "run reading" (it reads the pages
-    the reader turns, and captures the viewer itself), "run translating" (the window follows the viewer beside it,
-    `live.reads_beside`), "no run"."""
-    found = None
-    for m in modes:
-        if m["t"] > t:
-            break
-        found = m
-    if found is None or not found["run"]:
-        return "no run"
-    return "run translating" if found["beside"] else "run reading"
-
-
 def turns_of(events: list[dict[str, Any]], offset: float, end: float) -> list[dict[str, Any]]:
     """The stand-in's turns: the screen, its soft and its sharp draw, the rest after it; the start's screen and a
     change of layout (the narrow window) as turns too."""
@@ -4179,27 +4063,6 @@ def resized_away(job: dict[str, Any], sizes: list[float], captures: list[dict[st
             break
         last = c
     return last is not None and list(last["size"]) != list(size)
-
-
-def run_gets(reads: list[dict[str, Any]], frames: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:
-    """A whole-book run's frames got from its store, by who got them (`Notes.run_read`: "read", its reading loop, or
-    "erase", its erase ahead), and each one that was not the sharp frame: when, its screen, who got it, and how long
-    after it the run took a sharper frame of that screen in its place (its decision "sharper"; None: none after it).
-    A frame its reading loop got so is the page it read - but for one whose reading was thrown away (``thrown_away``:
-    a sharper picture took its place while it was read, and the page was read again from that one), left out here."""
-    by: dict[str, Counter[str]] = {}
-    for f in reads:
-        by.setdefault(str(f.get("by", "read")), Counter())[f["state"]] += 1
-    listed = []
-    for f in reads:
-        if f["state"] == "sharp" or f.get("thrown_away"):
-            continue
-        screen = (f.get("page"), f.get("spread"))
-        sharper = next((d["t"] for d in frames if d["t"] >= f["t"] and d["kind"] == "sharper"
-                        and (d.get("page"), d.get("spread")) == screen), None)
-        listed.append({"key": str(f["key"]), "by": str(f.get("by", "read")), "t_s": rel(f["t"]), "page": f.get("page"),
-                       "spread": f.get("spread"), "state": f["state"], "sharper_taken_after_ms": ms(sharper, f["t"])})
-    return {"frames_got_by": {k: dict(v) for k, v in by.items()}, "frames_got_not_sharp_list": listed}
 
 
 def across_sizes(jobs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -4430,8 +4293,8 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
     clock, put on the window's by the least latency of its console lines: `summarise`) to the window's first
     request for the job that finished the page (`finishing_job`), its first picture of the page with lettering on
     it, and its finished page. Its rest ends at the next turn or where the driver changed the window before it (a mode
-    left or entered, the theme, the text size, the stand-in's size, Finished reading: `Notes.acts`), whichever comes
-    first: what the window showed then is the page at rest (`at_rest`), not what the next scenario made of it."""
+    left or entered, the theme, the text size, the stand-in's size: `Notes.acts`), whichever comes first: what the
+    window showed then is the page at rest (`at_rest`), not what the next scenario made of it."""
     rows = []
     started = [j for j in notes.jobs if j["started"]]
     acts = sorted(getattr(notes, "acts", ()), key=lambda a: a["t"])
@@ -4483,7 +4346,6 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
             "requests": sum(j["requests"] for j in jobs),
             "jobs_discarded": sum(1 for j in jobs if j.get("discarded")),
             "job_at_turn": any(j["t"] <= lo < (j["done_t"] or end) for j in started),
-            "run": run_state(notes.modes, lo),
             "old_page_ms": old_page_ms, "old_lettering_ms": old_lettering_ms,
             "lettered_unsettled_ms": lettered_unsettled_ms(notes.displays, scr, sharp, hi),
             "lettered_soft_ms": lettered_soft_ms(notes.displays, scr, lo, hi),
@@ -4613,8 +4475,7 @@ def stage_split(rows: list[dict[str, Any]], turns: list[dict[str, Any]], notes: 
     in full, why, and the time to the first lettered bubble with and without that; the requests of the whole run by
     why they parted and whether computed in full, with the cuts of the pairs that only grow; the pages begun, left
     (their job cancelled or put back) and come back to - the requests the job that finished them made again (a line
-    one of the page's jobs before had asked); the first page with requests after a whole-book run; the jobs of the
-    window's first turns (scenario c)."""
+    one of the page's jobs before had asked); the jobs of the window's first turns (scenario c)."""
     by_id = {j["id"]: j for j in notes.jobs}
     started = [j for j in notes.jobs if j["started"]]
     rested = [r for r in rows if (r["rest_ms"] or 0) >= REST_MS and r["finishing_job"] is not None]
@@ -4658,9 +4519,9 @@ def stage_split(rows: list[dict[str, Any]], turns: list[dict[str, Any]], notes: 
         "full_prompt_ms_per_token": tail([1000 * (r.get("prompt_ms") or 0) / r["prompt_n"] for r in reqs
                                           if full_computed(r)]),
         # each cut: at its job's first request (the next page's: known at the end of the page before) or later in
-        # the job (a spread's next unit, a request asked again), or outside the page jobs (a whole-book run)
+        # the job (a spread's next unit, a request asked again), or outside the page jobs (the backlog's)
         "cuts": [{"t_s": rel(c["t"]), "job": c["job"], "before": c["before"], "after": c["after"],
-                  "at": ("run" if c["job"] is None else "first request" if not any(
+                  "at": ("backlog" if c["job"] is None else "first request" if not any(
                       r["job"] == c["job"] and r["t"] < c["t"] for r in notes.requests) else "later in the job")}
                  for c in notes.cuts],
         "server_resets": [{"t_s": rel(s["t"]), "why": s["why"], "job": s["job"]} for s in notes.server_resets]}
@@ -4685,22 +4546,6 @@ def stage_split(rows: list[dict[str, Any]], turns: list[dict[str, Any]], notes: 
                      "first_lettered_ms": row["first_lettered_ms"], "finished_ms": row["finished_ms"],
                      "rested": (row["rest_ms"] or 0) >= REST_MS})
     out["come_back"] = back
-    ends = [e["t"] for e in notes.run_ends]
-    after = []
-    for end in ends:
-        row = next((r for r in rows if r["finishing_job"] is not None and by_id[r["finishing_job"]]["t"] >= end
-                    and by_id[r["finishing_job"]]["requests"]), None)
-        if row is None:
-            continue
-        job = by_id[row["finishing_job"]]
-        stages_ = row["stages"] or {}
-        loads = [s for s in notes.server_resets if s["why"] == "load" and end <= s["t"] <= (job.get("done_t") or end)]
-        after.append({"run_end_s": rel(end), "turn": row["n"], "segment": row["segment"], "page": row["page"],
-                      "job_after_end_s": round((job["t"] - end) / 1000, 1), "load_in_job": bool(loads),
-                      "load_wait": stages_.get("load_wait"), "before_first_request": stages_.get("before_first_request"),
-                      "first_request": stages_.get("first_request"), "first_why": stages_.get("first_why"),
-                      "first_lettered_ms": row["first_lettered_ms"], "finished_ms": row["finished_ms"]})
-    out["after_a_run"] = after
     out["first_turns"] = [{"n": r["n"], "segment": r["segment"], "page": r["page"],
                            "first_lettered_ms": r["first_lettered_ms"], "finished_ms": r["finished_ms"],
                            **{k: (r["stages"] or {}).get(k) for k in ("load_wait", "before_first_request", "ocr",
@@ -5014,9 +4859,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     from taslation.ui.translator import remember_role
 
     # every module in place before the guard replaces what they import
-    from taslation import batch, pipeline, translation_view  # noqa: F401
-    from taslation.ui import jobs, live, overbook, reading, strip, trouble, viewers  # noqa: F401
-    from taslation.ui.dialogs import batch as batch_dialog, caches, start, stop  # noqa: F401
+    from taslation import frames, pipeline  # noqa: F401
+    from taslation.ui import jobs, live, overbook, reading, trouble, viewers  # noqa: F401
+    from taslation.ui.dialogs import caches, start  # noqa: F401
 
     guard = demo_video.Guard(hwnd)
     if guard.is_own(hwnd) or sv.find_window(browser.tree, browser.token) != hwnd:
@@ -5048,7 +4893,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     profiles.set_margins(info, area)
     profiles.set_margins(info, area, large=True)
     settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
-                        flash_when_done=False, sound_when_done=False, always_on_top=False, ui_scale=args.scale,
+                        always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
                         ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
                         ollama_num_gpu=args.ollama_num_gpu,
@@ -5186,12 +5031,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "during_job": spread_of([r["old_lettering_ms"] for r in rows if r["job_at_turn"] and r["old_lettering_ms"]]),
         "no_job": spread_of([r["old_lettering_ms"] for r in rows if not r["job_at_turn"] and r["old_lettering_ms"]]),
         "by_segment": {s: spread_of([r["old_lettering_ms"] for r in rows if r["segment"] == s
-                                     and r["old_lettering_ms"]]) for s in dict.fromkeys(r["segment"] for r in rows)},
-        "by_run": {s: spread_of([r["old_lettering_ms"] for r in rows if r["run"] == s and r["old_lettering_ms"]])
-                   for s in RUN_STATES}}
-    old_page = {  # (the page before on the page area, lettered or not: a whole-book run's reading shows no lettering)
-        "by_run": {s: spread_of([r["old_page_ms"] for r in rows if r["run"] == s and r["old_page_ms"] is not None])
-                   for s in RUN_STATES},
+                                     and r["old_lettering_ms"]]) for s in dict.fromkeys(r["segment"] for r in rows)}}
+    old_page = {  # (the page before on the page area, lettered or not)
+        "all": spread_of([r["old_page_ms"] for r in rows if r["old_page_ms"] is not None]),
         "by_segment": {s: spread_of([r["old_page_ms"] for r in rows
                                      if r["segment"] == s and r["old_page_ms"] is not None])
                        for s in dict.fromkeys(r["segment"] for r in rows)}}
@@ -5250,27 +5092,13 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         item["from_s"] = rel(item.pop("from_t"))
     leaves = [{**{k: v for k, v in item.items() if k != "t"}, "t_s": rel(item["t"])} for item in notes.leaves]
     modes = {"leaves_of_the_full_screen": leaves,
-             "columns": ["t_s", "reading", "over", "run", "beside", "text_size", "role"],
-             "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), int(m["run"]), int(m["beside"]),
-                       m["text_size"], m["role"]] for m in notes.modes],
+             "columns": ["t_s", "reading", "over", "text_size", "role"],
+             "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), m["text_size"], m["role"]]
+                      for m in notes.modes],
              "entered": {name: {k: v for k, v in facts.items() if k != "at"}
                          for name, facts in director.entered.items()},
              "driver_acts": [{**{k: v for k, v in a.items() if k != "t"}, "t_s": rel(a["t"])} for a in notes.acts],
              "hot_keys": [{**{k: v for k, v in h.items() if k != "t"}, "t_s": rel(h["t"])} for h in notes.hotkeys]}
-    run_requests = [r for r in requests if r["job"] is None]
-    whole_book = {
-        "decisions": dict(Counter(f"{f['kind']}:{f['state']}" for f in notes.run_frames)),
-        "frames_got": dict(Counter(f["state"] for f in notes.run_reads)),
-        # (a frame whose reading was thrown away for the sharper picture that took its place is no frame the run read)
-        "frames_got_not_sharp": sorted({str(f["key"]) for f in notes.run_reads
-                                        if f["state"] != "sharp" and not f.get("thrown_away")}),
-        "readings_thrown_away": dict(Counter(f["state"] for f in notes.run_reads if f.get("thrown_away"))),
-        **run_gets(notes.run_reads, notes.run_frames, rel),
-        "pages_got": len({f["key"] for f in notes.run_reads}),
-        "ends": [{"code": e["code"], "pages": e["pages"], "t_s": rel(e["t"])} for e in notes.run_ends],
-        "requests": len(run_requests), "requests_by_outcome": dict(Counter(str(r["outcome"]) for r in run_requests)),
-        "status_kinds_beside": dict(Counter(s["kind"] for s in notes.status_lines
-                                            if segment_at_t(s["t"]) == "w2"))}
     cancel_rows = [r for r in rows if r["segment"] == "x"]
     in_flight = [w for w in wasted if segment_at_t(w["t"]) == "x"]
     cancel = {"soft_ms": director.args.cancel_soft_ms, "factor": CANCEL_FACTOR,
@@ -5311,7 +5139,6 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "cache_across_sizes": across_sizes(job_list),
         "readings_on_a_miss": readings_on_a_miss(notes.resolves, rel),
         "modes": modes,
-        "whole_book_run": whole_book,
         "cancel_in_flight": cancel,
         "wasted_requests": wasted_summary,
         "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
@@ -5828,7 +5655,6 @@ def print_table(report: dict[str, Any], path: Path) -> None:
         print(f"requests {req['n']}: computed in full {req['full']} ({req['full_prompt_s']} s of {req['prompt_s']} s "
               f"prompt; answers {req['answer_s']} s); by why {req['by_why']}; cuts {len(req['cuts'])}")
         print(f"come back to: {split['come_back']}")
-        print(f"after a run: {split['after_a_run']}")
     wasted = run_["wasted_requests"]
     print(f"wasted requests {wasted['count']} {wasted['by_why']} {wasted['by_outcome']}; ran {wasted['ran_ms']}; "
           f"ran on after the cancel {wasted['ran_on_after_cancel_ms']}; next real request's server wait "
@@ -5852,8 +5678,8 @@ def print_table(report: dict[str, Any], path: Path) -> None:
           f"the sharp frame came; cache {at_end['cache']}) {left}; by the gate as the job ended: confirmed on a soft "
           f"frame {run_['jobs']['confirmed_on_soft']}, kept from frames not the sharp one "
           f"{run_['jobs']['kept_from_unsettled_frames']}")
-    print(f"the page before after a turn, by the run: {run_['old_page_after_a_turn']['by_run']}; its lettering "
-          f"{old['by_run']}")
+    print(f"the page before after a turn: {run_['old_page_after_a_turn']['all']}; by scenario "
+          f"{run_['old_page_after_a_turn']['by_segment']}")
     soft = run_["lettering_on_a_soft_frame"]
     read = soft["read_from_soft"]
     print(f"lettering on a soft frame: {soft['turns']} turns, {soft['ms']} ms, by segment {soft['by_segment']}; read "
@@ -5887,12 +5713,6 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if run_.get("page_keys"):
         print(f"page keys pressed on the window's page: {run_['page_keys']}")
     print(f"the full screen left: {modes.get('leaves_of_the_full_screen')}")
-    whole = run_["whole_book_run"]
-    if whole["decisions"] or whole["ends"]:
-        print(f"whole-book run: decisions {whole['decisions']}; frames got {whole['frames_got_by']}, not sharp "
-              f"{[(f['key'], f['by'], f['sharper_taken_after_ms']) for f in whole['frames_got_not_sharp_list']]}; "
-              f"readings thrown away for a sharper picture {whole.get('readings_thrown_away')}; "
-              f"ended {whole['ends']}; requests {whole['requests']}")
     cancel = run_["cancel_in_flight"]
     if cancel["turns"]:
         print(f"cancelled in flight (soft {cancel['soft_ms']} ms): jobs on soft {cancel['jobs_on_soft']}, requests "
@@ -5911,7 +5731,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
     ap.add_argument("--scenario", default="all",
-                    help="all, or some of c,a,b,d,e,r,o,z,w,x,f,f2,k (f brings f2 with it, w brings w2; k is "
+                    help="all, or some of c,a,b,d,e,r,t,o,z,x,f,f2,k (f brings f2 with it, t brings t2; k is "
                          "k5,k1,k2 and never in all)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
@@ -5988,8 +5808,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--k-backlog", default="on", choices=("on", "off"),
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
-                    help="scenarios k and w: in the narrow window (single pages), the stand-in placed at NARROW_SIZE "
-                         "first")
+                    help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
     ap.add_argument("--side-indicator", default=None, choices=("column", "rail", "off"),
                     help="the setting side_indicator of the window (default: the app's, column); not off: the "
                          "indicator beside the page is looked at from the window as the events come (`SideCheck`), "

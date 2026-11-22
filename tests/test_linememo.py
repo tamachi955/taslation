@@ -1,8 +1,7 @@
 """Line reuse (`taslation.linememo`): a short line translated before in the book or its series takes that translation
 again without a request. What is merged before a line is keyed and what is never reused; the memo sealed in the
-book's cache with no Japanese in it, before or after unsealing; a later page, the whole-book run and a line repeated
-in one request; a person's correction winning; "Translate again" and the whole book again asking every line and
-keeping the new answers; another model, language or series never reusing; a kept translation held to the series
+book's cache with no Japanese in it, before or after unsealing; a later page and a line repeated in one request; a
+person's correction winning; "Translate again" asking every line and keeping the new answers; another model, language or series never reusing; a kept translation held to the series
 sheet as it is now; the setting off; export, import, two windows saving the same book, and deletion. The lines and
 names are invented."""
 
@@ -13,12 +12,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from helpers import FakeOcr, read_book, store_json, store_text
-from test_batch import _fake_viewer
+from helpers import FakeOcr, store_json, store_text
 
 from taslation import linememo, protect
 from taslation.annotations import Glossary
-from taslation.batch import BatchReader
 from taslation.cache import BookCache, CacheStore
 from taslation.linememo import LineMemo, Plan, SeriesLines, material, normalise, scope
 from taslation.pipeline import Pipeline
@@ -338,7 +335,7 @@ def test_a_kept_translation_is_held_to_the_series_sheet_as_it_is_now(on, sample_
     pipeline, tr, _store = _pipeline(on, texts=page_1 + page_2, mapping=mapping)
     pipeline.process(sample_page)
     sheet = Glossary(Path("sheet.json"), "Harbor Lights")
-    sheet.set("ミカ", "Mika")  # a near spelling of what was kept: put right, as the whole-book run puts it right
+    sheet.set("ミカ", "Mika")  # a near spelling of what was kept: put right, as a fresh answer is put right
     sheet.set("行く", "Sail")  # nothing near it in "Let's go!": the line is asked for again, with the sheet
     pipeline.glossary, pipeline.glossary_text = sheet, sheet.format()
     tr.mapping["行くぞ！"] = "Sail out!"
@@ -429,29 +426,6 @@ def test_the_system_page_counts_the_lines_reused(hidden_root, settings):
     page.refresh(wait=True)
     assert "reused" not in page.note_var.get()
     page.destroy()
-
-
-# ------------------------------------------------------------------ the whole-book run
-def test_the_whole_book_run_reuses_lines_of_the_chunks_before(on, sample_page, sample_page2, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, on, monkeypatch)
-    on.chunk_bubbles = 8  # a page a chunk
-    pipeline, tr, _store = _pipeline(on, texts=PAGE_1)  # every page has the same six lines
-    progress = read_book(BatchReader(pipeline, hwnd=1, settings=on, book="Harbor Lights 1"))
-    assert progress.finished and pipeline.cache.bubble_count == 18 and progress.translated == 18
-    assert len(tr.calls) == 3
-    assert sorted(tr.calls[0]) == sorted(PAGE_1) and tr.calls[1:] == [[LONG], [LONG]]
-    assert sum(b.reused for p in pipeline.cache.pages for b in p.bubbles) == 10
-
-
-def test_the_whole_book_again_asks_every_line(on, sample_page, sample_page2, monkeypatch):
-    _fake_viewer(sample_page, sample_page2, on, monkeypatch)
-    on.chunk_bubbles = 8
-    pipeline, tr, _store = _pipeline(on, texts=PAGE_1)
-    read_book(BatchReader(pipeline, hwnd=1, settings=on, book="Harbor Lights 1"))
-    tr.calls.clear()
-    viewer = _fake_viewer(sample_page, sample_page2, on, monkeypatch)
-    read_book(BatchReader(pipeline, hwnd=1, settings=on, book="Harbor Lights 1", retranslate=True), viewer)
-    assert len(_asked(tr)) == 18
 
 
 # ------------------------------------------------------------------ export, import, delete

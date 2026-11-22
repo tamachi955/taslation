@@ -21,20 +21,11 @@ KEEP = ("TASlation", "Ollama", "> Ollama", "install.cmd", "ollama pull {model}",
         "http(s)", "Windows", "hwnd", "Left", "Right", "PageDown", "Space")
 # code -> the window's buttons it names, by their English keys in the window catalogs (taslation.i18n)
 BUTTONS = {
-    "batch.failed_requests": ("Read whole book...",),
-    "batch.stopped": ("Read whole book...",),
-    "batch.readings_kept": ("Read whole book...",),
-    "batch.read_again": ("Read whole book...",),
-    "batch.continues_translating": ("Read whole book...",),
-    "batch.stored_read_again": ("Read whole book...",),
-    "batch.not_book": ("Finished reading",),
-    "batch.viewer_lost": ("Finished reading", "Stop"),
-    "batch.stopped_reading": ("Finished reading",),
     "ollama.slow": ("Stop (Esc)",),
 }
 KEY_HINT = re.compile(r"\s*[(（](?:Esc|Échap|F\d+)[)）]\s*$")  # "Stop (Esc)" is the Stop button
 
-MESSAGE_PARAMS = {"error", "reason", "problem"}
+MESSAGE_PARAMS = {"error"}
 TEXT_PARAMS = {"title", "key", "call", "detail", "translator", "url", "model", "path", "missing", "command", "wanted",
                "used", "unit", "device", "folder", "book", "name", "language"}
 FLOAT_PARAMS = {"seconds"}
@@ -47,8 +38,7 @@ TEXTS = {"title": "Store - Browser", "key": "Left", "call": "PrintWindow", "deta
          "missing": "config.json", "command": "ollama pull qwen3.5:4b", "wanted": "qwen3.5:4b", "used": "gemma3:4b",
          "unit": "0a1b2c3d", "device": "GPU", "folder": "/keep", "book": "A book", "name": "PLaMo 3 Translate 2B",
          "language": "English"}
-NESTED = {"error": Message("ollama.timeout", seconds=900.0), "reason": Message("batch.finished_reading"),
-          "problem": Message("health.ollama_down", url=URL)}
+NESTED = {"error": Message("ollama.timeout", seconds=900.0)}
 ALL = ("en", *LANGUAGES)
 
 
@@ -209,7 +199,7 @@ def test_english_for_en_and_for_any_other_code():
     for lang in ("en", "xx", "", None, "ja-xx"):
         assert catalog(lang) == TEMPLATES
     english = catalog("en")
-    english["batch.started"] = "changed"
+    english["pipeline.translated"] = "changed"
     assert TEMPLATES == before and catalog("en") == before  # a copy every time, the registry untouched
     assert catalog("ZH_TW") == catalog("zh-tw") != catalog("zh")
     assert catalog("ja") is not catalog("ja")
@@ -218,16 +208,12 @@ def test_english_for_en_and_for_any_other_code():
 @pytest.mark.parametrize("lang", LANGUAGES)
 def test_a_message_and_its_nested_messages_render_in_one_language(lang):
     cat = catalog(lang)
-    reason, error = Message("batch.finished_reading"), Message("ollama.unreachable", url=URL)
-    done = Message("batch.finished", pages=3, bubbles=12, seconds=40.0, minutes=1, failed=1, error=error, reason=reason)
-    text = render(done, cat)
-    assert render(reason, cat) in text
-    assert text.endswith(JOINER + render(Message("batch.failures", failed=1, error=error), cat))  # the follow-up
-    assert str(reason) not in text  # nothing of it in English
-    stopped = render(Message("batch.not_started", reason=error), cat)
-    assert render(error, cat) in stopped and str(error) not in stopped
-    page = render(Message("pipeline.translated", bubbles=3, seconds=4.0, cached=0, new=1, review=0, error=error), cat)
-    assert page.endswith(JOINER + render(error, cat)) and str(error) not in page
+    error = Message("ollama.unreachable", url=URL)
+    page = render(Message("pipeline.translated", bubbles=3, seconds=4.0, cached=0, new=1, review=2, error=error), cat)
+    assert JOINER + render(Message("pipeline.to_review", review=2), cat) + JOINER in page  # the follow-ups, in order
+    assert page.endswith(JOINER + render(error, cat)) and str(error) not in page  # nothing of it in English
+    note = render(Message("batch.note_retry_failed", bubbles=4, error=error), cat)
+    assert render(error, cat) in note and str(error) not in note
 
 
 def test_japanese_reads_as_the_review_asked():
@@ -236,25 +222,19 @@ def test_japanese_reads_as_the_review_asked():
     assert render(Message("pipeline.from_cache", bubbles=6, seconds=0.1, **page), ja) == "6 行を以前の翻訳から表示しました。"
     assert render(Message("pipeline.translated", bubbles=6, seconds=2.1, **{**page, "review": 2}), ja) == (
         "6 行を翻訳しました（2 秒）。" + JOINER + "確認するとよいものが 2 件あります（翻訳者の役割、「レビュー...」）。")
-    assert "1冊まるごと読み取り" in ja["batch.stopped"] and "1ページずつ翻訳" in ja["batch.stopped"]
     assert ja["translator.model_missing"].startswith("この言語の翻訳モデル")
-    assert render(Message("batch.scanning_page", page=3), ja) == "3 ページ目を読み取り中..."
 
 
 def test_plural_words_follow_the_count():
     es = catalog("es")
-    one = render(Message("batch.failed_requests", failed=1, reason=Message("batch.reply_unusable"), pages=1, seconds=1.0,
-                         turns=0), es)
-    many = render(Message("batch.failed_requests", failed=5, reason=Message("batch.reply_unusable"), pages=21,
-                          seconds=1.0, turns=20), es)
-    assert "(1 solicitud fallida, 1 página leída)" in one and "(5 solicitudes fallidas, 21 páginas leídas)" in many
+    page = dict(seconds=1.0, cached=0, new=1, review=0, error="")
+    assert render(Message("pipeline.translated", bubbles=1, **page), es) == "1 línea traducida en 1 s."
+    assert render(Message("pipeline.translated", bubbles=5, **page), es) == "5 líneas traducidas en 1 s."
     ru = render(Message("pipeline.translated", bubbles=21, seconds=2.0, cached=0, new=1, review=0, error=""),
                 catalog("ru"))
     assert ru == "Переведено строк: 21 (2 с)."
-    done = dict(seconds=40.0, minutes=1, error=Message("ollama.unreachable", url=URL), reason=Message("batch.finished_reading"))
-    de = render(Message("batch.finished", pages=3, bubbles=12, failed=1, **done), catalog("de"))
-    assert de.startswith("Einlesen des ganzen Buchs fertig: 3 Seiten, 12 Zeilen übersetzt in 1 min - fertig gelesen.")
-    assert "1 Teil konnte nicht übersetzt werden." in de
-    de = render(Message("batch.finished", pages=1, bubbles=1, failed=2, **done), catalog("de"))
-    assert de.startswith("Einlesen des ganzen Buchs fertig: 1 Seite, 1 Zeile übersetzt in 1 min")
-    assert "2 Teile konnten nicht übersetzt werden." in de
+    de = catalog("de")
+    assert render(Message("pipeline.to_review", review=1), de).startswith("1 Zeile ist einen Blick wert")
+    assert render(Message("pipeline.to_review", review=2), de).startswith("2 Zeilen sind einen Blick wert")
+    assert render(Message("batch.note_retry_unusable", bubbles=1), de).startswith("Anfrage für 1 Zeile kam")
+    assert render(Message("batch.note_retry_unusable", bubbles=3), de).startswith("Anfrage für 3 Zeilen kam")

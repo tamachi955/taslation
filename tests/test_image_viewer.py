@@ -6,24 +6,16 @@ so without a word about tabs."""
 from __future__ import annotations
 
 import json
-import threading
 
-from helpers import EN_TEXTS, FakeOcr, read_book
 from PIL import Image
-from test_batch import FakeViewer
 from test_reading_messages import WAITING, Keys
 
-from taslation import batch as batch_mod
 from taslation import i18n
-from taslation.batch import BatchReader
-from taslation.cache import CacheStore, viewer_key_from_title
+from taslation.cache import viewer_key_from_title
 from taslation.capture import WindowInfo, still_the_book
 from taslation.config import Settings
-from taslation.message_texts import catalog
-from taslation.messages import Message, render
 from taslation.pagekeys import (BUILTIN_PRESETS, PageKeys, Profiles, names_a_file, profile_names, viewer_key,
                                 viewer_title)
-from taslation.translate import DictTranslator
 from taslation.ui import reading, viewers
 
 PHOTOS = "WinUIDesktopWin32WindowClass"  # the class of the image viewer of the incident
@@ -85,81 +77,8 @@ def test_the_chosen_image_viewer_is_in_front_while_its_title_changes(monkeypatch
 
 
 # ------------------------------------------------------------------ the batch
-class FileTitledViewer(FakeViewer):
-    """An image viewer: its window's title is the file it shows, "000.jpg" for the first page, "001.jpg" after one
-    turn; for its first *hidden_polls* looks its window is minimised."""
-
-    def __init__(self, pages: list[Image.Image], hidden_polls: int = 0):
-        super().__init__(pages)
-        self.hidden_polls = hidden_polls
-        self.titles: list[str] = []
-
-    def title(self, hwnd):
-        self.titles.append(f"{self.index:03d}.jpg")
-        return self.titles[-1]
-
-    def shown(self, hwnd):
-        self.hidden_polls -= 1
-        return self.hidden_polls < 0
-
-
-def _batch(viewer, settings, monkeypatch, class_name=PHOTOS):
-    monkeypatch.setattr(batch_mod, "capture_window", viewer.capture)
-    monkeypatch.setattr(batch_mod, "window_exists", lambda hwnd: True)
-    monkeypatch.setattr(batch_mod, "window_title", viewer.title)
-    monkeypatch.setattr(batch_mod, "window_shown", viewer.shown)
-    monkeypatch.setattr(batch_mod, "window_class", lambda hwnd: class_name)
-    settings.settle_ms = 10
-    settings.page_turn_wait_ms = 300
-    cache = CacheStore(settings.cache_dir).open("Book", "fake")
-    pipeline = batch_mod.Pipeline(settings, ocr=FakeOcr(), translator=DictTranslator(EN_TEXTS), cache=cache)
-    messages: list[str] = []
-    reader = BatchReader(pipeline, hwnd=IMAGES.hwnd, settings=settings, title="000.jpg",
-                         context_mode=False, on_progress=lambda p, r: messages.append(str(p.message)))
-    reader.wait_poll_s = 0.01
-    return reader, messages, cache
-
-
 def _pages(sample_page, sample_page2):
     return [sample_page, sample_page2, sample_page.transpose(Image.FLIP_LEFT_RIGHT)]
-
-
-def test_a_whole_book_run_in_an_image_viewer_goes_on_after_the_first_page_turn(sample_page, sample_page2, settings,
-                                                                                 monkeypatch):
-    viewer = FileTitledViewer(_pages(sample_page, sample_page2))
-    reader, messages, cache = _batch(viewer, settings, monkeypatch)
-    progress = read_book(reader)
-    assert progress.finished and progress.pages == 3, progress
-    assert "001.jpg" in viewer.titles and "002.jpg" in viewer.titles  # it was renamed with every page
-    assert not any(m.startswith("Waiting") for m in messages)  # never waiting for "another tab"
-    assert reader.viewer_class == PHOTOS and len(cache) == 3
-
-
-def test_the_same_window_taken_for_a_browser_would_have_waited(sample_page, sample_page2, settings, monkeypatch):
-    viewer = FileTitledViewer(_pages(sample_page, sample_page2))
-    reader, messages, _cache = _batch(viewer, settings, monkeypatch, class_name="Chrome_WidgetWin_1")
-    say = reader.on_progress
-
-    def stop_when_waiting(progress, result):
-        say(progress, result)
-        if messages[-1].startswith("Waiting"):
-            threading.Timer(0.05, reader.stop).start()
-
-    reader.on_progress = stop_when_waiting
-    progress = read_book(reader)
-    assert progress.pages <= 1 and viewer.titles[-1] == "001.jpg"  # the browser's rule, unchanged
-    assert any(m.startswith("Waiting: the viewer window shows '001.jpg' now, not the book") for m in messages)
-
-
-def test_a_minimised_image_viewer_is_waited_for_with_its_own_line(sample_page, sample_page2, settings, monkeypatch):
-    viewer = FileTitledViewer(_pages(sample_page, sample_page2), hidden_polls=3)
-    reader, messages, _cache = _batch(viewer, settings, monkeypatch)
-    progress = read_book(reader)
-    assert progress.finished and progress.pages == 3, progress
-    waiting = [m for m in messages if m.startswith("Waiting")]
-    assert waiting == ["Waiting: the viewer's window is hidden or minimised; bring it back"]
-    assert not any("tab" in m for m in messages) and any("back; carrying on" in m for m in messages)
-    assert render(Message("batch.waiting_viewer_hidden"), catalog("ja")) == HIDDEN_JA.rstrip("。")
 
 
 # ------------------------------------------------------------------ the profile: keys and area by the window's class

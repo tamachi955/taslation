@@ -146,7 +146,7 @@ def test_the_toolbar_shows_the_books_name_as_series_and_volume(hidden_root):
 # ------------------------------------------------------------------ the dialogs
 def test_the_start_dialog_asks_for_the_series_and_the_volume(hidden_root):
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()
     assert d.entry is d.fields.series and d.fields.volume.winfo_class() == "TEntry"
     assert (d.fields.series_label.cget("text"), d.fields.volume_label.cget("text")) == ("Series:", "Volume:")
@@ -159,13 +159,13 @@ def test_the_start_dialog_asks_for_the_series_and_the_volume(hidden_root):
     d._answer(d.default)
     assert answers == [("ok", "見本の物語 3")] and not d.winfo_exists()
 
-    d = StartDialog(hidden_root, "Star Road 第2巻", generic=False, ask=True, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Star Road 第2巻", generic=False, on_answer=lambda *a: answers.append(a))
     d.withdraw()  # a name the title gives: in its two fields, answered in the one spelling
     assert (d.fields.series_var.get(), d.fields.volume_var.get()) == ("Star Road", "2")
-    d._answer("start")
-    assert answers[-1] == ("start", "Star Road 2")
+    d._answer(d.default)
+    assert answers[-1] == ("ok", "Star Road 2")
 
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a),
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a),
                     matches=["Star Road 1", "Star Road 2"], hint="several")
     d.withdraw()
     d.fields.series_var.set("Star Road 2")
@@ -266,7 +266,7 @@ def test_the_offer_waits_while_the_window_is_at_work_and_names_no_book_offers_no
     from types import SimpleNamespace
 
     asked = []
-    window = SimpleNamespace(reading=False, _start_dialog=None, _batching=False, batch=None, busy=True,
+    window = SimpleNamespace(reading=False, _start_dialog=None, busy=True,
                              book_var=SimpleNamespace(get=lambda: "Some Title 3巻"), _kept_under=asked.append)
     book_fields.offer_standard_name(window)  # a page being translated: later
     window.busy = False

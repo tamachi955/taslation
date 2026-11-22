@@ -557,10 +557,10 @@ def test_the_window_queues_a_step_only_when_it_is_idle_and_nothing_is_held(setti
 
     pipeline = SimpleNamespace(behind_allowed=lambda: True, translator=object(), behind_paused=False)
     window = SimpleNamespace(auto_var=SimpleNamespace(get=lambda: True), selected=SimpleNamespace(hwnd=7),
-                             pipeline=pipeline, ready=True, busy=False, batch=None, _batching=False, _queued=None,
+                             pipeline=pipeline, ready=True, busy=False, _queued=None,
                              _jobs=queue.Queue(), _backlog=b)
     b.hwnd = 7
-    for attr, value in (("busy", True), ("ready", False), ("batch", object()), ("_batching", True)):
+    for attr, value in (("busy", True), ("ready", False)):
         before = getattr(window, attr)
         setattr(window, attr, value)
         backlog_tick(window)
@@ -592,7 +592,7 @@ def test_in_a_page_jobs_hold_the_window_queues_a_read_only_and_the_worker_leaves
                                translator=object(), behind_paused=False, kept_open_left=lambda: left[0],
                                decide_kept=lambda: decided.append("decided"), stop_warm=lambda: None)
     window = SimpleNamespace(auto_var=SimpleNamespace(get=lambda: True), selected=SimpleNamespace(hwnd=7),
-                             pipeline=pipeline, ready=True, busy=False, batch=None, _batching=False, _queued=None,
+                             pipeline=pipeline, ready=True, busy=False, _queued=None,
                              _jobs=queue.Queue(), _backlog=b)
     backlog_tick(window)
     assert window._jobs.empty()  # (only a translation to do: it waits for the decision)
@@ -776,7 +776,7 @@ def _window(b: Backlog, p) -> SimpleNamespace:
     import queue
 
     return SimpleNamespace(auto_var=SimpleNamespace(get=lambda: True), selected=SimpleNamespace(hwnd=7), pipeline=p,
-                           ready=True, busy=False, batch=None, _batching=False, _queued=None, _jobs=queue.Queue(),
+                           ready=True, busy=False, _queued=None, _jobs=queue.Queue(),
                            _backlog=b, _post=lambda kind, **data: None)
 
 
@@ -1045,19 +1045,16 @@ def test_a_page_job_stopped_without_a_turn_leaves_its_page_waiting_never_skipped
     assert not b.entries  # (not caught: Stop ends the page where it is; it is read or asked when shown again)
 
 
-def test_a_whole_book_run_and_another_book_drop_it_in_the_window():
+def test_another_book_drops_it_in_the_window():
     source = inspect.getsource(__import__("taslation.ui.jobs", fromlist=["x"]))
-    assert 'drop_backlog(self, "a whole-book run")' in source and 'drop_backlog(self, "another book")' in source
+    assert 'drop_backlog(self, "another book")' in source
     assert 'pause_backlog(self, "stop")' in source and "tracking.over()" in source
 
 
-def test_no_tracking_in_a_whole_book_run_nor_for_translate_again(settings, sample_page):
+def test_no_tracking_for_translate_again(settings, sample_page):
     p = _pipeline(settings, DictTranslator(EN_TEXTS))
     b = Backlog(lambda kind, **data: None)
     window = _window(b, p)
-    window.batch = object()
-    assert tracking_for(window, sample_page, None) is None
-    window.batch = None
     assert tracking_for(window, sample_page, None, again=object()) is None
     assert tracking_for(window, sample_page, None) is not None
 
@@ -1388,12 +1385,11 @@ def test_a_stopped_read_is_begun_again_at_another_size_with_other_units_once_a_s
 
 
 # ------------------------------------------------------------------ the events and the window
-def test_reading_events_go_to_the_reading_handlers_and_never_to_the_runs_page_strip():
+def test_reading_events_go_to_the_reading_handlers():
     from taslation.ui.jobs import JobsMixin
 
     got: list = []
-    fake = SimpleNamespace(_on_page_stage=lambda data: (_ for _ in ()).throw(AssertionError("the run's strip")),
-                           _on_reading_page_stage=lambda data: got.append(("stage", data)),
+    fake = SimpleNamespace(_on_reading_page_stage=lambda data: got.append(("stage", data)),
                            _on_reading_page_on_show=lambda data: got.append(("show", data)),
                            _on_reading_backlog=lambda data: got.append(("backlog", data)))
     JobsMixin._handle_event(fake, "page_stage", {"seq": 1, "stage": "read", "state": "done", "reading": True})
@@ -1433,7 +1429,7 @@ def test_guarantee_1_only_the_capture_the_job_read_is_ever_read_and_nothing_is_c
                                                                                         monkeypatch):
     import taslation.capture as capture
 
-    for name in ("capture_window", "frame_count", "frame_wait"):
+    for name in ("capture_window", "frame_count"):
         monkeypatch.setattr(capture, name, lambda *a, **k: (_ for _ in ()).throw(AssertionError("a capture")))
     posted, post = _events()
     b = Backlog(post)

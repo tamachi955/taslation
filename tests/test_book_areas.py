@@ -1,6 +1,6 @@
 """An area ignored on all pages of a book (a watermark, a page number, a banner): the area itself (its box grown from
 the dropped region's, what it holds, the pages it applies to, its place in the book's file), detection leaving out
-what lies in it on a page on show and in a whole-book scan alike (a rectangle the reader added stays, a cached
+what lies in it on a page on show and on one read behind the reader alike (a rectangle the reader added stays, a cached
 translation in it is kept but not drawn), translator mode's Page menu entry and the question after a drop at a place
 dropped on another page before, each one change that Ctrl+Z takes back, and Book settings' list with Remove area and
 its Undo. On the real pipeline and stores; the window's parts are borrowed onto stand-ins whose jobs run at once."""
@@ -143,8 +143,8 @@ def test_a_page_on_show_leaves_out_what_lies_in_an_area_and_keeps_its_translatio
     assert _at(back, LOWER_RIGHT).translated_text == text and len(p.translator.calls) == asked
 
 
-def test_a_whole_book_scan_leaves_out_what_lies_in_an_area_and_keeps_its_cached_translation(sample_page,
-                                                                                            sample_page2, settings):
+def test_a_page_read_behind_the_reader_leaves_out_what_lies_in_an_area_and_keeps_its_cached_translation(
+        sample_page, sample_page2, settings):
     plain = _pipeline(settings, "Plain").scan(sample_page2)
     found = [r for u in plain.units for r in u.japanese()]
     p = _pipeline(settings)
@@ -219,13 +219,9 @@ def test_the_same_place_twice_is_said_and_no_change(two_pages):
     assert w.said[-1] == book_areas.AREA_THERE and len(w.history) == 0 and len(w.pipeline.annotations.areas) == 1
 
 
-def test_not_during_a_run_and_not_in_reader_mode(two_pages):
+def test_not_in_reader_mode(two_pages):
     w, _second = two_pages
     w._chosen_region = _at(w.last_result, LOWER_RIGHT)
-    w._batching = True
-    w.ignore_area_everywhere()
-    assert w.said[-1] == book_areas.AREA_IN_A_RUN and not w.pipeline.annotations.areas
-    w._batching = False
     w.role_var.set("reader")
     w.ignore_area_everywhere()
     assert not w.pipeline.annotations.areas and len(w.history) == 0
@@ -338,7 +334,7 @@ def test_book_settings_without_areas_says_how_to_add_one(hidden_root, tmp_path):
 def test_every_word_in_every_language():
     words = [book_areas.IGNORE_EVERYWHERE, book_areas.IGNORE_TIP, book_areas.AREA_QUESTION, book_areas.AREA_YES,
              book_areas.AREA_NO, book_areas.AREA_ADDED, book_areas.AREA_THERE, book_areas.AREA_BACK,
-             book_areas.AREA_AGAIN, book_areas.AREA_IN_A_RUN, book_areas.SELECT_FIRST, book_areas.NO_BOOK,
+             book_areas.AREA_AGAIN, book_areas.SELECT_FIRST, book_areas.NO_BOOK,
              book_areas.SAVE_FAILED, "Storing your changes...", book_settings.AREAS_HEADING, book_settings.AREA_ROW,
              *book_settings.SIDE_WORDS.values(), book_settings.NO_AREAS, book_settings.REMOVE_AREA,
              book_settings.REMOVE_AREA_TIP, book_settings.AREA_REMOVED, book_settings.AREA_BACK,
