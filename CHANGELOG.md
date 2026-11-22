@@ -3,7 +3,7 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
-## 1.0.0 - 2026-11-22
+## 1.0.0 - 2026-11-23
 
 Reading
 
