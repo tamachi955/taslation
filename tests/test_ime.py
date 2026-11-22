@@ -109,7 +109,7 @@ def test_the_book_name_dialog_shows_the_text_being_composed_and_leaves_its_field
                                                                                       view):
     fake = FakeIme(monkeypatch)
     answers = []
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: answers.append(a))
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: answers.append(a))
     d.withdraw()
     try:
         d.fields.series_var.set("見本")
@@ -155,7 +155,7 @@ def test_nothing_shows_in_a_box_that_takes_no_typing_or_while_another_window_has
                                                                                          view):
     fake = FakeIme(monkeypatch)
     fake.composition = ime.Composition("あ")
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: None,
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: None,
                     matches=["Star Road 1", "Star Road 2"], hint="several")
     d.withdraw()
     try:
@@ -221,7 +221,7 @@ def test_the_window_installs_it_before_any_dialog_of_its_start():
 def test_the_windows_own_keys_never_run_in_a_dialogs_boxes(hidden_root):
     """The window's keys are bound on the main window and its page (`App._bind_shortcuts`, the page keys): a dialog's
     boxes carry their own window in their binding tags, not the main window."""
-    d = StartDialog(hidden_root, "Yomizuq", generic=True, ask=False, on_answer=lambda *a: None)
+    d = StartDialog(hidden_root, "Yomizuq", generic=True, on_answer=lambda *a: None)
     d.withdraw()
     try:
         for box in (d.fields.series, d.fields.volume):

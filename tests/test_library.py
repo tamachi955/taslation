@@ -146,16 +146,13 @@ def test_several_rows_go_to_the_recycle_bin_after_one_question(hidden_root, tmp_
     d.destroy()
 
 
-def test_keep_them_a_run_and_a_file_the_bin_refuses(hidden_root, tmp_path, monkeypatch):
+def test_keep_them_and_a_file_the_bin_refuses(hidden_root, tmp_path, monkeypatch):
     stores = _library(tmp_path)
     answer, asked, told = [False], [], []
     monkeypatch.setattr(caches, "ask", lambda _parent, text, *a, **k: asked.append(text) or answer[0])
     monkeypatch.setattr(caches, "tell", lambda _parent, text, **_k: told.append(text))
-    d = _dialog(hidden_root, stores, in_use=lambda book: book == f"{OTHER} 1")
+    d = _dialog(hidden_root, stores)
     d.recycle = lambda paths: pytest.fail("nothing is to go")
-    d._select_all()
-    d._delete()  # a run reads one of them: nothing asked, nothing deleted
-    assert not asked and d.backup_var.get() == f"{OTHER} 1 is being read by a run: press Stop first."
     _choose(d, (f"{SERIES} 2", "French"), (f"{SERIES} 10", "English"))
     d._delete()  # Keep them
     assert len(asked) == 1 and len(stores.cache.list()) == 4
@@ -422,12 +419,6 @@ def test_rename_hands_the_new_name_to_the_windows_rename_and_the_list_follows(hi
     window._start_dialog = object()  # the window waits for an answer of its own
     d._rename()
     assert d.backup_var.get() == "Answer the question in the TASlation window first." and len(window.asked) == 2
-    d.destroy()
-    d = CachesDialog(window, stores.cache, in_use=lambda book: True)
-    d.withdraw()
-    _choose(d, (f"{OTHER} 1", "English"))
-    d._rename()
-    assert d.backup_var.get() == f"{OTHER} 1 is being read by a run: press Stop first." and len(window.asked) == 2
     d.destroy()
     window.destroy()
 
