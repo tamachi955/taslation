@@ -4611,3 +4611,105 @@ the second out of memory and the slow reads. The whole suite on the same code: 5
 **Not verified.** LaMa's figure (not met on these frames); other cards (the floor is this driver's on this card, and
 on a larger one the margin is the same in MiB); other programs beyond this desktop's 90 minutes; the net against a
 really slow GPU (it fired in none of the runs, and the fill above stayed under it); the real viewer.
+
+## One judgement at the start (2026-11-22)
+
+The readers' rule of the entry above decided where charspot and nar read at their load, after every release, every
+30 s and around every load of the translation model, moved them both ways with a step between going and coming back,
+let the page models and the readers go before each load of the translation model and loaded a split model again, and
+left the window cache out where those 130 MiB alone would move the readers. LaMa and the layout model were counted
+but never placed. That is replaced by one judgement, at the start, for everything TASlation puts on the GPU; after it
+nothing moves.
+
+**The rule** (`taslation/ocr/place.py`):
+
+- At the window's start, after the legal notice, once Ollama answers and before any model loads
+  (`ui.jobs.JobsMixin._judge_gpu`): the card's total, less what other programs hold now (NVML's used memory less
+  TASlation's own: this process's and the model's ``size_vram`` by /api/ps), less every part the settings put on the
+  GPU at its measured peak - the translation model whole (PLaMo q8_0 with the window cache 2,100 MiB, Qwen 4,000), the
+  readers 420, LaMa 680 (970 above 1,440 px), the layout model 430 - less the CUDA context (100), must leave
+  `MARGIN_MIB` 710 (the driver's floor 490 and other programs' sway 220, both measured above).
+- Enough: everything loads in the background at once and stays. Short: TASlation's own box (Check again, Start on
+  the processor, Quit; "Do not ask again on this computer" keeps ``gpu_short`` "processor"). The processor's way moves
+  only what does not fit, in the order readers, LaMa, layout model, translation model.
+- A setting that puts a part on the GPU (``ocr_runs_on`` "gpu", layers in ``ollama_num_gpu``) never asks; no NVIDIA
+  GPU, a command and a tool never ask (the processor's way, silently).
+- One net: a part whose work fails on the GPU goes on on the processor for the rest of the session.
+
+On the measuring card with the default settings the start is enough while other programs hold up to 1,704 MiB
+(1,414 with a screen taller than 1,440 px, 1,804 with the window cache off); the rule of the entry above put the
+readers there up to 1,604 MiB with the window cache and 1,704 without it, and kept them up to 1,704 and 1,804.
+
+**The order to the processor**, from the measurements of this machine (GTX 1660 Ti 6 GB): the readers' OCR stage takes
+about 0.55-0.59 s a page on the GPU and 1.22 s on the processor, and runs beside the translation; LaMa 196 ms a window
+on the GPU and 1,713 on the processor, only for lettering on the drawing; the layout model 62 ms a page unit on the
+GPU and 507 on the processor, on every page before its first bubble; the translation model about four times slower on
+the processor. Per MiB freed the readers cost least (420 MiB for about 0.65 s a page that the translation mostly
+hides), LaMa next (680 MiB for 1.5 s a window, on the pages that have lettering on the art), the layout model then
+(430 MiB for 0.45 s on every page, which the first bubble waits for), and the model last. The measurements do not
+speak against the order.
+
+**What was removed:** the look every 30 s and its thread (`LOOK_S`), the step between going and coming back
+(`RETURN_MIB`, `STEP_MIB`), the readers kept through a load (`loading`, `busy`, `partly_loaded`,
+`Readers.keeps_through_load`), the release of the GPU models before a load of the translation model
+(`Pipeline.release_before_load`, the translator's ``before_load``) and the second load of a split model, the window
+cache's choice by the readers' room (`ollama_start.window_choice` is the setting's alone; `full_window_placements`),
+the reads that crawl (`SLOW_READS`, why "slow") and the second out of memory's count; their strings in the 16
+languages and their tests. `place.py` has 768 lines (648 at 788e93f, 780 at a45941f), `readers.py` 245 (295, 332).
+
+**Start times** (`start_times.py` of the scratch folder: the window made with no viewer listed, a server of its own
+on 127.0.0.1:11439, PLaMo q8_0 with the window cache, LaMa and the layout model on; ms from just before the window is
+made, smallest-largest (median) of six runs each, three of them interleaved old-new; the process's working set and
+the card's used memory over what it was before the start, MiB). The code before is 2fd7062 with a viewer chosen,
+which is when it warmed the page models (after the load at the start; without one it left them to the first page);
+the code after warms them at the start either way:
+
+| | before (2fd7062) | after (this) |
+|---|---|---|
+| the window usable (its first update) | 376-518 (478) | 458-520 (477) |
+| "ready" (the pipeline there) | 6,568-6,710 (6,618) | 6,317-6,447 (6,390) |
+| the page models loaded | 11,358-11,561 (11,403) | 7,579-8,018 (7,697) |
+| the translation model loaded | 9,782-9,985 (9,887) | 9,123-9,570 (9,178) |
+| everything loaded ("Loading the models..." gone) | 11,358-11,561 (11,403) | 9,107-9,571 (9,155) |
+| working set at the end | 2,464-2,552 (2,526) | 2,461-2,525 (2,520) |
+| the card, added | 2,889-2,892 | 2,892 |
+
+The window is usable as soon as before; everything is loaded about 2.2 s sooner, since the page models load beside
+the translation model instead of after it; the memory is the same. With a filler holding 800 MiB (other programs
+about 1.9 GB) the box came at 4,880 ms, was answered "Start on the processor" 0.1 s later, and the start went on:
+"ready" 6,203, everything loaded 9,705, working set 2,387, the card 2,571 MiB added (the readers on the processor).
+Twice during the day another agent's stand-in run held the card as a start of this code began (1.8 and 4.0 GB used):
+the box came both times, at 5.5 and 5.7 s, and nothing loaded until it was answered.
+
+**The window on the stand-in** (`tools/standin_e2e.py --soft-first off --scenario a,f --seed 1 --wait-done 120
+--start-ollama 11439`, default setup; first bubble and whole page from the stand-in's sharp draw, the medians of the
+rested pages of scenario a, of f in brackets, ms; the OCR stage and the translation's requests, medians):
+
+| run | code | filler | the plan | first bubble | whole page | OCR | requests |
+|---|---|---|---|---|---|---|---|
+| the readers' room (entry above) | f83c1c7 | none | readers on the GPU (room, 1,169 left) | 1,446 (1,569) | 5,777 (4,768) | 554 | 2,732 |
+| one judgement | this | none | all four on the GPU (1,143 MiB left) | 1,533 (1,571) | 5,929 (4,691) | 621 | 2,641 |
+
+One run of this code, 112 s, with nothing else running on the machine. "Loading the models..." was shown from 5.3 s
+to 10.0 s of the run, the System page said GPU for all four stages, and nothing moved during the run. The first page
+(turned at the start, before the loads were over) waited for them: its first bubble came 12.3 s after it was shown.
+The figures are within a single run's spread of those of the entry above. The stand-in with a filler that makes the
+start short (answered "Start on the processor" through the window's object, `--gpu-short-answer`) and with a filler
+grown after the start were not run.
+
+**Unknown models.** A model of the reader's own never seen loaded is counted by its file's size (/api/tags) times
+`UNKNOWN_SHARE` 1.6. The two measured models need 1.22 times their file (PLaMo: a 1,723 MiB file, 2,100 at the peak
+with the window cache) and 1.26 times (Qwen3.5 4B: 3,170 and 4,000); 1.6 is kept for a smaller model whose KV cache
+weighs more at the app's context, and errs toward asking. With Ollama not answering or the model not listed, the
+translation model is not counted and the start does not ask for it.
+
+**Tests.** `tests/test_ocr_place.py` (the boundaries to the MiB, the order, fixed and forced parts, no GPU, the plan
+for commands, the net) and `tests/test_gpu_short_dialog.py` (the box's three ways, Return and Escape, the remembered
+choice and the next start silent, forced "gpu" never asking, no NVIDIA GPU, Ollama down), the only tests where the box
+may appear (`tests/conftest.py` refuses it everywhere else). The test files the change touches, on this code: 1,054
+passed and 10 skipped, 265 passed and 3 skipped (the models' folder set). The whole suite was not run on this code.
+
+**Not verified.** The stand-in with a filler that makes the start short, and with one grown after the start (not
+run: the machine was shared with another agent's timing runs); the whole suite; other cards (the floor is this
+driver's on this card); a model of the reader's own (its share is an estimate); LaMa's figure on these frames; the
+real viewer.
