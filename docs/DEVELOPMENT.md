@@ -161,7 +161,11 @@ rows' languages.
   taken back - a unit's first line among them - and why, the requests so thrown away, counted apart from those sent
   for nothing, how long a taken-back lettering stayed on show, and that nothing of one was in a page's lines or on
   show at its result: the runners' summary fails a run on that; `units_taken_back`: each unit that took a run back,
-  its counts, why and the page jobs of its requests); the page jobs cancelled past their page
+  its counts, why, what became of the regions of the first run taken back once the unit was read (`taken_back_as`)
+  and the page jobs of its requests; `lines_held`, `held_ms`: the lines held back by a candidate
+  not read yet or by the order foreseen, and how long after the rule before 2026-11-22 would have sent them;
+  `order_ms`: what foreseeing a unit's order cost it, on the reading's thread); the page jobs cancelled
+  past their page
   (`jobs_cancelled_past_their_page`: the cancel after the result, the job's end after the cancel); jobs kept
   from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; which capture
   gave the stand-in's frames, Windows.Graphics.Capture or PrintWindow where it gave none (`capture_route`); the pages the

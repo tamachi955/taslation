@@ -4904,3 +4904,60 @@ stream asks as soon as a line is read, where a page job asked only once its unit
 made earlier on this computer had 2, with the OCR on the processor there). All 79 of the backlog's requests were
 computed at below-normal priority. A run of the tree before the reused lines and the fix above met all 70 too (892 s;
 489 lines sent early, 115 taken back, 35 requests sent for pages left).
+
+## The lines sent early in the order their unit will have (2026-11-22)
+
+With the lines sent as they are read, about 15 % of the lines sent early on the stand-in were taken back for the
+reading order. In three timing runs of 1.0.0's tree (`tools/standin_e2e.py --scenario a,f --soft-first off --seed 1
+--wait-done 120 --start-ollama 11435`) 96 to 104 lines were sent before their unit was read and 15 or 16 taken back,
+nearly all in one unit of page 8, whose order once read was not its order before the reading: a classical candidate,
+read after the layout model's, turned out to be text and came before lines already sent, and the unit's order once
+read (`Pipeline._order_read`: only the regions read as text ordered among themselves) differed from the one before
+the reading, in which candidates that are no text had their places too. The other take-back was a page's first unit
+whose only line turned out to be print.
+
+**What changed** (`taslation/streaming.py`). A run leaves when the candidates that may come before it are judged, in
+the order the unit will have: the lines known and the candidates that may still be text are ordered as
+`_order_read` orders a unit once read (`ORDER_AS_READ`; copies, shaped as they will be), and the lines before the
+first such candidate may leave, as far as the order with none of the classical candidates begins with them too (a
+tall candidate that is no text drops out, and the rows found without it differ). The candidates that may still be
+text are the layout model's and the classical ones not read yet, but for one that the lines read so far cover: it is
+left out unread at its turn (`HOLD_FOR_CLASSICAL`; before, a classical candidate not read yet counted as no text). A
+line that letters the place of another is left out as the reading's end leaves it out. The panels are found once per
+set of lettering boxes, as the unit's page does not change.
+
+**Step by step** (three runs each, the same recipe): holding for the classical candidates alone left 10 or 11 lines
+taken back, all in that unit (the order once read, at the end); with the order foreseen, 4 or 5 (while it was read);
+with the order without the classical candidates, 3 or 4, none for the order (the rest below).
+
+**Timing** (medians, with the 90th percentile, in ms from the turn, over the turns rested on to pages the cache did
+not hold; 33 two-page turns and 3 one-page turns per arm):
+
+| | 1.0.0 | Order foreseen |
+|---|---|---|
+| Two pages: first request | 668 (762) | 721 (893) |
+| Two pages: first bubble | 998 (1179) | 1043 (1176) |
+| Two pages: whole page | 5761 (6683) | 5842 (6674) |
+| One page: first request | 608 | 482 |
+| One page: first bubble | 769 | 663 |
+| One page: whole page | 1743 | 1686 |
+| Lines sent early, a run | 96 to 104 | 88 to 90 |
+| Lines that stood | 81 to 89 | 85 to 87 |
+| Lines taken back | 15 to 16 | 3 |
+
+Page by page, the first bubble moved by -195 (page 8) to +88 ms, page 8 was finished 1.6 s sooner (10.6 against
+12.2 s), and the other pages' whole page by -0.2 to +0.2 s. 40 lines a run waited for a candidate or for the order
+foreseen, after the rule before would have sent them: a median 0.25 s, 0.44 s at the 75th percentile, 1.06 s at
+most; a page's first request came up to 0.32 s later (page 2). Foreseeing the order cost a unit a median 80 ms on the
+reading's thread (at most 123; 232 to 246 ms before the panels were kept per set of lettering boxes). All 28 criteria
+of the runners' summary were met in each run, and nothing of a line taken back was in a page's lines or on show.
+With no GPU (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0`, one run), 28 lines were sent early and
+none taken back or held, as before (27 and 28, none taken back); two pages' first bubble 1823 (3205) against 1766
+(3255) and 1804 (3220), the whole page 20.9 against 21.6 and 21.1 s; foreseeing the order cost a unit a median 66 ms.
+
+**What is still taken back.** The 3 lines a run are in page 8's unit, at the end: its reading read lettering set
+across again as one paragraph (`Pipeline._prose`) and left the pieces out as repeats of it, so the line of a piece
+sent early is not asked (`taken_back_as` in the tool's report). The print unit sent nothing early in these runs.
+`tests/test_stream_lines.py`: the lines leave in the order the unit will have, a line whose place depends on a
+candidate not read yet waits for it, a classical candidate not read yet holds the lines after it unless what was
+read covers it, and a line lettering the place of one before it is not sent.

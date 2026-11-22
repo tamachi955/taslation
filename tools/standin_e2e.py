@@ -4332,6 +4332,12 @@ def streamed_lines(stream_log: list[dict[str, Any]], requests: list[dict[str, An
             "early_lettered": total("early_lettered"), "early_withdrawn": total("early_withdrawn"),
             "withdrawn_on_show_ms": dist(withdrawn),
             "first_early_lettering_ms": dist(first_early),
+            # the lines a classical candidate not read yet held back (`streaming.HOLD_FOR_CLASSICAL`), and for how long
+            # after the earlier rule would have known them
+            "lines_held": total("lines_held"),
+            "held_ms": dist([v for e in stream_log for v in e.get("held_ms") or ()]),
+            # what foreseeing the unit's order once read cost a unit (`streaming.ORDER_AS_READ`, on the reading's thread)
+            "order_ms": dist([e["order_ms"] for e in stream_log if e.get("order_ms") is not None]),
             "final_from_taken_back": total("final_from_taken_back", finished),
             "early_left_at_close": total("early_left", finished),
             "early_left_at_result": sum(int(j.get("early_left_at_result") or 0) for j in by_id.values()
@@ -4346,7 +4352,7 @@ def streamed_lines(stream_log: list[dict[str, Any]], requests: list[dict[str, An
 
 UNIT_KEYS = ("unit", "outcome", "runs_sent_early", "lines_sent_early", "runs_stood", "lines_stood", "runs_taken_back",
              "lines_taken_back", "requests_taken_back", "first_taken_back", "why_taken_back", "first_answer_ms",
-             "reconciled_ms")
+             "reconciled_ms", "taken_back_as")
 
 
 def readings_on_a_miss(resolves: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:
@@ -5959,7 +5965,8 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"{st['units_first_line_taken_back']} units), requests thrown away {st['requests_taken_back']}; "
               f"taken-back lettering on show {st['withdrawn_on_show_ms']}; left: final {st['final_from_taken_back']}, "
               f"on show at close {st['early_left_at_close']}, at result {st['early_left_at_result']}; why taken back "
-              f"{st['why_taken_back']}")
+              f"{st['why_taken_back']}; held for a classical candidate {st.get('lines_held')} lines, "
+              f"{st.get('held_ms')} ms; order foreseen {st.get('order_ms')} ms a unit")
     tail = run_.get("jobs_cancelled_past_their_page") or {}
     print(f"jobs cancelled past their page {tail.get('jobs')}: cancel after the result {tail.get('cancel_after_result_ms')}"
           f", done after the cancel {tail.get('done_after_cancel_ms')}; not cancelled, result to done "

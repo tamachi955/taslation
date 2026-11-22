@@ -333,6 +333,83 @@ def test_a_model_candidate_not_judged_yet_holds_the_lines_after_it(settings):
     assert _wanted(stream) == [("ありがとう",), ("大丈夫だよ",), ("まだ終わってない",)]
 
 
+def test_a_classical_candidate_not_read_yet_holds_the_lines_after_it_unless_text_read_covers_it(settings):
+    # (the layout model's candidates are read first, the classical ones after them: one that turns out to be text
+    # would come before the lines after it in the unit's order - they wait for its reading, and nothing is taken back)
+    regions = [_region("ありがとう", 0), _region("大丈夫だよ", 1), _region("まだ終わってない", 2), _region("じゃあね", 3)]
+    regions[0].from_model = regions[2].from_model = regions[3].from_model = True
+    covered = _region("ありがとう", 0)  # (a classical box of the first one's lettering: left out unread at its turn)
+    order = [regions[0], covered, regions[1], regions[2], regions[3]]
+    stream = _stream(settings, order)
+    stream.judged(regions[0])
+    assert _wanted(stream) == [("ありがとう",)]  # (the covered candidate holds nothing)
+    stream.judged(regions[2])
+    stream.judged(regions[3])
+    assert _wanted(stream) == [("ありがとう",)]  # (the second candidate, classical, not read: the rest waits)
+    covered.status = "repeated"
+    stream.judged(covered)
+    stream.judged(regions[1])  # (text: in its place, before the lines held)
+    assert _wanted(stream) == [("ありがとう",), ("大丈夫だよ",), ("まだ終わってない",), ("じゃあね",)]
+    assert stream.sent == [] and stream.back_to is None
+    stream.read_done()
+    log = stream.close()
+    assert log["lines_held"] == 2 and all(ms >= 0 for ms in log["held_ms"])  # (two the earlier rule had sent)
+
+
+def test_with_the_page_the_lines_leave_in_the_order_the_unit_will_have_once_read(settings):
+    # (`Pipeline._order_read` orders the regions read as text among themselves once the unit is read, which may differ
+    # from the order before the reading: the lines known are put in that order, a candidate not read yet among them)
+    left, right = _region("じゃあね", 0, 0), _region("ありがとう", 0, 1)
+    stream = _stream(settings, [left, right])
+    stream.rgb = np.full((1200, 800, 3), 255, np.uint8)
+    stream.judged(left)
+    assert _wanted(stream) == []  # (the right one, not read yet, comes first on a page read from the right)
+    stream.judged(right)
+    assert _wanted(stream) == [("ありがとう",), ("じゃあね",)]
+    regions = [left, right]
+    stream.pipeline._order_read(stream.rgb, _Unit.box, regions)
+    assert [r.source_text for r in regions] == ["ありがとう", "じゃあね"]  # (the order the request has)
+    assert stream.log["order_ms"] >= 0
+
+
+def _at(text: str, x0: int, y0: int, x1: int, y1: int) -> TextRegion:
+    return TextRegion(x0, y0, x1, y1, np.full((y1 - y0, x1 - x0), 255, np.uint8), (x0 + 10, y0 + 10, x1 - 10, y1 - 10),
+                      status="untranslated", source_text=text)
+
+
+def test_a_line_whose_place_depends_on_a_candidate_not_read_yet_waits_for_it(settings):
+    # (a tall classical candidate between two bubbles puts them in one row, the right one first; were it no text, the
+    # bubbles are two rows, the upper one first: a line leaves only where both orders begin with it)
+    upper, lower = _at("じゃあね", 0, 0, 300, 100), _at("ありがとう", 400, 150, 700, 250)
+    tall = _at("", 310, 0, 390, 250)
+    upper.from_model = lower.from_model = True
+    stream = _stream(settings, [lower, tall, upper])
+    stream.rgb = np.full((1200, 800, 3), 255, np.uint8)
+    stream.judged(lower)
+    assert _wanted(stream) == []  # (first with the tall one text, second without it: nothing yet)
+    stream.judged(upper)
+    assert _wanted(stream) == []
+    tall.status = "dropped"
+    stream.judged(tall)
+    stream.read_done()
+    assert _wanted(stream) == [("じゃあね",), ("ありがとう",)]
+    regions = [lower, tall, upper]
+    stream.pipeline._order_read(stream.rgb, _Unit.box, regions)
+    assert [r.source_text for r in regions[:2]] == ["じゃあね", "ありがとう"]  # (the order the request has)
+
+
+def test_a_line_lettering_the_place_of_one_before_it_is_not_sent(settings):
+    # (once the unit is read, of two regions read as text that letter one place the first stays: `_ocr_regions`)
+    first, again, other = _region("ありがとう", 0), _region("ありがと", 0), _region("またね", 1)
+    first.from_model = True
+    stream = _stream(settings, [first, again, other])
+    stream.rgb = np.full((1200, 800, 3), 255, np.uint8)
+    for r in (first, again, other):
+        stream.judged(r)
+    stream.read_done()
+    assert _wanted(stream) == [("ありがとう",), ("またね",)]
+
+
 def test_a_full_joined_run_waits_for_the_line_after_it(settings):
     texts = ["それで", "あの時に", "駅で会った人が", "いい人だった"]  # (three that go on, then the fourth)
     regions = [_region(t, k) for k, t in enumerate(texts)]
@@ -345,7 +422,8 @@ def test_a_full_joined_run_waits_for_the_line_after_it(settings):
     assert [spec.lines for spec, _r in wanted][0] == tuple(texts[:3]) and wanted[0][0].follow == (texts[3],)
 
 
-def test_a_request_under_way_is_cancelled_when_its_run_is_taken_back(settings):
+def test_a_request_under_way_is_cancelled_when_its_run_is_taken_back(settings, monkeypatch):
+    monkeypatch.setattr(streaming, "HOLD_FOR_CLASSICAL", False)  # (the earlier rule: a run sent too soon)
     first, second = _region("ありがとう", 0), _region("大丈夫だよ", 1)
     p = Pipeline(settings, ocr=None, translator=Recorded(delay=1.0))
     stream = streaming.LineStream(p, _Unit(), [first, second], None, threading.Event(), None, True, None)
@@ -374,7 +452,8 @@ def test_a_request_under_way_is_cancelled_when_its_run_is_taken_back(settings):
     assert p.translator.asked[0][0].count("<|plamo:msg|>") == p.translator.asked[1][0].count("<|plamo:msg|>") - 2
 
 
-def test_a_line_read_later_before_the_ones_sent_takes_them_back(settings):
+def test_a_line_read_later_before_the_ones_sent_takes_them_back(settings, monkeypatch):
+    monkeypatch.setattr(streaming, "HOLD_FOR_CLASSICAL", False)  # (the earlier rule: a run sent too soon)
     regions = [_region("ありがとう", 0), _region("大丈夫だよ", 1), _region("まだ終わってない", 2)]
     stream = _stream(settings, regions)
     stream.judged(regions[0])

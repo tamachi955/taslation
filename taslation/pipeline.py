@@ -3630,6 +3630,8 @@ class Pipeline:
         the status `ERASED`. *stream* (`streaming.LineStream`) is told each region judged and the end of the reading:
         the lines known go to the translator meanwhile."""
         self._measure_slants(rgb, regions)
+        if stream is not None:
+            stream.rgb = rgb  # (the order its lines will have once the unit is read: `streaming.ORDER_AS_READ`)
         judged: Callable[[TextRegion], None] = stream.judged if stream is not None else (lambda _r: None)
         usual: float | _UsualLater
         if self.ocr is None:

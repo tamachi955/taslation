@@ -8,8 +8,15 @@ own, through the translator's `plamo.PageSession` - the same requests, history, 
 glossary, names and draws that `PlamoTranslator.translate_page` makes for the same lines. A run leaves when
 
 * its lines are settled (read by the readers that settle a region: the second reader, the third one where they differ),
-* the layout model's candidates before them in the unit's order before the reading are judged (a classical candidate
-  not read yet is taken for no text: the rule the measurements chose, 2026-11-22),
+* the candidates that may come before them are judged. The lines known and the candidates that may still be text are
+  put in the order the unit will have once read (`ORDER_AS_READ`: `Pipeline._order_read` orders the regions read as
+  text among themselves, and a tall candidate that is no text no longer joins two rows), and the lines before the
+  first such candidate may leave, as far as the order with none of the classical candidates begins with them too; a
+  line that letters the place of another is left out as the reading's end leaves it out. Those candidates are the
+  layout model's, which are read first, and the classical ones, read after them, but for one that what was read as
+  text so far covers: it is left out unread at its turn (`HOLD_FOR_CLASSICAL`). Both since 2026-11-22: before, the
+  lines went in the order before the reading with the classical candidates taken for no text, and 15 % of the lines
+  sent early on the stand-in were taken back for the order, none since (docs/OFFLINE_VERIFICATION.md),
 * an open-ended line (`continuation.ends_open`, or one the reader marked as going on) has its next line,
 * and a joined run has all its members (or `continuation.MAX_JOINED` of them and the line after them).
 
@@ -47,6 +54,12 @@ from .translate.base import TranslationError
 from .translate.continuation import MAX_JOINED, ends_open, facts_of, runs
 
 STREAM_LINES = True  # the window's page job sends a unit's lines as they are read (False: all at once, after it)
+# a classical candidate not read yet that what was read as text does not cover holds back the lines after it in the
+# unit's order (False: it is taken for no text, the rule until 2026-11-22, whose late surprises took lines back)
+HOLD_FOR_CLASSICAL = True
+# the lines known are put in the order the unit will be read in once all of it is read (`Pipeline._order_read`: the
+# regions read as text ordered among themselves), not in its order before the reading (False: that one)
+ORDER_AS_READ = True
 WAIT_STEP_S = 0.01  # how often a wait of the stream looks at the page's cancel
 # the facts of a line its request is made of (`plamo.PageSession.run`: the speaker, the reader's hint, whether its
 # sentence goes on, its page unit): two runs with the same lines and these are the same request
@@ -165,6 +178,11 @@ class LineStream:
         self.serve, self.learns = bool(reuse), reuse is not None
         self.unjudged_models = {id(r) for r in regions if r.from_model}
         self.judged_ids: set[int] = set()
+        self.has_models = bool(self.unjudged_models)
+        self.rgb: Any = None  # the page (`Pipeline._ocr_regions` sets it): the order foreseen (`ORDER_AS_READ`)
+        self.panels: dict[tuple[tuple[int, ...], ...], Any] = {}  # (its panels, per set of lettering boxes)
+        self.reading_done = False
+        self.held: dict[int, float] = {}  # (the counts: lines known to the earlier rule, not yet here - since when)
         self.clones: dict[int, Any] = {}
         self.notes = pipeline.premises()
         self.context = pipeline._grown.peek(context_fits(self.translator, self.notes))  # (what `context_pairs` takes)
@@ -192,7 +210,7 @@ class LineStream:
                                     "requests_taken_back": 0, "first_taken_back": False, "requests": 0,
                                     "final_lines": 0, "final_from_taken_back": 0, "tokens_taken_back": [],
                                     "first_answer_ms": None, "reconciled_ms": None, "outcome": "",
-                                    "why_taken_back": ""}
+                                    "why_taken_back": "", "held_ms": []}
 
     # --- the worker's side, while the unit is read ------------------------------------------------------------------
     def judged(self, region: Any) -> None:
@@ -216,6 +234,7 @@ class LineStream:
     def read_done(self) -> None:
         """Every region of the unit judged."""
         self.unjudged_models.clear()
+        self.reading_done = True
         self._offer()
 
     @staticmethod
@@ -226,14 +245,139 @@ class LineStream:
 
     def _provisional(self) -> list[Any]:
         """The unit's lines as known now, in its order before the reading: those judged to be text, up to the first
-        candidate of the layout model not judged yet (a classical one not read yet counts as no text)."""
+        candidate not judged yet that may still be text - one of the layout model, or a classical one that what was
+        read as text so far does not cover (`HOLD_FOR_CLASSICAL`; one it covers is left out unread at its turn,
+        `Pipeline._ocr_regions`: what was read as text only grows). Once the unit is read, every line judged."""
+        from .detect.layout import cover_of
+
+        if self.rgb is not None and ORDER_AS_READ:
+            return self._provisional_ordered()
         out = []
+        read: list[Any] | None = None
         for r in self.order:
             if id(r) in self.unjudged_models:
                 break
-            if id(r) in self.judged_ids and self._text(r):
-                out.append(r)
+            if id(r) in self.judged_ids:
+                if self._text(r):
+                    out.append(r)
+                continue
+            if HOLD_FOR_CLASSICAL and not self.reading_done:
+                if read is None:
+                    read = [q for q in self.order
+                            if id(q) in self.judged_ids and q.status == "untranslated" and q.source_text]
+                if cover_of(r, read) is None:
+                    break  # (it may be text, and come before the lines after it: they wait for its reading)
         return out
+
+    def _undecided(self) -> list[Any]:
+        """The candidates not judged yet that may still be text: the layout model's; a classical one that the regions
+        read as text so far do not cover (with the layout model's candidates read first, one they cover is left out
+        unread at its turn), every one without them; none once the unit is read."""
+        from .detect.layout import cover_of
+
+        if self.reading_done:
+            return []
+        rest = [r for r in self.order if id(r) not in self.judged_ids]
+        if not HOLD_FOR_CLASSICAL:
+            return [r for r in rest if r.from_model]
+        if not self.has_models:
+            return rest  # (read in their order, each one: none is left out unread)
+        read = [q for q in self.order if id(q) in self.judged_ids and q.status == "untranslated" and q.source_text]
+        return [r for r in rest if r.from_model or cover_of(r, read) is None]
+
+    def _provisional_ordered(self) -> list[Any]:
+        """`_provisional` in the order the unit's request will have (`ORDER_AS_READ`): the lines judged to be text and
+        the candidates that may still be text ordered as `Pipeline._order_read` orders a unit once read
+        (`order_on_page` over those alone, each line shaped as it will be; the reader's order first), the lines up to
+        the first such candidate - as far as they are also the first lines of the order the unit has should none of
+        the classical ones be text (the layout model's are taken for text there too: they nearly always are): one
+        judged no text drops out, and the rows and panels found without it may put the lines otherwise (a tall
+        candidate that is no text joined two rows)."""
+        import copy
+
+        t = time.perf_counter()
+        text = self._lettering_once([r for r in self.order if id(r) in self.judged_ids and self._text(r)])
+        undecided = self._undecided()
+        stand_ins: dict[int, Any] = {}
+        for r in text:
+            stand_ins[id(r)] = self.clones.get(id(r)) or copy.copy(r)
+        for r in undecided:
+            stand_ins[id(r)] = copy.copy(r)  # (never the region itself: the ordering marks what it orders)
+        waiting = {id(r) for r in undecided}
+        out = []
+        for r in self._foreseen([*text, *undecided], stand_ins):
+            if id(r) in waiting:
+                break
+            out.append(r)
+        if out and not all(r.from_model for r in undecided):
+            alone = self._foreseen([*text, *(r for r in undecided if r.from_model)], stand_ins)
+            n = 0
+            while n < len(out) and out[n] is alone[n]:
+                n += 1
+            del out[n:]
+        self.log["order_ms"] = round(self.log.get("order_ms", 0.0) + (time.perf_counter() - t) * 1000.0, 1)
+        return out
+
+    def _lettering_once(self, text: list[Any]) -> list[Any]:
+        """*text* (lines judged, in the unit's order before the reading) without those the unit's reading will leave
+        out once it is read as lettering the same place as another (`Pipeline._ocr_regions`: the first stays, and a
+        shaped region before a plain box), judged on their shaped copies as it judges the shaped regions."""
+        from .pipeline import _plain, _same_lettering
+
+        def same(a: Any, b: Any) -> bool:
+            ca, cb = self.clones.get(id(a), a), self.clones.get(id(b), b)
+            return ca.adopted is b or cb.adopted is a or _same_lettering(ca, cb)
+
+        def plain(r: Any) -> bool:
+            return _plain(self.clones.get(id(r), r))
+
+        kept: list[Any] = []
+        for r in text:
+            twin = next((q for q in kept if same(q, r)), None)
+            if twin is None:
+                kept.append(r)
+            elif plain(twin) and not plain(r):
+                kept[kept.index(twin)] = r
+        order = {id(r): i for i, r in enumerate(text)}
+        return sorted(kept, key=lambda r: order[id(r)])
+
+    def _foreseen(self, regions: Sequence[Any], stand_ins: dict[int, Any]) -> list[Any]:
+        """*regions* in the order `Pipeline._order_read` would give them, were they the unit's text: their stand-ins
+        ordered as `order_on_page` orders (the panels found with their lettering as what may sit on a gutter, kept for
+        each set of lettering boxes: the unit's page does not change), `apply_order_hints`; in the unit's order before
+        the reading if that fails."""
+        from .detect.bubbles import order_regions
+        from .detect.panels import find_panels
+        from .regions import apply_order_hints
+
+        chosen = {id(r) for r in regions}
+        mine = [r for r in self.order if id(r) in chosen]
+        back = {id(stand_ins[id(r)]): r for r in mine}
+        try:
+            stand = [stand_ins[id(r)] for r in mine]
+            boxes = [s.text_box for s in stand]
+            key = tuple(sorted(tuple(int(v) for v in b) for b in boxes))
+            if key not in self.panels:
+                self.panels[key] = find_panels(self.rgb, self.unit_box, boxes) if stand else None
+            return [back[id(s)] for s in apply_order_hints(order_regions(stand, self.pipeline.rtl, self.panels[key]))]
+        except Exception:  # noqa: BLE001 - no order to foresee: the unit's own, before the reading
+            return mine
+
+    def _held_since(self, prov: Sequence[Any]) -> None:
+        """(the counts) The lines the earlier rule - a classical candidate not read yet taken for no text, the order
+        before the reading - would have known by now and *prov* does not yet: since when each was held, and how long
+        once it is known."""
+        if not (HOLD_FOR_CLASSICAL or ORDER_AS_READ):
+            return
+        now = time.monotonic()
+        known = {id(r) for r in prov}
+        for r in self.order:
+            if id(r) in self.unjudged_models:
+                break
+            if id(r) in self.judged_ids and self._text(r) and id(r) not in known:
+                self.held.setdefault(id(r), now)
+        for i in [i for i in self.held if i in known]:
+            self.log["held_ms"].append(round((now - self.held.pop(i)) * 1000.0, 1))
 
     def _runs_known(self) -> tuple[list[tuple[RunSpec, list[Any]]], list[tuple[Any, str]]]:
         """The runs of the lines known now that may leave (see the module's docstring), in order, up to the first that
@@ -243,6 +387,7 @@ class LineStream:
         from .translate.plamo import request_lines
 
         prov = self._provisional()
+        self._held_since(prov)
         if not prov:
             return [], []
         meta = facts_of(prov, [(r.unit, self.unit_box) for r in prov])
@@ -435,6 +580,14 @@ class LineStream:
                     self.log["why_taken_back"] = "at the end: " + (
                         why_differs(self.sent[stand].spec, final[stand][0] if stand < len(final) else None, asked)
                         if same else "context")
+                    # (what became of its regions once the unit was read: their status, the layout model's or not, and
+                    # for a repeat whether what it repeats is a region of the unit's or one its reading made)
+                    self.log["taken_back_as"] = [
+                        f"{r.status}{' (model)' if r.from_model else ''}"
+                        + ("" if getattr(r, "repeats", None) is None else
+                           f" of a region{' (model)' if r.repeats.from_model else ''}"
+                           if any(r.repeats is q for q in self.order) else " of one made")
+                        for r in self.sent[stand].regions]
                 self._back(stand)
             self.wanted = [(spec, []) for spec, _run in final]
             self.log["runs_stood"] = stand
@@ -611,6 +764,7 @@ class LineStream:
         gone = {s.token for s in self.taken_back}
         log["final_from_taken_back"] = sum(1 for s in self.sent if s.final and s.token in gone)
         log["first_answer_ms"] = None if self.first_answer_ms is None else round(self.first_answer_ms, 1)
+        log["lines_held"] = len(log["held_ms"])
         if self.fill is not None:
             log.update(self.fill.early_log())
         return log
