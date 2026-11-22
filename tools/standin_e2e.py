@@ -1762,6 +1762,7 @@ STAGES = (("pipeline", "Pipeline", "process", "process"), ("pipeline", "Pipeline
           ("pipeline", "Pipeline", "keep_shown", "keep_shown"), ("pipeline", "Pipeline", "_early_look", "early_look"),
           ("pipeline", "PageGate", "on_show", "gate_wait"), ("pipeline", "PageWork", "settle", "settle"),
           ("pipeline", "PageFill", "wait", "drafts_wait"), ("pipeline", "LoadAhead", "_run", "load_ahead"),
+          ("pipeline", "ReadBeside", "take", "beside_wait"), ("pipeline", "Pipeline", "_measure_slants", "slants"),
           ("translate.ollama", "OllamaTranslator", "ensure_loaded", "ensure_loaded"),
           ("translate.plamo", "PlamoTranslator", "warm_up", "warm_up"),
           ("translate.ollama", "OllamaTranslator", "warm_up", "warm_up"))
@@ -4626,10 +4627,12 @@ def timing_summary(rows: list[dict[str, Any]], soft_first: bool, drew_soft: list
 # a page job's stages as `job_stages` tells them, in the order of the job
 STAGE_KEYS = ("queued", "to_process", "fingerprint", "detect", "ocr", "order", "before_first_request", "gate_wait",
               "load_wait", "first_request", "first_prompt", "first_answer", "requests", "prompt", "answer",
-              "between_requests", "between_units", "after_requests", "tighten", "review", "large", "drafts_wait",
+              "between_requests", "between_units", "between_beside_wait", "between_store", "between_order",
+              "between_ocr", "between_other", "requests_idle", "requests_idle_max", "after_requests", "tighten",
+              "review", "large", "drafts_wait",
               "translate", "store",
               "render", "process", "result_to_window", "settle", "save", "keep_shown", "drafts_lettering",
-              "first_answer_to_lettered", "ocr_beside", "ocr_cpu", "ocr_gpu")
+              "first_answer_to_lettered", "ocr_beside", "ocr_cpu", "ocr_gpu", "slants", "slants_before_first_request")
 
 
 def job_stages(job: dict[str, Any], requests: list[dict[str, Any]], lettered_t: float | None) -> dict[str, Any] | None:
@@ -4670,15 +4673,28 @@ def job_stages(job: dict[str, Any], requests: list[dict[str, Any]], lettered_t: 
     sent = first["http_t"] or first["t"] if first is not None else None
     ran = sum(r["end_t"] - r["t"] for r in reqs if r["end_t"] is not None)
     gaps = units_gap = 0.0  # (between two requests of a unit's translation; between two units' translations)
+    gap_parts: Counter[str] = Counter()  # (the worker's stages within the time between two units' translations)
     for k, (_lab, a, b, _th, _x) in enumerate(trs):
         inside = [r for r in reqs if a <= r["t"] and r["end_t"] is not None and r["end_t"] <= b]
         if inside:
             gaps += (max(r["end_t"] for r in inside) - inside[0]["t"]
                      - sum(r["end_t"] - r["t"] for r in inside))
         if k:
-            units_gap += a - trs[k - 1][2]
+            g0 = trs[k - 1][2]
+            units_gap += a - g0
+            for lab, s0, s1, th, _x in spans:
+                if th == worker and g0 <= s0 and s1 <= a and lab not in ("process",):
+                    gap_parts[lab] += s1 - s0
+    idle: list[float] = []  # (the model idle between the job's requests: from the end of those before to the next)
+    reach: float | None = None
+    for r in reqs:
+        if reach is not None and r["t"] > reach:
+            idle.append(r["t"] - reach)
+        if r["end_t"] is not None:
+            reach = r["end_t"] if reach is None else max(reach, r["end_t"])
     out: dict[str, Any] = {
         "queued": ms(job.get("work_t"), job["t"]), "to_process": ms(p0, job.get("work_t")),
+        "requests_idle": round(sum(idle)) if reqs else None, "requests_idle_max": round(max(idle)) if idle else None,
         "fingerprint": total("units", "resolve", hi=p1), "detect": total("detect", "annotate", hi=p1),
         "ocr": total("ocr", hi=p1), "order": total("order", hi=p1, alone=True),
         "before_first_request": ms(sent, t0) if first is not None and t0 is not None and sent >= t0 else None,
@@ -4692,6 +4708,15 @@ def job_stages(job: dict[str, Any], requests: list[dict[str, Any]], lettered_t: 
         "answer": round(sum(r.get("answer_ms") or 0 for r in reqs)) if reqs else None,
         "between_requests": round(gaps) if reqs else None,
         "between_units": round(units_gap) if len(trs) > 1 else None,
+        # what of it the worker spent waiting for the next unit read beside, in the stores, the order and the rooms,
+        # and in nothing the stages tell
+        "between_beside_wait": round(gap_parts["beside_wait"]) if len(trs) > 1 else None,
+        "between_store": round(gap_parts["store"]) if len(trs) > 1 else None,
+        "between_order": round(gap_parts["order"]) if len(trs) > 1 else None,
+        "between_other": (round(units_gap - sum(v for lab, v in gap_parts.items() if lab in
+                                                ("beside_wait", "store", "order", "ocr")))
+                          if len(trs) > 1 else None),
+        "between_ocr": round(gap_parts["ocr"]) if len(trs) > 1 else None,
         "after_requests": ms(t1, max(ends)) if ends and t1 is not None else None,
         "tighten": total("tighten", hi=p1), "review": total("review", hi=p1), "large": total("large", hi=p1),
         "drafts_wait": total("drafts_wait", hi=p1),
@@ -4701,9 +4726,17 @@ def job_stages(job: dict[str, Any], requests: list[dict[str, Any]], lettered_t: 
         "drafts_lettering": total("letter", mine=False),
         "first_answer_to_lettered": ms(lettered_t, first["end_t"]) if first is not None and lettered_t else None,
         "ocr_beside": total("ocr", mine=False),
+        # the slants measured by the worker (`Pipeline._measure_slants`), and of them those before the first request
+        "slants": total("slants", hi=p1),
+        "slants_before_first_request": total("slants", hi=first["t"]) if first is not None else None,
         "ocr_cpu": round(sum(b - a for lab, a, b, _th, x in spans if lab == "ocr_read" and x == "cpu")),
         "ocr_gpu": round(sum(b - a for lab, a, b, _th, x in spans if lab == "ocr_read" and x != "cpu")),
     }
+    if os.environ.get("TASLATION_STAGE_TIMELINE"):  # (a developer's look: the job's spans and requests, ms from its start)
+        out["timeline"] = {
+            "spans": [(lab, round(a - p0), round(b - a), "worker" if th == worker else str(th)[-6:], x)
+                      for lab, a, b, th, x in spans if lab != "process" and a >= p0 - 1 and b <= p1 + 1],
+            "requests": [(round(r["t"] - p0), round((r["end_t"] or r["t"]) - r["t"])) for r in reqs]}
     out["ocr_reads"] = {"cpu": sum(1 for s in spans if s[0] == "ocr_read" and s[4] == "cpu"),
                         "gpu": sum(1 for s in spans if s[0] == "ocr_read" and s[4] != "cpu")}
     out["requests_n"] = len(reqs)
