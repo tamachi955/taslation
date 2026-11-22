@@ -7,6 +7,7 @@ no model, no Ollama but the fake one."""
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 from pathlib import Path
@@ -98,32 +99,65 @@ def test_just_before_a_load_the_readers_on_the_gpu_count_once():
     loading = GpuFacts(total=6144, used=others + CONTEXT_MIB + readers_now, own=CONTEXT_MIB + readers_now,
                        translator=PLAMO, translator_now=0, lama=True)
     peak = CONTEXT_MIB + PLAMO + LAMA_MIB + OCR
-    assert peak == 120 + 2000 + 680 + 500 == 3300
-    assert room_left(loading, OCR) == 6144 - others - peak == 1519 == room_left(before, OCR)
+    assert peak == 100 + 2000 + 680 + 420 == 3200
+    assert room_left(loading, OCR) == 6144 - others - peak == 1619 == room_left(before, OCR)
     assert room_left(loading, OCR) != 6144 - (others + readers_now) - peak  # (twice: in the others' memory too)
     assert room_left(loading, OCR) != 6144 - others - (peak - OCR)  # (none: their peak left out)
     kept = through_load(loading, OCR)
-    assert kept == Placement("gpu", place.ROOM, 1519)
-    assert loading.total - loading.used == 4579 >= PLAMO + MARGIN_MIB  # what Ollama finds free at the load
+    assert kept == Placement("gpu", place.ROOM, 1619)
+    assert loading.total - loading.used == 4599 >= PLAMO + MARGIN_MIB  # what is free at the load
     # another model in Ollama, of another program's, counts as other programs' memory: no room, let go
     crowded = GpuFacts(total=6144, used=loading.used + 1500, own=loading.own, translator=PLAMO, lama=True)
-    assert room_left(crowded, OCR) == 1519 - 1500 and through_load(crowded, OCR).device == "cpu"
+    assert room_left(crowded, OCR) == 1619 - 1500 and through_load(crowded, OCR).device == "cpu"
+    # readers kept through a load are readers on the GPU: they stay down to the margin, not the return mark
+    edge = dataclasses.replace(loading, used=loading.used + 1619 - MARGIN_MIB)
+    assert through_load(edge, OCR) == Placement("gpu", place.ROOM, MARGIN_MIB)
+    assert through_load(dataclasses.replace(edge, used=edge.used + 1), OCR).device == "cpu"
+
+
+def test_the_margin_is_the_driver_s_part_and_other_programs_sway_and_the_return_mark_one_step_more():
+    """Readers on the CPU go to the GPU from `RETURN_MIB` left at the peak, readers there stay down to `MARGIN_MIB`:
+    other programs' usual swing (`STEP_MIB`) moves them neither way."""
+    assert MARGIN_MIB == place.FLOOR_MIB + place.SWAY_MIB == 490 + 220
+    assert place.RETURN_MIB == MARGIN_MIB + place.STEP_MIB == MARGIN_MIB + 100
+    base = GpuFacts(total=6144, used=0, translator=PLAMO, lama=True, layout=True)
+
+    def at(room, staying):
+        return judge(dataclasses.replace(base, used=6144 - place.peak_mib(base, OCR) - room), OCR, staying)
+
+    assert at(place.RETURN_MIB, False) == Placement("gpu", place.ROOM, place.RETURN_MIB)
+    assert at(place.RETURN_MIB - 1, False) == Placement("cpu", place.NO_ROOM, place.RETURN_MIB - 1)
+    assert at(MARGIN_MIB, True) == Placement("gpu", place.ROOM, MARGIN_MIB)
+    assert at(MARGIN_MIB - 1, True) == Placement("cpu", place.NO_ROOM, MARGIN_MIB - 1)
+    for room in range(MARGIN_MIB, place.RETURN_MIB):
+        assert at(room, True).device == "gpu" and at(room, False).device == "cpu", room
+    edge = dataclasses.replace(base, used=6144 - place.peak_mib(base, OCR) - MARGIN_MIB)
+    assert decide(Settings(), OCR, cuda=True, facts=lambda s: edge, staying=True).device == "gpu"
+    assert decide(Settings(), OCR, cuda=True, facts=lambda s: edge).device == "cpu"
+
+
+def test_the_readers_are_counted_at_their_measured_peak():
+    """Torch's reserved memory at the readers' peak (2026-11-22, 509 and 206 crops and the largest made-up ones):
+    charspot alone 124 MiB, both 410; rounded up to 10 MiB, nothing added (their inputs are bounded)."""
+    assert CHARSPOT_MIB == 130 and CHARSPOT_MIB + NAR_MIB == 420 and CONTEXT_MIB == 100
 
 
 def test_the_measured_card_has_room_beside_plamo_and_both_page_models():
     """The 6 GB card with the layout model and LaMa on the GPU (their default there), its screen 1080 px high and
-    1343 MiB held by other programs: room for the readers; above 1390 MiB of them, or on a screen taller than 1440 px
-    (LaMa's larger windows), not."""
+    1343 MiB held by other programs: room for the readers; above 1704 MiB of them not, and on a screen taller than
+    1440 px (LaMa's larger windows) above 1414."""
     facts = GpuFacts(total=6144, used=1343, translator=PLAMO, lama=True, layout=True)
-    assert place.peak_mib(facts, OCR) == 120 + 2000 + 680 + 430 + 500 == 3730
-    assert judge(facts, OCR) == Placement("gpu", place.ROOM, 1071)
-    assert judge(GpuFacts(total=6144, used=1390, translator=PLAMO, lama=True, layout=True), OCR).device == "gpu"
-    assert judge(GpuFacts(total=6144, used=1391, translator=PLAMO, lama=True, layout=True), OCR).device == "cpu"
+    assert place.peak_mib(facts, OCR) == 100 + 2000 + 680 + 430 + 420 == 3630
+    assert judge(facts, OCR) == Placement("gpu", place.ROOM, 1171)
+    assert judge(GpuFacts(total=6144, used=1704, translator=PLAMO, lama=True, layout=True), OCR).device == "gpu"
+    assert judge(GpuFacts(total=6144, used=1705, translator=PLAMO, lama=True, layout=True), OCR).device == "cpu"
     tall = GpuFacts(total=6144, used=1343, translator=PLAMO, lama=True, layout=True, tall_screen=True)
-    assert judge(tall, OCR) == Placement("cpu", place.NO_ROOM, 1071 - (place.LAMA_TALL_MIB - LAMA_MIB)) \
-        and 1071 - 290 == 781
+    assert judge(tall, OCR) == Placement("gpu", place.ROOM, 1171 - (place.LAMA_TALL_MIB - LAMA_MIB)) \
+        and 1171 - 290 == 881
+    assert judge(dataclasses.replace(tall, used=1414), OCR).device == "gpu"
+    assert judge(dataclasses.replace(tall, used=1415), OCR).device == "cpu"
     # a tall screen with LaMa off counts nothing for it
-    assert place.peak_mib(GpuFacts(total=6144, used=0, translator=PLAMO, tall_screen=True), OCR) == 120 + 2000 + 500
+    assert place.peak_mib(GpuFacts(total=6144, used=0, translator=PLAMO, tall_screen=True), OCR) == 100 + 2000 + 420
 
 
 def test_a_screen_taller_than_1440_px_or_not_known_counts_lama_s_larger_windows(monkeypatch):
@@ -344,17 +378,18 @@ def _band(other, cache, setting="auto", cuda=True, tall=False):
 
 
 def test_the_losing_band_is_where_only_the_window_cache_s_mib_move_the_readers():
-    """On the 6 GB card, a screen up to 1440 px: the readers keep the GPU without the window cache up to 1390 MiB of
-    other programs, with it up to 1290 (q8_0); between the two the window cache would cost them the GPU."""
+    """On the 6 GB card, a screen up to 1440 px: the readers go to the GPU without the window cache up to 1704 MiB of
+    other programs, with it up to 1604 (q8_0); between the two the window cache would cost them the GPU. (The server
+    starts before the readers are anywhere: the return mark, not the margin.)"""
     peak = CONTEXT_MIB + LAMA_MIB + place.LAYOUT_MIB + OCR
-    assert 6144 - 1390 - (peak + 2000) == MARGIN_MIB == 6144 - 1290 - (peak + 2100)
-    for other, wanted in ((717, ("gpu", "gpu")), (1024, ("gpu", "gpu")), (1290, ("gpu", "gpu")),
-                          (1291, ("gpu", "cpu")), (1372, ("gpu", "cpu")), (1390, ("gpu", "cpu")),
-                          (1391, ("cpu", "cpu"))):
+    assert 6144 - 1704 - (peak + 2000) == place.RETURN_MIB == 6144 - 1604 - (peak + 2100)
+    for other, wanted in ((717, ("gpu", "gpu")), (1440, ("gpu", "gpu")), (1604, ("gpu", "gpu")),
+                          (1605, ("gpu", "cpu")), (1650, ("gpu", "cpu")), (1704, ("gpu", "cpu")),
+                          (1705, ("cpu", "cpu"))):
         before, after = _band(other, "q8_0")
         assert (before.device, after.device) == wanted, other
         assert before.room - after.room == 100
-    before, after = _band(1100, "q8_0", tall=True)  # (a taller screen: LaMa's larger windows)
+    before, after = _band(1360, "q8_0", tall=True)  # (a taller screen: LaMa's larger windows)
     assert (before.device, after.device) == ("gpu", "cpu")
     before, after = _band(1300, "q8_0", setting="gpu")  # (the place set: the same either way)
     assert before == after == Placement("gpu", place.SET)
@@ -378,7 +413,7 @@ def test_ollama_s_start_asks_the_rule_with_the_facts_of_the_moment(tmp_path, mon
     asked = []
     # the card's used memory, and this process's own: the first call only looks whether there is an NVIDIA GPU; then
     # the readers move to the GPU on another thread while the card is read (own 0, then 500), so it is read again
-    readings = iter([(6144, 1890), (6144, 1390), (6144, 1890), (6144, 1890),
+    readings = iter([(6144, 2494), (6144, 1994), (6144, 2494), (6144, 2494),
                      (6144, 1200), (6144, 1200), (6144, 2000)])
     owns = iter([0, 500, 500, 500, 0, 0, 0])
 
@@ -393,12 +428,12 @@ def test_ollama_s_start_asks_the_rule_with_the_facts_of_the_moment(tmp_path, mon
     monkeypatch.setattr(place, "card_memory", lambda: next(readings))
     monkeypatch.setattr(place, "own_mib", lambda: next(owns))
     monkeypatch.setattr(artwork, "_cuda", True)
-    s = _settings(tmp_path)  # (its models folder has no second reader: charspot's 450 MiB alone)
-    assert ollama_start.window_choice(s, "q8_0") == (False, ollama_start.WHY_READERS, (1074, 974))
+    s = _settings(tmp_path)  # (its models folder has no second reader: charspot's 130 MiB alone)
+    assert ollama_start.window_choice(s, "q8_0") == (False, ollama_start.WHY_READERS, (810, 710))
     # one snapshot for both, the card and this process's part of it of the same moment: the two differ by the
-    # translation model's figure alone (other programs 1390 MiB either way, not 890 for the second look)
-    assert asked == [(("q8_0", False), (6144, 1890), 500), (("q8_0", True), (6144, 1890), 500)]
-    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1264, 1164))
+    # translation model's figure alone (other programs 1994 MiB either way, not 1494 for the second look)
+    assert asked == [(("q8_0", False), (6144, 2494), 500), (("q8_0", True), (6144, 2494), 500)]
+    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1604, 1504))
 
 
 def test_a_model_of_the_reader_s_own_is_not_known_until_seen_loaded(tmp_path, ollama):
@@ -591,6 +626,96 @@ def test_a_cpu_error_is_not_retried(given_back):
     assert not m.gpu_failed
 
 
+# ------------------------------------------------------------------ reads that crawl on the GPU
+def test_reads_crawl_only_when_every_one_of_the_last_is_slower_than_twice_the_cpu_s():
+    cpu = [50.0, 60.0, 40.0]
+    assert place.SLOW_READS == 8 and place.CPU_READS == 3 and place.SLOW_FACTOR == 2.0
+    assert place.crawling([101.0] * 8, cpu) == (101.0, 50.0)
+    assert place.crawling([100.0] * 8, cpu) is None  # (twice the CPU's median exactly: not more)
+    assert place.crawling([300.0] * 7 + [20.0], cpu) is None  # one read at the GPU's own speed: waits, not a crawl
+    assert place.crawling([20.0] * 4 + [300.0] * 8, cpu) == (300.0, 50.0)  # (the last eight)
+    assert place.crawling([300.0] * 7, cpu) is None  # (too few reads on the GPU)
+    assert place.crawling([300.0] * 8, cpu[:2]) is None  # (the processor's time not known well enough)
+
+
+class Clock:
+    """`time.perf_counter` as `place` sees it, moved on by the reads themselves."""
+
+    def __init__(self):
+        self.now = 100.0
+
+    def perf_counter(self):
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = Clock()
+    monkeypatch.setattr(place, "time", SimpleNamespace(perf_counter=c.perf_counter))
+    return c
+
+
+def _timed(m, clock, gpu_ms, cpu_ms):
+    """One read of *m* that takes *gpu_ms* on the GPU and *cpu_ms* on the CPU; the networks it read with."""
+    def on(device, models):
+        m.reads.append(models[0])
+        clock.now += (cpu_ms if device == "cpu" else gpu_ms) / 1000
+        return models[0]
+
+    return m.run(on)
+
+
+def test_reads_that_crawl_on_the_gpu_go_to_the_cpu_for_the_session(given_back, clock):
+    told = []
+    m = FakeModels("charspot")
+    m.on_gpu_failure = lambda reader, why: told.append((reader, why))
+    m.to("cuda")
+    with place.loading():  # (the page waits for the translation model's load: a slower read costs it nothing)
+        read = [_timed(m, clock, 15, 50) for _ in range(40)]
+    # one read in nine on the CPU until three processor's times are known, none after them
+    assert [k for k, net in enumerate(read) if net == "net@cpu"] == [8, 17, 26]
+    assert list(m.cpu_ms) == pytest.approx([50.0] * 3) and not told and m.device == "cuda"
+    # the GPU crawls (its memory in the computer's own, another program at work on it): each read slower than twice
+    # the processor's; the eighth such read sends them to the CPU
+    read = [_timed(m, clock, 150, 50) for _ in range(9)]
+    assert read == ["net@cuda"] * 8 + ["net@cpu"]
+    assert m.gpu_failed == place.SLOW_GPU and not m.gpu_full and told == [("charspot", place.SLOW_GPU)]
+    assert m.device == "cpu" and given_back == [1] and not m.to("cuda")
+
+
+def test_no_read_goes_to_the_cpu_for_its_time_outside_a_load_and_none_crawls_unknown(given_back, clock):
+    m = FakeModels()
+    m.to("cuda")
+    assert [_timed(m, clock, 15, 50) for _ in range(30)] == ["net@cuda"] * 30  # (a page waits for each read now)
+    assert not m.cpu_ms
+    assert [_timed(m, clock, 400, 50) for _ in range(20)] == ["net@cuda"] * 20  # (no processor's time to judge by)
+    assert m.device == "cuda" and not m.gpu_failed
+    with place.loading():
+        assert [_timed(m, clock, 15, 50) for _ in range(2)] == ["net@cpu", "net@cuda"]  # (eight and more since one)
+
+
+def test_reads_that_wait_now_and_then_on_the_gpu_are_no_crawl(given_back, clock):
+    m = FakeModels()
+    m.to("cuda")
+    with place.loading():
+        for _ in range(27):
+            _timed(m, clock, 15, 50)
+    assert len(m.cpu_ms) == place.CPU_READS
+    for k in range(40):  # (three reads in four waited behind a page model of this process)
+        assert _timed(m, clock, 15 if k % 4 == 0 else 400, 50) == "net@cuda"
+    assert m.device == "cuda" and not m.gpu_failed
+
+
+def test_reads_while_the_translator_computes_are_the_processor_s_times(given_back, clock):
+    m = FakeModels()
+    m.to("cuda")
+    with place.translating():
+        for _ in range(3):
+            assert _timed(m, clock, 15, 50) == "net@cpu"
+    assert list(m.cpu_ms) == pytest.approx([50.0] * 3)
+    assert [_timed(m, clock, 15, 50) for _ in range(30)] == ["net@cuda"] * 30  # (none of the CPU's needed)
+
+
 # ------------------------------------------------------------------ the readers
 class FakeEngine(FakeModels):
     def __init__(self, model_dir, threads=0):
@@ -609,11 +734,12 @@ def fake_readers(monkeypatch, given_back):
     monkeypatch.setattr(readers, "missing_readers", lambda models_dir: [])
     monkeypatch.setattr(nar, "NarEngine", FakeEngine)
     monkeypatch.setattr(cpt, "CptEngine", FakeEngine)
-    rule = SimpleNamespace(answer=Placement("gpu", place.ROOM, 1500), asked=[])
+    rule = SimpleNamespace(answer=Placement("gpu", place.ROOM, 1500), asked=[], staying=[])
 
-    def decided(settings, ocr, failed="", cuda=None, facts=None):
+    def decided(settings, ocr, failed="", cuda=None, facts=None, staying=False):
         rule.asked.append((settings.ocr_runs_on, ocr, failed))
-        return Placement("cpu", place.FAILED, error=failed) if failed else rule.answer
+        rule.staying.append(staying)
+        return place.failed_placement(failed) if failed else rule.answer
 
     monkeypatch.setattr(place, "decide", decided)
     return rule
@@ -709,6 +835,82 @@ def test_an_out_of_memory_of_one_reader_puts_both_on_the_cpu_until_the_gpu_memor
     ocr.read_chars(None)
     assert fake_readers.asked[-1] == ("auto", OCR, "") and ocr.placement == Placement("gpu", place.ROOM, 1500)
     assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and ocr._nar.read() == "x read with net@cuda"
+
+
+def test_the_second_out_of_memory_of_a_session_keeps_them_on_the_cpu_for_the_rest_of_it(tmp_path, fake_readers):
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    for _round in range(place.FULLS_FOR_GOOD):
+        assert ocr.placement == Placement("gpu", place.ROOM, 1500)  # (the first time: back where the rule finds room)
+        ocr._nar.broken = True
+        assert ocr._nar.read("y") == "y read with net@cpu"
+        ocr._nar.broken = False
+        ocr.release_gpu()
+        ocr.read_chars(None)
+    assert place.FULLS_FOR_GOOD == 2 and len(fake_readers.asked) == 2
+    assert ocr.placement == Placement("cpu", place.FAILED, error="MemoryError_") and ocr.charspot.device == "cpu"
+    ocr.release_gpu()
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 2 and ocr._nar.device == "cpu"  # never decided again this session
+
+
+def test_reads_that_crawl_put_both_on_the_cpu_for_the_session_and_say_so(tmp_path, fake_readers, clock):
+    s = _settings(tmp_path)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    with place.loading():
+        for _ in range(27):  # (the processor's times known, during a load of the translation model)
+            _timed(ocr._nar, clock, 25, 70)
+    for _ in range(place.SLOW_READS):
+        _timed(ocr._nar, clock, 400, 70)
+    assert ocr.placement == Placement("cpu", place.SLOW, error=place.SLOW_GPU)
+    assert ocr.charspot.device == "cpu" and ocr._nar.device == "cpu"
+    ocr.release_gpu()
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 1 and ocr.charspot.device == "cpu"  # never decided again this session
+    row = _ocr_row(s, ocr)
+    assert row.where() == "CPU" and row.what == devices.OCR_WHY["slow"]
+
+
+def test_readers_the_rule_has_on_the_gpu_are_judged_as_staying_there(tmp_path, fake_readers):
+    """The hysteresis (`place.judge`'s *staying*): readers on the GPU by the rule stay down to `place.MARGIN_MIB` left
+    at the peak; readers anywhere else - on the CPU, not decided yet, on the GPU by the setting - go there from
+    `place.RETURN_MIB`."""
+    s = _settings(tmp_path)
+    ocr = readers.Readers(tmp_path, 0, settings=s)
+    for language, answer in (("German", Placement("gpu", place.ROOM, 1500)),
+                             ("French", Placement("cpu", place.NO_ROOM, 500)), ("Spanish", Placement("gpu", place.SET)),
+                             ("Italian", Placement("gpu", place.ROOM, 900))):
+        fake_readers.answer = answer
+        s.target_language = language
+        ocr.read_chars(None)
+    s.target_language = "Dutch"
+    ocr.read_chars(None)
+    assert fake_readers.staying == [False, True, True, False, False, True]
+
+
+def test_a_look_at_the_room_now_and_then_moves_them_where_the_rule_says(tmp_path, fake_readers, monkeypatch):
+    """Where the rule placed them, a read once `place.LOOK_S` went by asks it again on a thread of its own (other
+    programs grew, or let go): to the CPU below the margin, back to the GPU above the return mark."""
+    ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
+    ocr.read_chars(None)
+    assert len(fake_readers.asked) == 1 and ocr._look is None  # (`LOOK_S` not gone by)
+    monkeypatch.setattr(place, "LOOK_S", 0.0)
+    fake_readers.answer = Placement("cpu", place.NO_ROOM, 400)
+    ocr.read_chars(None)
+    ocr._look.join(5)
+    assert len(fake_readers.asked) == 2 and fake_readers.staying[-1] is True
+    assert ocr.placement.why == place.NO_ROOM and ocr.charspot.device == "cpu" and ocr._nar.device == "cpu"
+    fake_readers.answer = Placement("gpu", place.ROOM, 700)
+    ocr.read_chars(None)
+    ocr._look.join(5)
+    assert len(fake_readers.asked) == 3 and fake_readers.staying[-1] is False and ocr.charspot.device == "cuda"
+    with place.translating():  # (not while the translation model answers: the next read after it looks)
+        ocr.read_chars(None)
+    ocr._look.join(5)
+    assert len(fake_readers.asked) == 3
+    fake_readers.answer = Placement("gpu", place.SET)
+    forced = readers.Readers(tmp_path, 0, settings=_settings(tmp_path, ocr_runs_on="gpu"))
+    forced.read_chars(None)
+    assert forced._look is None and len(fake_readers.asked) == 4  # (a place the setting gives is never looked at)
 
 
 def test_the_window_s_first_reads_find_the_readers_where_they_are(tmp_path, fake_readers):
@@ -840,7 +1042,7 @@ def test_a_load_keeps_the_readers_the_rule_put_on_the_gpu_where_they_still_fit(t
     ocr = readers.Readers(tmp_path, 0, settings=_settings(tmp_path))
     ocr.release_gpu(load=True)
     assert measured.asked == 1  # asked again at the release
-    assert ocr.placement == Placement("gpu", place.ROOM, 1519) and ocr.holds_gpu()  # (the room of that moment)
+    assert ocr.placement == Placement("gpu", place.ROOM, 1619) and ocr.holds_gpu()  # (the room of that moment)
     assert ocr.charspot.device == "cuda" and ocr._nar.device == "cuda" and not given_back and place._kept
     with place.loading():
         assert ocr.read_chars(None).text == "x read with net@cuda"  # it reads there through the load
@@ -930,7 +1132,7 @@ def test_a_load_through_the_translator_keeps_them_and_reads_on_the_gpu_meanwhile
     ollama.answer = answer
     tr.translate_page(["はい"])
     assert during == [(True, "net@cuda"), (False, "net@cpu")]  # the load on the GPU, the request on the CPU
-    assert ocr.placement == Placement("gpu", place.ROOM, 1519) and ollama.loads == 1
+    assert ocr.placement == Placement("gpu", place.ROOM, 1619) and ollama.loads == 1
     ocr.read_chars(None)
     assert len(fake_readers.asked) == 1 and ocr.charspot.reads[-1] == "net@cuda"
 
@@ -1079,6 +1281,8 @@ def test_the_system_page_says_where_the_readers_are_and_why(tmp_path):
     assert tight.where() == "CPU" and "no room" in tight.what
     released = _ocr_row(s, SimpleNamespace(placement=Placement("cpu", place.RELEASED), settings=s))
     assert "next page" in released.what
+    slow = _ocr_row(s, SimpleNamespace(placement=Placement("cpu", place.SLOW, error=place.SLOW_GPU), settings=s))
+    assert slow.where() == "CPU" and "slower on the GPU" in slow.what and place.SLOW_GPU not in slow.what
 
 
 def test_without_loaded_readers_the_rule_is_asked_now(tmp_path, monkeypatch):
@@ -1168,6 +1372,13 @@ def test_the_readers_read_the_same_on_either_device(device, real_readers, sample
             assert abs(ca.score - cb.score) < 1e-4
 
 
+def test_the_system_page_s_line_says_the_margin_and_the_looks_as_the_rule_has_them():
+    from taslation.ui.dialogs import system_page
+
+    assert round(MARGIN_MIB * place.MiB / 1e8) * 100 == 700 and "about 700 MB" in system_page.OCR_RUNS_ON_TEXT
+    assert f"every {place.LOOK_S:.0f} seconds" in system_page.OCR_RUNS_ON_TEXT
+
+
 def test_the_new_lines_are_in_every_language():
     from taslation.i18n import CATALOGS, FEATURE_LANGUAGES
     from taslation.locales.features import ocr_release
@@ -1252,4 +1463,4 @@ def test_at_ollama_s_start_the_rule_does_not_ask_the_server_what_it_has_loaded(t
     monkeypatch.setattr(place, "page_models_on_gpu", lambda settings: (True, True))
     monkeypatch.setattr(place, "tall_screen", lambda: False)
     monkeypatch.setattr(artwork, "_cuda", True)
-    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1264, 1164))  # (charspot alone)
+    assert ollama_start.window_choice(s, "q8_0") == (True, ollama_start.WHY_NO_LOSS, (1604, 1504))  # (charspot alone)

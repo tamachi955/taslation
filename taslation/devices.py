@@ -276,6 +276,7 @@ OCR_WHY = {  # what runs there, by why it is there (`ocr.place.Placement.why`)
     "no_room": "The OCR readers: the GPU has no room for them beside the translator and the page models",
     "unknown": "The OCR readers: the room on the GPU is not known",
     "failed": "The OCR readers, on the CPU since the GPU failed ({error})",
+    "slow": "The OCR readers, on the CPU since they read slower on the GPU than on the CPU",
     "released": "The OCR readers: the GPU memory was let go, the next page decides again",
 }
 OCR_SET = {"gpu": "Two of the OCR readers, as set in ocr_runs_on (the third on the CPU)",
@@ -292,11 +293,8 @@ def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
         if ocr is not None and getattr(ocr, "settings", None) is None:
             placement = place.Placement("cpu", place.NOT_ASKED)  # (readers loaded without settings stay on the CPU)
         else:
-            from .ocr.readers import missing_readers
-
-            need = place.CHARSPOT_MIB + (0 if missing_readers(settings.models_dir) else place.NAR_MIB)
             try:
-                placement = place.decide(settings, need, cuda=cuda)
+                placement = place.decide(settings, place.readers_need(settings), cuda=cuda)
             except Exception:  # noqa: BLE001 - nothing to judge on
                 placement = place.Placement("cpu", place.UNKNOWN)
     if placement.why == place.SET:

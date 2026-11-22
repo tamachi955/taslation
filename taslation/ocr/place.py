@@ -3,9 +3,34 @@
 The setting ``ocr_runs_on``: "cpu" (always the CPU, as before), "gpu" (the GPU wherever torch has CUDA) or "auto", the
 default: the GPU only when, beside everything else TASlation keeps there at its peak - the translation model whole in
 video memory, LaMa and the layout model when the settings use them, this process's CUDA context - and beside what
-other programs hold now, the readers leave `MARGIN_MIB` free (`room_left`, the rule). A card of less than
-`MIN_TOTAL_MIB` is never asked. The readers on the GPU are charspot and nar (`OCR_MIB`); CPT, the third, which reads a
-line only where those two differ, stays on the CPU: its 440 MB of weights would be on the GPU for a few crops a page.
+other programs hold now, the readers at their own measured peak leave `MARGIN_MIB` free (`room_left`, the rule):
+`RETURN_MIB` for readers on the CPU to go there, `MARGIN_MIB` for readers there to stay (`judge`'s *staying*). A card
+of less than `MIN_TOTAL_MIB` is never asked. The readers on the GPU are charspot and nar (`CHARSPOT_MIB`, `NAR_MIB`);
+CPT, the third, which reads a line only where those two differ, stays on the CPU: its 440 MB of weights would be on
+the GPU for a few crops a page.
+
+What a fuller card does (Windows' driver model; GTX 1660 Ti 6 GB, driver 610.88, Ollama 0.40.16, measured 2026-11-22
+with a process that held dummy memory, step by step, beside the model and the readers): nothing fails. No allocation
+ran out of memory, the readers' copy to the GPU and Ollama's load among them, with 17.7 GB held on the 6 GB card; and
+Ollama loads the model whole whatever other processes hold - neither its "gpu memory available" nor llama.cpp's fit
+("projected to use 1981 MiB of device memory vs. 5134 MiB of free device memory") sees another process's memory, so
+its layers never move to the CPU because of the readers or of other programs. What happens instead is that the driver
+keeps some of the card free (`FLOOR_MIB`) and moves the memory of processes that are not computing just then into the
+computer's own, and back at their next turn: with the model loaded, the readers reading and the card more than full,
+each request to the model began 0.2-0.5 s later (its cached prompt read in 0.21-0.53 s instead of 0.01-0.07, 490-1150
+MiB of the runner moved), and with another program at work on its own memory the readers read 3.5 to 4.5 times slower
+(charspot 52-55 ms a crop instead of 15, nar 110-113 instead of 25 - slower than on the CPU, 28 and 73). The rule
+keeps it from coming to that: it counts the model whole beside the readers, the page models at their peaks and what
+other programs hold, and leaves free the driver's part and the most other programs were seen to grow between two
+looks (`SWAY_MIB`). So the readers never take the translation model's room: it is counted as if it were loaded,
+whether it is or not, at the most it was measured to take.
+
+The rule looks again while the readers read where it put them, every `LOOK_S` (`Readers._check`, on a thread of its
+own: a look costs NVML and an /api/ps, the read does not wait for it), so that other programs that grew send them to
+the CPU, and room that came back brings them again. The run-time net: an out of memory on the GPU sends them to the
+CPU until the GPU memory is next let go, the second of a session for the rest of it (`FULLS_FOR_GOOD`); reads that
+crawl there - each of the last `SLOW_READS` slower than `SLOW_FACTOR` times the CPU's (`crawling`) - send them to the
+CPU for the session too (`SLOW`), and the System page says so.
 
 What the rule measures (`GpuFacts`, `gather`):
 
@@ -46,7 +71,8 @@ before it as ever) where the rule put them there (`ROOM`: the setting's "gpu" le
 failure this session, and where the rule asked again just then still finds room for them (`through_load`: `judge` on
 the facts of that moment, every one of them measured - the card's memory, /api/ps answering, the model's need known -
 for other programs may have grown since): the rule counts the model whole in video memory beside them and leaves
-`MARGIN_MIB` free, so Ollama finds room for all of it. They read on there through the load, and the decision stands.
+`MARGIN_MIB` free, so all of it fits on the card beside them without the driver moving any of it out (Ollama itself
+would load it whole either way: it does not see them). They read on there through the load, and the decision stands.
 Just before a load the readers are in the card's used memory and in this process's own alike, so that they count once,
 as `peak_mib`'s *ocr*; the model is not loaded then (another model in Ollama counts as other programs' memory, as
 ever). A load that all the same ends with the model partly on the CPU (`partly_loaded`: ``size_vram`` below ``size``
@@ -68,10 +94,13 @@ from __future__ import annotations
 import contextlib
 import gc
 import logging
+import statistics
 import sys
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterable, Iterator, TypeVar
 
 LOG = logging.getLogger(__name__)
 MiB = 1024 * 1024
@@ -84,12 +113,18 @@ SETTING_VALUES = ("auto", "cpu", "gpu")  # ``ocr_runs_on``
 # reserved memory, each model alone, over the dataset's 214 pages, the 101 frames of the dev snapshots (1920x1032) and
 # frames of 1904x1072, 2560x1440 and 3840x2160 (two pages scaled to the frame's height). The figures are those peaks
 # and a fifth more, rounded up to 10 MiB, for the inputs not measured.
-# The readers: their weights and the caching allocator's blocks, 326 MiB, and what a crop takes while it is read
-# (charspot 38, nar 35), about 400 in all (the figures, set before, are above that fifth).
-CHARSPOT_MIB = 450
-NAR_MIB = 50
-# this process's CUDA context with the libraries the networks load there: 77 MiB bare, 99 with all of them
-CONTEXT_MIB = 120
+# The readers are counted at their measured peak with nothing added: their inputs are bounded (charspot's 256 cells
+# of 16 px, nar's 324 patches of 14 px), so the largest crop's is the peak. Torch's reserved memory for them, measured
+# again on 2026-11-22 over 509 crops of the dataset's pages for charspot and 206 for nar (each reader's own crops, as
+# the pipeline cuts them) and 11 made-up crops of the largest sizes: charspot alone 110 MiB (124 once its cache was
+# given back and the crops read again), both 410 (402 so) - their weights 328, a crop's work 35-38 MiB, the rest the
+# allocator's blocks. Rounded up to 10 MiB: charspot 124, both 410 less charspot's 124.
+CHARSPOT_MIB = 130
+NAR_MIB = 290
+# this process's CUDA context with the libraries the networks load there (Windows' dedicated memory less torch's
+# reserved): 77 MiB bare, 99 with all of them (2026-11-19); 76 bare, 86 with the readers' and the layout model's
+# (2026-11-22). The largest, rounded up to 10 MiB.
+CONTEXT_MIB = 100
 # LaMa: its weights (204 MiB reserved, 12 of kernels) and what the window takes while it is filled. The window is the
 # frame's own pixels around the region, 512 px a side or more for a larger region, so it grows with the screen: at the
 # largest window met, 336 MiB on the dev snapshots' frames (658x512) and 348 on 2560x1440 (815x512), 552 and 564 in
@@ -100,7 +135,9 @@ LAMA_MIB = 680
 LAMA_TALL_MIB = 970
 LAMA_SCREEN_PX = 1440
 # the layout model: its weights (175 MiB), blocks and kernels, 356 in all, the same on every frame (each page unit is
-# scaled to 640 px square: 123 MiB while it runs, on every input measured)
+# scaled to 640 px square: 123 MiB while it runs, on every input measured; 346 reserved again on 2026-11-22 through
+# whole pages, two-page frames of 1920x1032; with the readers 668 there and on 2560x1440, below the two figures'
+# sum, 742: the allocator's blocks are shared)
 LAYOUT_MIB = 430
 # The translation models whole in video memory, at the context the app asks for (PLaMo its own 8192, the chat model
 # ``ollama_num_ctx``'s default), by the server's KV cache type (``OLLAMA_KV_CACHE_TYPE``; `DEFAULT_KV` where it is set
@@ -118,12 +155,46 @@ KNOWN_TRANSLATORS: dict[tuple[str, int], dict[tuple[str, bool], tuple[int, int]]
 }
 DEFAULT_KV = "f16"  # Ollama's KV cache type where OLLAMA_KV_CACHE_TYPE is set nowhere
 RUNNER_SHARE = 1.25  # what the runner adds to /api/ps's size, at most (measured 1.06 and 1.23), for another model
-MARGIN_MIB = 1024  # left free at the peak for other programs that grow (a browser, a video)
+# What the rule leaves free at the peak (the module's docstring: what a fuller card does), measured on the 6 GB card
+# (2026-11-22). FLOOR_MIB: what NVIDIA's driver keeps free of the card - with less left, it moves the memory of a
+# process that is not computing just then into the computer's own (Ollama's runner while the OCR reads, the readers
+# while the model translates), and that process pays for it at its next turn. Filling the card step by step, it began
+# to with 337 to 484 MiB of NVML's free memory left, never with 527 or more; the highest, 484, rounded up. SWAY_MIB: how
+# far other programs' memory rose between two looks of the rule (`LOOK_S`), followed every second for 90 minutes with
+# the desktop in use (a browser, an editor, the desktop apps), 61 of them counted (the fill tests, the 3 minutes after
+# each and the moments the tests' own memory moved left out): by 216 MiB at most within 30 s (a browser, a desktop app and the window manager within 4 s),
+# rounded up. STEP_MIB, the hysteresis: their rise within 30 s at the 99th percentile, 71 MiB, rounded up to 100 -
+# their usual swing alone moves nothing.
+FLOOR_MIB = 490
+SWAY_MIB = 220
+STEP_MIB = 100
+MARGIN_MIB = FLOOR_MIB + SWAY_MIB  # left free at the peak for readers on the GPU to stay there
+RETURN_MIB = MARGIN_MIB + STEP_MIB  # ... for readers on the CPU to go there
+# Seconds between looks at the room while the readers read where the rule put them (`Readers._check`, on a thread of
+# its own): a look (`gather`) took 31 ms with TASlation's Ollama there (the median of 30, 47 at most; NVML's part 15),
+# 0.1 % of a processor's time at one look in 30 s; with no Ollama there 2.1-2.4 s, Windows refusing the connection,
+# which the read never waits for (`Readers._look_again`).
+LOOK_S = 30.0
+FULLS_FOR_GOOD = 2  # the out of memory of a session that keeps the readers on the CPU for the rest of it
 MIN_TOTAL_MIB = 5 * 1024  # a smaller card is the translator's and the page models'
+# The run-time net (`crawling`, `DeviceModels.run`): the last `SLOW_READS` reads on the GPU each more than
+# `SLOW_FACTOR` times the median of the reader's reads on the CPU (`CPU_READS` of them at least) send the readers to the
+# CPU for the session (`SLOW_GPU`, why `SLOW`). On an idle GPU a crop takes charspot 15 ms and nar 25 (medians of the
+# 509 and 206 crops), on this computer's CPU 28 and 73: a GPU read slower than twice the CPU's is four to six times
+# slower than its own, which no wait behind this process's page models makes of eight reads in a row. The processor's times are
+# those of the reads while the translation model computes (on the CPU anyway) and during its load (`DeviceModels.run`).
+# On a card filled past its size by a program computing on it, reads took charspot 52-55 ms and nar 110-113, 1.5 to
+# 1.9 times the CPU's: under the net, which is for a GPU far slower than that; the margin keeps the readers off such
+# a card.
+SLOW_READS = 8
+CPU_READS = 3
+SLOW_FACTOR = 2.0
+SLOW_GPU = "SlowGpu"  # (the failure's name, as a type name is for the others)
 
 # why the readers are where they are (`Placement.why`)
-ROOM, SET, NO_CUDA, NO_ROOM, UNKNOWN, FAILED, RELEASED, NOT_ASKED = (
-    "room", "set", "no_cuda", "no_room", "unknown", "failed", "released", "not_asked")
+ROOM, SET, NO_CUDA, NO_ROOM, UNKNOWN, FAILED, RELEASED, NOT_ASKED, SLOW = (
+    "room", "set", "no_cuda", "no_room", "unknown", "failed", "released", "not_asked", "slow")
+LOOKED_AT = (ROOM, NO_ROOM, UNKNOWN)  # the rule's own placements, which a look every `LOOK_S` may change
 
 
 @dataclass(frozen=True)
@@ -171,9 +242,11 @@ def room_left(facts: GpuFacts, ocr: int) -> int:
     return facts.total - other - peak_mib(facts, ocr)
 
 
-def judge(facts: GpuFacts | None, ocr: int) -> Placement:
+def judge(facts: GpuFacts | None, ocr: int, staying: bool = False) -> Placement:
     """"auto" on *facts*: the GPU when the card has `MIN_TOTAL_MIB` or more, the translation model's need is known and
-    `room_left` is `MARGIN_MIB` or more; else the CPU, and why."""
+    `room_left` is `RETURN_MIB` or more - `MARGIN_MIB` or more for readers the rule has on the GPU now (*staying*:
+    the hysteresis, so that a room that sways about one figure does not move them to and fro); else the CPU, and
+    why."""
     if facts is None:
         return Placement("cpu", UNKNOWN)
     if facts.total < MIN_TOTAL_MIB:
@@ -181,25 +254,38 @@ def judge(facts: GpuFacts | None, ocr: int) -> Placement:
     if facts.translator is None:
         return Placement("cpu", UNKNOWN)
     room = room_left(facts, ocr)
-    return Placement("gpu" if room >= MARGIN_MIB else "cpu", ROOM if room >= MARGIN_MIB else NO_ROOM, room)
+    fits = room >= (MARGIN_MIB if staying else RETURN_MIB)
+    return Placement("gpu" if fits else "cpu", ROOM if fits else NO_ROOM, room)
 
 
 def through_load(facts: GpuFacts | None, ocr: int) -> Placement:
     """The rule asked again just before Ollama loads the translation model (`Readers.keeps_through_load`): `judge` on
-    *facts*, but facts not all measured - Ollama not answering /api/ps among them - are a room not known."""
+    *facts* for readers on the GPU (*staying*), but facts not all measured - Ollama not answering /api/ps among them -
+    are a room not known. It counts the model whole beside them: neither Ollama nor llama.cpp's fit sees another
+    process's memory on Windows (the module's docstring), so the room for the model at its load is this rule's alone
+    to keep."""
     if facts is not None and not facts.answered:
         return Placement("cpu", UNKNOWN)
-    return judge(facts, ocr)
+    return judge(facts, ocr, staying=True)
+
+
+def failed_placement(failed: str) -> Placement:
+    """Where readers that failed on the GPU this session (*failed*, the failure's type name) are: on the CPU, why
+    `SLOW` for reads that crawled there (`SLOW_GPU`), else `FAILED`."""
+    if failed == SLOW_GPU:
+        return Placement("cpu", SLOW, error=failed)
+    return Placement("cpu", FAILED, error=failed)
 
 
 def decide(settings: Any, ocr: int, failed: str = "", cuda: bool | None = None,
-           facts: Callable[[Any], GpuFacts | None] | None = None) -> Placement:
+           facts: Callable[[Any], GpuFacts | None] | None = None, staying: bool = False) -> Placement:
     """Where the readers of *settings* run (their need on the GPU *ocr* MiB): the CPU after a GPU failure this
-    session (*failed*, its type name) and where torch has no CUDA (*cuda*: `artwork.has_cuda` when None, the question
-    the page models ask); else as ``ocr_runs_on`` says, "auto" by `judge` on *facts* (`gather`) of the moment."""
+    session (*failed*, its type name: `failed_placement`) and where torch has no CUDA (*cuda*: `artwork.has_cuda` when
+    None, the question the page models ask); else as ``ocr_runs_on`` says, "auto" by `judge` on *facts* (`gather`) of
+    the moment, *staying* for readers the rule has on the GPU now."""
     setting = str(getattr(settings, "ocr_runs_on", "auto") or "auto")
     if failed:
-        return Placement("cpu", FAILED, error=failed)
+        return failed_placement(failed)
     if setting == "cpu":
         return Placement("cpu", SET)
     if cuda is None:
@@ -210,7 +296,7 @@ def decide(settings: Any, ocr: int, failed: str = "", cuda: bool | None = None,
         return Placement("cpu", NO_CUDA)
     if setting == "gpu":
         return Placement("gpu", SET)
-    return judge((facts or gather)(settings), ocr)
+    return judge((facts or gather)(settings), ocr, staying)
 
 
 def readers_need(settings: Any) -> int:
@@ -532,6 +618,19 @@ def out_of_memory(error: BaseException) -> bool:
     return type(error).__name__ == "OutOfMemoryError" or "out of memory" in text or "alloc_failed" in text
 
 
+def crawling(gpu_ms: Iterable[float], cpu_ms: Iterable[float]) -> tuple[float, float] | None:
+    """Whether a reader's last reads on the GPU crawl: the fastest of the last `SLOW_READS` of them (*gpu_ms*) more
+    than `SLOW_FACTOR` times the median of its reads on the CPU this session (*cpu_ms*, `CPU_READS` of them at
+    least) - every one of them slow, as when the GPU's memory is in the computer's own or another program keeps the GPU
+    busy, not a read that waited behind a page model of this process now and then: (that fastest read, the CPU's
+    median, ms), else None."""
+    gpu, cpu = list(gpu_ms)[-SLOW_READS:], list(cpu_ms)
+    if len(gpu) < SLOW_READS or len(cpu) < CPU_READS:
+        return None
+    fastest, on_cpu = min(gpu), statistics.median(cpu)
+    return (fastest, on_cpu) if fastest > SLOW_FACTOR * on_cpu else None
+
+
 def give_back() -> None:
     """The GPU memory torch keeps cached for this process given back (its CUDA context stays)."""
     gc.collect()
@@ -555,7 +654,11 @@ class DeviceModels:
     def __init__(self) -> None:
         self._cpu_models: tuple[Any, ...] = ()
         self._gpu: tuple[str, tuple[Any, ...]] | None = None  # (device, the copy)
-        self.gpu_failed = ""  # the type name of the GPU's failure this session ("" none)
+        self.gpu_ms: deque[float] = deque(maxlen=SLOW_READS)  # the last reads' times on the GPU, ms (`crawling`)
+        self.cpu_ms: deque[float] = deque(maxlen=SLOW_READS)  # ... on the CPU
+        self._probe = False  # the next read is the CPU's, to know the processor's time (`run`)
+        self._since_probe = 0  # reads on the GPU since the last read on the CPU
+        self.gpu_failed = ""  # the type name of the GPU's failure this session ("" none; `SLOW_GPU`: it crawled)
         self.gpu_full = ""  # ... of an out of memory there, until the GPU memory is next let go (`Readers.release_gpu`)
         self.on_gpu_failure: Callable[[str, str], Any] | None = None  # (reader's name, failure's type name)
         self._lock = threading.Lock()
@@ -603,16 +706,30 @@ class DeviceModels:
 
     def run(self, read: Callable[[str, tuple[Any, ...]], T]) -> T:
         """*read*(device, networks) with the copy in force - on the CPU while the translation model computes
-        (`translating`) - and on the CPU when the GPU fails (see the class)."""
+        (`translating`) - and on the CPU when the GPU fails or crawls (see the class). Each read is timed for
+        `crawling`: a read on the CPU as the processor's time for this reader, one on the GPU as the GPU's. The reads
+        while the translation model computes are the CPU's anyway; while fewer than `CPU_READS` processor's times are
+        known, one read in `SLOW_READS` + 1 on the GPU during the translation model's load (`loading`: the page waits
+        for the load then, so the slower read costs it nothing) is the CPU's too, to know them (taken at any time, two
+        of them fell into the first page after the start on the stand-in, 144 ms of reads on the CPU). With no
+        processor's time known, no read counts as crawling."""
         with self._lock:
             held = self._gpu if not _translating else None
+            if held is not None and self._probe and _loading:
+                held, self._probe = None, False  # (this one on the CPU: a processor's time)
             if held is not None:
                 self._reading += 1
         if held is None:
-            return read("cpu", self._cpu_models)
-        why, full = "", False
+            start = time.perf_counter()
+            out = read("cpu", self._cpu_models)
+            self.cpu_ms.append((time.perf_counter() - start) * 1000)
+            self._since_probe = 0
+            return out
+        why, full, took = "", False, 0.0
         try:
-            return read(*held)
+            start = time.perf_counter()
+            out = read(*held)
+            took = (time.perf_counter() - start) * 1000
         except RuntimeError as e:
             why, full = type(e).__name__, out_of_memory(e)
         finally:
@@ -624,15 +741,30 @@ class DeviceModels:
                     self._give_back = False
             if late:
                 give_back()
+        if not why:
+            self.gpu_ms.append(took)
+            self._since_probe += 1
+            if len(self.cpu_ms) < CPU_READS:
+                self._probe = self._since_probe >= SLOW_READS
+            else:
+                verdict = crawling(self.gpu_ms, self.cpu_ms)
+                if verdict is not None:
+                    self._failed(SLOW_GPU, slow=verdict)
+            return out
         self._failed(why, full)
         return read("cpu", self._cpu_models)
 
-    def _failed(self, why: str, full: bool = False) -> None:
+    def _failed(self, why: str, full: bool = False, slow: tuple[float, float] | None = None) -> None:
         """The GPU failed (*why*, the type name): its copy dropped, the reads on the CPU, and `on_gpu_failure` told. An
         out of memory there (*full*) holds until the GPU memory is next let go (`gpu_full`, cleared by
         `Readers.release_gpu`): other programs, or the translation model's load, may have taken the room for a time;
-        any other failure (a CUDA error) holds for the rest of the session (`gpu_failed`)."""
-        if full:
+        any other failure (a CUDA error) and reads that crawl there (*slow*: the fastest of them and the processor's
+        median, ms, `crawling`; *why* `SLOW_GPU`) hold for the rest of the session (`gpu_failed`)."""
+        if slow is not None:
+            LOG.info("the OCR reader %s reads slowly on the GPU (%.0f ms a crop at the fastest, %.0f on the CPU): on "
+                     "the CPU for the rest of the session", self.name, slow[0], slow[1])
+            self.gpu_failed = SLOW_GPU
+        elif full:
             LOG.info("the GPU has no room for the OCR reader %s (%s): on the CPU until the GPU memory is next let go",
                      self.name, why)
             self.gpu_full = why or "OutOfMemoryError"

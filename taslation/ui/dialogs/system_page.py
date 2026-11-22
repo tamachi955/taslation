@@ -49,9 +49,11 @@ LOAD_AT_START_TEXT = ("The translation model loads while TASlation starts, so th
 # where the OCR readers run (``ocr_runs_on``, `taslation.ocr.place`); the 16 languages: `locales/features/ocr_release.py`
 OCR_RUNS_ON_LABEL = "OCR runs on:"
 OCR_RUNS_ON_CHOICES = (("auto", "The GPU when it has room"), ("cpu", "The processor (CPU)"), ("gpu", "The GPU"))
-OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU while at least 1 GB of it stays free "
-                    "beside the translation model and the page models, else the processor; the readings are the same. "
-                    "The OCR row above says where they are now. From the next page.")
+OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU while about 700 MB of it stays free "
+                    "beside the translation model, the page models and what other programs hold (the part the "
+                    "graphics driver keeps free, and room for those programs to grow), else the processor. While "
+                    "reading, this is looked at again every 30 seconds. The readings are the same. The OCR row above "
+                    "says where they are now. From the next page.")
 # the window cache of the Ollama TASlation starts (``ollama_window_cache``, `taslation.ollama_start.server_setup`); the
 # 16 languages: `locales/features/window_cache.py`
 WINDOW_CACHE_LABEL = "Translator's window cache:"

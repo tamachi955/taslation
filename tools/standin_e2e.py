@@ -1095,7 +1095,7 @@ class Notes:
         except Exception:  # noqa: BLE001 - a reader of another kind
             engines = ()
         rec = {"t": now_ms(), "device": getattr(placement, "device", None), "why": getattr(placement, "why", None),
-               "engines": list(engines), "loading": self.load_depth > 0}
+               "room": getattr(placement, "room", None), "engines": list(engines), "loading": self.load_depth > 0}
         with self.lock:
             last = self.ocr[-1] if self.ocr else None
             if last is None or any(last[k] != rec[k] for k in ("device", "why", "engines", "loading")):
@@ -1242,7 +1242,7 @@ class LogTap(logging.Handler):
     """The app's log records: where the OCR readers went (the template's codes, never a text of a page), and the
     warnings and errors by logger, level and type name."""
 
-    TEMPLATES = (("the OCR readers run on the %s (%s)", "run_on"),
+    TEMPLATES = (("the OCR readers run on the %s (%s", "run_on"),  # (device, why, MiB left at the peak)
                  ("the OCR readers stay on the GPU through", "stay_through_load"),
                  ("the OCR readers go to the CPU for the translation model's load", "cpu_for_load"),
                  ("where the OCR runs could not be decided", "undecided"))
@@ -1284,7 +1284,7 @@ class LogTap(logging.Handler):
                 if msg.startswith(template):
                     args = record.args if isinstance(record.args, tuple) else ()
                     words = ([] if code == "stay_through_load" else
-                             [str(a) for a in args if isinstance(a, (str, int, float))][:2])
+                             [str(a) for a in args if isinstance(a, (str, int, float))][:3])
                     with self.notes.lock:
                         self.notes.ocr_log.append({"t": now_ms(), "note": code, "args": words})
             if record.levelno >= logging.WARNING:

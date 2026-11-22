@@ -4498,3 +4498,113 @@ frame of another page cancels a running job once it has stayed 150 ms (`LEFT_PAG
 at the job's next check. With soft first that wait falls within the soft picture's 166 to 418 ms. In the sharp runs
 the stand-in drew nothing soft and the window never learnt that it does (`App._drew_soft`: 0); in the soft runs it
 learnt it once each, at the first soft picture.
+
+## The OCR readers' room on the GPU, measured (2026-11-22)
+
+The rule that puts charspot and nar on the GPU (`taslation/ocr/place.py`, `ocr_runs_on` "auto") left 1 GiB of the
+card free beside everything it counts (`MARGIN_MIB`, a figure set by hand), and counted the readers at 500 MiB and
+this process's CUDA context at 120. On the measuring computer, with other programs holding about 1.44 GB, it found 664
+MiB left and put the readers on the processor; put on the GPU by the setting, the first bubble of a page came after
+1.38 s instead of 2.57 s (its OCR 761 ms instead of 1,779). What the readers and the card's other tenants hold, what
+the card does when it is too full and how far other programs move were measured, and the margin is now made of those
+figures.
+
+**What changed.**
+
+- *The readers at their measured peak:* charspot 130 MiB, nar 290 (were 450 and 50), the CUDA context 100 (120).
+- *The margin from two measured parts:* `FLOOR_MIB` 490, what the driver keeps free of the card before it moves the
+  memory of a process that is not computing then into the computer's RAM, and `SWAY_MIB` 220, the most other programs
+  rose between two looks of the rule. Readers on the GPU stay there while `MARGIN_MIB` = 710 MiB is left at the peak;
+  readers on the CPU go there from `RETURN_MIB` = 810 (`STEP_MIB` 100 more, other programs' usual swing, which alone
+  moves nothing). Readers kept through a load of the translation model are readers staying.
+- *A look every 30 s* (`LOOK_S`) while the readers read where the rule put them (`Readers._check`; `_look_again` on a
+  thread of its own, the facts gathered before the decision's lock, since with no Ollama there a look takes 2 s).
+- *The run-time net:* the second out of memory of a session keeps the readers on the CPU for the rest of it
+  (`FULLS_FOR_GOOD`); reads that crawl - the fastest of a reader's last 8 on the GPU slower than twice the median of its
+  reads on the CPU, which are those while the translation model computes and one read in nine during its load until 3
+  are known - put both on the CPU for the session, and the System page says why ("slow", 16 languages). Taken at any
+  time instead of during the load, two such reads fell into the first page after the start (144 ms of reads on the
+  CPU there, one run).
+- *What is said:* the System page's line under "OCR runs on" gives about 700 MB and the look every 30 seconds (16
+  languages); the log line of a placement gives the room left at the peak and comes only when the place or the reason
+  changes; `docs/MANUAL.md` and `.ja.md`; the stand-in tool notes the room with each placement.
+
+**How it was measured.** The same machine (GTX 1660 Ti 6 GB, driver 610.88, Windows 11, torch 2.14.1+cu126, Ollama
+0.40.16), servers of the measurements' own on 127.0.0.1:11439 (the owner's on 11434 untouched), crops of the OpenMantra
+pages in `~/.taslation/datasets` as the pipeline cuts them (read only; the crops were kept in a scratch folder during
+the work and deleted after). A process's memory by Windows' per-process counters (GPU Process Memory, dedicated and
+shared), torch's own figures inside the process, the card's by NVML; the card filled by a scratch process holding dummy
+tensors of 32 MiB, written so that they are resident. Another agent's checks used the GPU and the processor for about
+20 minutes in the afternoon; no timing run below was overlapped (nvidia-smi and the processor's load looked at before
+each; a first run above the boundary, at 1,792 MiB of other programs, met the start of one in its last 40 s and was
+made again: its scenario a gave 2,676 and 7,484, as below).
+
+**The readers' memory** (torch's reserved MiB, and the process's dedicated memory as Windows counts it; 509 crops of
+charspot, 206 of nar, and 11 made-up ones of the largest sizes):
+
+| | weights (allocated / reserved) | peak reserved | dedicated at the peak | a crop's work | a crop on the GPU / CPU (median, ms) |
+|---|---|---|---|---|---|
+| charspot alone | 41 / 52 | 110 (124 once its cache was given back and the crops read again) | 194 (208) | 37-38 | 15.0 / 27.8 |
+| nar alone | 265 / 276 | 334 | 418 | 35.5 | 24.7 / 72.7 |
+| both | 308 / 328 | 410 (402) | 496 (488) | | 14.9 and 24.8 / - |
+
+The CUDA context alone: 76 MiB dedicated (78 shared). Giving torch's cache back (`empty_cache`) took both from 410 to
+344 MiB, back to about 400 within 60 crops: nothing lasting to gain. Torch capped below the peak
+(`set_per_process_memory_fraction`, 352 and 380 MiB): charspot ran out of memory and read on the CPU, as the net does.
+The copy of both to the GPU: 225-293 ms. In the pipeline, over 24 two-page frames of 1920x1032 and 12 of 2560x1440 made
+of the dataset's pages: the readers alone 482 MiB dedicated (396 reserved), the layout model alone 432 (346), both 754
+(668), the same at both sizes. LaMa erased nothing on those frames and was not measured again (its 680 MiB are those of
+2026-11-19).
+
+**A fuller card.** Nothing failed: no allocation ran out of memory with up to 17.7 GB held on the 6 GB card, the
+readers' copy and Ollama's load among them, and Ollama loaded the model whole each time, whatever the filler held
+(llama.cpp's fit said "5134 MiB of free device memory" every time: it does not see other processes). What the driver
+does instead is keep part of the card free and move the memory of a process that is not computing then into RAM, and
+back at its next turn:
+
+| what was filled | where it began | what it cost |
+|---|---|---|
+| the readers read while an idle filler grew past the card | memory moved with 337-339 MiB free (in another order 424); free never under 216-250 | nothing to the readers (charspot 14.5-16.8 ms a crop, nar 23.5-26.9): the filler's memory went |
+| an idle filler grew with the model loaded | no move with 527 MiB free; with 484 the runner went from 2,065 MiB on the card to 1,589, later 923-987 (395-466 free) | the model's speed kept (about 101 tokens/s), its cached prompt read in 0.34-0.53 s instead of 0.07 |
+| the readers came in after the model, beside an idle filler | free down to 164-192 MiB | the runner moved in part (1,333 MiB on the card), the next request's prompt 0.29 s |
+| a filler computing on its own memory, beside the readers and the model | 600 and 300 MiB free: as usual (88-90 tokens/s, time slices); 100 free: the runner at 1,461-1,563 | prompts 0.21-0.25 s; past the card by 200 and 600 MiB: charspot 52-55 ms a crop, nar 110-113, slower than on the CPU, prompts 0.38-0.43 s |
+
+So the floor is between 337 and 484 MiB of free memory here; `FLOOR_MIB` takes the highest.
+
+**Other programs.** Every second for 90 minutes with the desktop in use (a browser, an editor, the desktop apps; the
+stand-in's browsers and every process of the tests counted apart), 61 minutes of it counted: the fill tests and the 3
+minutes after each left out, and the moments when the tests' memory moved (NVML and the per-process counters are read
+a moment apart). Other programs held 1,032-1,517 MiB, median 1,174. Their rise within 30 s: 15 MiB at the 90th
+percentile, 71 at the 99th, 216 at most (a browser, a desktop app and the window manager within 4 s); within 10
+minutes 269 at most. After the fill tests other programs' memory stayed partly in RAM for a while (700-1,100 MiB on
+the card).
+
+**A look's cost.** `gather`, 30 times each: 31 ms median (47 at most; NVML's part 15.5) with TASlation's Ollama there,
+the model loaded or not; with no Ollama there 2.07-2.40 s, Windows refusing the connection.
+
+**The window on the stand-in.** `tools/standin_e2e.py --scenario a,f --start-ollama 11439 --seed 1 --wait-done 120`,
+default setup (no `--ocr-runs-on`; q8_0, LaMa and the layout model on the GPU, a 1920x1080 screen). Other programs'
+memory as the rule saw it at Ollama's start, from the rooms it found; first bubble and whole page from the stand-in's
+sharp draw, the medians of the 9 rested pages of scenario a (of f in brackets), ms; the OCR stage and the translation's
+requests, medians of the 15 turns:
+
+| run | code | filler | other programs | window cache | readers | first bubble | whole page | OCR | requests |
+|---|---|---|---|---|---|---|---|---|---|
+| before | 0.9.8 | none | 1,215 MiB | on | GPU (room) | 1,413 (1,498) | 5,837 (4,871) | 539 | 2,735 |
+| after | this | none | 1,262 MiB | on | GPU (room, 1,169 left) | 1,446 (1,569) | 5,777 (4,768) | 554 | 2,732 |
+| below the boundary | this | 394 MiB | 1,633 MiB | off ("readers") | GPU (room, 898 left) | 1,400 (1,523) | 6,757 (6,106) | 544 | 3,722 |
+| the same fill | 0.9.8 | 394 MiB | 1,651 MiB | on | CPU (no_room) | 2,696 (1,965) | 7,700 (6,335) | 1,353 | 2,948 |
+| above the boundary | this | 490 MiB | 1,773 MiB | on | CPU (no_room, 618 left) | 2,643 (2,133) | 7,451 (6,193) | 1,224 | 3,035 |
+
+The boundary in this setup: the readers go to the GPU with the window cache up to 1,604 MiB of other programs, without
+it up to 1,704 (between the two Ollama is started without it, as before), and stay there up to 1,704 and 1,804; with
+0.9.8 those were 1,290 and 1,390. In every run the System page's OCR row said where the readers were (GPU in the first
+three, CPU in the last two), and the readers stayed where they were placed through the whole run. With no filler the
+two codes are the same within the runs' spread (another run of this code with the reads on the CPU for the net taken
+at any time: 1,445 and 6,062). With other programs at about 1.6 GB, the readers on the GPU without the window cache
+gave a first bubble about 1.3 s sooner than 0.9.8's readers on the CPU with it, and the whole page about 0.9 s
+sooner, although each page's requests took about 0.8 s longer without the cache.
+
+**Not verified.** LaMa's figure (not met on these frames); other cards (the floor is this driver's on this card, and
+on a larger one the margin is the same in MiB); other programs beyond this desktop's 90 minutes; the net against a
+really slow GPU (it fired in none of the runs, and the fill above stayed under it); the real viewer.
