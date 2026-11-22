@@ -15,8 +15,8 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 
 | Step | With a GPU | Without a GPU |
 |---|---|---|
-| One screen showing one page (about 10 lines) | about 6 s (3 to 8) | about 23 s (12 to 30) |
-| One screen showing two pages (about 16 lines) | about 9 s (6 to 14) | about 30 s (19 to 45) |
+| One screen showing one page (about 12 lines) | about 4 s (2 to 6) | about 10 s (7 to 13) |
+| One screen showing two pages (about 20 lines) | about 8 s (5 to 13) | about 23 s (14 to 47) |
 | The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 6 s from the start); with Load the translation model at start off, 4 to 5 s more | the same |
 | Reading and translating a whole book (190 pages) | about 15 to 20 min | about 35 min to 1 h |
 
