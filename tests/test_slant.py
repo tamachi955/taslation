@@ -10,6 +10,7 @@ import random
 import cv2
 import numpy as np
 import pytest
+from conftest import requires_ocr
 from PIL import Image
 
 from taslation.annotations import RegionStyle
@@ -296,6 +297,72 @@ def test_a_slant_that_came_with_the_region_is_kept(settings):
     region.angle, region.tilt = -7.0, "set"
     Pipeline(settings, ocr=CropOcr(), translator=None)._measure_slants(page, [region])
     assert region.angle == -7.0
+
+
+def slanted_unit(angles=(15.0, 0.0, -20.0, 8.0), model=(1, 3)) -> tuple[np.ndarray, list[TextRegion]]:
+    """`slanted_page`'s bubbles side by side, one at each of *angles* (those numbered in *model* the layout model's)."""
+    pages, regions = [], []
+    for i, angle in enumerate(angles):
+        page, r = slanted_page(angle, columns=(6, 5, 7)[i % 3:] + (6, 5, 7)[:i % 3])
+        dx = 420 * i
+        regions.append(TextRegion(x0=r.x0 + dx, y0=r.y0, x1=r.x1 + dx, y1=r.y1, mask=r.mask.copy(),
+                                  text_box=(r.text_box[0] + dx, r.text_box[1], r.text_box[2] + dx, r.text_box[3]),
+                                  from_model=i in model))
+        pages.append(page)
+    return np.ascontiguousarray(np.concatenate(pages, axis=1)), regions
+
+
+@pytest.mark.parametrize("model", [(), (1, 3)], ids=["classical", "both"])
+def test_slants_measured_as_each_region_s_turn_comes_read_and_judge_alike(settings, monkeypatch, model):
+    """`SLANTS_AS_READ`: each region's slant measured as its turn comes, not all of the unit's first - the same slants,
+    crops, readings, fates, progress and book's sizes as measuring them all first, and the first region read before
+    the others are measured."""
+    import sys
+    from pathlib import Path
+
+    import taslation.pipeline as pipeline_module
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import judge_order_check
+
+    runs = []
+    for as_read in (False, True):
+        monkeypatch.setattr(pipeline_module, "SLANTS_AS_READ", as_read)
+        page, regions = slanted_unit(model=model)
+        ocr = CropOcr()
+        unmeasured: list[int] = []  # (how many of the unit's regions had no slant yet at its first reading)
+        read = ocr.read_with_confidence
+
+        def reading(image, _read=read, _ocr=ocr, _regions=regions, _seen=unmeasured):
+            if not _ocr.crops:
+                _seen.append(sum(r.tilt is None for r in _regions))
+            return _read(image)
+
+        ocr.read_with_confidence = reading  # type: ignore[method-assign]
+        p = Pipeline(settings, ocr=ocr, translator=None)
+        told: list[str] = []
+        left = p._ocr_regions(page, regions, lambda m: told.append(repr(m)))
+        runs.append((judge_order_check.fingerprint(regions), judge_order_check.fingerprint(left),
+                     [np.asarray(c).tobytes() for c in ocr.crops], told, list(p._book_sizes), unmeasured))
+    (fa, la, ca, ta, sa, ua), (fb, lb, cb, tb, sb, ub) = runs
+    assert fa == fb and la == lb and ca == cb and ta == tb and sa == sb
+    assert any(abs(dict(f)["angle"]) > 5 for f in fb)  # (slanted lettering among them)
+    assert ua == [0] and ub == [len(fb) - 1]  # (all measured first, or the first region alone)
+
+
+@requires_ocr
+@pytest.mark.page_models
+def test_the_real_readers_read_the_repository_s_pages_alike_with_the_slants_measured_as_read():
+    """The layout model's regions and the classical ones, read by the real readers with the slants measured as each
+    region's turn comes and all first: every region the same (tools/judge_order_check.py --flag slants)."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import judge_order_check
+
+    results = judge_order_check.check(["repo"], ["on", "off"], log=lambda _m: None, flag="SLANTS_AS_READ")
+    assert results and all(r["pages"] and r["different"] == 0 for r in results.values())
 
 
 def test_the_characters_of_a_slanted_reading_land_on_the_lettering(settings):

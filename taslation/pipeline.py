@@ -1478,6 +1478,7 @@ class _UsualLater:
             return
         check_cancel(self.cancel)
         p = self.pipeline
+        p._measure_slants(self.rgb, [r])  # (one sampled before its turn: its slant first, `SLANTS_AS_READ`)
         size = size_sample(p._read(self.rgb, r, r.text_box, p._ocr_view(self.rgb, r)))
         self.samples[id(r)] = size
         if size is not None:
@@ -3628,8 +3629,14 @@ class Pipeline:
         (`_prose`). What was left out leaves *regions* and is returned (each with the region it repeats in
         ``repeats``). A region the reader made "erase only" is read too (its reading shapes its erase) and then takes
         the status `ERASED`. *stream* (`streaming.LineStream`) is told each region judged and the end of the reading:
-        the lines known go to the translator meanwhile."""
-        self._measure_slants(rgb, regions)
+        the lines known go to the translator meanwhile. Each region's slant is measured as its turn comes
+        (`SLANTS_AS_READ`; a region the usual size samples first is measured then, `_UsualLater.sample`), or all of
+        them first: the same slants either way, for each is measured from its own pixels alone."""
+        one_by_one = SLANTS_AS_READ and JUDGE_AT_READ and self.ocr is not None
+        measure: Callable[[TextRegion], None] = ((lambda r: self._measure_slants(rgb, [r])) if one_by_one
+                                                 else (lambda _r: None))
+        if not one_by_one:
+            self._measure_slants(rgb, regions)
         if stream is not None:
             stream.rgb = rgb  # (the order its lines will have once the unit is read: `streaming.ORDER_AS_READ`)
         judged: Callable[[TextRegion], None] = stream.judged if stream is not None else (lambda _r: None)
@@ -3645,6 +3652,7 @@ class Pipeline:
         if not first:
             if JUDGE_AT_READ:
                 for i, r in enumerate(regions):
+                    measure(r)
                     self._read_regions(rgb, [r], report, fill, cancel, done=i, total=len(regions), usual=usual,
                                        among=among)
                     judged(r)
@@ -3677,6 +3685,7 @@ class Pipeline:
 
         if JUDGE_AT_READ:
             for i, r in enumerate(first):
+                measure(r)
                 self._read_regions(rgb, [r], report, fill, cancel, done=i, total=total, usual=usual, among=among)
                 twin_of(r)
                 judged(r)
@@ -3696,6 +3705,7 @@ class Pipeline:
             return True
 
         for i, r in enumerate(r for r in regions if not r.from_model):
+            measure(r)
             if repeats(r):
                 judged(r)
                 continue
@@ -5516,6 +5526,9 @@ SPREAD_READ = True  # a spread's next page unit is read while the one before it 
 # each region of a page unit is judged (and settled by the other readers) as soon as it is read, the page's usual size
 # taken only when a gate needs it (`_UsualLater`); False: all its regions read for that size first (the same fates)
 JUDGE_AT_READ = True
+# with it, each region's slant is measured as its turn to be read comes (`Pipeline._ocr_regions`), not all of a unit's
+# first: its first line goes to the translator that much sooner (the same slants; False: all measured first)
+SLANTS_AS_READ = True
 _SIZES = threading.local()  # the book's sizes as a unit read beside sees them (`_HeldSizes`), on its thread
 _DRAFTS: list[ThreadPoolExecutor] = []
 

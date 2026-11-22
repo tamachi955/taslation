@@ -147,7 +147,9 @@ rows' languages.
 * `tools/judge_order_check.py` reads pages with each region judged as soon as it is read and with all of a unit's
   regions read first (`pipeline.JUDGE_AT_READ`), with one pipeline and the book's sizes put back between the two, and
   compares every field of every region, the progress told and the book's sizes after, counts only: the repository's
-  test pages, `--sets openmantra` and `gold` (the dev snapshots that hold `ocr_gold.json`), `--detect on,off`.
+  test pages, `--sets openmantra` and `gold` (the dev snapshots that hold `ocr_gold.json`), `--detect on,off`;
+  `--flag slants` compares the slants measured as each region's turn comes with all of a unit's measured first
+  (`pipeline.SLANTS_AS_READ`) the same way.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory.
 * `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
@@ -164,7 +166,12 @@ rows' languages.
   its counts, why, what became of the regions of the first run taken back once the unit was read (`taken_back_as`)
   and the page jobs of its requests; `lines_held`, `held_ms`: the lines held back by a candidate
   not read yet or by the order foreseen, and how long after the rule before 2026-11-22 would have sent them;
-  `order_ms`: what foreseeing a unit's order cost it, on the reading's thread); the page jobs cancelled
+  `order_ms`: what foreseeing a unit's order cost it, on the reading's thread); where each page job's time went
+  (`stage_split`: among its stages the time between a spread's two units' translations and what the worker did in
+  it - the wait for the unit read beside, `between_beside_wait`, the store, the order, the rest -, the model's idle
+  time between the job's requests, `requests_idle`, and the slants the worker measured, `slants`, those before the
+  first request apart; with `TASLATION_STAGE_TIMELINE` set each job's spans, the readers' reads with their device,
+  and its requests, in ms from the job's start: times and labels only); the page jobs cancelled
   past their page
   (`jobs_cancelled_past_their_page`: the cancel after the result, the job's end after the cancel); jobs kept
   from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; which capture

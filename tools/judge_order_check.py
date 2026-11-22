@@ -5,10 +5,13 @@ it (`pipeline.JUDGE_AT_READ`, `pipeline._UsualLater`); before, it read all the r
 meant to give the same regions, texts, kinds, statuses, order and book's sizes on every page. This tool reads pages
 both ways with one pipeline (the book's sizes put back between the two, so that each way starts from the same ones;
 the OCR's memo shared: a crop read the same is read once) and compares every field of every region, the progress
-told and the book's sizes after. It prints counts only: nothing of a page's text.
+told and the book's sizes after. It prints counts only: nothing of a page's text. With ``--flag slants`` the two ways
+are the slants measured as each region's turn comes or all of a unit's first (`pipeline.SLANTS_AS_READ`), each
+region judged as soon as it is read.
 
     python tools/judge_order_check.py                    # the repository's test pages (tests/fixtures)
     python tools/judge_order_check.py --sets repo,openmantra,gold --detect on,off
+    python tools/judge_order_check.py --flag slants --sets repo,openmantra
 
 ``openmantra`` is the sample dataset (~/.taslation/datasets/openmantra/images, read in place); ``gold`` the screens of
 the book the OCR's gold set was made on (the dev snapshots folder that holds ``ocr_gold.json``, read in place, with
@@ -63,23 +66,27 @@ def fingerprint(regions: Sequence[Any]) -> list[tuple[Any, ...]]:
     return [tuple((f.name, _value(getattr(r, f.name), index)) for f in dataclasses.fields(r)) for r in regions]
 
 
-def read_both_ways(pipeline: Any, image: Any) -> tuple[bool, dict[str, Any]]:
-    """*image* read (`Pipeline.process`, nothing translated, no cache) the old way and the new one, each from the book's
-    sizes as they were: whether every region, the progress told and the book's sizes after are the same, and counts."""
+FLAGS = {"judge": "JUDGE_AT_READ", "slants": "SLANTS_AS_READ"}  # (`--flag`: the pipeline's switch read both ways)
+
+
+def read_both_ways(pipeline: Any, image: Any, flag: str = "JUDGE_AT_READ") -> tuple[bool, dict[str, Any]]:
+    """*image* read (`Pipeline.process`, nothing translated, no cache) the old way and the new one - the pipeline's
+    switch *flag* off, then on -, each from the book's sizes as they were: whether every region, the progress told and
+    the book's sizes after are the same, and counts."""
     from taslation import pipeline as pipeline_mod
 
     before = deque(pipeline._book_sizes, maxlen=pipeline._book_sizes.maxlen)
     out: list[tuple[Any, ...]] = []
-    for judge_at_read in (False, True):
+    for way in (False, True):
         pipeline._book_sizes = deque(before, maxlen=before.maxlen)
         told: list[Any] = []
-        held = pipeline_mod.JUDGE_AT_READ
-        pipeline_mod.JUDGE_AT_READ = judge_at_read
+        held = getattr(pipeline_mod, flag)
+        setattr(pipeline_mod, flag, way)
         try:
             res = pipeline.process(image, translate=False, use_cache=False,
                                    progress=lambda m: told.append((m.code, tuple(sorted(m.params.items())))))
         finally:
-            pipeline_mod.JUDGE_AT_READ = held
+            setattr(pipeline_mod, flag, held)
         out.append((fingerprint(res.regions), told, list(pipeline._book_sizes), res))
     (fa, ta, sa, ra), (fb, tb, sb, rb) = out
     facts = {"regions": len(rb.regions),
@@ -141,9 +148,11 @@ def gold_pages(limit: int = 0) -> Iterator[tuple[str, Any]]:
             yield f"gold screen #{n + 1}", img.convert("RGB")
 
 
-def check(sets: Sequence[str], detects: Sequence[str], limit: int = 0, log: Any = print) -> dict[str, Any]:
-    """The pages of *sets* read both ways with the layout model *detects* ("on", "off"): per set and detection, pages
-    alike and different, and the regions compared. Readers as the window builds them (`ocr.Readers`)."""
+def check(sets: Sequence[str], detects: Sequence[str], limit: int = 0, log: Any = print,
+          flag: str = "JUDGE_AT_READ") -> dict[str, Any]:
+    """The pages of *sets* read both ways (*flag* off and on, `read_both_ways`) with the layout model *detects* ("on",
+    "off"): per set and detection, pages alike and different, and the regions compared. Readers as the window builds
+    them (`ocr.Readers`)."""
     from taslation import netguard
     from taslation.config import Settings
     from taslation.ocr import Readers
@@ -164,7 +173,7 @@ def check(sets: Sequence[str], detects: Sequence[str], limit: int = 0, log: Any 
             alike = differ = regions = text = model = 0
             t0 = time.monotonic()
             for label, image in pages:
-                same, facts = read_both_ways(p, image)
+                same, facts = read_both_ways(p, image, flag)
                 alike += same
                 differ += not same
                 regions += facts["regions"]
@@ -185,8 +194,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--sets", default="repo", help="comma-separated: repo, openmantra, gold")
     ap.add_argument("--detect", default="on,off", help="the layout model: on, off or both (on,off)")
     ap.add_argument("--limit", type=int, default=0, help="only the first N pages of openmantra and gold")
+    ap.add_argument("--flag", default="judge", choices=sorted(FLAGS),
+                    help="what is read both ways: judge (JUDGE_AT_READ) or slants (SLANTS_AS_READ)")
     args = ap.parse_args(argv)
-    results = check([x for x in args.sets.split(",") if x], [x for x in args.detect.split(",") if x], args.limit)
+    results = check([x for x in args.sets.split(",") if x], [x for x in args.detect.split(",") if x], args.limit,
+                    flag=FLAGS[args.flag])
     return 0 if all(r["different"] == 0 for r in results.values()) else 1
 
 
