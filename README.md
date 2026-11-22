@@ -15,7 +15,7 @@ The pages in the video are from the [OpenMantra dataset](https://github.com/mant
 
 ## Features
 
-* **Real-time translation**: when you turn a page, its bubbles are replaced by their translations there and then, in reading order (from the top right). On the recommended computer the first bubble takes 1 to 2 seconds after the turn on a screen showing one page (2 to 3 on one showing two pages), and from there the translation generally moves faster than you read.
+* **Real-time translation**: when you turn a page, its bubbles are replaced by their translations there and then, in reading order (from the top right). On the recommended computer the first bubble comes about 0.7 seconds after the turn on a screen showing one page (about 1 second on one showing two pages), and from there the translation generally moves faster than you read.
 * **Background translation**: a page you turn past before its translation is finished goes on being read and translated in the background (a page the viewer showed for 0.8 seconds or more). When you turn back to it, the translation is there. The margin beside the page shows how far each page has come.
 * **Many languages**: 20 languages to translate into (English, Spanish, Portuguese (Brazil), French, German, Italian, Russian, Polish, Dutch, Turkish, Indonesian, Vietnamese, Thai, Chinese (Simplified), Chinese (Traditional), Korean, Arabic, Hebrew, Hindi, Bengali), and 17 languages for the window itself.
 * **Accurate translation**: the text is read by three OCR models, and where their readings differ, the one closest to the other two is taken. Lettering is erased in two ways (a white bubble is filled with the colour of its paper; under lettering on the drawing, the inpainting model LaMa fills the drawing in). The translation is made by PLaMo 3 Translate 2B, a model built for translation, which is given the pages before as context and your list of names and terms.
@@ -65,8 +65,8 @@ Translating into Portuguese (Brazil) or Turkish uses another translation model (
 
 | Step | With a GPU | Without a GPU |
 |---|---|---|
-| One screen showing one page (about 12 lines) | about 4 s | about 10 s |
-| One screen showing two pages (about 20 lines) | about 8 s | about 23 s |
+| One screen showing one page (about 9 lines; without a GPU about 5) | about 3 s | about 6 s |
+| One screen showing two pages (about 18 lines) | about 6 s | about 21 s |
 
 Measured on an Intel Core i7-9700F with 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB).
 

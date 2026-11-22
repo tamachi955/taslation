@@ -15,11 +15,11 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 
 | Step | With a GPU | Without a GPU |
 |---|---|---|
-| One screen showing one page (about 12 lines) | about 4 s (2 to 6) | about 10 s (7 to 13) |
-| One screen showing two pages (about 20 lines) | about 8 s (5 to 13) | about 23 s (14 to 47) |
-| The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 6 s from the start); with Load the translation model at start off, 4 to 5 s more | the same |
+| One screen showing one page (about 9 lines; without a GPU about 5) | about 3 s (1 to 5) | about 6 s (3 to 9) |
+| One screen showing two pages (about 18 lines) | about 6 s (4 to 12) | about 21 s (10 to 44) |
+| The first page after starting | nothing more once the translation model has loaded, which it does while TASlation starts (about 9 s from the start; "Loading the models..." shows until then); with Load the translation model at start off, 4 to 5 s more | the same |
 
-The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). These figures were measured with the reading of the pages (OCR) on the CPU (about 3 s for one two-page screen). On an NVIDIA GPU that has room for them, two of the three OCR readers run on the GPU (`ocr_runs_on`, docs/MANUAL.md, "The OCR models and their licence"). On the measuring computer, a page's OCR then took a median of 564 ms, against 1,104 ms with the readers on the CPU (docs/OFFLINE_VERIFICATION.md, "Where a page's time goes in the window").
+The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB). They were made on sample manga pages shown on a 1920×1080 screen. Pages with more lines take longer (translating one line takes about 0.4 s with the GPU and about 1.5 to 1.8 s without). The times run from the turn of the page until every line of the screen is lettered; the first bubble comes after about 0.7 s on a screen of one page and about 1 s on one of two (about 1.8 s without a GPU), because a page's lines go to the translator as they are read. They were measured with a viewer that draws the page sharp at once: a viewer that draws a page soft first adds that time. With the GPU, everything had room on it (docs/MANUAL.md, "What runs on the GPU"): the translation model, two of the three OCR readers, LaMa and the layout model.
 
 ## Installation
 

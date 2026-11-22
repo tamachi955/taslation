@@ -17,6 +17,8 @@ Reading
   still holds them loads as before; they do nothing. The command `taslation batch` and `gui --mode` are gone.
 * docs/LEGAL and the manual say what is true now; the README's and the installation guide's whole-book times are
   gone.
+* The README and the installation guide give the times measured again with this version (a screen of one page about
+  3 s with the GPU, one of two pages about 6 s; the first bubble after about 0.7 s and about 1 s).
 
 Speed
 
