@@ -4961,3 +4961,81 @@ sent early is not asked (`taken_back_as` in the tool's report). The print unit s
 `tests/test_stream_lines.py`: the lines leave in the order the unit will have, a line whose place depends on a
 candidate not read yet waits for it, a classical candidate not read yet holds the lines after it unless what was
 read covers it, and a line lettering the place of one before it is not sent.
+
+## A page's time, looked at for what can go (2026-11-23)
+
+Where a screen's time goes on 1.0.0, and what of it could go without changing a translation: the stand-in in sharp
+mode (`tools/standin_e2e.py --scenario a,f --soft-first off --seed 1 --wait-done 120 --start-ollama 11435`), three or
+four runs an arm. The tool's report now splits the time between a spread's two units, counts the model's idle time
+between a job's requests and the slants the worker measures, and with `TASLATION_STAGE_TIMELINE` set keeps each job's
+spans, reads and requests in time (times and labels only). Medians per two-page job unless said.
+
+**The wait between a spread's two units** (about 0.65 s) is the worker's wait in `ReadBeside.take` for the next unit,
+read beside (594 to 622 of 628 to 649 ms; the store, the order and the rest a few ms): not the layout model (the page
+was detected before), not the order (7 ms), not the drafts (their wait, some 40 ms, comes before it). The timeline of
+one run (10 two-page jobs) shows what it is. While the unit before is translated, the unit read beside reads on the
+processor, as the model's requests take the GPU (`ocr.place.translating`), at 90 to 190 ms a read at its lower
+priority, and gets through a median of 2 to 3 reads (its first 158 ms after it starts: the slants and the crops). The
+rest, a median of 29 reads, comes on the GPU once the last request of the unit before is done, at 15 to 25 ms a read
+(524 ms), with some 95 ms of the reading's own work between the reads. So the wait is that unit's reading on the GPU,
+which no request can share (a read on the GPU while the model computed took 687 ms).
+Tried and left out (kept on a branch of its own): the unit's lines sent to a stream held until its turn, which then
+asks those read so far at once while the rest is read. The two-page screen took longer - the whole page 6021 (p90
+6597) against 5825 (6564) ms, a page job's work 5.0 to 5.1 s against 4.6 s -, for the unit's requests then keep its
+remaining reads on the processor (2.3 s of reads there a job against 1.5 s, 0.6 s on the GPU against 0.8 s); the
+first bubble stayed (1014 against 1021 ms).
+
+**The prompt** (a run's 197 requests: 18.3 s of prompt, 13.8 s of answers). 186 requests extend what the server holds
+(71 ms each, 13.2 s: the line and some 14 tokens round it, 15 to 27 tokens at 3 to 4 ms a token). Computed in full:
+the history cut back once a run in the middle of a page (pairs 68 to 20, 1.48 s), a page's first request whose
+warming had not finished once a run (1.31 s; of 15 warmings 13 were held back by a page at work), the two romanised
+requests asked with a context of their own (0.64 to 0.75 s each, and 0.28 s for the request after them), and the four
+that bring the glossary in (some 120 ms each). No part of the prompt is rebuilt from one request to the next; the
+server spends some 12 ms a request outside the model's work, the window some 2 ms. Nothing was changed: what is left
+changes the text the model is given (where the history is cut, the words round a line) or joins lines in one request,
+which would hold back the lines sent as read and needs the official evaluation; neither was tried.
+
+**Before the first request.** Two pages, from the turn: the window's capture 78 ms, from it to the job's start 77 ms
+(19 on one page: the capture's units, the look in the cache, the live view drawn), the units and the look at other
+window sizes 50 ms (`Pipeline._resolve`, 40 to 53 ms on a page the cache does not hold), the detection some 0.2 s,
+then 248 ms to the first request: some 28 ms to the reading, some 50 ms before its first read - the slants of all the
+unit's regions, measured first -, 4 to 6 reads (some 100 ms) and the gate's wait for a look of the window after the
+job asked (some 37 ms, 8 to 86). The first request takes 150 ms, and from its answer to the bubble on show 100 ms.
+
+**What changed** (`taslation/pipeline.py`). Each region's slant is measured as its turn to be read comes
+(`SLANTS_AS_READ`, with `JUDGE_AT_READ`), not all of a unit's first; a region the page's usual size samples before its
+turn is measured then (`_UsualLater.sample`). Each slant comes from the region's own pixels, so the slants, crops,
+readings, fates, progress and book's sizes are those of measuring them all first: `tests/test_slant.py` compares both
+ways on slanted lettering, and the real readers read the repository's pages and 20 OpenMantra pages alike both ways,
+the layout model on and off (`tools/judge_order_check.py --flag slants`: 50 pages, 492 regions, none different).
+
+| | 1.0.0 (4 runs) | Slants as read (3 runs) |
+|---|---|---|
+| Two pages: first request | 708 (833) | 645 (786) |
+| Two pages: first bubble | 1036 (1236) | 971 (1171) |
+| Two pages: whole page | 5830 (6602) | 5865 (6747) |
+| Two pages: slants before the first request | 53 | 7 |
+| One page: first request | 470 | 503 |
+| One page: first bubble | 644 | 686 |
+| One page: whole page | 1664 | 1695 |
+| Lines sent early, taken back, a run | 90, 3 | 89 or 90, 3 |
+
+The first bubble came sooner on 8 of the 12 pages (by up to 157 ms) and later on 4 (by 4 to 55 ms). The whole page's
+difference is within what the runs of 1.0.0 differ by among themselves (5825 to 5877 ms; page by page up to 0.3 s);
+the one-page rows are one turn a run (1.0.0's four: 420 to 580 ms to the first request). The lines taken back are
+those of before ("at the end: not asked" and a print unit), none for the order; all 28 criteria of the runners'
+summary were met in each run. With no GPU (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0`, one run
+each; the slants measured before the first request 7 against 24 ms), two pages' first request 517 (614) against 534
+(645) ms, first bubble 1779 (3247) against 1874 (3267), whole page 20.8 against 21.2 s; 29 and 27 lines sent early,
+none taken back. In the narrow window (`--scenario k5 --k-narrow`: one page a screen, 20 quick turns and 21 turns
+rested on), 1.0.0's two runs against one: first request 473 and 487 against 417 ms, first bubble 763 and 696 against
+660, whole page 2680 and 2688 against 2554 (the slants before the first request 50 and 52 against 8); of the lines
+sent early 17 of 161 and 18 of 159 were taken back, 22 of 171, all but one a run at the quick turns' stops, none for
+the order.
+
+**A restart that failed.** In a first narrow-window run with the slants as read the server stopped answering after
+the quick turns (15 requests given up on ended with an error), and starting it again failed: the restart waits on
+the request's cancel (`ollama_start._wait_answer`), and a line stream's run's cancel (`streaming._Either`) had no
+`wait`. The pages after it were not lettered; that run is not in the figures above. Run again, it did not come back,
+nor in 1.0.0's two runs, so it is not known to come from the slants. The run's cancel now waits as a
+`threading.Event` does (`tests/test_stream_lines.py`), so such a restart goes as for any other request.
