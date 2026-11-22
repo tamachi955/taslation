@@ -144,6 +144,10 @@ rows' languages.
   4.0 material. Each card line and step names the sentences of README.md, docs/MANUAL.md or docs/THIRD_PARTY.md it
   follows, or is marked as the tool's own words; `tests/test_intro_video.py` fails when one of those sentences no
   longer stands word for word, so change the line with the document.
+* `tools/judge_order_check.py` reads pages with each region judged as soon as it is read and with all of a unit's
+  regions read first (`pipeline.JUDGE_AT_READ`), with one pipeline and the book's sizes put back between the two, and
+  compares every field of every region, the progress told and the book's sizes after, counts only: the repository's
+  test pages, `--sets openmantra` and `gold` (the dev snapshots that hold `ocr_gold.json`), `--detect on,off`.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory.
 * `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
@@ -152,7 +156,13 @@ rows' languages.
   cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
   any other is chosen), reads and translates with the real OCR and Ollama's default model (`--canned`: a made-up
   answerer in its place), and the tool writes numbers (the sharp frame to the first request, the first lettered
-  bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; jobs kept
+  bubble and the finished page; the requests sent for nothing, for frames that changed, with what they cost; the
+  lines sent to the translator as they were read (`streamed_lines`: those sent early, those that stood and those
+  taken back - a unit's first line among them - and why, the requests so thrown away, counted apart from those sent
+  for nothing, how long a taken-back lettering stayed on show, and that nothing of one was in a page's lines or on
+  show at its result: the runners' summary fails a run on that; `units_taken_back`: each unit that took a run back,
+  its counts, why and the page jobs of its requests); the page jobs cancelled past their page
+  (`jobs_cancelled_past_their_page`: the cancel after the result, the job's end after the cancel); jobs kept
   from a frame that was not the sharp one; jobs cancelled per scenario; stale pages; where the OCR ran; which capture
   gave the stand-in's frames, Windows.Graphics.Capture or PrintWindow where it gave none (`capture_route`); the pages the
   cache held as they were stored at another window size only, met right after a change of size or on a turn back, with
@@ -172,7 +182,10 @@ rows' languages.
   answer and of the backlog's pause for it, a silence with what the server answered just then), the report's
   `frame_stalls` (a sharp page the stand-in kept 6 s that none of the window's frames showed while it went on taking
   them: what covered the stand-in by program file name, the window's capture session, the first frame of a session of
-  the tool's own, the seconds since anyone's input) and `input_spells` (when the computer got input from anyone: a run
+  the tool's own, the seconds since anyone's input), `server_priority` (the server TASlation started lowered for the
+  backlog's work and set back, how many of the backlog's requests were computed low, and every other request
+  computed while it was low - a failure in `.github/gpu-checks/summarise.py`) and `input_spells` (when the computer
+  got input from anyone: a run
   with a person at the machine, whose windows may cover the stand-in, is told apart), the app's log in `app_log/` when
   the run had a stop, a stall or a request without an answer (unless it holds Japanese script), `--cover
   SEGMENT:AT:FOR` laying a window of the tool's own over the stand-in on purpose (the stand-in, a browser, stops

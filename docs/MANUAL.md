@@ -44,12 +44,15 @@ and with a viewer that has drawn a blurred picture first, up to 2 seconds after 
 With `early_start = false` in `taslation.toml`, a page is read only once its picture has stayed the same for `settle_ms`, as in earlier versions.
 A page turned while another is being translated shows at once as the viewer draws it, with nothing of the other page's translation over it;
 that translation is stopped only once the new picture has stayed the same for a moment (0.15 seconds; a black flash or a loading indicator stops
-nothing, and back on that page, its translation shows again), and the new page is read then.
+nothing, and back on that page, its translation shows again), and the new page is read then. A page already translated and on show,
+whose work is only to get its next showing ready, gives way at once.
 The bubbles the stopped page had translated by then stay in the cache, the page marked as not finished (only when its picture had stayed the same for 0.8 seconds, as above):
 back on it, they are lettered at once and only the rest is read and translated. A page stopped with "Stop" or Esc keeps nothing, as before.
 
 An untranslated page fills in while you look at it. The bubbles found are marked with frames (dashed; solid once read; gone once they turn out not to be text),
-and they are translated in the order the page's bubbles are read, each with the lines before it as context. Each bubble is lettered as soon as its translation is ready. At the end,
+and they are translated in the order the page's bubbles are read, each with the lines before it as context. Each bubble is lettered as soon as its translation is ready.
+A line goes to the translator as soon as it is read, before the rest of the page is read, so the first bubbles come sooner; once the page is read,
+a bubble translated that early may be replaced (for example when the reading order turned out different): it shows without lettering for a moment and is lettered again. At the end,
 names spelled differently from the series sheet are made consistent mechanically, so a few bubbles may change. A translation that does not fit its bubble is set in smaller letters
 (the model is not asked to shorten it).
 In the Reader role the bubbles filling in are the progress. Only when no bubble is lettered 1 second after you look at the page does the left end of the status bar
@@ -63,6 +66,7 @@ and the status bar shows the same.
 
 While you read, TASlation goes on reading and translating the pages you have turned past. How far it is shows in the margin on the side the page turns to
 (the left in a book read right to left, the right in a book read left to right), in both roles, in the window and on the full screen.
+This work runs at a lower priority than the programs you use, so that turning a page, and the page you are on, come first.
 
 * Where the margin is 141 pixels or wider, it is a column of the pages turned past, top to bottom. Each page has a small thumbnail (too small to read),
   its number and two bars (R for reading the text, T for the translation). A bar shows its state by its letter, its colour and its pattern: empty is not started,

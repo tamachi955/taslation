@@ -38,7 +38,7 @@ import statistics
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 import numpy as np
 from PIL import Image
@@ -151,13 +151,17 @@ def read_crop(ocr: Any, crop: Image.Image) -> CharspotReading:
     return CharspotReading(text, score=confidence)
 
 
-def charspot_accepts(reading: CharspotReading, usual: float) -> bool:
+def charspot_accepts(reading: CharspotReading, usual: float | Callable[[], float]) -> bool:
     """Whether *reading* is lettering rather than something the model saw in a drawing: long enough, and its characters
     no more than `GATE_SIZE_RATIO` times the page's *usual* size (`usual_size`), unless it is read with a confidence of
-    `GATE_SURE_SCORE` or more. No region the reader added comes here."""
+    `GATE_SURE_SCORE` or more. No region the reader added comes here. *usual* may be a function that gives the size:
+    it is called only for a reading the size decides (long enough, and less sure than that), so that a page's regions
+    read surely are judged before its usual size is known (`pipeline.Pipeline._ocr_regions`)."""
     if len(reading.chars) < GATE_MIN_CHARS:
         return False
-    return reading.score >= GATE_SURE_SCORE or reading.size <= GATE_SIZE_RATIO * usual
+    if reading.score >= GATE_SURE_SCORE:
+        return True
+    return reading.size <= GATE_SIZE_RATIO * (usual() if callable(usual) else usual)
 
 
 def size_sample(reading: CharspotReading) -> float | None:
@@ -169,8 +173,8 @@ def size_sample(reading: CharspotReading) -> float | None:
 
 def usual_size(page: Iterable[float], book: Iterable[float] = ()) -> float:
     """The usual character size: the median of the *page*'s samples, else of the *book*'s so far, else the default.
-    The page's samples are taken from all its regions before any is judged, so no region's fate hangs on the order
-    the regions were read in."""
+    The page's samples are taken from all its regions, each as it was before any was judged (the rest read as soon as
+    a gate needs the size: `charspot_accepts`), so no region's fate hangs on the order the regions were read in."""
     for sizes in (list(page), list(book)):
         if sizes:
             return float(statistics.median(sizes))

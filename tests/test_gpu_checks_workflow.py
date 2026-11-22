@@ -619,6 +619,52 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
     assert _failed(gone) == ["the tool wrote its report"]
 
 
+def test_lines_taken_back_are_reported_and_fail_a_run_only_when_something_of_them_stayed():
+    s = _summarise()
+    source = (ROOT / "tools" / "standin_e2e.py").read_text("utf-8")
+    for key in ("final_from_taken_back", "early_left_at_close", "early_left_at_result", *s.STREAMED_KEYS):
+        assert f'"{key}"' in source, key  # (the tool's `streamed_lines` writes them)
+    assert '"streamed_lines": streamed' in source
+    streamed = {"units": 6, "lines_sent_early": 20, "lines_stood": 18, "lines_taken_back": 2,
+                "units_first_line_taken_back": 1, "units_any_taken_back": 2, "requests_taken_back": 2,
+                "withdrawn_on_show_ms": {"n": 1, "median": 240, "max": 240},
+                "final_from_taken_back": 0, "early_left_at_close": 0, "early_left_at_result": 0}
+    criterion = ("nothing of a line taken back once its page was read stayed in the page's lines (and so in the "
+                 "cache) or on show when the page was finished")
+    out = s.standin(_report(streamed_lines=streamed), "", {}, "c", 600)
+    assert out["verdict"] == "pass", _failed(out)
+    assert out["streamed_lines"]["lines_taken_back"] == 2 and "final_from_taken_back" not in out["streamed_lines"]
+    md = s.standin_md(out)
+    assert "* lines sent as they were read (reported): 20 in 6 units, 18 stood, 2 taken back (a unit's first line " \
+           "in 1), 2 requests thrown away; a taken-back lettering on show ms median/max 240/240" in md
+    for key in ("final_from_taken_back", "early_left_at_close", "early_left_at_result"):
+        out = s.standin(_report(streamed_lines={**streamed, key: 1}), "", {}, "c", 600)
+        assert out["verdict"] == "fail" and _failed(out) == [criterion], (key, _failed(out))
+    out = s.standin(_report(), "", {}, "c", 600)  # (a run without the stream: neither judged nor reported)
+    assert out["streamed_lines"] is None and criterion not in [c["criterion"] for c in out["failed"]]
+
+
+def test_the_backlog_s_work_computed_low_is_reported_and_any_other_request_computed_low_fails_a_run():
+    s = _summarise()
+    source = (ROOT / "tools" / "standin_e2e.py").read_text("utf-8")
+    for key in (*s.PRIORITY_KEYS, "other_requests_low"):
+        assert f'"{key}"' in source, key  # (the tool's `priority_report` writes them)
+    assert '"server_priority": priority_report(notes, rel)' in source
+    priority = {"lowered": 3, "not_lowered": 0, "set_back": 3, "processes_set_back": 6, "low_ms": 9100,
+                "backlog_requests": 29, "backlog_requests_low": 29, "other_requests_low": []}
+    criterion = "no request but the backlog's was computed while the server was lowered for the backlog's work"
+    out = s.standin(_report(server_priority=priority), "", {}, "c", 600)
+    assert out["verdict"] == "pass", _failed(out)
+    assert out["server_priority"]["backlog_requests_low"] == 29 and "other_requests_low" not in out["server_priority"]
+    assert ("* the backlog's work computed low (reported): 29 of 29 backlog requests; the server lowered 3 times "
+            "(0 not), set back 3, low 9100 ms in all") in s.standin_md(out)
+    seen = [{"t_s": 300.4, "side": None, "job": 13}]
+    out = s.standin(_report(server_priority={**priority, "other_requests_low": seen}), "", {}, "c", 600)
+    assert out["verdict"] == "fail" and _failed(out) == [criterion]
+    out = s.standin(_report(), "", {}, "c", 600)  # (a tool before it: neither judged nor reported)
+    assert out["server_priority"] is None and criterion not in [c["criterion"] for c in out["failed"]]
+
+
 def test_a_job_that_gave_its_page_over_to_a_new_size_is_no_cancel_with_its_page_on_show():
     s = _summarise()
     # scenario o on a runner, as a tool before `resized_away` reported it: the job on the old size's frame cancelled

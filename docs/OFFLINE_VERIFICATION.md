@@ -4713,3 +4713,194 @@ passed and 10 skipped, 265 passed and 3 skipped (the models' folder set). The wh
 run: the machine was shared with another agent's timing runs); the whole suite; other cards (the floor is this
 driver's on this card); a model of the reader's own (its share is an estimate); LaMa's figure on these frames; the
 real viewer.
+
+## The backlog's translation computed below the desktop (2026-11-22)
+
+**What failed.** On GitHub's runners (Windows, 4 logical processors, no GPU: the OCR and the server on the
+processor), the stand-in group c-a-b on 1.0.0's tree failed 2 of 3 runs: scenario b's 10 quick turns (one every
+0.4 s) were drawn 4 and 7 times, and in the second run a page the stand-in had left on show stayed lettered 1222 ms
+after the window captured the new one (at 127.63 s). The code on the way from a turn to the window is the same as
+in version 0.9.7.
+
+**What the reports show.** The tool counts b's turns from the stand-in's own "draw" events, which it logs once a
+page's pictures have loaded; a draw that the next turn supersedes before they load is never logged. The stand-in
+was told every turn on time (its 12 control events, as in a run that passes) and the pages missing fit the 0.4 s
+steps, so the stand-in's draws were dropped, not its turns. The window pressed no key of its own (no page key in
+either run) and started one job a turn it saw: no turn was doubled, by the app or by the tool. What the two runs had
+in common: 2 to 3 s before b began (at 292.8 s and 290.8 s), after a's last page was finished, the backlog started a
+request of a page turned past in c whose prompt the server computed afresh ("history cut", about 720 new tokens),
+which ran 7.0 and 6.2 s on the processor until the backlog was stopped for b's pages. Each step of the window over
+900 ms around b (six in the two runs, 0.9 to 3.0 s with 31 to 172 ms of processor time, most of it waiting in the
+capture) came while that request ran, and the 1222 ms page of the second run came during another such request of the
+backlog's (984 new tokens, at 127.8 s). With four logical processors taken by the server's computation, the window's
+captures waited, and so did the browser's loading of the pictures. In a run of 0.9.7 on the runners (which stopped
+later on a fault of the tool's driver) the backlog had no such request at that point: the page jobs of c's two pages
+turned past were not confirmed there (the first had no gate, the second was taken back within TAKE_BACK_MS), so the
+backlog had none of them; on 1.0.0 the window learnt the stand-in's soft pictures 2.5 s in and both were confirmed -
+timing, not a change of the code.
+
+**What changed.** While the backlog translates (`backlog.Backlog._translate`), the server TASlation started computes
+at below-normal priority (`ollama_start.asking_behind`: BELOW_NORMAL_PRIORITY_CLASS for the server and the processes
+it started, its runner), and it is set back to the class it had at the next request to /api/generate or /api/chat
+made from anywhere else (`ollama_start.before_request`, called by the translator's `_request_once` and `_stream_once`):
+set back then, not when the backlog's request ends, because a request cancelled still computes to the end of its
+prompt's batch. A runner started while the server is low is low from its start (it inherits the class), and the
+next request sets it back with the server. Only a server this process started and alone uses (`own_server`), only
+on Windows; one that is at below normal or idle already is left as it is, and so is an Ollama that was there
+before, like a person's own. The page job's requests and the warming are not lowered.
+
+**Tests.** `tests/test_server_yields.py`: lowered until a request of another's and set back by it, a late runner set
+back, the class it had put back and a low one never raised, a foreign URL or none untouched, refusals and failures
+of the change, a request of another thread sets it back and one of the backlog's own thread does not, the backlog's
+step asks behind, the translator tells each path, and on real stand-in processes: lowered and set back, a child
+started while it is low, a server another TASlation uses left as it is. The other tests may change no priority
+(`tests/conftest.py`). The tool's report has `server_priority` (lowered, not lowered, set back, the time low, the
+backlog's requests and those computed low, any other request computed wholly while the server was low), and the
+runners' summary reports the first two and fails a run on the third.
+
+**Runs on this computer** (i7-9700F, 8 cores; `--scenario c,a,b --start-ollama 11435 --wait-done 120 --ocr-runs-on
+cpu --ollama-num-gpu 0` with `CUDA_VISIBLE_DEVICES=-1`, as on the runners; "3": the tool, the browser and the
+server held to three of the eight processors by their affinity):
+
+| Tree, processors | Criteria | b's quick turns drawn | Backlog's requests (computed low) | A large one of them | Window steps over 900 ms |
+|---|---|---|---|---|---|
+| With the change, 8 | 27 of 27 | 10 of 10 | 33 (33) | at 212.5 s, 1882 new tokens, cancelled after 115 ms | none |
+| 1.0.0, 3 | 26 of 26 | 10 of 10 | 18 | none | none |
+| With the change, 3 | 27 of 27 | 10 of 10 | 19 (19) | at 351.9 s, 0.15 s before b's first turn, 707 new tokens, cancelled after 215 ms | none |
+
+The failure did not come back here, nor did it come on 1.0.0 with three processors: there the backlog had no large
+request near b. In the third run it had one at b's start, and b's turns were all drawn and no step of the window took
+over 900 ms. What the server still computed of that request after its cancel (a cancelled request computes to the
+end of its prompt's batch) waited, at the lower priority, until the page's OCR was done, and the page's first request
+then waited 3.8 s at the server (its first request 7.7 s after the turn, against 2.4 s on 1.0.0 with three
+processors, where the backlog had nothing under way); at the normal priority the same work would have been done
+during the OCR, which it would have slowed. Scenario a's times were the same on both trees with three processors
+(first request median 2961 and 2968 ms, a page finished 31.9 and 32.2 s). The proof of the change is the group on
+the runners, run several times.
+
+**Left as it is.** A server kept low while other programs keep every processor busy could stay silent for the
+no-answer rule's 60 s on the processor (`NO_ANSWER_CPU_S`) and be restarted; the page job's own large prompts (a
+history cut, a context block) still compete at normal priority; and the backlog's reads (the OCR, in TASlation's own
+process) are not lowered.
+
+## A page's lines sent as they are read (2026-11-22)
+
+The first bubble of a page waited for the whole page unit's OCR: its regions were all read, then judged, ordered and
+given their rooms, and only then was the unit's request made. Now each region is judged as soon as it is read, and
+the lines known so far go to the translator while the rest of the unit is read; a line sent too soon is taken back
+once the unit is read.
+
+**Judged at the read** (`pipeline.JUDGE_AT_READ`). The gate's size test needs the page's usual size, which was taken
+from every region's reading first; now it is taken only when a verdict needs it (`pipeline._UsualLater`), which reads
+the samples of all the unit's regions then, as before any was judged. `tools/judge_order_check.py` reads pages both
+ways and compares every field of every region, the progress told and the book's sizes: the repository's pages, the
+sample dataset (214) and the gold set's screens (101), each with the layout model on and off - 640 readings, none
+different.
+
+**The line sender** (`taslation/streaming.py`, `LineStream`). After each region judged, the unit's lines known - its
+text regions in their order before the reading, up to the first candidate of the layout model not judged yet; a
+classical candidate not read yet counts as no text - leave one run at a time (a line, or the lines whose sentence
+goes on into the next bubble) on one thread, once they are settled, an open-ended line has its next line and a
+joined run its members. They are asked through the translator's page session (`plamo.PageSession`), the very loop of
+`translate_page`: the same history, joined runs, following Japanese, glossary, names and draws. Each answer is
+lettered at once on a drafts layer of the page (copies of the regions on a copy of the page), and so is each line
+known whose translation the book's lines already hold (`linememo`), which is asked nothing; nothing is asked or
+lettered before the frame was seen on show. When the unit is read and ordered, its request goes through the stream:
+the runs sent that begin its final list stand, and from the first that does not, every run sent is taken back - its
+request cancelled, the session put back to before it (pairs, draws, the book's names), its lettering withdrawn - and
+the rest is asked. The layer then hands the page over to the drafts proper. Nothing of a run taken back is kept:
+`tests/test_stream_lines.py` makes the same page with and without the stream, also with take-backs forced, with lines
+the book's lines translate and with a stop during the reading, and compares the requests that count, the page, its
+cache, the grown context, the draws and the names. The window's page job alone streams; the backlog's scan reads a
+page turned past whole and translates it afterwards, because nobody is waiting for its first bubble, its read is
+what a page job takes over when the page is shown, and on a computer without a GPU its requests during the OCR would
+only take the processor from the viewer and the page on show (see the section before).
+
+**The readers stay at one crop a request.** Batching the second reader after the first line was measured before
+this work: the unit read in 690 ms against 1210, but the second line final at 636 against 432 ms and every line at
+1428 against 1336 - later for lettering, and identical verdicts were not shown. Two-page screens (the layout pass
+of one unit and its reading before the other unit's pass) were left: their results are not the same by
+construction, since the shaper's claims count across both units and the page's plans (the regions announced, the
+loads ahead, the unit read beside) are made for all units at once.
+
+**A page job past its page gives way at once.** Once a job's result is on show, what it still does - the page
+lettered once more for its next showing (`Pipeline.keep_shown`) - is cancelled at the first frame of another page,
+not after LEFT_PAGE_MS (`Operation.gave_way`), and `keep_shown` takes the job's own detection of the same capture
+instead of a layout-model pass, which looks at no cancel (`Pipeline._detect_held`). In the timing runs below the
+cancel came a median 356 to 392 ms after the result a run (409 to 506 before: the stand-in turns as soon as a page
+is finished, and the window waited 150 ms more), and the job let go of the worker a median 45 to 68 ms after it (29 to
+98 before; at most 154): the step under way ends first, the lettering of a region or the page's fingerprint.
+
+**Timing on the stand-in** (`tools/standin_e2e.py --scenario a,f --soft-first off --wait-done 120 --start-ollama
+11435`, the stand-in drawing each turn sharp at once; 1.0.0's tree and this one run in turn on the same computer and
+server; medians, with the 90th percentile, in ms from the turn, over the turns rested on to pages the cache did not
+hold; the readers on the GPU, where the GPU budget placed them, but for the readings made while a request is under
+way, which its rule puts on the processor; unless said):
+
+| | 1.0.0 | Lines sent as read |
+|---|---|---|
+| Two pages: first request | 1301 (1779) | 657 (796) |
+| Two pages: first bubble | 1627 (2176) | 1039 (1271) |
+| Two pages: whole page | 6103 (7369) | 6518 (7599) |
+| Two pages: the new page's job from the turn | 197 (435) | 177 (336) |
+| One page: first request | 738 | 483 |
+| One page: first bubble | 789 | 697 |
+| One page: whole page | 1905 | 1835 |
+| Two pages, the OCR on the GPU (`--ocr-runs-on gpu`): first request | 1304 (1606) | 633 (758) |
+| the same: first bubble | 1532 (1863) | 961 (1276) |
+| the same: whole page | 5625 (6158) | 5813 (6981) |
+| Two pages, no GPU (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0`): first request | 1910 (2195) | 529 (605) |
+| the same: first bubble | 2913 (4573) | 1804 (3220) |
+| the same: whole page | 21861 (28518) | 21142 (27665) |
+
+Three runs each, 33 two-page turns and 3 one-page turns per arm (the one-page figures are those of one page, f2's),
+the GPU and no-GPU rows one run each. Every page's first bubble came sooner, by 0.1 to 1.1 s (the medians page by
+page). A whole page takes about as long as before: of the 11 two-page screens, five were finished sooner (by 0.03 to
+0.8 s), five later (by 0.07 to 0.6 s), and the one with the take-backs 2.2 s later; the pooled median moves more, as
+the screens' times lie apart. The readings of the rest of a unit are now made while its requests are under way, and
+the GPU budget's rule puts a reading made then on the processor (`ocr.place.translating`, unchanged: each of the
+sender's requests goes through it as any request does): a page's OCR took a median 0.53 to 0.54 s a run before and
+1.28 to 1.38 s after, the readings made on the processor 0.9 to 1.1 s a page before and 1.1 to 1.2 s after (90th
+percentile 2.3 to 2.8 against 3.3 to 3.4 s), those on the GPU 0.66 to 0.73 against 0.58 to 0.60 s; a draft's
+lettering about 265 against 345 ms.
+
+**What was taken back** (the three runs): 258 lines sent before their unit was read, 222 stood and 36 were taken back
+in 5 of 42 units - in each run, a unit in which a classical candidate early in the unit's order, read after the
+layout model's, was text, so that the 11 or 12 runs sent after it were asked again (about 0.27 s a request; that
+page was finished 2.2 s later than before, 14.2 against 12.0 s), and in two of the runs the first unit of a page
+whose only line turned out to be print once the unit was read (by the rules that look at a unit's lines together; 1
+request; in the third it had sent nothing yet). A unit's first line was taken back in 2 of 42 units (the print
+line). A taken-back lettering stayed on show 1.5 to 1.7 s (median), 2.8 s at most; nothing of a taken-back line was
+in a page's lines or still on show at its result, in any run. With the OCR on the GPU, 104 lines were sent early and
+17 taken back, in the same two units; with no GPU, 27 were sent early and none taken back (the model's answers come
+slower than the readings there).
+
+**Reused lines.** Before they were lettered early, one page of the scenarios had its first bubble later than on
+1.0.0 (2.3 against 1.7 s, in three runs of the stream without it): its first lettering on 1.0.0 was a line the book's
+lines already translated, handed over as the request began, which with the stream waited for the end of the unit's
+reading. Lettered on the drafts layer as soon as it is judged, it came at 1.2 s; the layer ends after the request
+has handed it over (`close`), so it does not blink. No other page's first bubble moved by more than 0.08 s against
+those three runs.
+
+**A page that stops ends the drafts layer.** The first run of every scenario with the reused lines lettered early
+failed one criterion: 4 units whose request had been made still had lettering on the drafts layer when they closed
+(the report counts them, it does not name them). The way found that leaves it: a page that stops drops the drafts'
+tasks not begun (`PageFill.wait` with drop), and the layer's end was among them when the page stopped right after
+its unit's request, before the drafts' thread came to it; a page stopped while its unit was read left its early
+lettering on show in the same way, although nothing of its lines was kept. Both were so before the reused lines too
+(the two tests below fail on that tree). A page that stops now ends the layer itself
+once the drafts' thread has nothing left of it: each part the layer lettered is sent again as the page's working copy
+has it, and nothing is lettered. `tests/test_stream_lines.py`: a page stopped while it is read, and one stopped right
+after its request with the drafts' thread slowed, leave nothing of the layer on show.
+
+**Every scenario, soft first** (`--scenario c,a,b,d,e,r,t,o,z,x,f,k --wait-done 120 --start-ollama 11435`, the
+stand-in drawing a turn soft first, the OCR on the GPU as the budget placed it): all 70 criteria met on the final
+tree (868 s). 593 lines were sent early in 125 units; 430 stood and 163 were taken back in 35 units - 24 because the
+reader left the page while it was read (22 of them in k1's and k2's quick turns), 10 because a classical candidate
+read later was text, 1 a print line. None was in a page's lines, and nothing of the layer was on show at a unit's
+close or at a page's result; a taken-back lettering stayed on show a median 468 ms (2.7 s at most). The requests
+sent for pages the reader left before they were read (`wasted_requests`, all dropped): 42, 40 of them in k1 - the
+stream asks as soon as a line is read, where a page job asked only once its unit was read (the run of 1.0.0's tree
+made earlier on this computer had 2, with the OCR on the processor there). All 79 of the backlog's requests were
+computed at below-normal priority. A run of the tree before the reused lines and the fix above met all 70 too (892 s;
+489 lines sent early, 115 taken back, 35 requests sent for pages left).

@@ -87,7 +87,12 @@ the window needs to follow the turn (a request asked from its start, its pairs c
 busy 3 s, and the window drew the turned page 2.6 s after it had captured it). A read stops between
 two regions (between the detectors too), a translation between two line requests - the request in flight is given up,
 its connection closed -, and the lines answered by then are stored as a page turned away from stores them (the
-sequence's host `keeps_answered`: `translate.sequence`). A turn waits for no more than the step under way.
+sequence's host `keeps_answered`: `translate.sequence`). A turn waits for no more than the step under way. A step
+that asks the translator has the server TASlation started compute at below-normal priority until the next request
+that is not the backlog's (`ollama_start.asking_behind`): the first capture of a turned page is what stops the step,
+and on a computer without a GPU the server's prompt at the desktop's priority delayed that very capture (GitHub's
+runners: 1.5-3 s, the stand-in viewer drawing 4 and 7 of 10 quick turns, with a request of 700-1000 tokens asked from
+its start right after a page was done).
 
 History: every request of the backlog's, as every request of the page on show, gets the pairs in the order the
 requests were made (the translator's `GrowingContext`), so that each extends the one before. (A history in story order,
@@ -1059,6 +1064,7 @@ class Backlog:
         what was answered by then stored. Its requests get the pairs in the order of work, as the page on show's do: a
         translator that grows them (`GrowingContext`) has them grown as it answers; for one that does not, the pairs
         answered (`_Recording`) join the pages' pairs (`Pipeline._context`) as the step ends, stopped or not."""
+        from .ollama_start import asking_behind
         from .translate.base import GrowingContext, grows_context
 
         units = [pipeline.resync(u) for u in entry.units or []]
@@ -1082,7 +1088,8 @@ class Backlog:
             recent = _Recording(pipeline.context_pairs() if on else (),
                                 maxlen=max(0, int(getattr(s, "context_pairs", 40))))
         try:
-            host._translate_units(todo, recent, notes, [], language)
+            with asking_behind(getattr(translator, "base", None)):  # (computed below the desktop: `ollama_start`)
+                host._translate_units(todo, recent, notes, [], language)
         finally:  # (stopped too - `Cancelled`, the lines answered by then stored -: what was answered goes on as context)
             if isinstance(recent, _Recording) and on and context is not None and recent.added:
                 context.append(list(recent.added))  # (the pages' pairs of a translator that does not grow them)

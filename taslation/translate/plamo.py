@@ -86,7 +86,7 @@ from .base import CONTEXT_GROWS_TO, HINT_SOMETIMES, SentPair, TranslationError
 from .continuation import MAX_JOINED, joined, runs, split_back
 from .models import PLAMO, plamo_code
 from .ollama import KEEP_ALIVE, OllamaTranslator, _ignore
-from .renderings import learn
+from .renderings import learn, names_of
 
 TAG, MSG, KEY, VAL = "<|plamo:tag|>", "<|plamo:msg|>", "<|plamo:key|>", "<|plamo:val|>"
 INDEX, ITEM, BOS = "<|plamo:index|>", "<|plamo:item|>", "<|plamo:bos|>"
@@ -167,6 +167,92 @@ def earlier_pairs(pairs: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     computed (`base.SentPair`: a joined run, a line per bubble) as it is, so that the prompt holds what the server
     computed."""
     return [p if isinstance(p, SentPair) else (one_line(p[0]), p[1]) for p in pairs]
+
+
+def request_lines(texts: Sequence[str], meta: Sequence[dict[str, Any] | None] | None) -> tuple[list[str], list[dict[str, Any]]]:
+    """A page request's lines as `PlamoTranslator.translate_page` asks them (`one_line`) and a copy of each one's facts
+    (*meta*, {} where there is none)."""
+    lines = [one_line(t) for t in texts]
+    return lines, [dict((meta[i] or {}) if meta and i < len(meta) else {}) for i in range(len(lines))]
+
+
+class PageSession:
+    """`PlamoTranslator.translate_page`'s state between the runs of one page's lines (`continuation.runs`): the earlier
+    pairs the next run starts from (the request's *context*, cut to the translator's ``history_pairs``, then each run
+    as it computed it: `PlamoTranslator._computed`), and the *computed* list it hands them to. `run` asks one run as
+    the page's request asks it; the names it shows are learnt there, before the next run's glossary is made. `mark`
+    says where it stands - its pairs, the translator's draws (`PlamoTranslator.draws`) and the book's names
+    (`renderings.BookNames`) - and `rewind` puts it back there: runs asked too soon (`streaming`), as though they had
+    never been asked. One thread runs it at a time."""
+
+    def __init__(self, translator: "PlamoTranslator", context: Sequence[tuple[str, str]] = (), notes: str = "",
+                 computed: list[tuple[str, str]] | None = None):
+        self.translator = translator
+        self.notes = notes
+        self.history = earlier_pairs(list(context)[-translator.history_pairs:])
+        self.computed = computed
+        self.requests = 0  # (requests made so far: the tools' count)
+
+    def run(self, lines: Sequence[str], facts: Sequence[dict[str, Any]], follow: Sequence[str],
+            took: Callable[[int, str], None], cancel: threading.Event | None = None,
+            on_slow: Callable[[float], None] | None = None) -> None:
+        """One run of a page's lines (*lines*, `request_lines`' with their *facts*; one line, or the lines whose
+        sentence goes on in the next bubble): asked joined when they share their speaker, and each by itself when that
+        answer does not split back onto them or they do not. *follow*: the Japanese after the run's last line as
+        `PlamoTranslator._following` gives it on the page; the others' is the run's next line. *took*(index in the
+        run, translation) for each line, "" for none, after the names it shows were learnt. `Cancelled` once *cancel*
+        is set, before a request or during one."""
+        t = self.translator
+        if cancel is not None and cancel.is_set():
+            raise Cancelled()
+        lines, facts = list(lines), list(facts)
+        last = len(lines) - 1
+
+        def took_one(i: int, got: str) -> None:
+            if got:
+                learn(self.notes, [(lines[i], got)])  # the book's names: what this line shows of them
+            took(i, got)
+
+        speaker = str(facts[0].get("speaker", "") or "")
+        if len(lines) > 1 and all(str(f.get("speaker", "") or "") == speaker for f in facts):
+            # (no hint: one bubble's hint would be the reference of the run's other bubbles too)
+            source = joined(lines)
+            self.requests += 1
+            parts = split_back(t._line(source, self.notes, self.history, speaker, cancel, on_slow, list(follow)),
+                               len(lines))
+            if parts is not None:
+                t._computed(self.history, source, self.computed)
+                for i, part in enumerate(parts):
+                    took_one(i, part)
+                return
+        for i in range(len(lines)):  # one bubble at a time: the run's joined answer could not be split back
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            following = list(follow) if i == last else t._following(lines, facts, lines, i)
+            self.requests += 1
+            got = t._line(lines[i], self.notes, self.history, str(facts[i].get("speaker", "") or ""), cancel, on_slow,
+                          following, t._hint(facts[i]))
+            if got:
+                t._computed(self.history, lines[i], self.computed)
+            took_one(i, got)
+
+    def mark(self) -> tuple[Any, ...]:
+        """Where the session stands now, for `rewind`."""
+        names = names_of(self.notes)
+        return (len(self.history), None if self.computed is None else len(self.computed), self.translator.draws(),
+                names.state() if names is not None else None)
+
+    def rewind(self, mark: tuple[Any, ...]) -> None:
+        """The session as it stood at *mark* (`mark`): the pairs and the computed ones added since gone, the draws
+        and the book's names as they were."""
+        held, computed, draws, names = mark
+        del self.history[held:]
+        if self.computed is not None and computed is not None:
+            del self.computed[computed:]
+        self.translator.set_draws(draws)
+        book = names_of(self.notes)
+        if book is not None and names is not None:
+            book.put_back(names)
 
 
 def pfml_ends(target: str, context: str = "", history: Sequence[tuple[str, str]] = (),
@@ -675,47 +761,32 @@ class PlamoTranslator(OllamaTranslator):
         if not texts:
             return []
         self.target_code  # noqa: B018 - a language PLaMo cannot write fails before any request
-        history = earlier_pairs(list(context)[-self.history_pairs:])
-        lines = [one_line(t) for t in texts]
-        facts = [dict((meta[i] or {}) if meta and i < len(meta) else {}) for i in range(len(lines))]
+        session = self.page_session(context, notes, computed)
+        lines, facts = request_lines(texts, meta)
         after = list(lines) + [str(t) for t in upcoming]  # what follows each line: the request's, then upcoming
         out: list[str] = [""] * len(lines)
 
-        def took(i: int, got: str) -> None:
-            out[i] = got
-            if got:
-                learn(notes, [(lines[i], got)])  # the book's names: what this line shows of them
-                if on_item is not None:
-                    on_item(i, got)
-
-        def computed_as(source: str) -> None:
-            self._computed(history, source, computed)
+        def took_in(run: list[int]) -> Callable[[int, str], None]:
+            def took(i: int, got: str) -> None:
+                out[run[i]] = got
+                if got and on_item is not None:
+                    on_item(run[i], got)
+            return took
 
         for run in runs(facts, len(lines), MAX_JOINED):
-            if cancel is not None and cancel.is_set():
-                raise Cancelled()
-            speaker = str(facts[run[0]].get("speaker", "") or "")
-            if len(run) > 1 and all(str(facts[k].get("speaker", "") or "") == speaker for k in run):
-                # (no hint: one bubble's hint would be the reference of the run's other bubbles too)
-                source = joined([lines[k] for k in run])
-                parts = split_back(self._line(source, notes, history, speaker, cancel, on_slow,
-                                              self._following(lines, facts, after, run[-1])), len(run))
-                if parts is not None:
-                    computed_as(source)
-                    for k, part in zip(run, parts):
-                        took(k, part)
-                    continue
-            for k in run:  # one bubble at a time: the run's joined answer could not be split back
-                if cancel is not None and cancel.is_set():
-                    raise Cancelled()
-                got = self._line(lines[k], notes, history, str(facts[k].get("speaker", "") or ""), cancel, on_slow,
-                                 self._following(lines, facts, after, k), self._hint(facts[k]))
-                if got:
-                    computed_as(lines[k])
-                took(k, got)
+            session.run([lines[k] for k in run], [facts[k] for k in run], self._following(lines, facts, after, run[-1]),
+                        took_in(run), cancel, on_slow)
         if not any(out):
             raise TranslationError(Message("ollama.bad_answer", chars=0))
         return out
+
+    def page_session(self, context: Sequence[tuple[str, str]] = (), notes: str = "",
+                     computed: list[tuple[str, str]] | None = None) -> "PageSession":
+        """What `translate_page` carries from one run of a page's lines to the next, as an object of its own
+        (`PageSession`): the pipeline's line sender (`streaming`) asks a page's runs with it one by one as their lines
+        are read, as `translate_page` would have asked them, and takes back runs it asked too soon (`PageSession.mark`,
+        `PageSession.rewind`)."""
+        return PageSession(self, context, notes, computed)
 
     def translate_aside(self, text: str, context: Sequence[tuple[str, str]] = (), notes: str = "",
                         cancel: threading.Event | None = None,

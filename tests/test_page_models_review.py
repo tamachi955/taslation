@@ -17,6 +17,7 @@ from taslation.config import LAMA_MODEL, Settings
 from taslation.detect import layout
 from taslation.detect.layout import BUBBLE, TEXT, LayoutModel, cover_of, model_regions
 from taslation.ocr.charspot import CharspotChar, CharspotReading
+from taslation import pipeline as pipeline_mod
 from taslation.pipeline import Pipeline, bubble_scores
 from taslation.regions import TextRegion
 from taslation.render import artwork, lama
@@ -370,6 +371,7 @@ def test_lying_in_a_bubbles_box_is_not_lying_in_its_lettering():
 
 # ------------------------------------------------------------------ 9: the page's usual size
 def test_every_region_is_judged_on_the_usual_size_of_the_whole_page(settings, monkeypatch):
+    monkeypatch.setattr(pipeline_mod, "JUDGE_AT_READ", False)  # (all the page's regions read first for it)
     p = Pipeline(settings, ocr=SimpleNamespace(read_chars=lambda img: CharspotReading("そうだね", score=0.95)),
                  translator=None, cache=None)
     monkeypatch.setattr(p, "_usual", lambda rgb, regions, cancel=None: 33.0)
@@ -379,6 +381,20 @@ def test_every_region_is_judged_on_the_usual_size_of_the_whole_page(settings, mo
     regions = [region(10, 10, 60, 200, from_model=True), region(300, 10, 350, 200), region(500, 10, 550, 200)]
     p._ocr_regions(np.full((400, 600, 3), 255, np.uint8), regions, lambda m: None)
     assert seen == [33.0, 33.0, 33.0]
+
+
+def test_judged_as_read_every_region_has_the_one_usual_size_of_the_whole_page(settings, monkeypatch):
+    """Each region judged as soon as it is read (`JUDGE_AT_READ`): every one is given the page's one usual size, taken
+    from all its regions (`_UsualLater`), whichever region a gate needs it for first."""
+    p = Pipeline(settings, ocr=SimpleNamespace(read_chars=lambda img: CharspotReading("そうだね", score=0.95)),
+                 translator=None, cache=None)
+    monkeypatch.setattr(p, "_usual", lambda rgb, regions, cancel=None: pytest.fail("read for the size first"))
+    seen = []
+    real = p._read_regions
+    monkeypatch.setattr(p, "_read_regions", lambda rgb, rs, *a, usual=None, **k: (seen.append(usual), real(rgb, rs, *a, usual=usual, **k)))
+    regions = [region(10, 10, 60, 200, from_model=True), region(300, 10, 350, 200), region(500, 10, 550, 200)]
+    p._ocr_regions(np.full((400, 600, 3), 255, np.uint8), regions, lambda m: None)
+    assert len(seen) == 3 and all(u is seen[0] for u in seen) and seen[0]() == pipeline_mod.usual_size([])
 
 
 # ------------------------------------------------------------------ 10: a release never waits

@@ -100,7 +100,10 @@ scenario before it); the page jobs and the translator's requests per page, and t
 (a page started early asks before its frame is confirmed); the requests sent for nothing (a job on a
 frame that was not the sharp one, or one dropped as its frame changed: how long each ran, how long after its job's
 cancel, and when the next request went out and how long that waited at the server, against Ollama's own time for
-it); the jobs on a soft frame whose frame was confirmed, those of them whose confirmation was taken back (while they
+it); the lines sent to the translator as they were read (`streaming.LineStream`): how many stood and how many were
+taken back once their unit was read, the requests so thrown away (counted apart from those sent for nothing), how
+long a taken-back lettering stayed on show, and that nothing of one was in the page's lines or on show at its result
+(``streamed_lines``); the jobs on a soft frame whose frame was confirmed, those of them whose confirmation was taken back (while they
 ran, after them), and the jobs on a frame that was not the sharp one with a page unit or a kept line of theirs in the
 cache the window left (must be none where the sharp frame of their page came: each told with its page, how late the
 window captured that sharp frame and why); which capture gave the stand-in's frames (Windows.Graphics.Capture, or
@@ -739,6 +742,7 @@ class Notes:
         self.readings: list[dict[str, Any]] = []  # normal reading's events (`backlog`: no thumbnail, no text)
         self.backlog: list[dict[str, Any]] = []  # the backlog's catches and steps, with what it held after each
         self.warm_calls: list[dict[str, Any]] = []  # each warming begun (`PlamoTranslator.warm_prefix`): what it did
+        self.priority: list[dict[str, Any]] = []  # the server lowered for the backlog and set back (`watch_priority`)
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
         self.side: SideCheck | None = None  # the indicator looked at from the window (`--side-indicator` not off)
@@ -897,9 +901,25 @@ class Notes:
             if kind == "translated":
                 job["translated"] += 1
                 job["first_translated_t"] = job["first_translated_t"] or t
+                # the drafts layer of a unit's lines sent as they were read (`PageFill.early_draft`): a lettering it
+                # showed, and how long one taken back stayed on show
+                index, early = data.get("index"), bool(data.get("early")) and not data.get("early_end")
+                shown = job.setdefault("_early_at", {})
+                if early and data.get("text"):
+                    job["early_translated"] = job.get("early_translated", 0) + 1
+                    job["first_early_t"] = job.get("first_early_t") or t
+                    shown.setdefault(index, t)
+                if data.get("withdrawn"):
+                    job["withdrawn"] = job.get("withdrawn", 0) + 1
+                    if index in shown:
+                        job.setdefault("withdrawn_ms", []).append(round(t - shown.pop(index), 1))
+                elif not early:
+                    shown.pop(index, None)
+                job.setdefault("_last_early", {})[index] = early and bool(data.get("text"))
             elif kind == "result":
                 result = data.get("result")
                 job["result_t"] = t
+                job["early_left_at_result"] = sum(1 for v in job.get("_last_early", {}).values() if v)
                 job["result_translated"] = len(getattr(result, "translated", []) or [])
                 job["result_from"] = self.code(self.shown(getattr(result, "original", None)))["state"]
                 job["result_boxes"] = [[int(v) for v in r.bbox] for r in getattr(result, "translated", []) or []]
@@ -927,7 +947,10 @@ class Notes:
             rec = {"t": t, "kind": kind, "job": job["id"] if job else None, "gate": state,
                    "frame": job["state"] if job else None, "end_t": None,
                    "outcome": None, "http_t": None, "http_end_t": None, "server_ms": None, "load_ms": None,
-                   "side": getattr(self.local, "side", None), "n": len(self.requests)}
+                   "side": getattr(self.local, "side", None), "n": len(self.requests),
+                   # (a run of a unit's lines sent as they were read, `streaming.LineStream`: its number, which the
+                   # stream's counts name when it was taken back)
+                   "stream": stream_token()}
             self.requests.append(rec)
             if job is not None:
                 job["requests"] += 1
@@ -2362,6 +2385,57 @@ def keep_server_log(ollama_start: Any, path: Path) -> None:
     ollama_start.launch = logged
 
 
+def watch_priority(notes: Notes) -> None:
+    """The server TASlation started computing the backlog's work at below-normal priority (`ollama_start.yield_server`,
+    from a step's start) and set back (`unyield_server`, at the next request that is not the backlog's): each, when,
+    and what came of it, for `priority_report`."""
+    from taslation import ollama_start
+
+    lower, back = ollama_start.yield_server, ollama_start.unyield_server
+
+    def lowered(url: Any) -> bool:
+        done = lower(url)
+        with notes.lock:
+            notes.priority.append({"t": now_ms(), "kind": "low", "done": bool(done)})
+        return done
+
+    def set_back() -> int:
+        count = back()
+        with notes.lock:
+            notes.priority.append({"t": now_ms(), "kind": "back", "done": int(count)})
+        return count
+
+    ollama_start.yield_server, ollama_start.unyield_server = lowered, set_back
+
+
+def priority_report(notes: Notes, rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The backlog's requests computed low, and none of anyone else's: the spans in which the server was lowered (from
+    a lowering to the next setting back), the backlog's requests begun in one, and every other request computed wholly
+    in one (it was not set back before it went out: `ollama_start.before_request`)."""
+    spans: list[tuple[float, float]] = []
+    since: float | None = None
+    for p in notes.priority:
+        if p["kind"] == "low" and p["done"] and since is None:
+            since = p["t"]
+        elif p["kind"] == "back" and since is not None:
+            spans.append((since, p["t"]))
+            since = None
+    if since is not None:
+        spans.append((since, float("inf")))
+    behind = [r for r in notes.requests if r.get("side") == "backlog"]
+    others = [r for r in notes.requests if r.get("side") != "backlog"]
+    low_others = [r for r in others if any(a <= r["t"] and (r["end_t"] or r["t"]) < b for a, b in spans)]
+    return {"lowered": sum(1 for p in notes.priority if p["kind"] == "low" and p["done"]),
+            "not_lowered": sum(1 for p in notes.priority if p["kind"] == "low" and not p["done"]),
+            "set_back": sum(1 for p in notes.priority if p["kind"] == "back" and p["done"]),
+            "processes_set_back": sum(p["done"] for p in notes.priority if p["kind"] == "back"),
+            "low_ms": round(sum((min(b, now_ms()) - a) for a, b in spans)),
+            "backlog_requests": len(behind),
+            "backlog_requests_low": sum(1 for r in behind if any(a <= r["t"] < b for a, b in spans)),
+            "other_requests_low": [{"t_s": rel(r["t"]), "side": r.get("side"), "job": r.get("job")}
+                                   for r in low_others][:20]}
+
+
 def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
             hotkeys: HotKeys) -> dict[str, Any]:
     """The guard (`demo_video`'s, keys and clicks refused; the global hot keys this tool's *hotkeys*), and the hooks
@@ -2400,6 +2474,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         guard.refuse("a capture session")
 
     wgc.latest = compositor
+    watch_priority(notes)
     overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
 
     App = app_mod.App
@@ -4217,6 +4292,63 @@ def wasted_requests(requests: list[dict[str, Any]], jobs: list[dict[str, Any]], 
     return out
 
 
+def stream_token() -> int | None:
+    """The number of the run of a unit's lines sent as they were read (`streaming.current_token`) that the calling
+    thread asks for, or None (a request of a page job's own, or a program without the stream)."""
+    try:
+        from taslation import streaming
+    except ImportError:
+        return None
+    return streaming.current_token()
+
+
+def streamed_lines(stream_log: list[dict[str, Any]], requests: list[dict[str, Any]],
+                   jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The units whose lines were sent to the translator as they were read (`Pipeline.stream_log`, one entry a unit):
+    lines sent early, lines that stood and lines taken back (the first line of a unit among them), the requests whose
+    answers were thrown away so (each counted once, by the stream's numbers - not in `wasted_requests`, whose jobs
+    are dropped or soft), the time a taken-back lettering stayed on show, and the two ends a finished page must meet:
+    no answer of a taken-back run in the page's final lines (`final_from_taken_back`) and no early lettering still
+    on show when the page's result came (`early_left_at_result`)."""
+    back_tokens = {t for e in stream_log for t in e.get("tokens_taken_back") or ()}
+    by_id = {j["id"]: j for j in jobs}
+    back = [r for r in requests if r.get("stream") is not None and r["stream"] in back_tokens]
+    finished = [e for e in stream_log if e.get("outcome") == "done"]  # (`LineStream.close`: the unit was asked)
+    withdrawn = [v for j in jobs for v in j.get("withdrawn_ms") or ()]
+    first_early = [ms(j["first_early_t"], j["t"]) for j in jobs if j.get("first_early_t") and j["started"]]
+
+    def total(key: str, of: list[dict[str, Any]] = stream_log) -> int:
+        return sum(int(e.get(key) or 0) for e in of)
+
+    return {"units": len(stream_log), "outcomes": dict(Counter(e.get("outcome") for e in stream_log)),
+            "lines_sent_early": total("lines_sent_early"), "lines_stood": total("lines_stood"),
+            "lines_taken_back": total("lines_taken_back"), "runs_taken_back": total("runs_taken_back"),
+            "units_first_line_taken_back": sum(1 for e in stream_log if e.get("first_taken_back")),
+            "units_any_taken_back": sum(1 for e in stream_log if e.get("runs_taken_back")),
+            "why_taken_back": dict(Counter(e["why_taken_back"] for e in stream_log if e.get("why_taken_back"))),
+            "requests_taken_back": len(back),
+            "requests_taken_back_ms": dist([ms(r["end_t"], r["t"]) for r in back if r["end_t"] is not None]),
+            "requests_stream": total("requests"),
+            "early_lettered": total("early_lettered"), "early_withdrawn": total("early_withdrawn"),
+            "withdrawn_on_show_ms": dist(withdrawn),
+            "first_early_lettering_ms": dist(first_early),
+            "final_from_taken_back": total("final_from_taken_back", finished),
+            "early_left_at_close": total("early_left", finished),
+            "early_left_at_result": sum(int(j.get("early_left_at_result") or 0) for j in by_id.values()
+                                        if j.get("result_t") is not None),
+            # each unit that took a run back: its counts, why, and the page jobs its taken-back requests were for
+            "units_taken_back": [
+                {**{k: e.get(k) for k in UNIT_KEYS},
+                 "jobs": sorted({r.get("job") for r in requests if r.get("stream") in set(e.get("tokens_taken_back")
+                                                                                          or ())} - {None})}
+                for e in stream_log if e.get("runs_taken_back")]}
+
+
+UNIT_KEYS = ("unit", "outcome", "runs_sent_early", "lines_sent_early", "runs_stood", "lines_stood", "runs_taken_back",
+             "lines_taken_back", "requests_taken_back", "first_taken_back", "why_taken_back", "first_answer_ms",
+             "reconciled_ms")
+
+
 def readings_on_a_miss(resolves: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:
     """The page jobs' looks for page units the cache did not hold as found (`Notes.resolved`): how many there were,
     how many went through readings and found a unit so, the time those took and the readings they went through
@@ -5196,6 +5328,27 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "real_ran_ms": dist([ms(r["end_t"], r["t"]) for r in real]),
         "list": [{**{k: v for k, v in w.items() if k != "t"}, "t_s": rel(w["t"]), "segment": segment_at_t(w["t"])}
                  for w in wasted]}
+    stream_log = list(getattr(getattr(director.app, "pipeline", None), "stream_log", None) or ())
+    streamed = streamed_lines(stream_log, requests, jobs)
+    back_tokens = {t for e in stream_log for t in e.get("tokens_taken_back") or ()}
+    wasted_t = {w["t"] for w in wasted}  # (a taken-back request of a job that was dropped is in both)
+    streamed["requests_taken_back_also_wasted"] = sum(
+        1 for r in requests if r.get("stream") in back_tokens and r["t"] in wasted_t)
+    # the page jobs cancelled after their result was shown (the page lettered once more for its next showing,
+    # `Pipeline.keep_shown`, given way to the frame of another page): how long after the result the cancel came and
+    # how long the job took after it to let go of the worker
+    tails = []
+    for j in started:
+        if j["result_t"] is None or j.get("done_t") is None:
+            continue
+        cut = next((c for c in sorted(notes.cancels) if j["result_t"] <= c <= j["done_t"]), None)
+        if cut is not None:
+            tails.append((ms(cut, j["result_t"]), ms(j["done_t"], cut)))
+    tail_summary = {"jobs": len(tails), "cancel_after_result_ms": dist([a for a, _b in tails]),
+                    "done_after_cancel_ms": dist([b for _a, b in tails]),
+                    "tail_uncut_ms": dist([ms(j["done_t"], j["result_t"]) for j in started
+                                           if j["result_t"] is not None and j.get("done_t") is not None
+                                           and not any(j["result_t"] <= c <= j["done_t"] for c in notes.cancels)])}
     cancelled_after_kept = [j for j in started if j["cancelled_t"] is not None and j.get("discarded") is False
                             and j["state"] == "sharp"]
     stale_status = [r for r in rows if r["status_old_page_ms"]]
@@ -5235,12 +5388,13 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                         for r in cancel_rows]}
     request_list = {"columns": ["t_s", "job", "frame", "gate", "outcome", "ran_ms", "server_ms", "server_wait_ms",
                                 "wasted", "side", "why", "full", "prompt_n", "prompt_ms", "answer_n", "answer_ms",
-                                "pairs", "joined", "kept_tokens_est", "prompt_tokens_est"],
+                                "pairs", "joined", "kept_tokens_est", "prompt_tokens_est", "stream"],
                     "rows": [[rel(r["t"]), r["job"], r["frame"], r["gate"], r["outcome"], ms(r["end_t"], r["t"]),
                               r["server_ms"], server_wait(r), wasted_why(by_id.get(r["job"]))
                               if r["job"] is not None else None, r.get("side"), r.get("why"), full_computed(r),
                               r.get("prompt_n"), r.get("prompt_ms"), r.get("answer_n"), r.get("answer_ms"),
-                              r.get("pairs"), r.get("joined"), r.get("kept_tokens_est"), r.get("prompt_tokens_est")]
+                              r.get("pairs"), r.get("joined"), r.get("kept_tokens_est"), r.get("prompt_tokens_est"),
+                              r.get("stream")]
                              for r in requests]}
     k_facts = k_block(notes, turns, rows, requests, spells, rel)
     pump = sorted(ms_ for ms_, _busy in notes.timings.get("_poll_events", []))
@@ -5264,6 +5418,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "modes": modes,
         "cancel_in_flight": cancel,
         "wasted_requests": wasted_summary,
+        "streamed_lines": streamed,
+        "jobs_cancelled_past_their_page": tail_summary,
         "jobs_cancelled_after_kept": {"count": len(cancelled_after_kept),
                                       "requests": sum(j["requests"] for j in cancelled_after_kept)},
         "request_list": request_list,
@@ -5332,6 +5488,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
+        "server_priority": priority_report(notes, rel),
         "window_order": [{**n, "t": rel(n["t"])} for n in tap.window_order],
         "frame_stalls": stalls_report(notes, rel),
         "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],
@@ -5795,6 +5952,18 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     print(f"wasted requests {wasted['count']} {wasted['by_why']} {wasted['by_outcome']}; ran {wasted['ran_ms']}; "
           f"ran on after the cancel {wasted['ran_on_after_cancel_ms']}; next real request's server wait "
           f"{wasted['next_real_server_wait_ms']} (all real: {wasted['real_server_wait_ms']})")
+    st = run_.get("streamed_lines") or {}
+    if st.get("units"):
+        print(f"lines sent as read: {st['lines_sent_early']} in {st['units']} units {st['outcomes']}, stood "
+              f"{st['lines_stood']}, taken back {st['lines_taken_back']} (first line in "
+              f"{st['units_first_line_taken_back']} units), requests thrown away {st['requests_taken_back']}; "
+              f"taken-back lettering on show {st['withdrawn_on_show_ms']}; left: final {st['final_from_taken_back']}, "
+              f"on show at close {st['early_left_at_close']}, at result {st['early_left_at_result']}; why taken back "
+              f"{st['why_taken_back']}")
+    tail = run_.get("jobs_cancelled_past_their_page") or {}
+    print(f"jobs cancelled past their page {tail.get('jobs')}: cancel after the result {tail.get('cancel_after_result_ms')}"
+          f", done after the cancel {tail.get('done_after_cancel_ms')}; not cancelled, result to done "
+          f"{tail.get('tail_uncut_ms')}")
     req = run_["requests"]
     clean = report["cleanup"]
     print(f"requests {req['total']} (on a gate pending {req['gate_pending']}, outside jobs "

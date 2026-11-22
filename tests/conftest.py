@@ -30,9 +30,11 @@ windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows only"
 @pytest.fixture(autouse=True)
 def nothing_starts_ollama(monkeypatch):
     """No test starts a real Ollama, or asks whether one runs, by way of the window's start or a command, and none
-    stops a process: the start, the request to stop, the termination and the stop itself fail the test where a test
-    reaches them (tests/test_ollama_start.py puts the real thing back, with fakes under it). What a test claimed is
-    forgotten after it, so that nothing is stopped at the interpreter's exit."""
+    stops a process or changes its priority: the start, the request to stop, the termination, the stop itself and a
+    change of priority class fail the test where a test reaches them (tests/test_ollama_start.py and
+    tests/test_server_yields.py put the real thing back, with fakes under it). What a test claimed, and a server it
+    lowered (`ollama_start.yield_server`), is forgotten after it, so that nothing is stopped at the interpreter's
+    exit."""
 
     def refused(what):
         def fail(*_args, **_kwargs):
@@ -44,6 +46,8 @@ def nothing_starts_ollama(monkeypatch):
     monkeypatch.setattr(ollama_start, "ask_to_stop", refused("request to stop"))
     monkeypatch.setattr(ollama_start, "terminate", refused("termination"))
     monkeypatch.setattr(ollama_start, "stop_server", refused("stop"))
+    monkeypatch.setattr(ollama_start, "set_priority_class", refused("change of priority"))
+    monkeypatch.setattr(ollama_start, "_yielded", {})
     yield
     ollama_start._claims.clear()
 
