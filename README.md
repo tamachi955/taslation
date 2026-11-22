@@ -67,7 +67,6 @@ Translating into Portuguese (Brazil) or Turkish uses another translation model (
 |---|---|---|
 | One screen showing one page (about 12 lines) | about 4 s | about 10 s |
 | One screen showing two pages (about 20 lines) | about 8 s | about 23 s |
-| Translating a whole book (190 pages) | about 15 to 20 min | about 35 min to 1 h |
 
 Measured on an Intel Core i7-9700F with 48 GB of RAM and a GeForce GTX 1660 Ti (6 GB).
 

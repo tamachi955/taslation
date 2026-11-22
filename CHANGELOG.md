@@ -3,6 +3,27 @@
 What changed for someone who uses TASlation, newest first. The version is under Help → "About TASlation", and
 `update.cmd` shows it before it updates.
 
+## 1.0.0 - 2026-11-22
+
+Reading
+
+* There is one way of reading now. "Read whole book..." is gone, with its dialog, the "Finished reading" button, the
+  thumbnail strip under the page and the questions it asked at Stop and at closing: the pages you turn past are
+  translated in the background as you read (0.9.7), and the margin beside the page shows how far they are.
+* Translations an earlier version saved by reading a whole book first stay in the cache and show as any page
+  translated before.
+* Settings that only the whole-book run used are gone (`context_mode`, `chunk_bubbles`, `lookahead_bubbles`,
+  `batch_max_pages`, `batch_memory_mb`, `scan_mode`, `flash_when_done`, `sound_when_done`). A `taslation.toml` that
+  still holds them loads as before; they do nothing. The command `taslation batch` and `gui --mode` are gone.
+* docs/LEGAL and the manual say what is true now; the README's and the installation guide's whole-book times are
+  gone.
+
+For developers
+
+* The stand-in viewer can draw every page sharp at once (`tools/standin_e2e.py --soft-first off`): the speed figures
+  we publish are measured so, without the time a viewer takes to draw a page soft first. The checks of correctness
+  keep the viewer that draws soft first.
+
 ## 0.9.8 - 2026-11-22
 
 Documents
