@@ -8,7 +8,8 @@ This is a translation. The Japanese text, [README.ja.md](README.ja.md), is the o
 
 The TASlation (Tool Assisting Self-translation of manga) window reads the manga page your viewer is showing, translates it on this computer, and shows the translation laid over the page. In Japan, the Copyright Act allows copying a work for your own private use (Article 30) and translating it for that use (Article 47-6); [docs/LEGAL.md](docs/LEGAL.md) sums up what 30 countries allow.
 
-https://github.com/user-attachments/assets/a99d3445-bd31-4dd2-be83-ff3702f4959c
+https://github.com/user-attachments/assets/04b17420-58c0-4362-a92a-64e0dc060dae
+
 
 The pages in the video are from the [OpenMantra dataset](https://github.com/mantra-inc/open-mantra-dataset) (published by Mantra Inc.; Hinami, Ishiwatari, Yasuda, Matsui, "Towards Fully Automated Manga Translation", AAAI 2021): the title バルーンドリーム by Mitsuki Kuchitaka (朽鷹みつき). The dataset is provided under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (attribution, non-commercial); the pages in the video are changed.
 
