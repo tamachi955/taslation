@@ -4605,6 +4605,9 @@ at any time: 1,445 and 6,062). With other programs at about 1.6 GB, the readers 
 gave a first bubble about 1.3 s sooner than 0.9.8's readers on the CPU with it, and the whole page about 0.9 s
 sooner, although each page's requests took about 0.8 s longer without the cache.
 
+The tests (`tests/test_ocr_place.py`, on fakes) hold the boundaries to the MiB both ways, the hysteresis, the looks,
+the second out of memory and the slow reads. The whole suite on the same code: 5,534 passed, 22 skipped, in 28 min 12 s.
+
 **Not verified.** LaMa's figure (not met on these frames); other cards (the floor is this driver's on this card, and
 on a larger one the margin is the same in MiB); other programs beyond this desktop's 90 minutes; the net against a
 really slow GPU (it fired in none of the runs, and the fill above stayed under it); the real viewer.
