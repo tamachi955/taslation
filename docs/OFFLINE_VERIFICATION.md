@@ -4567,3 +4567,125 @@ the runners, run several times.
 no-answer rule's 60 s on the processor (`NO_ANSWER_CPU_S`) and be restarted; the page job's own large prompts (a
 history cut, a context block) still compete at normal priority; and the backlog's reads (the OCR, in TASlation's own
 process) are not lowered.
+
+## A page's lines sent as they are read (2026-11-22)
+
+The first bubble of a page waited for the whole page unit's OCR: its regions were all read, then judged, ordered and
+given their rooms, and only then was the unit's request made. Now each region is judged as soon as it is read, and
+the lines known so far go to the translator while the rest of the unit is read; a line sent too soon is taken back
+once the unit is read.
+
+**Judged at the read** (`pipeline.JUDGE_AT_READ`). The gate's size test needs the page's usual size, which was taken
+from every region's reading first; now it is taken only when a verdict needs it (`pipeline._UsualLater`), which reads
+the samples of all the unit's regions then, as before any was judged. `tools/judge_order_check.py` reads pages both
+ways and compares every field of every region, the progress told and the book's sizes: the repository's pages, the
+sample dataset (214) and the gold set's screens (101), each with the layout model on and off - 640 readings, none
+different.
+
+**The line sender** (`taslation/streaming.py`, `LineStream`). After each region judged, the unit's lines known - its
+text regions in their order before the reading, up to the first candidate of the layout model not judged yet; a
+classical candidate not read yet counts as no text - leave one run at a time (a line, or the lines whose sentence
+goes on into the next bubble) on one thread, once they are settled, an open-ended line has its next line and a
+joined run its members. They are asked through the translator's page session (`plamo.PageSession`), the very loop of
+`translate_page`: the same history, joined runs, following Japanese, glossary, names and draws. Each answer is
+lettered at once on a drafts layer of the page (copies of the regions on a copy of the page), and so is each line
+known whose translation the book's lines already hold (`linememo`), which is asked nothing; nothing is asked or
+lettered before the frame was seen on show. When the unit is read and ordered, its request goes through the stream:
+the runs sent that begin its final list stand, and from the first that does not, every run sent is taken back - its
+request cancelled, the session put back to before it (pairs, draws, the book's names), its lettering withdrawn - and
+the rest is asked. The layer then hands the page over to the drafts proper. Nothing of a run taken back is kept:
+`tests/test_stream_lines.py` makes the same page with and without the stream, also with take-backs forced, with lines
+the book's lines translate and with a stop during the reading, and compares the requests that count, the page, its
+cache, the grown context, the draws and the names. The window's page job alone streams; the backlog's scan reads a
+page turned past whole and translates it afterwards, because nobody is waiting for its first bubble, its read is
+what a page job takes over when the page is shown, and on a computer without a GPU its requests during the OCR would
+only take the processor from the viewer and the page on show (see the section before).
+
+**The readers stay at one crop a request.** Batching the second reader after the first line was measured before
+this work: the unit read in 690 ms against 1210, but the second line final at 636 against 432 ms and every line at
+1428 against 1336 - later for lettering, and identical verdicts were not shown. Two-page screens (the layout pass
+of one unit and its reading before the other unit's pass) were left: their results are not the same by
+construction, since the shaper's claims count across both units and the page's plans (the regions announced, the
+loads ahead, the unit read beside) are made for all units at once.
+
+**A page job past its page gives way at once.** Once a job's result is on show, what it still does - the page
+lettered once more for its next showing (`Pipeline.keep_shown`) - is cancelled at the first frame of another page,
+not after LEFT_PAGE_MS (`Operation.gave_way`), and `keep_shown` takes the job's own detection of the same capture
+instead of a layout-model pass, which looks at no cancel (`Pipeline._detect_held`). In the timing runs below the
+cancel came a median 356 to 392 ms after the result a run (409 to 506 before: the stand-in turns as soon as a page
+is finished, and the window waited 150 ms more), and the job let go of the worker a median 45 to 68 ms after it (29 to
+98 before; at most 154): the step under way ends first, the lettering of a region or the page's fingerprint.
+
+**Timing on the stand-in** (`tools/standin_e2e.py --scenario a,f --soft-first off --wait-done 120 --start-ollama
+11435`, the stand-in drawing each turn sharp at once; 1.0.0's tree and this one run in turn on the same computer and
+server; medians, with the 90th percentile, in ms from the turn, over the turns rested on to pages the cache did not
+hold; the readers on the GPU, where the GPU budget placed them, but for the readings made while a request is under
+way, which its rule puts on the processor; unless said):
+
+| | 1.0.0 | Lines sent as read |
+|---|---|---|
+| Two pages: first request | 1301 (1779) | 657 (796) |
+| Two pages: first bubble | 1627 (2176) | 1039 (1271) |
+| Two pages: whole page | 6103 (7369) | 6518 (7599) |
+| Two pages: the new page's job from the turn | 197 (435) | 177 (336) |
+| One page: first request | 738 | 483 |
+| One page: first bubble | 789 | 697 |
+| One page: whole page | 1905 | 1835 |
+| Two pages, the OCR on the GPU (`--ocr-runs-on gpu`): first request | 1304 (1606) | 633 (758) |
+| the same: first bubble | 1532 (1863) | 961 (1276) |
+| the same: whole page | 5625 (6158) | 5813 (6981) |
+| Two pages, no GPU (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0`): first request | 1910 (2195) | 529 (605) |
+| the same: first bubble | 2913 (4573) | 1804 (3220) |
+| the same: whole page | 21861 (28518) | 21142 (27665) |
+
+Three runs each, 33 two-page turns and 3 one-page turns per arm (the one-page figures are those of one page, f2's),
+the GPU and no-GPU rows one run each. Every page's first bubble came sooner, by 0.1 to 1.1 s (the medians page by
+page). A whole page takes about as long as before: of the 11 two-page screens, five were finished sooner (by 0.03 to
+0.8 s), five later (by 0.07 to 0.6 s), and the one with the take-backs 2.2 s later; the pooled median moves more, as
+the screens' times lie apart. The readings of the rest of a unit are now made while its requests are under way, and
+the GPU budget's rule puts a reading made then on the processor (`ocr.place.translating`, unchanged: each of the
+sender's requests goes through it as any request does): a page's OCR took a median 0.53 to 0.54 s a run before and
+1.28 to 1.38 s after, the readings made on the processor 0.9 to 1.1 s a page before and 1.1 to 1.2 s after (90th
+percentile 2.3 to 2.8 against 3.3 to 3.4 s), those on the GPU 0.66 to 0.73 against 0.58 to 0.60 s; a draft's
+lettering about 265 against 345 ms.
+
+**What was taken back** (the three runs): 258 lines sent before their unit was read, 222 stood and 36 were taken back
+in 5 of 42 units - in each run, a unit in which a classical candidate early in the unit's order, read after the
+layout model's, was text, so that the 11 or 12 runs sent after it were asked again (about 0.27 s a request; that
+page was finished 2.2 s later than before, 14.2 against 12.0 s), and in two of the runs the first unit of a page
+whose only line turned out to be print once the unit was read (by the rules that look at a unit's lines together; 1
+request; in the third it had sent nothing yet). A unit's first line was taken back in 2 of 42 units (the print
+line). A taken-back lettering stayed on show 1.5 to 1.7 s (median), 2.8 s at most; nothing of a taken-back line was
+in a page's lines or still on show at its result, in any run. With the OCR on the GPU, 104 lines were sent early and
+17 taken back, in the same two units; with no GPU, 27 were sent early and none taken back (the model's answers come
+slower than the readings there).
+
+**Reused lines.** Before they were lettered early, one page of the scenarios had its first bubble later than on
+1.0.0 (2.3 against 1.7 s, in three runs of the stream without it): its first lettering on 1.0.0 was a line the book's
+lines already translated, handed over as the request began, which with the stream waited for the end of the unit's
+reading. Lettered on the drafts layer as soon as it is judged, it came at 1.2 s; the layer ends after the request
+has handed it over (`close`), so it does not blink. No other page's first bubble moved by more than 0.08 s against
+those three runs.
+
+**A page that stops ends the drafts layer.** The first run of every scenario with the reused lines lettered early
+failed one criterion: 4 units whose request had been made still had lettering on the drafts layer when they closed
+(the report counts them, it does not name them). The way found that leaves it: a page that stops drops the drafts'
+tasks not begun (`PageFill.wait` with drop), and the layer's end was among them when the page stopped right after
+its unit's request, before the drafts' thread came to it; a page stopped while its unit was read left its early
+lettering on show in the same way, although nothing of its lines was kept. Both were so before the reused lines too
+(the two tests below fail on that tree). A page that stops now ends the layer itself
+once the drafts' thread has nothing left of it: each part the layer lettered is sent again as the page's working copy
+has it, and nothing is lettered. `tests/test_stream_lines.py`: a page stopped while it is read, and one stopped right
+after its request with the drafts' thread slowed, leave nothing of the layer on show.
+
+**Every scenario, soft first** (`--scenario c,a,b,d,e,r,t,o,z,x,f,k --wait-done 120 --start-ollama 11435`, the
+stand-in drawing a turn soft first, the OCR on the GPU as the budget placed it): all 70 criteria met on the final
+tree (868 s). 593 lines were sent early in 125 units; 430 stood and 163 were taken back in 35 units - 24 because the
+reader left the page while it was read (22 of them in k1's and k2's quick turns), 10 because a classical candidate
+read later was text, 1 a print line. None was in a page's lines, and nothing of the layer was on show at a unit's
+close or at a page's result; a taken-back lettering stayed on show a median 468 ms (2.7 s at most). The requests
+sent for pages the reader left before they were read (`wasted_requests`, all dropped): 42, 40 of them in k1 - the
+stream asks as soon as a line is read, where a page job asked only once its unit was read (the run of 1.0.0's tree
+made earlier on this computer had 2, with the OCR on the processor there). All 79 of the backlog's requests were
+computed at below-normal priority. A run of the tree before the reused lines and the fix above met all 70 too (892 s;
+489 lines sent early, 115 taken back, 35 requests sent for pages left).
