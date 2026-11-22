@@ -22,7 +22,9 @@ only: the summary job has no virtual environment.
 A stand-in run is judged by what it must show on any computer however slow (`correctness`: the run went through, the
 window followed the stand-in and nothing else, nothing was kept or shown from a frame that was not the sharp one, no
 request was sent for nothing, no job was cancelled with its page on show (but for one that gave its page over to the
-frame of a new size, `_resized_away`), a page translated before came back without a request, each scenario did what
+frame of a new size, `_resized_away`), nothing of a line asked as it was read and taken back once its page was read
+stayed in the page's lines or on show when the page was finished (the lines so sent and taken back are reported, never
+a failure: `_streamed`), a page translated before came back without a request, each scenario did what
 it is for - the modes entered and left, the page keys handed on, ...). What depends on the
 computer's speed - the rested turns translated within their rest, the holds of ``--wait-done`` that reached their
 cap, lettering left on a page until the window's next capture, pages left half done in the cache - is reported beside
@@ -441,6 +443,14 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
               if s != "x" and s not in K_PACES and n}
     check("all", "no request sent for nothing (outside scenario x, whose point they are)", not wasted, wasted)
     # (scenario k: a page job asks before its frame is confirmed, and a page flipped past drops it - `_k_correctness`)
+    # (a line asked as it was read and taken back once its unit was read - `streaming.LineStream` - is not one: the
+    # tool counts it apart, `streamed_lines`; what it must leave is judged here)
+    streamed = run.get("streamed_lines")
+    if isinstance(streamed, dict) and streamed.get("units"):
+        kept = {k: streamed.get(k) for k in ("final_from_taken_back", "early_left_at_close", "early_left_at_result")
+                if streamed.get(k)}
+        check("all", "nothing of a line taken back once its page was read stayed in the page's lines (and so in the "
+              "cache) or on show when the page was finished", not kept, kept)
     stale = [s for s in (run.get("incidents") or {}).get("stale_overlays") or [] if isinstance(s, dict)]
     if all("seen_ms" in s for s in stale):  # (a tool before it said when the window saw the change: not looked at)
         late = [s for s in stale if (s.get("seen_ms") or 0) > STALE_MS]
@@ -575,6 +585,21 @@ def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, A
     return {k: v for k, v in found.items() if v}
 
 
+STREAMED_KEYS = ("units", "lines_sent_early", "lines_stood", "lines_taken_back", "units_first_line_taken_back",
+                 "units_any_taken_back", "requests_taken_back", "withdrawn_on_show_ms")
+
+
+def _streamed(run: dict[str, Any]) -> dict[str, Any] | None:
+    """The lines sent as they were read, reported and never a failure but for what a finished page must not keep
+    (`correctness`): the lines sent early, those that stood and those taken back (the first line of a unit among
+    them), the requests whose answers were thrown away so, how long a taken-back lettering stayed on show. None
+    without them (a tool or a program before the stream)."""
+    s = run.get("streamed_lines")
+    if not isinstance(s, dict) or not s.get("units"):
+        return None
+    return {k: s.get(k) for k in STREAMED_KEYS}
+
+
 PRIORITY_KEYS = ("lowered", "not_lowered", "set_back", "low_ms", "backlog_requests", "backlog_requests_low")
 
 
@@ -615,6 +640,7 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
         "segments": segment_rows(run), "meaning": meanings(report),
         "criteria": len(criteria), "failed": failed, "speed": speed(report, timeout_s),
         "scenario_k": k_figures(report),
+        "streamed_lines": _streamed(run),
         "requests": {k: requests.get(k) for k in ("total", "outside_page_jobs", "gate_pending", "warm_ups")},
         "jobs": {k: jobs.get(k) for k in ("started", "on", "discarded")},
         "server_started": {"setup": server.get("setup"), "stopped": server.get("stopped")} if server else None,
@@ -688,6 +714,14 @@ def standin_md(s: dict[str, Any]) -> str:
                          f"{_pair([first.get('median'), first.get('max')])} | {drained} | "
                          f"{k.get('background_requests')} | {k.get('peak_mb')} |")
         lines.append("")
+    if s.get("streamed_lines"):
+        st = s["streamed_lines"]
+        on_show = st.get("withdrawn_on_show_ms") or {}
+        lines.append(f"* lines sent as they were read (reported): {st.get('lines_sent_early')} in {st.get('units')} "
+                     f"units, {st.get('lines_stood')} stood, {st.get('lines_taken_back')} taken back (a unit's first "
+                     f"line in {st.get('units_first_line_taken_back')}), {st.get('requests_taken_back')} requests "
+                     f"thrown away; a taken-back lettering on show ms median/max "
+                     f"{_pair([on_show.get('median'), on_show.get('max')])}")
     if s.get("server_priority"):
         sp = s["server_priority"]
         lines.append(f"* the backlog's work computed low (reported): {sp.get('backlog_requests_low')} of "
