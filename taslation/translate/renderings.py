@@ -132,6 +132,17 @@ class BookNames:
             self._from_reading.clear()
             self._learnt.clear()
 
+    def state(self) -> tuple[dict[str, str], set[str], set[tuple[str, str]]]:
+        """A copy of everything it holds, for `put_back` (lines asked too soon taken back: `plamo.PageSession`)."""
+        with self._lock:
+            return dict(self._held), set(self._from_reading), set(self._learnt)
+
+    def put_back(self, state: tuple[dict[str, str], set[str], set[tuple[str, str]]]) -> None:
+        """What it holds as `state` gave it."""
+        held, from_reading, learnt = state
+        with self._lock:
+            self._held, self._from_reading, self._learnt = dict(held), set(from_reading), set(learnt)
+
     def learn(self, source: str, translation: str) -> None:
         """What the line *source* and its *translation* show: the names given a reading in brackets, and the names
         with an honorific rendered with it; a name already held keeps its rendering."""

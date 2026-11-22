@@ -127,6 +127,8 @@ from .translate.base import (GrowingContext, accepts, ask_again_romanised, ask_f
 from .translate.continuation import facts_of
 from .translate.renderings import BookNames, NamedPremises
 from .messages import Cancelled, Message, message_of
+from . import streaming
+from .streaming import LineStream
 
 ProgressFn = Callable[[str], None]  # gets a Message (a str with .code and .params): the stage of the page
 EventFn = Callable[[str, dict[str, Any]], None]  # (kind, data): how the page fills in, see PageFill
@@ -594,6 +596,14 @@ class PageFill:
         self.work: np.ndarray | None = None
         self._pending: list[Future[Any]] = []  # what was handed to the drafts' thread and not waited for
         self._measured: dict[int, Any] = {}  # the sizes the drafts measured (`Pipeline.cap_sizes`' *measured*)
+        # the drafts layer (`early_draft`): lines answered before their unit was read to its end, lettered on copies
+        # of their regions on a copy of the page; index -> (the copy, its text), and where each one changed the page
+        self.early: dict[int, tuple[TextRegion, str]] = {}
+        self.early_boxes: dict[int, Box] = {}
+        self.early_work: np.ndarray | None = None
+        self._early_since: dict[int, float] = {}
+        self._early_off = False
+        self._early_count = {"early_lettered": 0, "early_withdrawn": 0, "withdrawn_ms": []}
 
     def link(self, scanned: "ScannedRegion", region: TextRegion) -> None:
         """A scan's *scanned* region is the announced *region*: a translation of the one letters the other."""
@@ -621,6 +631,8 @@ class PageFill:
                 for i, text in sorted(dict(self.shown).items()):
                     if i in self.boxes:
                         self._send(i, text, self.boxes[i])
+            if self.early:  # (and the drafts layer's, from its thread)
+                self._pending.append(_drafts_pool().submit(self._early_resend))
 
     def read(self, region: TextRegion) -> None:
         i = self.index.get(id(region))
@@ -734,6 +746,146 @@ class PageFill:
         x0, y0, x1, y1 = box
         patch = Image.fromarray(self.work[y0:y1, x0:x1].copy())
         self.emit("translated", {"index": i, "text": text, "box": box, "patch": patch})
+
+    # --- the drafts layer: lines answered before their unit was read to its end (`streaming.LineStream`) -----------
+    def early_draft(self, region: TextRegion, shaped: TextRegion, text: str) -> None:
+        """The answer *text* to the announced *region*'s line, asked before its unit was read to its end, lettered on
+        the drafts' thread on *shaped* (a copy of *region*, shaped as it will be) on a copy of the page: shown as a
+        draft is (``translated``, with ``early``), while the region itself, the working copy and what the page's
+        drafts measure stay as they are. `early_end` hands the page over to the drafts proper."""
+        self._pending.append(_drafts_pool().submit(self._early_draft, region, shaped, text))
+
+    def early_withdraw(self, regions: Sequence[TextRegion]) -> None:
+        """The drafts layer's lettering of *regions* taken back (their lines were asked too soon): each sent again as
+        the page shows it without it (``translated`` with "" and ``withdrawn``)."""
+        self._pending.append(_drafts_pool().submit(self._early_withdraw, list(regions)))
+
+    def early_end(self) -> None:
+        """The drafts layer ends, after the drafts handed over before (the lines that stood, lettered on the regions
+        themselves): each part of the page it lettered is sent again from the working copy, so that nothing of it
+        stays on show - a line taken back shows as read, without its lettering, until its own draft comes."""
+        self._pending.append(_drafts_pool().submit(self._early_end))
+
+    def early_begin(self) -> None:
+        """(the worker, a unit's stream begins) The drafts layer takes drafts again (`early_end` closed it for the unit
+        before), its counts from nothing."""
+        self._early_off = False
+        self._early_count = {"early_lettered": 0, "early_withdrawn": 0, "withdrawn_ms": []}
+
+    def early_log(self) -> dict[str, Any]:
+        """What the drafts layer did, as counts and times (no text): lines lettered on it, those taken back off it and
+        how long each was on show (ms), and what it still shows (0 once it ended)."""
+        return {"early_lettered": self._early_count["early_lettered"],
+                "early_withdrawn": self._early_count["early_withdrawn"],
+                "withdrawn_ms": [round(ms, 1) for ms in self._early_count["withdrawn_ms"]],
+                "early_left": len(self.early_boxes)}
+
+    def _early_base(self) -> np.ndarray:
+        return (self.work if self.work is not None else self.rgb).copy()
+
+    def _early_cap(self) -> None:
+        h, w = self.rgb.shape[:2]
+        order = sorted(self.early)
+        shaped = [self.early[i][0] for i in order]
+        among = [r for r in list(self.regions) if self.index.get(id(r)) not in self.early]
+        self.pipeline.share_rooms(shaped, (w, h), among)
+        self.pipeline.cap_sizes(shaped, [self.early[i][1] for i in order])
+
+    def _early_send(self, i: int, text: str, box: Box, **marks: Any) -> None:
+        assert self.early_work is not None
+        x0, y0, x1, y1 = box
+        patch = Image.fromarray(self.early_work[y0:y1, x0:x1].copy())
+        self.emit("translated", {"index": i, "text": text, "box": box, "patch": patch, "early": True, **marks})
+
+    def _early_draft(self, region: TextRegion, shaped: TextRegion, text: str) -> None:
+        try:
+            i = self.index.get(id(region))
+            text = balance_marks((text or "").strip())
+            if self._early_off or i is None or not text or self.early.get(i, (None, ""))[1] == text:
+                return
+            if not self.pipeline.real_translation(region.source_text, text):
+                return
+            again = i in self.early_boxes
+            self.early[i] = (shaped, text)
+            self._early_since[i] = time.monotonic()
+            self._early_count["early_lettered"] += 1
+            if again:
+                self._early_reletter([i])
+                return
+            if self.early_work is None:
+                self.early_work = self._early_base()
+            self._early_cap()
+            self.early_boxes[i] = self.pipeline.letter_region(self.early_work, shaped, text, quick=True)
+            self._early_send(i, text, self.early_boxes[i])
+        except Exception:  # noqa: BLE001 - the drafts layer is a look only; the page is lettered on its own
+            pass
+
+    def _early_reletter(self, changed: Sequence[int]) -> None:
+        """The drafts layer lettered again over the page as the working copy has it, each of *changed* sent with the
+        part of the page it changes now or changed before ("" and ``withdrawn``: no longer on the layer)."""
+        before = dict(self.early_boxes)
+        self.early_work = self._early_base()
+        self._early_cap()
+        self.early_boxes = {i: self.pipeline.letter_region(self.early_work, self.early[i][0], self.early[i][1],
+                                                           quick=True) for i in sorted(self.early)}
+        for i in changed:
+            box = before.get(i, self.regions[i].bbox)
+            if i in self.early_boxes:
+                box = _union(box, self.early_boxes[i])
+                self._early_send(i, self.early[i][1], box)
+            else:
+                self._early_send(i, "", box, withdrawn=True)
+
+    def _early_withdraw(self, regions: Sequence[TextRegion]) -> None:
+        try:
+            if self._early_off:
+                return
+            gone = [i for i in (self.index.get(id(r)) for r in regions) if i is not None and i in self.early]
+            if not gone:
+                return
+            now = time.monotonic()
+            for i in gone:
+                self.early.pop(i)
+                self._early_count["early_withdrawn"] += 1
+                self._early_count["withdrawn_ms"].append((now - self._early_since.pop(i, now)) * 1000.0)
+            self._early_reletter(gone)
+        except Exception:  # noqa: BLE001 - as `_early_draft`
+            pass
+
+    def _early_resend(self) -> None:
+        try:
+            if not self._early_off and self.early_work is not None:
+                for i in sorted(self.early_boxes):
+                    if i in self.early:
+                        self._early_send(i, self.early[i][1], self.early_boxes[i])
+        except Exception:  # noqa: BLE001 - as `_early_draft`
+            pass
+
+    def _early_end(self) -> None:
+        try:
+            if self._early_off:
+                return
+            self._early_off = True
+            work = self.work if self.work is not None else self.rgb
+            now = time.monotonic()
+            for i in sorted(self.early_boxes):
+                box = _union(self.early_boxes[i], self.boxes[i]) if i in self.boxes else self.early_boxes[i]
+                text = self.shown.get(i, "")
+                marks: dict[str, Any] = {"early_end": True}
+                if i in self.early and text != self.early[i][1]:
+                    marks["withdrawn"] = True
+                    self._early_count["early_withdrawn"] += 1
+                    self._early_count["withdrawn_ms"].append((now - self._early_since.get(i, now)) * 1000.0)
+                x0, y0, x1, y1 = box
+                self.emit("translated", {"index": i, "text": text, "box": box,
+                                         "patch": Image.fromarray(work[y0:y1, x0:x1].copy()), **marks})
+        except Exception:  # noqa: BLE001 - as `_early_draft`
+            pass
+        finally:
+            self.early.clear()
+            self.early_boxes.clear()
+            self._early_since.clear()
+            self.early_work = None
 
 
 WARM_JOIN_S = 2.0  # how long a release waits for the warming's step under way (`Pipeline.stop_warm`; 0.25 s as a rule)
@@ -1444,6 +1596,8 @@ class Pipeline:
         self.line_tally = linememo.Tally()
         # this session's looks for the part of a translation to set larger (`large_part`): counts and time only
         self.large_tally = locate_large.Tally()
+        # each unit's lines sent as they were read (`streaming.LineStream`): counts and times only, the newest last
+        self.stream_log: deque[dict[str, Any]] = deque(maxlen=200)
         # the readings a person corrected this session (`correct_reading`), newest last: taken wherever the same
         # misreading is read at the same place again (`_take_corrections`). Memory only: never stored, never logged
         self.corrected_readings: deque[CorrectedReading] = deque(maxlen=CORRECTIONS_HELD)
@@ -2117,6 +2271,7 @@ class Pipeline:
                  and reads and self.translator is not None else None)
         held_ahead, _ON_SHOW.ahead = getattr(_ON_SHOW, "ahead", None), ahead
         beside: ReadBeside | None = None  # the next unit of a spread, read while this one is translated
+        streams: list[LineStream] = []  # (a unit's lines sent as they are read, until its request is made)
         try:
             for n, (unit, unit_regions, page) in enumerate(plans):
                 if unit.index in reused:  # read behind the reader: nothing read here, the rest of it asked for
@@ -2142,11 +2297,17 @@ class Pipeline:
                         if err:
                             result.error = err
                 elif unit_regions:
+                    stream: LineStream | None = None
                     if beside is not None and beside.index == n:
                         taken, beside = beside, None
                         taken.take(report, fill)  # (read beside: what it told told now, in its order)
                     else:
-                        self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
+                        # (the window's page job: each line goes to the translator as soon as it is read)
+                        stream = self._line_stream(unit, unit_regions, fill, cancel, on_slow, translate,
+                                                   reuse if use_cache else None)
+                        if stream is not None:
+                            streams.append(stream)
+                        self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box, stream=stream)
                     self._take_corrections(unit, unit_regions)
                     self._order_read(rgb, unit.box, unit_regions)
                     self.share_rooms(unit_regions, (rgb.shape[1], rgb.shape[0]))  # (each translation's room: its part)
@@ -2159,8 +2320,13 @@ class Pipeline:
                         if not (n + 1 < len(plans) and plans[n + 1][0].index in reused):
                             beside = self._read_beside(rgb, plans, n, fill, cancel)
                         try:
-                            err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
-                                                          reuse=reuse if use_cache else None)
+                            try:
+                                err = self._translate_regions(unit_regions, report, fill, cancel, on_slow, unit.box,
+                                                              reuse=reuse if use_cache else None, stream=stream)
+                            finally:
+                                if stream is not None:
+                                    streams.remove(stream)
+                                    self._close_stream(stream)
                         except Cancelled:
                             # (the reader turned away: the lines answered by then are kept, the unit marked as lacking
                             # the rest, `_keep_answered`; nothing with Stop, nor from a frame never kept: `Provisional`)
@@ -2175,6 +2341,8 @@ class Pipeline:
                             self._store_regions(unit, unit_regions)
                 all_regions.extend(unit_regions)
         finally:
+            for stream in streams:  # (the unit stopped or failed before its request: nothing it sent lasts)
+                self._close_stream(stream)
             if beside is not None:
                 beside.drop()  # (the unit before it stopped or failed: the reading ends, nothing of it told)
             _ON_SHOW.ahead = held_ahead
@@ -3434,7 +3602,8 @@ class Pipeline:
 
     def _ocr_regions(self, rgb: np.ndarray, regions: list[TextRegion], report: ProgressFn,
                      fill: PageFill | None = None, cancel: threading.Event | None = None,
-                     read: Sequence[TextRegion] = (), unit_box: Box | None = None) -> list[TextRegion]:
+                     read: Sequence[TextRegion] = (), unit_box: Box | None = None,
+                     stream: LineStream | None = None) -> list[TextRegion]:
         """Read *regions*. Where the layout model found some, those first and together (one that repeats another of
         them read as text before it is left out); then the classical ones, each read only if it does not repeat what
         was read as text so far (or *read*, regions read before), all judged on the page's usual size - each as soon
@@ -3444,8 +3613,10 @@ class Pipeline:
         across that was read in pieces, or within a region that holds more, is read again a paragraph a region
         (`_prose`). What was left out leaves *regions* and is returned (each with the region it repeats in
         ``repeats``). A region the reader made "erase only" is read too (its reading shapes its erase) and then takes
-        the status `ERASED`."""
+        the status `ERASED`. *stream* (`streaming.LineStream`) is told each region judged and the end of the reading:
+        the lines known go to the translator meanwhile."""
         self._measure_slants(rgb, regions)
+        judged: Callable[[TextRegion], None] = stream.judged if stream is not None else (lambda _r: None)
         usual: float | _UsualLater
         if self.ocr is None:
             usual = 0.0
@@ -3460,8 +3631,11 @@ class Pipeline:
                 for i, r in enumerate(regions):
                     self._read_regions(rgb, [r], report, fill, cancel, done=i, total=len(regions), usual=usual,
                                        among=among)
+                    judged(r)
             else:
                 self._read_regions(rgb, regions, report, fill, cancel, usual=usual, among=among)
+            if stream is not None:
+                stream.read_done()
             usual = _taken(usual)
             left = self._prose(rgb, regions, usual, report, fill, cancel, among, read)
             self._titles(regions, usual, fill, unit_box or (0, 0, rgb.shape[1], rgb.shape[0]))
@@ -3489,6 +3663,7 @@ class Pipeline:
             for i, r in enumerate(first):
                 self._read_regions(rgb, [r], report, fill, cancel, done=i, total=total, usual=usual, among=among)
                 twin_of(r)
+                judged(r)
         else:
             self._read_regions(rgb, first, report, fill, cancel, total=total, usual=usual, among=among)
             for r in first:
@@ -3506,11 +3681,15 @@ class Pipeline:
 
         for i, r in enumerate(r for r in regions if not r.from_model):
             if repeats(r):
+                judged(r)
                 continue
             self._read_regions(rgb, [r], report, fill, cancel, done=len(first) + i, total=total, usual=usual,
                                among=among)
             if r.status == "untranslated" and r.source_text:
                 got.append(r)
+            judged(r)
+        if stream is not None:
+            stream.read_done()
         usual = _taken(usual)  # (all read: before the shapes change, as `_usual` took it before any reading)
         for r in first:
             take_shape(r)
@@ -3550,6 +3729,31 @@ class Pipeline:
                                                        for r in plans[n][1]):
             return None
         return ReadBeside(self, rgb, n + 1, unit, regions, fill, cancel).start()
+
+    def _line_stream(self, unit: fp.PageUnit, regions: Sequence[TextRegion], fill: PageFill | None,
+                     cancel: threading.Event | None, on_slow: SlowFn | None, translate: bool,
+                     reuse: bool | None) -> LineStream | None:
+        """The stream that sends the lines of *unit* (its *regions*, about to be read in their turn) to the translator
+        as they are read (`streaming.LineStream`): in the window's page job (`page_on_show`) with a cancel and the
+        page's fill, `streaming.STREAM_LINES`, the OCR and a translator that hands its lines over one by one and asks
+        a page's runs one by one (``page_session``: PLaMo). None otherwise: the lines are asked once the unit is
+        read."""
+        t = self.translator
+        if not (streaming.STREAM_LINES and translate and fill is not None and cancel is not None and regions
+                and getattr(_ON_SHOW, "window", False) and self.ocr is not None and t is not None
+                and hasattr(t, "page_session") and takes_items(t) and grows_context(t)):
+            return None
+        work: PageWork | None = getattr(_ON_SHOW, "work", None)
+        stream = LineStream(self, unit, regions, fill, cancel, on_slow, reuse, work.gate if work is not None else None)
+        fill.early_begin()
+        return stream
+
+    def _close_stream(self, stream: LineStream) -> None:
+        """*stream* ended (`LineStream.close`), its counts kept in `stream_log`; a failure here is the stream's alone."""
+        try:
+            self.stream_log.append(stream.close())
+        except Exception:  # noqa: BLE001 - the counts only: the page goes on
+            logging.getLogger(__name__).exception("a line stream did not close")
 
     @staticmethod
     def _erase_only(regions: Sequence[TextRegion], fill: PageFill | None = None) -> None:
@@ -4325,7 +4529,8 @@ class Pipeline:
 
     def _translate_regions(self, regions: list[TextRegion], report: ProgressFn, fill: PageFill | None = None,
                            cancel: threading.Event | None = None, on_slow: SlowFn | None = None,
-                           unit_box: Box | None = None, reuse: bool | None = True) -> str:
+                           unit_box: Box | None = None, reuse: bool | None = True,
+                           stream: LineStream | None = None) -> str:
         """Translate the regions to translate (one request for all of them, in reading order), spell them as the
         series sheet spells (`terms.spelt_right`, as the backlog spells its replies: a name or term the model
         wrote another way near enough, no model request), check and tighten the translations, and set the regions'
@@ -4343,9 +4548,13 @@ class Pipeline:
         kept, respelt, for the lines to come; *reuse* False asks every line and keeps the answers ("Translate again"),
         None neither reuses nor keeps. Once the translations are final, one whose Japanese lettering set a part larger
         than the rest (`TextRegion.size_mix`) gets the part of it to set larger (`_locate_large`: requests beside the
-        page's, its words never changed)."""
+        page's, its words never changed). With *stream* (`streaming.LineStream`: the unit's lines sent as they were
+        read), the request is made through it: the runs it sent that the request begins with stand, the rest are
+        taken back and asked now - the same requests, answers handed over in the same order, the same pairs."""
         todo = [r for r in regions if r.status == "untranslated"]
         if not todo:
+            if stream is not None:
+                stream.discard()  # (nothing to translate after all: what it sent goes back)
             return ""
         if self.translator is None:
             return Message("pipeline.no_translator")
@@ -4398,13 +4607,18 @@ class Pipeline:
         if computed is not None:
             extra["computed"] = computed
         plan = linememo.plan_for(self, texts, meta, todo, serve=bool(reuse), learn=reuse is not None)
+        if stream is not None and not plan.asked:
+            stream.discard()  # (every line reused: nothing is asked, and what it sent goes back)
+            stream = None
+        # (the unit's lines sent as they were read: the request is made through the stream)
+        translate = stream.translate_page if stream is not None else self.translator.translate_page
 
         def ask() -> tuple[list[str], Message | str, bool]:
             """The model asked (the lines reused filled in): its translations, what went wrong, and whether that
             ends the page's translation here."""
             failure: Message | str = ""
             try:
-                outputs = plan.ask(self.translator.translate_page, self.context_pairs(), self.premises(),
+                outputs = plan.ask(translate, self.context_pairs(), self.premises(),
                                    meta=meta if any(meta) else None, **extra)
             except TranslationError as e:
                 failure = message_of(e)
@@ -4434,11 +4648,14 @@ class Pipeline:
             return outputs, failure, False
 
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
-        if work is not None and work.gate is not None and plan.asked and not work.gate.on_show(cancel):
+        if (work is not None and work.gate is not None and plan.asked and not (stream is not None and stream.gated)
+                and not work.gate.on_show(cancel)):
             # (a page on show whose frame is not the viewer's any more - it changed, the follow ended: `PageGate` -
-            # asks the model nothing; its job puts back what it did)
+            # asks the model nothing; its job puts back what it did. A stream that sent a line asked it before that)
             check_cancel(cancel)
             raise Cancelled()
+        if stream is not None:
+            stream.gate_passed()
         if later and fill is not None and DRAFTS_BESIDE:
             fill.beside(measure_rooms)  # (while the model writes; before the drafts, which may cut a mask back)
         def keep(cancelled: BaseException) -> None:
