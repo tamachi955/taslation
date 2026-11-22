@@ -502,9 +502,6 @@ class ArtEraser:
         self._checked = False
         self._release_asked = False  # a release that came while the model was at work: done once it is free
         self._lock = threading.Lock()
-        # called (it may wait) before the model runs on the GPU, once per region: the batch pauses the GPU while the
-        # reader turns pages (`Pipeline.gpu_gate`); never on the CPU
-        self.before_gpu: Callable[[], None] | None = None
 
     def ready(self) -> bool:
         """Whether the erase can run as far as can be known without loading it: the weights file is LaMa's (the names
@@ -552,9 +549,6 @@ class ArtEraser:
         its model, Tools > Release the model now), when the next erase loads it on the GPU again; a failure on the CPU
         leaves the paper fill for the session. After a window on the GPU the idle cache is given back
         (`give_back_idle`)."""
-        gate = self.before_gpu
-        if gate is not None and not self.failed and self.uses_gpu():
-            gate()
         with self._lock:
             if self.failed:
                 return None

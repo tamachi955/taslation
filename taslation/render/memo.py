@@ -10,9 +10,8 @@ Nothing here is written anywhere: the pixels stay in RAM, within a byte budget, 
   erase, no typesetting. Any change of a translation, a note, a style, a setting or a single pixel of the capture
   area gives another key, and the page is lettered from scratch.
 * `ErasedRegions`: what erasing a region did (the inpainting model on the art, most of all), by `Pipeline.erase_key`
-  (the region, the settings of the erase and the pixels round it), as the whole-book run's erased pages hold it
-  (`pageimages.PageImages`): a page shown again whose pixels changed elsewhere (the pointer over another bubble)
-  takes the erase of every other region from here.
+  (the region, the settings of the erase and the pixels round it, `pageimages.ErasedRegion`): a page shown again whose
+  pixels changed elsewhere (the pointer over another bubble) takes the erase of every other region from here.
 """
 
 from __future__ import annotations

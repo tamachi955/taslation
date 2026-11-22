@@ -43,7 +43,7 @@ MIN_RUN = 8  # pixels: a column (or a line) of text is at least this wide
 PAD = 6  # pixels around a column's ink in its crop
 MIN_COLUMNS, MAX_COLUMNS = 3, 30  # a colophon has a title and two labels at least; a page of prose has more
 MAX_PARTS = 2  # parts of one page read in full at most (the whole panel, its halves)
-MAX_READS = 6  # pages of one book read in full at most (a whole-book scan, the window's pages)
+MAX_READS = 6  # pages of one book read in full at most (the window's pages, those read behind the reader)
 # a column that carries one of these is a label of the colophon (the more specific first)
 LABELS = ("発行日", "発行者", "発行所", "発行", "著者", "印刷所", "印刷", "ISBN", "©", "(C)")
 AUTHOR_LABELS = ("著者", "作者", "原作", "作画", "漫画")

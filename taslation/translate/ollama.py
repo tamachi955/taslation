@@ -80,7 +80,7 @@ cancellable like a request. Every request carries ``keep_alive`` (the setting
 ``ollama_keep_alive``, in Ollama's own format: `keep_alive_value`): how long Ollama
 keeps the model after it, so the pages that go on needing it keep it, and it goes by
 itself after that; nothing asks for it periodically. `release` unloads it at once: the
-end of a whole-book run or a command, the window's close. ``"-1"`` (never unload) is
+end of a command, Tools > Release the model now, the window's close. ``"-1"`` (never unload) is
 the one setting that keeps the old way: loaded at the start, before the OCR model,
 and never released (`never_unloads`).
 
@@ -165,7 +165,7 @@ ALIVE_MISSES = 2
 # A server whose model process hangs loads the model again and again while /api/ps answers: the load of the request
 # asked again was waited for WARM_UP_TIMEOUT and ended as a timeout, the server never started again (2026-11-21)
 NO_ANSWER_LOAD_S = 60.0
-RELEASE_TIMEOUT = 3.0  # seconds a request to unload may take: the end of a run or the window's close wait for it
+RELEASE_TIMEOUT = 3.0  # seconds a request to unload may take: the end of a command or the window's close wait for it
 RELEASE_WAIT_S = 10.0  # how long `release(wait=True)` waits for the model to be gone (0.3 s as a rule)
 FULL_GPU_SHARE = 0.99  # the share of the model in GPU memory (`gpu_share`) from which it counts as being on the GPU
 _SECONDS_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)")
@@ -445,7 +445,7 @@ class OllamaTranslator:
     def _held(self, timeout: float) -> tuple[http.client.HTTPConnection, bool]:
         """This thread's connection to Ollama, with *timeout* for each wait on it, and whether it was kept from an
         earlier request (a new one connects with the request). Never shared between threads: the page's worker, a load
-        ahead, a whole-book run's translation and the window's own requests each have theirs (a new connection costs
+        ahead, the backlog and the window's own requests each have theirs (a new connection costs
         ~15 ms, a kept one 0.2)."""
         conn = getattr(self._local, "conn", None)
         kept = conn is not None and conn.sock is not None

@@ -19,7 +19,7 @@ What the pipeline hands a translator maps to it like this:
   for that line;
 * the earlier bubbles (the ``context`` pairs, the book's own lines before these) and the lines of this request done so
   far -> the earlier pairs, the oldest left out first when the prompt would not fit (`PROMPT_SHARE`). The pipeline and
-  the whole-book run give it pairs that only grow, cut back rarely (``grows_context``, `base.GrowingContext`, cut
+  the backlog give it pairs that only grow, cut back rarely (``grows_context``, `base.GrowingContext`, cut
   earlier when a request would not fit after them: `context_fits`), so that a request's first prompt extends the
   last prompt of the request before, which Ollama then does not compute again. A line done holds its pair as its
   request computed it (`_computed`, `base.SentPair`): a joined run one pair, a line per bubble, and the answer as the
@@ -96,12 +96,12 @@ NUM_CTX = 8192  # Ollama's context for PLaMo: a line's prompt is ~1,200 tokens w
 # the earlier pairs a request starts from, at most; the lines of the request done so far are added to them, never one
 # taken off the front: the prompts of a request then share their beginning, which Ollama computes once (cutting the
 # oldest pair at every line made each prompt new: prompt processing fell from 5,800 to 900 tokens a second). The
-# pipeline and the whole-book run give it pairs that only grow from request to request and are cut back rarely
+# pipeline and the backlog give it pairs that only grow from request to request and are cut back rarely
 # (`base.GrowingContext`, ``grows_context``), never more than this
 HISTORY_PAIRS = CONTEXT_GROWS_TO
-# tokens (reckoned high, `tokens_about`) a request keeps for its own lines after the earlier pairs it is given: a
-# whole-book run's 30 lines with their answers and a line's room for its answer (`GrowingContext.take` cuts the pairs
-# back when they would leave less: `context_fits`)
+# tokens (reckoned high, `tokens_about`) a request keeps for its own lines after the earlier pairs it is given: a page's
+# lines (30 at most were asked at once by the whole-book run of earlier versions) with their answers and a line's room
+# for its answer (`GrowingContext.take` cuts the pairs back when they would leave less: `context_fits`)
 REQUEST_ROOM = 2400
 # A line's prompt is kept within this share of the context, its answer's room taken off first; its length in tokens is
 # reckoned high (`tokens_about`): a reserved token one, any other character outside ASCII one (Japanese, Chinese,
@@ -540,7 +540,7 @@ class PlamoTranslator(OllamaTranslator):
 
     def warm_prefix(self, notes: str, pairs: Sequence[tuple[str, str]],
                     stop: threading.Event | None = None) -> dict[str, Any]:
-        """(while the reader reads: no page job, no whole-book run) The beginning the next page's first request will
+        """(while the reader reads: no page job) The beginning the next page's first request will
         start with - the premises *notes* and the earlier *pairs* that request will be given (`GrowingContext.peek`) -
         computed by the server now, when it does not hold `WARM_LEAST` tokens of it or more in any of what it may hold
         (`held_of`: after the pairs were cut back, or a load): that request then extends it, as it extends the last

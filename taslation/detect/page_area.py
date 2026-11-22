@@ -48,11 +48,9 @@ capture, or the manual area, when nothing was found yet). A 1920x1080 capture ta
 12 ms as a PIL image (the first call in a process some 10 ms more, while OpenCV starts), so running it on every
 capture is affordable.
 
-What the window and a whole-book run share of that use is here: `panel_inside` (the panel inside a hand-set area,
-`TIGHT_PX`), `joined` (the union of the boxes found), `area_margins` (the capture area the boxes found give, within
-the hand-set area when there is one), `page_panel` (a frame's panel as the capture area takes it in) and
-`JoinedArea`, the capture area of a whole-book run that follows the reader: it widens with the page panel of every
-page the run takes, before the run reads that page, and never narrows (`batch.BatchReader`).
+What the window makes of that use is here: `panel_inside` (the panel inside a hand-set area, `TIGHT_PX`), `joined`
+(the union of the boxes found), `area_margins` (the capture area the boxes found give, within the hand-set area when
+there is one) and `page_panel` (a frame's panel as the capture area takes it in).
 
 Known limits (pixels alone cannot tell these apart):
 
@@ -72,7 +70,6 @@ Known limits (pixels alone cannot tell these apart):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
 import cv2
@@ -249,12 +246,6 @@ def area_margins(found: Box | None, size: Size, hand: Any = None) -> Margins:
     return page_area_margins(common, size)
 
 
-def widest(a: Any, b: Any) -> Margins:
-    """The capture area that holds both areas *a* and *b* (margins of one capture size): the smaller margin on every
-    side."""
-    return tuple(min(int(x), int(y)) for x, y in zip(a, b))  # type: ignore[return-value]
-
-
 def page_panel(image: Image.Image, hand: Any = None) -> Box | None:
     """The page panel of the frame *image* as the capture area takes it in, in *image*'s pixels: `find_page_area` on
     the whole capture while the reader has set no area (*hand* None), else the panel inside that area
@@ -269,61 +260,6 @@ def page_panel(image: Image.Image, hand: Any = None) -> Box | None:
         return find_page_area(image)
     except Exception:  # noqa: BLE001 - a frame the finder cannot take changes nothing
         return None
-
-
-@dataclass
-class JoinedArea:
-    """The capture area of a whole-book run that follows the reader (`batch.BatchReader`'s *page_area*): the page
-    panels found in the frames the run takes as pages, joined (`joined`), and the area they give (`area_margins`), as
-    the window joins the panels of its own frames (`ui.live.LiveViewMixin._find_page`) - for one run, growing as the
-    pages come. A run that starts while the viewer shows a single page (a cover, narrower than the spreads after it)
-    takes in the wider panel of each spread as it comes, before it reads that spread.
-
-    *margins*: the area read now (left, top, right, bottom). *hand*: the reader's own area, the outer bound (None:
-    none, the panel is looked for on the whole capture); never exceeded, and a panel within `TIGHT_PX` of it is the
-    area itself. *size* and *found*: the capture size the panels are in and their union so far (None: none found yet),
-    as the window's record of the viewer has them when the run starts.
-
-    `meet` takes in a frame the run takes as a page, before the run reads it. The area only grows: every page is read
-    in an area that holds its own panel and those of the pages before it, so no page already read needs reading
-    again, and a page read once more (the reader went back) is read in an area that holds its panel as the first
-    time. A frame where no panel is found changes nothing. Two exceptions, both before any page is read in the area
-    they leave: while no panel is known (the area is the whole capture, or the reader's area with nothing found in
-    it), the first page's panel gives the area, as the window would have given it; and a capture of another size than
-    the panels found so far (the viewer's window resized) starts them over, margins being pixels.
-
-    One thread alone calls `meet` (the run's packer); the others read *margins*, which it replaces whole."""
-
-    margins: Margins
-    hand: Margins | None = None
-    size: Size | None = None
-    found: Box | None = None
-    # a page has been taken in the area, or a panel gave it: from then on it only grows
-    settled: bool = field(default=False, init=False)
-
-    def __post_init__(self) -> None:
-        self.margins = tuple(int(m) for m in self.margins)  # type: ignore[assignment]
-        self.hand = tuple(int(m) for m in self.hand) if self.hand is not None else None  # type: ignore[assignment]
-        self.size = (int(self.size[0]), int(self.size[1])) if self.size is not None else None
-        self.found = tuple(int(v) for v in self.found) if self.found is not None else None  # type: ignore[assignment]
-        self.settled = self.found is not None
-
-    def meet(self, image: Image.Image) -> bool:
-        """*image*, a frame the run takes as a page: the panel found in it (`page_panel`) joined in, and the area
-        widened to hold it. Whether the panels found changed (the window's record of them follows them)."""
-        size = (int(image.size[0]), int(image.size[1]))
-        if size != self.size:
-            self.size, self.found, self.settled = size, None, False
-        panel = page_panel(image, self.hand)
-        if panel is None:
-            self.settled = True  # (the page is read in the area as it is: from now on it only grows)
-            return False
-        found = joined(self.found, panel)
-        area = area_margins(found, size, self.hand)
-        self.margins = widest(self.margins, area) if self.settled else area
-        self.settled = True
-        changed, self.found = found != self.found, found
-        return changed
 
 
 # ---------------------------------------------------------------------------------------------------- measuring

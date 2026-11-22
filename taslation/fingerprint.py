@@ -319,7 +319,7 @@ def split_spread(gray: np.ndarray, box: Box, grow: bool = True, rtl: bool = True
 
     A gutter is a run of columns near the middle that carries no ink (white gap)
     or is perfectly uniform (viewer background). A false split on a single page
-    is harmless: both the batch pass and the reading pass apply the same rule,
+    is harmless: every reading of the page applies the same rule,
     so fingerprints still line up. *grow*: `page_box`'s, for each page's box.
     *nudge*: the gutter's columns, or an edge of a page's box, read with a pixel
     of ink more or less (`Nudge`); *moved* gets the nudges that would move the

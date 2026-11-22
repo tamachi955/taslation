@@ -39,9 +39,9 @@ itself, packed without loss (`pageimages.pack`, on a thread of its own) until th
 (`Pipeline.scan`), then dropped - the regions that read gave kept in its place. Caps: FRAME_CAP_MB of frames (counted
 as they are until packed) and of the regions' masks together, and UNIT_CAP page units; a page that would pass either
 is not caught (regions that would pass it are not kept: the page is then read again when shown). A thumbnail at most
-`batch.THUMB_HEIGHT` px high of every screen told to the window (in memory, too small to read; never shown as a page).
-The backlog is dropped (`drop`) when the window closes, for another book, another viewer window, and when a
-whole-book run starts; pages already stored stay stored, and nothing more is told of a screen dropped. Auto off, Stop
+`frames.THUMB_HEIGHT` px high of every screen told to the window (in memory, too small to read; never shown as a page).
+The backlog is dropped (`drop`) when the window closes, for another book and for another viewer window; pages already
+stored stay stored, and nothing more is told of a screen dropped. Auto off, Stop
 and Tools > Release the model now pause it (`paused`); the next page job, or Auto on, goes on with it. A translator
 that does not answer pauses it too ("no_answer", `follow_silence`: a request of any job's ended without an answer by
 the rule of `translate.ollama`, asked again and, for the server TASlation started, the server started again): it goes
@@ -69,8 +69,8 @@ a stage told done is never told at work again while the page is on show).
 
 The order of work on the window's single worker (`Backlog.tick`, `Backlog.step`): the page on show first, always - a
 step of the backlog is queued only while no page job runs or waits, nothing of a page job is held for its frame
-(`Pipeline.behind_allowed`) and the window is idle (not busy, no whole-book run, nothing queued, no page of the
-viewer's followed: `follows_viewer`); in the hold of a page
+(`Pipeline.behind_allowed`) and the window is idle (not busy, nothing queued, no page of the viewer's followed:
+`follows_viewer`); in the hold of a page
 job kept for now (the 2 s in which the window may still take its confirmation back on a viewer that draws a page soft
 first: `Pipeline.behind_reads_allowed`) a read only, of the nearest page that needs one - it asks the translator
 nothing and changes nothing a take-back puts back -, the decision held off while it runs (`Pipeline.holding_decision`;
@@ -94,10 +94,10 @@ requests were made (the translator's `GrowingContext`), so that each extends the
 each request given the pairs of the pages before it in the story, was measured in the stand-in's scenario k and on
 OpenMantra and taken out: no better translation, more of the server's time - docs/OFFLINE_VERIFICATION.md.)
 
-Events to the window (through *post*, the window's ``_post``), outside a whole-book run, each with ``reading=True``:
+Events to the window (through *post*, the window's ``_post``), each with ``reading=True``:
 
-* ``page_stage`` {seq, fingerprint, stage, state[, thumb], reading}: a screen of normal reading, at every change, in
-  the shape a whole-book run's has (`batch`): *seq* the screen's place in the order of first sight in this book and
+* ``page_stage`` {seq, fingerprint, stage, state[, thumb], reading}: a screen of normal reading, at every change:
+  *seq* the screen's place in the order of first sight in this book and
   session (1, 2, ...), *fingerprint* that of its first page unit, *stage* "read" or "translate", *state* "waiting",
   "working", "done", "failed", "skipped" or "missed" (a page that went by before it could be caught: on show
   SHOWN_AT_LEAST_MS or more, not soft, its frame changed before it was confirmed - or confirmed and not caught), and
@@ -141,7 +141,7 @@ DONE_CAP_MB = 64  # the regions as read kept of the pages done (`Backlog.keep_do
 def reading_event(window: Any, kind: str, data: dict[str, Any]) -> None:
     """(the window's event pump: `ui.jobs._handle_event`) An event of normal reading's - ``page_stage`` with
     ``reading``, ``page_on_show``, ``backlog`` - to the window's handler of it (``_on_reading_<kind>``), when it has
-    one; else nothing: a whole-book run's page strip never takes them."""
+    one; else nothing."""
     handler = getattr(window, f"_on_reading_{kind}", None)
     if handler is not None:
         handler(data)
@@ -326,8 +326,8 @@ def _not_the_same(pipeline: Any, kept: Sequence[Any], at: Any, sig: bytes, units
 
 
 class _Recording(deque):  # type: ignore[type-arg]
-    """The pairs a request of a translator that does not grow them starts from (a deque, as a whole-book run's), with
-    those added to it since (``added``)."""
+    """The pairs a request of a translator that does not grow them starts from (a deque), with those added to it
+    since (``added``)."""
 
     def __init__(self, pairs: Any = (), maxlen: int | None = None) -> None:
         super().__init__(pairs, maxlen=maxlen)
@@ -353,8 +353,6 @@ class _Host:
     def __init__(self, pipeline: Any, stop: Any, lock: Any) -> None:
         self.pipeline = pipeline
         self.progress = SimpleNamespace(answering=0)
-        self.retranslate = False
-        self._view = None
         self._stop = stop
         self._fatal: Any = None
         self._storing = lock
@@ -483,7 +481,7 @@ class Backlog:
     def tell(self, screen: Screen, stage: str, state: str, image: Any = None, **extra: Any) -> None:
         """``page_stage`` for *screen* (numbered now when it was never told), when its *stage* changes to *state*;
         the screen's first event gets its thumbnail, made from *image* (none: a page that went by)."""
-        from .batch import thumb_of
+        from .frames import thumb_of
 
         with self._lock:
             if not any(s is screen for s in self.screens):
@@ -709,7 +707,7 @@ class Backlog:
 
     # ------------------------------------------------------------------ dropping and pausing
     def drop(self, why: str = "") -> None:
-        """Everything the backlog holds goes (another book, another viewer window, a whole-book run, the close): its
+        """Everything the backlog holds goes (another book, another viewer window, the close): its
         frames and units, its screens; pages stored stay stored. The window is told at once, when anything was there:
         ``backlog`` with *dropped* True (pages and lines 0: the screens told so far are gone, the numbering starts at 1
         again), then the totals as ever."""
@@ -852,8 +850,7 @@ class Backlog:
             return
         pipeline = getattr(window, "pipeline", None)
         if (self.paused or self.fatal is not None or pipeline is None or not getattr(window, "ready", False)
-                or getattr(window, "busy", False) or getattr(window, "batch", None) is not None
-                or getattr(window, "_batching", False) or getattr(window, "_queued", None) is not None
+                or getattr(window, "busy", False) or getattr(window, "_queued", None) is not None
                 or not window._jobs.empty() or follows_viewer(window)):
             return
         allowed, full = _allowed(pipeline)
@@ -1057,8 +1054,8 @@ class Backlog:
         return "made"
 
     def _translate(self, pipeline: Any, entry: Entry, stop: Preempt, settings: Any) -> str:
-        """What is still to translate of *entry*'s units (held to the cache first: `Pipeline.resync`) asked for, as a
-        whole-book run asks for a run of units (`translate.sequence.translate_units`), stopped between line requests,
+        """What is still to translate of *entry*'s units (held to the cache first: `Pipeline.resync`) asked for as a
+        run of units (`translate.sequence.translate_units`), stopped between line requests,
         what was answered by then stored. Its requests get the pairs in the order of work, as the page on show's do: a
         translator that grows them (`GrowingContext`) has them grown as it answers; for one that does not, the pairs
         answered (`_Recording`) join the pages' pairs (`Pipeline._context`) as the step ends, stopped or not."""
@@ -1412,10 +1409,8 @@ def backlog_of(window: Any, make: bool = True) -> Backlog | None:
 
 
 def tracking_for(window: Any, image: Any, gate: Any, again: Any = None, replace_edited: bool = False) -> Tracking | None:
-    """(the worker, a page job of *window* starting) Its `Tracking`: None for "Translate again", and while a
-    whole-book run is on (its own events tell its pages)."""
-    if again is not None or replace_edited or getattr(window, "batch", None) is not None or \
-            getattr(window, "_batching", False):
+    """(the worker, a page job of *window* starting) Its `Tracking`: None for "Translate again"."""
+    if again is not None or replace_edited:
         return None
     pipeline = getattr(window, "pipeline", None)
     backlog = backlog_of(window)
@@ -1429,7 +1424,7 @@ def tracking_for(window: Any, image: Any, gate: Any, again: Any = None, replace_
 
 
 def drop_backlog(window: Any, why: str) -> None:
-    """*window*'s backlog dropped (another book, a whole-book run starting)."""
+    """*window*'s backlog dropped (another book)."""
     backlog = backlog_of(window, make=False)
     if backlog is not None:
         backlog.drop(why)

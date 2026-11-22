@@ -4,7 +4,7 @@ that ended without closing the window, put back at the next start.
 A browser-based viewer sometimes shows nothing: a loading screen that may just be slow, or that is stuck (a black page
 with a spinner, which a reload cures), or a frame that stays black. `capture.is_black` over the capture
 area says so, and `BlackWatch` is what follows, one spell of black frames at a time, for the window (`ui.live`, its
-heartbeat: the Tk thread is never held) and the batch (`batch.BatchReader._through_black`) alike. TASlation presses no
+heartbeat: the Tk thread is never held). TASlation presses no
 key for it, ever (no key the person did not press goes to the viewer):
 
 1. *Wait.* `black_wait_s` with the window's size stable (a change of it starts the wait over). After `SAY_AFTER_S` the

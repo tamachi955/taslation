@@ -15,7 +15,7 @@ an honorific is never taken for it; kinship words and titles before an honorific
 (`NOT_NAMES`); nor is a word that is the rendering of another name found. Scripts without capitals (Chinese,
 Korean, Thai) give nothing. A wrong suggestion is worse than a missed one, so every gate leans to saying nothing.
 
-Nothing here writes any text: the lines are a run's, or those of the pages read one by one in this session
+Nothing here writes any text: the lines are those of the pages read one by one in this session
 (`PageLines`, at most `PAGE_LINES_MAX`, in memory only); the result holds the name as the Japanese writes it (to show
 the reader in the window), its renderings and where each comes - never printed nor logged. Standard library only."""
 
@@ -73,7 +73,7 @@ NOT_RENDERINGS = HONORIFIC_WORDS | TITLE_WORDS
 
 
 class RunLine(NamedTuple):
-    """A line of a run: its Japanese (*source*, in memory only), its translation as stored (*text*) and where it is
+    """A line of the pages read: its Japanese (*source*, in memory only), its translation as stored (*text*) and where it is
     stored (*where*: the page's fingerprint and the bubble's box, for `cache.TextEdit`)."""
 
     source: str
@@ -82,11 +82,11 @@ class RunLine(NamedTuple):
 
 
 class PageLines:
-    """The lines of the pages read one by one in this session, for the name check (`find_variants`), as a run keeps its
-    own (`batch.BatchReader._keep_said`): each line's Japanese, its translation as stored and where it is stored. In
-    memory only, never written; at most *limit* of them (the lines seen longest ago go first); for one *scope* at a
-    time (the book, model and language: another starts them over). A line is kept by where it is stored, so a page
-    shown again adds nothing; its text follows what the cache holds (`retext`)."""
+    """The lines of the pages read one by one in this session, for the name check (`find_variants`): each line's
+    Japanese, its translation as stored and where it is stored. In memory only, never written; at most *limit* of them
+    (the lines seen longest ago go first); for one *scope* at a time (the book, model and language: another starts them
+    over). A line is kept by where it is stored, so a page shown again adds nothing; its text follows what the cache
+    holds (`retext`)."""
 
     def __init__(self, limit: int = PAGE_LINES_MAX) -> None:
         self.limit = max(1, int(limit))

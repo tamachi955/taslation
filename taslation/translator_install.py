@@ -50,7 +50,7 @@ PLAMO_FILE = "plamo-3-translate-2b-Q4_K_M.gguf"
 PLAMO_SHA256 = "1ffd9073afcc70e35ccc942428aa2b73d7aa2b9ea779bf504b775369e0276c13"
 PLAMO_BYTES = 1_807_203_040
 PLAMO_DIRNAME = "plamo-3-translate-2b"  # its folder under the models folder: the Modelfile and the licence's texts
-PLAMO_NUM_CTX = 16384  # the context the window's whole-book requests need (the card trained 32K)
+PLAMO_NUM_CTX = 16384  # the context its requests are given (the card trained 32K)
 PLAMO_STOPS = ("<|plamo:tag|>", "<|plamo:bos|>")  # where a translation ends (the card's Completions examples)
 # the licence, in the two languages the repository has it in (path in the repository, sha256, file name kept): the
 # texts at the pinned revision, "Established on February 25, 2025 / Revised on November 9, 2026"

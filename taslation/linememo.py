@@ -13,9 +13,9 @@ a line whose sentence goes on in the next bubble or comes from the one before (t
 `translate.continuation`: a piece of a sentence is no line of its own), nor one with the reader's hint for the
 model (a remark that holds for that bubble alone). The speaker and the kind the reader gave a line are part of its
 key: a line said by someone else, or marked a thought, is another line. The rule was chosen on OpenMantra
-(docs/OFFLINE_VERIFICATION.md, "Line reuse"): the repeats within a book are short lines; the professional
-translators rendered a repeated line alike only half the time, but our model's fresh translation of one came no closer
-to theirs than its first translation, whole-book or page by page, for any length or kind within `MAX_CHARS`. What reuse
+(docs/OFFLINE_VERIFICATION.md, "Line reuse"): the repeats within a book are short lines; the professional translators
+rendered a repeated line alike only half the time, but our model's fresh translation of one came no closer to theirs
+than its first translation, a whole book at once or page by page, for any length or kind within `MAX_CHARS`. What reuse
 risks is a first translation that misses coming back with the line, until a person corrects it once.
 
 Where it is kept: in the book's cache file (`cache.BookCache.lines`, the ``lines`` field before its pages), sealed
@@ -37,7 +37,7 @@ Title" for "Some Title 3" and for "Some Title 3巻" kept before the two fields, 
 under - letter case and spaces aside; read but never written); never another series'. A line a person corrected in
 translator mode wins over the model's, in the book and across the series (`Entry.edited`, `SeriesLines.find`): the
 editor's Save stores it (`remember_edit`), and later identical lines get it. A model's answer never replaces a
-person's (`LineMemo.put`); "Translate again" and the whole book translated again ask the model for every line (`Plan`
+person's (`LineMemo.put`); "Translate again" asks the model for every line (`Plan`
 with *serve* False) and replace the model's entries with the new answers; the editor's Ask again asks the model, and
 its answer saved is a person's choice. Ctrl+Z on a change of translator mode takes back the lines it kept with the
 rest of it (`LineMemo.state`, `LineMemo.carry`, with `ui.history`).
@@ -582,9 +582,9 @@ def held_lines(pipeline: Any) -> SeriesLines | None:
 
 def plan_for(pipeline: Any, texts: Sequence[str], meta: Sequence[dict[str, Any] | None] | None,
              regions: Sequence[Any] = (), serve: bool = True, learn: bool = True) -> Plan:
-    """The `Plan` of a request of *pipeline* (`Pipeline._translate_regions`, the whole-book run's
-    `BatchReader._translate_units`): its book's lines (`held_lines`), its translator and target language, its series
-    sheet; *serve* False ("Translate again", the whole book again) asks every line and keeps the new answers; *learn*
+    """The `Plan` of a request of *pipeline* (`Pipeline._translate_regions`, the backlog's
+    `translate.sequence.translate_units`): its book's lines (`held_lines`), its translator and target language, its
+    series sheet; *serve* False ("Translate again") asks every line and keeps the new answers; *learn*
     False keeps nothing either (a page read without the cache: `Pipeline.process` with ``use_cache`` False)."""
     lines = held_lines(pipeline) if serve or learn else None
     return Plan(lines, scope(pipeline.translator, pipeline.settings.target_language), texts, meta,

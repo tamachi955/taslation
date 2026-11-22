@@ -1,11 +1,10 @@
 """Quick checks of what translating needs: Ollama running, the translation model installed, the OCR model on disk.
 
-Meant to run when the window starts, every few seconds while a problem stands, and before a whole-book batch
-(`taslation.batch.preflight`). They only ever talk to the configured Ollama on this computer (a URL whose host
-is not a loopback address counts as "not running", and nothing is sent to it), with one short GET request at
-most, and they are quick when Ollama is not running: on Windows a refused connection takes about 2 s to be
-reported (the system tries twice more before it gives up), so every address gets a single connection attempt
-with a short timeout (`CONNECT_TIMEOUT`) instead; a server on this computer accepts at once.
+Meant to run when the window starts and every few seconds while a problem stands. They only ever talk to the configured
+Ollama on this computer (a URL whose host is not a loopback address counts as "not running", and nothing is sent to it),
+with one short GET request at most, and they are quick when Ollama is not running: on Windows a refused connection takes
+about 2 s to be reported (the system tries twice more before it gives up), so every address gets a single connection
+attempt with a short timeout (`CONNECT_TIMEOUT`) instead; a server on this computer accepts at once.
 
 `check` says what is wrong as `taslation.messages.Message` objects:
 

@@ -168,14 +168,6 @@ class _Session:
                 self._changed.wait_for(lambda: self._frame is not None or self.ended, left)
             return self._frame
 
-    def wait_past(self, seq: int, timeout: float) -> int:
-        """The session's frame count once it is past *seq*, or as it is after *timeout* seconds (every time: a caller
-        that waits for the next frame of a window that does not change waits each time)."""
-        with self._changed:
-            if self._seq <= seq and timeout > 0:
-                self._changed.wait_for(lambda: self._seq > seq or self.ended, timeout)
-            return self._seq
-
     def close(self, wait: bool = False) -> None:
         self._stop.set()
         if wait:
@@ -262,18 +254,6 @@ def count(hwnd: int) -> int | None:
     if session is None or session.hwnd != hwnd or session.ended or not session.has_frame:
         return None
     return session.seq
-
-
-def wait(hwnd: int, seq: int, timeout: float) -> int | None:
-    """The frame count of the window *hwnd* once a frame after frame *seq* has come, or after *timeout* seconds as it
-    is then: the capture's frame events, for a caller that follows every new frame (the whole-book run's sampler) and
-    otherwise sleeps. None at once when no session of it runs that has sent a frame (`count`): the caller looks for
-    itself then. Nothing is captured or started for it."""
-    with _lock:
-        session = _session
-    if session is None or session.hwnd != hwnd or session.ended or not session.has_frame:
-        return None
-    return session.wait_past(seq, timeout)
 
 
 def live(hwnd: int) -> bool:

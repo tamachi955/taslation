@@ -1,12 +1,10 @@
-"""The translating sequence of a run of page units read ahead (`taslation.pipeline.ScannedUnit`): what a whole-book
-run (`taslation.batch.BatchReader`) does with the units it has read, and what the reading's backlog
-(`taslation.backlog`) does with a page the reader turned past.
+"""The translating sequence of a run of page units read ahead (`taslation.pipeline.ScannedUnit`): what the reading's
+backlog (`taslation.backlog`) does with a page the reader turned past.
 
-`translate_units` takes a *host*: the object whose run it is, with what the sequence needs of it - a whole-book run's
-`BatchReader` is one, the backlog's `backlog.Steps` another. What the host has:
+`translate_units` takes a *host*: the object whose run it is, with what the sequence needs of it (the backlog's
+`backlog.Steps`). What the host has:
 
-* ``pipeline`` (the `Pipeline`, its translator set), ``progress`` (``answering`` is set to 0 as a request ends),
-  ``retranslate`` (every line asked of the model: none reused, `linememo`), ``_view`` (a `TranslationView`, or None);
+* ``pipeline`` (the `Pipeline`, its translator set), ``progress`` (``answering`` is set to 0 as a request ends);
 * ``_stop`` (a `threading.Event`: the requests' cancel - once set nothing more is asked), ``_fatal`` (None, or the
   failure every later request would repeat: set here, read before each run), ``_storing`` (the lock the cache's lines
   are planned and learnt under);
@@ -57,13 +55,9 @@ def translate_units(host: Any, units: list[ScannedUnit], recent: "deque[tuple[st
     each line still missing on its own; what comes back is checked and tightened in turn and completes the page
     units it can. What came back is stored even when its unit stays incomplete (`Pipeline.commit_unit`), and
     counted once, when it is stored. A page unit the model still gives nothing usable for is noted and translated
-    when its page is read (``batch.note_unit_failed``). A failure every later request would repeat (`fatal`) ends
-    the translation.
-
-    While frames are still read (`_deferring`), what it stores, counts and notes waits (`_store_unit`,
-    `_deferred`): it goes on as if every unit had been stored, its completeness as `Pipeline.commit_unit` would
-    return it (`_would_complete`). The lines kept for reuse (`linememo`) are kept at once, as without the overlap
-    (the next run's requests reuse them), under the run's lock: the reading of a page may read the cache meanwhile.
+    when its page is read (``batch.note_unit_failed``: the code's name is older than the backlog). A failure every
+    later request would repeat (`fatal`) ends the translation. The lines kept for reuse (`linememo`) are kept at once
+    (the next run's requests reuse them), under the host's lock: the reading of a page may read the cache meanwhile.
 
     A unit stored complete can change no more (only the lines of incomplete ones are asked again), nor can any of
     *units* once the call is over (Stop aside): either is told as soon as it is so (`_units_final`), so that its
@@ -75,6 +69,7 @@ def translate_units(host: Any, units: list[ScannedUnit], recent: "deque[tuple[st
         host._model_loaded()  # (a request is over: whatever it loaded is loaded)
     if not host._stop.is_set():
         host._units_final(units)
+
 
 def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str, str]] | GrowingContext",
                    notes_text: str, upcoming: list[str], language: str, depth: int = 0) -> None:
@@ -114,10 +109,6 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
         host._model_loaded()  # (the model answers: it is loaded)
         host._answered(answered, k, len(texts))
         got[k] = str(text or "")
-        view = host._view
-        if view is not None and 0 <= k < len(texts):  # (on show as it comes: `translation_view`)
-            ui, i = slots[k]
-            view.line(units[ui], i, texts[k], str(text or ""), str(meta[k].get("speaker", "")))
 
     told: dict[str, Any] = {"on_item": on_item} if accepts(translator.translate_page, "on_item") else {}
     # the earlier pairs the run's request computed, as its translator says (a joined run as one pair, the answers
@@ -125,11 +116,9 @@ def _translate_run(host: Any, units: list[ScannedUnit], recent: "deque[tuple[str
     # first prompt extends this run's last one
     computed: list[tuple[str, str]] | None = [] if grown and _base.tells_computed(translator) else None
     asked_with = dict(told, computed=computed) if computed is not None else told
-    if host._view is not None:
-        host._view.request(units)
     # a short line the book or its series translated before is not sent: it takes that translation (`linememo`)
     with host._storing:  # (the cache's lines: a page being read may look the cache up meanwhile)
-        plan = linememo.plan_for(host.pipeline, texts, meta, run, serve=not host.retranslate)
+        plan = linememo.plan_for(host.pipeline, texts, meta, run)
     keeps = bool(getattr(host, "keeps_answered", False))  # (a host that keeps what was answered when stopped)
     stopped_with: dict[int, str] | None = None  # (the lines answered when it was stopped: `kept_when_stopped`)
     try:

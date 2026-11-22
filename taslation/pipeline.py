@@ -10,16 +10,16 @@ Two ways of working:
 
 * ``process()``: one page now (live reading). Translates with the series sheet and
   the last pages as context.
-* ``scan()`` + ``commit_unit()``: used by the whole-book batch. ``scan()``
-  reads a page (detection + OCR) and keeps only text and geometry; the batch
-  reads every page first and then translates runs of lines, and
+* ``scan()`` + ``commit_unit()``: used by the work behind the reader
+  (`backlog`). ``scan()`` reads a page turned past (detection + OCR) and keeps
+  only text and geometry; the backlog translates its lines, and
   ``commit_unit()`` stores each result in the cache.
 
 What was translated is always kept: a page unit with one real translation or
 more is stored even when a bubble got none. The entry is then marked
 (`CachedPage.incomplete`), the bubble stays untranslated on the page, and the
-next reading of the page (``process()``) or whole-book run (``scan()``) asks
-for what is missing, and only that.
+next reading of the page (``process()`` or ``scan()``) asks for what is
+missing, and only that.
 
 ``process(events=...)`` also tells a window how the page fills in while it is
 translated (``PageFill``): the regions as soon as they are found, each one as
@@ -32,16 +32,6 @@ lettering is made from changed (`_shown_key`): no detection, no erase, no typese
 too (``erased_regions``, by `erase_key`), so a page whose pixels changed elsewhere erases only what changed; a
 page from the cache that must wait for the inpainting model is sent first as an early look (`_early_look`). All
 of it in memory only.
-
-Erased ahead: the whole-book batch erases every page it has read in the
-background (``scan(keep_regions=True)`` gives the regions as the render will
-see them, `erase_page` erases them) and keeps the erased pages in memory
-(`pageimages.PageImages`, set as ``erased_ahead``). `_render` takes a region's
-erase from there when its key matches (`erase_key`: the region, the settings of
-the erase and the pixels round it, so the very page in the very place), and
-erases the region itself otherwise. ``gpu_gate``, while set, is called before
-LaMa runs on the GPU (the batch holds it while the reader turns pages); the
-layout model does not wait for it (`_detect`).
 
 What the pipeline says is a `taslation.messages.Message` (a ``str`` with a
 ``code`` and ``params``): the progress callback gets the stages of a page
@@ -86,7 +76,7 @@ from . import linememo
 from . import locate_large
 from . import size_mix
 from .size_mix import SizeMix
-from .pageimages import ErasedRegion, PageImages, packed_mask, region_digest
+from .pageimages import ErasedRegion, packed_mask, region_digest
 from .render.memo import ErasedRegions, ShownPages, changed_pixels, pixels_digest, signature
 from .devices import StageTimes
 from .cache import INDEXED_WITHIN, SAME_BOX, BookCache, CachedBubble, CachedPage
@@ -538,9 +528,6 @@ class PageScan:
     width: int
     height: int
     units: list[ScannedUnit] = field(default_factory=list)
-    # with *keep_regions*: the regions the render will erase once the page is translated, as it will see them
-    # (`Pipeline.scan`), in memory only, for the erase ahead (`Pipeline.erase_page`)
-    erasable: list[TextRegion] = field(default_factory=list)
 
     @property
     def fingerprints(self) -> list[str]:
@@ -554,8 +541,7 @@ class PageScan:
 def scanned_bubble(unit: ScannedUnit, region: ScannedRegion, text: str, flags: Sequence[str] = (),
                    large: tuple[int, int, float] | None = None) -> CachedBubble:
     """The cached bubble of *region*, a region of the scanned *unit*, translated as *text* (*large*: the part of it set
-    larger, `CachedBubble.large`): its box and its outline in the unit's terms, as `Pipeline.commit_unit` stores it
-    and `PageDraft` letters it before it is stored."""
+    larger, `CachedBubble.large`): its box and its outline in the unit's terms, as `Pipeline.commit_unit` stores it."""
     pu = fp.PageUnit(unit.box, unit.fingerprint, unit.index)
     x0, y0 = region.bbox[0], region.bbox[1]
     poly = [pu.normalize((int(x) + x0, int(y) + y0, int(x) + x0, int(y) + y0))[:2] for x, y in region.poly]
@@ -748,143 +734,6 @@ class PageFill:
         x0, y0, x1, y1 = box
         patch = Image.fromarray(self.work[y0:y1, x0:x1].copy())
         self.emit("translated", {"index": i, "text": text, "box": box, "patch": patch})
-
-
-DraftLines = Sequence[tuple[ScannedUnit, "dict[int, str]"]]  # a page's scanned units, each with lines: index -> text
-
-
-class PageDraft:
-    """A page of a whole-book run with lines the model has answered and the run has not stored yet, lettered for the
-    window alone (`translation_view`; with no lines, the page the viewer shows while the run translates as the cache
-    letters it, `batch.BatchReader.viewer_page`): its start is the page as the cache letters it now (`Pipeline.page_picture`:
-    its frame when the cache holds nothing of it), and each line given to `letter` is matched to the run's region of
-    it as a cached bubble is (`scanned_bubble`, `Pipeline._apply_cached`), erased (the erase the run did ahead,
-    `PageImages.find`, else the paper fill: never LaMa) and lettered on a working copy (`work`) as
-    `Pipeline.translated_page` letters it. A line lettered once is not lettered again: the sizes of the page are kept
-    alike over the lines given so far (`cap_sizes`), and the stored page, lettered afresh (`restart`), puts them right.
-    Nothing is stored and nothing is written: the working copy is in memory only. *ok* is False when no image of the
-    page is held any more (the memory cap made room): nothing can be shown of it then."""
-
-    def __init__(self, pipeline: "Pipeline", store: PageImages, seq: int, storing: Any = None):
-        self.pipeline, self.store, self.seq = pipeline, store, seq
-        self.storing = storing  # the run's lock while it stores (`batch._storing`): held only to ask the cache
-        self.frame = store.original(seq)
-        self.regions: list[TextRegion] = store.regions(seq) or []
-        self.ok = self.frame is not None
-        self.drawn: dict[Any, str] = {}  # a lettered region (its index in `regions`) -> the text lettered in it
-        self._keys: dict[Any, bytes] = {}  # its `erase_key`, taken on the frame
-        self._pixels: dict[int, tuple[Any, np.ndarray]] = {}  # an erased page's pixels, unpacked once for the draft
-        if not self.ok:
-            return
-        assert self.frame is not None
-        self.rgb = np.asarray(self.frame.convert("RGB"))
-        self.units = pipeline.units_of(self.rgb)
-        self.owners = pipeline._owners(self.rgb, self.regions, self.units)
-        self.restart()
-
-    def restart(self) -> None:
-        """Start again from the page as the cache letters it now (lines of it stored meanwhile), nothing lettered. What
-        the cache holds for the page is taken under *storing* (copies), the lettering done without it: the run that
-        stores waits for no picture."""
-        if not self.ok:
-            return
-        p = self.pipeline
-        held: dict[tuple[Any, str], tuple[CachedPage, int] | None] = {}
-        if p.cache is not None:
-            with self.storing if self.storing is not None else nullcontext():
-                for unit in self.units:
-                    hit = p._lookup(unit)
-                    held[(tuple(unit.box), unit.fingerprint)] = None if hit is None else (copy.deepcopy(hit[0]), hit[1])
-        # (nothing of it stored yet: its frame, as `page_picture` gives it then)
-        picture = p.page_picture(self.store, self.seq, lambda unit: held.get((tuple(unit.box), unit.fingerprint))
-                                 ) if any(held.values()) else None
-        self.start = np.array(picture.convert("RGB")) if picture is not None else self.rgb.copy()
-        self.work = self.start.copy()
-        self.drawn = {}
-
-    def image(self) -> Image.Image | None:
-        """The page as it is lettered now (a picture of its own), None when no image of it is held."""
-        return Image.fromarray(self.work.copy()) if self.ok else None
-
-    def _unit(self, scanned: ScannedUnit) -> fp.PageUnit | None:
-        """The page unit of the frame that *scanned* was read from (the run read this very frame)."""
-        for unit in self.units:
-            if tuple(unit.box) == tuple(scanned.box) and unit.fingerprint == scanned.fingerprint:
-                return unit
-        for unit in self.units:
-            if unit.index == scanned.index and fp.hamming(unit.fingerprint, scanned.fingerprint) <= INDEXED_WITHIN:
-                return unit
-        return None
-
-    def _placed(self, lines: DraftLines) -> list[tuple[Any, TextRegion]]:
-        """Every line of *lines* on the region it is lettered in (copies of the run's regions), keyed by the region."""
-        p = self.pipeline
-        placed: list[tuple[Any, TextRegion]] = []
-        for scanned, texts in lines:
-            unit = self._unit(scanned)
-            regions = scanned.japanese()
-            bubbles = [scanned_bubble(scanned, regions[i], text) for i, text in sorted(texts.items())
-                       if 0 <= i < len(regions) and text]
-            if unit is None or not bubbles:
-                continue
-            page = CachedPage(fingerprint=scanned.fingerprint, aspect=scanned.aspect, bubbles=bubbles, seq=-1)
-            mine = [(n, copy.copy(r)) for n, r in enumerate(self.regions) if self.owners.get(id(r)) is unit]
-            index = {id(r): n for n, r in mine}
-            for r in p._apply_cached(unit, page, [r for _n, r in mine], self.rgb, p._areas_of(self.units, unit)):
-                if r.status == "translated" and r.translated_text:
-                    placed.append((index.get(id(r), ("cached", r.bbox)), r))
-        return placed
-
-    def letter(self, lines: DraftLines) -> bool:
-        """The page with *lines* (all the lines of it not stored yet) lettered: those not lettered yet are erased and
-        lettered on the working copy; when one lettered before is gone or reads otherwise, the page is lettered again
-        from its start. True when the picture changed."""
-        if not self.ok:
-            return False
-        p = self.pipeline
-        placed = self._placed(lines)
-        now = {key: r.translated_text for key, r in placed}
-        if any(now.get(key) != text for key, text in self.drawn.items()):
-            self.work = self.start.copy()
-            self.drawn = {}
-        new = [(key, r) for key, r in placed if key not in self.drawn]
-        if not new:
-            return False
-        for key, r in new:
-            if key not in self._keys:
-                self._keys[key] = p.erase_key(self.rgb, r)
-        found = self.store.find([self._keys[key] for key, _r in new], self.rgb.shape)
-        backgrounds = []
-        for n, (_key, r) in enumerate(new):
-            hit = found.get(n)
-            if hit is not None:  # erased ahead: that erase, as the render takes it
-                erased, page = hit
-                erased.paste(self.work, self._erased_pixels(page))
-                erased.settle(r)
-                backgrounds.append(erased.background)
-            else:
-                backgrounds.append(p._erase(self.work, r, quick=True))
-        keys = {key for key, _r in placed}  # (the run's regions not lettered here keep their part of a shared room)
-        p.share_rooms([r for _key, r in placed], (self.rgb.shape[1], self.rgb.shape[0]),
-                      [r for n, r in enumerate(self.regions) if n not in keys])
-        p.cap_sizes([r for _key, r in placed], [r.translated_text for _key, r in placed])
-        pil = Image.fromarray(self.work)
-        for (key, r), bg in zip(new, backgrounds):
-            p._set_text(pil, r, r.translated_text, bg, r.style)
-            self.drawn[key] = r.translated_text
-        self.work = np.array(pil)
-        return True
-
-    def _erased_pixels(self, page: Callable[[], np.ndarray]) -> np.ndarray:
-        """The pixels of the erased page `PageImages.find` gives *page* for, unpacked once while the draft lasts (not
-        again for each line); only read from."""
-        packed = getattr(page, "packed", None)
-        if packed is None:
-            return page()
-        hit = self._pixels.get(id(packed))
-        if hit is None or hit[0] is not packed:
-            hit = self._pixels[id(packed)] = (packed, page())
-        return hit[1]
 
 
 WARM_JOIN_S = 2.0  # how long a release waits for the warming's step under way (`Pipeline.stop_warm`; 0.25 s as a rule)
@@ -1403,7 +1252,7 @@ class ReadBeside:
 
     def _run(self) -> None:
         try:
-            from .batch import lower_priority  # (the batch imports the pipeline)
+            from .threads import lower_priority
 
             lower_priority()
         except Exception:  # noqa: BLE001 - only a matter of speed
@@ -1504,12 +1353,6 @@ class Pipeline:
         self.text_detector: TextBlockDetector | None = None
         # what lets go of a GPU model (a detector's or an inpainter's `release`): called before Ollama's model loads
         self.gpu_releases: list[Callable[[], Any]] = []
-        # while set, called (it may wait) before LaMa runs on the GPU: the batch's pause while the reader turns pages
-        # (`batch.GPU_QUIET_S`); the layout model does not wait (`_detect`)
-        self.gpu_gate: Callable[[], None] | None = None
-        # the pages the batch erased ahead (`erase_page`), in memory only: `_render` takes a region's erase from there,
-        # for a page the viewer shows (what they are kept for after the run, and all: no page is shown from them)
-        self.erased_ahead: PageImages | None = None
         # this session's lettered pages from the cache and live erases, in memory only (`render.memo`): a page shown
         # again comes back without detection, erase or typesetting
         self.shown_pages = ShownPages()
@@ -1561,87 +1404,11 @@ class Pipeline:
         self.corrected_readings: deque[CorrectedReading] = deque(maxlen=CORRECTIONS_HELD)
 
     # ------------------------------------------------------------------
-    def _before_gpu(self) -> None:
-        """A GPU model is about to run: the gate first, while one is set (`gpu_gate`)."""
-        gate = self.gpu_gate
-        if gate is not None:
-            gate()
-
-    def page_picture(self, store: PageImages, seq: int,
-                     lookup: Callable[[fp.PageUnit], tuple[CachedPage, int] | None] | None = None) -> Image.Image | None:
-        """The page *seq* of a whole-book run as the cache letters it now, for the run's translation view (the page
-        being translated, `PageDraft.restart`) and for the page the viewer itself shows while the run translates
-        (`batch.BatchReader.viewer_page`) alone: the window is shown no other page of the run's memory - reading is
-        on the viewer. Lettered with the translations the cache holds for it (`translated_page`, on its frame, in
-        memory) when it is translated, else its frame as it was captured; never the bare erased page
-        (`PageImages.original`). None when no image of it is held. A lettering that fails (the cache being written
-        meanwhile) gives the frame. *lookup*: as for `translated_page`."""
-        frame = store.original(seq)
-        if frame is None:
-            return None
-        regions = store.regions(seq)
-        if regions:
-            try:
-                lettered = self.translated_page(frame, regions, store, lookup)
-            except Exception:  # noqa: BLE001 - the frame, as it was captured, is what is left to show
-                lettered = None
-            if lettered is not None:
-                return lettered
-        return frame
-
-    def translated_page(self, frame: Image.Image, regions: Sequence[TextRegion], store: PageImages | None = None,
-                        lookup: Callable[[fp.PageUnit], tuple[CachedPage, int] | None] | None = None
-                        ) -> Image.Image | None:
-        """*frame* lettered with the translations the cache holds for its page units, on *regions* (the run's regions of
-        that frame, `PageImages.regions`), as `process` letters a page from the cache: each region's erase taken from
-        *store*'s erased page when it holds it, else the paper fill (never LaMa: this is for showing, on the window's
-        thread). None when the cache translates none of them. Nothing is stored, nothing of *regions* is changed.
-        *lookup*: what the cache holds for a unit, taken beforehand (`PageDraft.restart`: under the run's lock, so
-        that the lettering does not hold it); the cache itself (`_lookup`) when None."""
-        if self.cache is None or not regions:
-            return None
-        rgb = np.asarray(frame.convert("RGB"))
-        units = self.units_of(rgb)
-        if not units:
-            return None
-        live = [copy.copy(r) for r in regions]
-        owners = self._owners(rgb, live, units)
-        placed: list[TextRegion] = []
-        for unit in units:
-            hit = (lookup or self._lookup)(unit)
-            if hit is not None:
-                placed.extend(self._apply_cached(unit, hit[0], [r for r in live if owners[id(r)] is unit], rgb,
-                                                 self._areas_of(units, unit)))
-        todo = [r for r in placed if erases(r)]  # (an "erase only" region: erased, nothing set)
-        if not todo:
-            return None
-        self.share_rooms(placed, (rgb.shape[1], rgb.shape[0]), [r for r in live if all(r is not q for q in placed)])
-        out = rgb.copy()
-        found = store.find([self.erase_key(rgb, r) for r in todo], rgb.shape) if store is not None else {}
-        backgrounds = []
-        for i, r in enumerate(todo):
-            hit_erased = found.get(i)
-            if hit_erased is not None:  # erased ahead: that erase, as the render takes it
-                erased, page = hit_erased
-                erased.paste(out, page())
-                erased.settle(r)
-                backgrounds.append(erased.background)
-            else:
-                backgrounds.append(self._erase(out, r, quick=True))
-        lettered = [(r, bg) for r, bg in zip(todo, backgrounds) if r.status != ERASED]
-        self.cap_sizes([r for r, _bg in lettered], [r.translated_text for r, _bg in lettered])
-        pil = Image.fromarray(out)
-        for r, bg in lettered:
-            self._set_text(pil, r, r.translated_text, bg, r.style)
-        return pil
-
-    def release_page_images(self) -> None:
-        """Let go of the last whole-book run's page images (the window closes, another book): pages erase on show."""
-        store, self.erased_ahead = self.erased_ahead, None
-        if store is not None:
-            store.clear()
+    def forget_shown(self) -> None:
+        """Let go of this session's lettered pages and live erases (`shown_pages`, `erased_regions`): another book."""
         self.shown_pages.clear()
         self.erased_regions.clear()
+
 
     def warm_page_models(self) -> threading.Thread | None:
         """The layout model and LaMa loaded ahead, on a thread of their own at a lower priority, when the settings in
@@ -1672,7 +1439,7 @@ class Pipeline:
 
     def _warm(self, models: Sequence[Any], released: int) -> None:
         try:
-            from .batch import lower_priority  # (the batch imports the pipeline)
+            from .threads import lower_priority
 
             lower_priority()
         except Exception:  # noqa: BLE001 - only a matter of speed
@@ -1758,7 +1525,7 @@ class Pipeline:
 
     def _save_store(self, name: str, store: Any) -> bool:
         """*store*.save(); a failure (a full disk, a locked file) is no reason to lose the page at hand, so it does
-        not raise: it is kept in `save_error` for the window and the batch to say, until a save of *name* works.
+        not raise: it is kept in `save_error` for the window to say, until a save of *name* works.
         Within `saves_held`, a save of the cache waits for `flush_saves` (True); so does one while a page job's frame
         is not confirmed (`Provisional`), the cache left marked as it was before the job - and one while the window's
         close has put such a job back and its worker is still on it (`_holding`)."""
@@ -1783,7 +1550,7 @@ class Pipeline:
     def page_on_show(self, gate: PageGate | None = None) -> Iterator[PageWork]:
         """(the window's page job, on its worker) Within it, the page `process` reads is the one on show: its cache
         saves wait for it to be shown (`saves_held`), and the translator's model loads while it is read, with the
-        page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (a whole-book run's).
+        page's cancel (`LoadAhead`). Nothing of this thread's is changed for another thread (the backlog's).
 
         With *gate* pending (a frame not confirmed yet: `PageGate`), the job asks nothing of the translator before the
         window has found its frame on show after it asked (`PageGate.on_show`: `_translate_regions`, `LoadAhead`), and
@@ -1921,9 +1688,8 @@ class Pipeline:
 
     def set_margins(self, margins: Sequence[int]) -> None:
         """The capture area read from here on (left, top, right, bottom): the margins of the settings the pipeline was
-        given - in the window, the window's own, which it shows the page by. A whole-book run that follows the reader
-        widens it as the pages come, between two pages it reads and never during one (`batch.BatchReader._read_in`):
-        each step of a page's reading takes the margins afresh."""
+        given - in the window, the window's own, which it shows the page by. Each step of a page's reading takes the
+        margins afresh."""
         self._base_settings.margins = tuple(int(m) for m in margins)  # type: ignore[assignment]
 
     def _build_detectors(self) -> None:
@@ -1953,8 +1719,6 @@ class Pipeline:
                 self.gpu_releases[:] = [f for f in self.gpu_releases if getattr(f, "__self__", None) is not old]
         self.art_eraser = (artwork.ArtEraser(s.models_dir, s.art_erase, self._paper_erase)
                            if s.erase_mode == "fill" and artwork.available(s.models_dir, s.art_erase) else None)
-        if self.art_eraser is not None:
-            self.art_eraser.before_gpu = self._before_gpu
         wanted = s.detect_model == "on" or (s.detect_model == "auto" and self.art_eraser is not None)
         self.layout = (LayoutModel(s.models_dir)
                        if wanted and self._detector_given is None and layout_model.available(s.models_dir) else None)
@@ -2052,7 +1816,7 @@ class Pipeline:
         return pairs[-40:]
 
     def warm_soon(self) -> bool:
-        """(the window, while nothing of it runs: no page job, no request waiting, no whole-book run) The beginning of
+        """(the window, while nothing of it runs: no page job, no request waiting) The beginning of
         the next page's first request - the premises and the pairs `context_pairs` will give it, as they are now
         (`GrowingContext.peek`: cut back where it will cut them) - computed by the server on a thread of its own
         while the reader reads (`PlamoTranslator.warm_prefix`, which does nothing when the server holds it already),
@@ -2449,18 +2213,14 @@ class Pipeline:
 
     def _erases_on_art(self, page: np.ndarray, regions: Sequence[TextRegion]) -> bool:
         """Whether rendering *regions* on *page* (untouched) takes the inpainting model for one of them: a region
-        on the art that neither the erased pages of a run nor this session's erases hold."""
+        on the art that this session's erases do not hold."""
         eraser = self.art_eraser
         if eraser is None or eraser.failed:
             return False
         todo = [r for r in regions if erases(r)]
         if not todo:
             return False
-        keys = [self.erase_key(page, r) for r in todo]
-        store = self.erased_ahead
-        held = set(store.find(keys, page.shape)) if store is not None else set()
-        return any(i not in held and not self.erased_regions.has(k) and artwork.on_art(page, r)
-                   for i, (k, r) in enumerate(zip(keys, todo)))
+        return any(not self.erased_regions.has(self.erase_key(page, r)) and artwork.on_art(page, r) for r in todo)
 
     def _early_look(self, rgb: np.ndarray, regions: Sequence[TextRegion], fill: "PageFill",
                     cancel: threading.Event | None = None) -> None:
@@ -2478,38 +2238,17 @@ class Pipeline:
         except Exception:  # noqa: BLE001 - the finished page is rendered on its own
             pass
 
-    # ------------------------------------------------------------------ batch
+    # ------------------------------------------------------------------ behind the reader
     def scan(self, image: Image.Image, *, skip_cached: bool = True, progress: ProgressFn | None = None,
-             fresh: bool = False, cancel: threading.Event | None = None,
-             events: EventFn | None = None, keep_regions: bool = False, keep_edited: bool = True,
-             later: list[Callable[[], Any]] | None = None,
-             behind: bool = False, keep: Any = None) -> PageScan:
+             cancel: threading.Event | None = None, behind: bool = False, keep: Any = None) -> PageScan:
         """Detect and read a page; keep text and geometry only (the image is not retained). Once *cancel* is set,
         `Cancelled` is raised between regions.
 
-        With *later*, what the scan keeps besides what it returns - a cached page pruned or emptied (`_save_page`), the
-        page's place in the book's order of pages (`record_sequence`) - is appended there, in its order, instead of
-        done: the caller does it once it keeps the scan (a whole-book run throws away the reading of a frame a sharper
-        picture of the page replaced meanwhile, and keeps nothing of it).
-
         A page that is already in the cache is re-synchronised with the current
         detection: cached bubbles that no text region corresponds to any more are
-        dropped (they were false detections of an earlier run), text regions the
+        dropped (they were false detections of an earlier reading), text regions the
         cache does not have yet are returned for translation, and the rest is kept
         with its translation.
-
-        With *events*, the page is told as it fills in (`PageFill`): the regions of the units to translate once they
-        are found, and each one read; a page from the cache announces nothing.
-
-        With *fresh* (a whole-book run that translates every page again) a cached page's Japanese regions are all
-        returned for translation, but for those a translation a person wrote lies on (`CachedBubble.edited`): with
-        *keep_edited* (the default) that translation is kept, and the model is not asked for it.
-
-        With *keep_regions*, the scan's ``erasable`` holds the regions the render will erase once the page is
-        translated, as the render will see them: the detection's regions as they were before the reading (a page from
-        the cache is rendered without one), with the shape a model region takes (`take_shape`, as `_apply_cached`
-        gives it), of those read as Japanese and those the reader made "erase only", in reading order (`erase_page`
-        erases them ahead).
 
         With *behind* (a page the reader turned past, read from its capture: `backlog`), *cancel* stops it between
         the detectors too, as it stops a page on show. *keep* (an object, `backlog`) is told the reading as it goes,
@@ -2521,19 +2260,16 @@ class Pipeline:
         the page units -> copies of a read of the same frame stopped before, as ``found``, ``read`` and ``aliases``
         were then, or None) takes that read up: its detection in place of one, its units read as they were then (a
         misreading corrected since taken: `_take_corrections`), the rest read from its detection - what the read
-        would have been had it never stopped. Not with *events*, *keep_regions* or *fresh*: the backlog's read has
-        none of them.
+        would have been had it never stopped.
         """
         s = self.settings
         report = progress or (lambda _msg: None)
         rgb = np.asarray(image.convert("RGB"))
         scan = PageScan(width=rgb.shape[1], height=rgb.shape[0])
-        fill = PageFill(self, rgb, events) if events is not None else None
         units = self.units_of(rgb)  # (a spread: the page read first first, and so recorded)
         if not units:
             return scan
-        resume = getattr(keep, "resume", None) if keep is not None and fill is None and not keep_regions and not fresh \
-            else None
+        resume = getattr(keep, "resume", None) if keep is not None else None
         prior = resume(units) if callable(resume) else None
         prior_read: dict[int, list[TextRegion]] = {}  # (by unit index: the regions the read stopped before had read)
         prior_aliases: dict[int, list[tuple[Box, ...]]] = {}
@@ -2562,39 +2298,27 @@ class Pipeline:
             keep.units, keep.found = list(units), copy.deepcopy(regions)
         owners = self._owners(rgb, regions, units)
         before = _units_before(rgb, s.margins)
-        when_kept: Callable[[Callable[[], Any]], Any] = (later.append if later is not None
-                                                         else (lambda action: action()))
         if self.annotations is not None:
-            annotations = self.annotations
             for unit in units:
-                when_kept(lambda unit=unit: annotations.record_sequence(unit.fingerprint, unit.aspect))
+                self.annotations.record_sequence(unit.fingerprint, unit.aspect)
         plans: list[tuple[fp.PageUnit, list[TextRegion], tuple[CachedPage, int] | None]] = []
         for unit in units:
             hit = None
-            if (skip_cached or fresh) and self.cache is not None:
+            if skip_cached and self.cache is not None:
                 hit = self._lookup(unit, before)
             if unit.index in prior_read:  # (read before, ordered then)
                 plans.append((unit, prior_read[unit.index], hit))
                 continue
             plans.append((unit, apply_order_hints(
                 order_on_page(rgb, unit.box, [r for r in regions if owners[id(r)] is unit], self.rtl)), hit))
-        if fill is not None:
-            fill.announce([r for _unit, unit_regions, hit in plans if hit is None or fresh for r in unit_regions])
-        unread = {id(r): copy.copy(r) for _unit, unit_regions, _hit in plans for r in unit_regions} if keep_regions else {}
         for unit, unit_regions, hit in plans:
             su = ScannedUnit(index=unit.index, box=unit.box, fingerprint=unit.fingerprint, aspect=unit.aspect)
             taken = unit.index in prior_read  # (read by the read stopped before: as it read it, ordered and roomed)
-            left_out = (self._ocr_regions(rgb, unit_regions, report, fill, cancel, unit_box=unit.box)
+            left_out = (self._ocr_regions(rgb, unit_regions, report, None, cancel, unit_box=unit.box)
                         if unit_regions and not taken else [])
             self._take_corrections(unit, unit_regions)
             if not taken:
                 self._order_read(rgb, unit.box, unit_regions)
-            for r in unit_regions:
-                if keep_regions and (r.status == "untranslated" and r.source_text or r.status == ERASED):
-                    seen = unread.get(id(r)) or copy.copy(r)  # (a paragraph's region was made in the reading)
-                    take_shape(seen)
-                    seen.panel = r.panel  # (found after the reading, `_order_read`)
-                    scan.erasable.append(seen)
             stands_for: dict[int, list[Box]] = {}  # a region's id -> the boxes of the regions it repeated
             if taken:
                 for r, boxes in zip(unit_regions, prior_aliases.get(unit.index) or ()):
@@ -2609,32 +2333,12 @@ class Pipeline:
                 if isinstance(aliases, dict):
                     aliases[unit.index] = [tuple(stands_for.get(id(r), ())) for r in unit_regions]
             scanned = self._scanned_regions(unit_regions, stands_for)
-            if fill is not None:
-                for r, kept in zip(unit_regions, scanned):
-                    fill.link(kept, r)
             if hit is None:
                 su.regions = scanned
                 scan.units.append(su)
                 continue
             page, _distance = hit
             su.stored_fingerprint = page.fingerprint
-            if fresh:
-                # translate everything again; the page's entry is replaced (never duplicated) when the new one is saved
-                su.regions = scanned
-                su.kept = self._bubbles_held(unit, page.bubbles, scanned)  # nothing to translate them from
-                held_ids = {id(cb) for cb in su.kept}
-                if keep_edited:  # a person's translation stays, its region is not translated again
-                    mine = self._bubbles_matched(unit, [cb for cb in page.bubbles if cb.edited and id(cb) not in held_ids],
-                                                 su.japanese())
-                    su.kept.extend(cb for cb, _r in mine)
-                    held_ids.update(id(cb) for cb, _r in mine)
-                    su.regions = [r for r in scanned if not any(r is taken for _cb, taken in mine)]
-                su.kept.extend(self._kept_in_areas(units, unit, [cb for cb in page.bubbles if id(cb) not in held_ids]))
-                if not su.japanese() and page.bubbles:  # no text on this page any more
-                    when_kept(lambda print_=page.fingerprint, aspect=unit.aspect, kept=list(su.kept):
-                              self._save_page(print_, aspect, kept))
-                scan.units.append(su)
-                continue
             japanese = [r for r in scanned if r.is_japanese]
             matched = self._matched_bubbles(unit.normalize, japanese, page.bubbles)
             su.kept.extend(cb for _i, cb in matched)
@@ -2649,8 +2353,7 @@ class Pipeline:
             su.regions = [r for i, r in enumerate(japanese) if i not in matched_at]
             su.cached = not su.regions
             if su.cached and (su.dropped or page.incomplete):  # prune now; nothing to translate
-                when_kept(lambda print_=page.fingerprint, aspect=unit.aspect, kept=list(su.kept):
-                          self._save_page(print_, aspect, kept))
+                self._save_page(page.fingerprint, unit.aspect, list(su.kept))
             scan.units.append(su)
         return scan
 
@@ -2767,26 +2470,6 @@ class Pipeline:
         areas = self._areas_of(units, unit)
         return [cb for cb in bubbles if areas and any(a.holds(cb.box) for a in areas)]
 
-    def _bubbles_matched(self, unit: fp.PageUnit, bubbles: Sequence[CachedBubble],
-                         regions: Sequence[ScannedRegion]) -> list[tuple[CachedBubble, ScannedRegion]]:
-        """Those of *bubbles* one of *regions* lies on (`bubble_scores`, as `_bubbles_held` matches), each region taking
-        one, with the region it took."""
-        if not bubbles or not regions:
-            return []
-        scores = bubble_scores([[unit.normalize(b) for b in (r.bbox, *r.aliases)] for r in regions],
-                               [cb.box for cb in bubbles], self.settings.match_min_iou)
-        out: list[tuple[CachedBubble, ScannedRegion]] = []
-        taken: set[int] = set()
-        for j, cb in enumerate(bubbles):
-            best, best_iou = -1, 0.0
-            for i in range(len(regions)):
-                if i not in taken and scores[i][j] > best_iou:
-                    best, best_iou = i, scores[i][j]
-            if best >= 0:
-                taken.add(best)
-                out.append((cb, regions[best]))
-        return out
-
     def _bubbles_held(self, unit: fp.PageUnit, bubbles: Sequence[CachedBubble],
                       scanned: Sequence[ScannedRegion]) -> list[CachedBubble]:
         """Those of *bubbles* a scanned region that is not text to translate lies on (`match_min_iou`), each region
@@ -2847,7 +2530,7 @@ class Pipeline:
 
     def _lookup(self, unit: fp.PageUnit,
                 before: Callable[[], list[fp.PageUnit]] | None = None) -> tuple[CachedPage, int] | None:
-        """Find the unit's page in the cache; on a miss, pick up pages another process (a batch run) saved meanwhile,
+        """Find the unit's page in the cache; on a miss, pick up pages another process saved meanwhile,
         then look for the page as a cache kept before 2026-10-31 holds it (*before*: the capture's units as analyze
         found them then, `_units_before`; `_lookup_before`)."""
         assert self.cache is not None
@@ -2907,7 +2590,7 @@ class Pipeline:
         translated is always kept: whatever the unit has is stored, seen before or not, and a region without a
         translation stays untranslated. Only what `is_real_translation` accepts becomes a bubble. Returns True if
         complete: every region has its bubble; else the entry is marked `CachedPage.incomplete`, and the next reading
-        or whole-book run asks for the rest."""
+        asks for the rest."""
         if self.cache is None:
             return False
         new: list[CachedBubble] = []
@@ -2960,9 +2643,6 @@ class Pipeline:
         beside = _detect_pool().submit(classical_of, rgb) if parallel else None
         boxes = [u.box for u in (units if units is not None else fp.analyze(rgb, s.margins))]
         try:
-            # (no `gpu_gate` here: the layout model's 0.3 s a page on the GPU leaves a viewer's drawing alone, measured
-            # in Chrome while the pages are turned, and waiting for it held every page's reading back until the reader
-            # stopped turning; only LaMa waits)
             found = layout.boxes(rgb, boxes)
         finally:
             classical = beside.result() if beside is not None else None  # (waited for whatever happened)
@@ -3029,7 +2709,7 @@ class Pipeline:
         """Apply the reader's rectangles: drop detections mostly inside an area ignored on every page of the book
         (`BookArea.holds`, in the terms of the region's page unit) and inside an "ignore" box of the page, add a region
         for every "add" box (it belongs to the page unit it was stored under, wherever that unit's box now ends; an
-        area leaves it alone). A page on show and the whole-book run's scan both come this way."""
+        area leaves it alone). A page on show and the backlog's scan both come this way."""
         if self.annotations is None:
             return regions
         s = self.settings
@@ -3176,7 +2856,7 @@ class Pipeline:
             bubbles.append(CachedBubble(box=unit.normalize(r.bbox), text=r.translated_text, poly=poly, flags=list(r.flags),
                                         note=r.reader_note, angle=r.angle,
                                         large=locate_large.checked(r.translated_text, r.large), joined=r.joined))
-            r.from_cache = not page.incomplete  # (a marked page's are new to the reader, and to a run's count)
+            r.from_cache = not page.incomplete  # (a marked page's are new to the reader)
         work: PageWork | None = getattr(_ON_SHOW, "work", None)
         if work is not None:
             work.stored.append((page.fingerprint, page.aspect))
@@ -3324,10 +3004,10 @@ class Pipeline:
         """The person's reading *text* of *region* in place of the OCR's (the region editor's "Read as:", cleaned by
         `textclean.clean_reading`): `source_text` takes it, `ocr_reading` keeps what the OCR read, and wherever the
         same misreading is read at the same place this session it is read as *text* (`_take_corrections`: the page
-        translated again, read again from the cache, its region moved, a whole-book run). The OCR's reading given back
-        undoes it. A region the OCR read nothing in, or nothing it took for Japanese, is Japanese to translate now.
-        Held in memory only, as every reading is: nothing is stored or logged, nothing translated (Ask again and
-        Save do that). False when *text* is empty or the reading already is *text*."""
+        translated again, read again from the cache, its region moved, read behind the reader). The OCR's reading given
+        back undoes it. A region the OCR read nothing in, or nothing it took for Japanese, is Japanese to translate now.
+        Held in memory only, as every reading is: nothing is stored or logged, nothing translated (Ask again and Save do
+        that). False when *text* is empty or the reading already is *text*."""
         text = clean_reading(text)
         if not text or text == region.source_text:
             return False
@@ -3535,7 +3215,7 @@ class Pipeline:
         """The lines of the page *result* as the cache holds them now, for the name check of the pages read one by one
         (`name_variants.PageLines`, `jobs.keep_page_names`): each translated region's Japanese, the text of the
         stored bubble it is drawn from and where that is (the cached page's fingerprint and the bubble's box, as
-        `cache.TextEdit` finds it); a real translation only, as a run keeps its own (`BatchReader._keep_said`). A
+        `cache.TextEdit` finds it); a real translation only. A
         region drawn from the cache alone has no Japanese (the cache never holds it) and gives none. In memory only,
         never written nor logged; the worker's, as the cache is."""
         if self.cache is None or not result.units:
@@ -4570,7 +4250,7 @@ class Pipeline:
                            cancel: threading.Event | None = None, on_slow: SlowFn | None = None,
                            unit_box: Box | None = None, reuse: bool | None = True) -> str:
         """Translate the regions to translate (one request for all of them, in reading order), spell them as the
-        series sheet spells (`terms.spelt_right`, as a whole-book run spells its replies: a name or term the model
+        series sheet spells (`terms.spelt_right`, as the backlog spells its replies: a name or term the model
         wrote another way near enough, no model request), check and tighten the translations, and set the regions'
         texts, statuses and flags; "" or the Message of what went wrong. Lines the reply left without a usable
         translation (missing, empty, the Japanese copied) are asked for again, a few consecutive ones at a time with
@@ -4707,7 +4387,7 @@ class Pipeline:
             raise
         if stop:
             return failure
-        sheet = self.check_sheet()  # spelt as the series sheet spells, as a whole-book run's replies are; a reused
+        sheet = self.check_sheet()  # spelt as the series sheet spells, as the backlog's replies are; a reused
         # line was held to the sheet already (`linememo.held_to`), and the memo keeps the answers as spelt here
         outputs = [out if i in plan.served else spelt_right(sheet, texts[i], out, str(meta[i].get("speaker", "")))
                    for i, out in enumerate(outputs)]
@@ -4876,7 +4556,7 @@ class Pipeline:
         from the pairs *context* with the premises *notes* (the page's, `premises`, when None) and stop as a page's
         request does (*cancel* set: `Cancelled`); a request that fails ends the look with nothing found. A part the
         book translated before as a short line of its own is not asked for (`linememo`, with the facts *facts* of the
-        region, `region_meta`; under *lock* when given: a whole-book run's, whose pages may be read meanwhile), and
+        region, `region_meta`; under *lock* when given), and
         nothing is kept of any answer. Counted in `large_tally`."""
         if mix is None or not getattr(self.settings, "size_emphasis", True) or not translation.strip():
             return None
@@ -5305,39 +4985,31 @@ class Pipeline:
                 among: Sequence[TextRegion] = ()) -> None:
         """Erase every translated region of *regions* on the page *out* and letter its translation, in place (a region
         made "erase only", `ERASED`, is erased and nothing set), each in its own part of a room it shares with another
-        (`share_rooms`; *among*: regions of the page left as they are, whose rooms count all the same); with
-        *record*, each region keeps the size it was set at and what its lettering could not do as formatted, and with
-        *recap* too the sizes of the page are kept alike anew (`cap_sizes`). A region's erase comes from the erased
-        pages of a run (`erased_ahead`) or this session's erases (`erased_regions`) when one of them holds it (its
-        `erase_key`), else it is done here and kept in `erased_regions`; *quick*: the paper fill in place of the
-        inpainting model (`_erase`; an early look, not kept). Once *cancel* is set, `Cancelled` before the next
-        region's erase or lettering: *out* is then half done (the caller drops it), and each erase kept is whole."""
+        (`share_rooms`; *among*: regions of the page left as they are, whose rooms count all the same); with *record*,
+        each region keeps the size it was set at and what its lettering could not do as formatted, and with *recap* too
+        the sizes of the page are kept alike anew (`cap_sizes`). A region's erase comes from this session's erases
+        (`erased_regions`) when they hold it (its `erase_key`), else it is done here and kept in `erased_regions`;
+        *quick*: the paper fill in place of the inpainting model (`_erase`; an early look, not kept). Once *cancel* is
+        set, `Cancelled` before the next region's erase or lettering: *out* is then half done (the caller drops it), and
+        each erase kept is whole."""
         s = self.settings
         backgrounds: dict[int, tuple[int, int, int]] = {}
         self.share_rooms(regions, (out.shape[1], out.shape[0]), among)
         todo = [i for i, r in enumerate(regions) if erases(r)]
         keys = [self.erase_key(out, regions[i]) for i in todo]
-        ahead = self._erased_for(out, [regions[i] for i in todo], keys)
         place = {i: n for n, i in enumerate(todo)}
         for i, r in enumerate(regions):
             if i in place:
                 check_cancel(cancel)
                 n = place[i]
-                hit = ahead.get(n) if ahead else None
-                if hit is not None:  # erased ahead: the same erase, done already
-                    erased, page = hit
-                    erased.paste(out, page())
-                    erased.settle(r)
-                    backgrounds[i] = erased.background
+                kept = self.erased_regions.take(keys[n], out)
+                if kept is not None:  # erased so before this session: the same erase
+                    kept.settle(r)
+                    backgrounds[i] = kept.background
+                elif quick:
+                    backgrounds[i] = self._erase(out, r, quick=True)
                 else:
-                    kept = self.erased_regions.take(keys[n], out)
-                    if kept is not None:  # erased so before this session: the same erase
-                        kept.settle(r)
-                        backgrounds[i] = kept.background
-                    elif quick:
-                        backgrounds[i] = self._erase(out, r, quick=True)
-                    else:
-                        backgrounds[i] = self._erase_kept(out, r, keys[n])
+                    backgrounds[i] = self._erase_kept(out, r, keys[n])
                 if r.status == ERASED:  # erased, nothing set
                     del backgrounds[i]
                     if record:
@@ -5357,19 +5029,6 @@ class Pipeline:
             if record:
                 r.font_size, r.letter_flags = done.size, done.flags
         out[:] = np.asarray(pil)
-
-    def _erased_for(self, page: np.ndarray, regions: Sequence[TextRegion], keys: Sequence[bytes] | None = None
-                    ) -> dict[int, tuple[ErasedRegion, Callable[[], np.ndarray]]]:
-        """Of *regions*, about to be erased on *page* (untouched yet), those an erased page in `erased_ahead` holds:
-        index -> (what erasing it did, the erased page's pixels). Counted on the store (``reused``, ``erased_live``).
-        *keys*: the regions' `erase_key`s, when they are known already."""
-        store = self.erased_ahead
-        if store is None or not regions:
-            return {}
-        found = store.find(list(keys) if keys is not None else [self.erase_key(page, r) for r in regions], page.shape)
-        store.reused += len(found)
-        store.erased_live += len(regions) - len(found)
-        return found
 
     def _erase_reach(self, out: np.ndarray, r: TextRegion) -> tuple[int, int, int, int]:
         """The part of the page *out* erasing *r* may change: `ERASE_REACH` round its box, and with the inpainting
@@ -5426,20 +5085,6 @@ class Pipeline:
                              region.from_model, region.glyph, list(region.char_boxes), is_dark(region),
                              np.asarray(region.mask), crop,
                              *(("slant", region.angle, region.char_quads) if region.char_quads else ()))
-
-    def erase_page(self, page: np.ndarray | Image.Image, regions: Sequence[TextRegion],
-                   cancel: threading.Event | None = None) -> tuple[np.ndarray, list[ErasedRegion]]:
-        """*page* with *regions* erased in their order, as `_render` erases them (`_erase`: the paper fill, and LaMa on
-        the art when the settings have it), and for each region what its erase did (`ErasedRegion`, found again by
-        `erase_key` taken on the page before any erase, as the render takes it). The regions are erased as copies:
-        nothing of them changes. Once *cancel* is set, `Cancelled` is raised between regions."""
-        out = np.array(page.convert("RGB") if isinstance(page, Image.Image) else page, dtype=np.uint8, copy=True)
-        keys = [self.erase_key(out, r) for r in regions]
-        records: list[ErasedRegion] = []
-        for region, key in zip(regions, keys):
-            check_cancel(cancel)
-            records.append(self._erased_record(out, copy.copy(region), key)[1])
-        return out, records
 
     def page_without(self, result: PageResult, region: TextRegion) -> np.ndarray:
         """*result*'s page lettered as `rerender` letters it, but for *region*, which is left as it was captured:

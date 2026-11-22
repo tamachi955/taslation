@@ -4,7 +4,6 @@ from .wgc import close as stop_capture  # noqa: F401
 from .wgc import count as frame_count  # noqa: F401
 from .wgc import live as frames_come  # noqa: F401
 from .wgc import route as capture_route  # noqa: F401
-from .wgc import wait as frame_wait  # noqa: F401
 from .windows import (  # noqa: F401
     BROWSER_CLASSES,
     IS_WINDOWS,

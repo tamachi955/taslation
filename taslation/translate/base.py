@@ -116,8 +116,8 @@ class GrowingContext:
     """The earlier (Japanese, translation) pairs of a translator that `grows_context`: what is added stays, in its
     order, so that a request's prompt extends the one before it; once they pass *grows_to* pairs, or the translator
     finds that a request would have no room left after them (`take`'s *fits*), they are cut back to the newest
-    *cut_to* (fewer when even those do not fit). Memory only. Not shared between threads (the page's worker, or a
-    whole-book run's translation thread, has its own)."""
+    *cut_to* (fewer when even those do not fit). Memory only. Not shared between threads (the page's worker, or the
+    backlog's thread, has its own)."""
 
     def __init__(self, grows_to: int = CONTEXT_GROWS_TO, cut_to: int = CONTEXT_CUT_TO):
         self.grows_to = max(0, int(grows_to))

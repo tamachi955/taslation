@@ -107,7 +107,7 @@ class CachedBubble:
     angle: float = 0.0  # degrees its lettering is turned counter-clockwise (`TextRegion.angle`; written when not 0)
     reused: bool = False  # its translation is one kept for an identical line before it (`linememo`; written when so)
     # a person changed its translation (translator mode's editor, Find and replace; written when so): a page translated
-    # again keeps it without asking the model (`Pipeline.forget_page`'s *keep_edited*, `Pipeline.scan`'s), and "My
+    # again keeps it without asking the model (`Pipeline.forget_page`'s *keep_edited*), and "My
     # corrections" lists it (`BookCache.corrections`). A file without the mark is read as none
     edited: bool = False
     # the part of its text set larger than the rest, as the original lettered it (`TextRegion.large`: start, end and
@@ -169,7 +169,7 @@ class CachedPage:
     bubbles: list[CachedBubble]
     seq: int = 0  # order in which the page was first seen
     # the page has text the model gave nothing usable for: what it did give is kept here, and reading the page
-    # translates what is missing (`Pipeline.process`), as a whole-book run does (`Pipeline.scan`)
+    # translates what is missing (`Pipeline.process`), as the backlog's read does (`Pipeline.scan`)
     incomplete: bool = False
 
     def to_json(self) -> dict[str, Any]:
@@ -515,7 +515,7 @@ class BookCache:
         return cache
 
     def refresh(self) -> bool:
-        """Pick up what another process saved meanwhile (a batch run while the app is open, or the reverse).
+        """Pick up what another process saved meanwhile (a command run while the window is open, or another window).
 
         When the file is another version than this copy's, it is reloaded and the
         pages this process changed since its last save are applied on top. Returns
