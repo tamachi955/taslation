@@ -41,7 +41,7 @@ RELEASED_BOTH = "Released the translation model ({model}) and the page models. E
 RELEASED_MODEL = "Released the translation model ({model}). It loads again for the next translation."
 RELEASED_PAGES = "Released the page models. The translation model was not loaded."
 RELEASED_NOTHING = "Nothing to release: TASlation's models were not loaded."
-# ... and with the OCR readers' GPU memory (they read on the processor until the next page decides again)
+# ... and with the OCR readers' GPU memory (they read on the processor until the next page puts them back)
 RELEASED_ALL = ("Released the translation model ({model}), the page models and the OCR's GPU memory. Each loads again "
                 "when it is needed; the OCR reads on the processor until the next page.")
 RELEASED_MODEL_OCR = ("Released the translation model ({model}) and the OCR's GPU memory. The model loads again for the "

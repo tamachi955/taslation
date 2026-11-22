@@ -284,7 +284,7 @@ OCR_WHY = {  # what runs there, by why it is there (`ocr.place.Placement.why`)
     "processor": "The OCR readers, on the processor: the GPU's memory was short at the start",
     "unknown": "The OCR readers: the room on the GPU is not known",
     "failed": "The OCR readers, on the CPU since the GPU failed ({error})",
-    "released": "The OCR readers: the GPU memory was let go, the next page decides again",
+    "released": "The OCR readers: the GPU memory was let go, the next page puts them back",
 }
 OCR_SET = {"gpu": "Two of the OCR readers, as set in ocr_runs_on (the third on the CPU)",
            "cpu": "The OCR readers, as set in ocr_runs_on"}
