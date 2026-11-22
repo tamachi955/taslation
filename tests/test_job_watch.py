@@ -67,6 +67,36 @@ class FinishingWorker(CachedWorker):
             self.w._flush_fill()
 
 
+TAIL_S = 2.0  # what a job does after its page is on show (`Pipeline.keep_shown`: the page lettered once more)
+
+
+class TailWorker(Worker):
+    """`Worker`, whose job goes on for TAIL_S once its page is shown and kept, as the window's page job lays the page
+    out again for its next showing (`Pipeline.keep_shown`): a cancel ends it CANCEL_S later, with no page_cancelled
+    (the page is done; the job only ends)."""
+
+    def _tick(self, job):
+        now = self.clock.now
+        tail = getattr(job, "tail", None)
+        if tail is not None:
+            if job.cancel.is_set():
+                if job.cancel_seen is None:
+                    job.cancel_seen = now
+                if now - job.cancel_seen + 1e-9 < early.CANCEL_S:
+                    return self._again(job)
+                return Worker._end(self, job, "tail cut")
+            if now - tail + 1e-9 < TAIL_S:
+                return self._again(job)
+            return Worker._end(self, job, "done")
+        super()._tick(job)
+
+    def _end(self, job, how):
+        if how == "done" and job.shown is not None and getattr(job, "tail", None) is None:
+            job.tail = self.clock.now  # (shown and kept: what comes after the page begins)
+            return self._again(job)
+        Worker._end(self, job, how)
+
+
 @pytest.fixture
 def watch(follow, monkeypatch):
     """`follow`, the model answering for 3 s: page 2's job, started at its first frame, is read by 0.3 s, confirmed at
@@ -133,6 +163,35 @@ def test_a_new_page_that_stays_cancels_the_job_and_is_started_with_a_gate_of_its
     # started early as soon as the worker was free: what it stored kept once page 3 stayed twice settle_ms
     assert new.gate is not None and _after(new.gate.confirmed_at - (turned + 2.0), KEEP_S)
     assert new.asked < new.gate.confirmed_at  # (its request did not wait for that)
+
+
+def test_a_job_past_its_page_gives_way_to_a_new_page_at_once(follow):
+    # page 2 read by 0.3 s, confirmed at 0.8 s, answered and shown at 1.3 s; then it is laid out for its next
+    # showing until 3.3 s - the viewer turns to page 3 at 2.0 s, meanwhile
+    w, worker = follow.make(ask_s=1.0, worker=TailWorker)
+    three = _page(3)
+    turned = follow.show((0.0, "2", _page(2)), (2.0, "3", three), run=0.3 + 2.0 + 0.002)
+    job = worker.one("2")
+    assert job.tail is not None and w.last_result is job.result  # page 2 on show, its job past it
+    follow.clock.run(4)
+    # cancelled at the first look at page 3 (a frame step), not once page 3 had stayed LEFT_PAGE_MS
+    lag = job.cancel_seen - (turned + 2.0)
+    assert job.how == "tail cut" and lag <= 2 * FRAME_STEP_MS / 1000 + 0.011 < LEFT_PAGE_MS / 1000, lag
+    new = worker.one("3")
+    assert new.start - job.ended <= 0.016 and new.how == "done" and worker.kept == ["1", "2", "3"]
+    assert new.start - (turned + 2.0) < LEFT_PAGE_MS / 1000  # (before, at LEFT_PAGE_MS and the job's end after it)
+    assert new.gate is not None and _after(new.gate.confirmed_at - (turned + 2.0), KEEP_S)  # a gate of its own
+    assert not any("Stopped" in str(s) for s in w.statuses)  # (no page was stopped: page 2 was done)
+
+
+def test_a_job_still_on_its_page_is_not_cut_short_by_a_frame_that_does_not_stay(follow):
+    # page 2's job before its result: a frame of page 3 for 0.1 s changes nothing (LEFT_PAGE_MS as ever)
+    w, worker = follow.make(ask_s=1.0, worker=TailWorker)
+    follow.show((0.0, "2", _page(2)), (1.0, "3", _page(3)), (1.1, "2 again", _page(2)), run=0.3 + 1.0 + 0.5)
+    job = worker.one("2")
+    assert job.cancel_seen is None and job.shown is not None
+    follow.clock.run(3)
+    assert job.how == "done" and [j.name for j in worker.jobs] == ["1", "2"] and w.last_result is job.result
 
 
 def test_a_page_that_sharpens_while_the_cancelled_job_goes_is_on_show_and_read_sharp(watch, monkeypatch):

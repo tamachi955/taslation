@@ -1032,6 +1032,9 @@ class JobsMixin:
             if data.get("edited") and data["result"] is not self.last_result:
                 self.say("Saved on the page the editor was opened on.")  # the page on show stays
                 return
+            # (the page job's page is on show: what the job does after it gives way to another page at once,
+            # `LiveViewMixin._tail_gives_way`)
+            self._result_shown_of = getattr(self, "_page_cancel", None)
             self._fill = None
             job_news(self, data)
             self._settle_live(data["result"])

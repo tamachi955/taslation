@@ -89,6 +89,60 @@ def test_a_cancel_ends_it_with_nothing_kept(sample_page, settings, monkeypatch):
     assert "shown before" not in shown.timings and len(p.shown_pages) == 1
 
 
+@pytest.mark.parametrize("which", ["sample_page", "sample_page2"])
+def test_it_takes_the_page_jobs_detection_of_the_same_capture(which, settings, monkeypatch, request):
+    page = request.getfixturevalue(which)
+    # a detection of its own (no page job on show before it)
+    own = _pipeline(settings, "Own detection")
+    own.process(page.copy())
+    assert own.keep_shown(page.copy())
+    as_own = own.process(page.copy())
+    assert "shown before" in as_own.timings
+
+    # the page job on show, then the same capture lettered ahead: no detection, the very page kept
+    p = _pipeline(settings, "Held detection")
+    capture = page.copy()
+    with p.page_on_show(None):
+        p.process(capture, cancel=threading.Event())
+    p.shown_pages.clear()  # (what the job's reading of an uncached page keeps: nothing; here a cached one's)
+    detected = _count_detection(p, monkeypatch)
+    assert p.keep_shown(capture, cancel=threading.Event())
+    assert detected == [] and p._detected is None  # (let go once it is over)
+    again = p.process(page.copy())
+    assert "shown before" in again.timings
+    assert np.array_equal(np.asarray(again.image), np.asarray(as_own.image))
+    assert _as_shown(again) == _as_shown(as_own)
+
+    # the next page job of the same capture (the job before it turned away from, its hold never let go): its own
+    p.shown_pages.clear()
+    with p.page_on_show(None):
+        p.process(capture, cancel=threading.Event())
+    assert p._detected is not None
+    detected.clear()
+    p.shown_pages.clear()
+    with p.page_on_show(None):
+        p.process(capture, cancel=threading.Event())
+    assert detected == [1]
+
+    # another capture object, a detector or a setting changed since: detected afresh
+    for other in ("capture", "shaper", "setting"):
+        with p.page_on_show(None):
+            p.process(capture, cancel=threading.Event())
+        p.shown_pages.clear()
+        detected.clear()
+        if other == "shaper":
+            from taslation.detect.layout import Shaper
+
+            p.shaper = Shaper(p.settings.white_threshold, p.settings.dark_threshold)
+            assert p.keep_shown(capture, cancel=threading.Event())
+        elif other == "setting":
+            p._base_settings.white_threshold -= 1
+            p.keep_shown(capture, cancel=threading.Event())  # (kept or not: another setting may letter it apart)
+        else:
+            assert p.keep_shown(page.copy(), cancel=threading.Event())
+        assert detected == [1]
+
+
 def test_nothing_is_done_for_a_page_its_next_showing_letters_afresh(sample_page, settings, monkeypatch):
     p = _pipeline(settings, "Not kept")
     p.process(sample_page.copy(), use_cache=False)  # not in the cache

@@ -404,6 +404,7 @@ class Operation:
     looked_at: float = 0.0  # "change" with frames counted: when the frame was last captured
     redo: bool = False  # "settle": the page started early was dropped; started again once the worker is free
     over_job: bool = False  # "settle": begun while a page job runs, on a frame of another page (`_look_over_job`)
+    gave_way: bool = False  # ... a job past its page, cancelled at once (`_tail_gives_way`): no LEFT_PAGE_MS wait
     held_soft: bool = False  # "settle": its frame looks soft (a viewer that draws soft first): not started early on it
     keys: tuple[str, ...] = ()  # "change": the posted keys awaited, the first one's own wait for all (`_held_keys`)
 
@@ -1858,8 +1859,10 @@ class LiveViewMixin(BlackViewerMixin):
         if self._on_job_page(image):
             self._check_sharper(image, thumb)
             return
+        gave = self._tail_gives_way()  # (a job past its page: cancelled now, not once the frame stayed LEFT_PAGE_MS)
         self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
-                           last_detail=_detail(self, image, self._area_box(image)), image=image, over_job=True)
+                           last_detail=_detail(self, image, self._area_box(image)), image=image, over_job=True,
+                           gave_way=gave)
 
     def _page_job_runs(self) -> bool:
         """Whether a page job runs that the window can cancel (`_cancel_page`)."""
@@ -1870,6 +1873,23 @@ class LiveViewMixin(BlackViewerMixin):
         """Whether a page job the window cancelled (a page turned, Stop) is still on its way out."""
         cancel = getattr(self, "_page_cancel", None)
         return bool(self.busy) and cancel is not None and cancel.is_set()
+
+    def _job_past_its_page(self) -> bool:
+        """Whether the page job that runs has its page on show already (its result shown: `_result_shown_of`) and
+        only does what comes after - the page lettered once more for its next showing (`Pipeline.keep_shown`), the
+        look for a colophon -: cancelling it loses nothing of the page, which is on show and in the cache."""
+        cancel = getattr(self, "_page_cancel", None)
+        return self._page_job_runs() and cancel is getattr(self, "_result_shown_of", None)
+
+    def _tail_gives_way(self) -> bool:
+        """A frame of another page while the page job that runs is past its page (`_job_past_its_page`): the job is
+        cancelled at once - no LEFT_PAGE_MS wait, which is there not to cancel a page still being read for a frame
+        that is not the viewer's next page; here there is nothing to lose, and the worker is free for the new page as
+        soon as the job sees its cancel. Coming back to the page letters it from the cache. Whether it was."""
+        if not self._job_past_its_page():
+            return False
+        self._following.taken = None
+        return self._cancel_page(turned=True)
 
     def _on_job_page(self, image: Image.Image) -> bool:
         """Whether the viewer's frame *image* shows the page the running job reads (`_job_frame`; `_shows_page`)."""
@@ -2068,15 +2088,23 @@ class LiveViewMixin(BlackViewerMixin):
     def _settle_s(self, op: Operation) -> float:
         """How long *op*'s frame must stay as it is (seconds): for a page started early on it (`_early_start`),
         KEEP_SETTLES times settle_ms - then what its job stores lasts (`_early_confirm`) -, and for a frame of another
-        page while a job runs (`Operation.over_job`), before which the job is not cancelled, LEFT_PAGE_MS; else -
-        early_start off, a key pressed for real (its two turns are watched for), a page the cache holds, a page that
-        could not be started early - settle_ms, as ever."""
+        page while a job runs (`Operation.over_job`), before which the job is not cancelled, LEFT_PAGE_MS - none when
+        that job was past its page and gave way at once (`Operation.gave_way`): the frame is started early, a gate of
+        its own, as soon as the worker is free -; else - early_start off, a key pressed for real (its two turns are
+        watched for), a page the cache holds, a page that could not be started early - settle_ms, as ever."""
         settle_ms = self.settings.settle_ms
         if not self._early_on() or op.turned_at is not None:
             return settle_ms / 1000
         if self._early_of(op) is not None:
             return KEEP_SETTLES * settle_ms / 1000
-        return (LEFT_PAGE_MS if op.over_job else settle_ms) / 1000
+        if op.over_job:
+            return 0.0 if op.gave_way else LEFT_PAGE_MS / 1000
+        return settle_ms / 1000
+
+    def _settle_step_ms(self, op: Operation) -> int:
+        """The next look at *op*'s frame, its frames not counted: once its stay (`_settle_s`) is over, and no sooner
+        than FRAME_STEP_MS (a stay of none, `Operation.gave_way`, is looked at as a frame counted is)."""
+        return max(FRAME_STEP_MS, round(self._settle_s(op) * 1000))
 
     def _watched(self, op: Operation) -> bool:
         """Whether *op*, its frames not counted, is looked at every FOLLOW_STEP_MS rather than every settle_ms: a page
@@ -2295,12 +2323,14 @@ class LiveViewMixin(BlackViewerMixin):
     def _begin_follow(self, hwnd: int, reference: Any, key: str = "", retried: bool = False, *,
                       phase: str = "change", last: np.ndarray | None = None,
                       last_detail: np.ndarray | None = None, operation: bool = False, fast: bool = False,
-                      seq: int | None = None, image: Image.Image | None = None, over_job: bool = False) -> None:
+                      seq: int | None = None, image: Image.Image | None = None, over_job: bool = False,
+                      gave_way: bool = False) -> None:
         """Follow the viewer's frame (follow = "events"), in place of a follow before: from *phase* "change" (an
         operation of TASlation's: awaited to change from *reference*, at FOLLOW_STEP_MS; with *seq*, the viewer's
         frame count when *reference* was captured, at each new frame as it comes, `_counted_change`), "settle" (it has
         changed: *last* is the frame seen, *image* its capture; *operation*: after TASlation's own operation;
-        *over_job*: a frame of another page than the running job's, `_look_over_job`) or, *fast*, "recheck" (a page
+        *over_job*: a frame of another page than the running job's, `_look_over_job`; *gave_way*: that job, past its
+        page, cancelled at once, `_tail_gives_way`) or, *fast*, "recheck" (a page
         just taken at once: `_take_at_once`). A posted key that comes while the one before is still awaited with
         nothing changed goes with it (`_held_keys`). The backlog's step under way stops (`_stop_behind`), and none
         begins while the viewer is followed (`backlog.Backlog.tick`): the page it goes to comes first."""
@@ -2311,7 +2341,7 @@ class LiveViewMixin(BlackViewerMixin):
         if phase == "change":
             f.retake = None  # an operation: the page a sharper frame waited for is not the one to come
         op = Operation(hwnd, reference, key, retried or not key, time.monotonic(), phase, last, last_detail,
-                       operation=phase == "change" or operation, over_job=over_job)
+                       operation=phase == "change" or operation, over_job=over_job, gave_way=gave_way and over_job)
         if key and phase == "change":
             op.keys = (key,)
         if held is not None:  # (its wait goes on from the first key, the frames before it the same)
@@ -2374,7 +2404,7 @@ class LiveViewMixin(BlackViewerMixin):
         if op.seq is not None:
             self._next_step(op, FRAME_STEP_MS)
         else:
-            self._next_step(op, FOLLOW_STEP_MS if self._watched(op) else round(self._settle_s(op) * 1000))
+            self._next_step(op, FOLLOW_STEP_MS if self._watched(op) else self._settle_step_ms(op))
 
     def _end_follow(self) -> None:
         """The operation followed, if any, followed no further (a page started early on its frame is dropped)."""
@@ -2506,7 +2536,7 @@ class LiveViewMixin(BlackViewerMixin):
                 op.last, op.last_detail, op.last_image, op.settles = thumb, frame_detail, image, op.settles + 1
                 if moving:
                     op.last_at = now
-                self._next_step(op, round(self._settle_s(op) * 1000))
+                self._next_step(op, self._settle_step_ms(op))
                 return
             early = self._early_of(op)
             if early is not None:
@@ -2555,6 +2585,7 @@ class LiveViewMixin(BlackViewerMixin):
             # frame that was not the page's for long, a picture redrawn, a page turned and back, cancelled a page still
             # on show)
             over = self._page_job_runs()
+            op.gave_way = over and self._tail_gives_way()  # (a job past its page: cancelled now)
             if not over and self._take_at_once(op.hwnd, image, thumb, frame_detail, op.operation):
                 return  # (a page the cache holds: taken now)
             op.over_job = over
@@ -2669,6 +2700,7 @@ class LiveViewMixin(BlackViewerMixin):
             # LEFT_PAGE_MS, the page started early, a gate of its own, once the worker is free - not taken as settled
             # and queued, then started with no gate: never caught once turned past, `backlog`)
             op.over_job = bool(self.auto_var.get()) and (self._page_job_runs() or self._page_job_ends())
+            op.gave_way = op.over_job and self._tail_gives_way()  # (a job past its page: cancelled now)
             self._show_live(image, thumb)  # the turned page shows at once
             self._settle_on(op, thumb, frame_detail, now, image)
             return

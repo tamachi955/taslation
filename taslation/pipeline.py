@@ -1598,6 +1598,9 @@ class Pipeline:
         self.large_tally = locate_large.Tally()
         # each unit's lines sent as they were read (`streaming.LineStream`): counts and times only, the newest last
         self.stream_log: deque[dict[str, Any]] = deque(maxlen=200)
+        # the last page job's detection, held for its next lettering (`_detect_held`): the capture, the inputs, copies
+        self._detected: tuple[Any, tuple[Any, ...], tuple[Any, ...], list[TextRegion]] | None = None
+        self._ahead = False  # (`keep_shown` letters the page ahead: the one taker of the held detection)
         # the readings a person corrected this session (`correct_reading`), newest last: taken wherever the same
         # misreading is read at the same place again (`_take_corrections`). Memory only: never stored, never logged
         self.corrected_readings: deque[CorrectedReading] = deque(maxlen=CORRECTIONS_HELD)
@@ -2187,7 +2190,7 @@ class Pipeline:
             # (`_detect`: a page on show, its units known, and what cancels it: looked at between the detectors)
             _ON_SHOW.units, _ON_SHOW.rgb, _ON_SHOW.cancel = units, rgb, cancel
             try:
-                regions = self._annotate(rgb, self._detect(rgb), units)
+                regions = self._annotate(rgb, self._detect_held(image, rgb, units, on_show is not None), units)
             finally:
                 _ON_SHOW.units = _ON_SHOW.rgb = _ON_SHOW.cancel = None
         timer.lap("detect")
@@ -2204,6 +2207,7 @@ class Pipeline:
 
         plans: list[tuple[fp.PageUnit, list[TextRegion], CachedPage | None]] = []
         for unit in units:
+            check_cancel(cancel)  # (a unit's cache entry taken: some ms each)
             page: CachedPage | None = None
             if unit.index in reused:  # read behind the reader: its regions as read, held to the cache as it is now
                 unit_regions = reused[unit.index]
@@ -2407,22 +2411,58 @@ class Pipeline:
         next showing letters it - from the cache, as `process` with *complete* does it - and kept in `shown_pages`:
         that showing (the viewer drew the page again, the reader came back to it) is laid over from memory at once,
         the very page it would letter. Nothing is done when the page is not in the cache whole, is kept already, or
-        its next reading adds to its cache entry (`_shown_key` is none); its stage times are not counted. *cancel*
-        set (a new page, Stop) ends it where `process` stops, and nothing is kept; so does a failure. Whether the page
-        is kept now."""
+        its next reading adds to its cache entry (`_shown_key` is none); its stage times are not counted. The page
+        job's own detection of *image* is taken in place of one (`_detect_held`). *cancel* set (a new page, Stop) ends
+        it where `process` stops, and nothing is kept; so does a failure. Whether the page is kept now."""
         if self.cache is None:
             return False
         try:
+            check_cancel(cancel)
             rgb = np.asarray(image.convert("RGB"))
             units = self.units_of(rgb)
             key = self._shown_key(rgb, units, True, complete) if units else None
             if key is None or self.shown_pages.has(key):
                 return False
             check_cancel(cancel)
+            self._ahead = True
             self.process(image, complete=complete, cancel=cancel, timed=False)
             return self.shown_pages.has(key)
         except Exception:  # noqa: BLE001 - Cancelled, or a failure: the next showing letters the page as ever
             return False
+        finally:
+            self._ahead = False
+            self._detected = None  # (the page job's detection, held for this lettering: let go)
+
+    def _detect_held(self, image: Image.Image, rgb: np.ndarray, units: Sequence[fp.PageUnit],
+                     keep: bool) -> list[TextRegion]:
+        """`_detect` of the capture *image* (*rgb*, its page units *units*). With *keep* (the window's page job on show)
+        copies of what it found are held for the same capture's next lettering - `keep_shown`, straight after the job's
+        result -, which alone takes copies of them in place of a detection of its own (``_ahead``: never a page job,
+        whose detection is its own even of the same capture): `_detect` of the very pixels (the capture object itself)
+        with the very models, detectors and settings it depends on (`_detect_inputs`), so the same regions - and no
+        layout-model pass, which looks at no cancel while it runs (some 80 ms a page unit on a mid-range GPU). Held
+        until keep_shown is over or another page job detects."""
+        objects, values = self._detect_inputs(units)
+        if getattr(self, "_ahead", False):
+            held = getattr(self, "_detected", None)
+            if (held is not None and held[0] is image and len(held[1]) == len(objects)
+                    and all(a is b for a, b in zip(held[1], objects)) and held[2] == values):
+                return copy.deepcopy(held[3])
+        regions = self._detect(rgb)
+        if keep:
+            self._detected = (image, objects, values, copy.deepcopy(regions))
+        return regions
+
+    def _detect_inputs(self, units: Sequence[fp.PageUnit]) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        """What `_detect` of a capture depends on besides its pixels: the objects that detect (the layout model, the
+        erase whose readiness lets it work on "auto", the classical detectors, the shaper), compared by identity, and
+        the values (whether the model failed, the erase is ready, every setting in force, the units' boxes)."""
+        s = self.settings
+        layout, eraser = self.layout, self.art_eraser
+        objects = (layout, eraser, self.detector, self.text_detector, self.shaper)
+        values = (bool(getattr(layout, "failed", False)), eraser is not None and bool(eraser.ready()),
+                  tuple(getattr(s, f.name) for f in fields(s)), tuple(tuple(u.box) for u in units))
+        return objects, values
 
     def _erases_on_art(self, page: np.ndarray, regions: Sequence[TextRegion]) -> bool:
         """Whether rendering *regions* on *page* (untouched) takes the inpainting model for one of them: a region
