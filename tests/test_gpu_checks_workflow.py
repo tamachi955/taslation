@@ -619,6 +619,27 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
     assert _failed(gone) == ["the tool wrote its report"]
 
 
+def test_the_backlog_s_work_computed_low_is_reported_and_any_other_request_computed_low_fails_a_run():
+    s = _summarise()
+    source = (ROOT / "tools" / "standin_e2e.py").read_text("utf-8")
+    for key in (*s.PRIORITY_KEYS, "other_requests_low"):
+        assert f'"{key}"' in source, key  # (the tool's `priority_report` writes them)
+    assert '"server_priority": priority_report(notes, rel)' in source
+    priority = {"lowered": 3, "not_lowered": 0, "set_back": 3, "processes_set_back": 6, "low_ms": 9100,
+                "backlog_requests": 29, "backlog_requests_low": 29, "other_requests_low": []}
+    criterion = "no request but the backlog's was computed while the server was lowered for the backlog's work"
+    out = s.standin(_report(server_priority=priority), "", {}, "c", 600)
+    assert out["verdict"] == "pass", _failed(out)
+    assert out["server_priority"]["backlog_requests_low"] == 29 and "other_requests_low" not in out["server_priority"]
+    assert ("* the backlog's work computed low (reported): 29 of 29 backlog requests; the server lowered 3 times "
+            "(0 not), set back 3, low 9100 ms in all") in s.standin_md(out)
+    seen = [{"t_s": 300.4, "side": None, "job": 13}]
+    out = s.standin(_report(server_priority={**priority, "other_requests_low": seen}), "", {}, "c", 600)
+    assert out["verdict"] == "fail" and _failed(out) == [criterion]
+    out = s.standin(_report(), "", {}, "c", 600)  # (a tool before it: neither judged nor reported)
+    assert out["server_priority"] is None and criterion not in [c["criterion"] for c in out["failed"]]
+
+
 def test_a_job_that_gave_its_page_over_to_a_new_size_is_no_cancel_with_its_page_on_show():
     s = _summarise()
     # scenario o on a runner, as a tool before `resized_away` reported it: the job on the old size's frame cancelled

@@ -735,6 +735,7 @@ class Notes:
         self.readings: list[dict[str, Any]] = []  # normal reading's events (`backlog`: no thumbnail, no text)
         self.backlog: list[dict[str, Any]] = []  # the backlog's catches and steps, with what it held after each
         self.warm_calls: list[dict[str, Any]] = []  # each warming begun (`PlamoTranslator.warm_prefix`): what it did
+        self.priority: list[dict[str, Any]] = []  # the server lowered for the backlog and set back (`watch_priority`)
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
         self.side: SideCheck | None = None  # the indicator looked at from the window (`--side-indicator` not off)
@@ -2359,6 +2360,57 @@ def keep_server_log(ollama_start: Any, path: Path) -> None:
     ollama_start.launch = logged
 
 
+def watch_priority(notes: Notes) -> None:
+    """The server TASlation started computing the backlog's work at below-normal priority (`ollama_start.yield_server`,
+    from a step's start) and set back (`unyield_server`, at the next request that is not the backlog's): each, when,
+    and what came of it, for `priority_report`."""
+    from taslation import ollama_start
+
+    lower, back = ollama_start.yield_server, ollama_start.unyield_server
+
+    def lowered(url: Any) -> bool:
+        done = lower(url)
+        with notes.lock:
+            notes.priority.append({"t": now_ms(), "kind": "low", "done": bool(done)})
+        return done
+
+    def set_back() -> int:
+        count = back()
+        with notes.lock:
+            notes.priority.append({"t": now_ms(), "kind": "back", "done": int(count)})
+        return count
+
+    ollama_start.yield_server, ollama_start.unyield_server = lowered, set_back
+
+
+def priority_report(notes: Notes, rel: Callable[[Any], Any]) -> dict[str, Any]:
+    """The backlog's requests computed low, and none of anyone else's: the spans in which the server was lowered (from
+    a lowering to the next setting back), the backlog's requests begun in one, and every other request computed wholly
+    in one (it was not set back before it went out: `ollama_start.before_request`)."""
+    spans: list[tuple[float, float]] = []
+    since: float | None = None
+    for p in notes.priority:
+        if p["kind"] == "low" and p["done"] and since is None:
+            since = p["t"]
+        elif p["kind"] == "back" and since is not None:
+            spans.append((since, p["t"]))
+            since = None
+    if since is not None:
+        spans.append((since, float("inf")))
+    behind = [r for r in notes.requests if r.get("side") == "backlog"]
+    others = [r for r in notes.requests if r.get("side") != "backlog"]
+    low_others = [r for r in others if any(a <= r["t"] and (r["end_t"] or r["t"]) < b for a, b in spans)]
+    return {"lowered": sum(1 for p in notes.priority if p["kind"] == "low" and p["done"]),
+            "not_lowered": sum(1 for p in notes.priority if p["kind"] == "low" and not p["done"]),
+            "set_back": sum(1 for p in notes.priority if p["kind"] == "back" and p["done"]),
+            "processes_set_back": sum(p["done"] for p in notes.priority if p["kind"] == "back"),
+            "low_ms": round(sum((min(b, now_ms()) - a) for a, b in spans)),
+            "backlog_requests": len(behind),
+            "backlog_requests_low": sum(1 for r in behind if any(a <= r["t"] < b for a, b in spans)),
+            "other_requests_low": [{"t_s": rel(r["t"]), "side": r.get("side"), "job": r.get("job")}
+                                   for r in low_others][:20]}
+
+
 def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
             hotkeys: HotKeys) -> dict[str, Any]:
     """The guard (`demo_video`'s, keys and clicks refused; the global hot keys this tool's *hotkeys*), and the hooks
@@ -2397,6 +2449,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         guard.refuse("a capture session")
 
     wgc.latest = compositor
+    watch_priority(notes)
     overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
 
     App = app_mod.App
@@ -5299,6 +5352,7 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
+        "server_priority": priority_report(notes, rel),
         "window_order": [{**n, "t": rel(n["t"])} for n in tap.window_order],
         "frame_stalls": stalls_report(notes, rel),
         "input_spells": [[rel(a), rel(b)] for a, b in notes.inputs],

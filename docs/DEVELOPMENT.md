@@ -172,7 +172,10 @@ rows' languages.
   answer and of the backlog's pause for it, a silence with what the server answered just then), the report's
   `frame_stalls` (a sharp page the stand-in kept 6 s that none of the window's frames showed while it went on taking
   them: what covered the stand-in by program file name, the window's capture session, the first frame of a session of
-  the tool's own, the seconds since anyone's input) and `input_spells` (when the computer got input from anyone: a run
+  the tool's own, the seconds since anyone's input), `server_priority` (the server TASlation started lowered for the
+  backlog's work and set back, how many of the backlog's requests were computed low, and every other request
+  computed while it was low - a failure in `.github/gpu-checks/summarise.py`) and `input_spells` (when the computer
+  got input from anyone: a run
   with a person at the machine, whose windows may cover the stand-in, is told apart), the app's log in `app_log/` when
   the run had a stop, a stall or a request without an answer (unless it holds Japanese script), `--cover
   SEGMENT:AT:FOR` laying a window of the tool's own over the stand-in on purpose (the stand-in, a browser, stops

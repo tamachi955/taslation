@@ -446,6 +446,11 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
         late = [s for s in stale if (s.get("seen_ms") or 0) > STALE_MS]
         check("all", "no lettering of a page the stand-in had left on show over 1 s after the window captured the "
               "new one", not late, [[s.get("from_s"), s.get("seen_ms")] for s in late])
+    priority = run.get("server_priority")
+    if isinstance(priority, dict):  # (a tool before it did not watch the server's priority: not looked at)
+        low = priority.get("other_requests_low") or []
+        check("all", "no request but the backlog's was computed while the server was lowered for the backlog's work",
+              not low, low[:5])
     server = report.get("server_started")
     if isinstance(server, dict):
         check("all", "the Ollama TASlation started was stopped at the end", server.get("stopped") is True,
@@ -570,6 +575,9 @@ def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, A
     return {k: v for k, v in found.items() if v}
 
 
+PRIORITY_KEYS = ("lowered", "not_lowered", "set_back", "low_ms", "backlog_requests", "backlog_requests_low")
+
+
 def standin(report: Any, console: str, facts: dict[str, Any], group: str,
             timeout_s: float | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": "standin", "group": group, **_run_facts(facts), "console": console_facts(console)}
@@ -610,6 +618,8 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
         "requests": {k: requests.get(k) for k in ("total", "outside_page_jobs", "gate_pending", "warm_ups")},
         "jobs": {k: jobs.get(k) for k in ("started", "on", "discarded")},
         "server_started": {"setup": server.get("setup"), "stopped": server.get("stopped")} if server else None,
+        "server_priority": {k: (run.get("server_priority") or {}).get(k) for k in PRIORITY_KEYS}
+        if isinstance(run.get("server_priority"), dict) else None,
         "ocr_devices": sorted({",".join(str(e) for e in p.get("engines") or []) for p in placements
                                if isinstance(p, dict)}),
     })
@@ -678,6 +688,11 @@ def standin_md(s: dict[str, Any]) -> str:
                          f"{_pair([first.get('median'), first.get('max')])} | {drained} | "
                          f"{k.get('background_requests')} | {k.get('peak_mb')} |")
         lines.append("")
+    if s.get("server_priority"):
+        sp = s["server_priority"]
+        lines.append(f"* the backlog's work computed low (reported): {sp.get('backlog_requests_low')} of "
+                     f"{sp.get('backlog_requests')} backlog requests; the server lowered {sp.get('lowered')} times "
+                     f"({sp.get('not_lowered')} not), set back {sp.get('set_back')}, low {sp.get('low_ms')} ms in all")
     if "speed" in s:
         found = s["speed"]
         lines.append("* speed (reported, never a failure): "

@@ -63,6 +63,7 @@ and the status bar shows the same.
 
 While you read, TASlation goes on reading and translating the pages you have turned past. How far it is shows in the margin on the side the page turns to
 (the left in a book read right to left, the right in a book read left to right), in both roles, in the window and on the full screen.
+This work runs at a lower priority than the programs you use, so that turning a page, and the page you are on, come first.
 
 * Where the margin is 141 pixels or wider, it is a column of the pages turned past, top to bottom. Each page has a small thumbnail (too small to read),
   its number and two bars (R for reading the text, T for the translation). A bar shows its state by its letter, its colour and its pattern: empty is not started,

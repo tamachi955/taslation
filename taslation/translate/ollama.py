@@ -414,6 +414,7 @@ class OllamaTranslator:
         """Ollama's answer to one request, in one piece, on this thread's connection (`_held`): one the server closed
         while it was kept (Ollama's own idle close, a restart) is opened anew and the request sent once more, nothing of
         it having been answered."""
+        _own_priority(path)
         data = None
         headers = {"Accept": "application/json"}
         if payload is not None:
@@ -535,6 +536,7 @@ class OllamaTranslator:
         No proxy is ever involved (the connection goes straight to the loopback address)."""
         if cancel is not None and cancel.is_set():
             raise Cancelled()
+        _own_priority(path)
         data = json.dumps(payload).encode("utf-8")
         headers = {"Accept": "application/x-ndjson", "Content-Type": "application/json"}
         pieces: list[str] = []
@@ -1192,6 +1194,14 @@ def partly_on_gpu(share: float | None) -> bool:
 
 def _ignore(_text: str) -> None:
     pass
+
+
+def _own_priority(path: str) -> None:
+    """(before each request) The server TASlation started back at its own priority when the backlog's work had lowered
+    it and this request has it compute for something else (`ollama_start.before_request`)."""
+    from ..ollama_start import before_request
+
+    before_request(path)
 
 
 def _stale(e: BaseException) -> bool:

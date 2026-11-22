@@ -84,7 +84,21 @@ model but TASlation's own; at most once in `RESTART_GAP_S`. It is stopped as at 
 above with what `server_setup` gives it now, its record carrying the other TASlation processes that used the old one,
 and waited for `START_WAIT_S`. An Ollama the person runs is never stopped, restarted or reconfigured: the request
 then ends with a sentence that asks the reader to restart it. Everything here waits, and runs in a worker thread,
-never on Tk's."""
+never on Tk's.
+
+Yielding (`asking_behind`, `yield_server`, `before_request`): the work behind the reader - a step of the backlog that
+asks the translator for the pages turned past (`taslation.backlog`) - is computed by the server TASlation started at
+below-normal priority: the server and the processes it started (the model's runner), from the step's start until the
+next request that has the server compute and is not such work (the page on show's, a load: `before_request`, which
+`translate.ollama` calls before each request); each then goes back to the class the server had. Not as the step ends:
+a request the step gave up is still computed to the end of the prompt batch under way, and that is what a turn meets.
+On a computer without a GPU the server's prompt takes the processor from everything the reader sees (GitHub's runners,
+4 logical processors: a request of the backlog's asked from its start, 700 to 1000 tokens, kept the server at work 6-7
+s right after a page was done; the window's captures of the viewer stalled 1.5-3 s with 30-80 ms of processor time of
+their own, and the stand-in viewer, a browser drawing on the processor, drew 4 and 7 of 10 quick turns); at
+below-normal priority it computes on what the desktop leaves. Only for a server this process alone uses (another
+TASlation's requests are not this one's to slow) and only on Windows; a process that cannot be set is left as it is.
+An Ollama the person runs is never touched."""
 
 from __future__ import annotations
 
@@ -417,7 +431,11 @@ class ProcessInfo(NamedTuple):
 
 _SYNCHRONIZE = 0x00100000
 _PROCESS_TERMINATE = 0x0001
+_PROCESS_SET_INFORMATION = 0x0200
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+NORMAL_PRIORITY_CLASS = 0x00000020
+BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+IDLE_PRIORITY_CLASS = 0x00000040
 _WAIT_OBJECT_0 = 0
 _WAIT_ABANDONED = 0x80
 _WAIT_TIMEOUT = 0x102
@@ -442,6 +460,9 @@ def _kernel32() -> Any:
         k.QueryFullProcessImageNameW.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
                                                  ctypes.POINTER(wintypes.DWORD))
         k.TerminateProcess.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        k.GetPriorityClass.restype = wintypes.DWORD
+        k.GetPriorityClass.argtypes = (wintypes.HANDLE,)
+        k.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
         k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         k.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
         k.CreateMutexW.restype = wintypes.HANDLE
@@ -573,6 +594,34 @@ def terminate(pid: int, started: int) -> bool:
     try:
         info = _info_of(handle)
         return info is not None and info.started == started and bool(_kernel32().TerminateProcess(handle, 1))
+    finally:
+        _kernel32().CloseHandle(handle)
+
+
+def priority_class(pid: int, started: int) -> int | None:
+    """Process *pid*'s priority class (`NORMAL_PRIORITY_CLASS`, ...), when it is still the one that started at
+    *started*; None otherwise, and when Windows does not say."""
+    handle = _open(pid, _SYNCHRONIZE)
+    if handle is None:
+        return None
+    try:
+        info = _info_of(handle)
+        if info is None or info.started != started:
+            return None
+        return int(_kernel32().GetPriorityClass(handle)) or None
+    finally:
+        _kernel32().CloseHandle(handle)
+
+
+def set_priority_class(pid: int, started: int, value: int) -> bool:
+    """Process *pid* given the priority class *value*, when it is still the one that started at *started*. Whether
+    it was."""
+    handle = _open(pid, _SYNCHRONIZE | _PROCESS_SET_INFORMATION)
+    if handle is None:
+        return False
+    try:
+        info = _info_of(handle)
+        return info is not None and info.started == started and bool(_kernel32().SetPriorityClass(handle, value))
     finally:
         _kernel32().CloseHandle(handle)
 
@@ -846,7 +895,111 @@ def _ours(name: Any, own: Iterable[str]) -> bool:
     return by_ollama_name(name) is not None or any(same_model(name, m) or same_model(m, str(name)) for m in own)
 
 
-STOPPED = "The translation program TASlation started was stopped."
+# ------------------------------------------------------------------ the work behind the reader yields (see the top)
+COMPUTING_PATHS = ("/api/generate", "/api/chat")  # the requests that have the server compute (`before_request`)
+_yield_lock = threading.Lock()
+_yielded: dict[tuple[int, int], int] = {}  # a server lowered (pid, started): the priority class it had before
+_behind = threading.local()  # ``on``: this thread asks for work behind the reader (`asking_behind`)
+
+
+def own_server(url: Any) -> tuple[int, int] | None:
+    """The server TASlation started for *url* (pid, started) when this process holds a claim on it, it still runs as
+    that process and no other TASlation process that uses it still runs; else None."""
+    if not url:
+        return None
+    with _claims_lock:
+        paths = [path for path, claim in _claims.items() if _same_url(claim.url, str(url))]
+    if not paths:
+        return None
+    me = this_process()
+    for path in paths:
+        record = _read(path)
+        if record is None or not _same_url(record.get("url"), str(url)) or not _server_alive(record):
+            continue
+        if all(_is(user, me) for user in record["users"] if _alive(user)):
+            return int(record["pid"]), int(record["started"])
+    return None
+
+
+def _set_all(server: tuple[int, int], value: int) -> int:
+    """*server*, then every process it started now (`descendants`), given the priority class *value*; how many were.
+    The server first: what it started is looked for after it (a look that fails leaves them as they are)."""
+    count = int(set_priority_class(*server, value))
+    try:
+        started = descendants(*server)
+    except Exception as e:  # noqa: BLE001
+        LOG.debug("the processes the server started were not found (%s)", type(e).__name__)
+        return count
+    for pid, began in started:
+        count += set_priority_class(pid, began, value)
+    return count
+
+
+def yield_server(url: Any) -> bool:
+    """The server TASlation started for *url* (`own_server`) and every process it started at below-normal priority,
+    the class the server had kept for `unyield_server` (a process started while it is lowered gets it from the
+    server). Whether it is lowered now; nothing changed for a server whose class is that low already, or lower."""
+    if sys.platform != "win32":
+        return False
+    server = own_server(url)
+    if server is None:
+        return False
+    with _yield_lock:
+        if server not in _yielded:
+            was = priority_class(*server)
+            if was is None or was in (BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS):
+                return False
+            if not set_priority_class(*server, BELOW_NORMAL_PRIORITY_CLASS):
+                return False  # (the server refused: nothing it started is lowered alone)
+            _yielded[server] = was
+        _set_all(server, BELOW_NORMAL_PRIORITY_CLASS)  # (each step: a model loaded meanwhile with another class)
+        return True
+
+
+def unyield_server() -> int:
+    """Every server `yield_server` lowered, and the processes it started now, back at the class the server had; how
+    many processes were set (a server that has ended since: none)."""
+    with _yield_lock:
+        lowered = list(_yielded.items())
+        _yielded.clear()
+        return sum(_set_all(server, was) for server, was in lowered)
+
+
+def server_yields() -> bool:
+    """Whether a server is lowered now (`yield_server`)."""
+    return bool(_yielded)
+
+
+@contextlib.contextmanager
+def asking_behind(url: Any) -> Iterator[None]:
+    """(a step of the backlog's that asks the translator, on the window's worker) What this thread asks meanwhile is
+    work behind the reader: the server TASlation started for *url* computes it at below-normal priority
+    (`yield_server`), from now until a request that is not such work has the server compute (`before_request`)."""
+    before = getattr(_behind, "on", False)
+    _behind.on = True
+    try:
+        try:
+            yield_server(url)
+        except Exception as e:  # noqa: BLE001 - the step asks all the same, at the server's own priority
+            LOG.debug("the server's priority was not lowered (%s)", type(e).__name__)
+        yield
+    finally:
+        _behind.on = before
+
+
+def before_request(path: Any) -> None:
+    """(`translate.ollama`, before each request) A request that has the server compute (`COMPUTING_PATHS`) and is not
+    work behind the reader (`asking_behind`): a server lowered for that work back at its own priority first. Nothing
+    to do (the rule, at once) while none is lowered."""
+    if not _yielded or getattr(_behind, "on", False) or str(path) not in COMPUTING_PATHS:
+        return
+    try:
+        unyield_server()
+    except Exception as e:  # noqa: BLE001 - the request goes all the same
+        LOG.debug("the server's priority was not set back (%s)", type(e).__name__)
+
+
+STOPPED ="The translation program TASlation started was stopped."
 IN_USE = "The translation program TASlation started is left running: another TASlation still uses it."
 FOREIGN = ("The translation program TASlation started is left running, and TASlation no longer stops it: another "
            "program has {count} model(s) loaded in it ({names}).")
