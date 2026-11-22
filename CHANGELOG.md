@@ -20,13 +20,27 @@ Reading
 
 Speed
 
-* The models that read the text run on the GPU more often. Before, they went to the processor whenever less than 1 GB
-  of the GPU's memory would stay free beside everything else, a figure set by hand; now the rule is made of measured
-  figures (what the readers need at their largest, where the driver begins to move memory off the card, how much other
-  programs' use moves) and asks for about 700 MB. On the test computer (6 GB, other programs holding 1.6 GB of it)
-  that is the difference between the readers on the processor and on the GPU: the first bubble of a two-page screen
-  after 1.4 s instead of 2.7 s. The room is looked at again every 30 seconds, and reads that turn out slower on the
-  GPU than on the processor move back to it for the session (Tools → Settings → System says why).
+* A page's lines go to the translator as soon as they are read, so the first bubble comes sooner: on a screen showing
+  two pages about 1.0 s after the turn instead of 1.6 s (without a GPU 1.8 s instead of 2.9 s; measured on the test
+  computer with a viewer that draws the page sharp at once). The whole page takes as long as before. Once the page is
+  read, a bubble translated that early may be replaced, for example where the reading order turned out different.
+* A line the book has already translated is lettered as soon as it is read.
+* A page already translated and on show gives way at once when you turn the page.
+* The GPU's memory is judged once, as the window starts, for everything TASlation puts there (the translation model,
+  two of the OCR readers, LaMa, the layout model). When it all fits, everything loads in the background at once and
+  stays ("Loading the models..." in the status bar; you can choose the viewer meanwhile). When it does not, a box says
+  by how much, with "Check again", "Start on the processor" (only what does not fit goes there: the OCR readers first,
+  the translation model last) and "Quit", and "Do not ask again on this computer". Nothing moves between the GPU and
+  the processor during the session any more. Before, the OCR readers went to the processor whenever less than 1 GB of
+  the GPU's memory would stay free, a figure set by hand; the judgement is now made of measured figures and asks for
+  about 700 MB.
+* While pages turned past are translated in the background, the translation server TASlation started runs at
+  below-normal priority, so the viewer and the page on show keep the processor (an Ollama of your own is left as it
+  is).
+
+Fixes
+
+* Stopping a page no longer leaves lettering of lines sent early on show.
 
 For developers
 

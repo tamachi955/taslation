@@ -10,7 +10,7 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 * About 7.5 GB of free disk space (about 9.0 GB when you translate into Portuguese (Brazil) or Turkish; of the translation models, PLaMo 3 Translate 2B takes about 1.8 GB (about 3.8 GB only while it is being imported), and Qwen3.5 4B, used for Portuguese (Brazil) and Turkish, about 3.3 GB; only one of the two is installed, whichever your target language needs).
   On a computer with an NVIDIA GPU, PyTorch's GPU build needs about 3.7 GB more (and, during the installation only, about 2.6 GB more again)
 * 16 GB of RAM recommended (measured: TASlation itself used up to about 2.5 GB, and Ollama, which does the translating, up to about 2 GB with a GPU and about 4 GB without one. Those are the figures with Ollama's cache switched off (TASlation sets it so for the Ollama it starts). With the cache, Ollama used up to about 10 GB with a GPU and about 7.4 GB without. When you close TASlation, the Ollama it started stops too, and that RAM is free again. It has not been tried on a computer with 8 GB)
-* An NVIDIA GPU (6 GB of memory) recommended. Measured: the translation model used about 1.9 GB and the model that erases lettering on the art about 0.5 GB, besides what Windows and your other programs use. A 4 GB GPU works too, but when less than about 3 GB of its memory is free, part of the translation model runs on the CPU and translation is about 1.5 times slower. It also runs without a GPU (translation is then about 4 times slower). AMD and Intel GPUs are not used (it runs on the CPU).
+* An NVIDIA GPU (6 GB of memory) recommended. Measured: the translation model used about 1.9 GB and the model that erases lettering on the art about 0.5 GB, besides what Windows and your other programs use. On a 4 GB GPU not everything fits with the default settings: TASlation says so as it starts, and runs what does not fit on the processor (the models that read the text first, the translation model last), which is slower. It also runs without a GPU (translation is then about 4 times slower). AMD and Intel GPUs are not used (it runs on the CPU).
 * A viewer that shows the book (an app or a browser)
 
 | Step | With a GPU | Without a GPU |
@@ -74,9 +74,9 @@ The Ollama TASlation starts also gets the full window cache: `LLAMA_ARG_SWA_FULL
 (the setting "Translator's window cache" in Tools > Settings... > System, `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
 (in TASlation's environment, or kept by Windows for this user or this computer) is passed on as it is.
 With it, llama.cpp keeps the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
-and keeps 256 MB of earlier requests in RAM. By default ("On, unless the OCR then leaves the GPU") TASlation decides each time it starts Ollama:
-it leaves the window cache out when its extra GPU memory would move two of the OCR readers from the GPU to the processor
-(on a 6 GB GPU, only when other programs hold about 1.6 to 1.7 GB of it). "Off" never uses it, "Always on" always does.
+and keeps 256 MB of earlier requests in RAM. "On" (the default) uses it, "Off" does not.
+The check of the GPU's memory as TASlation starts counts the translation model with the window cache (docs/MANUAL.md, "What runs on the GPU"):
+on a 6 GB GPU with the default settings it asks when other programs hold more than about 1.7 GB of it.
 The window and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
 
 For an Ollama you run yourself, neither the installer nor TASlation sets these two variables. To use the window cache there,
