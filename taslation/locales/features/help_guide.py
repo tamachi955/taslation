@@ -1,5 +1,5 @@
-"""The window's own guide: Help > How to use... (the topics of `ui.dialogs.help.TOPICS`, one string per paragraph), the
-popup of a first start, and the line of the Batch dialog that stays in view (the sentence its explanation has too)."""
+"""The window's own guide: Help > How to use... (the topics of `ui.dialogs.help.TOPICS`, one string per paragraph) and
+the popup of a first start."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "How to use...": {
@@ -93,7 +93,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "3. 여기서 페이지 키나 페이지 클릭으로 넘기면 TASlation이 번역된 페이지를 보여 줍니다.",
         "th": "3. พลิกหน้าที่นี่ ด้วยปุ่มพลิกหน้าหรือคลิกที่หน้า แล้ว TASlation จะแสดงหน้าที่แปลแล้ว",
     },
-    # the Batch dialog: what stays in view
     # headings
     "Getting started": {
         "ja": "はじめに",
@@ -112,24 +111,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "開始使用",
         "ko": "시작하기",
         "th": "เริ่มต้นใช้งาน",
-    },
-    "Reading a whole book": {
-        "ja": "1冊まるごと読む",
-        "es": "Leer un libro entero",
-        "pt": "Ler um livro inteiro",
-        "fr": "Lire un livre entier",
-        "de": "Ein ganzes Buch lesen",
-        "it": "Leggere un libro intero",
-        "nl": "Een heel boek lezen",
-        "pl": "Czytanie całej książki",
-        "ru": "Чтение всей книги",
-        "tr": "Bir kitabın tamamını okuma",
-        "id": "Membaca seluruh buku",
-        "vi": "Đọc cả cuốn sách",
-        "zh": "阅读整本书",
-        "zh-tw": "閱讀整本書",
-        "ko": "책 전체 읽기",
-        "th": "อ่านทั้งเล่ม",
     },
     "When something goes wrong": {
         "ja": "うまくいかないとき",
@@ -313,23 +294,23 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "독자 역할에서는 페이지 키와 페이지 클릭이 뷰어로 전달되고, 나갈 때까지 '자동'이 켜져 있어 넘기는 페이지마다 번역합니다.",
         "th": "ในบทบาทผู้อ่าน ปุ่มพลิกหน้าและการคลิกบนหน้าจะส่งไปยังโปรแกรมอ่าน และ “อัตโนมัติ” จะเปิดอยู่จนกว่าคุณจะออก จึงแปลทุกหน้าที่คุณพลิก",
     },
-    "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, or to start a whole-book run, leave the full screen first.": {
-        "ja": "翻訳者の役割では、ページ送りのキーはそのままビューアのページをめくり、ページ上ではウィンドウと同じように作業できます: 領域をクリックして選択、ドラッグで移動・大きさの変更・回転・新しい領域の作成、ダブルクリックで編集します。翻訳者のキーも使えます。クリックはビューアに送られません。「自動」は設定したままです。役割や本の名前を変えるとき、1冊まるごと読み取りを始めるときは、先にフルスクリーンを抜けてください。",
-        "es": "Con el rol de traductor, las teclas de página siguen pasando las páginas del visor, y trabajas en la página como en la ventana: haz clic en una región para seleccionarla, arrastra para moverla, redimensionarla, girarla o dibujar una, y haz doble clic para editarla; las teclas del traductor también funcionan. Ningún clic va al visor. Auto queda como lo pusiste. Para cambiar el rol o el nombre del libro, o para empezar la lectura del libro entero, sal primero de la pantalla completa.",
-        "pt": "Na função de tradutor, as teclas de página continuam virando as páginas do visualizador, e você trabalha na página como na janela: clique numa região para selecioná-la, arraste para movê-la, redimensioná-la, girá-la ou desenhar uma, e clique duas vezes para editá-la; as teclas do tradutor também funcionam. Nenhum clique vai para o visualizador. O Auto fica como você o deixou. Para mudar a função ou o nome do livro, ou para começar a leitura do livro inteiro, saia primeiro da tela cheia.",
-        "fr": "Avec le rôle de traducteur, les touches de page tournent toujours les pages de la visionneuse, et vous travaillez sur la page comme dans la fenêtre : cliquez sur une zone pour la sélectionner, faites glisser pour la déplacer, la redimensionner, la faire pivoter ou en dessiner une, double-cliquez pour la modifier ; les touches du traducteur fonctionnent aussi. Aucun clic ne va à la visionneuse. Auto reste tel que vous l'avez réglé. Pour changer de rôle ou de nom de livre, ou pour lancer la lecture du livre entier, quittez d'abord le plein écran.",
-        "de": "In der Rolle Übersetzer blättern die Seitentasten weiter im Viewer, und Sie arbeiten auf der Seite wie im Fenster: Klicken Sie auf einen Bereich, um ihn auszuwählen, ziehen Sie, um ihn zu verschieben, in der Größe zu ändern, zu drehen oder einen neuen zu zeichnen, und doppelklicken Sie, um ihn zu bearbeiten; die Tasten des Übersetzers funktionieren ebenfalls. Kein Klick geht an den Viewer. Auto bleibt, wie Sie es eingestellt haben. Um die Rolle oder den Namen des Buchs zu ändern oder das Lesen des ganzen Buchs zu starten, verlassen Sie zuerst das Vollbild.",
-        "it": "Con il ruolo di traduttore, i tasti pagina girano comunque le pagine del visualizzatore, e lavori sulla pagina come nella finestra: fai clic su una regione per selezionarla, trascina per spostarla, ridimensionarla, ruotarla o disegnarne una, fai doppio clic per modificarla; anche i tasti del traduttore funzionano. Nessun clic va al visualizzatore. Auto resta come l'hai impostato. Per cambiare ruolo o nome del libro, o per avviare la lettura di tutto il libro, esci prima dallo schermo intero.",
-        "nl": "In de rol Vertaler bladeren de paginatoetsen nog steeds in de viewer, en werkt u op de pagina zoals in het venster: klik op een gebied om het te selecteren, sleep om het te verplaatsen, het formaat te wijzigen, het te draaien of er een te tekenen, en dubbelklik om het te bewerken; de toetsen van de vertaler werken ook. Geen klik gaat naar de viewer. Auto blijft zoals u het instelde. Om de rol of de naam van het boek te wijzigen, of om het hele boek te laten lezen, verlaat u eerst het volledige scherm.",
-        "pl": "W roli tłumacza klawisze stron nadal przewracają strony czytnika, a na stronie pracujesz tak jak w oknie: kliknij obszar, aby go zaznaczyć, przeciągnij, aby go przesunąć, zmienić rozmiar, obrócić lub narysować nowy, kliknij dwukrotnie, aby go edytować; klawisze tłumacza też działają. Żadne kliknięcie nie trafia do czytnika. Auto zostaje tak, jak je ustawiłeś. Aby zmienić rolę lub nazwę książki albo zacząć czytanie całej książki, najpierw wyjdź z pełnego ekranu.",
-        "ru": "В роли переводчика клавиши страниц по-прежнему листают просмотрщик, а со страницей вы работаете так же, как в окне: щёлкните область, чтобы выбрать её, перетащите, чтобы переместить, изменить размер, повернуть или нарисовать новую, дважды щёлкните, чтобы изменить её; клавиши переводчика тоже работают. Щелчки в просмотрщик не передаются. «Авто» остаётся таким, как вы его поставили. Чтобы сменить роль или название книги или начать чтение всей книги, сначала выйдите из полноэкранного режима.",
-        "tr": "Çevirmen rolünde sayfa tuşları görüntüleyicinin sayfalarını çevirmeye devam eder ve sayfada penceredeki gibi çalışırsınız: seçmek için bir bölgeye tıklayın, taşımak, boyutlandırmak, döndürmek ya da yenisini çizmek için sürükleyin, düzenlemek için çift tıklayın; çevirmenin tuşları da çalışır. Hiçbir tıklama görüntüleyiciye gitmez. Otomatik, ayarladığınız gibi kalır. Rolü ya da kitabın adını değiştirmek veya kitabın tamamını okutmak için önce tam ekrandan çıkın.",
-        "id": "Dalam peran Penerjemah, tombol halaman tetap membalik halaman penampil, dan Anda bekerja di halaman seperti di jendela: klik wilayah untuk memilihnya, seret untuk memindahkan, mengubah ukuran, memutar, atau menggambar wilayah baru, klik dua kali untuk menyuntingnya; tombol penerjemah juga berfungsi. Tidak ada klik yang diteruskan ke penampil. Otomatis tetap seperti yang Anda atur. Untuk mengganti peran atau nama buku, atau memulai pembacaan seluruh buku, keluar dulu dari layar penuh.",
-        "vi": "Trong vai trò Người dịch, các phím lật trang vẫn lật trang trình xem, và bạn làm việc trên trang như trong cửa sổ: nhấp vào một vùng để chọn, kéo để di chuyển, đổi cỡ, xoay hoặc vẽ vùng mới, nhấp đúp để sửa; các phím của người dịch cũng dùng được. Không cú nhấp nào được chuyển tới trình xem. Tự động giữ nguyên như bạn đã đặt. Để đổi vai trò hoặc tên sách, hay bắt đầu đọc cả cuốn sách, hãy thoát toàn màn hình trước.",
-        "zh": "在译者角色下，翻页键仍会翻动查看器的页面，你可以像在窗口中一样处理页面：单击区域将其选中，拖动以移动、调整大小、旋转或绘制新区域，双击进行编辑；译者的按键也可使用。单击不会传给查看器。“自动”保持你的设置。要更改角色或书名，或开始整本阅读，请先退出全屏。",
-        "zh-tw": "在譯者角色下，翻頁鍵仍會翻動檢視器的頁面，你可以像在視窗中一樣處理頁面：按一下區域將其選取，拖曳以移動、調整大小、旋轉或繪製新區域，按兩下進行編輯；譯者的按鍵也可使用。按一下不會傳給檢視器。「自動」保持你的設定。要變更角色或書名，或開始整本閱讀，請先離開全螢幕。",
-        "ko": "번역자 역할에서는 페이지 키가 여전히 뷰어의 페이지를 넘기고, 페이지에서는 창에서처럼 작업합니다. 영역을 클릭해 선택하고, 드래그해 옮기거나 크기를 바꾸거나 회전하거나 새로 그리며, 더블 클릭해 편집합니다. 번역자의 키도 쓸 수 있습니다. 클릭은 뷰어로 전달되지 않습니다. '자동'은 설정한 그대로입니다. 역할이나 책 이름을 바꾸거나 책 전체 읽기를 시작하려면 먼저 전체 화면을 나가세요.",
-        "th": "ในบทบาทผู้แปล ปุ่มพลิกหน้ายังพลิกหน้าในโปรแกรมอ่าน และคุณทำงานบนหน้าได้เหมือนในหน้าต่าง: คลิกบริเวณเพื่อเลือก ลากเพื่อย้าย ปรับขนาด หมุน หรือวาดบริเวณใหม่ ดับเบิลคลิกเพื่อแก้ไข ปุ่มของผู้แปลก็ใช้ได้ การคลิกจะไม่ส่งต่อไปยังโปรแกรมอ่าน “อัตโนมัติ” คงไว้ตามที่คุณตั้ง หากจะเปลี่ยนบทบาทหรือชื่อหนังสือ หรือเริ่มอ่านทั้งเล่ม ให้ออกจากเต็มหน้าจอก่อน",
+    "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, leave the full screen first.": {
+        "ja": "翻訳者の役割では、ページ送りのキーはそのままビューアのページをめくり、ページ上ではウィンドウと同じように作業できます: 領域をクリックして選択、ドラッグで移動・大きさの変更・回転・新しい領域の作成、ダブルクリックで編集します。翻訳者のキーも使えます。クリックはビューアに送られません。「自動」は設定したままです。役割や本の名前を変えるときは、先にフルスクリーンを抜けてください。",
+        "es": "Con el rol de traductor, las teclas de página siguen pasando las páginas del visor, y trabajas en la página como en la ventana: haz clic en una región para seleccionarla, arrastra para moverla, redimensionarla, girarla o dibujar una, y haz doble clic para editarla; las teclas del traductor también funcionan. Ningún clic va al visor. Auto queda como lo pusiste. Para cambiar el rol o el nombre del libro, sal primero de la pantalla completa.",
+        "pt": "Na função de tradutor, as teclas de página continuam virando as páginas do visualizador, e você trabalha na página como na janela: clique numa região para selecioná-la, arraste para movê-la, redimensioná-la, girá-la ou desenhar uma, e clique duas vezes para editá-la; as teclas do tradutor também funcionam. Nenhum clique vai para o visualizador. O Auto fica como você o deixou. Para mudar a função ou o nome do livro, saia primeiro da tela cheia.",
+        "fr": "Avec le rôle de traducteur, les touches de page tournent toujours les pages de la visionneuse, et vous travaillez sur la page comme dans la fenêtre : cliquez sur une zone pour la sélectionner, faites glisser pour la déplacer, la redimensionner, la faire pivoter ou en dessiner une, double-cliquez pour la modifier ; les touches du traducteur fonctionnent aussi. Aucun clic ne va à la visionneuse. Auto reste tel que vous l'avez réglé. Pour changer de rôle ou de nom de livre, quittez d'abord le plein écran.",
+        "de": "In der Rolle Übersetzer blättern die Seitentasten weiter im Viewer, und Sie arbeiten auf der Seite wie im Fenster: Klicken Sie auf einen Bereich, um ihn auszuwählen, ziehen Sie, um ihn zu verschieben, in der Größe zu ändern, zu drehen oder einen neuen zu zeichnen, und doppelklicken Sie, um ihn zu bearbeiten; die Tasten des Übersetzers funktionieren ebenfalls. Kein Klick geht an den Viewer. Auto bleibt, wie Sie es eingestellt haben. Um die Rolle oder den Namen des Buchs zu ändern, verlassen Sie zuerst das Vollbild.",
+        "it": "Con il ruolo di traduttore, i tasti pagina girano comunque le pagine del visualizzatore, e lavori sulla pagina come nella finestra: fai clic su una regione per selezionarla, trascina per spostarla, ridimensionarla, ruotarla o disegnarne una, fai doppio clic per modificarla; anche i tasti del traduttore funzionano. Nessun clic va al visualizzatore. Auto resta come l'hai impostato. Per cambiare ruolo o nome del libro, esci prima dallo schermo intero.",
+        "nl": "In de rol Vertaler bladeren de paginatoetsen nog steeds in de viewer, en werkt u op de pagina zoals in het venster: klik op een gebied om het te selecteren, sleep om het te verplaatsen, het formaat te wijzigen, het te draaien of er een te tekenen, en dubbelklik om het te bewerken; de toetsen van de vertaler werken ook. Geen klik gaat naar de viewer. Auto blijft zoals u het instelde. Om de rol of de naam van het boek te wijzigen, verlaat u eerst het volledige scherm.",
+        "pl": "W roli tłumacza klawisze stron nadal przewracają strony czytnika, a na stronie pracujesz tak jak w oknie: kliknij obszar, aby go zaznaczyć, przeciągnij, aby go przesunąć, zmienić rozmiar, obrócić lub narysować nowy, kliknij dwukrotnie, aby go edytować; klawisze tłumacza też działają. Żadne kliknięcie nie trafia do czytnika. Auto zostaje tak, jak je ustawiłeś. Aby zmienić rolę lub nazwę książki, najpierw wyjdź z pełnego ekranu.",
+        "ru": "В роли переводчика клавиши страниц по-прежнему листают просмотрщик, а со страницей вы работаете так же, как в окне: щёлкните область, чтобы выбрать её, перетащите, чтобы переместить, изменить размер, повернуть или нарисовать новую, дважды щёлкните, чтобы изменить её; клавиши переводчика тоже работают. Щелчки в просмотрщик не передаются. «Авто» остаётся таким, как вы его поставили. Чтобы сменить роль или название книги, сначала выйдите из полноэкранного режима.",
+        "tr": "Çevirmen rolünde sayfa tuşları görüntüleyicinin sayfalarını çevirmeye devam eder ve sayfada penceredeki gibi çalışırsınız: seçmek için bir bölgeye tıklayın, taşımak, boyutlandırmak, döndürmek ya da yenisini çizmek için sürükleyin, düzenlemek için çift tıklayın; çevirmenin tuşları da çalışır. Hiçbir tıklama görüntüleyiciye gitmez. Otomatik, ayarladığınız gibi kalır. Rolü ya da kitabın adını değiştirmek için önce tam ekrandan çıkın.",
+        "id": "Dalam peran Penerjemah, tombol halaman tetap membalik halaman penampil, dan Anda bekerja di halaman seperti di jendela: klik wilayah untuk memilihnya, seret untuk memindahkan, mengubah ukuran, memutar, atau menggambar wilayah baru, klik dua kali untuk menyuntingnya; tombol penerjemah juga berfungsi. Tidak ada klik yang diteruskan ke penampil. Otomatis tetap seperti yang Anda atur. Untuk mengganti peran atau nama buku, keluar dulu dari layar penuh.",
+        "vi": "Trong vai trò Người dịch, các phím lật trang vẫn lật trang trình xem, và bạn làm việc trên trang như trong cửa sổ: nhấp vào một vùng để chọn, kéo để di chuyển, đổi cỡ, xoay hoặc vẽ vùng mới, nhấp đúp để sửa; các phím của người dịch cũng dùng được. Không cú nhấp nào được chuyển tới trình xem. Tự động giữ nguyên như bạn đã đặt. Để đổi vai trò hoặc tên sách, hãy thoát toàn màn hình trước.",
+        "zh": "在译者角色下，翻页键仍会翻动查看器的页面，你可以像在窗口中一样处理页面：单击区域将其选中，拖动以移动、调整大小、旋转或绘制新区域，双击进行编辑；译者的按键也可使用。单击不会传给查看器。“自动”保持你的设置。要更改角色或书名，请先退出全屏。",
+        "zh-tw": "在譯者角色下，翻頁鍵仍會翻動檢視器的頁面，你可以像在視窗中一樣處理頁面：按一下區域將其選取，拖曳以移動、調整大小、旋轉或繪製新區域，按兩下進行編輯；譯者的按鍵也可使用。按一下不會傳給檢視器。「自動」保持你的設定。要變更角色或書名，請先離開全螢幕。",
+        "ko": "번역자 역할에서는 페이지 키가 여전히 뷰어의 페이지를 넘기고, 페이지에서는 창에서처럼 작업합니다. 영역을 클릭해 선택하고, 드래그해 옮기거나 크기를 바꾸거나 회전하거나 새로 그리며, 더블 클릭해 편집합니다. 번역자의 키도 쓸 수 있습니다. 클릭은 뷰어로 전달되지 않습니다. '자동'은 설정한 그대로입니다. 역할이나 책 이름을 바꾸려면 먼저 전체 화면을 나가세요.",
+        "th": "ในบทบาทผู้แปล ปุ่มพลิกหน้ายังพลิกหน้าในโปรแกรมอ่าน และคุณทำงานบนหน้าได้เหมือนในหน้าต่าง: คลิกบริเวณเพื่อเลือก ลากเพื่อย้าย ปรับขนาด หมุน หรือวาดบริเวณใหม่ ดับเบิลคลิกเพื่อแก้ไข ปุ่มของผู้แปลก็ใช้ได้ การคลิกจะไม่ส่งต่อไปยังโปรแกรมอ่าน “อัตโนมัติ” คงไว้ตามที่คุณตั้ง หากจะเปลี่ยนบทบาทหรือชื่อหนังสือ ให้ออกจากเต็มหน้าจอก่อน",
     },
     "F11 leaves the full screen and gives the window back as it was. Esc does too; in the Translator role it first lets go of a selected region.": {
         "ja": "F11 でフルスクリーンを抜けると、ウィンドウは元の状態に戻ります。Esc でも抜けますが、翻訳者の役割では先に領域の選択を解除します。",
@@ -348,43 +329,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "按 F11 離開全螢幕，視窗恢復原樣。Esc 也可以；在譯者角色下，它會先取消選取的區域。",
         "ko": "F11을 누르면 전체 화면을 나가고 창이 원래대로 돌아옵니다. Esc도 같지만, 번역자 역할에서는 먼저 선택한 영역을 해제합니다.",
         "th": "F11 จะออกจากเต็มหน้าจอ และคืนหน้าต่างให้เหมือนเดิม Esc ก็เช่นกัน แต่ในบทบาทผู้แปล จะยกเลิกการเลือกบริเวณก่อน",
-    },
-    # a whole book
-    "This is optional: page by page, as you read, is the normal way. Check your store's terms of use first.": {
-        "ja": "これは任意の機能です。通常は読みながら1ページずつ翻訳します。先に書店の利用規約を確認してください。",
-        "es": "Es opcional: lo normal es página a página, según lees. Consulta antes las condiciones de uso de tu tienda.",
-        "pt": "É opcional: o normal é página por página, conforme você lê. Consulte antes os termos de uso da sua loja.",
-        "fr": "C'est facultatif : la façon normale est page par page, au fil de la lecture. Consultez d'abord les conditions d'utilisation de votre boutique.",
-        "de": "Das ist freiwillig: Üblich ist Seite für Seite beim Lesen. Prüfen Sie zuerst die Nutzungsbedingungen Ihres Shops.",
-        "it": "È facoltativo: il modo normale è pagina per pagina, mentre leggi. Controlla prima le condizioni d'uso del tuo negozio.",
-        "nl": "Dit is optioneel: normaal gaat het pagina voor pagina terwijl u leest. Controleer eerst de gebruiksvoorwaarden van uw winkel.",
-        "pl": "To opcja: zwykle tłumaczy się stronę po stronie, w trakcie czytania. Najpierw sprawdź warunki korzystania ze swojego sklepu.",
-        "ru": "Это необязательно: обычно страницы переводятся по одной, по мере чтения. Сначала проверьте условия использования вашего магазина.",
-        "tr": "Bu isteğe bağlıdır: Olağan yol, okudukça sayfa sayfa ilerlemektir. Önce mağazanızın kullanım koşullarına bakın.",
-        "id": "Ini opsional: cara biasa adalah halaman demi halaman sambil membaca. Periksa dulu ketentuan penggunaan toko Anda.",
-        "vi": "Đây là tùy chọn: cách thông thường là từng trang khi bạn đọc. Hãy xem trước điều khoản sử dụng của cửa hàng.",
-        "zh": "这是可选功能：通常是边读边逐页翻译。请先查看书店的使用条款。",
-        "zh-tw": "這是選用功能：通常是邊讀邊逐頁翻譯。請先查看書店的使用條款。",
-        "ko": "이 기능은 선택 사항입니다. 보통은 읽으면서 한 페이지씩 번역합니다. 먼저 서점의 이용 약관을 확인하세요.",
-        "th": "นี่เป็นตัวเลือกเสริม ปกติจะแปลทีละหน้าขณะอ่าน กรุณาตรวจสอบข้อกำหนดการใช้งานของร้านค้าก่อน",
-    },
-    "Open the book at the first page you want, then choose Read whole book... and Start.": {
-        "ja": "読み始めたいページを開き、「1冊まるごと読む...」を選んで「開始」を押します。",
-        "es": "Abre el libro en la primera página que quieras, elige Leer todo el libro... y luego Iniciar.",
-        "pt": "Abra o livro na primeira página que quiser, escolha Ler o livro inteiro... e depois Iniciar.",
-        "fr": "Ouvrez le livre à la première page voulue, choisissez Lire tout le livre... puis Démarrer.",
-        "de": "Öffnen Sie das Buch auf der gewünschten ersten Seite, wählen Sie „Ganzes Buch lesen...“ und dann Start.",
-        "it": "Apri il libro alla prima pagina che vuoi, scegli Leggi tutto il libro... e poi Avvia.",
-        "nl": "Open het boek op de eerste pagina die u wilt, kies Hele boek lezen... en dan Start.",
-        "pl": "Otwórz książkę na wybranej pierwszej stronie, wybierz Przeczytaj całą książkę... i kliknij Start.",
-        "ru": "Откройте книгу на нужной первой странице, выберите «Прочитать всю книгу...» и нажмите «Старт».",
-        "tr": "Kitabı istediğiniz ilk sayfada açın, Kitabın tamamını oku... seçeneğini seçip Başlat'a basın.",
-        "id": "Buka buku di halaman pertama yang diinginkan, pilih Baca seluruh buku... lalu Mulai.",
-        "vi": "Hãy mở sách ở trang đầu tiên bạn muốn, chọn Đọc cả cuốn sách... rồi Bắt đầu.",
-        "zh": "把书打开到想开始的那一页，选择“阅读整本书...”，然后点“开始”。",
-        "zh-tw": "把書打開到想開始的那一頁，選擇「閱讀整本書...」，然後按「開始」。",
-        "ko": "시작할 페이지에서 책을 열고 책 전체 읽기...를 고른 다음 시작을 누르세요.",
-        "th": "เปิดหนังสือที่หน้าแรกที่ต้องการ แล้วเลือก “อ่านทั้งเล่ม...” และกด “เริ่ม”",
     },
     # page keys
     "Arrow keys, Page Up, Page Down, Home, End and Space pressed on the page go on to the viewer.": {

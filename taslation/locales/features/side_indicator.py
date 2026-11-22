@@ -1,7 +1,7 @@
 """The window's strings for the indicator beside the page (`ui.side`, `ui.side_model`, `ui.side_view`): its hover text
 (the summary, a screen, a run of the narrow bar) and the Reader's status slot (`ui.status_slot`); its row in the
 Settings dialog is in `settings_dialog`. The viewer is named as the window's other strings name it (ja ビューア, de
-Viewer, pl czytnik, zh 查看器, zh-tw 檢視器, th โปรแกรมอ่าน); a page is counted as the page strip counts it (ja
+Viewer, pl czytnik, zh 查看器, zh-tw 檢視器, th โปรแกรมอ่าน); a page is counted as the window counts it (ja
 「ページ目」, ko 「페이지」).
 
 Machine-translated; no native review."""

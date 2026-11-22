@@ -1,10 +1,9 @@
 """Messages: what TASlation's working parts tell the reader, as a stable code and its parameters.
 
-Everything the batch, the pipeline, the OCR engine, the translator, the window capture and the health checks
-say - a status line, the reason a batch ended, an error - is a `Message`: a dotted, stable *code* (for example
-``batch.scanning_page``) and its *params* (plain numbers and short strings: page counts, seconds, a window
-title, a model name, a URL, a key name; never the text of a book). A param may itself be a `Message` (the
-error that made a request fail, the reason a batch ended).
+Everything the pipeline, the OCR engine, the translator, the window capture and the health checks say - a status
+line, a note, an error - is a `Message`: a dotted, stable *code* (for example ``pipeline.translated``) and its
+*params* (plain numbers and short strings: page counts, seconds, a window title, a model name, a URL, a key name;
+never the text of a book). A param may itself be a `Message` (the error that made a request fail).
 
 The contract, for a window or anything else that shows them:
 
@@ -36,76 +35,20 @@ from typing import Any, Mapping
 JOINER = " - "  # between a message and its follow-ups
 
 # --- the registry ----------------------------------------------------------------------------------------
-# code -> the params its producers always supply. Grouped by producer: batch.py, capture, pipeline.py,
+# code -> the params its producers always supply. Grouped by producer: translate/sequence.py, capture, pipeline.py,
 # translate/ollama.py, translate/base.py, ocr/charspot.py, health.py.
 PARAMS: dict[str, tuple[str, ...]] = {
-    # batch: progress
-    "batch.started": ("problems", "problem"),
-    "batch.preflight_problems": ("problems", "problem"),
-    "batch.not_started": ("reason",),
-    "batch.book_back": (),
-    "batch.waiting_other_tab": ("title",),
-    "batch.viewer_draws_again": (),
-    "batch.waiting_covered": (),
-    "batch.waiting_behind": (),
-    "batch.waiting_viewer_hidden": (),
-    "batch.not_book": (),
-    "batch.backlog_full": ("queued",),
-    "batch.backlog_room": (),
-    "batch.page_missed": ("pages",),
-    "batch.missed_taken": (),
-    "batch.note_missed": ("pages",),
-    "batch.page_waits": ("queued",),
-    "batch.finishing": ("queued",),
-    "batch.erasing_ahead": ("pages",),
-    "batch.finished_reading": (),
-    "batch.read_so_far": (),
-    "batch.viewer_lost": ("error",),
-    "batch.waiting_capture": ("error",),
-    "batch.viewer_loading": (),
-    "batch.translating_page": ("page",),
-    "batch.translated_page": ("page", "bubbles", "seconds", "error"),
-    "batch.page_error": ("error",),
-    "batch.scanning_page": ("page",),
-    "batch.stale_dropped": ("dropped",),
-    "batch.read_page": ("page", "lines", "pages", "bubbles", "cached", "seconds", "dropped"),
-    "batch.page_cached": ("page", "lines", "seconds", "dropped"),
-    "batch.pages_read": ("pages", "bubbles"),
-    "batch.continuing": ("lines",),
-    "batch.translating_chunk": ("chunk", "chunks", "bubbles"),
-    "batch.translated_chunk": ("chunk", "chunks", "bubbles", "seconds"),
-    # batch: how it ended (BatchProgress.summary, the last message)
-    "batch.finished": ("pages", "bubbles", "seconds", "minutes", "failed", "error", "reason"),
-    "batch.failures": ("failed", "error"),
-    "batch.failed_requests": ("failed", "reason", "pages", "seconds"),
-    "batch.stopped": ("page", "pages", "bubbles", "seconds"),
-    # batch: why it ended (BatchProgress.reason)
-    "batch.no_page_seen": (),
-    "batch.page_limit": ("limit",),
-    "batch.user_stop": (),
-    "batch.stopped_reading": ("pages", "seconds", "kept", "again"),
-    "batch.readings_kept": (),
-    "batch.read_again": ("pages",),
-    "batch.stopped_translating": ("done", "total", "pages", "seconds", "kept", "again"),
-    "batch.continues_translating": (),
-    "batch.stored_read_again": ("pages",),
-    "batch.viewer_black": (),
-    "batch.locked": ("pid",),
-    "batch.nothing_new": ("reason",),
-    "batch.scan_ended": (),
-    "batch.save_failed": ("error",),
+    # translate/sequence.py: a reply that could not be used, and the notes of the requests (the codes' names are older
+    # than the backlog)
     "batch.reply_unusable": (),
-    # batch: notes (BatchProgress.notes)
     "batch.note_gave_up": ("units",),
     "batch.note_retry_failed": ("bubbles", "error"),
     "batch.note_retry_unusable": ("bubbles",),
     "batch.note_unit_failed": ("unit", "error"),
     "batch.note_incomplete": ("incomplete", "units"),
     "batch.note_unit_incomplete": ("unit",),
-    "batch.note_pruned": ("bubbles",),
     # window capture (CaptureError.message)
     "viewer.covered": (),
-    "viewer.closed": (),
     "viewer.gone": (),
     "viewer.no_area": (),
     "viewer.windows_only": (),
@@ -156,7 +99,7 @@ PARAMS: dict[str, tuple[str, ...]] = {
     "ocr.error": ("detail",),
     "ocr.one_reader": (),
     "layout.classical": (),
-    # health checks (health.check, batch.preflight)
+    # health checks (health.check)
     "health.ollama_down": ("url",),
     "health.ollama_not_installed": (),
     "health.ollama_no_answer": (),
@@ -180,66 +123,6 @@ PARAMS: dict[str, tuple[str, ...]] = {
 
 # code -> its English text; the fallback for a window without a template of its own for the code
 TEMPLATES: dict[str, str] = {
-    "batch.started": "Whole-book run started",
-    "batch.preflight_problems": "before the start {problems:problem was|problems were} found: {problem}",
-    "batch.not_started": "Whole-book run not started: {reason}",
-    "batch.book_back": "The book is back; carrying on",
-    "batch.waiting_other_tab": ("Waiting: the viewer window shows {title!r} now, not the book. Bring the book's tab "
-                                "back, or drag that tab out of the browser once so that it has a window of its own; "
-                                "TASlation then finds the book while you use other tabs."),
-    "batch.viewer_draws_again": "The viewer draws again; carrying on",
-    "batch.waiting_covered": "Waiting: the viewer draws nothing behind TASlation; move TASlation aside",
-    "batch.waiting_behind": "Waiting: the viewer draws nothing behind another window; move that window aside",
-    "batch.waiting_viewer_hidden": "Waiting: the viewer's window is hidden or minimised; bring it back",
-    "batch.not_book": "Waiting: this does not look like a page of the book, so it is not read. Go back to the book, or press Finished reading",
-    "batch.backlog_full": "Please wait: {queued} pages are waiting to be read. Turn the next page when this line has gone",
-    "batch.backlog_room": "Caught up: turn the next page when you like",
-    "batch.page_missed": ("A page went by before it could be taken (not taken yet: {pages:page|pages}). Please turn back "
-                          "one page; the strip marks which"),
-    "batch.missed_taken": "The page that went by is taken now; carry on when you like",
-    "batch.note_missed": "{pages:page|pages} went by before they could be taken, so they are not translated",
-    "batch.page_waits": "Pages waiting to be read: {queued}",
-    "batch.finishing": "Finished reading. Pages still to read: {queued}",
-    "batch.erasing_ahead": "Getting the pages read ready to show. Pages still to erase: {pages}",
-    "batch.finished_reading": "you finished reading",
-    "batch.read_so_far": "you asked for the pages read so far",
-    "batch.viewer_lost": "{error}. Finished reading translates what was read; Stop keeps it for the next run in this window",
-    "batch.waiting_capture": "Waiting: {error}",
-    "batch.viewer_loading": "The viewer is still loading; TASlation is waiting",
-    "batch.translating_page": "Page {page}: translating...",
-    "batch.translated_page": "Page {page}: {bubbles:line|lines}  [{seconds:.0f}s]",
-    "batch.page_error": "{error}",
-    "batch.scanning_page": "Scanning page {page}...",
-    "batch.stale_dropped": "{dropped} old line(s) removed",
-    "batch.read_page": "Page {page}: {lines:line|lines} read  [{seconds:.0f}s]",
-    "batch.page_cached": "Page {page}: {lines:line|lines} translated before  [{seconds:.0f}s]",
-    "batch.pages_read": "Every page is read: {pages:screen|screens}, {bubbles:line|lines}. The viewer is no longer needed; the translation comes now...",
-    "batch.continuing": "Going on with the pages read earlier: {lines:line|lines} to translate",
-    "batch.translating_chunk": "Translating chunk {chunk}/{chunks} ({bubbles:line|lines})...",
-    "batch.translated_chunk": "Translated chunk {chunk}/{chunks}: {bubbles:line|lines} so far  [{seconds:.0f}s]",
-    "batch.finished": "Whole-book scan done: {pages:page|pages}, {bubbles:line|lines} translated in {minutes:minute|minutes} - {reason}.",
-    "batch.failures": ("{failed} part(s) could not be translated. They are done when you read those pages, or in the "
-                       "next whole-book run."),
-    "batch.failed_requests": ("Nothing could be translated: {reason} ({failed:request|requests} failed, "
-                              "{pages:page|pages} read). Fix that, then run Read whole book... again."),
-    "batch.stopped": ("Whole-book scan stopped at page {page}. The rest is translated page by page as you read; "
-                      "Read whole book... scans again."),
-    "batch.no_page_seen": ("no page of the book could be seen in the viewer; check that the book is on show, then start "
-                           "again"),
-    "batch.page_limit": "reached the page limit ({limit})",
-    "batch.user_stop": "stopped",
-    "batch.stopped_reading": "Stopped after reading {pages:page|pages}. Nothing is translated yet: the translation comes after Finished reading.",
-    "batch.readings_kept": "Read whole book... goes on from the page on show, until you close TASlation.",
-    "batch.read_again": "Those pages are read again next time: go back {pages:page|pages} in the viewer, then run Read whole book... again.",
-    "batch.stopped_translating": "Stopped: {done} of {total} lines are translated and stored, and stay.",
-    "batch.continues_translating": "Read whole book... translates the rest, until you close TASlation.",
-    "batch.stored_read_again": "The rest needs reading again: go back {pages:page|pages} in the viewer, then run Read whole book... again; the pages translated are skipped.",
-    "batch.viewer_black": "Waiting: the viewer shows nothing. Reload the book in its own window: click the book, then press its reload key (F5 in a browser; in TASlation's window F5 translates instead). TASlation carries on by itself",
-    "batch.locked": "Another TASlation window is already reading this book. Close it, then try again.",
-    "batch.nothing_new": "nothing new to translate ({reason})",
-    "batch.scan_ended": "the scan ended",
-    "batch.save_failed": ("stopped because the translations cannot be saved ({error}); free some disk space, or close "
-                          "what holds the file, then run it again"),
     "batch.reply_unusable": "the model's reply could not be used",
     "batch.note_gave_up": ("{units} page unit(s) gave up after repeated failures; they are translated when their page "
                            "is read"),
@@ -249,10 +132,8 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "{incomplete} of {units} page unit(s) came back incomplete; asking again for those",
     "batch.note_unit_incomplete": ("page unit {unit}: incomplete translation; what is missing is translated when its "
                                    "page is read"),
-    "batch.note_pruned": "{bubbles} cached line(s) no longer matched a text region and were removed",
     "viewer.covered": ("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or "
                        "move it so that a strip of the viewer stays visible."),
-    "viewer.closed": "the viewer window was closed",
     "viewer.gone": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.no_area": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.windows_only": "window capture is only available on Windows",
@@ -342,13 +223,6 @@ TEMPLATES: dict[str, str] = {
 
 # code -> (param, follow-up code): the follow-up's sentence comes after the message when the param is set
 FOLLOW_UPS: dict[str, tuple[tuple[str, str], ...]] = {
-    "batch.started": (("problems", "batch.preflight_problems"),),
-    "batch.translated_page": (("error", "batch.page_error"),),
-    "batch.read_page": (("dropped", "batch.stale_dropped"),),
-    "batch.page_cached": (("dropped", "batch.stale_dropped"),),
-    "batch.finished": (("failed", "batch.failures"),),
-    "batch.stopped_reading": (("kept", "batch.readings_kept"), ("again", "batch.read_again")),
-    "batch.stopped_translating": (("kept", "batch.continues_translating"), ("again", "batch.stored_read_again")),
     "pipeline.from_cache": (("review", "pipeline.to_review"), ("error", "pipeline.page_error")),
     "pipeline.translated": (("review", "pipeline.to_review"), ("error", "pipeline.page_error")),
 }

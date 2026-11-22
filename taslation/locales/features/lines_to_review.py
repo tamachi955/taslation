@@ -1,6 +1,5 @@
 """The window's strings for "Lines to review": the Translator role's list of every line of the book worth a look,
-page by page, from the saved translations alone (`ui.dialogs.review_list`), and the page strip's mark on a page with
-such lines (`ui.strip`). The reasons themselves are those of "Review this page" (`locales.features.review_reasons` and
+page by page, from the saved translations alone (`ui.dialogs.review_list`). The reasons themselves are those of "Review this page" (`locales.features.review_reasons` and
 the window's lists); "Review..." is named as its button is (ja 「レビュー...」, de „Durchsehen...“).
 
 Machine-translated; no native review."""
@@ -120,23 +119,5 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "按頁列出這本書翻譯時被標記為需要檢查的行，以及帶讀者註的行，只根據已儲存的譯文；對於正在顯示的頁面，還包括排字檢查發現的問題。選取一行即可看到它在哪一頁，然後在閱讀器中翻到那一頁：在那裡用「檢查...」開啟它的編輯器。",
         "ko": "번역할 때 검토 표시가 된 줄과 독자 주석이 있는 줄을, 저장된 번역만으로 페이지별로 보여 줍니다. 표시 중인 페이지는 식자 검사에서 찾은 것도 함께 나옵니다. 하나를 고르면 어느 페이지에 있는지 알 수 있으니, 뷰어에서 그 페이지로 가서 '검토...'로 편집기를 여세요.",
         "th": "บรรทัดในหนังสือเล่มนี้ที่ถูกทำเครื่องหมายให้ตรวจดูตอนแปล และบรรทัดที่มีหมายเหตุสำหรับผู้อ่าน ทีละหน้า จากคำแปลที่บันทึกไว้เท่านั้น สำหรับหน้าที่แสดงอยู่ จะมีสิ่งที่การตรวจการจัดตัวอักษรพบด้วย เลือกรายการหนึ่งเพื่อดูว่าอยู่หน้าไหน แล้วเปิดหน้านั้นในโปรแกรมอ่าน ที่นั่น \"ตรวจทาน...\" จะเปิดตัวแก้ไขของบรรทัดนั้น",
-    },
-    "{n} line(s) on this page are worth a look: Lines to review... lists them.": {
-        "ja": "このページには確認したほうがよい行が {n} 行あります。「要確認の行...」で一覧にできます。",
-        "es": "{n} línea(s) de esta página conviene revisar: «Líneas por revisar...» las lista.",
-        "pt": "{n} linha(s) desta página vale a pena revisar: «Linhas a revisar...» lista-as.",
-        "fr": "{n} ligne(s) de cette page méritent d'être relues : « Lignes à relire... » les liste.",
-        "de": "{n} Zeile(n) dieser Seite sind einen Blick wert: „Zeilen zum Durchsehen...“ listet sie auf.",
-        "it": "{n} riga/e di questa pagina vale la pena rivedere: «Righe da rivedere...» le elenca.",
-        "nl": "{n} regel(s) op deze pagina zijn het nakijken waard: 'Na te kijken regels...' toont ze.",
-        "pl": "Na tej stronie są wiersze warte przejrzenia ({n}): „Wiersze do przeglądu...” je pokazuje.",
-        "ru": "На этой странице есть строки, которые стоит проверить ({n}): их перечисляет «Строки для проверки...».",
-        "tr": "Bu sayfada bakmaya değer {n} satır var: «Gözden geçirilecek satırlar...» onları listeler.",
-        "id": "{n} baris di halaman ini perlu ditinjau: \"Baris untuk ditinjau...\" menampilkannya.",
-        "vi": "Trang này có {n} dòng đáng xem lại: \"Dòng cần rà soát...\" liệt kê chúng.",
-        "zh": "此页有 {n} 行值得检查：“待检查的行...”会列出它们。",
-        "zh-tw": "此頁有 {n} 行值得檢查：「待檢查的行...」會列出它們。",
-        "ko": "이 페이지에 살펴볼 줄이 {n}줄 있습니다. '검토할 줄...'에서 볼 수 있습니다.",
-        "th": "หน้านี้มี {n} บรรทัดที่ควรตรวจดู \"บรรทัดที่ควรตรวจทาน...\" จะแสดงรายการให้",
     },
 }

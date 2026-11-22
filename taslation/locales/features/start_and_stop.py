@@ -1,8 +1,6 @@
 """The window's strings for the translation model loaded at the start (``load_model_at_start``: its row on the System
-page of Tools > Settings..., `ui.dialogs.system_page`) and for the question before Stop once Finished reading was
-pressed (`ui.jobs.JobsMixin._ask_stop`): the translation may have begun beside the pages still read, and what it
-translated stays. Menus, buttons and entries are worded as the window words them (ja 「ツール」「モデルを今すぐ解放」
-「読み終えた」「1冊まるごと読む...」).
+page of Tools > Settings..., `ui.dialogs.system_page`). Menus and entries are worded as the window words them (ja
+「ツール」「モデルを今すぐ解放」).
 
 Machine-translated; no native review."""
 
@@ -35,24 +33,5 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "TASlation 啟動時就載入翻譯模型，這樣第一頁要翻譯時不必再等幾秒。關閉：在第一行需要翻譯時才載入。無論哪種方式，一段時間沒有請求後模型都會離開 GPU（ollama_keep_alive），也可以用「工具」>「立即釋放模型」馬上釋放。下次啟動時生效。",
         "ko": "TASlation이 시작되는 동안 번역 모델을 불러오므로, 처음 번역할 페이지가 몇 초를 기다리지 않습니다. 끄면: 처음 번역할 줄이 나올 때 불러옵니다. 어느 쪽이든 한동안 요청이 없으면 GPU에서 내려가며(ollama_keep_alive), 도구 > 지금 모델 해제로 바로 내릴 수도 있습니다. 다음 시작부터 적용됩니다.",
         "th": "โมเดลแปลจะโหลดระหว่างที่ TASlation เริ่มทำงาน หน้าแรกที่ต้องแปลจึงไม่ต้องรอโมเดลอีกหลายวินาที ปิด: โมเดลจะโหลดเมื่อมีบรรทัดแรกที่ต้องแปล ไม่ว่าแบบไหน โมเดลจะออกจาก GPU เมื่อไม่มีคำขอสักพัก (ollama_keep_alive) หรือออกทันทีด้วย เครื่องมือ > ปล่อยโมเดลตอนนี้ มีผลตั้งแต่การเริ่มโปรแกรมครั้งถัดไป",
-    },
-    # ------------------------------------------------------------------ the question before Stop
-    "Stop the whole-book run? You pressed Finished reading: {pages} page(s) are read, and their translation has begun or comes next. If you stop now, the lines translated so far are stored and stay. The rest of what was read is kept only until you close TASlation: Read whole book... translates it then.": {
-        "ja": "1冊まるごと読み取りを停止しますか？ 「読み終えた」が押されています。{pages} ページを読み取り、その翻訳は始まっているか、このあと始まります。いま停止しても、ここまで翻訳した行は保存済みで残ります。読み取った内容の残りは TASlation を閉じるまでしか残りません。その間に「1冊まるごと読む...」を実行すると翻訳します。",
-        "es": "¿Detener la lectura del libro entero? Pulsaste Lectura terminada: hay {pages} página(s) leída(s), y su traducción ya ha empezado o viene ahora. Si la detienes ahora, las líneas traducidas hasta el momento están guardadas y se quedan. El resto de lo leído solo se conserva hasta que cierres TASlation: mientras tanto, Leer todo el libro... lo traduce.",
-        "pt": "Parar a leitura do livro inteiro? Você apertou Leitura concluída: {pages} página(s) foram lidas, e a tradução delas já começou ou vem em seguida. Se parar agora, as linhas traduzidas até aqui estão salvas e ficam. O resto do que foi lido só fica guardado até você fechar o TASlation: até lá, Ler o livro inteiro... o traduz.",
-        "fr": "Arrêter la lecture du livre entier ? Vous avez appuyé sur Lecture terminée : {pages} page(s) sont lues, et leur traduction a commencé ou suit. Si vous arrêtez maintenant, les lignes traduites jusqu'ici sont enregistrées et le restent. Le reste de ce qui a été lu n'est gardé que jusqu'à ce que vous fermiez TASlation : d'ici là, Lire tout le livre... le traduit.",
-        "de": "Den Durchgang durch das ganze Buch anhalten? Sie haben Fertig gelesen gedrückt: {pages} Seite(n) sind gelesen, und ihre Übersetzung hat begonnen oder kommt als Nächstes. Wenn Sie jetzt anhalten, sind die bis hierher übersetzten Zeilen gespeichert und bleiben. Der Rest des Gelesenen bleibt nur erhalten, bis Sie TASlation schließen: Bis dahin übersetzt Ganzes Buch lesen... ihn.",
-        "it": "Fermare la lettura dell'intero libro? Hai premuto Lettura finita: {pages} pagina/e sono lette, e la loro traduzione è iniziata o viene ora. Se ti fermi adesso, le righe tradotte finora sono salvate e restano. Il resto di ciò che è stato letto rimane solo finché non chiudi TASlation: nel frattempo Leggi tutto il libro... lo traduce.",
-        "nl": "De ronde door het hele boek stoppen? U drukte op Klaar met lezen: er zijn {pages} pagina('s) gelezen, en de vertaling ervan is begonnen of volgt nu. Stopt u nu, dan zijn de regels die tot nu toe vertaald zijn opgeslagen en blijven ze. De rest van wat gelezen is blijft alleen bewaard tot u TASlation sluit: tot dan vertaalt Hele boek lezen... het.",
-        "pl": "Zatrzymać przebieg przez całą książkę? Naciśnięto Koniec czytania: odczytane strony: {pages}, a ich tłumaczenie już się zaczęło albo zaraz się zacznie. Po zatrzymaniu teraz przetłumaczone dotąd wiersze są zapisane i zostają. Reszta tego, co odczytano, zostaje tylko do zamknięcia TASlation: do tego czasu Przeczytaj całą książkę... ją przetłumaczy.",
-        "ru": "Остановить проход по всей книге? Вы нажали «Чтение закончено»: прочитано страниц: {pages}, и их перевод уже начался или начнётся сейчас. Если остановить сейчас, строки, переведённые до этого момента, сохранены и останутся. Остальное из прочитанного хранится, только пока вы не закроете TASlation: до этого «Прочитать всю книгу...» переведёт его.",
-        "tr": "Tüm kitap okuması durdurulsun mu? Okuma bitti'ye bastınız: {pages} sayfa okundu ve çevirisi başladı ya da sırada. Şimdi durdurursanız şimdiye kadar çevrilen satırlar kaydedilmiştir ve kalır. Okunanların kalanı yalnızca TASlation'ı kapatana kadar saklanır: o zamana kadar Kitabın tamamını oku... onu çevirir.",
-        "id": "Hentikan proses seluruh buku? Anda sudah menekan Selesai membaca: {pages} halaman sudah dibaca, dan penerjemahannya sudah dimulai atau segera dimulai. Jika dihentikan sekarang, baris yang sudah diterjemahkan sejauh ini tersimpan dan tetap ada. Sisa yang sudah dibaca hanya disimpan sampai Anda menutup TASlation: sebelum itu, Baca seluruh buku... akan menerjemahkannya.",
-        "vi": "Dừng lượt đọc cả cuốn? Bạn đã bấm Đã đọc xong: đã đọc {pages} trang, và phần dịch của chúng đã bắt đầu hoặc sắp bắt đầu. Nếu dừng bây giờ, các dòng đã dịch đến lúc này đã được lưu và vẫn còn đó. Phần còn lại của những gì đã đọc chỉ được giữ đến khi bạn đóng TASlation: trước đó, Đọc cả cuốn sách... sẽ dịch nó.",
-        "zh": "要停止整本书的读取吗？你已按下“读完了”：已读取 {pages} 页，其翻译已经开始或即将开始。现在停止的话，到目前为止翻译的行已保存，并会保留。读取内容的其余部分只保留到你关闭 TASlation 为止：在此之前运行“阅读整本书...”即可翻译。",
-        "zh-tw": "要停止整本書的讀取嗎？你已按下「讀完了」：已讀取 {pages} 頁，其翻譯已經開始或即將開始。現在停止的話，到目前為止翻譯的行已儲存，並會保留。讀取內容的其餘部分只保留到你關閉 TASlation 為止：在此之前執行「閱讀整本書...」即可翻譯。",
-        "ko": "책 전체 읽기를 중지할까요? 다 읽음을 눌렀습니다. {pages}페이지를 읽었고, 번역은 이미 시작했거나 곧 시작합니다. 지금 중지해도 지금까지 번역한 줄은 저장되어 그대로 남습니다. 읽은 내용의 나머지는 TASlation을 닫을 때까지만 남습니다. 그 전에 책 전체 읽기...를 실행하면 번역합니다.",
-        "th": "หยุดการอ่านทั้งเล่มไหม คุณกดอ่านจบแล้ว อ่านไปแล้ว {pages} หน้า และการแปลเริ่มแล้วหรือกำลังจะเริ่ม ถ้าหยุดตอนนี้ บรรทัดที่แปลไปแล้วถูกบันทึกและยังคงอยู่ ส่วนที่เหลือของสิ่งที่อ่านไว้จะเก็บไว้จนกว่าคุณจะปิด TASlation เท่านั้น ระหว่างนี้ อ่านทั้งเล่ม... จะแปลให้",
     },
 }

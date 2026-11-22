@@ -1,63 +1,9 @@
-"""What the window says of a whole-book run and of the kept files since the model only translates (2026-11-06: no
-translator's notes of its own, no review pass, no shorter versions, no alternatives): the band once the reading is
-done, the batch dialog's explanation, the line after a rename, the title of the saved translations' dialog."""
+"""What the window says of the kept files since the model only translates (2026-11-06: no translator's notes of its
+own, no review pass, no shorter versions, no alternatives): the line after a rename, the title of the saved
+translations' dialog."""
 
 TEXTS: dict[str, dict[str, str]] = {
-    "Finished reading. Pages still to read: {queued}. The translation comes next.": {
-        "ja": "読み終えました。まだ読み取っていないページ: {queued}。続いて翻訳に進みます。",
-        "es": "Lectura terminada. Páginas por leer: {queued}. Luego viene la traducción.",
-        "pt": "Leitura concluída. Páginas ainda por ler: {queued}. Em seguida vem a tradução.",
-        "fr": "Lecture terminée. Pages encore à lire : {queued}. Vient ensuite la traduction.",
-        "de": "Fertig gelesen. Noch zu lesende Seiten: {queued}. Danach kommt die Übersetzung.",
-        "it": "Lettura finita. Pagine ancora da leggere: {queued}. Poi viene la traduzione.",
-        "nl": "Klaar met lezen. Nog te lezen pagina's: {queued}. Daarna komt de vertaling.",
-        "pl": "Koniec czytania. Strony do odczytania: {queued}. Potem tłumaczenie.",
-        "ru": "Чтение закончено. Осталось прочитать страниц: {queued}. Дальше перевод.",
-        "tr": "Okuma bitti. Okunacak sayfa kaldı: {queued}. Sırada çeviri var.",
-        "id": "Selesai membaca. Halaman yang masih harus dibaca: {queued}. Berikutnya terjemahan.",
-        "vi": "Đã đọc xong. Số trang còn phải đọc: {queued}. Tiếp theo là bản dịch.",
-        "zh": "已读完。还要读取的页数：{queued}。接下来是翻译。",
-        "zh-tw": "已讀完。還要讀取的頁數：{queued}。接下來是翻譯。",
-        "ko": "다 읽었습니다. 아직 읽을 페이지: {queued}. 이어서 번역을 진행합니다.",
-        "th": "อ่านจบแล้ว หน้าที่ยังต้องอ่าน: {queued} ต่อไปคือการแปล",
-    },
-    "All pages are read. The translation starts now. The viewer is not used during this step.": {
-        "ja": "全ページを読み取りました。これから翻訳します。この間はビューアを操作しません。",
-        "es": "Todas las páginas están leídas. Ahora empieza la traducción. Durante este paso no se usa el visor.",
-        "pt": "Todas as páginas foram lidas. Agora começa a tradução. O visualizador não é usado nesta etapa.",
-        "fr": "Toutes les pages sont lues. La traduction commence. La visionneuse n'est pas utilisée pendant cette étape.",
-        "de": "Alle Seiten sind gelesen. Jetzt beginnt die Übersetzung. Der Viewer wird in diesem Schritt nicht benutzt.",
-        "it": "Tutte le pagine sono lette. Ora comincia la traduzione. Il visualizzatore non viene usato in questa fase.",
-        "nl": "Alle pagina's zijn gelezen. Nu begint de vertaling. De viewer wordt tijdens deze stap niet gebruikt.",
-        "pl": "Wszystkie strony odczytane. Teraz zaczyna się tłumaczenie. Na tym etapie czytnik nie jest używany.",
-        "ru": "Все страницы прочитаны. Сейчас начнётся перевод. На этом этапе просмотрщик не используется.",
-        "tr": "Tüm sayfalar okundu. Çeviri şimdi başlıyor. Bu adımda görüntüleyici kullanılmaz.",
-        "id": "Semua halaman sudah dibaca. Terjemahan dimulai sekarang. Penampil tidak digunakan pada langkah ini.",
-        "vi": "Đã đọc xong mọi trang. Bản dịch bắt đầu ngay bây giờ. Bước này không dùng trình xem.",
-        "zh": "所有页面已读取。现在开始翻译。此步骤不使用查看器。",
-        "zh-tw": "所有頁面已讀取。現在開始翻譯。此步驟不使用檢視器。",
-        "ko": "모든 페이지를 읽었습니다. 이제 번역을 시작합니다. 이 단계에서는 뷰어를 사용하지 않습니다.",
-        "th": "อ่านครบทุกหน้าแล้ว เริ่มแปลตอนนี้ ขั้นตอนนี้ไม่ใช้โปรแกรมอ่าน",
-    },
     # (the last sentence rewritten on 2026-11-20 to say what is true of the disk; machine-translated; no native review)
-    "Turn the pages at your own pace, in the viewer or with the page keys in TASlation's window.\nTASlation never turns a page by itself: it reads each page you turn, with no translation yet.\nWhen you reach the end, press Finished reading. Then TASlation translates the whole book at once,\nwith the whole story and your series sheet; the viewer is not needed from then on, and the pages\ncan be read when it is done. No page image is written to disk; Help > How to use... > Your data lists what is kept.": {
-        "ja": "ビューアでも TASlation のウィンドウのページキーでも、ご自分のペースでページをめくってください。\nTASlation が自分でページをめくることはありません。めくられたページを読み取るだけで、まだ翻訳はしません。\n最後まで読んだら「読み終えた」を押してください。物語全体とシリーズ設定を踏まえて、本全体をまとめて翻訳します。\nそのあとビューアは不要で、終わればページを読めます。\nページ画像はディスクに書き込みません（保存するものは「ヘルプ」>「使い方...」の「データについて」にあります）。",
-        "es": "Pasa las páginas a tu ritmo, en el visor o con las teclas de página en la ventana de TASlation.\nTASlation nunca pasa una página por sí mismo: lee cada página que pasas, sin traducir todavía.\nAl llegar al final, pulsa Lectura terminada. Entonces TASlation traduce todo el libro de una vez,\ncon toda la historia y tu ficha de la serie; desde ahí ya no hace falta el visor, y las páginas\nse pueden leer cuando termine. No se escribe en el disco ninguna imagen de página; Ayuda > Cómo se usa... > Tus datos enumera lo que se guarda.",
-        "pt": "Vire as páginas no seu ritmo, no visualizador ou com as teclas de página na janela do TASlation.\nO TASlation nunca vira uma página por conta própria: ele lê cada página que você vira, sem traduzir ainda.\nAo chegar ao fim, pressione Leitura concluída. Então o TASlation traduz o livro inteiro de uma vez,\ncom a história toda e a sua ficha da série; a partir daí o visualizador não é mais necessário, e as páginas\npodem ser lidas quando terminar. Nenhuma imagem de página é gravada no disco; Ajuda > Como usar... > Seus dados lista o que é guardado.",
-        "fr": "Tournez les pages à votre rythme, dans la visionneuse ou avec les touches de page dans la fenêtre de TASlation.\nTASlation ne tourne jamais une page de lui-même : il lit chaque page que vous tournez, sans traduire encore.\nArrivé à la fin, appuyez sur Lecture terminée. TASlation traduit alors tout le livre d'un coup,\navec toute l'histoire et votre fiche de la série ; la visionneuse ne sert plus ensuite, et les pages\nse lisent une fois le travail fini. Aucune image de page n'est écrite sur le disque ; Aide > Mode d'emploi... > Vos données liste ce qui est conservé.",
-        "de": "Blättern Sie in Ihrem Tempo um, im Viewer oder mit den Seitentasten im TASlation-Fenster.\nTASlation blättert nie von selbst um: Es liest jede Seite, die Sie umblättern, noch ohne Übersetzung.\nDrücken Sie am Ende Fertig gelesen. Dann übersetzt TASlation das ganze Buch auf einmal,\nmit der ganzen Geschichte und Ihrem Serienblatt; der Viewer wird danach nicht mehr gebraucht, und die Seiten\nlassen sich lesen, sobald es fertig ist. Kein Seitenbild kommt auf die Festplatte; Hilfe > Bedienung... > Ihre Daten führt auf, was gespeichert wird.",
-        "it": "Gira le pagine al tuo ritmo, nel visualizzatore o con i tasti pagina nella finestra di TASlation.\nTASlation non gira mai una pagina da solo: legge ogni pagina che giri, senza tradurre ancora.\nArrivato alla fine, premi Lettura finita. TASlation traduce allora tutto il libro in una volta,\ncon tutta la storia e la tua scheda della serie; da lì il visualizzatore non serve più, e le pagine\nsi possono leggere al termine. Nessuna immagine di pagina viene scritta sul disco; Aiuto > Come si usa... > I tuoi dati elenca ciò che viene conservato.",
-        "nl": "Sla de pagina's om in uw eigen tempo, in de viewer of met de paginatoetsen in het TASlation-venster.\nTASlation slaat nooit zelf een pagina om: het leest elke pagina die u omslaat, nog zonder vertaling.\nDruk aan het eind op Klaar met lezen. Dan vertaalt TASlation het hele boek in één keer,\nmet het hele verhaal en uw serieblad; de viewer is daarna niet meer nodig, en de pagina's\nzijn te lezen zodra het klaar is. Er wordt geen pagina-afbeelding op schijf opgeslagen; Help > Hoe werkt het... > Uw gegevens noemt wat er wordt bewaard.",
-        "pl": "Przewracaj strony we własnym tempie, w czytniku lub klawiszami stron w oknie TASlation.\nTASlation nigdy nie przewraca strony samo: odczytuje każdą przewróconą przez ciebie stronę, jeszcze bez tłumaczenia.\nNa końcu naciśnij Koniec czytania. Wtedy TASlation tłumaczy całą książkę naraz,\nz całą historią i twoją kartą serii; czytnik nie jest już potem potrzebny, a strony\nmożna czytać po zakończeniu. Żaden obraz strony nie trafia na dysk; to, co jest zachowywane, wymienia Pomoc > Jak używać... > Twoje dane.",
-        "ru": "Листайте страницы в своём темпе, в просмотрщике или клавишами страниц в окне TASlation.\nTASlation никогда не листает страницы сам: он читает каждую страницу, которую вы перелистнули, пока без перевода.\nВ конце нажмите «Чтение закончено». Тогда TASlation переводит всю книгу сразу,\nс учётом всей истории и вашей карточки серии; после этого просмотрщик не нужен, а страницы\nможно читать, когда всё будет готово. Изображения страниц на диск не записываются; что хранится, перечислено в разделе Справка > Как пользоваться... > Ваши данные.",
-        "tr": "Sayfaları kendi hızınızda çevirin, görüntüleyicide ya da TASlation penceresindeki sayfa tuşlarıyla.\nTASlation hiçbir sayfayı kendiliğinden çevirmez: çevirdiğiniz her sayfayı okur, henüz tercüme etmez.\nSona geldiğinizde Okuma bitti düğmesine basın. TASlation tüm kitabı tüm hikâyeyle ve seri kartınızla\nbirlikte bir kerede tercüme eder; bundan sonra görüntüleyici gerekmez, sayfalar iş bitince\nokunabilir. Diske hiçbir sayfa görüntüsü yazılmaz; neyin saklandığını Yardım > Nasıl kullanılır... > Verileriniz bölümü listeler.",
-        "id": "Balik halaman sesuai kecepatan Anda, di penampil atau dengan tombol halaman di jendela TASlation.\nTASlation tidak pernah membalik halaman sendiri: ia membaca setiap halaman yang Anda balik, belum menerjemahkan.\nDi akhir, tekan Selesai membaca. Lalu TASlation menerjemahkan seluruh buku sekaligus,\ndengan seluruh cerita dan lembar seri Anda; setelah itu penampil tidak diperlukan, dan halaman\nbisa dibaca saat selesai. Tidak ada gambar halaman yang ditulis ke disk; apa yang disimpan tercantum di Bantuan > Cara memakai... > Data Anda.",
-        "vi": "Hãy lật trang theo nhịp của bạn, trong trình xem hoặc bằng phím trang trong cửa sổ TASlation.\nTASlation không bao giờ tự lật trang: nó đọc từng trang bạn lật, chưa dịch vội.\nKhi đến cuối, hãy nhấn Đã đọc xong. Khi đó TASlation dịch cả cuốn sách một lượt,\ncùng toàn bộ câu chuyện và phiếu bộ truyện của bạn; từ đó không cần trình xem nữa, và có thể\nđọc các trang khi xong. Không có ảnh trang nào được ghi vào đĩa; những gì được giữ được liệt kê ở Trợ giúp > Cách sử dụng... > Dữ liệu của bạn.",
-        "zh": "请按自己的节奏翻页，在查看器中或用 TASlation 窗口中的翻页键都可以。\nTASlation 绝不会自行翻页：它只读取您翻过的每一页，此时还不翻译。\n读到最后时，请按“读完了”。然后 TASlation 结合整个故事和您的系列设定一次翻译整本书；\n之后不再需要查看器，完成后即可阅读各页。\n不会把页面图像写入磁盘；保存的内容见“帮助 > 使用方法... > 你的数据”。",
-        "zh-tw": "請按自己的節奏翻頁，在檢視器中或用 TASlation 視窗中的翻頁鍵都可以。\nTASlation 絕不會自行翻頁：它只讀取您翻過的每一頁，此時還不翻譯。\n讀到最後時，請按「讀完了」。然後 TASlation 結合整個故事和您的系列設定一次翻譯整本書；\n之後不再需要檢視器，完成後即可閱讀各頁。\n不會把頁面影像寫入磁碟；保存的內容見「說明 > 使用方法... > 你的資料」。",
-        "ko": "뷰어에서든 TASlation 창의 페이지 키로든 원하는 속도로 페이지를 넘기세요.\nTASlation은 스스로 페이지를 넘기지 않습니다. 넘긴 페이지를 읽기만 하고 아직 번역하지 않습니다.\n끝까지 읽으면 '다 읽음'을 누르세요. 그러면 TASlation이 이야기 전체와 시리즈 시트를 바탕으로\n책 전체를 한 번에 번역합니다. 그 뒤로는 뷰어가 필요 없고, 끝나면 페이지를 읽을 수 있습니다.\n페이지 이미지는 디스크에 쓰지 않으며, 보관하는 것은 도움말 > 사용 방법... > 내 데이터에 나와 있습니다.",
-        "th": "พลิกหน้าตามจังหวะของคุณ ในโปรแกรมอ่านหรือด้วยปุ่มหน้าในหน้าต่าง TASlation\nTASlation ไม่เคยพลิกหน้าเอง: จะอ่านแต่ละหน้าที่คุณพลิก โดยยังไม่แปล\nเมื่อถึงตอนจบ ให้กด อ่านจบแล้ว แล้ว TASlation จะแปลทั้งเล่มในคราวเดียวโดยใช้เรื่องทั้งหมดและแผ่นข้อมูลซีรีส์ของคุณ\nหลังจากนั้นไม่ต้องใช้โปรแกรมอ่าน และอ่านหน้าต่างๆ ได้เมื่อเสร็จ\nไม่เขียนภาพหน้าลงดิสก์ สิ่งที่เก็บไว้ดูได้ที่ ความช่วยเหลือ > วิธีใช้... > ข้อมูลของคุณ",
-    },
     "This book is now called {book}. Moved along: {caches} translation file(s), {marks} file(s) of page marks, {sheets} series sheet file(s).": {
         "ja": "この本の書名を『{book}』にしました。一緒に移したもの: 訳文ファイル {caches} 件、ページに付けた情報のファイル {marks} 件、シリーズ設定ファイル {sheets} 件。",
         "es": "Este libro se llama ahora {book}. Se trasladaron con él: {caches} archivo(s) de traducciones, {marks} archivo(s) de marcas en las páginas, {sheets} archivo(s) de la ficha de la serie.",

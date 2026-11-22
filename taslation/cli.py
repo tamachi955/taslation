@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -32,10 +31,10 @@ def _utf8_console() -> None:
             pass
 
 
-def _book_parts(parser: argparse.ArgumentParser, series_help: str | None = None) -> None:
+def _book_parts(parser: argparse.ArgumentParser) -> None:
     """--series and --volume: the book's name as the window's two fields give it (`_given_book`)."""
-    parser.add_argument("--series", help=series_help or "the book's series: with --volume (or alone, a book of one "
-                                                        "volume) it names the book, in place of --book")
+    parser.add_argument("--series", help="the book's series: with --volume (or alone, a book of one volume) it names "
+                                         "the book, in place of --book")
     parser.add_argument("--volume", help="the book's volume, with --series: a number (3, ３, ③, 三, 第3巻 are all 3; "
                                          "10.5), or 上, 中, 下, 前編, 後編")
 
@@ -107,8 +106,6 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--full-screen", "--reading", dest="reading", action="store_true",
                    help="start on the full screen (the page alone, in the role chosen) once the viewer is chosen; F11 "
                         "leaves it (--reading, its earlier name, does the same)")
-    g.add_argument("--mode", choices=["book", "page"],
-                   help="'page' (default): page by page; 'book': read and translate the whole book first")
     g.add_argument("--role", choices=["reader", "translator"],
                    help="start as a reader (default) or as a translator (mark text, fix translations, keep a glossary)")
 
@@ -136,25 +133,6 @@ def build_parser() -> argparse.ArgumentParser:
     _book_parts(r)
     r.add_argument("--translator", choices=["ollama", "echo", "none"], default="ollama")
     r.add_argument("--json", action="store_true")
-
-    b = sub.add_parser("batch", help="read the pages you turn in the viewer and fill the translation cache "
-                                     "(press Enter when you have finished the book)")
-    b.add_argument("--window", required=True, help="viewer window title (substring)")
-    b.add_argument("--book", help="cache name (default: derived from the window title)")
-    _book_parts(b, series_help="the book's series: with --volume (or alone, a book of one volume) it names the book "
-                               "as the window's two fields do; with --book, the series sheet's series (default: the "
-                               "book's name without its volume)")
-    b.add_argument("--max-pages", type=int)
-    b.add_argument("--wait", type=float, default=600.0,
-                   help="seconds to wait for the viewer window to appear before giving up (default 600)")
-    b.add_argument("--no-context", action="store_true",
-                   help="translate page by page as it goes, without reading the book first")
-    b.add_argument("--retranslate", action="store_true",
-                   help="translate every page again (after changing the series sheet or the premises); cached pages "
-                        "are replaced, but for the translations you corrected in the window (see `review --corrections`)")
-    b.add_argument("--replace-corrections", action="store_true",
-                   help="with --retranslate: translate the lines you corrected again too")
-    b.add_argument("--translator", choices=["ollama", "echo", "none"], default="ollama")
 
     rv = sub.add_parser("review", help="list the cached translations flagged for a second look (set small, a "
                                         "rendering missed, far longer or shorter than the Japanese, the OCR unsure)")
@@ -285,7 +263,7 @@ def translation_model(settings: Settings) -> Any:
     return choose(settings.ollama_model, settings.target_language, health.installed_models(settings.ollama_url))
 
 
-TRANSLATING_COMMANDS = ("translate", "read", "batch")  # the commands --language gives a translator model to
+TRANSLATING_COMMANDS = ("translate", "read")  # the commands --language gives a translator model to
 
 
 def _console_yes(question: str) -> bool:
@@ -598,43 +576,31 @@ def _book_name(given: str | None, title: str, settings: Settings | None = None) 
     return book
 
 
-WINDOW_POLL_S = 2.0
 ENLARGE_LOOKS = 10  # the enlarged window's frame is looked at this many times at most before reading goes on
 
 
-def _pick_window(query: str, wait: float = 0.0):
+def _pick_window(query: str):
     """The viewer window *query* names (`capture.match_windows`: its exact title, its tab's title in a browser, the
-    start of that, ...); with *wait*, keep looking for that many seconds while no window matches. When several
-    match, none is guessed: they are listed and the command ends (exit code 2) asking for a fuller title - a chat
-    page whose title begins with the viewer's name must not be driven for the reader's tab."""
+    start of that, ...). When several match, none is guessed: they are listed and the command ends (exit code 2)
+    asking for a fuller title - a chat page whose title begins with the viewer's name must not be driven for the
+    reader's tab. When none matches, the windows that can be captured are listed (exit code 2)."""
     from .capture import list_windows, match_windows
 
-    deadline = time.monotonic() + wait
-    announced = False
-    while True:
-        wins = list_windows()
-        found = match_windows(query, wins)
-        if len(found) == 1:
-            win = found[0]
-            if announced:
-                print(f"found {win.label()}", flush=True)
-            return win
-        if found:
-            print(f"several windows match {query!r}:")
-            for w in found:
-                print("  " + w.label())
-            print("pass a fuller title with --window: the window's whole title, or a browser tab's whole title")
-            raise SystemExit(2)
-        if time.monotonic() >= deadline:
-            print(f"no window title contains {query!r}. Capturable windows:")
-            for w in wins:
-                print("  " + w.label())
-            raise SystemExit(2)
-        if not announced:
-            announced = True
-            print(f"waiting for a window whose title contains {query!r} (up to {wait:.0f}s; open the book in its viewer)...",
-                  flush=True)
-        time.sleep(WINDOW_POLL_S)
+    wins = list_windows()
+    found = match_windows(query, wins)
+    if len(found) == 1:
+        return found[0]
+    if found:
+        print(f"several windows match {query!r}:")
+        for w in found:
+            print("  " + w.label())
+        print("pass a fuller title with --window: the window's whole title, or a browser tab's whole title")
+        raise SystemExit(2)
+    print(f"no window title contains {query!r}. Capturable windows:")
+    for w in wins:
+        print("  " + w.label())
+    raise SystemExit(2)
+
 
 
 # --- commands ------------------------------------------------------------------
@@ -804,7 +770,7 @@ def enlarge_viewer(hwnd: int, settings: Settings):
     """The viewer before a command-line read of one page: its window enlarged (`capture.enlarge_window`: no key, no
     change of the foreground; a maximised window stays as it is), waited for until two frames settle_ms apart are
     alike; what to put back with `capture.restore_window`, None for a window that was left as it is."""
-    from .batch import frames_differ, thumbnail
+    from .frames import frames_differ, thumbnail
     from .capture import CaptureError, capture_window, enlarge_window, window_rect
 
     enlarged = enlarge_window(hwnd)
@@ -858,55 +824,6 @@ def cmd_read(args: argparse.Namespace, settings: Settings) -> int:
     from .ui.preview import show_preview
 
     show_preview(result.image, f"TASlation - {win.title}")
-    return 0
-
-
-def _finish_at_enter(reader: Any) -> None:
-    """Enter at the command line says the book is done (`BatchReader.finish`); without a console nothing does."""
-    try:
-        input()
-    except (EOFError, OSError, ValueError):
-        return
-    reader.finish()
-
-
-def cmd_batch(args: argparse.Namespace, settings: Settings) -> int:
-    from .batch import BatchReader
-    from .capture import enable_dpi_awareness
-
-    from .annotations import GlossaryStore
-    from .bookname import clean_series
-    from .notes import sheet_key
-
-    if getattr(args, "replace_corrections", False) and not args.retranslate:
-        raise SystemExit("error: --replace-corrections goes with --retranslate")
-    _notice_once(settings)
-    enable_dpi_awareness()
-    win = _pick_window(args.window, wait=max(0.0, args.wait))
-    book = _book_name(_given_book(args, settings), win.title, settings)
-    series = clean_series(args.series) or sheet_key(GlossaryStore(settings.glossary_dir), book)
-    pipeline = build_pipeline(settings, args.translator, book, series=series, warm_first=True)
-    cache_note = str(pipeline.cache.path) if pipeline.cache is not None else "(disabled)"
-    mode = "page by page" if args.no_context else "whole book (every page you turn is read, then translated)"
-    print(f"batch reading {win.label()} -> cache {cache_note}\nmode: {mode}; series: {series!r}")
-    print("Turn the pages in the viewer at your own pace: TASlation reads each page you turn, and never turns one "
-          "itself. Press Enter when you have finished the book. Ctrl+C stops.")
-
-    def on_progress(p, _result):
-        print(p.message)
-
-    reader = BatchReader(pipeline, win.hwnd, settings, on_progress, max_pages=args.max_pages,
-                         context_mode=not args.no_context, book=book,
-                         series=series, title=win.title, query=args.window, retranslate=args.retranslate,
-                         replace_corrections=getattr(args, "replace_corrections", False))
-    threading.Thread(target=_finish_at_enter, args=(reader,), name="batch-enter", daemon=True).start()
-    try:
-        reader.run()
-    except KeyboardInterrupt:
-        reader.stop()
-        print("stopped")
-    for note in reader.progress.notes:
-        print("note:", note)
     return 0
 
 
@@ -1236,7 +1153,7 @@ def _say_not_here(settings: Settings) -> None:
 
 # the commands that read or write the saved files with text of a book: at their start the plain ones are protected
 # (`_protect_at_start`; the window does it itself, `ui.app`). `audit` only counts them: it reports what is on disk.
-STORE_COMMANDS = frozenset({"translate", "read", "batch", "review", "cache", "annotations", "glossary"})
+STORE_COMMANDS = frozenset({"translate", "read", "review", "cache", "annotations", "glossary"})
 
 
 def _protect_at_start(args: argparse.Namespace, settings: Settings) -> None:
@@ -1538,9 +1455,9 @@ def cmd_gui(args: argparse.Namespace, settings: Settings) -> int:
     enable_dpi_awareness()
     from .ui.app import run_app
 
-    overrides = {k: v for k, v in (("scan_mode", getattr(args, "mode", None)), ("role", getattr(args, "role", None))) if v}
-    if overrides:
-        settings = settings.with_overrides(**overrides)
+    role = getattr(args, "role", None)
+    if role:
+        settings = settings.with_overrides(role=role)
         settings.validate()
     return run_app(settings, window_query=args.window, book=_given_book(args, settings),
                    auto=getattr(args, "auto", True),
@@ -1590,7 +1507,6 @@ COMMANDS = {
     "notice": cmd_notice,
     "translate": cmd_translate,
     "read": cmd_read,
-    "batch": cmd_batch,
     "cache": cmd_cache, "review": cmd_review,
     "annotations": cmd_annotations,
     "glossary": cmd_glossary,
@@ -1610,7 +1526,6 @@ def main(argv: list[str] | None = None) -> int:
         args.auto = True
         args.on_top = False
         args.reading = False
-        args.mode = None
         args.role = None
     try:
         settings = load_settings(args)

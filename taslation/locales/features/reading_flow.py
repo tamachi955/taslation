@@ -1,7 +1,7 @@
 """The window's strings about turning the pages from TASlation's window: a key of the window's that goes on to the
 viewer as the viewer's own key (`ui.viewers.keys_words`, from Page keys...); the full screen's close button at the top
-edge, its first line in each role, Auto turned on by the full screen in the Reader role and off by a whole-book run
-(said once a session), and the name asked for after pages were read on the full screen under a name that names no
+edge, its first line in each role, Auto turned on by the full screen in the Reader role (said once a session), and
+the name asked for after pages were read on the full screen under a name that names no
 book (`ui.reading`, `ui.live`)."""
 
 TEXTS: dict[str, dict[str, str]] = {
@@ -76,42 +76,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "全螢幕（譯者角色）：按一下區域將其選取，按兩下進行編輯；翻頁鍵翻動檢視器的頁面。Esc 先取消選取再離開；F11 立即離開。",
         "ko": "전체 화면, 번역자 역할: 영역을 클릭해 선택하고 더블 클릭해 편집합니다. 페이지 키로 뷰어의 페이지를 넘깁니다. Esc는 먼저 선택을 해제한 뒤 나가고, F11은 바로 나갑니다.",
         "th": "เต็มหน้าจอ บทบาทผู้แปล: คลิกบริเวณเพื่อเลือก ดับเบิลคลิกเพื่อแก้ไข ปุ่มพลิกหน้าจะพลิกหน้าในโปรแกรมอ่าน Esc จะยกเลิกการเลือกก่อนแล้วจึงออก F11 ออกทันที",
-    },
-    "A whole-book run starts from the window: leave the full screen first (F11).": {
-        "ja": "1冊まるごと読み取りはウィンドウから始めます。先にフルスクリーンを抜けてください（F11）。",
-        "es": "La lectura del libro entero se inicia desde la ventana: sal antes de la pantalla completa (F11).",
-        "pt": "A leitura do livro inteiro começa pela janela: saia antes da tela cheia (F11).",
-        "fr": "La lecture du livre entier se lance depuis la fenêtre : quittez d'abord le plein écran (F11).",
-        "de": "Das Lesen des ganzen Buchs startet im Fenster: Verlassen Sie zuerst das Vollbild (F11).",
-        "it": "La lettura di tutto il libro si avvia dalla finestra: esci prima dallo schermo intero (F11).",
-        "nl": "Het lezen van het hele boek start vanuit het venster: verlaat eerst het volledige scherm (F11).",
-        "pl": "Czytanie całej książki uruchamia się z okna: najpierw wyjdź z pełnego ekranu (F11).",
-        "ru": "Чтение всей книги запускается из окна: сначала выйдите из полноэкранного режима (F11).",
-        "tr": "Kitabın tamamının okunması pencereden başlatılır: önce tam ekrandan çıkın (F11).",
-        "id": "Pembacaan seluruh buku dimulai dari jendela: keluar dulu dari layar penuh (F11).",
-        "vi": "Việc đọc cả cuốn sách được bắt đầu từ cửa sổ: hãy thoát toàn màn hình trước (F11).",
-        "zh": "整本阅读需从窗口开始：请先退出全屏（F11）。",
-        "zh-tw": "整本閱讀需從視窗開始：請先離開全螢幕（F11）。",
-        "ko": "책 전체 읽기는 창에서 시작합니다. 먼저 전체 화면을 나가세요 (F11).",
-        "th": "การอ่านทั้งเล่มเริ่มจากหน้าต่าง: ออกจากเต็มหน้าจอก่อน (F11)",
-    },
-    "Whole-book run starting... Auto is off while the run reads each page you turn, and on again when it ends.": {
-        "ja": "1冊まるごと読み取りを開始します... 実行中は「自動」をオフにし、めくったページを実行が読み取ります。終わると「自動」はオンに戻ります。",
-        "es": "Iniciando la lectura del libro entero... Auto queda desactivado mientras la lectura lee cada página que pasas, y vuelve a activarse al terminar.",
-        "pt": "Iniciando a leitura do livro inteiro... O Auto fica desligado enquanto a leitura lê cada página que você vira, e volta a ligar quando ela termina.",
-        "fr": "Démarrage de la lecture du livre entier... Auto est désactivé pendant que la lecture lit chaque page que vous tournez, et réactivé à la fin.",
-        "de": "Das Lesen des ganzen Buchs startet... Auto ist aus, während dabei jede Seite gelesen wird, die Sie umblättern, und danach wieder an.",
-        "it": "Avvio della lettura di tutto il libro... Auto resta disattivato mentre la lettura legge ogni pagina che giri, e si riattiva alla fine.",
-        "nl": "Lezen van het hele boek start... Auto staat uit zolang elke pagina wordt gelezen die u omslaat, en gaat daarna weer aan.",
-        "pl": "Rozpoczynanie czytania całej książki... Auto jest wyłączone, dopóki odczyt czyta każdą przewracaną stronę, i włączy się znowu po jego końcu.",
-        "ru": "Запуск чтения всей книги... «Авто» выключено, пока чтение читает каждую перелистанную страницу, и снова включится, когда оно закончится.",
-        "tr": "Kitabın tamamının okunması başlıyor... Okuma çevirdiğiniz her sayfayı okurken Otomatik kapalıdır; okuma bitince yeniden açılır.",
-        "id": "Memulai pembacaan seluruh buku... Otomatis dimatikan selama pembacaan membaca tiap halaman yang Anda balik, dan aktif lagi setelah selesai.",
-        "vi": "Đang bắt đầu đọc cả cuốn sách... Tự động tắt trong khi quá trình đọc đọc từng trang bạn lật, và bật lại khi kết thúc.",
-        "zh": "正在开始整本阅读... 阅读期间“自动”关闭，由阅读读取你翻到的每一页；结束后“自动”重新开启。",
-        "zh-tw": "正在開始整本閱讀... 閱讀期間「自動」關閉，由閱讀讀取你翻到的每一頁；結束後「自動」重新開啟。",
-        "ko": "책 전체 읽기를 시작하는 중... 읽는 동안에는 '자동'이 꺼지고 넘기는 페이지를 읽기가 읽습니다. 끝나면 '자동'이 다시 켜집니다.",
-        "th": "กำลังเริ่มอ่านทั้งเล่ม... ระหว่างอ่าน “อัตโนมัติ” จะปิด และการอ่านจะอ่านทุกหน้าที่คุณพลิก เมื่อเสร็จ “อัตโนมัติ” จะเปิดอีกครั้ง",
     },
     "The pages are kept under {book} from now on (F5 keeps the page on show too).": {
         "ja": "これからのページは「{book}」として保存します（表示中のページも F5 で保存できます）。",

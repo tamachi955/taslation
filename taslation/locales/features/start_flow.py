@@ -1,11 +1,9 @@
-"""The window's strings for the start of a book and what stands around it: the start dialog (the book's name, "Read
-the whole book first?"), the setup banner's note in the status line, the scan band (the page read, the bubbles
-translated and the time left), a page translation that Stop
-cancels or whose model is slow, a book's files that cannot be opened now.
+"""The window's strings for the start of a book and what stands around it: the start dialog (the book's name) and
+the line when it is closed, how long a time is (`banner.duration_text`), a book's files that cannot be opened now, and
+a page translation that Stop cancels or whose model is slow.
 
-Terms as the window's catalogs have them: the whole-book scan is ja 「1冊まるごと読み取り」, whole-book mode
-「1冊まとめて先に翻訳」, page by page 「1ページずつ翻訳」, the series sheet 「シリーズ設定」; Stop is the window's
-Stop button in each language."""
+Terms as the window's catalogs have them: the series sheet is ja 「シリーズ設定」; Stop is the window's Stop button in
+each language."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ the start dialog
@@ -27,14 +25,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "이 책의 이름은 무엇인가요? TASlation은 이 책의 번역을 이 이름으로 보관합니다.",
         "th": "หนังสือเล่มนี้ชื่ออะไร TASlation เก็บคำแปลของหนังสือเล่มนี้ไว้ภายใต้ชื่อนี้",
     },
-    "Page by page instead": {
-        "ja": "1ページずつ翻訳する", "es": "Mejor página a página", "pt": "Página por página em vez disso",
-        "fr": "Plutôt page par page", "de": "Lieber Seite für Seite", "it": "Meglio pagina per pagina",
-        "nl": "Liever pagina voor pagina", "pl": "Zamiast tego strona po stronie", "ru": "Лучше постранично",
-        "tr": "Bunun yerine sayfa sayfa", "id": "Per halaman saja", "vi": "Thay vào đó dịch từng trang",
-        "zh": "改为逐页翻译", "zh-tw": "改為逐頁翻譯", "ko": "대신 페이지별로",
-        "th": "แปลทีละหน้าแทน",
-    },
     "Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.": {
         "ja": "まだ何も読み取っていません。次のページで改めて確認します。F5 でこのページを今すぐ翻訳できます。",
         "es": "Todavía no se ha leído nada: TASlation vuelve a preguntar en la página siguiente. F5 traduce esta página ahora.",
@@ -53,25 +43,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "아직 아무것도 읽지 않았습니다. 다음 페이지에서 TASlation가 다시 묻습니다. F5를 누르면 이 페이지를 지금 번역합니다.",
         "th": "ยังไม่ได้อ่านอะไร: TASlation จะถามอีกครั้งที่หน้าถัดไป F5 จะแปลหน้านี้ทันที",
     },
-    "The whole book is not read yet: first fix what the lines above the page say. Until then TASlation translates page by page.": {
-        "ja": "まだ1冊まるごとは読み取りません。先にページの上の表示に従って問題を解決してください。それまでは1ページずつ翻訳します。",
-        "es": "Todavía no se lee el libro entero: primero resuelve lo que dicen las líneas de encima de la página. Hasta entonces, TASlation traduce página a página.",
-        "pt": "O livro inteiro ainda não é lido: primeiro resolva o que dizem as linhas acima da página. Até lá, o TASlation traduz página por página.",
-        "fr": "Le livre entier n'est pas encore lu : réglez d'abord ce que disent les lignes au-dessus de la page. D'ici là, TASlation traduit page par page.",
-        "de": "Das ganze Buch wird noch nicht gelesen: Beheben Sie zuerst, was die Zeilen über der Seite sagen. Bis dahin übersetzt TASlation Seite für Seite.",
-        "it": "Il libro intero non viene ancora letto: prima risolvi ciò che dicono le righe sopra la pagina. Fino ad allora TASlation traduce pagina per pagina.",
-        "nl": "Het hele boek wordt nog niet gelezen: los eerst op wat de regels boven de pagina zeggen. Tot dan vertaalt TASlation pagina voor pagina.",
-        "pl": "Cała książka nie jest jeszcze czytana: najpierw napraw to, o czym mówią wiersze nad stroną. Do tego czasu TASlation tłumaczy strona po stronie.",
-        "ru": "Вся книга пока не читается: сначала устраните то, о чём говорят строки над страницей. До тех пор TASlation переводит постранично.",
-        "tr": "Kitabın tamamı henüz okunmuyor: önce sayfanın üstündeki satırların söylediğini düzeltin. O zamana kadar TASlation sayfa sayfa çevirir.",
-        "id": "Seluruh buku belum dibaca: perbaiki dulu apa yang disebutkan baris-baris di atas halaman. Sampai saat itu TASlation menerjemahkan per halaman.",
-        "vi": "Chưa đọc cả cuốn sách: trước hết hãy khắc phục điều mà các dòng phía trên trang cho biết. Cho đến lúc đó, TASlation dịch từng trang một.",
-        "zh": "暂不读取整本书：请先解决页面上方各行所说的问题。在此之前，TASlation 逐页翻译。",
-        "zh-tw": "暫不讀取整本書：請先解決頁面上方各行所說的問題。在此之前，TASlation 逐頁翻譯。",
-        "ko": "아직 책 전체를 읽지 않습니다. 먼저 페이지 위의 줄에 적힌 문제를 해결하세요. 그때까지 TASlation는 페이지별로 번역합니다.",
-        "th": "ยังไม่ได้อ่านทั้งเล่ม: กรุณาแก้ไขสิ่งที่ข้อความเหนือหน้าระบุก่อน ระหว่างนี้ TASlation จะแปลทีละหน้า",
-    },
-    # ------------------------------------------------------------------ the scan band
+    # ------------------------------------------------------------------ how long a time is
     "{minutes} min": {
         "ja": "{minutes}分", "es": "{minutes} min", "pt": "{minutes} min", "fr": "{minutes} min",
         "de": "{minutes} Min.", "it": "{minutes} min", "nl": "{minutes} min", "pl": "{minutes} min",
@@ -86,24 +58,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "tr": "{hours} sa {minutes} dk", "id": "{hours} jam {minutes} menit", "vi": "{hours} giờ {minutes} phút",
         "zh": "{hours} 小时 {minutes} 分钟", "zh-tw": "{hours} 小時 {minutes} 分鐘", "ko": "{hours}시간 {minutes}분",
         "th": "{hours} ชม. {minutes} นาที",
-    },
-    "Auto: follow page turns is on again.": {
-        "ja": "「自動: ページ送りに追従」が再び ON になりました。",
-        "es": "«Auto: seguir los cambios de página» vuelve a estar activado.",
-        "pt": "\"Auto: seguir as viradas de página\" está ligado de novo.",
-        "fr": "« Auto : suivre les changements de page » est de nouveau activé.",
-        "de": "„Auto: dem Umblättern folgen“ ist wieder an.",
-        "it": "«Auto: segui i cambi di pagina» è di nuovo attivo.",
-        "nl": "‘Auto: bladeren volgen’ staat weer aan.",
-        "pl": "„Auto: podążaj za zmianą strony” jest znowu włączone.",
-        "ru": "«Авто: следовать за перелистыванием» снова включено.",
-        "tr": "\"Otomatik: sayfa çevirmeyi izle\" yeniden açık.",
-        "id": "\"Otomatis: ikuti pergantian halaman\" aktif lagi.",
-        "vi": "\"Tự động: theo dõi lật trang\" đã bật lại.",
-        "zh": "“自动：跟随翻页”已重新开启。",
-        "zh-tw": "「自動：跟隨翻頁」已重新開啟。",
-        "ko": "'자동: 페이지 넘김 따라가기'가 다시 켜졌습니다.",
-        "th": "“อัตโนมัติ: ติดตามการพลิกหน้า” เปิดอีกครั้งแล้ว",
     },
     # ------------------------------------------------------------------ a book's files that cannot be opened now
     "Could not open the files TASlation keeps for {book}: {error}. Nothing was translated; close what holds the file (another TASlation, a backup tool), then try again.": {

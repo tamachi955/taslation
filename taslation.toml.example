@@ -12,8 +12,8 @@ ollama_url = "http://127.0.0.1:11434"
 ollama_model = "auto"         # "auto": PLaMo 3 Translate 2B for every language it writes, Qwen3.5 4B for Brazilian Portuguese and Turkish; or an Ollama model of your own (see docs/MANUAL.md, the section on choosing the model)
 ollama_timeout = 900.0
 ollama_temperature = 0.2
-ollama_num_ctx = 16384        # the chat translator's context window (0 = server default; a batch request needs ~10K); PLaMo has its own (8192)
-ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the window's start (load_model_at_start) or the first line to translate loads it, the end of a whole-book run or closing the window releases it. "-1": load it at the start and never unload
+ollama_num_ctx = 16384        # the chat translator's context window (0 = server default); PLaMo has its own (8192)
+ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the window's start (load_model_at_start) or the first line to translate loads it, Tools > Release the model now or closing the window releases it. "-1": load it at the start and never unload
 load_model_at_start = true    # the window loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; also Tools > Settings... > System). false: the first line to translate loads it
 ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Tools > Settings... > System). Tools > Release the model now gives the GPU memory back at once
 ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto": unless that moves the OCR readers off the GPU; "on"; "off": as before (also Tools > Settings... > System; from Ollama's next start)
@@ -21,10 +21,7 @@ target_language = "English"
 context_pages = 2             # live mode: previous pages given to the model as context (memory only; PLaMo's earlier
                               # lines grow to 60 and are cut back to the newest 20; 0: none)
 
-# --- whole-book batch: every page read as it is turned, then all of them translated in chunks with the whole book as context ---
-context_mode = true           # false: page by page (each page translated as it is captured)
-chunk_bubbles = 30            # lines per request of the whole-book translation (3-5 pages; in runs of 100 the replies drift off their lines)
-lookahead_bubbles = 60        # upcoming bubbles shown to the chat translator for context only (PLaMo has no place for them)
+# --- the pages turned past, translated behind the reader ---
 context_pairs = 40            # previous (source, translation) pairs carried into the next request (PLaMo: as above)
 
 # --- OCR ---
@@ -70,7 +67,7 @@ fingerprint_max_distance = 36
 match_min_iou = 0.4
 reuse_lines = true            # a short line translated before in the book or its series gets that translation again, without a request (a correction of yours first); kept in the book's cache under a keyed hash of the line, never the Japanese
 
-# --- batch reading ---
+# --- following the viewer ---
 # The viewer's page keys, which the page keys you press in TASlation's window are passed on as: Left, Right, Up, Down,
 # PageUp, PageDown, Home, End, Space, Enter, Tab, Backspace, Escape, F1-F12, a letter or a digit. Page > Page keys... (or `taslation keys`) keeps keys per viewer
 # in profiles.json, and "Apply to all viewers" keeps defaults there too; both come before these lines, which are
@@ -84,11 +81,8 @@ black_wait_s = 30             # seconds a black viewer is waited for before you 
 page_turn_wait_ms = 3000
 settle_ms = 400
 early_start = true            # a new page is read from its first frame; it asks the model and is kept once that frame stays (false: wait settle_ms first)
-batch_max_pages = 2000
-batch_memory_mb = 2048        # page images a whole-book run keeps in memory (packed, never on disk); at most a quarter of the RAM
 
 # --- app ---
-scan_mode = "page"            # "page": page by page (default); "book": read and translate the whole book first
 role = "reader"               # "reader" | "translator" (mark text, fix translations, keep a glossary)
 ui_language = ""              # window language: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
 ui_scale = 1.0                # size of the window's text, times what Windows sets for its monitor (0.5-3.0; also Tools > Settings...)
@@ -102,8 +96,6 @@ hover_reveal = "panel"        # how a bubble under the pointer shows the other s
 side_indicator = "column"     # the pages turned past, beside the page on the side it turns to: "column" (small thumbnails with how far each page is, where the margin has room; a narrow bar elsewhere) | "rail" (the narrow bar only) | "off"; also Tools > Settings...
 panel_font_size = 0           # the panel's text in points (6-72; it follows ui_scale and the monitor's scaling, at most 8 % of the screen's height, and the panel stays on the screen); 0: automatic (twice readable_font_size, at least 1.25 times the bubble's lettering on the screen, 16-44 px)
 hover_delay_ms = 450          # how long the pointer rests on a bubble before its other side shows (0-3000): this long on a bubble hard to read and on every one with the original on the page, 8/3 as long on the others (450: 0.45 s and 1.2 s; 0: at once)
-flash_when_done = true        # a whole-book run that finishes or stops with a problem while TASlation is not in front flashes its taskbar button (no focus taken)
-sound_when_done = false       # ... and plays the system's default sound
 follow = "events"             # "events": the viewer is captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
 update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... asks, when you choose it; also Tools > Settings...
 debug = false

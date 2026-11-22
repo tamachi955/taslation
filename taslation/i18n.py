@@ -35,7 +35,6 @@ JA: dict[str, str] = {
     "Book:": "書名:",
     "To:": "翻訳先:",
     "Translate (F5)": "翻訳 (F5)",
-    "Read whole book...": "1冊まるごと読む...",
     "Stop (Esc)": "停止 (Esc)",
     "Set area...": "範囲設定...",
     "Clear area": "範囲解除",
@@ -67,10 +66,6 @@ JA: dict[str, str] = {
     "Translating...": "翻訳中...",
     "Storing your changes...": "変更を保存中...",
     "Dropping the region...": "領域を削除中...",
-    "Stopping the whole-book run...": "1冊まるごと読み取りを停止しています...",
-    "Whole-book run starting...": "1冊まるごと読み取りを開始します...",
-    "Whole-book mode: this page is not translated yet. Turn the pages at your own pace: TASlation reads each page you turn, and translates the book when you press Finished reading. Stop ends the run.":
-        "1冊まとめて翻訳: このページは未翻訳です。ご自分のペースでページをめくってください。TASlation はめくられたページを読み取り、「読み終えた」を押すと本を翻訳します。「停止」で終えられます。",
     "Sent {key} to the viewer...": "ビューアに {key} を送信...",
     "The viewer did not change (end of book, or the key means nothing there).":
         "ビューアの表示が変わりません（巻末か、そのキーが効かない画面です）。",
@@ -93,9 +88,7 @@ JA: dict[str, str] = {
         "訳文を保存できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
     "Give the book a name first (its series in the Series field, and its volume beside it if it has one).":
         "先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
-    # batch dialog
-    "Read the whole book": "1冊まるごと読む",
-    "Start": "開始",
+    # buttons
     "Cancel": "キャンセル",
     "Close": "閉じる",
     "Save": "保存",
@@ -211,9 +204,6 @@ JA: dict[str, str] = {
         "TASlation はインターネットへの接続の試みを {blocked} 回止めました。このパソコンから外には何も出ていません。何もする必要はありません。",
     "TASlation - translating...": "TASlation - 翻訳中...",
     "This viewer cannot be read behind the full screen; press F11": "このビューアはフルスクリーンの裏では読み取れません。F11 を押してください",
-    "The full screen translates page by page; the whole-book scan waits until you leave it (F11).":
-        "フルスクリーンでは1ページずつ翻訳します。1冊まるごと読み取りはフルスクリーンを抜けるまで待ちます（F11）。",
-    "Full screen waits for the whole-book run to finish (Stop ends it).": "フルスクリーンは1冊まるごと読み取りが終わるまで待ちます（「停止」で中断できます）。",
     "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it.":
         "フルスクリーン: ページ送りキーでビューアのページをめくります。F11 か Esc で戻ります。",
     "{done} of {total} line(s) done": "{total} 行中 {done} 行完了",

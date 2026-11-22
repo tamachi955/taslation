@@ -1,67 +1,11 @@
 """Turkish (Türkçe) templates for `taslation.messages` (see `taslation.message_texts`): the polite imperative, as the
-window; its buttons as the window names them (Toplu: kitabın tamamını oku..., Durdur).
+window; its buttons as the window names them (Durdur).
 
 A noun after a number stays singular in Turkish ("3 sayfa"), so counts need no plural words; no suffix is put on a
 placeholder (its sound decides the suffix), it goes on the noun after it ("{model} modeli", "{url} adresinde").
 """
 
 TEMPLATES: dict[str, str] = {
-    "batch.started": "Kitabın tamamının okunması başladı",
-    "batch.preflight_problems": "başlamadan önce {problems} sorun bulundu: {problem}",
-    "batch.not_started": "Kitabın tamamının okunması başlamadı: {reason}",
-    "batch.book_back": "Kitap geri geldi; devam ediliyor",
-    "batch.waiting_other_tab": ("Bekleniyor: görüntüleyici penceresi şu anda kitabı değil “{title}” sekmesini "
-                                "gösteriyor. Kitabın sekmesine dönün ya da bu sekmeyi bir kez tarayıcının dışına "
-                                "sürükleyip kendi penceresine taşıyın; böylece siz başka sekmeleri kullanırken TASlation "
-                                "kitabı bulur."),
-    "batch.viewer_draws_again": "Görüntüleyici yeniden çiziyor; devam ediliyor",
-    "batch.waiting_behind": "Bekleniyor: görüntüleyici başka bir pencerenin arkasında hiçbir şey çizmiyor; o pencereyi kenara çekin",
-    "batch.waiting_covered": "Bekleniyor: görüntüleyici TASlation'ın arkasında hiçbir şey çizmiyor; TASlation'ı kenara çekin",
-    "batch.waiting_viewer_hidden": "Bekleniyor: görüntüleyicinin penceresi gizli ya da simge durumunda; geri getirin",
-    "batch.waiting_capture": "Bekleniyor: {error}",
-    "batch.viewer_lost": "{error}. Okuma bitti okunanları tercüme eder; Durdur bir sonraki çalıştırma için bu pencerede saklar",
-    "batch.finished_reading": "okuma bitti",
-    "batch.read_so_far": "şimdiye kadar okunan sayfaları istediniz",
-    "batch.finishing": "Okuma bitti. Okunacak sayfa kaldı: {queued}",
-    "batch.erasing_ahead": "Okunan sayfalar gösterime hazırlanıyor. Silinecek sayfa kaldı: {pages}",
-    "batch.page_waits": "Okunmayı bekleyen sayfalar: {queued}",
-    "batch.backlog_room": "Yetişildi: sonraki sayfayı istediğiniz zaman çevirin",
-    "batch.page_missed": "Bir sayfa alınamadan geçildi (henüz alınmayan: {pages}). Lütfen bir sayfa geri dönün; şerit hangisi olduğunu gösteriyor",
-    "batch.missed_taken": "Geçilen sayfa artık alındı; istediğiniz zaman devam edin",
-    "batch.note_missed": "Alınamadan geçildiği için çevrilmeyen sayfalar: {pages}",
-    "batch.backlog_full": "Lütfen bekleyin: {queued} sayfa okunmayı bekliyor. Bu satır kaybolunca sonraki sayfayı çevirin",
-    "batch.not_book": "Bekleniyor: bu kitabın bir sayfasına benzemiyor, bu yüzden okunmuyor. Kitaba dönün ya da Okuma bitti düğmesine basın",
-    "batch.translating_page": "Sayfa {page}: çevriliyor...",
-    "batch.translated_page": "Sayfa {page}: {bubbles} satır  [{seconds:.0f} sn]",
-    "batch.page_error": "{error}",
-    "batch.scanning_page": "Sayfa {page} taranıyor...",
-    "batch.stale_dropped": "kaldırılan eski satır: {dropped}",
-    "batch.read_page": "Sayfa {page}: okunan satır: {lines}  [{seconds:.0f} sn]",
-    "batch.page_cached": "Sayfa {page}: daha önce çevrilmiş satır: {lines}  [{seconds:.0f} sn]",
-    "batch.pages_read": "Tüm sayfalar okundu: {pages} ekran, {bubbles} satır. Görüntüleyiciye artık gerek yok; şimdi çeviri geliyor...",
-    "batch.continuing": "Daha önce okunan sayfalarla devam ediliyor: çevrilecek satır: {lines}",
-    "batch.stopped_reading": "{pages} sayfa okunduktan sonra durduruldu. Henüz hiçbir şey tercüme edilmedi: çeviri Okuma bitti düğmesinden sonra gelir.",
-    "batch.readings_kept": "Kitabın tamamını oku... gösterilen sayfadan devam eder, TASlation'ı kapatana kadar.",
-    "batch.read_again": "Bir dahaki sefere bu sayfalar yeniden okunur: görüntüleyicide {pages} sayfa geri gidin ve Kitabın tamamını oku... komutunu yeniden çalıştırın.",
-    "batch.stopped_translating": "Durduruldu: {total} satırın {done} tanesi tercüme edilip kaydedildi ve kalıyor.",
-    "batch.continues_translating": "Kitabın tamamını oku... kalanını tercüme eder, TASlation'ı kapatana kadar.",
-    "batch.stored_read_again": "Kalanı için yeniden okumak gerekir: görüntüleyicide {pages} sayfa geri gidin ve Kitabın tamamını oku... komutunu yeniden çalıştırın; tercüme edilen sayfalar atlanır.",
-    "batch.translating_chunk": "Blok {chunk}/{chunks} çevriliyor ({bubbles} satır)...",
-    "batch.translated_chunk": "Blok {chunk}/{chunks} çevrildi: şimdiye kadar {bubbles} satır  [{seconds:.0f} sn]",
-    "batch.finished": "Kitabın tamamının taranması bitti: {pages} sayfa, çevrilen {bubbles} satır, {minutes} dk - {reason}.",
-    "batch.failures": ("Çevrilemeyen bölüm: {failed}. Bu sayfaları okuduğunuzda veya kitabın tamamının bir sonraki okunmasında yapılır."),
-    "batch.failed_requests": ("Hiçbir şey çevrilemedi: {reason} ({failed} istek başarısız, {pages} sayfa okundu). Sorunu giderin, ardından Kitabın tamamını oku... komutunu yeniden çalıştırın."),
-    "batch.stopped": ("Kitabın tamamının taranması {page}. sayfada durduruldu. Kalan sayfalar siz okudukça sayfa sayfa çevrilir; Kitabın tamamını oku... yeniden tarar."),
-    "batch.no_page_seen": ("görüntüleyicide kitabın hiçbir sayfası görünmüyor; kitabın ekranda olduğunu kontrol edin, "
-                           "ardından yeniden başlayın"),
-    "batch.page_limit": "sayfa sınırına ulaşıldı ({limit})",
-    "batch.user_stop": "durduruldu",
-    "batch.viewer_loading": "Görüntüleyici hâlâ yükleniyor; TASlation bekliyor",
-    "batch.viewer_black": "Bekleniyor: görüntüleyici hiçbir şey göstermiyor. Kitabı kendi penceresinde yeniden yükleyin: kitaba tıklayın, ardından yeniden yükleme tuşuna basın (tarayıcıda F5; TASlation penceresinde F5 çeviri yapar). TASlation kendiliğinden devam eder",
-    "batch.locked": "Başka bir TASlation penceresi bu kitabı zaten okuyor. Onu kapatın, sonra yeniden deneyin.",
-    "batch.nothing_new": "çevrilecek yeni bir şey yok ({reason})",
-    "batch.scan_ended": "tarama bitti",
-    "batch.save_failed": "çeviriler kaydedilemediği için durduruldu ({error}); diskte yer açın veya dosyayı tutan şeyi kapatın, sonra yeniden çalıştırın",
     "batch.reply_unusable": "modelin yanıtı kullanılamadı",
     "batch.note_gave_up": "{units} sayfa birimi tekrarlanan hatalardan sonra bırakıldı; sayfaları okunurken çevrilir",
     "batch.note_retry_failed": "{bubbles} satırlık istek başarısız oldu ({error}); iki yarıya bölünerek yeniden deneniyor",
@@ -69,11 +13,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "sayfa birimi {unit}: {error}; sayfası okunurken çevrilecek",
     "batch.note_incomplete": "{units} sayfa biriminden {incomplete} tanesi eksik döndü; eksik olanlar yeniden isteniyor",
     "batch.note_unit_incomplete": "sayfa birimi {unit}: eksik çeviri; eksik kalan kısım sayfası okunurken çevrilecek",
-    "batch.note_pruned": "önbellekteki {bubbles} satır artık bir metin bölgesiyle eşleşmediği için kaldırıldı",
     "viewer.covered": ("TASlation görüntüleyiciyi tamamen kapladığı için görüntüleyici çizmeyi bıraktı. TASlation "
                        "penceresini ekranı kaplamaktan çıkarın ya da görüntüleyicinin bir şeridi görünür kalacak şekilde "
                        "taşıyın."),
-    "viewer.closed": "görüntüleyici penceresi kapatıldı",
     "viewer.gone": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.no_area": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.windows_only": "pencere yakalama yalnızca Windows'ta kullanılabilir",

@@ -1,66 +1,11 @@
 """Polish (Polski) templates for `taslation.messages` (see `taslation.message_texts`): the informal imperative, as the
-window; its buttons as the window names them („Seria: przeczytaj całą książkę...”, Stop).
+window; its buttons as the window names them (Stop).
 
 Polish has several plural forms: a count is written as a label ("dymków: 5", "stron: 21") or with a word that does
 not change ("{minutes} min"), so that it reads right for every number.
 """
 
 TEMPLATES: dict[str, str] = {
-    "batch.started": "Rozpoczęto czytanie całej książki",
-    "batch.preflight_problems": "problemów wykrytych przed startem: {problems}; {problem}",
-    "batch.not_started": "Nie rozpoczęto czytania całej książki: {reason}",
-    "batch.book_back": "Książka wróciła; kontynuacja",
-    "batch.waiting_other_tab": ("Oczekiwanie: okno czytnika pokazuje teraz „{title}”, a nie książkę. Wróć do karty "
-                                "książki albo raz przeciągnij tę kartę poza przeglądarkę, żeby miała własne okno; wtedy "
-                                "TASlation znajdzie książkę, gdy używasz innych kart."),
-    "batch.viewer_draws_again": "Czytnik znów rysuje; kontynuacja",
-    "batch.waiting_behind": "Oczekiwanie: czytnik nic nie rysuje za innym oknem; przesuń to okno",
-    "batch.waiting_covered": "Oczekiwanie: czytnik nic nie rysuje za TASlation; przesuń TASlation",
-    "batch.waiting_viewer_hidden": "Oczekiwanie: okno czytnika jest ukryte lub zminimalizowane; przywróć je",
-    "batch.waiting_capture": "Oczekiwanie: {error}",
-    "batch.viewer_lost": "{error}. Koniec czytania tłumaczy to, co odczytano; Stop zachowuje to na następny raz w tym oknie",
-    "batch.finished_reading": "koniec czytania",
-    "batch.read_so_far": "wybrano dotąd odczytane strony",
-    "batch.finishing": "Koniec czytania. Strony do odczytania: {queued}",
-    "batch.erasing_ahead": "Przygotowanie odczytanych stron do wyświetlenia. Strony do wyczyszczenia: {pages}",
-    "batch.page_waits": "Strony czekające na odczyt: {queued}",
-    "batch.backlog_room": "Nadrobione: przewróć następną stronę, kiedy chcesz",
-    "batch.page_missed": "Strona została przewrócona, zanim udało się ją pobrać (jeszcze niepobrane: {pages}). Cofnij się o jedną stronę; pasek pokazuje którą",
-    "batch.missed_taken": "Pominięta strona jest już pobrana; kontynuuj, kiedy chcesz",
-    "batch.note_missed": "Strony przewrócone, zanim udało się je pobrać, więc nieprzetłumaczone: {pages}",
-    "batch.backlog_full": "Poczekaj chwilę, strony czekające na odczyt: {queued}. Przewróć następną, gdy ten wiersz zniknie",
-    "batch.not_book": "Oczekiwanie: to nie wygląda na stronę książki, więc nie zostanie odczytane. Wróć do książki lub naciśnij Koniec czytania",
-    "batch.translating_page": "Strona {page}: tłumaczenie...",
-    "batch.translated_page": "Strona {page} - wierszy: {bubbles}  [{seconds:.0f} s]",
-    "batch.page_error": "{error}",
-    "batch.scanning_page": "Skanowanie strony {page}...",
-    "batch.stale_dropped": "usunięte stare wiersze: {dropped}",
-    "batch.read_page": "Strona {page}: odczytane wiersze: {lines}  [{seconds:.0f} s]",
-    "batch.page_cached": "Strona {page}: wiersze już przetłumaczone: {lines}  [{seconds:.0f} s]",
-    "batch.pages_read": "Wszystkie strony odczytane - ekranów: {pages}, wierszy: {bubbles}. Czytnik nie jest już potrzebny; teraz tłumaczenie...",
-    "batch.continuing": "Dalej ze stronami już odczytanymi - wiersze do przetłumaczenia: {lines}",
-    "batch.stopped_reading": "Zatrzymano po odczytaniu stron: {pages}. Nic nie jest jeszcze przetłumaczone: tłumaczenie następuje po Koniec czytania.",
-    "batch.readings_kept": "„Przeczytaj całą książkę...” kontynuuje od widocznej strony, dopóki nie zamkniesz TASlation.",
-    "batch.read_again": "Następnym razem te strony zostaną odczytane ponownie: cofnij się w czytniku o strony ({pages}) i uruchom znów „Przeczytaj całą książkę...”.",
-    "batch.stopped_translating": "Zatrzymano: wiersze {done} z {total} są przetłumaczone i zapisane, i tak zostaje.",
-    "batch.continues_translating": "„Przeczytaj całą książkę...” przetłumaczy resztę, dopóki nie zamkniesz TASlation.",
-    "batch.stored_read_again": "Reszta wymaga ponownego odczytu: cofnij się w czytniku o strony ({pages}) i uruchom znów „Przeczytaj całą książkę...”; przetłumaczone strony zostaną pominięte.",
-    "batch.translating_chunk": "Tłumaczenie bloku {chunk}/{chunks} (wierszy: {bubbles})...",
-    "batch.translated_chunk": "Przetłumaczono blok {chunk}/{chunks} - wierszy do tej pory: {bubbles}  [{seconds:.0f} s]",
-    "batch.finished": "Skanowanie całej książki zakończone (stron: {pages}, przetłumaczonych wierszy: {bubbles}, {minutes} min) - {reason}.",
-    "batch.failures": ("Nieprzetłumaczone części: {failed}. Zostaną przetłumaczone, gdy przeczytasz te strony, albo przy następnym czytaniu całej książki."),
-    "batch.failed_requests": ("Nic nie udało się przetłumaczyć: {reason} (nieudanych żądań: {failed}, przeczytanych stron: {pages}). Usuń przyczynę, a potem ponownie uruchom „Przeczytaj całą książkę...”."),
-    "batch.stopped": ("Skanowanie całej książki zatrzymane na stronie {page}. Resztę tłumaczy się strona po stronie podczas czytania; „Przeczytaj całą książkę...” skanuje ponownie."),
-    "batch.no_page_seen": ("w czytniku nie widać żadnej strony książki; sprawdź, czy książka jest wyświetlana, a potem "
-                           "zacznij od nowa"),
-    "batch.page_limit": "osiągnięto limit stron ({limit})",
-    "batch.user_stop": "zatrzymano",
-    "batch.viewer_loading": "Czytnik wciąż się wczytuje; TASlation czeka",
-    "batch.viewer_black": "Oczekiwanie: czytnik niczego nie pokazuje. Wczytaj książkę ponownie w jej własnym oknie: kliknij książkę, a potem naciśnij jej klawisz odświeżania (F5 w przeglądarce; w oknie TASlation F5 tłumaczy). TASlation sam wznowi pracę",
-    "batch.locked": "Inne okno TASlation już czyta tę książkę. Zamknij je i spróbuj ponownie.",
-    "batch.nothing_new": "nic nowego do przetłumaczenia ({reason})",
-    "batch.scan_ended": "skanowanie się zakończyło",
-    "batch.save_failed": "przerwano, bo nie można zapisać tłumaczeń ({error}); zwolnij miejsce na dysku albo zamknij to, co blokuje plik, i uruchom ponownie",
     "batch.reply_unusable": "nie udało się użyć odpowiedzi modelu",
     "batch.note_gave_up": "jednostek stron porzuconych po powtarzających się błędach: {units}; zostaną przetłumaczone podczas czytania ich strony",
     "batch.note_retry_failed": "żądanie (wierszy: {bubbles}) nie powiodło się ({error}); ponowna próba w dwóch połowach",
@@ -69,10 +14,8 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "niekompletnych jednostek stron: {incomplete} z {units}; ponowne żądanie dla nich",
     "batch.note_unit_incomplete": ("jednostka strony {unit}: niekompletne tłumaczenie; brakująca część zostanie "
                                    "przetłumaczona podczas czytania strony"),
-    "batch.note_pruned": "usuniętych z pamięci podręcznej wierszy, które nie pasowały już do obszaru tekstu: {bubbles}",
     "viewer.covered": ("Czytnik przestał rysować, bo TASlation zasłania go całkowicie. Wyłącz maksymalizację okna "
                        "TASlation albo przesuń je tak, aby było widać choćby pasek czytnika."),
-    "viewer.closed": "okno czytnika zostało zamknięte",
     "viewer.gone": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.no_area": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.windows_only": "przechwytywanie okien działa tylko w systemie Windows",

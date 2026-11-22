@@ -136,12 +136,17 @@ class ConfigError(ValueError):
 # notes, its review pass and its shorter versions, removed 2026-11-06 (both translators only translate), and the
 # prompt styles for translation-only models ("mt", "index"), removed the same day: the chat prompts only; and the
 # viewer's full-screen key, which TASlation pressed at the first read (fullscreen_key), and the reload of a viewer that
-# stays black (reload_key, black_reload_*), removed the same day: TASlation presses no key the person did not press
+# stays black (reload_key, black_reload_*), removed the same day: TASlation presses no key the person did not press.
+# The last line: the whole-book mode's (its way of reading and translating, its requests' size and look-ahead, its
+# limits and memory, its taskbar flash and sound), removed 2026-11-22 with the mode: the pages turned past go on being
+# translated behind the reader (`backlog`) instead
 DROPPED_SETTINGS: set[str] = {"first_page_key", "fullscreen_key", "reload_key", "black_reload_wait_s",
                               "black_reload_gap_s", "black_reload_max", "ocr_device", "ocr_batch", "ocr_precision", "ocr_reader", "ocr_reread_below",
                               "ocr_upscale", "ocr_upscale_below",
                               "notes_pages_per_request", "series_notes", "revision_flag_distance", "revision_changes_only",
-                              "review_pass", "ollama_prompt_style"}
+                              "review_pass", "ollama_prompt_style",
+                              "scan_mode", "context_mode", "chunk_bubbles", "lookahead_bubbles", "batch_max_pages",
+                              "batch_memory_mb", "flash_when_done", "sound_when_done"}
 
 
 @dataclass
@@ -155,10 +160,10 @@ class Settings:
     ollama_model: str = "auto"
     ollama_timeout: float = 900.0
     ollama_temperature: float = 0.2
-    ollama_num_ctx: int = 16384  # the chat translator's context window (0 = server default); a batch request needs ~10K; PLaMo has its own (8192)
+    ollama_num_ctx: int = 16384  # the chat translator's context window (0 = server default); PLaMo has its own (8192)
     # How long Ollama keeps the model loaded after a request, in Ollama's own format: a duration ("30m", "2h") or
     # seconds ("0": unloads after every request). Every request carries it; the window's start (`load_model_at_start`)
-    # or else the first line to translate loads the model, and the end of a whole-book run or the window closed
+    # or else the first line to translate loads the model, and Tools > Release the model now or the window closed
     # releases it; "-1": loaded at the start, before the OCR model, and never released (`translate.ollama.never_unloads`).
     ollama_keep_alive: str = "5m"
     # How many of the model's layers Ollama puts on the GPU (its ``num_gpu`` option, for both translators): empty, the
@@ -181,11 +186,9 @@ class Settings:
     # to page and are cut back rarely (`translate.base.GrowingContext`: 60, then the newest 20); 0: none for either
     context_pages: int = 2
 
-    # --- whole-book batch: every page read as it is turned, then all of them translated with the whole book as context ---
-    context_mode: bool = True  # False: page by page (each page translated as it is captured)
-    chunk_bubbles: int = 30  # lines per request of the whole-book translation (3-5 pages; in runs of 100 the replies drift off their lines)
-    lookahead_bubbles: int = 60  # upcoming bubbles shown to the chat translator for context only (PLaMo has no place for them)
-    context_pairs: int = 40  # previous (source, translation) pairs carried into the next request (PLaMo: as context_pages)
+    # the pages turned past, translated behind the reader (`backlog`): previous (source, translation) pairs carried into
+    # the next request (PLaMo: as context_pages)
+    context_pairs: int = 40
 
     # --- OCR ---
     models_dir: Path = field(default_factory=default_models_dir)
@@ -257,7 +260,7 @@ class Settings:
     # never the Japanese (`linememo`). Off: every line is asked for, and nothing is kept for reuse
     reuse_lines: bool = True
 
-    # --- batch reading (follows the viewer) ---
+    # --- following the viewer ---
     # The viewer's page keys, which a page key the person presses in TASlation's window is passed on as (names: Left,
     # Right, Up, Down, PageUp, PageDown, Home, End, Space, Enter, Tab, Backspace, Escape, F1-F12, a letter or a digit).
     # A viewer's own keys (Page > Page keys..., kept in profiles.json with the capture area) and the defaults "Apply to
@@ -273,14 +276,8 @@ class Settings:
     # once the frame has stayed unchanged for twice settle_ms; false: read once the frame has stayed unchanged for
     # settle_ms, as before
     early_start: bool = True
-    batch_max_pages: int = 2000
-    # MB of page images a whole-book run keeps in memory, packed without loss and never on disk: the pages waiting to be
-    # read (the reader is asked to wait only when they fill it), the pages read and erased ahead for the session; at most
-    # a quarter of the machine's memory (`pageimages.memory_cap`). A 200-screen volume takes about 130-300 MB.
-    batch_memory_mb: int = 2048
 
     # --- app ---
-    scan_mode: str = "page"  # "page": page by page (default) | "book": the whole book read and translated first
     role: str = "reader"  # the window's starting mode: "reader" | "translator" (mark text, fix translations)
     ui_language: str = ""  # language of the window (a code from i18n.UI_LANGUAGES); empty = the first-start choice
     # the size of the window's text, times what Windows sets for its monitor (1.0 = as Windows has it): applied at the
@@ -316,8 +313,6 @@ class Settings:
     # bubble hard to read where it is and on every one with the original on the page, 8/3 as long on the others
     # (450: 0.45 s and 1.2 s; 0: at once; HOVER_DELAY_RANGE)
     hover_delay_ms: int = 450
-    flash_when_done: bool = True  # a whole-book run that ends while TASlation is not in front flashes its taskbar button
-    sound_when_done: bool = False  # ... and plays the system's default sound (`ui.attention`)
     follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
     # whether the window looks for a new version when it starts (`ui.updates`): "off" (the default: only Help > Check
     # for updates... asks, when it is chosen) or "daily" (at most once a day, by check_update.py in a process of its
@@ -410,14 +405,10 @@ class Settings:
             raise ConfigError("; ".join(problems))
         if float(self.black_wait_s) <= 0:
             raise ConfigError("black_wait_s must be more than 0")
-        if int(self.batch_memory_mb) < 64:
-            raise ConfigError("batch_memory_mb must be 64 or more (MB of page images a whole-book run keeps in memory)")
         if not MIN_UI_SCALE <= float(self.ui_scale) <= MAX_UI_SCALE:
             raise ConfigError(f"ui_scale must be between {MIN_UI_SCALE} and {MAX_UI_SCALE} (1.0: as Windows sets it)")
         if self.theme not in ("system", "light", "dark"):
             raise ConfigError("theme must be 'system', 'light' or 'dark'")
-        if self.scan_mode not in ("book", "page"):
-            raise ConfigError("scan_mode must be 'book' or 'page'")
         if self.follow not in ("events", "poll"):
             raise ConfigError("follow must be 'events' or 'poll'")
         if self.role not in ("reader", "translator"):

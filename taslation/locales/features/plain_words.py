@@ -3,24 +3,6 @@ keys in the help, the menus' lines in the status bar, the tips of the region edi
 book's three plain settings. Terms as the window's catalogs have them. Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
-    "Stop": {
-        "ja": "停止",
-        "es": "Detener",
-        "pt": "Parar",
-        "fr": "Arrêter",
-        "de": "Stopp",
-        "it": "Ferma",
-        "nl": "Stop",
-        "pl": "Stop",
-        "ru": "Стоп",
-        "tr": "Durdur",
-        "id": "Hentikan",
-        "vi": "Dừng",
-        "zh": "停止",
-        "zh-tw": "停止",
-        "ko": "중지",
-        "th": "หยุด",
-    },
     "unsure reading": {
         "ja": "読み取りに自信なし",
         "es": "lectura dudosa",
