@@ -219,7 +219,9 @@ def test_a_load_with_the_old_server_s_think_refusal(ollama):
 
 
 # ---------------------------------------------------------------------------- a late load is checked
-def test_the_hook_runs_before_the_load_and_never_while_the_model_stays(ollama, settings):
+def test_a_load_lets_none_of_the_gpu_models_go(ollama, settings):
+    """The judgement at the start counted the model whole beside the page models and the readers
+    (`taslation.ocr.place`): nothing is released for its load, the first or a later one."""
     tr, _said = _translator(ollama)
     pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr)
     assert pipeline.gpu_releases == []  # empty until a GPU model registers
@@ -227,11 +229,13 @@ def test_the_hook_runs_before_the_load_and_never_while_the_model_stays(ollama, s
     pipeline.gpu_releases.append(lambda: order.append(("detector", ollama.loads)))
     pipeline.gpu_releases.append(lambda: order.append(("inpainter", ollama.loads)))
     tr.translate_page(["一"])
+    tr.release()
     tr.translate_page(["二"])
-    assert order == [("detector", 0), ("inpainter", 0)]
+    assert ollama.loads == 2 and order == []
+    assert not hasattr(tr, "before_load")
 
 
-def test_a_release_that_fails_does_not_stop_the_others_or_the_page(ollama, settings):
+def test_a_release_that_fails_does_not_stop_the_others(ollama, settings):
     tr, _said = _translator(ollama)
     pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr)
     done: list = []
@@ -240,29 +244,22 @@ def test_a_release_that_fails_does_not_stop_the_others_or_the_page(ollama, setti
         raise RuntimeError("no")
 
     pipeline.gpu_releases.extend([broken, lambda: done.append(1)])
-    assert tr.translate_page(["一"]) == ["T:一"] and done == [1]
+    pipeline.release_gpu_models()  # (Tools > Release the model now)
+    assert done == [1] and tr.translate_page(["一"]) == ["T:一"]
 
 
-def test_a_model_partly_on_the_cpu_gets_one_retry_after_a_release(ollama, settings):
-    ollama.shares = [0.55, 1.0]
+def test_a_model_that_comes_up_split_is_said_once_loaded_once_and_translates_all_the_same(ollama, settings):
+    ollama.shares = [0.6, 0.6]
     tr, said = _translator(ollama)
     pipeline = Pipeline(settings, ocr=FakeOcr(), translator=tr)
     released: list = []
     pipeline.gpu_releases.append(lambda: released.append(ollama.loads))
     assert tr.translate_page(["一"]) == ["T:一"]
-    assert ollama.loads == 2 and len(_unloads(ollama)) == 1 and released == [0, 1]
-    assert _codes(said) == ["ollama.loading", "ollama.loaded"]  # all right in the end: nothing to worry the reader with
-
-
-def test_a_model_that_stays_split_is_said_once_and_translates_all_the_same(ollama):
-    ollama.shares = [0.55, 0.6, 0.6]
-    tr, said = _translator(ollama)
-    assert tr.translate_page(["一"]) == ["T:一"]
-    assert ollama.loads == 2  # one retry, no more
+    assert ollama.loads == 1 and _unloads(ollama) == [] and released == []  # no second load, nothing let go
     assert _codes(said) == ["ollama.loading", "ollama.loaded", "ollama.partly_on_gpu"]
     assert said[-1].params == {"model": MODEL, "percent": 60}
     tr.translate_page(["二"])
-    assert ollama.loads == 2 and len(said) == 3  # it stays as it is
+    assert ollama.loads == 1 and len(said) == 3  # it stays as it is
 
 
 def test_a_machine_without_a_gpu_for_ollama_loads_once(ollama):

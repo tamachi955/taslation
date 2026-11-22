@@ -1,7 +1,7 @@
 """The translation model loaded at the window's start (``load_model_at_start``, on by default; `JobsMixin._job_init`,
-`_load_at_start`, `OllamaTranslator.ensure_loaded` *quiet*): once, while the OCR model loads, without a word in the
-status line, the page models warmed only after it; one load with the page that needs the model meanwhile (which then
-says that it loads); nothing with the setting off (the first line loads it, as before), with ``ollama_keep_alive`` "0",
+`_load_at_start`, `OllamaTranslator.ensure_loaded` *quiet*): once, while the OCR model loads, without a word of its own
+in the status line, the page models warmed beside it and "Loading the models..." (`_watch_loads`) until both are over;
+one load with the page that needs the model meanwhile (which then says that it loads); nothing with the setting off (the first line loads it, as before), with ``ollama_keep_alive`` "0",
 with Ollama down or the model missing; a load that fails says nothing; Release the model now waits for it and nothing
 loads after it; the window's close ends it. And the setting's row on the Settings dialog's System page. Against a
 stand-in Ollama for PLaMo: the machine's own Ollama is never asked anything."""
@@ -126,7 +126,6 @@ class Pipeline:
     def __init__(self, settings, ocr=None, translator=None, log=None):
         self.ocr, self.translator, self.log = ocr, translator, log
         self.layout = self.art_eraser = None
-        translator.before_load = self.release_gpu_models
 
     def warm_page_models(self):
         self.log.append("warm page models")
@@ -143,6 +142,8 @@ class Window:
 
     _init_flow_state = jobs.JobsMixin._init_flow_state
     _job_init = jobs.JobsMixin._job_init
+    _judge_gpu = jobs.JobsMixin._judge_gpu
+    _watch_loads = jobs.JobsMixin._watch_loads
     _load_at_start = jobs.JobsMixin._load_at_start
     wait_load_at_start = jobs.JobsMixin.wait_load_at_start
     _warm_page_models = jobs.JobsMixin._warm_page_models
@@ -175,10 +176,18 @@ class Window:
         return [d["message"].code for k, d in self.events() if k == "model_status"]
 
     def loaded(self) -> None:
-        """The load at the start over (its thread ended)."""
+        """The load at the start over (its thread ended), and the watch on the loads with it."""
         if self._start_load is not None:
             self._start_load.join(10.0)
             assert not self._start_load.is_alive()
+        for thread in threading.enumerate():
+            if thread.name == "taslation-watch-loads":
+                thread.join(10.0)
+
+
+def _loading(events) -> list[bool]:
+    """What the "models_loading" events said, in order (True: "Loading the models..." on)."""
+    return [d["on"] for k, d in events if k == "models_loading"]
 
 
 @pytest.fixture
@@ -224,8 +233,10 @@ def test_the_model_loads_once_at_the_start_beside_the_ocr_model_and_says_nothing
     w.loaded()
     assert _loads(server) == 1 and server.loaded == {MODEL}
     assert server.log.index("load") < server.log.index("ocr loaded")  # asked while the OCR model loaded
-    assert "warm page models" in server.log  # warmed once the load was over (never during it: below)
-    assert w.model_lines() == []  # nothing said: no "Loading the model", no "Loaded"
+    assert server.log.count("warm page models") == 1  # warmed at the start, beside it (the judgement counted both)
+    events = w.events()
+    assert [d["message"].code for k, d in events if k == "model_status"] == []  # no "Loading the model", no "Loaded"
+    assert _loading(events) == [True, False]  # "Loading the models..." from before the load to after it
     asked = server.log.count("/api/ps")
     assert w.translator.translate_page(["一行目です。"]) == ["A line."]  # the first page: the model is there
     assert _loads(server) == 1 and server.log.count("/api/ps") == asked  # not loaded again, not even looked for
@@ -236,18 +247,23 @@ def test_a_page_that_needs_the_model_meanwhile_waits_for_that_load_and_says_so(w
     server.go.clear()  # the load takes its time
     w = window()
     w._job_init()  # (ready without waiting for the model)
-    assert server.load_began.wait(5.0) and "ready" in [k for k, _d in w.events()]
+    assert server.load_began.wait(5.0)
+    events = w.events()
+    assert "ready" in [k for k, _d in events] and _loading(events) == [True]  # usable; the indicator on
     got = []
     page = threading.Thread(target=lambda: got.append(w.translator.translate_page(["一行目です。"])))
     page.start()
     time.sleep(0.4)
-    assert not got and server.log.count("warm page models") == 0  # waits; and no page model takes the memory
+    assert not got and server.log.count("warm page models") == 1  # waits; the page models loaded beside the load
+    meanwhile = w.events()
+    assert _loading(meanwhile) == []  # (still loading: the indicator stays)
     server.go.set()
     page.join(10.0)
     w.loaded()
     assert got == [["A line."]] and _loads(server) == 1  # one load for both
-    assert w.model_lines() == ["ollama.loading", "ollama.loaded"]  # the page said the load as its own
-    assert "warm page models" in server.log
+    events = meanwhile + w.events()
+    assert [d["message"].code for k, d in events if k == "model_status"] == ["ollama.loading", "ollama.loaded"]
+    assert _loading(events) == [False]  # the indicator goes once the load is over
 
 
 class _SlowLayoutCode(types.ModuleType):
@@ -390,7 +406,7 @@ def test_release_the_model_now_waits_for_the_load_and_nothing_loads_after_it(win
     release.join(10.0)
     assert done == [([MODEL], False, False)] and server.loaded == set()
     assert server.log.index("unload") > server.log.index("load")
-    assert server.log.count("warm page models") == 0  # not warmed after the release
+    assert server.log.count("warm page models") == 1  # warmed at the start, not again after the release
     time.sleep(0.3)
     assert _loads(server) == 1 and server.loaded == set()  # nothing loads again by itself
     assert w.translator.translate_page(["一行目です。"]) == ["A line."]  # until a page needs the model
@@ -407,7 +423,7 @@ def test_the_window_s_close_ends_the_load_under_way(window):
     w._release_model()
     w.loaded()
     assert time.monotonic() - began < 2.0  # ended at once (Stop), not waited for
-    assert server.log.count("warm page models") == 0 and w.model_lines() == []
+    assert server.log.count("warm page models") == 1 and w.model_lines() == []  # (warmed at the start, beside it)
     assert "unload" in server.log  # what was asked to load goes with the window
 
 

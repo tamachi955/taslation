@@ -1010,8 +1010,7 @@ def start_own_ollama(s: Settings, port: int) -> dict[str, Any]:
     answered = health.ollama_running(s.ollama_url)
     setup = ollama_start.setup_of(s.ollama_url, s.state_dir)
     record = {"port": port, "answered": answered, "start_s": round(time.monotonic() - t0, 1),
-              "setup": setup.to_record() if setup is not None else None,
-              "readers_room_mib": list(setup.rooms) if setup is not None else None}
+              "setup": setup.to_record() if setup is not None else None}
     print(f"Ollama started by TASlation on port {port}: {record}", flush=True)
     if not answered:
         ollama_start.finish_all()

@@ -8,20 +8,19 @@ What goes:
   or use this session, unloaded with a request of Ollama's own API, ``keep_alive`` 0, whatever ``ollama_keep_alive``
   says). A model of another program's in the same Ollama is never asked to go, and Ollama itself is neither stopped
   nor started;
-* the page models (`Pipeline.release_gpu_models`, the path a load of the translation model takes: the layout model and
-  LaMa let go of their memory, each loaded again when a page needs it);
-* the OCR readers' copies on the GPU, where the rule put two of them there (``ocr_runs_on``: `Readers.release_gpu`,
-  one of the pipeline's ``gpu_releases``): they read on the processor, and the next page decides again where. (The
-  release before a load of the translation model may keep them there, `Readers.keeps_through_load`; this one never
-  does.)
+* the page models (`Pipeline.release_gpu_models`: the layout model and LaMa let go of their memory, each loaded again
+  when a page needs it);
+* the OCR readers' copies on the GPU, where the judgement at the start put two of them there (`ocr.place`:
+  `Readers.release_gpu`, one of the pipeline's ``gpu_releases``): they read on the processor until their next read
+  puts them back where the session's plan has them.
 
 What stays: the OCR readers on the processor (their own copies, as loaded: on the CPU they hold no GPU memory), and the
 CUDA context PyTorch made once a page model or a reader ran on the GPU (a few hundred MB: torch gives back the memory
 it cached, not its context, which goes with the window). The status line names what was released, the OCR's GPU
 memory among it when it held some (`released_line`). The next line to translate loads the model again as ever
-(`OllamaTranslator.ensure_loaded`, said in the status line). The model's load at the window's start
-(``load_model_at_start``), when it is still under way, is waited for and released with the rest, and the page models
-are not warmed after it.
+(`OllamaTranslator.ensure_loaded`, said in the status line), where the session's plan has it. The model's load at the
+window's start (``load_model_at_start``), when it is still under way, is waited for and released with the rest; the
+page models' warm-up at the start ends with the release (what it had not loaded yet loads on first use).
 
 Refused with a plain line while the model is in use: a page or a request being translated (``busy``), one waiting for
 the models (``_queued``). Otherwise it is a job of the window's worker, after

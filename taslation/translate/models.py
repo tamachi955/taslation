@@ -168,11 +168,13 @@ def choose(setting: Any, target_language: str, installed: Iterable[str] | None) 
 def make_translator(settings: Any, model: TranslatorModel | str | None = None, *, seed: int | None = None) -> Any:
     """The translator for *model* (a `TranslatorModel` or an Ollama name; default: the one the settings want for their
     target language, `wanted_name`), set up from *settings* (URL, timeout, temperature, keep_alive, the layers on the
-    GPU, target language):
+    GPU - 0 where the judgement at the start sent the model to the processor, `ocr.place.translator_on_processor` -,
+    target language):
     a `PlamoTranslator` for PLaMo, an `OllamaTranslator` (the chat prompts) for Qwen and for any
     other Ollama model. A known model chosen by the language carries it as ``auto_model``, so that a missing model is
     said as ``translator.model_missing``. *seed*: Ollama's sampling seed for every request (the evaluation tools; the
     app sends none)."""
+    from ..ocr import place
     from .ollama import OllamaTranslator, num_gpu_value
     from .plamo import PlamoTranslator
 
@@ -180,9 +182,12 @@ def make_translator(settings: Any, model: TranslatorModel | str | None = None, *
         model = wanted_name(settings.ollama_model, settings.target_language)
     known = model if isinstance(model, TranslatorModel) else by_ollama_name(model)
     name = model.ollama_name if isinstance(model, TranslatorModel) else str(model)
+    layers = num_gpu_value(getattr(settings, "ollama_num_gpu", ""))
+    if layers is None and place.translator_on_processor():
+        layers = 0  # (the judgement at the start sent the model to the processor for this session)
     common = dict(timeout=settings.ollama_timeout, temperature=settings.ollama_temperature,
                   target_language=settings.target_language, keep_alive=settings.ollama_keep_alive, seed=seed,
-                  num_gpu=num_gpu_value(getattr(settings, "ollama_num_gpu", "")))
+                  num_gpu=layers)
     if known is PLAMO:
         translator: Any = PlamoTranslator(settings.ollama_url, name, **common)
     else:
@@ -208,13 +213,13 @@ def follow(translator: Any, settings: Any, name: str, target_language: str) -> A
     """The translator to translate *target_language* with the Ollama model *name* (what `choose` decided), given the
     one in use, *translator*: that one itself, its ``model`` and ``target_language`` set, while its class is the one
     for *name* (`needs_rebuild`); else a new one (`make_translator`, with *settings* and that language) that takes over
-    what the window hung on the old one (``revive``, ``restart``, ``on_status``, ``before_load``) and its ``seed``. The
+    what the window hung on the old one (``revive``, ``restart``, ``on_status``) and its ``seed``. The
     caller hands a new one to the pipeline (`Pipeline.set_translator`, which lets the old one's model go). A translator
     that is no Ollama one (echo, a test's stand-in) only has ``model`` and ``target_language`` set."""
     if name and needs_rebuild(translator, name):
         fresh = make_translator(settings.with_overrides(target_language=target_language), name,
                                 seed=getattr(translator, "seed", None))
-        for hook in ("revive", "restart", "on_status", "before_load"):
+        for hook in ("revive", "restart", "on_status"):
             if getattr(translator, hook, None) is not None:
                 setattr(fresh, hook, getattr(translator, hook))
         return fresh

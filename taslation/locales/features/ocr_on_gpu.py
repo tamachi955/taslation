@@ -1,8 +1,7 @@
 """The window's strings for where the OCR readers run (`devices.ocr_device`, shown on Tools > Settings... > System and
-by ``taslation doctor``): on the GPU where it has room for two of them, else on the CPU, and why. "The OCR readers" is
-worded as in the System page's other rows (ja 「OCR の読み取り」, de „Die OCR-Leser“), the translator and the page
-models as in Release the model now (ja 「ページ用モデル」, fr « modèles de page »); ``ocr_runs_on`` is the setting's
-own name, kept as it is.
+by ``taslation doctor``): on the GPU where the judgement at the start put them, else on the CPU, and why. "The OCR
+readers" is worded as in the System page's other rows (ja 「OCR の読み取り」, de „Die OCR-Leser“); ``ocr_runs_on`` is
+the setting's own name, kept as it is.
 
 Machine-translated; no native review."""
 
@@ -25,23 +24,23 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "OCR 판독기 중 두 개 (GPU에 자리가 있어서; 세 번째는 CPU)",
         "th": "ตัวอ่าน OCR สองตัว เพราะ GPU มีที่ว่างพอ (ตัวที่สามอยู่บน CPU)",
     },
-    "The OCR readers: the GPU has no room for them beside the translator and the page models": {
-        "ja": "OCR の読み取り: 翻訳モデルとページ用モデルのほかに、GPU に空きがありません",
-        "es": "Los lectores OCR: la GPU no tiene sitio para ellos junto al traductor y los modelos de página",
-        "pt": "Os leitores de OCR: a GPU não tem espaço para eles junto ao tradutor e aos modelos de página",
-        "fr": "Les lecteurs OCR : la GPU n'a pas de place pour eux à côté du traducteur et des modèles de page",
-        "de": "Die OCR-Leser: Die GPU hat neben dem Übersetzer und den Seitenmodellen keinen Platz für sie",
-        "it": "I lettori OCR: la GPU non ha spazio per loro accanto al traduttore e ai modelli di pagina",
-        "nl": "De OCR-lezers: de GPU heeft naast de vertaler en de paginamodellen geen ruimte voor ze",
-        "pl": "Czytniki OCR: GPU nie ma na nie miejsca obok tłumacza i modeli strony",
-        "ru": "Модели OCR: на GPU для них нет места рядом с переводчиком и моделями страницы",
-        "tr": "OCR okuyucuları: GPU'da çevirmen ve sayfa modellerinin yanında onlara yer yok",
-        "id": "Pembaca OCR: GPU tidak punya ruang untuknya di samping penerjemah dan model halaman",
-        "vi": "Bộ đọc OCR: GPU không còn chỗ cho chúng bên cạnh bộ dịch và các mô hình trang",
-        "zh": "OCR 识别模型：除了翻译器和页面模型之外，GPU 没有空间容纳它们",
-        "zh-tw": "OCR 辨識模型：除了翻譯器和頁面模型之外，GPU 沒有空間容納它們",
-        "ko": "OCR 판독기: 번역기와 페이지 모델 외에 GPU에 자리가 없습니다",
-        "th": "ตัวอ่าน OCR: GPU ไม่มีที่ว่างพอนอกจากตัวแปลและโมเดลหน้า",
+    "The OCR readers, on the processor: the GPU's memory was short at the start": {
+        "ja": "OCR の読み取り（起動時に VRAM の空き容量が不足していたため CPU で実行中）",
+        "es": "Los lectores OCR, en el procesador: al iniciar faltaba memoria en la GPU",
+        "pt": "Os leitores de OCR, no processador: faltava memória na GPU ao iniciar",
+        "fr": "Les lecteurs OCR, sur le processeur : la mémoire de la GPU manquait au démarrage",
+        "de": "Die OCR-Leser, auf dem Prozessor: Beim Start reichte der GPU-Speicher nicht",
+        "it": "I lettori OCR, sul processore: all'avvio la memoria della GPU non bastava",
+        "nl": "De OCR-lezers, op de processor: bij het starten kwam het GPU-geheugen tekort",
+        "pl": "Czytniki OCR, na procesorze: przy uruchomieniu zabrakło pamięci GPU",
+        "ru": "Модели OCR, на процессоре: при запуске не хватило памяти GPU",
+        "tr": "OCR okuyucuları, işlemcide: başlangıçta GPU belleği yetmedi",
+        "id": "Pembaca OCR, di prosesor: memori GPU kurang saat mulai",
+        "vi": "Bộ đọc OCR, chạy trên bộ xử lý: lúc khởi động bộ nhớ GPU không đủ",
+        "zh": "OCR 识别模型，在处理器上运行：启动时 GPU 内存不足",
+        "zh-tw": "OCR 辨識模型，在處理器上執行：啟動時 GPU 記憶體不足",
+        "ko": "OCR 판독기, 프로세서에서 동작: 시작할 때 GPU 메모리가 부족했습니다",
+        "th": "ตัวอ่าน OCR ทำงานบนโปรเซสเซอร์ เพราะตอนเริ่มหน่วยความจำ GPU ไม่พอ",
     },
     "The OCR readers: the room on the GPU is not known": {
         "ja": "OCR の読み取り: GPU の空きがわかりません",
@@ -78,24 +77,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "OCR 辨識模型，GPU 出錯後改在 CPU 上執行（{error}）",
         "ko": "OCR 판독기, GPU 오류 이후 CPU에서 동작 ({error})",
         "th": "ตัวอ่าน OCR ทำงานบน CPU ตั้งแต่ GPU ขัดข้อง ({error})",
-    },
-    "The OCR readers, on the CPU since they read slower on the GPU than on the CPU": {
-        "ja": "OCR の読み取り（GPU では CPU より遅かったため CPU で実行中）",
-        "es": "Los lectores OCR, en la CPU desde que leían más despacio en la GPU que en la CPU",
-        "pt": "Os leitores de OCR, na CPU desde que liam mais devagar na GPU do que na CPU",
-        "fr": "Les lecteurs OCR, sur le CPU depuis qu'ils lisaient plus lentement sur la GPU que sur le CPU",
-        "de": "Die OCR-Leser, auf der CPU, seit sie auf der GPU langsamer lasen als auf der CPU",
-        "it": "I lettori OCR, sulla CPU da quando leggevano più lentamente sulla GPU che sulla CPU",
-        "nl": "De OCR-lezers, op de CPU sinds ze op de GPU trager lazen dan op de CPU",
-        "pl": "Czytniki OCR, na CPU, odkąd na GPU czytały wolniej niż na CPU",
-        "ru": "Модели OCR, на CPU, так как на GPU они читали медленнее, чем на CPU",
-        "tr": "OCR okuyucuları, GPU'da CPU'dan yavaş okuduklarından beri CPU'da",
-        "id": "Pembaca OCR, di CPU sejak membaca lebih lambat di GPU daripada di CPU",
-        "vi": "Bộ đọc OCR, chạy trên CPU từ khi chúng đọc trên GPU chậm hơn trên CPU",
-        "zh": "OCR 识别模型，在 GPU 上比在 CPU 上更慢，因此改在 CPU 上运行",
-        "zh-tw": "OCR 辨識模型，在 GPU 上比在 CPU 上更慢，因此改在 CPU 上執行",
-        "ko": "OCR 판독기, GPU에서 CPU보다 느리게 읽어서 CPU에서 동작",
-        "th": "ตัวอ่าน OCR ทำงานบน CPU เพราะบน GPU อ่านช้ากว่าบน CPU",
     },
     "The OCR readers: the GPU memory was let go, the next page decides again": {
         "ja": "OCR の読み取り: GPU のメモリーを返しました。次のページで改めて決めます",

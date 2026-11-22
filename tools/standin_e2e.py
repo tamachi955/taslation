@@ -699,6 +699,10 @@ class Notes:
         self.tool_cover: dict[str, Any] | None = None  # the tool's own window over the stand-in (`--cover`)
         self.loads: list[list[float]] = []
         self.load_depth = 0
+        # the start's dialog on the GPU's memory as the driver met and answered it (`--gpu-short-answer`), and the
+        # window's "Loading the models..." (``_models_loading``) as it came and went
+        self.gpu_dialogs: list[dict[str, Any]] = []
+        self.models_loading: list[list[Any]] = []
         self.ocr: list[dict[str, Any]] = []
         self.ocr_log: list[dict[str, Any]] = []
         self.owners: Counter[str] = Counter()
@@ -1242,10 +1246,10 @@ class LogTap(logging.Handler):
     """The app's log records: where the OCR readers went (the template's codes, never a text of a page), and the
     warnings and errors by logger, level and type name."""
 
-    TEMPLATES = (("the OCR readers run on the %s (%s", "run_on"),  # (device, why, MiB left at the peak)
-                 ("the OCR readers stay on the GPU through", "stay_through_load"),
-                 ("the OCR readers go to the CPU for the translation model's load", "cpu_for_load"),
-                 ("where the OCR runs could not be decided", "undecided"))
+    # (the session's plan, `ocr.place.settle`: parts on the GPU, parts sent to the processor, why, short by, left;
+    # the readers' placement: device, why, MiB left at the peak; the net: the part, the failure's type name)
+    TEMPLATES = (("the GPU for this session:", "plan"), ("the OCR readers run on the %s (%s", "run_on"),
+                 ("the %s failed on the GPU", "failed"), ("where the OCR runs could not be decided", "undecided"))
 
     # the lines of the rule for a request without an answer (`translate.ollama`, `ollama_start.OllamaStarter.restart`,
     # `pipeline.LoadAhead`) and of the backlog's pause for it: fixed words, numbers and a thread's name, never a line
@@ -1283,8 +1287,7 @@ class LogTap(logging.Handler):
             for template, code in self.TEMPLATES:
                 if msg.startswith(template):
                     args = record.args if isinstance(record.args, tuple) else ()
-                    words = ([] if code == "stay_through_load" else
-                             [str(a) for a in args if isinstance(a, (str, int, float))][:3])
+                    words = [str(a) for a in args if isinstance(a, (str, int, float))][:5]
                     with self.notes.lock:
                         self.notes.ocr_log.append({"t": now_ms(), "note": code, "args": words})
             if record.levelno >= logging.WARNING:
@@ -2771,18 +2774,18 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         setattr(App, name, cancelling)
     counted(plamo_mod.PlamoTranslator, "warm_up", notes.warmup)
     counted(ollama_mod.OllamaTranslator, "warm_up", notes.warmup)
-    loading = place.loading
+    for cls in (plamo_mod.PlamoTranslator, ollama_mod.OllamaTranslator):  # a load or a warm-up of the model: its span
+        if "warm_up" not in vars(cls):
+            continue
 
-    @contextlib.contextmanager
-    def load() -> Any:
-        notes.load_begin()
-        try:
-            with loading():
-                yield
-        finally:
-            notes.load_end()
+        def load(self: Any, *a: Any, _original: Callable[..., Any] = vars(cls)["warm_up"], **k: Any) -> Any:
+            notes.load_begin()
+            try:
+                return _original(self, *a, **k)
+            finally:
+                notes.load_end()
 
-    place.loading = load
+        cls.warm_up = load
     real_owner = live.foreground_owner
 
     def owner(hwnd: int, viewer: int, *a: Any, **k: Any) -> str:
@@ -2916,6 +2919,7 @@ class Director:
         try:
             with self.notes.lock:  # (this runs on the Tk thread: its CPU time so far, a page job running or not)
                 self.notes.tk_cpu.append((time.monotonic(), time.thread_time(), bool(getattr(self.app, "busy", False))))
+            self.start_dialog()
             self.check()
             if not self.over:
                 self.pull()
@@ -2931,6 +2935,27 @@ class Director:
             self.stop(f"{type(e).__name__} in the driver{_where(e)}")
         if not self.over:
             self.app.after(TICK_MS, self.tick)
+
+    def start_dialog(self) -> None:
+        """The start's dialog on the GPU's memory (`ui.dialogs.gpu_short`), when the window shows it: noted (its MB,
+        what it would send to the processor, when) and answered through the window's own object as ``--gpu-short-answer``
+        says (`GpuShortDialog.choose`: no input to the computer; "none" leaves it open); and the window's "Loading the
+        models..." noted as it comes and goes."""
+        app, notes = self.app, self.notes
+        on = bool(getattr(app, "_models_loading", False))
+        with notes.lock:
+            if not notes.models_loading or notes.models_loading[-1][1] != on:
+                notes.models_loading.append([now_ms(), on])
+        dialog = getattr(app, "_gpu_dialog", None)
+        if dialog is None or getattr(dialog, "answered", ""):
+            return
+        answer = str(getattr(self.args, "gpu_short_answer", "processor") or "processor")
+        with notes.lock:
+            if not notes.gpu_dialogs or notes.gpu_dialogs[-1].get("dialog") != id(dialog):
+                notes.gpu_dialogs.append({"t": now_ms(), "dialog": id(dialog), "short_mb": getattr(dialog, "shown_mb", None),
+                                          "parts": list(getattr(dialog, "parts", ()) or ()), "answer": answer})
+        if answer != "none":
+            dialog.choose(answer)
 
     def check(self) -> None:
         """The guard first: anything chosen but the stand-in, a call refused, the stand-in gone - the run stops."""
@@ -4924,10 +4949,15 @@ def stop_started(url: str, state: Path) -> dict[str, Any]:
     (`ollama_start.setup_of`), the models still loaded in it (none: the window let go of its model), and the server
     stopped as TASlation's own end stops it (`ollama_start.finish_all`; the scratch state still holds its record)."""
     from taslation import ollama_start
+    from taslation.ocr import place
 
     setup = ollama_start.setup_of(url, state)
+    plan = place.session()
     out: dict[str, Any] = {"setup": setup.to_record() if setup is not None else None,
-                           "readers_room_mib": list(setup.rooms) if setup is not None else None,
+                           "gpu_plan": None if plan is None else {
+                               "gpu": list(plan.gpu), "cpu": list(plan.cpu), "short_mib": plan.short,
+                               "left_mib": plan.left, "why": plan.why,
+                               "failed": {p: place.failure(p) for p in place.TO_PROCESSOR if place.failure(p)}},
                            "loaded_at_close": loaded_models(url)}
     mine = [m for m in out["loaded_at_close"] or [] if m.split(":")[0] == PLAMO]
     if mine:
@@ -5296,6 +5326,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "ocr": {"placements": [{**o, "t": rel(o["t"])} for o in notes.ocr],
                 "log": [{**o, "t": rel(o["t"])} for o in notes.ocr_log], "loads": loads,
                 "system_page": director.facts},
+        "gpu_start": {"dialogs": [{k: (rel(v) if k == "t" else v) for k, v in d.items() if k != "dialog"}
+                                  for d in notes.gpu_dialogs],
+                      "models_loading": [[rel(t), on] for t, on in notes.models_loading]},
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
@@ -5855,6 +5888,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "of --ollama-url), with the environment it chooses; stopped at the end")
     ap.add_argument("--ollama-window-cache", default="auto", choices=("auto", "off", "on"),
                     help="the setting ollama_window_cache of the window (default: the app's, auto)")
+    ap.add_argument("--gpu-short-answer", default="processor", choices=("processor", "again", "quit", "none"),
+                    help="the start's dialog on the GPU's memory, when the window shows it (the card short for "
+                         "everything at the start): answered through the window's own object with this (default: "
+                         "start on the processor; none: left open), no input to the computer; noted in the report "
+                         "(gpu_start)")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
     ap.add_argument("--browser", default="auto", choices=("auto", "chrome", "edge"))

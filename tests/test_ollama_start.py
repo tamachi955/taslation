@@ -74,11 +74,11 @@ class Machine:
         self.asked: list[int] = []
         self.terminated: list[int] = []
         self.waits: list[float] = []
-        self.window = (True, ollama_start.WHY_NO_LOSS, (1200, 1100))  # what `window_choice` says
-        self.chosen: list[tuple[Any, str]] = []  # (settings, KV type) it was asked with
+        self.window = True  # what `window_choice` says
+        self.chosen: list[Any] = []  # the settings it was asked with
 
-    def choose(self, settings, kv):
-        self.chosen.append((settings, kv))
+    def choose(self, settings):
+        self.chosen.append(settings)
         return self.window
 
     def running(self, url, timeout=1.0):
@@ -165,7 +165,7 @@ def machine(nothing_starts_ollama, monkeypatch, tmp_path):
     monkeypatch.setenv("LLAMA_ARG_CACHE_RAM", "0")  # (the environment's own tests take them away)
     monkeypatch.setenv("OLLAMA_KV_CACHE_TYPE", "q8_0")
     monkeypatch.setenv("LLAMA_ARG_SWA_FULL", "0")
-    monkeypatch.setattr(ollama_start, "window_choice", m.choose)  # (the readers' rule is never asked here)
+    monkeypatch.setattr(ollama_start, "window_choice", m.choose)  # (the settings it is asked with are kept)
     monkeypatch.setattr(ollama_start, "START_WAIT_S", 0.05)
     monkeypatch.setattr(ollama_start, "POLL_S", 0.005)
     return m
@@ -277,27 +277,27 @@ def test_where_no_variable_is_set_the_server_gets_the_window_cache_256_mib_in_ra
     s = Settings(state_dir=tmp_path / "s", ocr_runs_on="auto")
     env, asked = _started_env(machine, tmp_path, monkeypatch, small=True, settings=s)
     assert asked == ["OLLAMA_KV_CACHE_TYPE", "LLAMA_ARG_SWA_FULL", "LLAMA_ARG_CACHE_RAM"]
-    assert machine.chosen == [(s, "q8_0")]  # the rule asked once, for the KV cache the server gets
+    assert machine.chosen == [s]  # the setting asked once
     assert env["OLLAMA_KV_CACHE_TYPE"] == "q8_0" == ollama_start.KV_CACHE_SMALL_GPU
     assert env["LLAMA_ARG_SWA_FULL"] == "1" == ollama_start.SWA_FULL_ON
     assert env["LLAMA_ARG_CACHE_RAM"] == "256" == ollama_start.CACHE_RAM_WITH_WINDOW
     assert {k: v for k, v in env.items() if k not in VARIABLES} == dict(os.environ)
 
 
-def test_where_the_window_cache_would_move_the_ocr_readers_the_server_gets_today_s_settings(
-        machine, tmp_path, monkeypatch):
+def test_without_the_window_cache_the_server_gets_no_ram_cache_either(machine, tmp_path, monkeypatch):
     _unset(monkeypatch)
-    machine.window = (False, ollama_start.WHY_READERS, (1100, 970))
+    machine.window = False
     env, _asked = _started_env(machine, tmp_path, monkeypatch, small=True, settings=Settings(state_dir=tmp_path))
     assert "LLAMA_ARG_SWA_FULL" not in env and env["LLAMA_ARG_CACHE_RAM"] == "0" == ollama_start.CACHE_RAM_OFF
     assert env["OLLAMA_KV_CACHE_TYPE"] == "q8_0"
 
 
-def test_a_larger_gpu_or_none_gets_no_kv_cache_setting_and_the_rule_counts_ollama_s_own_f16(
+def test_a_larger_gpu_or_none_gets_no_kv_cache_setting_and_the_judgement_counts_ollama_s_own_f16(
         machine, tmp_path, monkeypatch):
     _unset(monkeypatch)
     env, _asked = _started_env(machine, tmp_path, monkeypatch, small=False, settings=Settings(state_dir=tmp_path))
-    assert "OLLAMA_KV_CACHE_TYPE" not in env and machine.chosen[0][1] == "f16" == ollama_start.KV_CACHE_DEFAULT
+    assert "OLLAMA_KV_CACHE_TYPE" not in env
+    assert ollama_start.setup_of(URL).kv_cache == "f16" == ollama_start.KV_CACHE_DEFAULT
     assert (env["LLAMA_ARG_SWA_FULL"], env["LLAMA_ARG_CACHE_RAM"]) == ("1", "256")
 
 
@@ -345,77 +345,29 @@ def test_only_the_missing_variable_is_added(machine, tmp_path, monkeypatch):
 REAL_WINDOW_CHOICE = ollama_start.window_choice
 
 
-@pytest.mark.parametrize("setting, full, cache", [("off", False, "0"), ("on", True, "256")])
-def test_the_setting_s_off_and_on_hold_whatever_the_rule_would_say(machine, tmp_path, monkeypatch, setting, full,
-                                                                   cache):
+@pytest.mark.parametrize("setting, full, cache", [("off", False, "0"), ("on", True, "256"), ("auto", True, "256")])
+def test_the_setting_alone_decides_the_window_cache(machine, tmp_path, monkeypatch, setting, full, cache):
+    """"on" and "auto" (the default) give it, "off" not; nothing of the GPU's is asked for it (the start's judgement
+    counts the model with it at its real size, `taslation.ocr.place`)."""
     from taslation.ocr import place
 
     _unset(monkeypatch)
     monkeypatch.setattr(ollama_start, "window_choice", REAL_WINDOW_CHOICE)
-    monkeypatch.setattr(place, "full_window_placements", lambda *a, **k: pytest.fail("the readers' rule was asked"))
+    monkeypatch.setattr(place, "card_memory", lambda: pytest.fail("the card was asked"))
     env, _asked = _started_env(machine, tmp_path, monkeypatch, small=True,
                                settings=Settings(state_dir=tmp_path, ollama_window_cache=setting))
     assert ("LLAMA_ARG_SWA_FULL" in env) is full and env["LLAMA_ARG_CACHE_RAM"] == cache
     assert ollama_start.setup_of(URL).why == ollama_start.WHY_SETTING
 
 
-def _placements(monkeypatch, before, after, memory=(6144, 1300)):
-    """`window_choice` on a card with *memory* (total, used MiB; None: no NVML) where the readers' rule puts them at
-    *before* without the window cache and *after* with it; the calls it got."""
+def test_the_ocr_s_place_and_the_card_never_change_the_window_cache(monkeypatch, tmp_path):
     from taslation.ocr import place
 
-    calls: list[tuple[Any, str]] = []
-    monkeypatch.setattr(place, "card_memory", lambda: memory)
-    monkeypatch.setattr(place, "full_window_placements",
-                        lambda settings, kv, **k: calls.append((settings, kv)) or (before, after))
-    return calls
-
-
-def test_auto_keeps_today_s_server_only_where_the_window_cache_alone_moves_the_readers(monkeypatch, tmp_path):
-    from taslation.ocr.place import NO_CUDA, NO_ROOM, ROOM, SET, UNKNOWN, Placement
-
-    s = Settings(state_dir=tmp_path)
-    cases = [  # (without, with) -> (window cache, why)
-        ((Placement("gpu", ROOM, 1100), Placement("cpu", NO_ROOM, 970)), (False, ollama_start.WHY_READERS)),
-        ((Placement("gpu", ROOM, 1500), Placement("gpu", ROOM, 1370)), (True, ollama_start.WHY_NO_LOSS)),
-        ((Placement("cpu", NO_ROOM, 900), Placement("cpu", NO_ROOM, 770)), (True, ollama_start.WHY_NO_LOSS)),
-        ((Placement("cpu", UNKNOWN), Placement("cpu", UNKNOWN)), (True, ollama_start.WHY_NO_LOSS)),
-        ((Placement("cpu", NO_CUDA), Placement("cpu", NO_CUDA)), (True, ollama_start.WHY_NO_GPU)),
-        ((Placement("gpu", SET), Placement("gpu", SET)), (True, ollama_start.WHY_NO_LOSS)),
-    ]
-    for (before, after), wanted in cases:
-        calls = _placements(monkeypatch, before, after)
-        full, why, rooms = REAL_WINDOW_CHOICE(s, "q8_0")
-        assert (full, why) == wanted and rooms == (before.room, after.room) and calls == [(s, "q8_0")]
-
-
-def test_auto_gives_the_window_cache_without_a_gpu_and_where_the_ocr_s_place_is_set(monkeypatch, tmp_path):
-    from taslation.ocr.place import NO_ROOM, ROOM, Placement
-
-    losing = (Placement("gpu", ROOM, 1100), Placement("cpu", NO_ROOM, 970))
-    calls = _placements(monkeypatch, *losing, memory=None)
-    assert REAL_WINDOW_CHOICE(Settings(state_dir=tmp_path), "f16") == (True, ollama_start.WHY_NO_GPU, (None, None))
-    assert calls == []  # (no NVIDIA GPU: nothing more is asked, torch is never loaded for it)
-    calls = _placements(monkeypatch, *losing)
-    for fixed in ("gpu", "cpu"):
-        assert REAL_WINDOW_CHOICE(Settings(state_dir=tmp_path, ocr_runs_on=fixed), "q8_0")[:2] == (
-            True, ollama_start.WHY_OCR_SET)
-    assert REAL_WINDOW_CHOICE(Settings(state_dir=tmp_path, ollama_window_cache="off"), "q8_0")[:2] == (
-        False, ollama_start.WHY_SETTING)
-    assert REAL_WINDOW_CHOICE(Settings(state_dir=tmp_path, ollama_window_cache="on"), "q8_0")[:2] == (
-        True, ollama_start.WHY_SETTING)
-    assert calls == []
-
-
-def test_a_rule_that_cannot_measure_gives_the_window_cache(monkeypatch, tmp_path):
-    from taslation.ocr import place
-
-    def broken(*_a, **_k):
-        raise RuntimeError("no facts")
-
-    monkeypatch.setattr(place, "card_memory", lambda: (6144, 1300))
-    monkeypatch.setattr(place, "full_window_placements", broken)
-    assert REAL_WINDOW_CHOICE(Settings(state_dir=tmp_path), "q8_0") == (True, ollama_start.WHY_NO_LOSS, (None, None))
+    monkeypatch.setattr(place, "card_memory", lambda: pytest.fail("the card was asked"))
+    for runs_on in ("auto", "cpu", "gpu"):
+        for setting, full in (("auto", True), ("on", True), ("off", False)):
+            s = Settings(state_dir=tmp_path, ocr_runs_on=runs_on, ollama_window_cache=setting)
+            assert REAL_WINDOW_CHOICE(s) is full
 
 
 def test_the_setting_is_checked_and_named_in_the_example():
@@ -441,23 +393,21 @@ def test_the_decision_is_made_once_per_start_kept_in_the_record_and_logged_witho
         assert REAL_START(starter) is None
         assert REAL_START(starter) is None  # (it answers: nothing is started, nothing decided)
         assert REAL_START(OllamaStarter(URL, state_dir=_state(tmp_path), settings=s)) is None  # (another joins it)
-    assert len(machine.started) == 1 and machine.chosen == [(s, "q8_0")]
+    assert len(machine.started) == 1 and machine.chosen == [s]
     assert _record(tmp_path)["setup"] == {"kv_cache": "q8_0", "full_window": True, "cache_ram": "256",
-                                          "why": ollama_start.WHY_NO_LOSS, "rooms": [1200, 1100]}
+                                          "why": ollama_start.WHY_SETTING}
     said = [r.getMessage() for r in caplog.records if "window cache" in r.getMessage()]
-    assert said == ["Ollama started by TASlation: the full-size window cache on (the OCR readers run in the same "
-                    "place either way), KV cache q8_0, prompt cache in RAM 256 MiB; the OCR readers' room at the peak "
-                    "1200 MiB without the window cache, 1100 MiB with it"]
+    assert said == ["Ollama started by TASlation: the full-size window cache on (as ollama_window_cache says), KV "
+                    "cache q8_0, prompt cache in RAM 256 MiB"]
     # what the server got, for the readers' rule and the System page: this process's, and another's from the record
     assert ollama_start.server_cache(URL) == ("q8_0", True)
     with ollama_start._setups_lock:
         ollama_start._setups.clear()
     assert ollama_start.setup_of(URL) is None and ollama_start.setup_of(URL, _state(tmp_path)).full_window is True
-    assert ollama_start.setup_of(URL, _state(tmp_path)).rooms == (1200, 1100)
     assert ollama_start.server_cache(URL, _state(tmp_path)) == ("q8_0", True)
     # the server gone and started again: decided again, for that start
     machine.answers, machine.after_start = False, 2  # (two looks find it gone: the start's and the starter's)
-    machine.window = (False, ollama_start.WHY_READERS, (1100, 970))
+    machine.window = False
     machine.procs.pop(machine.pids[0])
     monkeypatch.setattr(ollama_start, "RETRY_GAP_S", 0.0)
     assert REAL_START(starter) is None
@@ -495,7 +445,7 @@ def test_the_saved_settings_decide_where_the_caller_has_none(machine, tmp_path, 
     saved.write_text('ollama_window_cache = "off"\n', "utf-8")
     monkeypatch.setattr(Settings, "config_file", classmethod(lambda cls, path=None: saved))
     _started_env(machine, tmp_path, monkeypatch, small=True)
-    assert machine.chosen and machine.chosen[0][0].ollama_window_cache == "off"
+    assert machine.chosen and machine.chosen[0].ollama_window_cache == "off"
 
 
 @pytest.mark.parametrize("mib, small", [(6144, True), (4096, True), (6145, False), (8192, False), (0, False)])
@@ -619,8 +569,7 @@ def test_the_server_taslation_starts_is_written_down_with_who_uses_it(machine, t
     pid = _started_one(machine, tmp_path)
     record = _record(tmp_path)
     assert set(record) == {"what", "pid", "exe", "started", "url", "setup", "users"}  # no text of a book
-    assert record["setup"] == {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "set",
-                               "rooms": [None, None]}
+    assert record["setup"] == {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "set"}
     assert (record["pid"], record["started"], record["url"]) == (pid, machine.procs[pid].started, URL)
     assert record["exe"] == str(tmp_path / "Programs" / "Ollama" / "ollama.exe")
     assert record["users"] == [{"pid": ME, "started": 1}] and owns_server()

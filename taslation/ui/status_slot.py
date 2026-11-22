@@ -7,7 +7,9 @@ what the page cannot show itself, in fixed words, with no seconds and nothing tu
   bubble lettered;
 * the page could not be translated (its job failed, or the translator gave an error): "This page could not be
   translated. F5 tries again." with an orange "!" - while the viewer shows that page;
-* the page has nothing to read: "Nothing to read on this page." for `NOTHING_S` seconds.
+* the page has nothing to read: "Nothing to read on this page." for `NOTHING_S` seconds;
+* the models still loading at the start (`jobs.JobsMixin._watch_loads`) while no page is under way: "Loading the
+  models...", in either role, until everything the start loads is there.
 
 Nothing else is said there. In the window the slot is at the status line's left end (`SlotLabel`); on the full screen
 at the bottom of the page's exit-side margin (`ImageCanvas.set_slot`). The Translator role keeps the badge as it was
@@ -35,14 +37,15 @@ READING_KEY = "Reading the page..."
 TRANSLATING_KEY = "Translating..."
 ERROR_KEY = "This page could not be translated. F5 tries again."
 NOTHING_KEY = "Nothing to read on this page."
-KEYS = (LOADING_KEY, READING_KEY, TRANSLATING_KEY, ERROR_KEY, NOTHING_KEY)
+MODELS_KEY = "Loading the models..."  # the start's loads (`jobs.JobsMixin._watch_loads`), while no page is under way
+KEYS = (LOADING_KEY, READING_KEY, TRANSLATING_KEY, ERROR_KEY, NOTHING_KEY, MODELS_KEY)
 
 
 def slot_text(key: str) -> str:
     """A slot's words in the window's language."""
     return {LOADING_KEY: _("Loading the model..."), READING_KEY: _("Reading the page..."),
             TRANSLATING_KEY: _("Translating..."), ERROR_KEY: _("This page could not be translated. F5 tries again."),
-            NOTHING_KEY: _("Nothing to read on this page.")}[key]
+            NOTHING_KEY: _("Nothing to read on this page."), MODELS_KEY: _("Loading the models...")}[key]
 
 
 @dataclass
@@ -98,6 +101,8 @@ def job_on_show(window: Any) -> bool:
 
 def wanted(window: Any, state: SlotState, now: float) -> tuple[str, bool] | None:
     """What the slot says now (its key, and whether it is the orange "!" one), or None."""
+    if getattr(window, "_models_loading", False) and not getattr(window, "_busy_shown", False):
+        return MODELS_KEY, False  # (in either role: the start's loads, no page under way)
     if not reader_role(window):
         return None
     result = getattr(window, "last_result", None)

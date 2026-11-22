@@ -74,9 +74,9 @@ request to the model): /api/ps says whether it is loaded (a page in the cache se
 request, so reading the cache never loads it; it is not asked while the model answered
 within `PS_RECHECK_S`, half its ``keep_alive`` when that is shorter, and a request that
 failed or a release makes the next request ask again); when it is not, the reader is told
-(`on_status`), the pipeline's GPU models let go (`before_load`, which is
-`Pipeline.release_before_load`) and `warm_up` loads it under its own timeout,
-cancellable like a request. Every request carries ``keep_alive`` (the setting
+(`on_status`) and `warm_up` loads it under its own timeout, cancellable like a request:
+beside the page models and the OCR readers, which stay (the judgement at the start counted
+the model whole beside them: `taslation.ocr.place`). Every request carries ``keep_alive`` (the setting
 ``ollama_keep_alive``, in Ollama's own format: `keep_alive_value`): how long Ollama
 keeps the model after it, so the pages that go on needing it keep it, and it goes by
 itself after that; nothing asks for it periodically. `release` unloads it at once: the
@@ -86,21 +86,15 @@ and never released (`never_unloads`).
 
 Every request to the model (`_chat`, PLaMo's `_generate`) runs within `taslation.ocr.place.translating`, a streamed
 one to its end: the OCR readers that are on the GPU read on the CPU meanwhile, for on a GPU the model computes on
-they wait (0.7 s a crop instead of 0.13). A load and a warm-up run within `place.loading`: where the readers read is
-decided after it (a crop on the GPU during a load reads as fast as on an idle GPU, so nothing moves for a load; the
-release before it keeps them on the GPU where the rule still finds room for them beside the whole model, and a model
-that comes up partly on the CPU all the same is told to `place.partly_loaded`, which lets them go before its second
-load).
+they wait (0.7 s a crop instead of 0.13). A load moves nothing: a crop on the GPU during a load reads as fast as on an
+idle GPU.
 
-A load is checked afterwards: a model that came up partly on the CPU (`gpu_share`) is
-unloaded and loaded once more after the GPU models are let go; if that does not help
-the reader is told (``ollama.partly_on_gpu``). What else holds GPU memory did not
-change Ollama's share when measured (Windows, Ollama 0.40, a card of 6 GB): the model
-came up whole next to 4.8 GB held by torch, idle, or 4 GB in constant use, with
-Ollama reading 5.0 GB free throughout, since the driver moves the others' memory
-aside. A model that does land partly on the CPU translates 4 times slower (14.5
-against 63 tokens/s at 55 %). So the check is a net, for a card or a system that
-behaves otherwise, and letting the GPU models go keeps them from being paged around.
+A load is checked afterwards: a model that came up partly on the CPU (`gpu_share`) is said to the reader
+(``ollama.partly_on_gpu``), and nothing else is done. What else holds GPU memory did not change Ollama's share when
+measured (Windows, Ollama 0.40, a card of 6 GB): the model came up whole next to 4.8 GB held by torch, idle, or 4 GB
+in constant use, with Ollama reading 5.0 GB free throughout, since the driver moves the others' memory aside. A model
+that does land partly on the CPU translates 4 times slower (14.5 against 63 tokens/s at 55 %). ``num_gpu`` 0 (the
+judgement at the start sent the model to the processor: `taslation.translate.models`) is not checked.
 
 ``num_gpu`` (the setting ``ollama_num_gpu``, `num_gpu_value`): None, the default, sends nothing and leaves it to the
 server, as before (the requests are what they were, byte for byte); a number goes with every request and every
@@ -374,8 +368,6 @@ class OllamaTranslator:
         self._waits = _Waits()  # the seconds the requests waited for a first byte in a row, none coming (`_Watch`)
         self._load_most = 0.0  # the longest load this translator measured (`_load_bound`)
         self._share: float | None = None  # the model's share on the GPU last seen (`gpu_share`; 0.0: the processor)
-        # called before the model is loaded: what else is in GPU memory goes (`Pipeline.release_before_load`)
-        self.before_load: Callable[[], Any] | None = None
         # told about a load as a Message: ``ollama.loading``, ``ollama.loaded``, ``ollama.partly_on_gpu``
         self.on_status: Callable[[Message], Any] | None = None
         self._used: set[str] = set()  # the models this translator had Ollama load or use (what `release` unloads)
@@ -736,9 +728,7 @@ class OllamaTranslator:
                                    "keep_alive": self.keep_alive if keep_alive is None else keep_alive_value(keep_alive)}
         self._used.add(payload["model"])
         start = time.monotonic()
-        with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
-            self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow,
-                            alive=self._ps_answers)
+        self._chat_once(payload, timeout or min(self.timeout, WARM_UP_TIMEOUT), cancel, on_slow, alive=self._ps_answers)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start  # (not last_stats: a warm-up must not stand in for a page's statistics)
@@ -771,14 +761,6 @@ class OllamaTranslator:
             try:
                 self.on_status(message)
             except Exception:  # noqa: BLE001 - whoever listens must not end the request
-                pass
-
-    def _free_gpu(self) -> None:
-        """What else is in GPU memory goes (`before_load`)."""
-        if self.before_load is not None:
-            try:
-                self.before_load()
-            except Exception:  # noqa: BLE001 - a model that stays must not end the request
                 pass
 
     def ensure_loaded(self, cancel: threading.Event | None = None,
@@ -837,20 +819,10 @@ class OllamaTranslator:
             self._say(Message("ollama.loading", model=model))
         # (streamed whatever the caller gave, so that the server is looked at while it loads: `warm_up`)
         watched = cancel if cancel is not None else threading.Event()
-        with ocr_place.loading():  # (from the release of the GPU models on: the OCR decides where it reads after it)
-            self._free_gpu()
-            seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
-            self._load_most = max(self._load_most, seconds)
-            share = self.gpu_share(model)
-            checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
-            if checked and partly_on_gpu(share):
-                ocr_place.partly_loaded(share)  # (OCR readers kept on the GPU through the load go in the release below)
-                self.release(model, wait=True)
-                self._free_gpu()
-                again = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
-                self._load_most = max(self._load_most, again)
-                seconds += again
-                share = self.gpu_share(model)
+        seconds = self.warm_up(model, timeout=WARM_UP_TIMEOUT, cancel=watched, on_slow=on_slow)
+        self._load_most = max(self._load_most, seconds)
+        share = self.gpu_share(model)
+        checked = self.num_gpu is None  # (layers set by hand: a model split on purpose is as it should be)
         if not quiet:
             self._say(loaded_message(model, seconds))
         if checked and partly_on_gpu(share):

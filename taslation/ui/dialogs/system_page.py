@@ -13,9 +13,11 @@ GPU (``ollama_num_gpu``: empty, the server decides; 0, the processor only; a num
 what it does (`num_gpu`, read and checked by the dialog's Save: `NUM_GPU_PROBLEM`); and whether the window loads it
 at its start (``load_model_at_start``, a checkbox with its line: `load_at_start`, from the next start). Then where the
 OCR readers run (``ocr_runs_on``, `OCR_RUNS_ON_CHOICES`: the GPU when it has room, the processor, the GPU), a list
-with its line (`ocr_runs_on`, from the next page); where they are now and why is the OCR's row in the list above
-(`devices.ocr_device`). Last, the window cache of the Ollama TASlation starts (``ollama_window_cache``,
-`WINDOW_CACHE_CHOICES`: on unless the OCR then leaves the GPU, off, always on), a list with its line
+with its line (`ocr_runs_on`); where they are now and why is the OCR's row in the list above (`devices.ocr_device`),
+and what the judgement at the start found short and sent to the processor is the note under the list
+(`devices.plan_text`). Then what a start short of GPU memory does (``gpu_short``, a checkbox with its line: `gpu_short`,
+from the next start; the start's dialog's Do not ask again on this computer ticks it). Last, the window cache of the
+Ollama TASlation starts (``ollama_window_cache``, `WINDOW_CACHE_CHOICES`: on, off), a list with its line
 (`window_cache`, from Ollama's next start); what the server running now got is in the translator's row above
 (`devices.window_cache_text`). Then whether the window looks for a new version when it starts (``update_check``,
 "daily" or "off": `ui.updates`), a checkbox with its line on what is asked of whom (`update_check`, from the next
@@ -49,19 +51,24 @@ LOAD_AT_START_TEXT = ("The translation model loads while TASlation starts, so th
 # where the OCR readers run (``ocr_runs_on``, `taslation.ocr.place`); the 16 languages: `locales/features/ocr_release.py`
 OCR_RUNS_ON_LABEL = "OCR runs on:"
 OCR_RUNS_ON_CHOICES = (("auto", "The GPU when it has room"), ("cpu", "The processor (CPU)"), ("gpu", "The GPU"))
-OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU while about 700 MB of it stays free "
-                    "beside the translation model, the page models and what other programs hold (the part the "
-                    "graphics driver keeps free, and room for those programs to grow), else the processor. While "
-                    "reading, this is looked at again every 30 seconds. The readings are the same. The OCR row above "
-                    "says where they are now. From the next page.")
+OCR_RUNS_ON_TEXT = ("When it has room: two of the three OCR readers use the GPU when the check at the start finds room "
+                    "there for everything TASlation puts on it, with about 700 MB to spare beside what other programs "
+                    "hold (the part the graphics driver keeps free, and room for those programs to grow). When it is "
+                    "short, the start asks, and the OCR readers are the first to go to the processor. It is checked "
+                    "once, at the start, and kept. The readings are the same. The OCR row above says where they are "
+                    "now. The processor or the GPU: from the next page; when it has room: from the next start.")
+# what a start that is short of GPU memory does (``gpu_short``, `taslation.ocr.place`, `ui.dialogs.gpu_short`); the
+# 16 languages: `locales/features/gpu_start.py`
+GPU_SHORT_LABEL = "When the GPU's memory is short at the start, start with part of the work on the processor without asking"
+GPU_SHORT_TEXT = ("Off: a box at the start says by how much it is short and asks. On: what does not fit runs on the "
+                  "processor, and the note under the list above says what. From the next start.")
 # the window cache of the Ollama TASlation starts (``ollama_window_cache``, `taslation.ollama_start.server_setup`); the
 # 16 languages: `locales/features/window_cache.py`
 WINDOW_CACHE_LABEL = "Translator's window cache:"
-WINDOW_CACHE_CHOICES = (("auto", "On, unless the OCR then leaves the GPU"), ("off", "Off"), ("on", "Always on"))
+WINDOW_CACHE_CHOICES = (("auto", "On"), ("off", "Off"))
 WINDOW_CACHE_TEXT = ("The Ollama TASlation starts keeps the cache of the translation model's whole window, and 256 MB "
                      "of earlier requests in RAM, so that each request goes on from the last: translation about a "
-                     "quarter faster, for about 130 MB more GPU memory (220 MB on a GPU of more than 6 GB). The "
-                     "default leaves it off where those MB would move two of the OCR readers to the processor. Not for "
+                     "quarter faster, for about 130 MB more GPU memory (220 MB on a GPU of more than 6 GB). Not for "
                      "an Ollama you run yourself. From the next start of Ollama.")
 # whether the window looks for a new version at its start (``update_check``, `taslation.ui.updates`); the 16
 # languages: `locales/features/updates.py`
@@ -158,27 +165,39 @@ class SystemPage(ttk.Frame):
                          foreground=theme.colour("note"))
         line.grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(OCR_RUNS_ON_TEXT), name, box)
+        self.gpu_short = tk.BooleanVar(self, value=str(getattr(settings, "gpu_short", "ask")) == "processor")
+        check = ttk.Checkbutton(layers, text=in_lines(_(GPU_SHORT_LABEL), width), variable=self.gpu_short)
+        check.grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        line = ttk.Label(layers, text=in_lines(_(GPU_SHORT_TEXT), width), justify="left",
+                         foreground=theme.colour("note"))
+        line.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        tip(_(GPU_SHORT_TEXT), check)
         name = ttk.Label(layers, text=_(WINDOW_CACHE_LABEL))
-        name.grid(row=6, column=0, sticky="w", pady=(10, 0))
+        name.grid(row=8, column=0, sticky="w", pady=(10, 0))
         shown = [_(label) for _value, label in WINDOW_CACHE_CHOICES]
         now = str(getattr(settings, "ollama_window_cache", "auto") or "auto")
+        now = "auto" if now == "on" else now  # ("on", an older choice: the same as the default now)
         self.window_cache = tk.StringVar(self, value=next((_(label) for value, label in WINDOW_CACHE_CHOICES
                                                            if value == now), shown[0]))
         box = ttk.Combobox(layers, textvariable=self.window_cache, values=shown, state="readonly",
                            width=box_chars(shown))
-        box.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+        box.grid(row=8, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
         line = ttk.Label(layers, text=in_lines(_(WINDOW_CACHE_TEXT), width), justify="left",
                          foreground=theme.colour("note"))
-        line.grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        line.grid(row=9, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(WINDOW_CACHE_TEXT), name, box)
         self.update_check = tk.BooleanVar(self, value=str(getattr(settings, "update_check", "off")) == "daily")
         check = ttk.Checkbutton(layers, text=_(UPDATE_CHECK_LABEL), variable=self.update_check)
-        check.grid(row=8, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        check.grid(row=10, column=0, columnspan=2, sticky="w", pady=(10, 0))
         line = ttk.Label(layers, text=in_lines(_(UPDATE_CHECK_TEXT), width), justify="left",
                          foreground=theme.colour("note"))
-        line.grid(row=9, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        line.grid(row=11, column=0, columnspan=2, sticky="w", pady=(2, 0))
         tip(_(UPDATE_CHECK_TEXT), check)
         self.looked = False
+
+    def gpu_short_value(self) -> str:
+        """What the box says, as ``gpu_short`` keeps it ("processor" or "ask")."""
+        return "processor" if self.gpu_short.get() else "ask"
 
     def update_check_value(self) -> str:
         """What the checkbox says, as ``update_check`` keeps it ("daily" or "off")."""
@@ -264,6 +283,9 @@ class SystemPage(ttk.Frame):
         note = (_("Seconds a page: the mean of the last {count} pages lettered.").format(count=len(times)) if len(times)
                 else _("Seconds a page: none yet. They show once pages have been translated, and are kept when the window closes."))
         note += " " + _("Only an NVIDIA GPU with CUDA counts here; nothing is loaded to find out.")
+        planned = devices.plan_text()  # (the judgement at the start: short, and what went to the processor)
+        if planned:
+            note += "\n" + planned
         tally = getattr(self.pipeline(), "line_tally", None)  # (`linememo.Tally`: counts only)
         if tally is not None and tally.reused + tally.asked:
             note += "\n" + _("Short lines reused this session without asking the model: {reused} of {lines}.").format(

@@ -950,10 +950,13 @@ Empty (the default) leaves it to Ollama, and the requests are exactly as before.
 It is sent as the `num_gpu` option of Ollama's requests. Once saved, the next request uses it (a model already loaded may take a moment to be loaded again for it).
 With a number of layers set, a model split between the GPU and the processor is neither loaded again nor reported (it was asked for). Anything but empty or a whole number from 0 to 999 is not saved.
 Under that, "OCR runs on" (`ocr_runs_on`) chooses where the OCR readers run: "The GPU when it has room" (the default), "The processor (CPU)" or "The GPU" (see below).
-Where they run now, and why, is in the OCR row above. Once saved, it applies from the next page.
+Where they run now, and why, is in the OCR row above. Once saved, "The processor (CPU)" and "The GPU" apply from the next page, "The GPU when it has room" from the next start.
+The box under it, "When the GPU's memory is short at the start, start with part of the work on the processor without asking" (`gpu_short`), decides what a start does when its check finds the GPU's memory short ("What runs on the GPU", below).
+Off (the default), it says by how much and asks; on, it starts with what does not fit on the processor. It applies from the next start.
+When the start was short, or a part failed on the GPU, a note under the rows says so and what runs on the processor.
 Last, "Translator's window cache" (`ollama_window_cache`) decides whether the Ollama TASlation starts keeps the cache of the translation model's whole window:
-"On, unless the OCR then leaves the GPU" (the default), "Off" or "Always on" (see below). It applies from the next start of Ollama; the translation's row above
-says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it, and why).
+"On" (the default) or "Off" (see below). It applies from the next start of Ollama; the translation's row above
+says whether the Ollama running now has it ("Started by TASlation with the window cache", or without it).
 Under it, the box "Look for a new version once a day when TASlation starts" (`update_check`: `"off"`, the default, or `"daily"`; the installer asks once) makes TASlation, at a start a day or more after the last look,
 30 seconds or more after the window is ready and while no page is read or translated, run a program of its own, `check_update.py`, which asks GitHub for the first 16 KB of `CHANGELOG.md`.
 A newer version is named in the Help menu's "Check for updates..." item and in one line at the bottom of the window (no dialog). When it could not ask, it says nothing. It applies from the next start.
@@ -987,10 +990,11 @@ ollama_keep_alive = "5m"     # how long Ollama keeps the model after a request: 
                              # unloads, "0" unloads after every request
 ollama_num_gpu = ""          # the model's layers on the GPU: "" Ollama decides, "0" the processor only, or a number
 load_model_at_start = true   # the window loads the translation model at start, beside the OCR models; false: the first line to translate does
-ollama_window_cache = "auto" # the Ollama TASlation starts: the cache of the model's whole window, unless the OCR readers would then leave the GPU; "off"; "on"
+ollama_window_cache = "auto" # the Ollama TASlation starts: the cache of the model's whole window ("auto", "on"); "off": without it
 ocr_threads = 0              # CPU threads for the OCR model (0 = torch's default, one per core); while
                              # other programs keep the CPU busy, half the cores can be faster
-ocr_runs_on = "auto"         # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
+ocr_runs_on = "auto"         # "auto": two of the OCR readers where the check at the start puts them (the GPU when everything fits); "cpu"; "gpu"
+gpu_short = "ask"            # the GPU's memory short at the start: "ask" (a box), or "processor" (what does not fit runs on the processor)
 font_path = ""               # auto: the series sheet's font where installed, then models/fonts per script, then system fonts
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 hover_shows = "original"     # the Reader role: the translation on the page ("original" under the
@@ -1046,17 +1050,32 @@ and it is not an error. Running `install.cmd` installs the other two.
 
 On the CPU, the OCR models share the `ocr_threads` setting. When the CPU is busy with
 other work, setting `ocr_threads` to half the number of cores can make it faster.
-With an NVIDIA GPU, `ocr_runs_on` (`"auto"` by default) puts manga-ocr-charspot-small and manga-ocr-nar-small on the GPU, but only when it has room for them at TASlation's peak:
-the translation model whole in video memory, LaMa and the layout model when they are used (LaMa needs more on a screen taller than 1440 pixels, where the lettering is larger in pixels), PyTorch's own memory, and what other programs hold now, with about 700 MB left over:
-what the graphics driver keeps free (with less, it moves the memory of a program that is not computing just then into the computer's RAM, and that program waits for it at its next turn), and room for other programs to grow until the next look.
-To come back to the GPU they need about 100 MB more than that, so that other programs' memory going up and down a little does not move them to and fro.
-A card of less than 5 GB is never used for them, and the larger translation model (Qwen3.5 4B) leaves no room on a 6 GB card. The third model reads only a few lines a page and stays on the CPU.
-TASlation decides when the OCR models load, again after the GPU memory was let go ("Tools > Release the model now", and before Ollama loads its model when the room is no longer there), when a setting it depends on changes, and every 30 seconds while it reads (a look takes about 30 ms on its own thread; the reading does not wait for it).
-While Ollama loads its model, the two stay on the GPU as long as the room is still there at that moment; with `"gpu"` they go back to the CPU for the load, as before.
-It never decides while the translation model loads or answers, but at the first line read after that (at start, after the translation model's load when that is still under way).
-While the translation model answers (the next page of a spread is read meanwhile, for one), the two read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
-If the GPU fails, that line is read on the CPU. When its memory ran out, the OCR stays on the CPU until the GPU memory is next let go (before the translation model's next load, or "Tools > Release the model now"), and TASlation then decides again; the second time in a session, and after another CUDA error, it stays on the CPU until the window closes. It does the same when the two read slower on the GPU than twice their time on the CPU, eight lines in a row (the GPU's memory moved into RAM, or another program keeping the GPU busy). The layout model and LaMa do the same when the GPU's memory runs out: they go on on the CPU until it is next let go, and the page comes out as usual. The readings are the same on both.
-`"cpu"` keeps the OCR on the CPU; `"gpu"` puts the two on the GPU wherever there is one, without looking at the room. The "System" page says where they are and why.
+The third OCR model reads only a few lines a page and stays on the CPU; where the other two read is in the next section.
+
+### What runs on the GPU
+
+With an NVIDIA GPU, TASlation checks once, as the window starts, whether the card's memory holds everything its settings put there.
+It counts the translation model whole (with its window cache when it has one, below), two of the three OCR readers (manga-ocr-charspot-small and manga-ocr-nar-small, `ocr_runs_on`), LaMa and the layout model when they are used (LaMa needs more on a screen taller than 1440 pixels, where the lettering is larger in pixels) and PyTorch's own memory, beside what other programs hold at that moment, with about 700 MB left over.
+Those 700 MB are what the graphics driver keeps free (with less, it moves the memory of a program that is not computing just then into the computer's RAM, and that program waits for it at its next turn) and room for other programs to grow.
+The check comes after the legal notice, once Ollama answers and before any model is loaded. It asks nothing over the network (the figures are this computer's card's and Ollama's).
+
+When it all fits, the window can be used at once and the models load in the background. The status bar says "Loading the models..." until they are all there, so you can choose the viewer to translate meanwhile. A page turned before that waits until what it needs is there.
+With "Load the translation model at start" off, the translation model loads at the first page that needs it, but its room is counted at the start all the same.
+Everything stays where it was put for the session: nothing is looked at again, and nothing moves.
+
+When it does not fit, a box comes before anything loads: "The GPU's memory is short by N MB. Close other applications that use it and check again, or start with part of the work on the processor (slower)." Under that, it says what would run on the processor.
+"Check again" (Enter) checks once more, after you closed something. "Start on the processor" starts with only what does not fit on the processor: the OCR readers first, then LaMa, then the layout model, and the translation model last. "Quit" (Esc, or closing the box) closes TASlation.
+The order puts first what loses the least time: the OCR reads beside the translation (a page about 1.2 s on the CPU, about 0.6 s on the GPU), LaMa erases only lettering on the drawing (about 1.7 s a place on the CPU, about 0.2 s on the GPU), the layout model works on every page before its first bubble (about 0.5 s a page unit on the CPU, about 0.06 s on the GPU), and the translation model translates about four times slower on the CPU.
+With "Do not ask again on this computer" ticked, the next starts do so without asking (`gpu_short = "processor"`; the box "When the GPU's memory is short at the start, start with part of the work on the processor without asking" on the System page of "Tools > Settings..." is that setting).
+The System page then says, under its rows, by how much the start was short and what runs on the processor this session.
+On a 6 GB card with the default settings (PLaMo, both page models, a screen up to 1440 pixels high), the box comes when other programs hold more than about 1.7 GB at the start (about 1.4 GB with a taller screen). The larger translation model (Qwen3.5 4B) does not fit on a 6 GB card together with the OCR readers and the page models.
+
+A computer without an NVIDIA GPU never sees the box. Neither do the `taslation` commands and the developer's tools, which cannot ask: they do as "Start on the processor" does.
+`ocr_runs_on`'s `"cpu"` and `"gpu"`, and a number of layers in `ollama_num_gpu`, put those parts there whatever the room. With a part put on the GPU that way, the start never asks: it starts as the settings say and shows on the System page by how much it is short.
+
+The memory other programs take after the start is theirs: TASlation does not look again. On Windows a card used past its memory gives no error; it gets slower, because the driver moves memory to and fro and the reading and the translation wait for it (on the 6 GB card a request began 0.2 to 0.5 s later, and with another program computing on the card the OCR read more slowly than on the CPU). The System page still says GPU meanwhile. Close the other program, or start TASlation again, which checks again.
+When a part fails on the GPU (its memory runs out, a CUDA error), it goes on on the CPU until the session ends, the page comes out as usual, and the System page says so. The readings are the same on both.
+While the translation model answers (the next page of a spread is read meanwhile, for one), the two OCR readers read on the CPU as well: on the GPU they would wait for the model's computing, 0.7 s a line against 0.13 s on the CPU.
 
 Ollama's model is put in GPU memory only while it is needed. The window loads it at start, while the OCR models load (`load_model_at_start = true`, the default;
 "Load the translation model at start" on the System page of "Tools > Settings..."), so the first page to translate does not wait for it. Nothing is shown for this load,
@@ -1068,10 +1087,10 @@ extends this, so it is not loaded again for every page. When the window closes, 
 While you read a page and nothing is being translated, the window has Ollama compute the beginning of the next page's first request (the series sheet and the earlier lines that request starts from) when Ollama does not hold it already, as after the earlier lines were cut back to the newest: the next untranslated page you turn to does not wait for it (a second or so).
 It sends what that request would send and keeps nothing of the answer, so the requests are what they are without it; as when Ollama computes a request from another starting point, the model can word a line slightly otherwise (on a test set about one line in ten, with about the same score). It shows nothing, is done only while the model is loaded wholly on the graphics card, and stops as soon as you turn.
 With `ollama_keep_alive = "-1"`, as before, it is loaded at start, before the OCR models, and never released.
-When only part of the loaded model fits on the graphics card, it is loaded once more, and if it still does not fit, you are told so.
+When only part of the loaded model fits on the graphics card, you are told so (it is not loaded again).
 To free the GPU memory at once for a game or another program, use "Tools > Release the model now". It releases the translation model TASlation loaded or used this session
 with a normal request of Ollama's API (`keep_alive` 0 for that model), and the page models (the layout model and LaMa) give their memory back too. It does so with `ollama_keep_alive = "-1"` as well.
-A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. OCR models on the GPU go back to the processor (the next page decides again where they read),
+A model another program loaded into the same Ollama is left alone, and Ollama itself is neither stopped nor started. OCR models on the GPU go back to the processor (the next page puts them back where the check at the start put them),
 and what stays is the CUDA context PyTorch made once a page model or the OCR ran on the GPU (a few hundred MB), until the window closes.
 The status line says what was released (the OCR's GPU memory too, when it held some). While a page is being translated and while a translation waits to start it releases nothing and says so in the status line.
 If the model is still loading at start, it waits for that load and then releases it. The next line that needs translating loads the model again as usual.
@@ -1089,10 +1108,9 @@ On an NVIDIA GPU with 6 GB of memory or less, `OLLAMA_KV_CACHE_TYPE` is `q8_0` (
 and `LLAMA_ARG_CACHE_RAM=256` keeps 256 MB of earlier requests in RAM (without the variable Ollama uses up to 8 GB for them).
 In TASlation's measurements on a 6 GB GPU, translating took about a quarter less time with them (296 s instead of 401 s for 214 pages translated in one pass,
 0.98 s instead of 1.28 s a line without a GPU), and the model took 130 MB more GPU memory (220 MB with Ollama's default KV cache).
-The setting "Translator's window cache" (`ollama_window_cache`) decides: with "On, unless the OCR then leaves the GPU" (the default) TASlation looks, each time it starts Ollama,
-where the OCR readers would run (`ocr_runs_on`, below) with the model at its size without the window cache and with it. When only those 130 MB would move them to the processor,
-it starts Ollama without the window cache and with `LLAMA_ARG_CACHE_RAM=0`; otherwise with both (on a computer without a usable GPU, or with the readers' place set to "The GPU" or "The processor", too).
-"Off" always starts it with `LLAMA_ARG_CACHE_RAM=0` alone, as before; "Always on" always with both. What it chose is in the log, one line each time it starts Ollama,
+The setting "Translator's window cache" (`ollama_window_cache`) decides: "On" (the default; `"auto"` or `"on"` in the file) passes both,
+"Off" (`"off"`) `LLAMA_ARG_CACHE_RAM=0` alone, as before. The check at the start counts the translation model with its window cache (130 MB) (the start of this section);
+the window cache is no longer left out to keep the OCR readers on the GPU. What it chose is in the log, one line each time it starts Ollama,
 and in the translation's row of the System page and of `taslation doctor`.
 For an Ollama that was there before, `install.cmd` sets `LLAMA_ARG_CACHE_RAM=0` and, on a GPU of 6 GB or less, `OLLAMA_KV_CACHE_TYPE=q8_0` as environment variables of this Windows user
 ("Installation" in docs/INSTALL.md, which also says how to give your own Ollama the window cache). Because Windows keeps them, the Ollama TASlation starts on that computer gets `LLAMA_ARG_CACHE_RAM=0` too: the window cache without the 256 MB in RAM

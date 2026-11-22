@@ -1,7 +1,7 @@
 """A page on show in the window that has a line to translate loads the translator's model while the rest of it is read
-(`pipeline.LoadAhead`, within `Pipeline.page_on_show`): one load (`OllamaTranslator.ensure_loaded` takes turns), the
-GPU models let go once before it and warmed again only after it, the page's cancel ends it, and the page never lets go
-of the worker with its load under way. A page from the cache, one with nothing to translate, a translator set to
+(`pipeline.LoadAhead`, within `Pipeline.page_on_show`): one load (`OllamaTranslator.ensure_loaded` takes turns), none
+of the GPU models let go for it or warmed again after it (the judgement at the start counted the model whole beside
+them), the page's cancel ends it, and the page never lets go of the worker with its load under way. A page from the cache, one with nothing to translate, a translator set to
 unload at once and a page outside the window (a command) load nothing ahead. A fake Ollama keeps the
 model as the real one does; the translations are what they are without it."""
 from __future__ import annotations
@@ -78,7 +78,6 @@ def _pipeline(settings, url, book="Ahead", keep_alive="5m", ocr=None):
     released: list[float] = []
     real = p.release_gpu_models
     p.release_gpu_models = lambda: (released.append(time.monotonic()), real())[1]
-    tr.before_load = p.release_gpu_models
     warmed: list[float] = []
     p.warm_page_models = lambda: warmed.append(time.monotonic())
     return p, said, released, warmed
@@ -93,10 +92,10 @@ def test_the_model_loads_while_the_page_is_read(ollama, settings, sample_page):
     with p.page_on_show():
         result = p.process(sample_page, cancel=threading.Event())
     assert not result.error and result.translated
-    assert ollama.loads == 1 and len(ollama.warmed) == 1 and len(released) == 1
+    assert ollama.loads == 1 and len(ollama.warmed) == 1
     assert ollama.warmed[0] < p.ocr.ends[-1]  # the load began while the page was read
     assert [m.code for m in said] == ["ollama.loading", "ollama.loaded"]
-    assert len(warmed) == 1 and warmed[0] >= ollama.answered[0]  # the page models after the load, never during it
+    assert released == [] and warmed == []  # the page models stay as they were: nothing let go, nothing warmed again
     assert _no_load_thread()
 
     # the same page, the model loaded the usual way (by the request): the very translations and page
@@ -161,14 +160,12 @@ def test_outside_the_window_and_with_keep_alive_0_nothing_loads_ahead(ollama, se
 
 def test_two_loads_at_once_are_one(ollama):
     tr = OllamaTranslator(ollama.url, MODEL, timeout=10.0, keep_alive="5m")
-    freed: list[int] = []
-    tr.before_load = lambda: freed.append(1)
     threads = [threading.Thread(target=tr.ensure_loaded) for _ in range(3)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(5.0)
-    assert ollama.loads == 1 and len(ollama.warmed) == 1 and freed == [1]
+    assert ollama.loads == 1 and len(ollama.warmed) == 1
 
 
 def test_a_wait_for_another_load_ends_with_stop(ollama):

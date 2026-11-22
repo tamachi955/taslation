@@ -9,14 +9,17 @@ only once it is in use (asking first would take video memory the translator need
 _loaded`), which says how much of a loaded model is in video memory and never loads one. Where the stages run:
 
 * detection: the classical detectors on the CPU; with the layout model in use (`detect_model`, installed) the model
-  runs on the GPU where torch has CUDA, else on the CPU;
-* OCR: where the readers are (`ocr.Readers.placement`: charspot and nar on the GPU where it has room for them, else
-  on the CPU, and why; CPT on the CPU); without loaded readers (``taslation doctor``), where the rule would put them now
-  (`ocr.place.decide`, which asks NVML and /api/ps, as above);
+  runs on the GPU where torch has CUDA and the judgement at the start put it there (`ocr.place.on_gpu`), else on the
+  CPU;
+* OCR: where the readers are (`ocr.Readers.placement`: charspot and nar where the judgement at the start put them,
+  and why; CPT on the CPU); without loaded readers (``taslation doctor``), where the session's plan puts them
+  (`ocr.place.readers_placement`, which asks NVML and /api/ps, as above, for a plan not made yet);
 * translation: Ollama's model on the GPU, the CPU or both, as /api/ps says while it is loaded, and for an Ollama
   TASlation started, whether it got the window cache (`window_cache_text`, `ollama_start.setup_of`);
 * erasing: the paper fill on the CPU; LaMa on the art where `art_erase` runs it on this computer and it is installed
-  (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU too), on the GPU where torch has CUDA."""
+  (`artwork.available`: "auto" only where torch has CUDA, "lama" on the CPU too), on the GPU where torch has CUDA and
+  the judgement at the start put it there. What the start found short, and what it sent to the processor, is
+  `plan_text`."""
 
 from __future__ import annotations
 
@@ -253,39 +256,80 @@ def stage_devices(settings: Any, translator: Any = None, cuda: bool | None = Non
     from .detect import layout
     from .render import artwork
 
+    from .ocr import place
+
     cuda = artwork.has_cuda() if cuda is None else cuda
+    if cuda:
+        place.plan_for(settings)  # (the session's plan; a command's, ``taslation doctor``'s, made now as it would be)
     name = (gpu_name() if cuda else "") if gpu is None else gpu
-    on_gpu = "gpu" if cuda else "cpu"
     models_dir = settings.models_dir
     detect_model = getattr(settings, "detect_model", "auto")
     art_erase = getattr(settings, "art_erase", "auto")
     lama = getattr(settings, "erase_mode", "fill") == "fill" and artwork.available(models_dir, art_erase, cuda=cuda)
     model = (detect_model == "on" or (detect_model == "auto" and lama)) and layout.available(models_dir)
-    out = [StageDevice("detect", on_gpu if model else "cpu",
+    layout_gpu = bool(cuda and model and place.on_gpu(place.LAYOUT))  # (the session's plan: `ocr.place`)
+    lama_gpu = bool(cuda and lama and place.on_gpu(place.LAMA))
+    out = [StageDevice("detect", "gpu" if layout_gpu else "cpu",
                        _("The layout model and the classical detectors") if model else _("The classical detectors"),
-                       name if model else ""),
+                       name if layout_gpu else ""),
            ocr_device(settings, ocr, cuda, name)]
     out.append(_translator_device(settings, translator, name))
-    out.append(StageDevice("erase", on_gpu if lama else "cpu", _("LaMa on the drawing, the paper fill in the bubbles")
-                           if lama else _("The paper fill"), name if lama else ""))
+    out.append(StageDevice("erase", "gpu" if lama_gpu else "cpu", _("LaMa on the drawing, the paper fill in the bubbles")
+                           if lama else _("The paper fill"), name if lama_gpu else ""))
     return out
 
 
 OCR_WHY = {  # what runs there, by why it is there (`ocr.place.Placement.why`)
     "room": "Two of the OCR readers, as the GPU has room for them (the third on the CPU)",
-    "no_room": "The OCR readers: the GPU has no room for them beside the translator and the page models",
+    "processor": "The OCR readers, on the processor: the GPU's memory was short at the start",
     "unknown": "The OCR readers: the room on the GPU is not known",
     "failed": "The OCR readers, on the CPU since the GPU failed ({error})",
-    "slow": "The OCR readers, on the CPU since they read slower on the GPU than on the CPU",
     "released": "The OCR readers: the GPU memory was let go, the next page decides again",
 }
 OCR_SET = {"gpu": "Two of the OCR readers, as set in ocr_runs_on (the third on the CPU)",
            "cpu": "The OCR readers, as set in ocr_runs_on"}
+# the parts of `ocr.place` by name (the note under the System page's list, `plan_text`, and the start's dialog,
+# `ui.dialogs.gpu_short`), and that note's lines; the 16 languages: `locales/features/gpu_start.py`
+PART_NAMES = {"readers": "the OCR readers", "lama": "the erase model on the art (LaMa)",
+              "layout": "the layout model", "translator": "the translation model"}
+PLAN_SHORT = "At the start the GPU's memory was short by {mb} MB: {parts} run on the processor this session."
+PLAN_FIXED = "At the start the GPU's memory was short by {mb} MB; the settings fix what runs on the GPU, so nothing was moved."
+PLAN_FAILED = "After a failure on the GPU, {parts} run on the processor for the rest of this session."
+
+
+def short_mb(mib: int) -> int:
+    """*mib* as the window says a shortage: MB, rounded up to 10."""
+    return max(10, -(-int(mib) // 10) * 10)
+
+
+def parts_text(parts: Iterable[str]) -> str:
+    """*parts* (`ocr.place`'s names) in the window's language, as a list."""
+    return _(", ").join(_(PART_NAMES[p]) for p in parts if p in PART_NAMES)
+
+
+def plan_text() -> str:
+    """The note on the session's GPU plan (`ocr.place.session`), in the window's language: how much the start was short
+    by and what went to the processor for it, or that the settings fixed it; what failed on the GPU since (the net);
+    "" when the start had room and nothing failed, or no plan was made."""
+    from .ocr import place
+
+    plan = place.session()
+    lines = []
+    if plan is not None and plan.short:
+        if plan.cpu:
+            lines.append(_(PLAN_SHORT).format(mb=short_mb(plan.short), parts=parts_text(plan.cpu)))
+        else:
+            lines.append(_(PLAN_FIXED).format(mb=short_mb(plan.short)))
+    failed = [p for p in place.TO_PROCESSOR if place.failure(p)]
+    if failed:
+        lines.append(_(PLAN_FAILED).format(parts=parts_text(failed)))
+    return "\n".join(lines)
 
 
 def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
     """Where the OCR readers run: where *ocr* (the window's `Readers`) has them (its ``placement``); without readers
-    that decide, where the rule would put them now with *settings* (`ocr.place.decide`, *cuda* as known)."""
+    that decide, where the session's plan puts them with *settings* (`ocr.place.readers_placement`, *cuda* as
+    known; a command that has none makes it)."""
     from .ocr import place
 
     placement = getattr(ocr, "placement", None)
@@ -294,7 +338,7 @@ def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
             placement = place.Placement("cpu", place.NOT_ASKED)  # (readers loaded without settings stay on the CPU)
         else:
             try:
-                placement = place.decide(settings, place.readers_need(settings), cuda=cuda)
+                placement = place.readers_placement(settings, cuda=cuda)
             except Exception:  # noqa: BLE001 - nothing to judge on
                 placement = place.Placement("cpu", place.UNKNOWN)
     if placement.why == place.SET:
@@ -309,7 +353,6 @@ def ocr_device(settings: Any, ocr: Any, cuda: bool, gpu: str) -> StageDevice:
 
 WINDOW_CACHE_ROWS = {  # what the server TASlation started got (`ollama_start.ServerSetup`), in the translator's row
     "on": "Started by TASlation with the window cache",
-    "readers": "Started by TASlation without the window cache, which would move the OCR readers to the processor",
     "off": "Started by TASlation without the window cache",
 }
 
@@ -318,7 +361,7 @@ def window_cache_text(settings: Any) -> str:
     """What the Ollama at the address of *settings* got from TASlation, in the window's language (`WINDOW_CACHE_ROWS`;
     the record in the state folder says it for a server another TASlation started); "" for an Ollama TASlation did not
     start."""
-    from .ollama_start import WHY_READERS, setup_of
+    from .ollama_start import setup_of
 
     try:
         setup = setup_of(settings.ollama_url, getattr(settings, "state_dir", None))
@@ -326,7 +369,7 @@ def window_cache_text(settings: Any) -> str:
         return ""
     if setup is None:
         return ""
-    return _(WINDOW_CACHE_ROWS["on" if setup.full_window else "readers" if setup.why == WHY_READERS else "off"])
+    return _(WINDOW_CACHE_ROWS["on" if setup.full_window else "off"])
 
 
 def _translator_device(settings: Any, translator: Any, gpu: str) -> StageDevice:
@@ -367,7 +410,8 @@ def seconds_text(seconds: float | None) -> str:
 
 
 def lines(settings: Any, times: StageTimes | None = None, translator: Any = None, **known: Any) -> list[str]:
-    """What `taslation doctor` prints: a line per stage, where it runs, what runs there and the seconds a page."""
+    """What `taslation doctor` prints: a line per stage, where it runs, what runs there and the seconds a page; then
+    what the judgement found short and sent to the processor, when it did (`plan_text`)."""
     times = times if times is not None else StageTimes.load(settings.state_dir)
     seconds = times.per_page()
     out = []
@@ -375,6 +419,7 @@ def lines(settings: Any, times: StageTimes | None = None, translator: Any = None
         took = seconds.get(row.stage)
         timing = f"{seconds_text(took)} a page" if took is not None else "not timed yet"
         out.append(f"  {_(STAGE_NAMES[row.stage])}: {row.where()} ({row.what}); {timing}")
+    out += [f"  {line}" for line in plan_text().splitlines()]
     out.append(f"  (seconds a page: the mean of the last {len(times)} page(s) lettered in the window)" if len(times)
                else "  (seconds a page: none yet; they are kept when the window closes after translating pages)")
     return out

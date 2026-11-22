@@ -24,19 +24,17 @@ changed):
   one computes only its new tokens, and one that parts from it within its pairs computes from there instead of from
   its start (OpenMantra, the 6 GB card: translation 26 to 27 % faster with the cache below; 132 MiB more GPU memory
   with q8_0, 220 with f16; docs/OFFLINE_VERIFICATION.md, "The full-size window cache"). The value Windows keeps,
-  else ``1`` as ``ollama_window_cache`` says (`window_choice`): "on" always, "off" never, "auto" (the default) unless
-  the OCR readers would leave the GPU for it - where `taslation.ocr.place`'s rule keeps them there with the model at
-  its footprint without the cache and puts them on the CPU with it (`place.full_window_placements`; asked once, at the
-  start; a computer without a usable GPU, and a fixed ``ocr_runs_on``, get it);
+  else ``1`` as ``ollama_window_cache`` says (`window_choice`): "on" and "auto" (the default) yes, "off" no; the
+  judgement at the window's start counts the model with it at its real size (`taslation.ocr.place`);
 * ``LLAMA_ARG_CACHE_RAM``, how many MiB of RAM the server may keep as a cache of earlier prompts (8 GiB unless told):
   the value Windows keeps (an older install.ps1 set it for the user), else `CACHE_RAM_WITH_WINDOW` (256) where the
   window cache is full-size and the setting is not "off" (a saved prompt is then tens of MB, and the request after
   one whose ``context`` differs finds the state before it), else 0 (with checkpoints a saved prompt took 1.5 to 2 GB,
   for no speed with a GPU).
 
-What the server got (`ServerSetup`: the KV type, the window, the RAM cache, why, and the room the rule found both
-ways) is kept for the address (`setup_of`, `server_cache`: `taslation.ocr.place` counts the translation model by it)
-and in the record below, and the log says it once (numbers only).
+What the server got (`ServerSetup`: the KV type, the window, the RAM cache, why) is kept for the address
+(`setup_of`, `server_cache`: `taslation.ocr.place` counts the translation model by it) and in the record below, and
+the log says it once (numbers only).
 
 Only the address Ollama serves by default is started (`startable`): an Ollama set up elsewhere is the setup of whoever
 set it up, and starting one here would not answer there.
@@ -137,8 +135,7 @@ SWA_FULL_ON = "1"
 TRUE_VALUES = ("1", "true", "on", "enabled")  # what llama.cpp's server takes as true for a flag's variable
 WINDOW_CACHE_VALUES = ("auto", "off", "on")  # ``ollama_window_cache``
 # why the server's window cache is as it is (`ServerSetup.why`)
-WHY_SET, WHY_SETTING, WHY_OCR_SET, WHY_NO_GPU, WHY_NO_LOSS, WHY_READERS = (
-    "set", "setting", "ocr_set", "no_gpu", "no_loss", "readers")
+WHY_SET, WHY_SETTING = "set", "setting"
 # where Windows keeps the variables of the user and of the computer, from which a new process's environment is made
 USER_ENV_KEY = "Environment"
 MACHINE_ENV_KEY = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
@@ -212,31 +209,25 @@ def is_true(value: Any) -> bool:
 class ServerSetup:
     """What the Ollama TASlation starts is given (`server_setup`): its KV cache type *kv_cache* (`KV_CACHE_DEFAULT`
     where it is set nowhere), whether its window cache is full-size (*full_window*), its RAM cache in MiB
-    (*cache_ram*), *why* the window cache is as it is (`WHY_SET`, ...), the variables TASlation adds to its own
-    environment (*added*), and the room the OCR readers' rule found at the peak without the window cache and with it
-    (*rooms*: MiB, None where it did not measure)."""
+    (*cache_ram*), *why* the window cache is as it is (`WHY_SET`, `WHY_SETTING`), and the variables TASlation adds to
+    its own environment (*added*)."""
 
     kv_cache: str
     full_window: bool
     cache_ram: str
     why: str
     added: dict[str, str] = field(default_factory=dict, compare=False)
-    rooms: tuple[int | None, int | None] = (None, None)
 
     def to_record(self) -> dict[str, Any]:
         return {"kv_cache": self.kv_cache, "full_window": self.full_window, "cache_ram": self.cache_ram,
-                "why": self.why, "rooms": list(self.rooms)}
+                "why": self.why}
 
     @classmethod
     def from_record(cls, data: Any) -> "ServerSetup | None":
         if not isinstance(data, dict) or not isinstance(data.get("full_window"), bool):
             return None
-        rooms = data.get("rooms")
-        if not (isinstance(rooms, list) and len(rooms) == 2
-                and all(r is None or (isinstance(r, int) and not isinstance(r, bool)) for r in rooms)):
-            rooms = [None, None]
         return cls(str(data.get("kv_cache") or KV_CACHE_DEFAULT), data["full_window"], str(data.get("cache_ram") or ""),
-                   str(data.get("why") or ""), rooms=(rooms[0], rooms[1]))
+                   str(data.get("why") or ""))
 
 
 def window_setting(settings: Any) -> str:
@@ -245,31 +236,11 @@ def window_setting(settings: Any) -> str:
     return value if value in WINDOW_CACHE_VALUES else "auto"
 
 
-def window_choice(settings: Any, kv: str) -> tuple[bool, str, tuple[int | None, int | None]]:
-    """Whether the server TASlation starts with the KV cache *kv* gets the full-size window cache by
-    ``ollama_window_cache`` of *settings* (the module's docstring), why (`WHY_SETTING`, `WHY_OCR_SET`, `WHY_NO_GPU`,
-    `WHY_NO_LOSS`, `WHY_READERS`), and the rooms the readers' rule found without it and with it. Asked once, as the
-    server starts; NVML first, so that a computer without an NVIDIA GPU never loads torch for it."""
-    setting = window_setting(settings)
-    if setting != "auto":
-        return setting == "on", WHY_SETTING, (None, None)
-    if str(getattr(settings, "ocr_runs_on", "auto") or "auto") in ("cpu", "gpu"):
-        return True, WHY_OCR_SET, (None, None)
-    from .ocr import place
-
-    if place.card_memory() is None:
-        return True, WHY_NO_GPU, (None, None)
-    try:
-        before, after = place.full_window_placements(settings, kv)
-    except Exception as e:  # noqa: BLE001 - nothing to judge on: the readers' room is not known either way
-        LOG.info("the room for the OCR readers could not be measured for Ollama's start (%s)", type(e).__name__)
-        return True, WHY_NO_LOSS, (None, None)
-    rooms = (before.room, after.room)
-    if before.why == place.NO_CUDA:
-        return True, WHY_NO_GPU, rooms
-    if before.device == "gpu" and after.device != "gpu":
-        return False, WHY_READERS, rooms
-    return True, WHY_NO_LOSS, rooms
+def window_choice(settings: Any) -> bool:
+    """Whether the server TASlation starts gets the full-size window cache by ``ollama_window_cache`` of *settings*:
+    "on" and "auto" (the default) yes, "off" no. The judgement at the start counts the translation model with it, at
+    its real size (`taslation.ocr.place`)."""
+    return window_setting(settings) != "off"
 
 
 def _settings_or_saved(settings: Any) -> Any:
@@ -295,7 +266,6 @@ def server_setup(settings: Any = None) -> ServerSetup:
         if kv:
             added[KV_CACHE_VAR] = kv
     kv = (kv or "").strip() or KV_CACHE_DEFAULT
-    rooms: tuple[int | None, int | None] = (None, None)
     own = os.environ.get(SWA_FULL_VAR)
     if own is None:
         own = stored_value(SWA_FULL_VAR)
@@ -305,7 +275,7 @@ def server_setup(settings: Any = None) -> ServerSetup:
         full, why = is_true(own), WHY_SET
     else:
         settings = _settings_or_saved(settings)
-        full, why, rooms = window_choice(settings, kv)
+        full, why = window_choice(settings), WHY_SETTING
         if full:
             added[SWA_FULL_VAR] = SWA_FULL_ON
     ram = os.environ.get(CACHE_RAM_VAR)
@@ -315,7 +285,7 @@ def server_setup(settings: Any = None) -> ServerSetup:
             with_window = full and window_setting(_settings_or_saved(settings)) != "off"
             ram = CACHE_RAM_WITH_WINDOW if with_window else CACHE_RAM_OFF
         added[CACHE_RAM_VAR] = ram
-    return ServerSetup(kv, full, ram, why, added, rooms)
+    return ServerSetup(kv, full, ram, why, added)
 
 
 def server_env(settings: Any = None, setup: ServerSetup | None = None) -> dict[str, str] | None:
@@ -328,20 +298,14 @@ def server_env(settings: Any = None, setup: ServerSetup | None = None) -> dict[s
 WHY_TEXT = {  # the log's and the tests' words for `ServerSetup.why`
     WHY_SET: "LLAMA_ARG_SWA_FULL as set on this computer",
     WHY_SETTING: "as ollama_window_cache says",
-    WHY_OCR_SET: "ocr_runs_on is set",
-    WHY_NO_GPU: "no NVIDIA GPU with CUDA for the OCR readers",
-    WHY_NO_LOSS: "the OCR readers run in the same place either way",
-    WHY_READERS: "with it the OCR readers would leave the GPU",
 }
 
 
 def _say_setup(setup: ServerSetup) -> None:
     """The log's line on what the server TASlation started got (numbers and settings only)."""
-    before, after = setup.rooms
     LOG.info("Ollama started by TASlation: the full-size window cache %s (%s), KV cache %s, prompt cache in RAM %s "
-             "MiB; the OCR readers' room at the peak %s MiB without the window cache, %s MiB with it",
-             "on" if setup.full_window else "off", WHY_TEXT.get(setup.why, setup.why), setup.kv_cache,
-             setup.cache_ram, "?" if before is None else before, "?" if after is None else after)
+             "MiB", "on" if setup.full_window else "off", WHY_TEXT.get(setup.why, setup.why), setup.kv_cache,
+             setup.cache_ram)
 
 
 _setups: dict[str, ServerSetup] = {}  # address -> what the server TASlation started there got (this process, a record)

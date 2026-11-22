@@ -1597,7 +1597,7 @@ def server_summary(started: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     setup = started.get("setup") or {}
     return {"full_window": setup.get("full_window"), "cache_ram_mib": setup.get("cache_ram"),
-            "kv_cache": setup.get("kv_cache"), "why": setup.get("why"), "readers_room_mib": setup.get("rooms"),
+            "kv_cache": setup.get("kv_cache"), "why": setup.get("why"), "gpu_plan": started.get("gpu_plan"),
             "stopped": started.get("stopped"), "loaded_at_close": started.get("loaded_at_close")}
 
 

@@ -65,7 +65,7 @@ from ..ollama_start import POPUP_CODES, OllamaStarter, count_as_own, own_models
 from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, in_step as in_backlog_step, pause_backlog,
                        reading_event, tick as backlog_tick, tracking_for)
 from ..pipeline import keeps_answered, turn_away
-from . import area, name_check, updates
+from . import area, name_check, status_slot, updates
 from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, QUEUE_RANK, READING_NOTE_MS, READY, VIEWER_BLACK,
                         VIEWER_LOADING)
 from .dialogs import caches as boxes
@@ -215,8 +215,8 @@ def prepare_layout_code(settings: Any) -> threading.Thread | None:
     *settings* use the model (`pipeline.layout_wanted`; `layout.prepare`: nothing is loaded, no GPU memory taken), so
     that a page turned as the window becomes ready does not wait for that import in its detection, where no cancel
     reaches it: 4.4 s of the 5.2 s such a page waited on the stand-in viewer, its first bubble 7.1 s after the turn, and
-    a frame dropped meanwhile kept the worker from the next one as long. The weights still load where they did (the
-    first page that needs the model, or the warm-up once Ollama's load is over: `_load_at_start`). The thread."""
+    a frame dropped meanwhile kept the worker from the next one as long. The weights load with the other models once
+    the pipeline is there (`JobsMixin._warm_page_models`), or in the first page that needs the model. The thread."""
     def run() -> None:
         try:
             from ..detect import layout
@@ -232,13 +232,13 @@ def prepare_layout_code(settings: Any) -> threading.Thread | None:
     return thread
 
 
-def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]]:
-    """The OCR model of *settings* loaded in a thread of its own, and one crop read by each of its readers
-    (`first_reads`); what is returned waits for that, and gives the readers (None when they did not load) and what
-    their load raised. Loaded once, for the window's start (`JobsMixin._job_init`), which waits for it before the
-    pipeline is made - and so does every job after the start, a page asked for early among them. Where they read is
-    the rule's (`place_with`, *settings* the window's own): decided once loaded, unless the translation model is being
-    loaded at the start meanwhile (`load_model_at_start`), which leaves it to the first read after that load."""
+def load_readers(settings: Any, placed: threading.Event | None = None) -> Callable[[], tuple[Any, BaseException | None]]:
+    """The OCR model of *settings* loaded in a thread of its own, put where the session's plan has it once *placed* is
+    set (`place_with`, *settings* the window's own: the judgement at the start, `JobsMixin._judge_gpu`), and one crop
+    read by each of its readers there (`first_reads`); what is returned waits for that, and gives the readers (None
+    when they did not load) and what their load raised. Loaded once, for the window's start (`JobsMixin._job_init`),
+    which waits for it before the pipeline is made - and so does every job after the start, a page asked for early
+    among them."""
     from ..ocr import Readers
     from ..ocr.readers import place_with
 
@@ -246,7 +246,10 @@ def load_readers(settings: Any) -> Callable[[], tuple[Any, BaseException | None]
 
     def load() -> None:
         try:
-            ocr = place_with(Readers(settings.models_dir, settings.ocr_threads), settings)
+            ocr = Readers(settings.models_dir, settings.ocr_threads)
+            if placed is not None:
+                placed.wait()
+            ocr = place_with(ocr, settings)
         except BaseException as e:  # noqa: BLE001 - the start says it as it always did
             done.append((None, e))
             return
@@ -303,10 +306,10 @@ class JobsMixin:
         self._ollama: OllamaStarter | None = None  # starts Ollama when it does not answer (made by `_job_init`)
         self._before_loading: Any = None  # what the page was doing when Ollama's model began to load
         self._partial_said = False  # the popup about a model partly on the CPU was shown (once a session)
-        self._start_load: threading.Thread | None = None  # the model's load at the start (`_load_at_start`) ...
-        self._start_load_over = threading.Event()  # ... is over, however it ended (the page models may be warmed)
+        self._start_load: threading.Thread | None = None  # the model's load at the start (`_load_at_start`)
         self._start_load_cancel = threading.Event()  # ends that load (the window closes)
-        self._start_load_released = False  # Release the model now came meanwhile: the page models are not warmed
+        self._models_loading = False  # what loads at the start is under way ("Loading the models...": `_watch_loads`)
+        self._gpu_dialog: Any = None  # the start's dialog on the GPU's memory, while it is open (`_show_gpu_short`)
         self._health: list[Any] = []  # the setup's problems and notices on show (health.check's Messages)
         self._health_after: str | None = None  # the next look at them while one stands
         self._health_checking = False  # a check runs (in a thread of its own)
@@ -414,13 +417,17 @@ class JobsMixin:
 
     def _job_init(self) -> None:
         """The start: the OCR model loads in a thread of its own (`load_readers`) while, in this order, Ollama is
-        started when it does not answer (what stands in the way said in a popup, once) and the setup is checked (the
-        banner from the start on); the start then waits for the OCR model, says what went wrong with it as ever, and
-        makes the pipeline. Ollama's model, when Ollama runs and has it, is loaded on a thread of its own while the OCR
-        model loads (``load_model_at_start``, on by default: `_load_at_start`), and the window is ready without waiting
-        for it; with the setting off it is left for the first page that needs it (`OllamaTranslator.ensure_loaded`).
-        An ``ollama_keep_alive`` that keeps it for good loads it here, while the OCR model loads, and once ready the
-        status line says what loaded where; one that unloads it after every request loads nothing ahead."""
+        started when it does not answer (what stands in the way said in a popup, once), the setup is checked (the
+        banner from the start on) and the GPU's memory is judged for everything TASlation puts there (`_judge_gpu`:
+        short, the start asks first). Then everything loads where the judgement put it, the window usable all the
+        while: the start waits for the OCR model, says what went wrong with it as ever, and makes the pipeline (the
+        window is ready: a page asked for now is read as soon as what it needs is there); the translation model, when
+        Ollama runs and has it (``load_model_at_start``, on by default: `_load_at_start`; with the setting off it is
+        left for the first page that needs it, `OllamaTranslator.ensure_loaded`, its room counted all the same), and
+        the page models (`_warm_page_models`) load on threads of their own, and the status bar says "Loading the
+        models..." until all of it is loaded (`_watch_loads`). An ``ollama_keep_alive`` that keeps the model for good
+        loads it here, and once ready the status line says what loaded where; one that unloads it after every request
+        loads nothing ahead."""
         from ..ocr import ModelNotInstalled
         from ..pipeline import Pipeline
         from ..translate import TranslationError
@@ -428,7 +435,8 @@ class JobsMixin:
         from ..translate.ollama import loaded_message, never_unloads
 
         s = self.settings
-        readers = load_readers(s)
+        placed = threading.Event()  # the judgement is made: the readers go where it put them (`load_readers`)
+        readers = load_readers(s, placed)
         prepare_layout_code(s)  # (beside the OCR model's load: the CPU's work alone)
         self._ollama = OllamaStarter(s.ollama_url,
                                      lambda: self._post("status", key="Starting the translation program..."),
@@ -438,6 +446,13 @@ class JobsMixin:
             self._post("ollama_failed", message=failed)
         problems, models = self._check_setup()  # the setup banner from the start on (nothing is loaded for it)
         self._post("health", problems=problems)
+        try:
+            going = self._judge_gpu(asks_ollama=models is not None)
+        finally:
+            placed.set()
+        if not going:  # Quit at the GPU's dialog: the window closes, nothing loads
+            return
+        self._post("models_loading", on=True)
         # the model the target language needs (or Qwen for a PLaMo not installed yet: `translate.models.choose`); the
         # translator follows the language from here on (`_use_model`)
         chosen = choose(s.ollama_model, s.target_language, models)
@@ -466,6 +481,7 @@ class JobsMixin:
             self._post("error", message=message_of(f"{type(error).__name__}: {error}", "ocr.error"), cached_note=True)
         self.pipeline = Pipeline(s, ocr=ocr, translator=self.translator)
         self._warm_page_models()
+        self._watch_loads()
         if s.cache_enabled:
             try:  # the caches' fingerprints read once here, so that recognising a book later reads only what changed
                 self.store.identities()
@@ -537,49 +553,141 @@ class JobsMixin:
         if taken:
             self._warn_unasked(rendered(Message("store.set_aside", path=", ".join(str(t.copy) for t in taken))))
 
+    def _judge_gpu(self, asks_ollama: bool = True) -> bool:
+        """(worker, at the start, before anything is loaded) The one judgement of the session (`ocr.place`): the
+        GPU's memory for everything the settings put there. Enough, or short with ``gpu_short`` "processor" (what
+        does not fit goes to the processor), or short with nothing that could go: settled as it is. Short otherwise:
+        the window asks (the "gpu_short" event, `ui.dialogs.gpu_short`) and this waits for the answer - Check again
+        judges anew, Start on the processor sends what does not fit there (and, with Do not ask again on this
+        computer ticked, keeps ``gpu_short`` "processor" in the settings), Quit closes the window. No NVIDIA GPU
+        (NVML does not answer): nothing is judged or asked. *asks_ollama*: Ollama answered the setup check (else
+        /api/ps is not asked: a server that is not there takes Windows about 2 s to refuse). Whether the start goes
+        on."""
+        from ..ocr import place
+
+        s = self.settings
+        choice = str(getattr(s, "gpu_short", "ask") or "ask")
+        while True:
+            try:
+                facts = place.gather(s, ask=asks_ollama)
+                if facts is None:  # (no NVIDIA GPU: nothing judged, nothing asked)
+                    plan = place.Plan(why=place.NO_GPU)
+                    break
+                needs = place.needs(s, ask=asks_ollama)
+                plan = place.judge(facts, needs, choice)
+            except Exception as e:  # noqa: BLE001 - nothing to judge on: as the settings say
+                LOG.info("the GPU's room could not be judged at the start (%s)", type(e).__name__)
+                plan = place.Plan(why=place.NO_GPU)
+                break
+            if not plan.asks:
+                break
+            offer = place.judge(facts, needs, "processor")
+            answer, remember = self._ask_gpu_short(plan.short, offer.cpu)
+            if answer == "quit":
+                return False
+            if answer == "processor":
+                choice = "processor"
+                if remember:
+                    self._post("gpu_short_kept")
+        place.settle(plan)
+        return True
+
+    def _ask_gpu_short(self, short: int, parts: tuple[str, ...]) -> tuple[str, bool]:
+        """(worker) The start's dialog on the GPU's memory short by *short* MiB, *parts* the ones Start on the
+        processor sends there: the "gpu_short" event, its answer waited for ("again", "processor" or "quit"; the dialog
+        gone without one, the window closed: "quit") and whether Do not ask again on this computer was ticked."""
+        answered = threading.Event()
+        reply: list[tuple[str, bool]] = []
+
+        def answer(choice: str, remember: bool = False) -> None:
+            if not answered.is_set():
+                reply.append((choice, remember))
+                answered.set()
+
+        self._post("gpu_short", short=short, parts=parts, answer=answer)
+        answered.wait()
+        return reply[0]
+
+    def _show_gpu_short(self, short: int, parts: tuple[str, ...], answer: Callable[..., None]) -> None:
+        """The "gpu_short" event on the Tk thread: the start's dialog (`ui.dialogs.gpu_short.GpuShortDialog`), kept as
+        ``_gpu_dialog`` while it is open (a tool answers it through it), the answer handed to *answer*; Quit closes the
+        window."""
+        from .dialogs.gpu_short import GpuShortDialog
+
+        def done(choice: str, remember: bool) -> None:
+            self._gpu_dialog = None
+            answer(choice, remember)
+            if choice == "quit":
+                self.after(0, self._on_close)
+
+        self._gpu_dialog = GpuShortDialog(self, short, parts, done)
+
+    def _keep_gpu_short(self) -> None:
+        """The "gpu_short_kept" event: Do not ask again on this computer was ticked - ``gpu_short`` "processor" kept
+        in the settings file the window's settings were read from, as Tools > Settings... saves it (the System page's
+        box); settings read from no file write the state folder's (`config.settings_file`'s last place)."""
+        from .. import config
+
+        s = self.settings
+        path = getattr(s, "config_path", None) or Path(s.state_dir) / config.CONFIG_FILENAME
+        try:
+            s.gpu_short = "processor"
+            config.write_settings(path, {"gpu_short": "processor"})
+        except Exception as e:  # noqa: BLE001 - the next start asks again, no more than that
+            LOG.warning("the choice for a GPU that is short could not be kept (%s)", type(e).__name__)
+
+    def _watch_loads(self) -> None:
+        """(worker, at the start, the pipeline made) What loads at the start - the translation model's load at the
+        start, the page models' warm-up - waited for on a thread of its own; the "models_loading" event with *on*
+        False once all of it is over, however it ended (the status bar's "Loading the models..." goes)."""
+        start_load = getattr(self, "_start_load", None)
+        pipeline = getattr(self, "pipeline", None)
+        warming = getattr(pipeline, "_warming", None)
+
+        def run() -> None:
+            for thread in (start_load, warming):
+                if thread is not None:
+                    thread.join()
+            self._post("models_loading", on=False)
+
+        threading.Thread(target=run, name="taslation-watch-loads", daemon=True).start()
+
     def _load_at_start(self) -> None:
         """(worker, at the start) The translation model loaded on a thread of its own while the OCR model loads
-        (`loads_at_start`), Ollama started and found to have it; nothing of it is said but a model partly on the CPU
-        (`OllamaTranslator.ensure_loaded` *quiet*), and it goes as ``ollama_keep_alive`` says, as after a page. It is
-        the one load of the model: a page that needs the model meanwhile waits for it and says that it loads
-        (`ensure_loaded`, one at a time). The page models are warmed once it is over (`_warm_page_models` waits for
-        it), never during it, so that they never take the memory Ollama loads into. A load that fails says nothing:
-        the first page that needs the model says what is wrong, as ever. The window's close ends it
-        (`_release_model`); Release the model now waits for it, then releases what it loaded (`wait_load_at_start`)."""
-        translator, cancel, over = self.translator, self._start_load_cancel, self._start_load_over
+        (`loads_at_start`), Ollama started and found to have it, where the judgement at the start put it; nothing of
+        it is said but a model partly on the CPU (`OllamaTranslator.ensure_loaded` *quiet*), and it goes as
+        ``ollama_keep_alive`` says, as after a page. It is the one load of the model: a page that needs the model
+        meanwhile waits for it and says that it loads (`ensure_loaded`, one at a time). The page models load beside it
+        (the judgement counted the model whole beside them). A load that fails says nothing: the first page that needs
+        the model says what is wrong, as ever. The window's close ends it (`_release_model`); Release the model now
+        waits for it, then releases what it loaded (`wait_load_at_start`)."""
+        translator, cancel = self.translator, self._start_load_cancel
 
         def run() -> None:
             try:
                 translator.ensure_loaded(cancel, quiet=True)
             except BaseException:  # noqa: BLE001 - the window closed, or a load that failed: a page says it
                 pass
-            over.set()
-            if not cancel.is_set() and not self._start_load_released:
-                self._warm_page_models()
 
         self._start_load = threading.Thread(target=run, name="taslation-load-model", daemon=True)
         self._start_load.start()
 
     def wait_load_at_start(self) -> None:
         """(worker) Release the model now (`gpu_release.release_models`): the load at the start, when it is under
-        way, is waited for (`ollama.WARM_UP_TIMEOUT` at most), so that what it loads is released with the rest, and
-        the page models are not warmed after it; nothing loads again until a page needs the model."""
+        way, is waited for (`ollama.WARM_UP_TIMEOUT` at most), so that what it loads is released with the rest;
+        nothing loads again until a page needs the model."""
         from ..translate.ollama import WARM_UP_TIMEOUT
 
-        self._start_load_released = True
         thread = self._start_load
         if thread is not None and thread is not threading.current_thread():
             thread.join(WARM_UP_TIMEOUT)
 
     def _warm_page_models(self) -> None:
-        """The page models (layout, erase) made ready ahead of the first page, once the pipeline is there and a
-        viewer is chosen (`Pipeline.warm_page_models`: cheap, safe to repeat, returns at once; any thread). Again
-        after a change of what they are (a book's settings). Not while the model loads at the start: that load warms
-        them once it is over (`_load_at_start`)."""
+        """The page models (layout, erase) loaded ahead of the first page, where the session's plan has them, once the
+        pipeline is there (`Pipeline.warm_page_models`: cheap, safe to repeat, returns at once; any thread): at the
+        start, with the other models, and again after a change of what they are (a book's settings)."""
         pipeline = getattr(self, "pipeline", None)
-        if pipeline is None or getattr(self, "selected", None) is None:
-            return
-        if getattr(self, "_start_load", None) is not None and not self._start_load_over.is_set():
+        if pipeline is None:
             return
         try:
             pipeline.warm_page_models()
@@ -989,6 +1097,13 @@ class JobsMixin:
             self._warn_unasked(rendered(data["message"]))
         elif kind == "not_here":  # saved files this Windows user cannot open here, found at the start
             self._tell_not_here(int(data.get("files", 0)))
+        elif kind == "gpu_short":  # the start: the GPU's memory short for everything (`_judge_gpu` waits)
+            self._show_gpu_short(int(data["short"]), tuple(data["parts"]), data["answer"])
+        elif kind == "gpu_short_kept":
+            self._keep_gpu_short()
+        elif kind == "models_loading":  # the start's loads under way, or over (`_watch_loads`)
+            self._models_loading = bool(data.get("on"))
+            status_slot.again(self)
         elif kind == "models":
             self._take_models(data["models"])
         elif kind == "health":  # a setup check: the banner, and the next check while a problem stands

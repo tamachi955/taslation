@@ -356,8 +356,9 @@ def _note(message: Any) -> None:
 
 
 def build_ocr(settings: Settings):
-    """The OCR engine, where ``ocr_runs_on`` and the room on the GPU put it (`ocr.place`); a model that is not
-    installed ends the command with what to do."""
+    """The OCR engine, where ``ocr_runs_on`` and the room on the GPU put it (`ocr.place.plan_for`: a command asks
+    nothing - what does not fit goes to the processor); a model that is not installed ends the command with what to
+    do."""
     from .ocr import ModelNotInstalled, Readers
     from .ocr.readers import place_with
 

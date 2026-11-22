@@ -64,7 +64,7 @@ for again by the pipeline (`base.ask_for_missing`); every request for a line thi
 with another sampling seed (`_draw`), so that it is a new draw, not the same answer again.
 
 Everything else is `OllamaTranslator`'s: the loopback-only connection without proxies, the model loaded on demand and
-released (`ensure_loaded`, `release`, `release_now`, `warm_up`, `gpu_share`, ``before_load``, ``on_status``,
+released (`ensure_loaded`, `release`, `release_now`, `warm_up`, `gpu_share`, ``on_status``,
 ``keep_alive``, the layers on the GPU ``num_gpu`` in every request and warm-up when it is set), Ollama
 started again when a request finds it gone (``revive``), the fixed ``seed`` of the evaluation tools, and the same
 `TranslationError` message codes; a model that is not installed is ``translator.model_missing`` when the target
@@ -640,12 +640,11 @@ class PlamoTranslator(OllamaTranslator):
         self._held_now(None)  # (a load: the server holds no prompt of this translator's)
         limit = timeout or min(self.timeout, WARM_UP_TIMEOUT)
         start = time.monotonic()
-        with ocr_place.loading():  # (a load: where the OCR reads is decided after it)
-            if cancel is None and on_slow is None:
-                self._request("/api/generate", {**payload, "stream": False}, limit)
-            else:  # (the server looked at while it loads: `OllamaTranslator.warm_up`)
-                self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit,
-                             alive=self._ps_answers)
+        if cancel is None and on_slow is None:
+            self._request("/api/generate", {**payload, "stream": False}, limit)
+        else:  # (the server looked at while it loads: `OllamaTranslator.warm_up`)
+            self._stream("/api/generate", {**payload, "stream": True}, _ignore, cancel, on_slow, limit,
+                         alive=self._ps_answers)
         if payload["keep_alive"] == self.keep_alive:
             self._answered(payload["model"])
         return time.monotonic() - start

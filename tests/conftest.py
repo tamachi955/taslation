@@ -205,13 +205,43 @@ def classical_unless_asked(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_real_gpu_measured_for_the_ocr(monkeypatch):
-    """Where the OCR readers would run is never judged on this machine's GPU or its Ollama: the rule's facts
-    (`ocr.place.gather`: NVML, /api/ps) are none, so "auto" keeps them on the CPU wherever torch has CUDA; a test of the
-    rule gives its own facts. The translation model is counted as on a server with a q8_0 KV cache and no full-size
-    window cache (`ocr.place.server_cache`: never this machine's variables or its NVML), unless a test says
-    otherwise."""
-    monkeypatch.setattr(place, "gather", lambda settings, cache=None, memory=None, own=None, ask=True: None)
+    """What runs on the GPU is never judged on this machine's GPU or its Ollama: the judgement's facts
+    (`ocr.place.gather`: NVML, /api/ps) are none - as without an NVIDIA GPU: no start's dialog, "auto" keeps the OCR
+    readers on the CPU wherever torch has CUDA -, and each test starts with no session's plan and no failure
+    (`place.reset`); a test of the judgement gives its own facts. The translation model is counted as on a server with
+    a q8_0 KV cache and no full-size window cache (`ocr.place.server_cache`: never this machine's variables or its
+    NVML), unless a test says otherwise."""
+    place.reset()
+    monkeypatch.setattr(place, "gather", lambda settings, memory=None, own=None, ask=True: None)
     monkeypatch.setattr(place, "server_cache", lambda settings: ("q8_0", False))
+    yield
+    place.reset()
+
+
+@pytest.fixture
+def gpu_dialog_allowed():
+    """A test that shows the start's dialog on the GPU's memory on purpose (tests/test_gpu_short_dialog.py)."""
+    return True
+
+
+@pytest.fixture(autouse=True)
+def no_gpu_dialog_unless_asked(request, monkeypatch):
+    """The start's dialog on the GPU's memory (`ui.dialogs.gpu_short`) never comes up in a test that does not ask for
+    it (`gpu_dialog_allowed`): one that would show it fails, whatever thread or callback made it."""
+    if "gpu_dialog_allowed" in request.fixturenames:
+        yield
+        return
+    from taslation.ui.dialogs import gpu_short
+
+    shown: list[int] = []
+
+    def refused(self, *args, **kwargs):
+        shown.append(1)
+        raise RuntimeError("the start's GPU dialog came up in a test that does not ask for it")
+
+    monkeypatch.setattr(gpu_short.GpuShortDialog, "__init__", refused)
+    yield
+    assert not shown, "the start's dialog on the GPU's memory came up in a test that does not ask for it"
 
 
 @pytest.fixture(scope="session")

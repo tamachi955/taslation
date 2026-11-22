@@ -16,7 +16,7 @@ ollama_num_ctx = 16384        # the chat translator's context window (0 = server
 ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the window's start (load_model_at_start) or the first line to translate loads it, Tools > Release the model now or closing the window releases it. "-1": load it at the start and never unload
 load_model_at_start = true    # the window loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; also Tools > Settings... > System). false: the first line to translate loads it
 ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Tools > Settings... > System). Tools > Release the model now gives the GPU memory back at once
-ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto": unless that moves the OCR readers off the GPU; "on"; "off": as before (also Tools > Settings... > System; from Ollama's next start)
+ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto" (the default) and "on": with it; "off": as before (also Tools > Settings... > System; from Ollama's next start)
 target_language = "English"
 context_pages = 2             # live mode: previous pages given to the model as context (memory only; PLaMo's earlier
                               # lines grow to 60 and are cut back to the newest 20; 0: none)
@@ -27,7 +27,8 @@ context_pairs = 40            # previous (source, translation) pairs carried int
 # --- OCR ---
 # models_dir = "C:/path/to/models"   # where setup_models.py put the OCR model (default: ./models)
 ocr_threads = 0               # threads for the OCR model (0 = one per core); while other programs keep the CPU busy, half the cores can be faster
-ocr_runs_on = "auto"          # "auto": two of the OCR readers on the GPU only when it has room beside the translator and the page models; "cpu"; "gpu"
+ocr_runs_on = "auto"          # "auto": two of the OCR readers where the check at the start puts them (the GPU when everything fits); "cpu"; "gpu"
+gpu_short = "ask"             # when the GPU's memory is short at the start: "ask" (a dialog), or "processor" (what does not fit runs on the processor, without asking)
 
 # --- detection ---
 white_threshold = 225

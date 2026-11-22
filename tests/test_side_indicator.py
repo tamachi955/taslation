@@ -612,6 +612,29 @@ def test_a_page_that_could_not_be_translated_says_so_with_its_mark(window):
     assert status_slot.wanted(w, w._side.slot, 0.0) is None  # another page: gone
 
 
+def test_loading_the_models_is_said_in_either_role_until_the_start_s_loads_are_over(window):
+    """The start's one indicator (`jobs.JobsMixin._watch_loads`, the "models_loading" event): the window is usable
+    meanwhile, and a page under way says its own stage instead."""
+    w = window(size=(720, 900))
+    w.show(page(2))
+    w._handle_event("models_loading", {"on": True})
+    assert status_slot.wanted(w, w._side.slot, 0.0) == (status_slot.MODELS_KEY, False)
+    status_slot.tick(w)
+    assert w._side.slot_label.var.get() == "Loading the models..."
+    w.role_var.set("translator")
+    assert status_slot.wanted(w, w._side.slot, 0.0) == (status_slot.MODELS_KEY, False)  # (in either role)
+    w.role_var.set("reader")
+    frame = page(3)
+    w.show(frame)
+    w.busy, w._busy_shown, w._busy_since, w._job_frame = True, True, 50.0, frame
+    w._progress = Message("pipeline.stage_reading", total=3)
+    assert status_slot.wanted(w, w._side.slot, 51.0) == (status_slot.READING_KEY, False)  # the page's own stage
+    w.busy, w._busy_shown, w._job_frame, w._progress = False, False, None, ""
+    assert status_slot.wanted(w, w._side.slot, 51.0) == (status_slot.MODELS_KEY, False)
+    w._handle_event("models_loading", {"on": False})
+    assert status_slot.wanted(w, w._side.slot, 51.0) is None  # all loaded: gone
+
+
 def test_nothing_to_read_is_said_for_four_seconds(window, monkeypatch):
     w = window(size=(720, 900))
     empty = result(2, [])

@@ -1160,12 +1160,11 @@ class LoadAhead:
     """The translator's model loaded on a thread of its own while a page on show in the window is read
     (`Pipeline.page_on_show`): started once the reading finds the first line to translate, so that a load (seconds,
     when Ollama does not hold the model) is done while the rest of the page is read, and the request finds the model
-    loaded (`OllamaTranslator.ensure_loaded`: one load at a time, the GPU models let go before it as ever). The page's
-    cancel ends it; `join` waits for it, so that the page lets go of the worker with no load of its own under way (Tools
-    > Release the model now waits for the page). Once it has loaded the model, the page models are warmed again
-    (`Pipeline.warm_page_models`): after the load, never during it, so that they never take the memory Ollama loads
-    into. A load that fails is left to the request, which says what is wrong as ever. A page whose frame is not kept
-    yet (*gate*, `PageGate`) loads nothing before the window has seen that frame on show after the load asked
+    loaded (`OllamaTranslator.ensure_loaded`: one load at a time; the page models and the OCR readers stay where they
+    are, the judgement at the start counted the model whole beside them). The page's cancel ends it; `join` waits for
+    it, so that the page lets go of the worker with no load of its own under way (Tools > Release the model now waits
+    for the page). A load that fails is left to the request, which says what is wrong as ever. A page whose frame is
+    not kept yet (*gate*, `PageGate`) loads nothing before the window has seen that frame on show after the load asked
     (`PageGate.on_show`), as its request does; a page done before that (every line reused) loads nothing, and a frame
     that changes meanwhile cancels the load with the page."""
 
@@ -1187,7 +1186,6 @@ class LoadAhead:
         if self.gate is not None and not self.gate.confirmed:
             if not self.gate.on_show(_Either(self.cancel, self.done), close=False) or self.cancel.is_set():
                 return  # (the job decides the gate: its own wait closes it)
-        released = pipeline._gpu_released
         began = time.monotonic()
         try:
             translator.ensure_loaded(self.cancel)
@@ -1198,11 +1196,6 @@ class LoadAhead:
                 logging.getLogger(__name__).warning("no answer: the load ahead of the page's request ended after "
                                                     "%.1f s", time.monotonic() - began)
             return
-        if pipeline._gpu_released != released and not self.cancel.is_set():  # (it loaded the model)
-            try:
-                pipeline.warm_page_models()
-            except Exception:  # noqa: BLE001 - only a matter of speed: each loads when it is needed
-                pass
 
     def join(self) -> None:
         self.done.set()
@@ -1351,7 +1344,7 @@ class Pipeline:
         self._detector_given = detector
         self.detector: BubbleDetector = detector or detector_from_settings(settings)
         self.text_detector: TextBlockDetector | None = None
-        # what lets go of a GPU model (a detector's or an inpainter's `release`): called before Ollama's model loads
+        # what lets go of a GPU model (a detector's or an inpainter's `release`, the readers'): Release the model now
         self.gpu_releases: list[Callable[[], Any]] = []
         # this session's lettered pages from the cache and live erases, in memory only (`render.memo`): a page shown
         # again comes back without detection, erase or typesetting
@@ -1370,8 +1363,6 @@ class Pipeline:
         if callable(getattr(ocr, "release_gpu", None)):  # the OCR readers on the GPU go too (`Readers.release_gpu`)
             self.gpu_releases.append(ocr.release_gpu)
         self.translator = translator
-        if hasattr(translator, "before_load"):
-            translator.before_load = self.release_before_load
         self.cache = cache
         self._ocr_memo: dict[str, CharspotReading] = {}  # crop hash -> reading, memory only
         self._unanimous_memo: dict[str, bool] = {}  # crop hash and text -> all readers read it (`_unanimous`)
@@ -1412,13 +1403,13 @@ class Pipeline:
 
     def warm_page_models(self) -> threading.Thread | None:
         """The layout model and LaMa loaded ahead, on a thread of their own at a lower priority, when the settings in
-        force use them (`_build_models`: detect_model "on", or "auto" with the inpainting; art_erase on): the window
-        calls it once it is up and a viewer is picked, so that the first page waits for neither (a fresh start's
-        first cached page 5.3 s with "auto", 3.3 s without). Nothing is lettered or kept but the models. The first page
-        that comes meanwhile waits only for what is still loading (each model's own lock). A release before Ollama's
-        load (`release_gpu_models`) that comes meanwhile is done once the model at hand is loaded, and ends the
-        warm-up: what is left loads on first use, after Ollama's model, so that the warm-up never takes the GPU memory
-        Ollama is loading into. The thread, or None when there is nothing to warm (or it is warming already)."""
+        force use them (`_build_models`: detect_model "on", or "auto" with the inpainting; art_erase on), each where
+        the session's plan has it (`ocr.place.on_gpu`): the window calls it at its start, with the other models, so
+        that the first page waits for neither (a fresh start's first cached page 5.3 s with "auto", 3.3 s without).
+        Nothing is lettered or kept but the models. The first page that comes meanwhile waits only for what is still
+        loading (each model's own lock). Release the model now (`release_gpu_models`) that comes meanwhile is done
+        once the model at hand is loaded, and ends the warm-up: what is left loads on first use. The thread, or None
+        when there is nothing to warm (or it is warming already)."""
         running = self._warming
         if running is not None and running.is_alive():
             return None
@@ -1446,51 +1437,30 @@ class Pipeline:
             pass
         for model in models:
             if self._gpu_released != released:
-                return  # Ollama's model is loading: the rest loads on first use, after it
+                return  # Release the model now came meanwhile: the rest loads on first use
             model.warm()
             if model is not self.layout and model is not self.art_eraser:
                 model.release()  # the settings changed meanwhile: this one is not used any more
 
-    def release_gpu_models(self, load: bool = False) -> None:
-        """Every GPU model of `gpu_releases` lets go (each loads again when it is next needed). One that fails keeps
-        neither the others nor the page from going on. *load*: the release before Ollama loads the translation model
-        (`release_before_load`): the OCR readers' release comes last, once the page models have let go, and keeps them
-        on the GPU where the rule still finds room for them beside the whole model (`Readers.release_gpu` with
-        *load*)."""
+    def release_gpu_models(self) -> None:
+        """Every GPU model of `gpu_releases` lets go (Tools > Release the model now; each loads again where the
+        session's plan has it when it is next needed). One that fails keeps neither the others nor the page from going
+        on. Nothing lets go for a load of the translation model: the judgement at the start counted it whole beside
+        them (`taslation.ocr.place`)."""
         self._gpu_released += 1  # (a warm-up under way stops: `_warm`)
-        releases = list(self.gpu_releases)
-        if load:
-            releases.sort(key=self._through_load)  # (stable: the readers' last)
-        for release in releases:
+        for release in list(self.gpu_releases):
             try:
-                if load and self._through_load(release):
-                    release(load=True)
-                else:
-                    release()
+                release()
             except Exception:  # noqa: BLE001 - it stays in memory, no more than that
                 pass
 
-    def release_before_load(self) -> None:
-        """What lets go of the GPU before Ollama loads the translation model (the translator's ``before_load``):
-        `release_gpu_models` with *load*. Tools > Release the model now lets everything go (`release_gpu_models`)."""
-        self.release_gpu_models(load=True)
-
-    @staticmethod
-    def _through_load(release: Callable[..., Any]) -> bool:
-        """Whether *release*, one of `gpu_releases`, is the OCR readers' (`Readers.release_gpu`), which may keep them on
-        the GPU through a load."""
-        return callable(getattr(getattr(release, "__self__", None), "keeps_through_load", None))
-
     def set_translator(self, translator: Translator | None) -> None:
         """Translate with *translator* from now on (the window's, when the target language needs another model:
-        `taslation.translate.models`): the one before lets its model go (`release_translator`), and the new one lets
-        the GPU models go before it loads its own, as the first one did."""
+        `taslation.translate.models`): the one before lets its model go (`release_translator`)."""
         if translator is self.translator:
             return
         self.release_translator()
         self.translator = translator
-        if hasattr(translator, "before_load"):
-            translator.before_load = self.release_before_load
 
     def release_translator(self) -> None:
         """The translator's model leaves memory now (`OllamaTranslator.release`), for a translator that has one, a

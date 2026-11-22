@@ -414,10 +414,11 @@ def test_where_the_readers_read_while_the_pictures_were_taken():
 
 
 def test_what_the_starter_chose_is_kept():
-    started = {"setup": {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "setting",
-                         "rooms": [None, None]}, "loaded_at_close": None, "finish": [], "stopped": True}
+    plan = {"gpu": ["translator", "readers", "lama", "layout"], "cpu": [], "short": 0, "why": "room"}
+    started = {"setup": {"kv_cache": "q8_0", "full_window": False, "cache_ram": "0", "why": "setting"},
+               "gpu_plan": plan, "loaded_at_close": None, "finish": [], "stopped": True}
     assert pv.server_summary(started) == {"full_window": False, "cache_ram_mib": "0", "kv_cache": "q8_0",
-                                          "why": "setting", "readers_room_mib": [None, None], "stopped": True,
+                                          "why": "setting", "gpu_plan": plan, "stopped": True,
                                           "loaded_at_close": None}
     assert pv.server_summary(None) is None
 

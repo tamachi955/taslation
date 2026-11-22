@@ -28,9 +28,11 @@ erase on the art", 2026-11-15).
 LaMa runs in torch, on the GPU when torch has one (about 0.6 s a screen) and on the CPU otherwise (about 4 s). Where
 it runs at all is the setting `art_erase`, read by one rule (`runs_here`, and `available` for the weights too): "auto",
 the default, only where torch has a CUDA GPU, so that a computer without one erases exactly as with "off" and never
-loads the model; "lama" everywhere, on the CPU too; "off" nowhere. It is loaded on first use; `ArtEraser.release`
-gives its memory back and the next erase loads it again. A failure on the GPU moves the work to the CPU for the rest
-of the session (a fallback, not the rule's choice), one on the CPU leaves the regions to `erase_region`.
+loads the model; "lama" everywhere, on the CPU too; "off" nowhere. On the GPU unless the judgement at the start sent
+it to the processor (`taslation.ocr.place`). It is loaded at the start with the other models (`ArtEraser.warm`);
+`ArtEraser.release` gives its memory back and the next erase loads it again. A failure on the GPU moves the work to
+the CPU for the rest of the session (a fallback, not the rule's choice), one on the CPU leaves the regions to
+`erase_region`.
 
 ``erase_mode = "fill"`` only: "inpaint" and "classic" stay as they are, whole pages of them.
 """
@@ -445,7 +447,7 @@ def runs_here(setting: str, cuda: bool | None = None) -> bool:
     `devices.stage_devices`, `health.page_models_missing`, the Settings dialog): "off" never; "lama" always, on the
     CPU too; "auto" (the default) only where torch has a CUDA GPU: *cuda* when the caller knows it, else `has_cuda`,
     asked only for "auto". The weights are `available`'s to check. A GPU that fails at run time moves the work to the
-    CPU until the model is next let go (`ArtEraser._fill`, `ArtEraser.release`): a fallback, not this rule's choice."""
+    CPU for the rest of the session (`ArtEraser._fill`): a fallback, not this rule's choice."""
     if setting == "off":
         return False
     if setting == "auto":
@@ -524,9 +526,13 @@ class ArtEraser:
 
     @staticmethod
     def _device() -> str:
+        """Where the model loads: the GPU where torch has CUDA and the session's plan has it there
+        (`ocr.place.on_gpu`: not sent to the processor for the room, no failure there this session)."""
         import torch
 
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        from ..ocr import place
+
+        return "cuda" if torch.cuda.is_available() and place.on_gpu(place.LAMA) else "cpu"
 
     def _load(self, device: str) -> None:
         from .lama import LamaInpainter
@@ -544,11 +550,9 @@ class ArtEraser:
             return None, type(e).__name__
 
     def _fill(self, part: np.ndarray, hole: np.ndarray) -> np.ndarray | None:
-        """*part* with *hole* filled; None when LaMa cannot do it. A failure on the GPU (its memory is shared with
-        Ollama), loading or running, moves to the CPU until the model is next let go (`release`: before Ollama loads
-        its model, Tools > Release the model now), when the next erase loads it on the GPU again; a failure on the CPU
-        leaves the paper fill for the session. After a window on the GPU the idle cache is given back
-        (`give_back_idle`)."""
+        """*part* with *hole* filled; None when LaMa cannot do it. A failure on the GPU, loading or running, moves it
+        to the CPU for the rest of the session (`ocr.place.failed`); a failure on the CPU leaves the paper fill for the
+        session. After a window on the GPU the idle cache is given back (`give_back_idle`)."""
         with self._lock:
             if self.failed:
                 return None
@@ -557,7 +561,9 @@ class ArtEraser:
             if filled is not None and device != "cpu":
                 give_back_idle()
             if filled is None and device != "cpu":
-                LOG.info("inpainting failed on the GPU (%s): on the CPU until the model is let go", why)
+                from ..ocr import place
+
+                place.failed(place.LAMA, why)
                 self._drop(device)
                 filled, why = self._try("cpu", part, hole)
             if filled is None:

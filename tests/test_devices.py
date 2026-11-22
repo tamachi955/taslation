@@ -129,6 +129,8 @@ class Start:
     (``order``)."""
 
     _job_init = jobs.JobsMixin._job_init
+    _judge_gpu = jobs.JobsMixin._judge_gpu
+    _watch_loads = jobs.JobsMixin._watch_loads
     _warm_page_models = jobs.JobsMixin._warm_page_models
     _revive_ollama = jobs.JobsMixin._revive_ollama
     _restart_ollama = jobs.JobsMixin._restart_ollama
@@ -151,9 +153,13 @@ class Start:
         return self._setup
 
     def events(self) -> list[tuple[str, dict]]:
+        """What was posted, in order, without the "models_loading" indicator (on and off, its off from a thread of its
+        own: tests/test_model_at_start.py follows it)."""
         out = []
         while not self._events.empty():
-            out.append(self._events.get_nowait())
+            event = self._events.get_nowait()
+            if event[0] != "models_loading":
+                out.append(event)
         return out
 
 

@@ -193,12 +193,15 @@ class Settings:
     # --- OCR ---
     models_dir: Path = field(default_factory=default_models_dir)
     ocr_threads: int = 0  # threads the OCR model computes with (0 = torch's default, one per core); while other programs keep the CPU busy, half the cores can be faster
-    # where two of the three OCR readers (charspot, nar) run: "auto" (the default) on the GPU only when it has room for
-    # them beside the translation model whole in video memory, the page models in use and what other programs hold,
-    # with a margin (`ocr.place`, decided when they load and again after the GPU memory was let go), else on the CPU;
-    # "cpu" always on the CPU; "gpu" on the GPU wherever torch has CUDA. A GPU that fails moves them to the CPU for the
-    # session. (A new name: ``ocr_device``, a setting of the OCR before 2026-11-01, is still dropped quietly.)
+    # where two of the three OCR readers (charspot, nar) run: "auto" (the default) where the judgement at the start puts
+    # them (`ocr.place`: on the GPU when everything TASlation puts there fits with a margin), "cpu" always on the CPU,
+    # "gpu" on the GPU wherever torch has CUDA. A GPU that fails moves them to the CPU for the session. (A new name:
+    # ``ocr_device``, a setting of the OCR before 2026-11-01, is still dropped quietly.)
     ocr_runs_on: str = "auto"
+    # what a start does when the GPU's memory is short for everything TASlation puts there (`ocr.place`): "ask" (the
+    # default: the start's dialog, `ui.dialogs.gpu_short`) or "processor" (what does not fit runs on the processor, as
+    # the dialog's Start on the processor; its "Do not ask again on this computer" sets it)
+    gpu_short: str = "ask"
 
     # --- detection ---
     white_threshold: int = 225
@@ -376,6 +379,8 @@ class Settings:
             raise ConfigError("detect_model must be 'auto', 'on' or 'off'")
         if self.ocr_runs_on not in ("auto", "cpu", "gpu"):
             raise ConfigError("ocr_runs_on must be 'auto', 'cpu' or 'gpu'")
+        if self.gpu_short not in ("ask", "processor"):
+            raise ConfigError("gpu_short must be 'ask' or 'processor'")
         if self.ollama_window_cache not in ("auto", "off", "on"):
             raise ConfigError("ollama_window_cache must be 'auto', 'off' or 'on'")
         from .translate.ollama import NUM_GPU_MOST, keep_alive_value, num_gpu_value

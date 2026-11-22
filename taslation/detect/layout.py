@@ -107,18 +107,24 @@ class LayoutModel:
             return False
         if self._device:
             return self._device == "cuda"
+        return self._planned() == "cuda"
+
+    @staticmethod
+    def _planned() -> str:
+        """Where the model loads: the GPU where torch has CUDA and the session's plan has it there
+        (`ocr.place.on_gpu`: not sent to the processor for the room, no failure there this session)."""
         import torch
 
-        return bool(torch.cuda.is_available())
+        from ..ocr import place
+
+        return "cuda" if torch.cuda.is_available() and place.on_gpu(place.LAYOUT) else "cpu"
 
     def _load(self, device: str = "") -> None:
-        import torch
-
         model_class = _model_class()  # (imported ahead at the window's start: `prepare`)
         from transformers.utils import logging as hf_logging
 
         hf_logging.disable_progress_bar()  # (a window has no console for it)
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        device = device or self._planned()
         self._device = device  # (what a failed load has to free)
         self._net = model_class.from_pretrained(str(self.folder), local_files_only=True, use_safetensors=True,
                                                 trust_remote_code=False).eval().to(device)
@@ -142,14 +148,13 @@ class LayoutModel:
 
     def detect(self, rgb: np.ndarray) -> list[Detection]:
         """The boxes of one page unit, in its coordinates. With the GPU full (loading or running: `place.out_of_memory`)
-        it goes on on the CPU until it is next let go (`release`), when the next page loads it where torch has CUDA
-        again; the failed step's tensors are let go first (the exception, whose traceback holds them, is left behind)."""
-        import torch
-
+        it goes on on the CPU for the rest of the session (`place.failed`); the failed step's tensors are let go first
+        (the exception, whose traceback holds them, is left behind)."""
+        from ..ocr import place
         from ..ocr.place import out_of_memory
 
         with self._lock:
-            device = self._device or ("cuda" if torch.cuda.is_available() else "cpu")
+            device = self._device or self._planned()
             full = False
             try:
                 if self._net is None:
@@ -163,7 +168,7 @@ class LayoutModel:
                 if self._release_asked and not full:
                     self._release_asked = False
                     self._drop()
-            LOG.info("the GPU is full: the layout model goes on on the CPU")
+            place.failed(place.LAYOUT, "OutOfMemoryError")
             self._drop("cuda")
             self._load("cpu")
             return self._forward(rgb)

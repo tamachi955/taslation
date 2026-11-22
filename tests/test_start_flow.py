@@ -659,17 +659,19 @@ def test_the_check_at_every_frame_reads_the_cache_file_only_once_a_save_changed_
     assert not flow._all_cached(page)
 
 
-def test_the_page_models_are_warmed_once_a_viewer_and_the_pipeline_are_there(flow):
+def test_the_page_models_are_warmed_once_the_pipeline_is_there_with_a_viewer_chosen_or_not(flow):
+    """At the start they load with the other models while the person chooses what to read ("Loading the models...")."""
     warmed = []
     flow.pipeline = SimpleNamespace(warm_page_models=lambda: warmed.append(1))
     flow._warm_page_models()
     assert warmed == [1]
     flow.selected = None
     flow._warm_page_models()
+    assert warmed == [1, 1]
     flow.selected = VIEWER
     flow.pipeline = None  # not made yet: nothing
     flow._warm_page_models()
-    assert warmed == [1]
+    assert warmed == [1, 1]
 
 
 # ------------------------------------------------------------------ Stop, a new page, a slow model, no flicker
@@ -1590,6 +1592,8 @@ def test_the_start_goes_on_when_the_ocr_model_fails_to_load(flow, monkeypatch):
     flow._restart_ollama = lambda cancel=None, on_restarting=None: None
     flow._translator_status = app_mod.App._translator_status.__get__(flow)
     flow._job_init = app_mod.App._job_init.__get__(flow)
+    flow._judge_gpu = app_mod.App._judge_gpu.__get__(flow)
+    flow._watch_loads = app_mod.App._watch_loads.__get__(flow)
     flow._job_init()
     flow.pump()
     assert flow.ready and flow.pipeline is not None and flow.pipeline.ocr is None and flow._ocr_failed
