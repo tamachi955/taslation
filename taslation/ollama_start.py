@@ -899,10 +899,20 @@ def _set_all(server: tuple[int, int], value: int) -> int:
     return count
 
 
+def lower_class(was: int) -> int | None:
+    """The priority class a server that had *was* computes work behind the reader at: below normal, or idle for one
+    that is at below normal already (as every process of a job started at below normal is: the viewer and the window
+    are at that class too there, and the work behind them still has to give way). None for one that is idle."""
+    if was == IDLE_PRIORITY_CLASS:
+        return None
+    return IDLE_PRIORITY_CLASS if was == BELOW_NORMAL_PRIORITY_CLASS else BELOW_NORMAL_PRIORITY_CLASS
+
+
 def yield_server(url: Any) -> bool:
-    """The server TASlation started for *url* (`own_server`) and every process it started at below-normal priority,
-    the class the server had kept for `unyield_server` (a process started while it is lowered gets it from the
-    server). Whether it is lowered now; nothing changed for a server whose class is that low already, or lower."""
+    """The server TASlation started for *url* (`own_server`) and every process it started one priority class lower
+    (`lower_class`: below normal, idle for one at below normal), the class the server had kept for `unyield_server`
+    (a process started while it is lowered gets it from the server). Whether it is lowered now; nothing changed for
+    a server that is idle already."""
     if sys.platform != "win32":
         return False
     server = own_server(url)
@@ -911,12 +921,13 @@ def yield_server(url: Any) -> bool:
     with _yield_lock:
         if server not in _yielded:
             was = priority_class(*server)
-            if was is None or was in (BELOW_NORMAL_PRIORITY_CLASS, IDLE_PRIORITY_CLASS):
+            low = None if was is None else lower_class(was)
+            if low is None:
                 return False
-            if not set_priority_class(*server, BELOW_NORMAL_PRIORITY_CLASS):
+            if not set_priority_class(*server, low):
                 return False  # (the server refused: nothing it started is lowered alone)
             _yielded[server] = was
-        _set_all(server, BELOW_NORMAL_PRIORITY_CLASS)  # (each step: a model loaded meanwhile with another class)
+        _set_all(server, lower_class(_yielded[server]))  # (each step: a model loaded meanwhile with another class)
         return True
 
 

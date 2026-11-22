@@ -35,7 +35,7 @@ Speed
   the GPU's memory would stay free, a figure set by hand; the judgement is now made of measured figures and asks for
   about 700 MB.
 * While pages turned past are translated in the background, the translation server TASlation started runs at
-  below-normal priority, so the viewer and the page on show keep the processor (an Ollama of your own is left as it
+  a lower priority, so the viewer and the page on show keep the processor (an Ollama of your own is left as it
   is).
 
 Fixes

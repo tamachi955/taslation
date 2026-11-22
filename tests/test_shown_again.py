@@ -161,6 +161,9 @@ def test_an_early_look_only_for_pages_without_the_inpainting_held(cached, sample
         failed = False
         setting = "auto"
 
+        def ready(self):
+            return True
+
         def erase(self, image, region, *args):
             return Pipeline._paper_erase(image, region, *args)
     monkeypatch.setattr(pipeline, "art_eraser", Eraser())

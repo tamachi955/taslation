@@ -99,13 +99,18 @@ def test_each_goes_back_to_the_class_the_server_had_and_a_low_one_is_never_raise
     before_request("/api/generate")
     assert classes.of == {SERVER: 0x8000, RUNNER: 0x8000}
 
-    for low in (BELOW, IDLE):  # (as low already, or lower: nothing changed, nothing set back)
-        classes.of = {SERVER: low, RUNNER: low}
-        classes.sets.clear()
-        with asking_behind(URL):
-            assert not server_yields()
-        before_request("/api/generate")
-        assert classes.sets == [] and classes.of == {SERVER: low, RUNNER: low}
+    classes.of = {SERVER: BELOW, RUNNER: BELOW}  # (a job started at below normal: one class lower all the same)
+    with asking_behind(URL):
+        assert server_yields() and classes.of == {SERVER: IDLE, RUNNER: IDLE}
+    before_request("/api/generate")
+    assert classes.of == {SERVER: BELOW, RUNNER: BELOW}
+
+    classes.of = {SERVER: IDLE, RUNNER: IDLE}  # (idle already: nothing changed, nothing set back)
+    classes.sets.clear()
+    with asking_behind(URL):
+        assert not server_yields()
+    before_request("/api/generate")
+    assert classes.sets == [] and classes.of == {SERVER: IDLE, RUNNER: IDLE}
 
 
 def test_a_server_this_process_did_not_start_or_shares_is_never_touched(classes):
@@ -264,18 +269,20 @@ def test_the_server_and_what_it_starts_compute_low_and_go_back(stand_in, monkeyp
     server = stand_in(SERVER_CODE, str(flag))
     first = _pythons(server, 1)
     assert len(first) == 1
-    assert ollama_start.priority_class(*server) == NORMAL  # (as this test's process: a server started from it)
+    had = ollama_start.priority_class(*server)  # (as this test's process: normal, or below normal on a runner)
+    low = ollama_start.lower_class(had)
+    assert had in (NORMAL, BELOW) and low in (BELOW, IDLE) and low != had
     _claimed(monkeypatch, tmp_path, server, [ollama_start.this_process()])
     assert ollama_start.own_server(URL) == server
     with asking_behind(URL):
-        assert ollama_start.priority_class(*server) == BELOW and ollama_start.priority_class(*first[0]) == BELOW
+        assert ollama_start.priority_class(*server) == low and ollama_start.priority_class(*first[0]) == low
     flag.write_text("", "utf-8")  # (a model loaded while it is low: its process gets the server's class)
     both = _pythons(server, 2)
     assert len(both) == 2
-    assert all(ollama_start.priority_class(*p) == BELOW for p in both)
+    assert all(ollama_start.priority_class(*p) == low for p in both)
     before_request("/api/generate")
-    assert ollama_start.priority_class(*server) == NORMAL
-    assert all(ollama_start.priority_class(*p) == NORMAL for p in both)
+    assert ollama_start.priority_class(*server) == had
+    assert all(ollama_start.priority_class(*p) == had for p in both)
 
 
 def test_a_server_another_taslation_uses_is_left_as_it_is(stand_in, monkeypatch, tmp_path):
@@ -283,7 +290,8 @@ def test_a_server_another_taslation_uses_is_left_as_it_is(stand_in, monkeypatch,
     other = stand_in("import time; time.sleep(60)")  # (another TASlation's process, that runs)
     _claimed(monkeypatch, tmp_path, server, [ollama_start.this_process(), {"pid": other[0], "started": other[1]}])
     assert ollama_start.own_server(URL) is None
+    had = ollama_start.priority_class(*server)
     with asking_behind(URL):
-        assert ollama_start.priority_class(*server) == NORMAL
+        assert ollama_start.priority_class(*server) == had
     _claimed(monkeypatch, tmp_path, server, [ollama_start.this_process(), {"pid": other[0], "started": other[1] + 1}])
     assert ollama_start.own_server(URL) == server  # (a user that no longer runs: a number reused since)
