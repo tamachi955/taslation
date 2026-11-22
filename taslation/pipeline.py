@@ -4594,7 +4594,7 @@ class Pipeline:
         todo = [r for r in regions if r.status == "untranslated"]
         if not todo:
             if stream is not None:
-                stream.discard()  # (nothing to translate after all: what it sent goes back)
+                stream.discard("no line")  # (nothing to translate after all: what it sent goes back)
             return ""
         if self.translator is None:
             return Message("pipeline.no_translator")
@@ -4648,7 +4648,7 @@ class Pipeline:
             extra["computed"] = computed
         plan = linememo.plan_for(self, texts, meta, todo, serve=bool(reuse), learn=reuse is not None)
         if stream is not None and not plan.asked:
-            stream.discard()  # (every line reused: nothing is asked, and what it sent goes back)
+            stream.discard("every line reused")  # (nothing is asked, and what it sent goes back)
             stream = None
         # (the unit's lines sent as they were read: the request is made through the stream)
         translate = stream.translate_page if stream is not None else self.translator.translate_page

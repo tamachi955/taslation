@@ -527,12 +527,14 @@ class LineStream:
             if self.gated is None:
                 self.gated = True
 
-    def discard(self) -> None:
-        """(the worker) The unit asks nothing of the translator after all (no line, or every one reused): every run sent
-        taken back before anything else is asked."""
+    def discard(self, why: str = "") -> None:
+        """(the worker) The unit asks nothing of the translator after all (no line, or every one reused: *why*, for the
+        counts): every run sent taken back before anything else is asked."""
         if self.discarded or self.complete:
             return
         self.discarded = True
+        if self.sent and not self.log.get("why_taken_back"):
+            self.log["why_taken_back"] = "nothing asked: " + (why or "no line")
         self._halt()
         with self.lock:
             gone = list(self.sent)
@@ -558,6 +560,8 @@ class LineStream:
                 self.taken_back.extend(gone)
             if gone and (self.gate is None or self.gate.confirmed):
                 self.session.rewind(self.start)
+            if gone and not self.log.get("why_taken_back"):
+                self.log["why_taken_back"] = "stopped"
             self.log["outcome"] = "stopped"
         else:
             self.log["outcome"] = "discarded" if self.discarded else "done"

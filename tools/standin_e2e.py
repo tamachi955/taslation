@@ -4310,7 +4310,18 @@ def streamed_lines(stream_log: list[dict[str, Any]], requests: list[dict[str, An
             "final_from_taken_back": total("final_from_taken_back", finished),
             "early_left_at_close": total("early_left", finished),
             "early_left_at_result": sum(int(j.get("early_left_at_result") or 0) for j in by_id.values()
-                                        if j.get("result_t") is not None)}
+                                        if j.get("result_t") is not None),
+            # each unit that took a run back: its counts, why, and the page jobs its taken-back requests were for
+            "units_taken_back": [
+                {**{k: e.get(k) for k in UNIT_KEYS},
+                 "jobs": sorted({r.get("job") for r in requests if r.get("stream") in set(e.get("tokens_taken_back")
+                                                                                          or ())} - {None})}
+                for e in stream_log if e.get("runs_taken_back")]}
+
+
+UNIT_KEYS = ("unit", "outcome", "runs_sent_early", "lines_sent_early", "runs_stood", "lines_stood", "runs_taken_back",
+             "lines_taken_back", "requests_taken_back", "first_taken_back", "why_taken_back", "first_answer_ms",
+             "reconciled_ms")
 
 
 def readings_on_a_miss(resolves: list[dict[str, Any]], rel: Callable[[Any], Any]) -> dict[str, Any]:

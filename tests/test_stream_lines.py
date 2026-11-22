@@ -184,7 +184,7 @@ def test_a_page_stopped_while_it_is_read_puts_back_what_its_lines_changed(settin
         _read(p, sample_page, True, monkeypatch, cancel=cancel)
     assert p.translator.asked  # (lines were asked while the page was read)
     assert lasting() == before
-    assert p.stream_log[-1]["outcome"] == "stopped"
+    assert p.stream_log[-1]["outcome"] == "stopped" and p.stream_log[-1]["why_taken_back"] == "stopped"
 
 
 def test_nothing_is_asked_before_the_frame_was_seen_on_show(settings, sample_page, monkeypatch):
@@ -322,3 +322,17 @@ def test_a_line_read_later_before_the_ones_sent_takes_them_back(settings):
     with stream.lock:
         stream._apply_back()
     assert stream.sent == sent[:1] and stream.taken_back == sent[1:]
+
+
+def test_a_unit_that_asks_nothing_after_all_takes_back_every_run_sent_and_says_why(settings):
+    regions = [_region("ありがとう", 0), _region("大丈夫だよ", 1)]
+    stream = _stream(settings, regions)
+    for r in regions:
+        stream.judged(r)
+    sent = [streaming._Sent(spec, rs, stream.session.mark(), False) for spec, rs in stream.wanted]
+    stream.sent.extend(sent)
+    stream.discard("every line reused")
+    log = stream.close()
+    assert stream.sent == [] and stream.taken_back == sent and log["outcome"] == "discarded"
+    assert log["runs_taken_back"] == 2 and log["first_taken_back"]
+    assert log["why_taken_back"] == "nothing asked: every line reused"
