@@ -14,7 +14,9 @@ glossary, names and draws that `PlamoTranslator.translate_page` makes for the sa
 * and a joined run has all its members (or `continuation.MAX_JOINED` of them and the line after them).
 
 Each answer is lettered at once on the page's drafts layer of its own (`PageFill.early_draft`: copies of the regions
-on a copy of the page; the regions themselves are never touched). Once the unit is read, ordered and given its rooms,
+on a copy of the page; the regions themselves are never touched), and so is each line known that the book's lines
+already translate (`linememo`: it is asked nothing, and the request hands its translation over first), once the
+frame was seen on show. Once the unit is read, ordered and given its rooms,
 its final list is what the page's request is made of (`Pipeline._translate_regions`, `linememo.Plan`): the runs sent
 that it begins with stand - their answers taken as that request's own, lettered on the page as its drafts are, in
 the same order -, and from the first that does not (a line read later came before it, a paragraph was joined, the
@@ -182,6 +184,8 @@ class LineStream:
         self.early_ended = False
         self.t0 = time.monotonic()
         self.taken_back: list[_Sent] = []
+        self.served_ids: set[int] = set()  # the regions whose reused translation went to the drafts layer
+        self.served_waiting: list[tuple[Any, Any, str]] = []  # (those known before the frame was seen on show)
         self.first_answer_ms: float | None = None
         self.log: dict[str, Any] = {"unit": self.unit, "runs_sent_early": 0, "lines_sent_early": 0, "runs_stood": 0,
                                     "lines_stood": 0, "runs_taken_back": 0, "lines_taken_back": 0,
@@ -231,23 +235,25 @@ class LineStream:
                 out.append(r)
         return out
 
-    def _runs_known(self) -> list[tuple[RunSpec, list[Any]]]:
+    def _runs_known(self) -> tuple[list[tuple[RunSpec, list[Any]]], list[tuple[Any, str]]]:
         """The runs of the lines known now that may leave (see the module's docstring), in order, up to the first that
-        may not yet."""
+        may not yet; and the lines known whose translation the book's lines give (`linememo.Plan.served`: no request),
+        each with it."""
         from . import linememo
         from .translate.plamo import request_lines
 
         prov = self._provisional()
         if not prov:
-            return []
+            return [], []
         meta = facts_of(prov, [(r.unit, self.unit_box) for r in prov])
         known = len(prov)
         if meta[-1].get("continues") or ends_open(prov[-1].source_text):
             known -= 1  # (an open-ended last line: whether it goes on depends on the next one)
         if not known:
-            return []
+            return [], []
         texts = [r.source_text for r in prov[:known]]
         plan = linememo.plan_for(self.pipeline, texts, meta[:known], (), serve=self.serve, learn=self.learns)
+        served = [(prov[i], text) for i, text in sorted(plan.served.items())]
         asked = plan.asked
         lines, facts = request_lines([texts[i] for i in asked], [meta[i] for i in asked])
         out: list[tuple[RunSpec, list[Any]]] = []
@@ -257,18 +263,19 @@ class LineStream:
             follow = self.translator._following(lines, facts, lines, run[-1])
             out.append((RunSpec([lines[k] for k in run], [facts[k] for k in run], follow),
                         [prov[asked[k]] for k in run]))
-        return out
+        return out, served
 
     def _offer(self) -> None:
         if self.complete or self.closed:
             return
         try:
-            wanted = self._runs_known()
+            wanted, served = self._runs_known()
         except Exception:  # noqa: BLE001 - a guess that fails sends nothing; the final request is made as ever
-            wanted = []
+            wanted, served = [], []
         with self.lock:
             if self.complete or self.closed:
                 return
+            self._draft_served(served)
             self.wanted = wanted
             m = 0
             while m < len(self.sent) and m < len(wanted) and self.sent[m].spec == wanted[m][0]:
@@ -281,6 +288,22 @@ class LineStream:
                 self._back(m)
             self.lock.notify_all()
             self._start()
+
+    def _draft_served(self, served: Sequence[tuple[Any, str]]) -> None:
+        """(under the lock) Each line known whose translation the book's lines give (*served*: region, translation)
+        lettered on the drafts layer once, as an answer is - the request would take that translation without asking
+        the model, and hands it over first -, once the frame was seen on show (the sender asks that, `_work`)."""
+        if self.fill is None:
+            return
+        for region, text in served:
+            clone = self.clones.get(id(region))
+            if id(region) in self.served_ids or clone is None or not text:
+                continue
+            self.served_ids.add(id(region))
+            if self.gated:
+                self.fill.early_draft(region, clone, text)
+            elif self.gated is None:
+                self.served_waiting.append((region, clone, text))
 
     def _back(self, m: int) -> None:
         """(under the lock) The runs sent from the *m*th on taken back: the one under way cancelled; the sender puts
@@ -339,6 +362,10 @@ class LineStream:
                 ok = self.gate is None or self.gate.on_show(_Either(self.cancel, self.halted), close=False)
                 with self.lock:
                     self.gated = bool(ok)
+                    waiting, self.served_waiting = self.served_waiting, []
+                    if ok and not (self.complete or self.closed) and self.fill is not None:
+                        for region, clone, text in waiting:  # (the reused translations known meanwhile)
+                            self.fill.early_draft(region, clone, text)
                     if not ok:
                         self.sent.remove(s)
                         self.flight = None
@@ -545,7 +572,7 @@ class LineStream:
         drafted = [r for s in gone for r in s.drafted]
         if drafted and self.fill is not None:
             self.fill.early_withdraw(drafted)
-        self._end_early()
+        # (the drafts layer ends at `close`: after the drafts of the reused translations the request hands over)
 
     def close(self) -> dict[str, Any]:
         """(the worker, the unit done, stopped or failed) The sender ended; a stream never reconciled (the page stopped
@@ -565,6 +592,7 @@ class LineStream:
             self.log["outcome"] = "stopped"
         else:
             self.log["outcome"] = "discarded" if self.discarded else "done"
+            self._end_early()  # (a unit that asked nothing, or a request that ended without waiting on an answer)
         if self.fill is not None:
             try:
                 self.fill.wait(drop=stopped)  # (the layer's last work done, or dropped with the page)

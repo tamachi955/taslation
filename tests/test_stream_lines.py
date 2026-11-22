@@ -161,6 +161,34 @@ def test_runs_asked_too_soon_are_taken_back_and_nothing_of_them_lasts(settings, 
     assert withdrawn and all(d["text"] == "" or not d.get("early") or d.get("early_end") for d in withdrawn)
 
 
+def test_a_line_the_book_already_translates_is_lettered_while_the_page_is_read(settings, sample_page, monkeypatch):
+    # (read once: the book's lines learn the page's; read again, out of the cache, with two lines new)
+    again = TEXTS[:3] + ["新しい台詞だ", "もう一つの台詞"] + TEXTS[5:]
+
+    def twice(p: Pipeline, streamed: bool):
+        _read(p, sample_page, streamed, monkeypatch)
+        for page in list(p.cache.pages):
+            p.cache.remove(page.fingerprint)
+        p.shown_pages.clear()
+        p.ocr = SlowOcr(again)
+        p.translator.asked.clear()
+        return _read(p, sample_page, streamed, monkeypatch)
+
+    settings.reuse_lines = True  # (the default; the tests' settings turn it off)
+    a = _pipeline(settings, "Served alone")
+    events_a, result_a = twice(a, False)
+    b = _pipeline(settings, "Served streamed")
+    events_b, result_b = twice(b, True)
+    served = {r.translated_text for r in result_b.regions if getattr(r, "reused_text", "")}
+    assert served and 0 < len(a.translator.asked)  # (some lines reused, the new ones asked)
+    assert [x[:2] for x in a.translator.asked] == _kept_requests(b)
+    assert _page(result_a) == _page(result_b)
+    early = {d["text"] for k, d in events_b if k == "translated" and d.get("early") and not d.get("early_end")}
+    assert served and served <= early  # (the reused ones lettered on the drafts layer, asked nothing)
+    log = b.stream_log[-1]
+    assert log["early_withdrawn"] == 0 and log["early_left"] == 0 and _shown_early_at_end(events_b) == []
+
+
 def test_a_page_stopped_while_it_is_read_puts_back_what_its_lines_changed(settings, sample_page, monkeypatch):
     p = _pipeline(settings, "Stopped", delay=0.01)
 
