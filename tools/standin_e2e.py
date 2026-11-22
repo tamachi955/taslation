@@ -650,6 +650,15 @@ def placed_view(browser: Any, ready: dict[str, str], since: int, seconds: float 
 
 
 # ---------------------------------------------------------------------------------------------------- the notes
+def _where(e: BaseException) -> str:
+    """Where *e* rose, as " (file:line in function < file:line in function)", its two innermost frames: a failure of
+    the tool's own names its place in the report, never its message (which may hold a path or a text)."""
+    frames = traceback.extract_tb(e.__traceback__)[-2:]
+    if not frames:
+        return ""
+    return " (" + " < ".join(f"{Path(f.filename).name}:{f.lineno} in {f.name}" for f in reversed(frames)) + ")"
+
+
 class Notes:
     """What the hooks see, as numbers and codes (`standin_viewer.Shown` of every picture): the page jobs, the
     translator's requests, the pictures the page area was given, the frames captured, the loads of the model, the OCR
@@ -2961,8 +2970,8 @@ class Director:
                 self.step()
                 self.due_shots()
                 self.cover_step()
-        except Exception as e:  # noqa: BLE001 - said by its type, and the run ends
-            self.stop(f"{type(e).__name__} in the driver")
+        except Exception as e:  # noqa: BLE001 - said by its type and where it rose (no message: no text), and the run ends
+            self.stop(f"{type(e).__name__} in the driver{_where(e)}")
         if not self.over:
             self.app.after(TICK_MS, self.tick)
 
@@ -4956,7 +4965,7 @@ def run(args: argparse.Namespace) -> int:
                                 narrow_rect, mode)
     except Exception as e:  # noqa: BLE001 - said (its type and where, no value), then everything is closed
         traceback.print_exc()
-        report["run"] = {"failed": f"{type(e).__name__} in the driver"}
+        report["run"] = {"failed": f"{type(e).__name__} in the driver{_where(e)}"}
     finally:
         if canned is not None:
             canned.stop()
