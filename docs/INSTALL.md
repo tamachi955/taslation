@@ -76,7 +76,7 @@ The Ollama TASlation starts also gets the full window cache: `LLAMA_ARG_SWA_FULL
 With it, llama.cpp keeps the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
 and keeps 256 MB of earlier requests in RAM. By default ("On, unless the OCR then leaves the GPU") TASlation decides each time it starts Ollama:
 it leaves the window cache out when its extra GPU memory would move two of the OCR readers from the GPU to the processor
-(on a 6 GB GPU, only when other programs hold about 1.3 to 1.4 GB of it). "Off" never uses it, "Always on" always does.
+(on a 6 GB GPU, only when other programs hold about 1.6 to 1.7 GB of it). "Off" never uses it, "Always on" always does.
 The window and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
 
 For an Ollama you run yourself, neither the installer nor TASlation sets these two variables. To use the window cache there,

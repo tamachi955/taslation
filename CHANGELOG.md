@@ -18,6 +18,16 @@ Reading
 * docs/LEGAL and the manual say what is true now; the README's and the installation guide's whole-book times are
   gone.
 
+Speed
+
+* The models that read the text run on the GPU more often. Before, they went to the processor whenever less than 1 GB
+  of the GPU's memory would stay free beside everything else, a figure set by hand; now the rule is made of measured
+  figures (what the readers need at their largest, where the driver begins to move memory off the card, how much other
+  programs' use moves) and asks for about 700 MB. On the test computer (6 GB, other programs holding 1.6 GB of it)
+  that is the difference between the readers on the processor and on the GPU: the first bubble of a two-page screen
+  after 1.4 s instead of 2.7 s. The room is looked at again every 30 seconds, and reads that turn out slower on the
+  GPU than on the processor move back to it for the session (Tools → Settings → System says why).
+
 For developers
 
 * The stand-in viewer can draw every page sharp at once (`tools/standin_e2e.py --soft-first off`): the speed figures
