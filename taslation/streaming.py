@@ -153,11 +153,28 @@ class _Sent:
 
 
 class _Either:
+    """A run's request's cancel: the page's (*a*, None or anything with ``is_set``) or the run's own (*b*)."""
+
     def __init__(self, a: Any, b: threading.Event):
         self.a, self.b = a, b
 
     def is_set(self) -> bool:
         return bool(self.a is not None and self.a.is_set()) or self.b.is_set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """As `threading.Event.wait`, as the restart of a server that gave a request no answer waits on the request's
+        cancel (`ollama_start._wait_answer`; without it that restart failed on a run's request, 2026-11-23): True
+        once either is set - the page's looked at every EITHER_STEP_S -, False when *timeout* seconds went by."""
+        end = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
+        while not self.is_set():
+            left = EITHER_STEP_S if end is None else min(EITHER_STEP_S, end - time.monotonic())
+            if left <= 0:
+                return False
+            self.b.wait(left)
+        return True
+
+
+EITHER_STEP_S = 0.05  # how often a run's cancel waited on looks at the page's (`_Either.wait`)
 
 
 class LineStream:

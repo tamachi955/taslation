@@ -479,3 +479,26 @@ def test_a_unit_that_asks_nothing_after_all_takes_back_every_run_sent_and_says_w
     assert stream.sent == [] and stream.taken_back == sent and log["outcome"] == "discarded"
     assert log["runs_taken_back"] == 2 and log["first_taken_back"]
     assert log["why_taken_back"] == "nothing asked: every line reused"
+
+
+def test_a_runs_cancel_is_waited_on_as_an_event_and_a_restart_waits_on_it(monkeypatch):
+    """(the rule for a request without an answer, `translate.ollama`) A run's request's cancel is waited on where the
+    restart of a server that gave no answer waits on it: it had no ``wait``, and that restart failed for a run."""
+    from taslation import health, ollama_start
+
+    page, own = threading.Event(), threading.Event()
+    either = streaming._Either(page, own)
+    began = time.monotonic()
+    assert either.wait(0.06) is False and time.monotonic() - began >= 0.05
+    threading.Timer(0.05, page.set).start()  # (the page's cancel: looked at between the waits)
+    began = time.monotonic()
+    assert either.wait(5.0) is True and time.monotonic() - began < 2.0
+    alone = streaming._Either(None, own)
+    threading.Timer(0.05, own.set).start()
+    assert alone.wait() is True and alone.wait(0) is True
+    monkeypatch.setattr(health, "ollama_running", lambda url: False)
+    monkeypatch.setattr(ollama_start, "START_WAIT_S", 0.2)
+    monkeypatch.setattr(ollama_start, "POLL_S", 0.02)
+    quiet = streaming._Either(threading.Event(), threading.Event())
+    assert ollama_start._wait_answer("http://127.0.0.1:1", quiet).code == "health.ollama_no_answer"
+    assert ollama_start._wait_answer("http://127.0.0.1:1", either).code == "health.ollama_down"
