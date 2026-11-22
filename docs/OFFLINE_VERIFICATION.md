@@ -4465,3 +4465,36 @@ stay valid and show as any cached page. The sections above stay as they were wri
   scenario on 2026-11-21, and as the yardstick of how long the backlog takes in the sections on pages turned past
   (2026-11-20 to 2026-11-22: 36.2 to 37.7 s for the 5 screens of scenario w in the wide window). On GitHub's runners
   the third group of stand-in scenarios is now t, t2 and k's three paces ("t-t2-k5-k1-k2").
+
+**Run after the removal.** The whole suite on a snapshot of the tree: 5103 passed, 22 skipped, 7 failed - five tests
+still passed arguments that are gone (corrected), two need a git repository and pass in the working tree. The stand-in
+viewer end to end (`--scenario c,a,b,d,e,r,t,o,z,x,f,k --start-ollama 11435 --wait-done 120`, the stand-in drawing
+soft first as ever; translation on this computer's GPU, the OCR on the processor as the GPU budget placed it): exit 0
+in 885 s, every screen rested on translated (a 9/9, d 3/3, r 4/4, o 3/3, z 3/3, f 3/3, f2 2/2, k5, k1 and k2 21/21
+each), no stale result and no lag, no soft frame confirmed or left in the cache, no job cancelled with its page still
+on show, 2 requests wasted (both dropped in k1); behind the reader, 18 of k2's 20 screens turned past caught (its read
+reused for all 20) and 2 of k1's, drained in 30.5 s and 14.9 s.
+
+**Timing with the stand-in sharp from the start (2026-11-22).** `tools/standin_e2e.py --soft-first off` draws every
+turn sharp at once; three runs of `--scenario a,f --wait-done 120` that way and three with the default, alternating,
+on the same computer and server (port 11435). Medians in ms over the turns rested on to pages the cache did not hold:
+two-page screens 33 turns (a and f), one-page screens 3 turns (f2):
+
+| | Sharp at once, from the turn | Soft first, from the turn | Soft first, from the sharp picture |
+|---|---|---|---|
+| One page: first bubble | 1212 | 1415 | 1200 |
+| One page: whole page | 2142 | 2335 | 2119 |
+| Two pages: first bubble | 2818 | 3004 | 2690 |
+| Two pages: whole page | 7769 | 7364 | 7099 |
+
+The runs of one way differ among themselves by a few hundred ms on a whole two-page screen. In the sharp runs the
+page's job started 367 ms after the turn on two-page screens (126-469) and 69 ms after it on one page: the window's
+capture of the new picture 78 ms after the stand-in drew it (51-149; the capture call itself about 35 ms), its look
+at the frame before the job 80 ms (two pages) or 19 ms (one page) while the worker was free, the worker's queue 2 to
+9 ms. On 20 of the 33 two-page turns the page before's job was still in its last step at the turn - lettering the
+finished page once more from the cache so that its next showing is at once (`Pipeline.keep_shown`, about 0.5 s; the
+stand-in turns as soon as a page is finished) - and the new page's job started 294 ms after the capture (244-388): a
+frame of another page cancels a running job once it has stayed 150 ms (`LEFT_PAGE_MS`), and the cancel takes effect
+at the job's next check. With soft first that wait falls within the soft picture's 166 to 418 ms. In the sharp runs
+the stand-in drew nothing soft and the window never learnt that it does (`App._drew_soft`: 0); in the soft runs it
+learnt it once each, at the first soft picture.
