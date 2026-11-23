@@ -1,9 +1,9 @@
 """The window's strings for see-through mode's side panes (`ui.seethrough`, a prototype behind ``see_through``): the
-controls left of the page (Stop while a page is translated, the lettering's switch with its key, the indicators'
-switch, the way back to TASlation's own window) and the indicators right of it (how far the page on show is, where the
-translator runs). The other words of the panes are the window's own (Translate, Auto, Set area..., Settings..., Quit,
-the status line, the indicator's lines). "Lettering" is worded as in the window's other strings (ja 「写植」), the
-processor as in the System page's (ja 「CPU」).
+controls left of the page (Stop while a page is translated, the indicators' switch, the way back to TASlation's own
+window) and the indicators right of it (how far the page on show is, where the translator runs). The other words of
+the panes are the window's own (Translate, Auto, Lettering - the Settings dialog's, ja 「写植」 -, Set area...,
+Settings..., Quit, the status line, the indicator's lines); the processor is worded as in the System page's (ja
+「CPU」).
 
 Machine-translated; no native review."""
 
@@ -12,12 +12,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ja": "停止", "es": "Detener", "pt": "Parar", "fr": "Arrêter", "de": "Stopp", "it": "Ferma", "nl": "Stop",
         "pl": "Stop", "ru": "Стоп", "tr": "Durdur", "id": "Hentikan", "vi": "Dừng", "zh": "停止", "zh-tw": "停止",
         "ko": "중지", "th": "หยุด",
-    },
-    "Lettering (F9)": {
-        "ja": "写植 (F9)", "es": "Rotulado (F9)", "pt": "Letreiramento (F9)", "fr": "Lettrage (F9)",
-        "de": "Beschriftung (F9)", "it": "Lettering (F9)", "nl": "Belettering (F9)", "pl": "Liternictwo (F9)",
-        "ru": "Надписи (F9)", "tr": "Yazı (F9)", "id": "Huruf (F9)", "vi": "Chữ (F9)", "zh": "文字排版 (F9)",
-        "zh-tw": "文字排版 (F9)", "ko": "글자 (F9)", "th": "การลงตัวอักษร (F9)",
     },
     "Indicators": {
         "ja": "インジケーター", "es": "Indicadores", "pt": "Indicadores", "fr": "Indicateurs", "de": "Anzeigen",

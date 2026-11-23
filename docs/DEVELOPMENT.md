@@ -348,14 +348,24 @@ rows' languages.
   for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
-  them). The side panes (`taslation/panes.py`) are watched once a second (`panes`): shown or hidden beside a single
-  page or a spread, the most px each shared with the page box (0 expected), their gaps to it and their sizes, and
-  which window `WindowFromPoint` gives on the right pane (the stand-in: click-through), on a control of the left one
-  (the pane) and between two of its rows (the stand-in); some 8 s in, the lettering's switch on the left pane is
-  clicked twice by a press and a release POSTED to the pane's own window (no input of the system's: the lettering off
-  and on again), with the time until it changed and the window in front looked at every 5 ms meanwhile (the stand-in
-  throughout). `--see-pane-shot` keeps one copy of the stand-in's place on the screen the first time both panes show
-  beside a spread whose page is done (SCRATCH/shots: a sample page, delete it after). `--see-truth` adds copies of the
+  them). The side panes (`taslation/panes.py`, at the capture area's two outer edges) are watched once a second
+  (`panes`): shown or hidden with a single page or a spread, the most px each shared with the page box (0 expected),
+  their gaps to it, their px to their edge of the area (8 at 100 %), their columns in the client (the same with a
+  single page and a spread) and their sizes, and which window `WindowFromPoint` gives on the right pane (the stand-in:
+  click-through), on a control of the left one (the pane) and between two of its rows (the stand-in); some 8 s in,
+  the lettering's switch on the left pane is clicked twice by a press and a release POSTED to the pane's own window
+  (no input of the system's: the lettering off and on again), with the time until it changed and the window in front
+  looked at every 5 ms meanwhile (the stand-in throughout). The see-through window's reading of the pointer is the
+  tool's for the whole run (`capture.seethrough.cursor_pos` put in its place: none, so the real pointer, wherever it
+  rests, changes nothing; the tool never moves it); some 14 s in, it is put on a patch shown and off it again five
+  times (`hover`: the ms until the patch is gone and until it is back, the other patches staying) and then at the
+  edge of a patch with no other one near that side (4 px off hides it, 10 px off keeps it hidden, 12 px off shows it
+  again, 5 px off keeps it shown, 4 px off hides it again, at 100 %). `--see-pane-shot` keeps one copy of the
+  stand-in's place on the screen the first time both panes show with a spread whose page is done and the copy shows
+  nothing of another program's (outside where TASlation's windows draw it must be the viewer's own frame: a
+  notification lies in a band of the window order that `cover_rects` does not walk; else put off to a later look,
+  `shot_put_off`, or, where those pixels lie in the bottom third only, cut 32 px above them with both panes whole and
+  the rest looked at again pixel by pixel but for an 8 px rim, `shot_rows_cut`) (SCRATCH/shots: a sample page, delete it after). `--see-truth` adds copies of the
   stand-in's place on the screen every 33 ms, in memory, checked for patches
   of another page than the one the copy shows (an old patch counts when its lettering's ink is on the screen and not
   in the viewer's own frame of that moment) and for how the page's own patches lie (0 px off at 100 %); two of them,

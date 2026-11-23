@@ -196,6 +196,30 @@ def compose(size: tuple[int, int], patches: list[Patch] | tuple[Patch, ...], out
     return out
 
 
+def hovered(boxes: list[Box], point: tuple[int, int], before: Box | None, grow: int, keep: int) -> int | None:
+    """Which of the patch places *boxes* (frame pixels) the pointer at *point* (frame pixels) is over: the one it
+    was over before (*before*, its box) as long as the pointer is within *keep* px of it - or the one of *boxes* that
+    meets that box most, a page lettered again -, else the nearest one it is within *grow* px of (*keep* > *grow*: a
+    pointer resting on the edge does not make it come and go); None for none."""
+    x, y = point
+
+    def gap(b: Box) -> int:  # (px from the box to the point, 0 inside it)
+        return max(b[0] - x, x - (b[2] - 1), b[1] - y, y - (b[3] - 1), 0)
+
+    if before is not None and gap(before) <= keep:
+        for i, b in enumerate(boxes):
+            if b == before:
+                return i
+        meets = [(min(b[2], before[2]) - max(b[0], before[0])) * (min(b[3], before[3]) - max(b[1], before[1]))
+                 if b[0] < before[2] and before[0] < b[2] and b[1] < before[3] and before[1] < b[3] else 0
+                 for b in boxes]
+        best = max(range(len(boxes)), key=lambda i: meets[i], default=None)
+        if best is not None and meets[best] > 0 and gap(boxes[best]) <= keep:
+            return best
+    near = [(gap(b), i) for i, b in enumerate(boxes) if gap(b) <= grow]
+    return min(near)[1] if near else None
+
+
 def covered(box: Box, offset: tuple[int, int], covers: list[Box]) -> bool:
     """Whether the patch place *box* (frame pixels; the frame's top left on the screen at *offset*) meets any of the
     screen rectangles *covers* (windows over the viewer)."""

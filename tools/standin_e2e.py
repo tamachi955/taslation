@@ -2927,9 +2927,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return "viewer" if args.front == "viewer" and got != "own" else got
 
     overbook.foreground_owner = over_owner
-    from taslation.ui import seethrough as see_mod
-
-    see_mod.foreground_owner = owner  # (its hot key: held while the viewer is in front, as the window is told)
     from taslation.ui import order as order_mod
 
     if getattr(args, "order_partly", "as-built") != "as-built":  # (`ui.order`'s switch, for this run alone)
@@ -6291,8 +6288,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "shots/ (they show the sample pages: delete them after)")
     ap.add_argument("--see-pane-shot", action="store_true",
                     help="with --see-through: one copy of the stand-in's place on the screen, taken the first time "
-                         "both side panes show beside a spread whose page is done, into shots/ (it shows a sample page: "
-                         "delete it after)")
+                         "both side panes show beside a spread whose page is done and the copy shows nothing of another "
+                         "program's, into shots/ (it shows a sample page: delete it after)")
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")

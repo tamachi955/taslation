@@ -3,9 +3,9 @@ viewer's window or its full screen): TASlation's lettering lies over the viewer'
 and the viewer takes every click and key itself.
 
 * `start` makes the see-through window at the window's start when the setting is on (and asks the capture for frames
-  up to every `wgc.FAST_UPDATE_MS`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over, holds
-  the hot key (`HOTKEY`, only while the viewer is in front: it is the system's for as long as it is registered) and
-  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too).
+  up to every `wgc.FAST_UPDATE_MS`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
+  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode holds no hot
+  key: every key goes to the viewer, and the lettering is hidden and shown again with the left pane's switch.
 * The patches are where the lettered page differs from the frame it was read from - the page filling in (drafts,
   then the final page) and the last translated page -, made on the Tk thread and handed over as immutable arrays.
   Whether a patch shows is the see-through window's own decision, at every frame of the viewer's
@@ -18,15 +18,18 @@ and the viewer takes every click and key itself.
   without them, the bubbles that reach those rows (cut by a bar) left out, and the page is read once more for those
   alone (`Pipeline.carry_over`: the lines kept are not asked again). The page on a flat ground of any colour is the
   capture area (`seethrough.ground_box`: a white ground too).
-* The side panes (`taslation.panes`, shown by `capture.seethrough`): on the viewer's ground beside the page at rest
-  (`note_frame` keeps the page box, the steady band and the ground's colour), LEFT the controls - Translate (Stop while
-  a page can be stopped), Auto, the target language (an arrow each side; taken once no arrow was clicked for
-  LANGUAGE_SETTLE_MS), the lettering's switch (as F9), the indicators' switch (kept in the settings file:
-  ``see_through_indicators``), Set area..., Settings..., the way back to TASlation's window, Quit -, RIGHT the
+* The side panes (`taslation.panes`, shown by `capture.seethrough`): on the viewer's ground at the capture area's two
+  outer edges (`note_frame` keeps the page box at rest, the area's columns, the steady band and the ground's colour),
+  LEFT the controls - Translate (Stop while a page can be stopped) with, at the row's right end, a square button drawn
+  as a circular arrow that asks for the page on show again (`translate_now`, what F5 does in the window; dim until a
+  page was lettered and while the window's Translate is), Auto, the target language (an arrow each side; taken once no
+  arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
+  file: ``see_through_indicators``), Set area..., Settings..., the way back to TASlation's window, Quit -, RIGHT the
   indicators: what the status slot says, how far the page filling in is (lines lettered of the lines read), the status
   line, the backlog, the pages that went by too fast and those updated since they were seen (the indicator's own
-  lines), where the translator runs. `panes_tick` (every TICK_MS) acts on the clicks on the left pane and draws a pane
-  again only when what it says changed. A pane that does not fit its ground hides (`panes.place`).
+  lines), where the translator runs - the window's words with what they say of keys left out (`panes.without_keys`:
+  the keys are the viewer's here). `panes_tick` (every TICK_MS) acts on the clicks on the left pane and draws a pane
+  again only when what it says changed. A pane that would come near the page hides (`panes.place`).
 * TASlation's own window is put aside: shown at a quiet start (never activated, so that its widgets are laid out)
   and minimised QUIET_MS later (`quiet_started`; minimising a window that is not active moves no foreground), reached
   again from the left pane (TASlation window) or the taskbar. A dialog of its own that comes up meanwhile - the
@@ -50,16 +53,12 @@ from PIL import Image
 from .. import config
 from .. import panes as pn
 from .. import seethrough as st
-from ..capture import foreground_owner, foreground_window
 from ..capture import seethrough as window
 from ..capture import wgc
-from ..capture.overlay import HotKeys
 from ..i18n import _
 from ..i18n import current as ui_language
 
 TICK_MS = 50
-HOTKEY = "see_through"
-HOTKEY_VK = 0x78  # F9: free in the default keymap and not one of over-the-book's hot keys (F5, F11, Esc)
 BAR_WAIT_S = 3.5  # a frame with bars over the page is read only once they have stayed so long (a viewer's own bars go
 # by themselves in 1-3 s once the pointer rests; bars held longer are painted over in the frame read)
 MEMO_KEPT = 4
@@ -93,7 +92,7 @@ def quiet_start(app: Any, settings: Any) -> None:
     or minimised alike), which takes the foreground from the viewer; so the first one it makes is a decoy put inside
     a frame of the window's own (``-use``), a child window, which nothing activates. The window itself is then shown
     as Tk shows every later one, not activated (SW_SHOWNOACTIVATE): the viewer stays in front and takes the reader's
-    keys, F9 among them, with no click first. Nothing moves the foreground. The decoy goes once the window is shown
+    keys with no click first. Nothing moves the foreground. The decoy goes once the window is shown
     (`quiet_started`)."""
     app._quiet_decoy = None
     app._quiet_ended = False
@@ -195,13 +194,13 @@ def start(app: Any) -> bool:
     """The see-through window made when the setting asks for it (Windows only); whether it runs."""
     app._see_through = None
     app._see_memo = []
-    app._see_keys = None
     app._see_bars_since = None
     app._see_rest_box = None
     app._see_job = None
     app._see_carries = []  # (when, pages carried over, bubbles left out), see after_bars
     app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
-    app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour) at the last rest (`note_frame`)
+    app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour, the capture area's columns)
+    # at the last rest (`note_frame`)
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
     app._see_language = None  # (language, after job) while the left pane's arrows are being clicked
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
@@ -222,10 +221,6 @@ def start(app: Any) -> bool:
 
 def close(app: Any) -> None:
     over = getattr(app, "_see_through", None)
-    keys = getattr(app, "_see_keys", None)
-    if keys is not None:
-        keys.close()
-        app._see_keys = None
     if over is not None:
         app._see_through = None
         over.close()
@@ -246,41 +241,21 @@ def _tick(app: Any) -> None:
 
 
 def tick(app: Any) -> None:
-    """The viewer followed, the hot key held while the viewer is in front (and its presses acted on), the patches
-    handed over when they changed, the side panes' clicks acted on and the panes drawn again when they changed."""
+    """The viewer followed, the patches handed over when they changed, the side panes' clicks acted on and the panes
+    drawn again when they changed."""
     over = app._see_through
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
     over.follow(hwnd)
     app._see_dpi = window.viewer_dpi(hwnd)
-    _hotkey(app, hwnd)
     present(app)
     panes_tick(app)
     if on(app):  # (not after Quit on the left pane: the window has gone)
         _dialog_waits(app)
 
 
-def _hotkey(app: Any, viewer: int) -> None:
-    owner = foreground_owner(foreground_window(), viewer) if viewer else ""
-    keys = app._see_keys
-    wanted = owner == "viewer"
-    if keys is None:
-        if not wanted:
-            return
-        keys = app._see_keys = HotKeys.start()
-        if keys is None:
-            return
-    if wanted and HOTKEY not in keys.registered:
-        keys.register(HOTKEY, HOTKEY_VK)
-    elif not wanted and HOTKEY in keys.registered:
-        keys.unregister(HOTKEY)
-    for name in keys.take():
-        if name == HOTKEY:
-            toggle(app)
-
-
 def toggle(app: Any) -> None:
-    """The hot key: the lettering over the viewer hidden, or shown again."""
+    """The left pane's Lettering: the lettering over the viewer hidden, or shown again."""
     over = getattr(app, "_see_through", None)
     if over is not None:
         over.set_on(not over.on)
@@ -329,14 +304,27 @@ def _language_shown(app: Any) -> str:
     return _(language) if language in LANGUAGES else language
 
 
+def again_enabled(app: Any) -> bool:
+    """Whether the left pane's circular arrow (ask for the page on show again: `translate_now`, F5 in the window) is
+    live: once a page was lettered, and not while the window's Translate is greyed (a job at work for a while)."""
+    if getattr(app, "last_result", None) is None:
+        return False
+    button = getattr(app, "translate_btn", None)
+    try:
+        return button is None or str(button.cget("state")) != "disabled"
+    except tk.TclError:
+        return False
+
+
 def left_rows(app: Any) -> list[pn.Row]:
     """The left pane: what the window offers a reader in the Reader role, the controls a click acts on."""
     over = getattr(app, "_see_through", None)
-    first = pn.Row("stop", _("Stop")) if _stoppable(app) else pn.Row("translate", _("Translate"))
+    again = {"square": "again", "square_enabled": again_enabled(app)}
+    first = pn.Row("stop", _("Stop"), **again) if _stoppable(app) else pn.Row("translate", _("Translate"), **again)
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
             pn.Row("language", _language_shown(app), "choice"),
-            pn.Row("lettering", _("Lettering (F9)"), "toggle", on=bool(over is None or over.on)),
+            pn.Row("lettering", _("Lettering"), "toggle", on=bool(over is None or over.on)),
             pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
             pn.Row("area", _("Set area...")),
             pn.Row("settings", _("Settings...")),
@@ -348,22 +336,23 @@ def right_rows(app: Any) -> list[pn.Row]:
     """The right pane, words only, each row only when it has something to say: the status slot (`status_slot`: what
     the page cannot show itself), how far the page filling in is, the status line, the indicator's lines on the pages
     behind (the backlog, those that went by too fast, those updated since they were seen: `side_model`), where the
-    translator runs."""
+    translator runs. The window's words name no key here (`panes.without_keys`: every key is the viewer's)."""
     from . import status_slot
 
     rows: list[pn.Row] = []
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None
-    if want:
-        rows.append(pn.Row("", status_slot.slot_text(want[0]), "text", warn=bool(want[1])))
+    slot = pn.without_keys(status_slot.slot_text(want[0])) if want else ""
+    if slot:
+        rows.append(pn.Row("", slot, "text", warn=bool(want and want[1])))
     fill = getattr(app, "_fill", None)
     if fill is not None and fill.final is None:
         total = sum(1 for s in fill.states if s != "skipped")
         if total:
             rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
                                "text"))
-    status = str(_get(getattr(app, "status_var", None), "") or "").strip()
+    status = pn.without_keys(str(_get(getattr(app, "status_var", None), "") or "").strip())
     if status:
         rows.append(pn.Row("", status, "text"))
     model = getattr(side, "model", None)
@@ -409,8 +398,8 @@ def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, 
 
 def panes_tick(app: Any) -> None:
     """The clicks on the left pane acted on, then both panes handed to the see-through window as they are to be: on
-    the ground beside the page at the last rest, or hidden (no page on a flat ground yet, no room, the right one
-    switched off)."""
+    the ground at the capture area's outer edges, beside the page at the last rest, or hidden (no page on a flat
+    ground yet, no room, the right one switched off)."""
     over = getattr(app, "_see_through", None)
     if over is None:
         return
@@ -423,14 +412,15 @@ def panes_tick(app: Any) -> None:
             app._see_pane_memo[side] = (memo[0], memo[1], None)  # (a click comes to nothing)
         over.set_panes(None, None)
         return
-    size, page, band, colour = ground
+    size, page, band, colour, columns = ground
     dpi = getattr(app, "_see_dpi", st.BASE_DPI)
     language = ui_language()
     scheme = pn.colours(colour)
-    room_left, room_right = pn.rooms(size, page, dpi)
+    room_left, room_right = pn.rooms(size, page, dpi, columns)
     left = _picture(app, "left", left_rows(app), room_left, language, dpi, scheme)
     right = _picture(app, "right", right_rows(app), room_right, language, dpi, scheme) if indicators_on(app) else None
-    box_left, box_right = pn.place(size, page, band, left.size if left else None, right.size if right else None, dpi)
+    box_left, box_right = pn.place(size, page, band, left.size if left else None, right.size if right else None, dpi,
+                                   columns)
     for side, picture, box in (("left", left, box_left), ("right", right, box_right)):
         memo = app._see_pane_memo.get(side)
         if memo is not None:
@@ -534,6 +524,7 @@ def _flip_auto(app: Any) -> None:
 
 PANE_ACTIONS: dict[str, Any] = {
     "translate": lambda app: app.translate_now(),
+    "again": lambda app: app.translate_now(),  # (the circular arrow: what F5 does in the window, for the page on show)
     "stop": lambda app: app.stop_page(),
     "auto": _flip_auto,
     "language_prev": lambda app: _pick_language(app, -1),
@@ -626,8 +617,8 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     """A frame just captured of the viewer (`LiveViewMixin._capture_frame`): since when bars lie over the page (and a
     look once they have stayed BAR_WAIT_S: a viewer draws no new frame while they stand still), and the page box of
     the last frame at rest (which tells half a spread) with what the side panes are placed by: the frame's size, the
-    steady band's rows (`seethrough.steady_box` of the capture area: where bars never come) and the ground's colour
-    (none at rest on no flat ground: the panes hide)."""
+    steady band's rows (`seethrough.steady_box` of the capture area: where bars never come), the ground's colour
+    (none at rest on no flat ground: the panes hide) and the capture area's columns (the panes at its edges)."""
     found = frame_look(app, image, facts)
     if found.kind is not None:
         return
@@ -642,7 +633,7 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
             app._see_rest_box = found.box
             _rgb, area = area_rgb(app, image, facts)
             steady = st.steady_box(image.size, area)
-            app._see_ground = (image.size, found.box, (steady[1], steady[3]), found.ground)
+            app._see_ground = (image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2]))
         else:
             app._see_ground = None
         return

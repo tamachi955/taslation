@@ -7,6 +7,9 @@ click, no message; the foreground is only read):
 * every frame the stand-in's capture session delivers (`wgc.add_listener`: when), so that the frames a second of the
   browser while its bars fade or its spinner turns can be told with the see-through window on and off;
 * which window is in front, every FRONT_EVERY_S, and each change (the stand-in, this process, another);
+* the side panes once a second (`_pane_watch`), one click on the left pane's lettering switch posted to the pane
+  (`_click_lettering`), and the patch under the pointer (`_hover_measure`: the pointer the see-through window reads is
+  this tool's for the whole run, `install`; the real pointer is never moved);
 * every HIT_EVERY_S, which window `WindowFromPoint` gives at the middle of each patch shown, at the page's middle and
   on the ground beside it: the stand-in's, never the see-through window;
 * the process's CPU time, every CPU_EVERY_S, with whether a page job ran;
@@ -46,9 +49,14 @@ VISIBLE_TOL = 8  # a patch's pixel is on the screen when every channel is within
 VISIBLE_SHARE = 0.9  # a patch is on the screen when so many of its opaque pixels looked at are
 INK_LEVEL = 100  # a patch's pixel darker than this (every channel) is of its letters (an old patch: its letters seen)
 SHOTS_KEPT = 2
+SHOT_CUT_MARGIN = 32  # px kept free above another program's pixels where a copy is cut (`_pane_watch`)
+SHOT_EDGE = 8  # ... and the rim of the part kept that its second look leaves out
 SRCCOPY, CAPTUREBLT = 0x00CC0020, 0x40000000
 GA_ROOT = 2
 PANE_CLICK_AFTER_S = 8.0  # the lettering's switch on the left pane is clicked (posted to the pane) once after so long
+HOVER_AFTER_S = 14.0  # the pointer the see-through window reads (the tool's, `install`) is put on a patch after so long
+HOVER_ROUNDS = 5
+HOVER_FOR_S = 60.0  # ... for so long at the most (a round in which another page came is begun again)
 WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0201, 0x0202, 0x0001
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -103,6 +111,31 @@ def screen_copy(x: int, y: int, w: int, h: int) -> np.ndarray:
         _gdi32.DeleteObject(bmp)
         _gdi32.DeleteDC(dc)
         _user32.ReleaseDC(None, screen)
+
+
+def foreign_tiles(copy: np.ndarray, frames: list[np.ndarray | None], masks: list[tuple[int, int, int, int]],
+                  tile: int = 16, level: int = 24, share: float = 0.2) -> tuple[int, tuple[int, ...] | None]:
+    """How many *tile*-px squares of the screen copy *copy* (RGB, the viewer's client area) show something else than
+    the viewer's own frames *frames* (RGB, the same area: a pixel counts when it is more than *level* off in a channel
+    from every one of them) on more than *share* of their pixels outside *masks* (client boxes where TASlation's own
+    windows draw): another program's window over the viewer (a notification, say), which a copy must not show - and
+    the client box round those squares; (-1, None) when there is no frame of the copy's size to tell it by."""
+    if not frames or any(f is None or f.shape != copy.shape for f in frames):
+        return -1, None
+    h, w = copy.shape[:2]
+    differs = np.ones((h, w), bool)
+    for f in frames:
+        differs &= np.abs(copy.astype(np.int16) - f.astype(np.int16)).max(axis=2) > level
+    for x0, y0, x1, y1 in masks:
+        differs[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = False
+    padded = np.zeros((-(-h // tile) * tile, -(-w // tile) * tile), bool)
+    padded[:h, :w] = differs
+    counts = padded.reshape(padded.shape[0] // tile, tile, padded.shape[1] // tile, tile).sum(axis=(1, 3))
+    rows, cols = np.nonzero(counts > tile * tile * share)
+    if not len(rows):
+        return 0, None
+    box = (int(cols.min()) * tile, int(rows.min()) * tile, int(cols.max() + 1) * tile, int(rows.max() + 1) * tile)
+    return int(len(rows)), box
 
 
 def window_pid(hwnd: int) -> int:
@@ -216,9 +249,17 @@ class SeeWatch:
         self.panes: Counter[str] = Counter()  # (side, page kind, shown or hidden) at each look
         self.pane_overlap: dict[str, int] = {}  # (side, page kind) -> the most px a pane shared with the page box
         self.pane_gaps: Counter[str] = Counter()  # (side, page kind, px between the pane and the page)
+        self.pane_edges: Counter[str] = Counter()  # (side, page kind, px between the pane and its edge of the area)
+        self.pane_x: Counter[str] = Counter()  # (side, page kind, its columns in the client: the same on both kinds)
         self.pane_sizes: Counter[str] = Counter()  # (side, w x h)
+        self.fake_point: tuple[int, int] | None = None  # where the see-through window is told the pointer is
+        self.hover: dict[str, Any] = {}  # (`_hover_measure`)
+        self.hover_thread: threading.Thread | None = None
         self.pane_click: dict[str, Any] = {}  # (`_click_lettering`)
         self.pane_shot_saved: str | None = None
+        self.pane_shot_skipped = 0  # (looks at which another program's window lay over the stand-in: no copy then)
+        self.pane_shot_why: Counter[str] = Counter()  # (why, numbers only: the client box of the squares that differ)
+        self.pane_shot_cut = 0  # (rows left out at the copy's foot: another program's pixels there)
         self.started = time.monotonic()
         self.front_before = int(front_before)  # (the window in front just before TASlation's window was made)
         self.activations = activations
@@ -244,10 +285,14 @@ class SeeWatch:
 
     # the hooks
     def install(self) -> None:
+        from taslation.capture import seethrough as window
         from taslation.capture import wgc
         from taslation.ui import seethrough as ui
 
         wgc.add_listener(self._frame)
+        # the pointer as the see-through window reads it is this tool's (`fake_point`: none but while `_hover_measure`
+        # sets one): the real pointer is never moved, and wherever it rests it changes nothing in a run
+        window.cursor_pos = lambda: self.fake_point
         pairs = ui.pairs
 
         def noted(app: Any) -> Any:
@@ -271,6 +316,8 @@ class SeeWatch:
     def close(self) -> None:
         self.stop.set()
         self.thread.join(3.0)
+        if self.hover_thread is not None:
+            self.hover_thread.join(3.0)
         from taslation.capture import wgc
 
         wgc.remove_listener(self._frame)
@@ -321,6 +368,9 @@ class SeeWatch:
                     self._click_lettering()
                 except Exception as e:  # noqa: BLE001 - noted
                     self.pane_click = {"error": type(e).__name__}
+            if self.hover_thread is None and now - self.started >= HOVER_AFTER_S:
+                self.hover_thread = threading.Thread(target=self._hover_safe, name="see-hover", daemon=True)
+                self.hover_thread.start()
             if self.truth and now >= next_copy:
                 try:
                     self._copy()
@@ -341,7 +391,7 @@ class SeeWatch:
                     left, top, right, bottom = chosen.patches[i].box
                     points.append(("patch", origin[0] + (left + right) // 2, origin[1] + (top + bottom) // 2))
             points.append(("page", origin[0] + size[0] // 2, origin[1] + size[1] // 2))
-            points.append(("ground", origin[0] + 12, origin[1] + size[1] // 2))
+            points.append(("ground", origin[0] + 12, origin[1] + size[1] * 93 // 100))  # (below the panes' band)
         for where, x, y in points:
             hwnd = int(_user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) or 0)
             self.hits[f"{where}:{self._who(hwnd)}"] += 1
@@ -374,6 +424,10 @@ class SeeWatch:
             self.pane_overlap[key] = max(self.pane_overlap.get(key, 0), pn.overlap(box, screen_page))
             gap = screen_page[0] - box[2] if side == "left" else box[0] - screen_page[2]
             self.pane_gaps[f"{key}:{gap}"] += 1
+            columns = ground[4] if len(ground) > 4 else (0, ground[0][0])
+            edge = box[0] - (x0 + columns[0]) if side == "left" else (x0 + columns[1]) - box[2]
+            self.pane_edges[f"{key}:{edge}"] += 1
+            self.pane_x[f"{key}:{box[0] - x0}..{box[2] - x0}"] += 1
             self.pane_sizes[f"{side}:{box[2] - box[0]}x{box[3] - box[1]}"] += 1
 
             def who(x: int, y: int) -> str:
@@ -393,13 +447,52 @@ class SeeWatch:
             if first is not None and second is not None and second[1] > first[3]:
                 self.hits[f"pane_left_gap:{who(box[0] + (first[0] + first[2]) // 2, box[1] + (first[3] + second[1]) // 2)}"] += 1
         shown = over.shown()
-        if (self.pane_shot is not None and self.pane_shot_saved is None and kind == "spread"
+        hovering = self.fake_point is not None or (self.hover_thread is not None and self.hover_thread.is_alive())
+        if (self.pane_shot is not None and self.pane_shot_saved is None and kind == "spread" and not hovering
                 and all(b is not None for b in boxes.values()) and shown is not None
                 and any(s.serial == shown[0] and s.final for s in list(over._store.sets))):
+            from taslation.capture import seethrough as window
+
             x, y, w, h = windows._client_box(self.hwnd)
+            if window.cover_rects(self.hwnd, (x, y, x + w, y + h), over.own_windows()):
+                self.pane_shot_skipped += 1  # (another program's window over the stand-in: its contents are not this
+                self.pane_shot_why["a window above"] += 1  # tool's to copy; a later look)
+                return
+            # a notification lies in a band of the window order of its own, which `cover_rects` does not walk: the copy
+            # is kept only when, outside where TASlation's windows draw, it shows the viewer's own frame
+            serial, _indices, origin, _size = shown
+            chosen = {s.serial: s for s in list(over._store.sets)}.get(serial)
+            dx, dy = origin[0] - x, origin[1] - y
+            masks = [] if chosen is None else [  # (every patch of the page: shown or not, as a look may change it)
+                (b[0] + dx - 3, b[1] + dy - 3, b[2] + dx + 3, b[3] + dy + 3) for b in (p.box for p in chosen.patches)]
+            masks += [(b[0] - x - 2, b[1] - y - 2, b[2] - x + 2, b[3] - y + 2) for b in boxes.values() if b is not None]
+            before = self._viewer_frame()
+            copy = screen_copy(x, y, w, h)
+            frames = [before, self._viewer_frame()]
+            tiles, where = (-1, None) if chosen is None else foreign_tiles(copy, frames, masks)
+            panes_end = max(b[3] - y for b in boxes.values() if b is not None)
+            if tiles > 0 and where is not None and where[1] - SHOT_CUT_MARGIN >= max(h * 2 // 3, panes_end):
+                # another program's pixels in the bottom third only (a notification that stays until it is put
+                # away, which is not this tool's to do): the copy is cut above them, both panes whole, and the part
+                # kept is looked at again square by square, a single pixel off being enough to give it up
+                cut = where[1] - SHOT_CUT_MARGIN
+                copy = np.ascontiguousarray(copy[:cut])
+                kept = [None if f is None else f[:cut] for f in frames]
+                edge = SHOT_EDGE  # (the copy's rows at the window's top edge differ from the frame's: not looked at)
+                rim = [(0, 0, w, edge), (0, 0, edge, cut), (w - edge, 0, w, cut), (0, cut - edge, w, cut)]
+                tiles, where = foreign_tiles(copy, kept, masks + rim, tile=8, share=0.0)
+                if tiles == 0:
+                    self.pane_shot_cut = h - cut
+            del before, frames
+            if tiles != 0:
+                del copy  # (never kept, never looked at)
+                self.pane_shot_skipped += 1
+                self.pane_shot_why["no frame to tell by" if tiles < 0 else
+                                   f"another program's pixels: {tiles} squares in {where}"] += 1
+                return
             self.pane_shot.mkdir(parents=True, exist_ok=True)
             path = self.pane_shot / "see_through_panes.png"
-            Image.fromarray(screen_copy(x, y, w, h)).save(path)
+            Image.fromarray(copy).save(path)
             self.pane_shot_saved = str(path)
 
     def _click_lettering(self) -> None:
@@ -445,14 +538,148 @@ class SeeWatch:
         self.pane_click = {"posted_to_the_pane": 4, "rows": rows, "front_before": self._who(front),
                            "acted_on": clicked}
 
+    def _hover_safe(self) -> None:
+        try:
+            self._hover_measure()
+        except Exception as e:  # noqa: BLE001 - noted
+            self.fake_point = None
+            self.hover = {"error": type(e).__name__}
+
+    def _hover_measure(self) -> None:
+        """(a thread of its own, from HOVER_AFTER_S on) The pointer on a patch and off it again, HOVER_ROUNDS times,
+        as the see-through window reads it (this tool's `fake_point`: the real pointer is never moved): how long until
+        the patch is gone and until it is back, whether the others stay; then at the edge of a patch with no other one
+        near that side (HOVER_IN_PX off hides it, HOVER_OUT_PX off keeps it hidden, farther shows it again, a px farther
+        than HOVER_IN_PX keeps it shown). Each round takes the page shown then (two patches or
+        more); a round in which another page came is begun again, for HOVER_FOR_S at the most."""
+        from taslation import seethrough as st
+        from taslation.capture import seethrough as window
+
+        front = int(_user32.GetForegroundWindow() or 0)
+        others_in_front: set[str] = set()
+        rounds: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        turned = no_room = 0
+        end = time.monotonic() + HOVER_FOR_S
+
+        def wait(until: Callable[[], bool], limit: float = 2.0) -> float | None:
+            t = time.monotonic()
+            while time.monotonic() - t < limit and not self.stop.is_set():
+                if until():
+                    return round((time.monotonic() - t) * 1000, 1)
+                now = int(_user32.GetForegroundWindow() or 0)
+                if now != front:
+                    others_in_front.add(self._who(now))
+                time.sleep(0.001)
+            return None
+
+        def pick() -> tuple[Any, ...] | None:
+            over = self.over()
+            shown = over.shown() if over is not None else None
+            if shown is None or len(shown[1]) < 2:
+                return None
+            serial, indices, origin, size = shown
+            chosen = {s.serial: s for s in list(over._store.sets)}.get(serial)
+            if chosen is None:
+                return None
+            return over, serial, tuple(indices), origin, size, chosen
+
+        def gap(b: tuple[int, ...], x: int, y: int) -> int:  # (as `seethrough.hovered` takes it)
+            return max(b[0] - x, x - (b[2] - 1), b[1] - y, y - (b[3] - 1), 0)
+
+        def edge_plan(over: Any, chosen: Any, indices: tuple[int, ...], origin: tuple[int, int],
+                      size: tuple[int, int], offsets: list[int], keep: int) -> tuple[int, str, list[Any]] | None:
+            """A patch shown and a side of it where the points *offsets* px off its edge lie on the page, on no side
+            pane, and farther than *keep* px from every other patch shown (which they could otherwise make hide or
+            keep hidden instead)."""
+            panes = [b for b in (over.pane_shown(side) for side in ("left", "right")) if b is not None]
+            for index in indices:
+                b = chosen.patches[index].box
+                cx, cy = (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+                for side in ("right", "left", "below", "above"):
+                    points = [(b[2] - 1 + d, cy) if side == "right" else (b[0] - d, cy) if side == "left" else
+                              (cx, b[3] - 1 + d) if side == "below" else (cx, b[1] - d) for d in offsets]
+                    if all(0 <= px < size[0] and 0 <= py < size[1]
+                           and not any(p[0] <= origin[0] + px < p[2] and p[1] <= origin[1] + py < p[3] for p in panes)
+                           and all(gap(chosen.patches[j].box, px, py) > keep for j in indices if j != index)
+                           for px, py in points):
+                        return index, side, points
+            return None
+
+        try:
+            while time.monotonic() < end and not self.stop.is_set() and (len(rounds) < HOVER_ROUNDS or not edges):
+                got = pick()
+                if got is None:
+                    time.sleep(0.1)
+                    continue
+                over, serial, indices, origin, size, chosen = got
+                index, rest = indices[0], indices[1:]
+                box = chosen.patches[index].box
+                centre = (origin[0] + (box[0] + box[2]) // 2, origin[1] + (box[1] + box[3]) // 2)
+
+                def now() -> tuple[int, ...] | None:
+                    s = over.shown()
+                    return tuple(s[1]) if s is not None and s[0] == serial else None
+
+                if len(rounds) < HOVER_ROUNDS:
+                    self.fake_point = centre
+                    gone = wait(lambda: now() is None or index not in now())
+                    during = now()
+                    time.sleep(0.25)
+                    self.fake_point = None
+                    back = wait(lambda: now() is None or index in now())
+                    if during is None or now() is None:
+                        turned += 1
+                        continue
+                    rounds.append({"gone_ms": gone, "back_ms": back, "others_stayed": all(i in during for i in rest)})
+                    time.sleep(0.25)
+                    continue
+                dpi = getattr(over, "_dpi", st.BASE_DPI)
+                grow, keep = st.scaled(window.HOVER_IN_PX, dpi), st.scaled(window.HOVER_OUT_PX, dpi)
+                labels = (("within_in", grow), ("within_out", keep), ("beyond_out", keep + 2),
+                          ("near_again", grow + 1), ("within_in_again", grow))
+                plan = edge_plan(over, chosen, indices, origin, size, [d for _label, d in labels], keep)
+                if plan is None:  # (no patch of this page with room round it: another page)
+                    no_room += 1
+                    time.sleep(0.5)
+                    continue
+                index, side, points = plan
+                steps: list[dict[str, Any]] = []
+                for (label, off), (px, py) in zip(labels, points):
+                    self.fake_point = (origin[0] + px, origin[1] + py)
+                    time.sleep(0.3)
+                    current = now()
+                    steps.append({"at": label, "px_off_patch": off,
+                                  "patch_shown": None if current is None else index in current,
+                                  "others_shown": None if current is None else
+                                  all(i in current for i in indices if i != index)})
+                self.fake_point = None
+                wait(lambda: now() is None or index in now(), 1.0)
+                if any(s["patch_shown"] is None for s in steps):
+                    turned += 1
+                    continue
+                edges.append({"side": side, "steps": steps, "grow_keep_px": [grow, keep],
+                              "expected_shown": [False, False, True, True, False]})
+        finally:
+            self.fake_point = None
+        self.hover = {"rounds": rounds, "gone_ms": spread([r["gone_ms"] for r in rounds]),
+                      "back_ms": spread([r["back_ms"] for r in rounds]),
+                      "others_stayed": all(r["others_stayed"] for r in rounds) if rounds else None,
+                      "edge": edges[0] if edges else None, "begun_again_for_another_page": turned,
+                      "pages_without_room_at_an_edge": no_room,
+                      "front_same": int(_user32.GetForegroundWindow() or 0) == front,
+                      "other_windows_in_front_meanwhile": sorted(others_in_front)}
+
     def pane_report(self) -> dict[str, Any]:
         over = self.over()
         counts = dict(over.counts) if over is not None else {}
         return {"looks": dict(self.panes), "overlap_px_max": dict(self.pane_overlap),
-                "gaps_px": dict(self.pane_gaps), "sizes": dict(self.pane_sizes),
+                "gaps_px": dict(self.pane_gaps), "edges_px": dict(self.pane_edges), "x_in_client": dict(self.pane_x),
+                "sizes": dict(self.pane_sizes), "hover": self.hover,
                 "hits": {k: v for k, v in self.hits.items() if k.startswith("pane_")},
-                "click": self.pane_click, "shot": self.pane_shot_saved,
-                "window": {k: counts.get(k) for k in ("pane_draws", "pane_moves", "pane_hides", "clicks")},
+                "click": self.pane_click, "shot": self.pane_shot_saved, "shot_put_off": self.pane_shot_skipped,
+                "shot_put_off_why": dict(self.pane_shot_why.most_common(8)), "shot_rows_cut": self.pane_shot_cut,
+                "window": {k: counts.get(k) for k in ("pane_draws", "pane_moves", "pane_hides", "clicks", "hovers")},
                 "hides_by_why": dict(Counter(n["why"] for n in (list(over.notes) if over is not None else [])
                                              if n["ev"] == "pane_hide"))}
 
