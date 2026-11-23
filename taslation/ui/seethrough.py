@@ -46,9 +46,16 @@ LOOK_INFO = "taslation.see_look"  # (the picture's info) the look a frame read w
 PAINTED_INFO = "taslation.see_painted"  # (the picture's info) the rows painted over in it
 GONE_LOOK_MS = 150  # once the bars have gone, the viewer is looked at so soon (a page read under them: read_under_bars)
 CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`read_under_bars`)
+# (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
 
 
 QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
+
+
+def px(app: Any, size: int) -> int:
+    """*size* px at 96 DPI as many pixels of the viewer's frames (its monitor's DPI, `tick`): a viewer at 125 % or
+    150 % draws everything that much larger (`seethrough.scaled`)."""
+    return st.scaled(size, getattr(app, "_see_dpi", st.BASE_DPI))
 
 
 def on(app: Any) -> bool:
@@ -113,6 +120,7 @@ def start(app: Any) -> bool:
     app._see_rest_box = None
     app._see_job = None
     app._see_carries = []  # (when, pages carried over, bubbles left out), see after_bars
+    app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
     if not bool(getattr(app.settings, "see_through", False)):
         return False
     over = window.SeeThrough.start()
@@ -159,6 +167,7 @@ def tick(app: Any) -> None:
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
     over.follow(hwnd)
+    app._see_dpi = window.viewer_dpi(hwnd)
     _hotkey(app, hwnd)
     present(app)
 
@@ -224,7 +233,8 @@ def present(app: Any) -> None:
             continue
         if original.size != lettered.size:
             continue
-        patches = st.make_patches(_rgb(original), _rgb(lettered))
+        patches = st.make_patches(_rgb(original), _rgb(lettered), margin=px(app, st.MARGIN),
+                                  gap=px(app, st.GROUP_PX))
         over.present(id(original), original.size, patches, final)
         memo[:] = [(original, state), *[(img, s) for img, s in memo if img is not original]][:MEMO_KEPT]
 
@@ -254,7 +264,7 @@ def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
         before = app._see_rest_box
         if before is not None:
             before = (before[0] - box[0], before[1] - box[1], before[2] - box[0], before[3] - box[1])
-        found = st.look(rgb, before)
+        found = st.look(rgb, before, step=px(app, st.LOOK_STEP))
         page = None if found.box is None else (found.box[0] + box[0], found.box[1] + box[1],
                                                  found.box[2] + box[0], found.box[3] + box[1])
         rows = tuple((a + box[1], b + box[1]) for a, b in found.bands)
@@ -337,7 +347,8 @@ def read_under_bars(app: Any, image: Image.Image) -> bool:
         return False
     rows = original.info[PAINTED_INFO]
     boxes = [tuple(getattr(r, "bbox", ())) for r in getattr(result, "regions", None) or ()]
-    cut = any(len(b) == 4 and b[1] < end + CUT_PX and b[3] > start - CUT_PX for b in boxes for start, end in rows)
+    near = px(app, CUT_PX)
+    cut = any(len(b) == 4 and b[1] < end + near and b[3] > start - near for b in boxes for start, end in rows)
     return cut and bool(app._shows_page(image, original))
 
 
@@ -363,7 +374,7 @@ def after_bars(app: Any, image: Image.Image) -> bool:
     pipeline = getattr(app, "pipeline", None)
     if pipeline is not None:
         try:
-            carried, dropped = pipeline.carry_over(result, image, rows, CUT_PX)
+            carried, dropped = pipeline.carry_over(result, image, rows, px(app, CUT_PX))
         except Exception:  # noqa: BLE001 - the cache stays as it was; the page is read anew if a bubble was cut
             carried = dropped = 0
     notes = getattr(app, "_see_carries", None)

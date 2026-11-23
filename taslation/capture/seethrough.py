@@ -139,6 +139,34 @@ if IS_WINDOWS:
     _gdi32.DeleteDC.argtypes = [wintypes.HDC]
     _kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
     _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    _user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    _user32.MonitorFromWindow.restype = wintypes.HMONITOR
+
+MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 2, 0
+_shcore: Any = None  # (shcore.dll, loaded at the first `viewer_dpi`)
+
+
+def viewer_dpi(viewer: int) -> int:
+    """The DPI of the monitor the viewer's window *viewer* is on (its effective DPI: 96 at 100 %, 120 at 125 %, 144 at
+    150 %), which is how much larger than at 100 % the viewer's frames show what it draws - whether the viewer scales
+    itself or Windows stretches it; st.BASE_DPI where it cannot be told (not Windows, no window, an older Windows)."""
+    global _shcore
+    if not IS_WINDOWS or not viewer:
+        return st.BASE_DPI
+    try:
+        if _shcore is None:
+            _shcore = ctypes.WinDLL("shcore")
+            _shcore.GetDpiForMonitor.argtypes = [wintypes.HMONITOR, ctypes.c_int, ctypes.POINTER(wintypes.UINT),
+                                                 ctypes.POINTER(wintypes.UINT)]
+            _shcore.GetDpiForMonitor.restype = ctypes.c_long
+        monitor = _user32.MonitorFromWindow(viewer, MONITOR_DEFAULTTONEAREST)
+        x, y = wintypes.UINT(0), wintypes.UINT(0)
+        if monitor and _shcore.GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, ctypes.byref(x), ctypes.byref(y)) == 0 \
+                and x.value > 0:
+            return int(x.value)
+    except (AttributeError, OSError):
+        pass
+    return st.BASE_DPI
 
 
 def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]

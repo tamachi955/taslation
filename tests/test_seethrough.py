@@ -60,6 +60,46 @@ def test_letters_close_together_are_one_patch_and_a_stray_pixel_none():
     assert [p.box for p in st.make_patches(frame, done)] == [(150, 50, 175, 60)]
 
 
+def test_the_pixel_sizes_go_with_the_viewers_dpi():
+    # 100 %, 125 %, 150 %, 200 %: the group's 9 px, the margin's 6, the look's step of 4 and the cut's 3
+    assert [st.scaled(st.GROUP_PX, d) for d in (96, 120, 144, 192)] == [9, 11, 14, 18]
+    assert [st.scaled(st.MARGIN, d) for d in (96, 120, 144, 192)] == [6, 8, 9, 12]
+    assert [st.scaled(st.LOOK_STEP, d) for d in (96, 120, 144, 192)] == [4, 5, 6, 8]
+    assert [st.scaled(3, d) for d in (96, 120, 144, 192)] == [3, 4, 5, 6]  # (half up: 4.5 is 5)
+    assert st.scaled(9, None) == st.scaled(9, 0) == 9 and st.scaled(1, 48) == 1
+    frame = page()
+    done = frame.copy()
+    done[50:60, 150:160] = 255 - done[50:60, 150:160]
+    done[50:60, 172:182] = 255 - done[50:60, 172:182]  # 12 px apart: two patches at 100 %, one bubble at 150 %
+    assert len(st.make_patches(frame, done)) == 2
+    one, = st.make_patches(frame, done, margin=st.scaled(st.MARGIN, 144), gap=st.scaled(st.GROUP_PX, 144))
+    assert one.box == (150, 50, 182, 60) and one.near == (141, 41, 191, 69)
+
+
+def test_the_window_side_takes_the_sizes_at_the_viewers_dpi(monkeypatch):
+    from PIL import Image
+
+    from taslation.ui import seethrough as ui
+
+    app = see_app()
+    app._see_dpi = 144
+    steps = []
+    real = st.look
+    monkeypatch.setattr(ui.st, "look", lambda rgb, before=None, step=st.LOOK_STEP: steps.append(step) or
+                        real(rgb, before, step))
+    image = Image.fromarray(page(ground=0))
+    ui.frame_look(app, image, Facts(image))
+    assert steps == [6] and ui.px(app, ui.CUT_PX) == 5
+    app._see_dpi = 96
+    assert ui.px(app, ui.CUT_PX) == ui.CUT_PX
+    assert ui.window.viewer_dpi(0) == st.BASE_DPI  # (no viewer: as at 100 %)
+    if __import__("sys").platform == "win32":
+        import ctypes
+
+        desktop = ctypes.windll.user32.GetDesktopWindow()
+        assert 96 <= ui.window.viewer_dpi(desktop) <= 480  # (the monitor's own; this test changes no setting)
+
+
 def test_a_patch_shows_over_its_own_pixels_and_goes_when_they_change():
     frame = page()
     patch = st.make_patches(frame, lettered(frame, [(120, 20, 170, 60)]))[0]

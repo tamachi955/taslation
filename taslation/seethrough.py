@@ -37,6 +37,7 @@ PIXEL_TOL = 24  # a pixel compared is another when one of its channels differs b
 CHANGED_SHARE = 0.01  # a patch's pixels are another's when more than this share of those compared is another
 GROUP_PX = 9  # changed pixels this close together are one patch (the letters of one bubble, its erased ground)
 MIN_PATCH_PX = 4  # a group of fewer changed pixels is no patch (a stray pixel of the lettering's edge)
+BASE_DPI = 96  # the pixel sizes here (MARGIN, GROUP_PX, LOOK_STEP) are at this DPI: `scaled` takes them to a viewer's
 SETS_KEPT = 3  # the overlay keeps the patches of so many pages (a page turned back to shows at once)
 
 
@@ -112,16 +113,23 @@ def sample(pixels: np.ndarray, box: Box, step: int = STEP) -> np.ndarray:
     return pixels[top:bottom:step, left:right:step, :3]
 
 
+def scaled(px: int, dpi: int | float | None) -> int:
+    """*px* at BASE_DPI as many pixels at *dpi* (a viewer's window at 125 % is at 120, at 150 % at 144; None or 0: as
+    BASE_DPI), rounded half up, at least 1: what the viewer draws is that much larger in its frames."""
+    return max(1, int(px * float(dpi or BASE_DPI) / BASE_DPI + 0.5))
+
+
 def make_patches(original: np.ndarray, lettered: np.ndarray, margin: int = MARGIN,
-                 step: int = STEP) -> tuple[Patch, ...]:
+                 step: int = STEP, gap: int = GROUP_PX) -> tuple[Patch, ...]:
     """The patches of the page *lettered* read from the frame *original* (both RGB, (H, W, 3) uint8): one for every
-    group of pixels the lettering changed (`groups`), its picture opaque where it changed. The frame's pixels are
-    kept as BGR, as the viewer's frames come (Windows.Graphics.Capture's BGRA)."""
+    group of pixels the lettering changed, pixels up to *gap* apart being of one (`groups`), its picture opaque where
+    it changed, *margin* px round it compared too. The frame's pixels are kept as BGR, as the viewer's frames come
+    (Windows.Graphics.Capture's BGRA)."""
     mask = changed_mask(original, lettered)
     height, width = mask.shape
     out = []
     bgr_frame = original[:, :, ::-1]
-    for box in groups(mask):
+    for box in groups(mask, gap):
         left, top, right, bottom = box
         piece = lettered[top:bottom, left:right]
         alpha = mask[top:bottom, left:right]
