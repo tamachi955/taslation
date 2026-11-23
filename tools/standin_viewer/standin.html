@@ -42,6 +42,17 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
+With ``slider=1`` in the query a page slider lies under the page, as a viewer's own: a thin bar with a round knob at
+the place of the screen on show, the first page at the right end (a book read right to left). It listens to the
+pointer events on the canvas (pointerdown, pointermove, pointerup, pointercancel, lostpointercapture) as a common web
+slider does: a press on the knob takes the pointer (setPointerCapture) and the knob follows it while the button is
+held; a press on the bar puts the knob there and takes the pointer as well; the release goes to the page at the
+knob's place (``ev=jump from=.. to=.. by=drag|click``; the same page: ``ev=stay``). With ``slider=2`` the page under
+the knob is drawn as it moves (``why=preview``, sharp at once), as a viewer that previews the pages while its slider is
+dragged; the release turns to it as ``slider=1`` does. A press elsewhere does nothing but is said (``ev=pointer``,
+with the moves counted at its release), and so are the DOM's click events (``ev=click``). Without it nothing of this
+is drawn or listened to.
+
 What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch; a draw with the page's
 rectangle and the band's height in the canvas's pixels), which the driver reads from the browser's log; the title
 stays as it is, as a reader's tab title does. A strip of cells in the band carries the screen on show (its first
@@ -66,8 +77,14 @@ const cfg = {
   band: num("band", 54),
   layout: query.get("layout") || "auto",  // "auto" (spreads while the window is wider than high), "spread", "single"
   softFirst: query.get("soft_first") !== "0",  // false: every turn drawn sharp at once, nothing after it
+  slider: ["1", "2"].includes(query.get("slider")) ? Number(query.get("slider")) : 0,  // the page slider under the page
   script: hashed.get("s") || "",
 };
+// the slider (CSS pixels): the foot under the page it lies in, the bar's ends (shares of the width; the counter on
+// the right stays clear), its height, the knob's radius and how far round the knob and the bar a press takes them
+const SLIDER_FOOT = 56, SLIDER_Y = 26, SLIDER_X0 = 0.12, SLIDER_X1 = 0.80, SLIDER_BAR = 4, KNOB = 8, KNOB_REACH = 14,
+      BAR_REACH = 10;
+const SLIDER_BAR_COLOUR = "#8a8d92", SLIDER_KNOB_COLOUR = "#e8e8e8";
 const softQuery = [cfg.softMin, cfg.softMax], factorQuery = cfg.factor;  // (a script's "t" and "b" put them back)
 document.title = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
 
@@ -177,7 +194,7 @@ function code(soft, spin) {  // the screen on show, as cells: 1010, 12 bits (pag
 
 function rects(pics) {
   const d = dpr(), W = view.width, H = view.height, B = Math.round(cfg.band * d), m = Math.round(14 * d);
-  const foot = Math.round(20 * d);
+  const foot = Math.round((cfg.slider ? SLIDER_FOOT : 20) * d);
   const tall = Math.max(...pics.map(p => high(p.img)));
   const widths = pics.map(p => wide(p.img) * tall / high(p.img));
   const total = widths.reduce((a, b) => a + b, 0);
@@ -219,6 +236,114 @@ function counter() {
   g.fillText(pages.join("-") + " / " + entries.length, W - Math.round(16 * d), H - Math.round(6 * d));
 }
 
+// ------------------------------------------------------------------------------------------------ the slider
+let dragging = null;  // a press the slider took: {id, from, by, offset, knob, moves, events}
+let pressed = null;   // a press elsewhere: {id, moves}
+function track() {  // the bar in the canvas's pixels: its ends and its middle's row
+  const d = dpr(), W = view.width, H = view.height;
+  return { x0: Math.round(W * SLIDER_X0), x1: Math.round(W * SLIDER_X1), y: H - Math.round(SLIDER_Y * d) };
+}
+function knobX(n) {  // the knob's place for page n: the first page at the right end
+  const t = track(), last = Math.max(1, entries.length - 1);
+  return Math.round(t.x1 - (Math.max(0, Math.min(last, n)) / last) * (t.x1 - t.x0));
+}
+function pageAtX(x) {  // the screen whose place on the bar is nearest x
+  const t = track(), last = Math.max(1, entries.length - 1);
+  const share = (t.x1 - Math.max(t.x0, Math.min(t.x1, x))) / Math.max(1, t.x1 - t.x0);
+  return first(Math.round(share * last));
+}
+function slider() {  // the bar and the knob (where the pointer holds it, else at the screen's place), over the foot
+  if (!cfg.slider) return;
+  const d = dpr(), t = track(), r = Math.round(KNOB * d), h = Math.max(1, Math.round(SLIDER_BAR * d));
+  g.fillStyle = GROUND; g.fillRect(t.x0 - r - 2, t.y - r - 2, t.x1 - t.x0 + 2 * r + 4, 2 * r + 4);
+  g.fillStyle = SLIDER_BAR_COLOUR; g.fillRect(t.x0, t.y - Math.floor(h / 2), t.x1 - t.x0, h);
+  g.fillStyle = SLIDER_KNOB_COLOUR;
+  g.beginPath(); g.arc(dragging ? dragging.knob : knobX(index), t.y, r, 0, Math.PI * 2); g.fill();
+}
+function sliderPart(x, y) {  // what of the slider a press at (x, y), canvas pixels, is on: knob, bar or else
+  const d = dpr(), t = track();
+  if (Math.hypot(x - knobX(index), y - t.y) <= KNOB_REACH * d) return "knob";
+  if (x >= t.x0 - KNOB * d && x <= t.x1 + KNOB * d && Math.abs(y - t.y) <= BAR_REACH * d) return "bar";
+  return "else";
+}
+function pointerWords(e) {
+  const d = dpr();
+  return "x=" + Math.round(e.clientX * d) + " y=" + Math.round(e.clientY * d) + " buttons=" + e.buttons + " id=" +
+         e.pointerId + " type=" + (e.pointerType || "") + " trusted=" + (e.isTrusted ? 1 : 0);
+}
+function moveKnob(x) {  // the knob held at x (canvas pixels); with slider=2 the page under it drawn
+  const t = track();
+  dragging.knob = Math.max(t.x0, Math.min(t.x1, Math.round(x - dragging.offset)));
+  slider();
+  if (cfg.slider !== 2) return;
+  const n = pageAtX(dragging.knob);
+  if (n === index || black) return;
+  stopSharp();
+  spinning = false;
+  index = n;
+  keepNear(index);
+  drawScreen(false, "preview");
+}
+function endDrag(how) {  // the press the slider took is over: the release goes to the page at the knob's place
+  const held = dragging, to = pageAtX(held.knob);
+  dragging = null;
+  try { if (view.hasPointerCapture(held.id)) view.releasePointerCapture(held.id); } catch (err) { /* (gone) */ }
+  const words = "from=" + held.from + " to=" + to + " by=" + held.by + " moves=" + held.moves + " events=" +
+                held.events + " how=" + how;
+  if (how !== "up") {  // cancelled: no jump, the screen before the press back
+    say("slider_cancel", words);
+    if (index !== held.from) turnTo(held.from, "slider_cancel"); else slider();
+    return;
+  }
+  say(to === held.from ? "stay" : "jump", words);
+  if (to !== held.from) turnTo(to, "slider"); else if (index !== to) turnTo(to, "slider"); else slider();
+}
+if (cfg.slider) {
+  view.addEventListener("pointerdown", e => {
+    const d = dpr(), x = e.clientX * d, y = e.clientY * d;
+    const part = black ? "else" : sliderPart(x, y);
+    say("pointer", "kind=down on=" + part + " " + pointerWords(e));
+    e.preventDefault();
+    if (part === "else") { pressed = { id: e.pointerId, moves: 0 }; return; }
+    dragging = { id: e.pointerId, from: index, by: part === "knob" ? "drag" : "click",
+                 offset: part === "knob" ? x - knobX(index) : 0, knob: knobX(index), moves: 0, events: 0 };
+    try { view.setPointerCapture(e.pointerId); } catch (err) { say("pointer", "kind=no_capture"); }
+    moveKnob(x);
+  });
+  view.addEventListener("pointermove", e => {
+    const many = typeof e.getCoalescedEvents === "function" ? Math.max(1, e.getCoalescedEvents().length) : 1;
+    if (dragging && e.pointerId === dragging.id) {
+      dragging.events++; dragging.moves += many;
+      moveKnob(e.clientX * dpr());
+    } else if (pressed && e.pointerId === pressed.id && e.buttons) {
+      pressed.moves += many;
+    }
+  });
+  view.addEventListener("pointerup", e => {
+    say("pointer", "kind=up " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) {
+      moveKnob(e.clientX * dpr());
+      endDrag("up");
+    } else if (pressed && e.pointerId === pressed.id) {
+      say("pointer", "kind=released on=else moves=" + pressed.moves);
+      pressed = null;
+    }
+  });
+  view.addEventListener("pointercancel", e => {
+    say("pointer", "kind=cancel " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) endDrag("cancel");
+    if (pressed && e.pointerId === pressed.id) pressed = null;
+  });
+  view.addEventListener("lostpointercapture", e => {
+    say("pointer", "kind=lost " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) endDrag("lost");
+  });
+  view.addEventListener("click", e => {
+    const d = dpr();
+    say("click", "on=" + (black ? "else" : sliderPart(e.clientX * d, e.clientY * d)) + " " + pointerWords(e));
+  });
+}
+
 async function drawScreen(soft, why) {
   const token = ++drawToken;
   const began = now();
@@ -228,7 +353,7 @@ async function drawScreen(soft, why) {
   g.fillStyle = GROUND; g.fillRect(0, 0, view.width, view.height);
   const rs = rects(pics);
   pics.forEach((p, k) => drawPicture(g, p, rs[k], soft));
-  band(); counter(); code(soft, false);
+  band(); counter(); slider(); code(soft, false);
   shown = soft ? "soft" : "sharp";
   if (!soft) {
     base = document.createElement("canvas"); base.width = view.width; base.height = view.height;
