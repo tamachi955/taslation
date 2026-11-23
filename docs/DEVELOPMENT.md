@@ -281,6 +281,57 @@ rows' languages.
   back to the page it came from. Its log says each jump (`ev=jump`: from, to, by drag or click, the moves), every
   press elsewhere and every click. The page area leaves the bar out (`fingerprint.page_box`: background lies between
   it and the page) and the reading finds no page unit in it.
+  `--standin-profile dark|light` has the stand-in behave as one of two kinds of web viewer, read from the owner's
+  screen recordings of two real ones (30 fps, 1920 x 1080); only the behaviour is copied, never the look: no name,
+  mark, colour or text of theirs, the sample pages only. Off by default, so every scenario and its figures stay as
+  they were. In both the band stands for the browser's own tabs and address bar and is drawn only while the window
+  does not fill the screen; under it the viewer's area, the page fitted to its height, a spread centred on the ground
+  (1918 x 946 in a window: the spread about 1332 wide, about 294 of ground each side; the browser's full screen
+  1920 x 1080: about 1524 and 198), the cover and a last page alone and centred; a turn drawn at once (no slide, no
+  fade; the soft first only with `--soft-first on`, off by default with a profile); bars that lie OVER the page (it
+  is neither moved nor resized) and fade in and out over 0.2 s; a slider in the bottom bar, right to left, that takes
+  a drag of the knob and a click on the bar. The browser's own full-screen notice is not drawn (it comes by itself
+  in a real browser): a scenario in the full screen has to expect it.
+  `dark`: black ground; a white top bar of 94 px (a back mark, a mark in the middle, three controls; a title and a
+  button under them) and a white bottom bar of 56 px (the slider's line with a knob and a few dots, "page/pages,
+  percent" under it); white tabs with an arrow at the very left and right edges, 32 x 70, shown on a pointer move and
+  gone 3 s later, apart from the bars, none for back on the first screen; a jump by the slider draws the viewer's
+  area black with a small spinner for 0.5 to 1.1 s (as measured: 1.03, 0.73, 1.10, 0.53 s), the bars staying over it,
+  and once in four jumps (seeded; seen once) one page of the spread first and the other 2 s later, its half black; a
+  resize (the full screen in or out) the same black for 0.4 to 0.5 s. The bars come while the pointer is in the top
+  bar's band or the bottom bar's (`bars=edge`) and go a second after it leaves - the owner's recollection ("probably"),
+  not measured; a key turn hides them (seen once). Turns: the arrow keys, the side arrows, and a click anywhere on the
+  ground beside the page (left of it the next page, right of it back; full height, but the bars while shown), as far
+  as the owner remembers.
+  `light`: white ground; see-through grey bars of 40 px (small marks and the title in the top one; a zoom figure and
+  two zoom marks, the slider in the middle and "page/pages" beside it in the bottom one), shown on any pointer move
+  and gone 3 s after the last (`bars=move`); round dark arrows of 30 px set 180 px in from the viewer's edges, shown
+  always while the page can be turned that way; no black at a jump or a resize; a jump draws the target washed out
+  and soft for 0.2 s, then sharp (`preview=1`; the 1.7 s picture seen once is not built). The second recording was a
+  novel: no page geometry is taken from it, so the geometry is the first one's.
+  Every part has its own name, given by `--standin-option NAME=VALUE` (again for more; `profile=` and the same names
+  in the page's query): `ground` black|white, `cover` 1|0, `bars` none|edge|click|move, `bar_top`, `bar_bottom` (px),
+  `bar_style` solid|glass, `bar_fade_ms`, `bar_hide_ms` (empty: edge 1000, move 3000), `bar_key_hide`, `arrows`
+  none|edge|inset, `arrow_show` move|always, `arrow_hide_ms`, `arrow_inset` (px), `page_clicks` (a click on the page's
+  left or right third turns it), `ground_clicks`, `jump` plain|spinner, `jump_ms` (A-B), `jump_half` (a share),
+  `half_ms`, `preview` 1|0, `preview_ms`, `resize` plain|spinner, `resize_ms` (A-B), `focus_black` (the black of the
+  focus, off with a profile), `counter` percent|pages. Not known, so an option with a default chosen here: whether a
+  click ON the page turns it (`page_clicks`: off for dark, on for light), the clicks on the ground in light (off),
+  whether a key hides light's bars (no), how long the bars and the arrows stay (above), whether the arrows fade (they
+  do not), the arrows' inset in light (180 px, from the novel's recording: to be checked on a manga). The page says
+  each event with its time: `turn` with its cause (`by=key|arrow|ground|page|script`) and a click's place, `key`,
+  `bars`/`bars_done`, `arrows`, `spinner` (`why=jump|resize`), `preview`, `draw` (`kind=half|preview`, both coded
+  soft for the e2e tool's decoder; the black with the spinner decodes as `spinner`, or black in the full screen),
+  `size` (`full=`, `band=`), `pointer` and `click`. Its script has `vN` (the bars for N ms) and `a` (the side arrows),
+  and its n and p hide the bars as a key does. Scenario q (by its name only) is written for a profile: turns, two
+  jumps, the bars at rest and just after a turn, the arrows.
+  `tools/standin_selfcheck.py --out SCRATCH` drives the stand-in alone, no TASlation, in a headless browser (no
+  window on the screen, no input of the system's: the browser's debugging protocol on a loopback port gives the
+  page trusted pointer and key events, sets its window to 1918 x (946 + band) and its full screen to 1920 x 1080, and
+  takes its pictures): in each profile, and then with a few parts switched, a turn by key, by the side arrow and by a
+  click on the ground or the page, the bars in and out, a drag of the knob and a click on the bar (the spinner, the
+  washed-out picture), the full screen and back. It prints the page's log and PASS or FAIL for each check, with what
+  the e2e tool's decoder reads in each picture (into SCRATCH/shots: the sample pages, scratch only).
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
   window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is

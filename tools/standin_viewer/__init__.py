@@ -6,6 +6,8 @@ docstring says how); this module starts it in a throwaway browser window and tal
 
 * the script the page runs by itself (`Step`, `format_script`, `parse_script`): no key, no click, nothing sent to
   any window;
+* the page's behaviour profiles (`PROFILES`, ``profile=dark|light``: two kinds of web viewer, their parts each
+  switchable alone, `PROFILE_OPTIONS`, `parse_options`), off unless asked for;
 * the page list and the control file, both written into a scratch folder given (`write_page_list`,
   `write_control`), never anywhere else: the list names the pictures by file URL where they are (a dataset read in
   place, or the repository's test fixtures), and no picture is copied or written;
@@ -40,11 +42,20 @@ HTML = Path(__file__).resolve().with_name("standin.html")
 TITLE = "Stand-in reader"  # the page's title, the token after it
 PAGE_LIST, CONTROL = "pages.js", "control.js"
 REPLACE_TRIES_S = 2.0  # the control file's rename is tried again so long while the browser holds it open
-# go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released
-OPS = "gwnpjfstbmehku"
+# go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released, the
+# bars shown for a while (a profile), the side arrows shown (a profile)
+OPS = "gwnpjfstbmehkuva"
 WITH_NUMBER = "gwjmh"  # steps that need a number
 CELL, CODE_X, CODE_Y = 6, 12, 12  # the page's code cells (CSS pixels from the content's top left), as standin.html
 LEAD = (1, 0, 1, 0)
+# the page's behaviour profiles (``profile=``) and the names of their parts, each switchable alone in the query (as
+# PROFILES in standin.html, whose docstring says what each does)
+PROFILES = ("dark", "light")
+PROFILE_OPTIONS = ("ground", "cover", "bars", "bar_top", "bar_bottom", "bar_style", "bar_fade_ms", "bar_hide_ms",
+                   "bar_key_hide", "arrows", "arrow_show", "arrow_hide_ms", "arrow_inset", "page_clicks",
+                   "ground_clicks", "jump", "jump_ms", "jump_half", "half_ms", "preview", "preview_ms", "resize",
+                   "resize_ms", "focus_black", "counter")
+OPTION_VALUE = re.compile(r"[A-Za-z0-9_.\-]*")
 DARK = 16  # a frame no brighter than this at every point looked at is black
 
 
@@ -152,21 +163,49 @@ def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int 
             time.sleep(0.02)
 
 
+def parse_options(texts: Iterable[str]) -> dict[str, str]:
+    """``NAME=VALUE`` words (a profile's parts, `PROFILE_OPTIONS`) as a dict; a name not known or a value with other
+    than letters, digits, ``_ . -`` refused."""
+    out: dict[str, str] = {}
+    for text in texts:
+        name, sep, value = str(text).partition("=")
+        name = name.strip()
+        if not sep or name not in PROFILE_OPTIONS or not OPTION_VALUE.fullmatch(value.strip()):
+            names = ", ".join(PROFILE_OPTIONS)
+            raise ValueError(f"not a profile option: {text!r} (NAME=VALUE, NAME one of {names})")
+        out[name] = value.strip()
+    return out
+
+
 def page_url(token: str, steps: Sequence[Step], folder: Path, seed: int = 1, band: int = 54,
              soft: tuple[int, int] = (150, 400), factor: int = 6, flash_ms: int = 800, layout: str = "auto",
-             soft_first: bool = True, slider: int = 0) -> str:
+             soft_first: bool | None = None, slider: int = 0, profile: str = "",
+             options: dict[str, Any] | None = None) -> str:
     """The stand-in page's URL: the page itself (`HTML`), its token, the page list and the control file in the
-    scratch *folder*, its draws; the script in the hash. Without *soft_first* (``soft_first=0`` in the query) the page
+    scratch *folder*, its draws; the script in the hash. *soft_first* False (``soft_first=0`` in the query): the page
     draws every turn sharp at once and nothing after it; *slider* 1 or 2 (``slider=N``): the page slider under the
-    page, 2 with the pages drawn as its knob is dragged (standin.html says how). With neither the URL is what it
-    always was."""
+    page, 2 with the pages drawn as its knob is dragged (standin.html says how). *profile* "dark" or "light"
+    (``profile=``): it behaves as that kind of web viewer, each of its parts in *options* (`PROFILE_OPTIONS`) given
+    another value; a profile draws every turn sharp at once unless *soft_first* is True (``soft_first=1``). With none
+    of them the URL is what it always was."""
     if slider not in (0, 1, 2):
         raise ValueError("slider is 0, 1 or 2")
+    if profile not in ("", *PROFILES):
+        raise ValueError(f"profile is one of {PROFILES} or none")
+    options = dict(options or {})
+    if options and not profile:
+        raise ValueError("options are a profile's")
+    parse_options(f"{k}={v}" for k, v in options.items())
     folder = Path(folder).resolve()
+    if profile:
+        first = {"soft_first": 1} if soft_first else {}
+    else:
+        first = {} if soft_first is None or soft_first else {"soft_first": 0}
     query = urlencode({"token": token, "pages": file_url(folder / PAGE_LIST), "control": file_url(folder / CONTROL),
                        "seed": seed, "band": band, "soft_min": soft[0], "soft_max": soft[1], "factor": factor,
-                       "flash_ms": flash_ms, "layout": layout, **({} if soft_first else {"soft_first": 0}),
-                       **({"slider": slider} if slider else {})})
+                       "flash_ms": flash_ms, "layout": layout, **first,
+                       **({"slider": slider} if slider else {}), **({"profile": profile} if profile else {}),
+                       **{k: options[k] for k in PROFILE_OPTIONS if k in options}})
     return file_url(HTML) + "?" + query + "#s=" + format_script(steps)
 
 
@@ -522,6 +561,6 @@ class SelectionGuard:
         return self.stopped
 
 
-__all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
+__all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "PROFILES", "PROFILE_OPTIONS", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
            "browser_command", "cells_of", "decode", "file_url", "find_browser", "find_window", "format_script",
-           "page_url", "parse_line", "parse_script", "process_tree", "write_control", "write_page_list"]
+           "page_url", "parse_line", "parse_options", "parse_script", "process_tree", "write_control", "write_page_list"]

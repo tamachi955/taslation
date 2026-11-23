@@ -67,7 +67,7 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
     assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
-        standin_e2e.wanted("a,q")
+        standin_e2e.wanted("a,y")  # (q is scenario q, for a stand-in with a profile)
 
 
 def _plan(wait_done=None):
