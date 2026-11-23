@@ -298,6 +298,9 @@ class Settings:
     # TASlation's, the viewer taking every click and key itself; F9 hides it or shows it again while the viewer is in
     # front (`ui.seethrough`)
     see_through: bool = False
+    # see-through mode's right side pane, the indicators beside the page (`ui.seethrough`): shown or not; the switch in
+    # its left pane writes it here, kept for the next starts
+    see_through_indicators: bool = True
     # the translation on the page (the Reader role by hover_shows, the Translator role always; on the full screen as
     # in the window): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its
     # place, `ui.in_place`); off, nothing shows under the pointer

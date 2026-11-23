@@ -340,14 +340,23 @@ rows' languages.
   page and on the ground (always the stand-in's); who was in front, and each change, with the activations of
   TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
   window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
-  window was on the screen once a second (shown, minimised, hidden); each time the bars went from a page read under
+  window was on the screen once a second (shown, minimised, hidden: put aside, minimised is expected once it has been
+  shown); each time the bars went from a page read under
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
   read and asked for again); the stand-in's frames a second
   while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
   for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
-  them). `--see-truth` adds copies of the stand-in's place on the screen every 33 ms, in memory, checked for patches
+  them). The side panes (`taslation/panes.py`) are watched once a second (`panes`): shown or hidden beside a single
+  page or a spread, the most px each shared with the page box (0 expected), their gaps to it and their sizes, and
+  which window `WindowFromPoint` gives on the right pane (the stand-in: click-through), on a control of the left one
+  (the pane) and between two of its rows (the stand-in); some 8 s in, the lettering's switch on the left pane is
+  clicked twice by a press and a release POSTED to the pane's own window (no input of the system's: the lettering off
+  and on again), with the time until it changed and the window in front looked at every 5 ms meanwhile (the stand-in
+  throughout). `--see-pane-shot` keeps one copy of the stand-in's place on the screen the first time both panes show
+  beside a spread whose page is done (SCRATCH/shots: a sample page, delete it after). `--see-truth` adds copies of the
+  stand-in's place on the screen every 33 ms, in memory, checked for patches
   of another page than the one the copy shows (an old patch counts when its lettering's ink is on the screen and not
   in the viewer's own frame of that moment) and for how the page's own patches lie (0 px off at 100 %); two of them,
   of a page lettered in full, go into SCRATCH/shots (the sample pages: delete them after). `--standin-size WxH` gives

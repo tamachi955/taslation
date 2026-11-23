@@ -18,8 +18,25 @@ and the viewer takes every click and key itself.
   without them, the bubbles that reach those rows (cut by a bar) left out, and the page is read once more for those
   alone (`Pipeline.carry_over`: the lines kept are not asked again). The page on a flat ground of any colour is the
   capture area (`seethrough.ground_box`: a white ground too).
+* The side panes (`taslation.panes`, shown by `capture.seethrough`): on the viewer's ground beside the page at rest
+  (`note_frame` keeps the page box, the steady band and the ground's colour), LEFT the controls - Translate (Stop while
+  a page can be stopped), Auto, the target language (an arrow each side; taken once no arrow was clicked for
+  LANGUAGE_SETTLE_MS), the lettering's switch (as F9), the indicators' switch (kept in the settings file:
+  ``see_through_indicators``), Set area..., Settings..., the way back to TASlation's window, Quit -, RIGHT the
+  indicators: what the status slot says, how far the page filling in is (lines lettered of the lines read), the status
+  line, the backlog, the pages that went by too fast and those updated since they were seen (the indicator's own
+  lines), where the translator runs. `panes_tick` (every TICK_MS) acts on the clicks on the left pane and draws a pane
+  again only when what it says changed. A pane that does not fit its ground hides (`panes.place`).
+* TASlation's own window is put aside: shown at a quiet start (never activated, so that its widgets are laid out)
+  and minimised QUIET_MS later (`quiet_started`; minimising a window that is not active moves no foreground), reached
+  again from the left pane (TASlation window) or the taskbar. A dialog of its own that comes up meanwhile - the
+  book's name asked for, a model offered - would wait unseen behind the minimised window (Tk keeps a transient of a
+  minimised window hidden), so the window is shown again for it (`_dialog_waits`). A control that opens a dialog
+  (Set area..., Settings..., a language whose model is not there) shows the window first, and that is the one time a
+  click on a pane brings TASlation in front: the reader asked for its dialog.
 
-Nothing here presses a key, posts a message or moves the foreground."""
+Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, or a
+dialog of TASlation's own, moves the foreground."""
 
 from __future__ import annotations
 
@@ -30,11 +47,15 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from .. import config
+from .. import panes as pn
 from .. import seethrough as st
 from ..capture import foreground_owner, foreground_window
 from ..capture import seethrough as window
 from ..capture import wgc
 from ..capture.overlay import HotKeys
+from ..i18n import _
+from ..i18n import current as ui_language
 
 TICK_MS = 50
 HOTKEY = "see_through"
@@ -49,7 +70,10 @@ CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`re
 # (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
 
 
-QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
+QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made, and the
+# window is minimised then (once it has been shown: its widgets laid out at their sizes)
+ASIDE_TRIES = 10  # ... looked at again every QUIET_MS so many times while it is not shown yet
+LANGUAGE_SETTLE_MS = 1200  # the language chosen with the left pane's arrows is taken once none was clicked so long
 
 
 def px(app: Any, size: int) -> int:
@@ -90,9 +114,12 @@ def quiet(app: Any) -> bool:
 
 
 def quiet_started(app: Any) -> None:
-    """The window's start made (Tk shows it at its first idle, the decoy first): the decoy goes QUIET_MS later."""
+    """The window's start made (Tk shows it at its first idle, the decoy first): the decoy goes QUIET_MS later, and
+    in see-through mode the window is put aside then (`aside`) - unless the start was not quiet after all (the legal
+    notice)."""
     if getattr(app, "_quiet_decoy", None) is None:
         return
+    put_aside = quiet(app) and on(app)
 
     def drop() -> None:
         decoy, app._quiet_decoy = app._quiet_decoy, None
@@ -101,8 +128,61 @@ def quiet_started(app: Any) -> None:
                 widget.destroy()
             except tk.TclError:
                 pass
+        if put_aside and not getattr(app, "_quiet_ended", False):
+            aside(app)
 
     app.after(QUIET_MS, drop)
+
+
+def aside(app: Any, tries: int = ASIDE_TRIES) -> None:
+    """TASlation's own window minimised, once it has been shown (never activated: minimising it moves no foreground),
+    so that the viewer stands alone with the panes; it is reached again from the left pane (`window_up`) or the
+    taskbar."""
+    try:
+        if not app.winfo_ismapped():
+            if tries > 0:
+                app.after(QUIET_MS, lambda: aside(app, tries - 1))
+            return
+        if app.state() == "normal":
+            app.iconify()
+            app._see_aside = True
+    except tk.TclError:
+        pass
+
+
+def window_up(app: Any) -> None:
+    """TASlation's own window shown again and brought in front (the reader asked for it, or for one of its dialogs):
+    maximised again when it opened so."""
+    app._see_aside = False
+    try:
+        if app.state() in ("iconic", "withdrawn"):
+            app.deiconify()
+            if getattr(app, "_opening_zoomed", False):
+                app.state("zoomed")
+        app.lift()
+        app.focus_force()
+    except tk.TclError:
+        pass
+
+
+def _dialog_waits(app: Any) -> None:
+    """While the window is put aside (`aside`), a dialog of its own that is to show (a transient top-level, neither
+    shown nor a tip): Tk keeps it hidden behind the minimised window, so the window is shown again for it."""
+    if not getattr(app, "_see_aside", False):
+        return
+    try:
+        if app.state() != "iconic":
+            app._see_aside = False  # (the reader showed it again: theirs from now on)
+            return
+        decoy = getattr(app, "_quiet_decoy", None) or ()
+        for child in app.winfo_children():
+            if not isinstance(child, tk.Toplevel) or child in decoy:
+                continue
+            if child.wm_transient() and not child.wm_overrideredirect() and not child.winfo_viewable():
+                window_up(app)
+                return
+    except tk.TclError:
+        pass
 
 
 def quiet_end(app: Any) -> None:
@@ -121,6 +201,11 @@ def start(app: Any) -> bool:
     app._see_job = None
     app._see_carries = []  # (when, pages carried over, bubbles left out), see after_bars
     app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
+    app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour) at the last rest (`note_frame`)
+    app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
+    app._see_language = None  # (language, after job) while the left pane's arrows are being clicked
+    app._see_clicked = []  # (when, control) of each click acted on, for the tools
+    app._see_aside = False  # the window was put aside (`aside`)
     if not bool(getattr(app.settings, "see_through", False)):
         return False
     over = window.SeeThrough.start()
@@ -162,7 +247,7 @@ def _tick(app: Any) -> None:
 
 def tick(app: Any) -> None:
     """The viewer followed, the hot key held while the viewer is in front (and its presses acted on), the patches
-    handed over when they changed."""
+    handed over when they changed, the side panes' clicks acted on and the panes drawn again when they changed."""
     over = app._see_through
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
@@ -170,6 +255,9 @@ def tick(app: Any) -> None:
     app._see_dpi = window.viewer_dpi(hwnd)
     _hotkey(app, hwnd)
     present(app)
+    panes_tick(app)
+    if on(app):  # (not after Quit on the left pane: the window has gone)
+        _dialog_waits(app)
 
 
 def _hotkey(app: Any, viewer: int) -> None:
@@ -196,6 +284,267 @@ def toggle(app: Any) -> None:
     over = getattr(app, "_see_through", None)
     if over is not None:
         over.set_on(not over.on)
+
+
+# ------------------------------------------------------------------ the side panes
+def indicators_on(app: Any) -> bool:
+    """Whether the right pane, the indicators, is to show (``see_through_indicators``)."""
+    return bool(getattr(app.settings, "see_through_indicators", True))
+
+
+def _get(var: Any, default: Any = None) -> Any:
+    try:
+        return var.get() if var is not None else default
+    except tk.TclError:
+        return default
+
+
+def _stoppable(app: Any) -> bool:
+    """Whether a page job can be stopped now (the window's Stop is not greyed)."""
+    button = getattr(app, "stop_btn", None)
+    try:
+        return button is not None and str(button.cget("state")) != "disabled"
+    except tk.TclError:
+        return False
+
+
+def _languages(app: Any) -> list[str]:
+    """The target languages the left pane's arrows go through: the "To:" box's list (English names), the language in
+    force first when it is not one of them."""
+    from .constants import LANGUAGES
+
+    names = list(LANGUAGES)
+    current = str(_get(getattr(app, "lang_var", None), "") or "")
+    if current and current not in names:
+        names.insert(0, current)
+    return names
+
+
+def _language_shown(app: Any) -> str:
+    """The target language as the left pane shows it: the one being chosen with its arrows, else the one in force."""
+    picking = getattr(app, "_see_language", None)
+    language = picking[0] if picking is not None else str(_get(getattr(app, "lang_var", None), "") or "")
+    from .constants import LANGUAGES
+
+    return _(language) if language in LANGUAGES else language
+
+
+def left_rows(app: Any) -> list[pn.Row]:
+    """The left pane: what the window offers a reader in the Reader role, the controls a click acts on."""
+    over = getattr(app, "_see_through", None)
+    first = pn.Row("stop", _("Stop")) if _stoppable(app) else pn.Row("translate", _("Translate"))
+    return [first,
+            pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
+            pn.Row("language", _language_shown(app), "choice"),
+            pn.Row("lettering", _("Lettering (F9)"), "toggle", on=bool(over is None or over.on)),
+            pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
+            pn.Row("area", _("Set area...")),
+            pn.Row("settings", _("Settings...")),
+            pn.Row("window", _("TASlation window")),
+            pn.Row("quit", _("Quit"))]
+
+
+def right_rows(app: Any) -> list[pn.Row]:
+    """The right pane, words only, each row only when it has something to say: the status slot (`status_slot`: what
+    the page cannot show itself), how far the page filling in is, the status line, the indicator's lines on the pages
+    behind (the backlog, those that went by too fast, those updated since they were seen: `side_model`), where the
+    translator runs."""
+    from . import status_slot
+
+    rows: list[pn.Row] = []
+    side = getattr(app, "_side", None)
+    shown = getattr(getattr(side, "slot", None), "shown", None)
+    want = shown[0] if shown else None
+    if want:
+        rows.append(pn.Row("", status_slot.slot_text(want[0]), "text", warn=bool(want[1])))
+    fill = getattr(app, "_fill", None)
+    if fill is not None and fill.final is None:
+        total = sum(1 for s in fill.states if s != "skipped")
+        if total:
+            rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
+                               "text"))
+    status = str(_get(getattr(app, "status_var", None), "") or "").strip()
+    if status:
+        rows.append(pn.Row("", status, "text"))
+    model = getattr(side, "model", None)
+    if model is not None:
+        try:
+            counts = model.counts()
+            backlog = model.backlog
+            if backlog.pages > 0:
+                rows.append(pn.Row("", _("Working on the others: {pages} page(s), {lines} line(s) to go.").format(
+                    pages=backlog.pages, lines=backlog.lines), "text"))
+            missed = max(counts["missed"], backlog.dropped)
+            if missed:
+                rows.append(pn.Row("", _("{n} turned too fast to catch: turn back to them in the viewer to have them read.").format(n=missed), "text"))
+            if counts["updated"]:
+                rows.append(pn.Row("", _("{n} updated since you saw them.").format(n=counts["updated"]), "text"))
+        except Exception:  # noqa: BLE001 - the indicator's lines left out
+            pass
+    where = getattr(app, "_compute_where", "")
+    if where in ("gpu", "cpu"):
+        rows.append(pn.Row("", _("Translator: on the GPU") if where == "gpu" else _("Translator: on the processor"),
+                           "text"))
+    return rows
+
+
+def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, dpi: int,
+             scheme: pn.Colours) -> pn.Picture | None:
+    """The picture of the pane *side* of *rows* in the *room* its ground leaves (None: it does not fit), made again
+    only when what it is made of changed. The right one is as wide as the room lets it (MAX_W at the most), whatever
+    it says: only its height changes with its words."""
+    if not rows:
+        return None
+    width = pn.width_for(rows, language, dpi, room, fill=side == "right")
+    if width is None:
+        return None
+    key = (tuple(rows), width, language, dpi, scheme)
+    memo = app._see_pane_memo.get(side)
+    if memo is not None and memo[0] == key:
+        return memo[1]
+    picture = pn.render(rows, width, language, dpi, scheme)
+    app._see_pane_memo[side] = (key, picture, None)
+    return picture
+
+
+def panes_tick(app: Any) -> None:
+    """The clicks on the left pane acted on, then both panes handed to the see-through window as they are to be: on
+    the ground beside the page at the last rest, or hidden (no page on a flat ground yet, no room, the right one
+    switched off)."""
+    over = getattr(app, "_see_through", None)
+    if over is None:
+        return
+    for side, x, y, _t in over.take_clicks():
+        if pane_click(app, side, x, y) == "quit":
+            return  # (the window has gone)
+    ground = getattr(app, "_see_ground", None)
+    if ground is None:
+        for side, memo in list(app._see_pane_memo.items()):
+            app._see_pane_memo[side] = (memo[0], memo[1], None)  # (a click comes to nothing)
+        over.set_panes(None, None)
+        return
+    size, page, band, colour = ground
+    dpi = getattr(app, "_see_dpi", st.BASE_DPI)
+    language = ui_language()
+    scheme = pn.colours(colour)
+    room_left, room_right = pn.rooms(size, page, dpi)
+    left = _picture(app, "left", left_rows(app), room_left, language, dpi, scheme)
+    right = _picture(app, "right", right_rows(app), room_right, language, dpi, scheme) if indicators_on(app) else None
+    box_left, box_right = pn.place(size, page, band, left.size if left else None, right.size if right else None, dpi)
+    for side, picture, box in (("left", left, box_left), ("right", right, box_right)):
+        memo = app._see_pane_memo.get(side)
+        if memo is not None:
+            app._see_pane_memo[side] = (memo[0], memo[1], box if picture is not None else None)
+    over.set_panes((left.bgra, box_left) if left is not None and box_left is not None else None,
+                   (right.bgra, box_right) if right is not None and box_right is not None else None)
+
+
+def pane_click(app: Any, side: str, x: int, y: int) -> str:
+    """A click on the pane *side* at (*x*, *y*) of its picture as last handed over: the control there acted on; its
+    name ("" for none)."""
+    memo = app._see_pane_memo.get(side) if side == "left" else None
+    if memo is None or memo[2] is None:
+        return ""
+    name = memo[1].hit(x, y)
+    action = PANE_ACTIONS.get(name)
+    if action is None:
+        return ""
+    app._see_clicked.append((time.monotonic(), name))
+    action(app)
+    return name
+
+
+def _pick_language(app: Any, step: int) -> None:
+    """An arrow of the language row: the next or the one before in the list, shown at once, taken once no arrow was
+    clicked for LANGUAGE_SETTLE_MS (the translator may follow it with another model)."""
+    names = _languages(app)
+    picking = getattr(app, "_see_language", None)
+    current = picking[0] if picking is not None else str(_get(getattr(app, "lang_var", None), "") or "")
+    index = names.index(current) if current in names else 0
+    chosen = names[(index + step) % len(names)]
+    if picking is not None:
+        try:
+            app.after_cancel(picking[1])
+        except (tk.TclError, ValueError):
+            pass
+    try:
+        job = app.after(LANGUAGE_SETTLE_MS, lambda: _language_settled(app))
+    except Exception:  # noqa: BLE001 - no Tk loop (a test): taken at once
+        app._see_language = (chosen, None)
+        _language_settled(app)
+        return
+    app._see_language = (chosen, job)
+
+
+def _language_settled(app: Any) -> None:
+    """The language chosen with the arrows taken, as the "To:" box takes one chosen there (`_target_picked`); a
+    language whose model is not there is offered in a dialog of the window's, which is shown first."""
+    picking, app._see_language = getattr(app, "_see_language", None), None
+    if picking is None:
+        return
+    language = picking[0]
+    if language == str(_get(getattr(app, "lang_var", None), "") or ""):
+        return
+    plan = getattr(app, "_plan", None)
+    try:
+        offered = plan is not None and plan(language) is not None
+    except Exception:  # noqa: BLE001 - not known: the window shown, as for an offer
+        offered = True
+    if offered:
+        window_up(app)
+    from .constants import LANGUAGES
+
+    shown = getattr(app, "lang_shown", None)
+    if shown is not None:
+        shown.set(_(language) if language in LANGUAGES else language)  # (the "To:" box: lang_var follows)
+    picked = getattr(app, "_target_picked", None)
+    if picked is not None:
+        picked()
+
+
+def _flip_indicators(app: Any) -> None:
+    """The indicators' switch: the right pane shown or not, the choice kept in the settings file for the next starts
+    (as the window's other choices are: `config.write_settings`)."""
+    value = not indicators_on(app)
+    app.settings.see_through_indicators = value
+    try:
+        config.write_settings(config.settings_file(app.settings), {"see_through_indicators": value})
+    except (config.ConfigError, OSError) as e:
+        from .hover import NOT_KEPT
+
+        say = getattr(app, "say", None)
+        if say is not None:
+            say(NOT_KEPT, error=getattr(e, "strerror", None) or str(e))
+
+
+def _with_window(step: str) -> Any:
+    """An action that opens a dialog of the window's: the window shown first (put aside, its dialogs would not
+    show)."""
+    def act(app: Any) -> None:
+        window_up(app)
+        getattr(app, step)()
+    return act
+
+
+def _flip_auto(app: Any) -> None:
+    var = getattr(app, "auto_var", None)
+    if var is not None:
+        var.set(not bool(_get(var, False)))
+
+
+PANE_ACTIONS: dict[str, Any] = {
+    "translate": lambda app: app.translate_now(),
+    "stop": lambda app: app.stop_page(),
+    "auto": _flip_auto,
+    "language_prev": lambda app: _pick_language(app, -1),
+    "language_next": lambda app: _pick_language(app, 1),
+    "lettering": toggle,
+    "indicators": _flip_indicators,
+    "area": _with_window("set_area"),
+    "settings": _with_window("open_settings"),
+    "window": window_up,
+    "quit": lambda app: app._on_close(),
+}
 
 
 # ------------------------------------------------------------------ the patches
@@ -276,7 +625,9 @@ def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
 def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     """A frame just captured of the viewer (`LiveViewMixin._capture_frame`): since when bars lie over the page (and a
     look once they have stayed BAR_WAIT_S: a viewer draws no new frame while they stand still), and the page box of
-    the last frame at rest (which tells half a spread)."""
+    the last frame at rest (which tells half a spread) with what the side panes are placed by: the frame's size, the
+    steady band's rows (`seethrough.steady_box` of the capture area: where bars never come) and the ground's colour
+    (none at rest on no flat ground: the panes hide)."""
     found = frame_look(app, image, facts)
     if found.kind is not None:
         return
@@ -289,6 +640,11 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
         app._see_bars_since = None
         if found.box is not None:
             app._see_rest_box = found.box
+            _rgb, area = area_rgb(app, image, facts)
+            steady = st.steady_box(image.size, area)
+            app._see_ground = (image.size, found.box, (steady[1], steady[3]), found.ground)
+        else:
+            app._see_ground = None
         return
     if app._see_bars_since is None:
         app._see_bars_since = time.monotonic()

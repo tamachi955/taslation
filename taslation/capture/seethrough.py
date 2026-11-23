@@ -17,6 +17,15 @@ lettering laid over the viewer's own window, which goes on taking every click an
   then (`seethrough.visible`), with no wait for Tk. The Tk thread only hands it the patches of the page as they are
   lettered (`present`: immutable arrays under a lock). So a turn hides the old lettering at the first frame that
   shows another page, whatever Tk is doing.
+* The side panes (`taslation.panes`; their pictures and their places from the Tk thread, `set_panes`) are two more
+  layered windows of this thread's, topmost, never activated (WS_EX_NOACTIVATE), with no taskbar button: they lie on
+  the viewer's ground beside the page, follow the viewer's moves as the lettering does, hide while it is minimised,
+  hidden or cloaked and where a window above the viewer meets them; the F9 key hides the lettering only. The RIGHT one
+  (the indicators) is click-through as the lettering's window is. The LEFT one (the controls) takes the clicks on its
+  plates - no WS_EX_TRANSPARENT; a layered window passes on a click on a pixel of alpha 0, so between its rows and
+  round them the viewer takes it -, answers WM_MOUSEACTIVATE with MA_NOACTIVATE (a click never activates it: the
+  viewer keeps the keyboard), and keeps each click (`take_clicks`: where in the pane) for the Tk thread, which acts on
+  it. The panes take no key, and send, post and press nothing either.
 
 What it shows is decided by one rule (`taslation.seethrough`): a patch belongs to the pixels it was made from."""
 
@@ -51,6 +60,13 @@ GW_HWNDPREV, GA_ROOT, GWL_EXSTYLE = 3, 2, -20
 BI_RGB, DIB_RGB_COLORS = 0, 0
 CLASS = "TASlationSeeThrough"
 ERROR_CLASS_ALREADY_EXISTS = 1410
+# the left side pane: takes the clicks on its plates (no WS_EX_TRANSPARENT), never activated, no taskbar button
+PANE_CLASS = "TASlationSeeThroughPane"
+PANE_EX_STYLE = WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
+IDC_ARROW = 32512
+PANES = ("left", "right")
+CLICKS_KEPT = 32  # clicks on the left pane not taken yet by the Tk thread (`take_clicks`): the oldest go first
 
 LOOK_S = 0.05  # with no frame coming, the window looks at the viewer this often (moved, minimised, covered)
 COVER_S = 0.1  # the windows over the viewer are looked for at most this often
@@ -141,6 +157,8 @@ if IS_WINDOWS:
     _kernel32.GetModuleHandleW.restype = wintypes.HMODULE
     _user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
     _user32.MonitorFromWindow.restype = wintypes.HMONITOR
+    _user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+    _user32.LoadCursorW.restype = wintypes.HANDLE
 
 MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 2, 0
 _shcore: Any = None  # (shcore.dll, loaded at the first `viewer_dpi`)
@@ -177,30 +195,99 @@ def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
     return _user32.DefWindowProcW(hwnd, message, wparam, lparam)
 
 
+_pane_clicks: dict[int, Any] = {}  # a left pane's window -> what takes its clicks: (x, y) in its own pixels
+
+
+def _pane_proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
+    if message == WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE  # (a click is taken, the window never activated: the viewer keeps the keyboard)
+    if message == WM_LBUTTONDOWN:
+        return 0
+    if message == WM_LBUTTONUP:
+        take = _pane_clicks.get(int(hwnd or 0))
+        if take is not None:
+            take(ctypes.c_short(int(lparam) & 0xFFFF).value, ctypes.c_short((int(lparam) >> 16) & 0xFFFF).value)
+        return 0
+    return _user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+
 _PROC = WNDPROC(_proc) if IS_WINDOWS else None  # kept for the life of the process: the class points at it
+_PANE_PROC = WNDPROC(_pane_proc) if IS_WINDOWS else None
 _class_ready = False
 
 
 def _register_class() -> bool:
+    """The window classes of the lettering's window (click-through: the right pane's too) and of the left pane."""
     global _class_ready
     if _class_ready:
         return True
-    wc = WNDCLASSW()
-    wc.lpfnWndProc = _PROC
-    wc.hInstance = _kernel32.GetModuleHandleW(None)
-    wc.lpszClassName = CLASS
-    if not _user32.RegisterClassW(ctypes.byref(wc)) and ctypes.get_last_error() != ERROR_CLASS_ALREADY_EXISTS:
-        return False
+    instance = _kernel32.GetModuleHandleW(None)
+    for name, proc, cursor in ((CLASS, _PROC, None), (PANE_CLASS, _PANE_PROC, IDC_ARROW)):
+        wc = WNDCLASSW()
+        wc.lpfnWndProc = proc
+        wc.hInstance = instance
+        wc.lpszClassName = name
+        if cursor is not None:  # (the arrow over the controls, not whatever the viewer had last)
+            wc.hCursor = _user32.LoadCursorW(None, ctypes.c_void_p(cursor))
+        if not _user32.RegisterClassW(ctypes.byref(wc)) and ctypes.get_last_error() != ERROR_CLASS_ALREADY_EXISTS:
+            return False
     _class_ready = True
     return True
 
 
-def cover_rects(viewer: int, client: st.Box, own: int = 0) -> list[st.Box]:
+def _make_dib(size: tuple[int, int]) -> tuple[int, int, int, np.ndarray]:
+    """A memory DC with a 32-bit top-down DIB of *size* selected into it: (dc, bitmap, the DC's old bitmap, its
+    pixels as BGRA, top row first); `_free_dib` lets it go."""
+    width, height = size
+    info = BITMAPINFO()
+    info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    info.bmiHeader.biWidth = width
+    info.bmiHeader.biHeight = -height  # top-down
+    info.bmiHeader.biPlanes = 1
+    info.bmiHeader.biBitCount = 32
+    info.bmiHeader.biCompression = BI_RGB
+    bits = ctypes.c_void_p()
+    screen = _user32.GetDC(None)
+    try:
+        dc = _gdi32.CreateCompatibleDC(screen)
+        bitmap = _gdi32.CreateDIBSection(screen, ctypes.byref(info), DIB_RGB_COLORS, ctypes.byref(bits), None, 0)
+    finally:
+        _user32.ReleaseDC(None, screen)
+    if not bitmap or not bits.value:
+        _gdi32.DeleteDC(dc)
+        raise OSError("CreateDIBSection failed")
+    old = _gdi32.SelectObject(dc, bitmap)
+    buffer = (ctypes.c_ubyte * (width * height * 4)).from_address(bits.value)
+    return dc, bitmap, old, np.frombuffer(buffer, np.uint8).reshape(height, width, 4)
+
+
+def _free_dib(dib: tuple[Any, ...]) -> None:
+    dc, bitmap, old = dib[:3]
+    _gdi32.SelectObject(dc, old)
+    _gdi32.DeleteObject(bitmap)
+    _gdi32.DeleteDC(dc)
+
+
+def _layered(hwnd: int, dc: int, origin: tuple[int, int], size: tuple[int, int]) -> bool:
+    """The layered window *hwnd* drawn from the memory DC *dc* (premultiplied BGRA of *size*) at *origin*."""
+    blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
+    screen = _user32.GetDC(None)
+    try:
+        return bool(_user32.UpdateLayeredWindow(hwnd, screen, ctypes.byref(wintypes.POINT(*origin)),
+                                                ctypes.byref(wintypes.SIZE(*size)), dc,
+                                                ctypes.byref(wintypes.POINT(0, 0)), 0, ctypes.byref(blend),
+                                                ULW_ALPHA))
+    finally:
+        _user32.ReleaseDC(None, screen)
+
+
+def cover_rects(viewer: int, client: st.Box, own: int | frozenset[int] | set[int] = 0) -> list[st.Box]:
     """The screen rectangles of the windows above the viewer's window *viewer* that meet its client area *client*
-    (screen pixels): shown, not minimised nor cloaked, not click-through (this window, *own*, never counts), by the
-    rectangle the compositor shows of them (without the invisible resize borders)."""
+    (screen pixels): shown, not minimised nor cloaked, not click-through (the see-through windows, *own* - one or a
+    set -, never count), by the rectangle the compositor shows of them (without the invisible resize borders)."""
     from . import windows
 
+    mine = {int(own)} if isinstance(own, int) else {int(h) for h in own}
     out: list[st.Box] = []
     root = _user32.GetAncestor(viewer, GA_ROOT) or viewer
     above = _user32.GetWindow(root, GW_HWNDPREV)
@@ -208,7 +295,7 @@ def cover_rects(viewer: int, client: st.Box, own: int = 0) -> list[st.Box]:
         if not above:
             break
         h = int(above)
-        if (h != own and _user32.IsWindowVisible(h) and not _user32.IsIconic(h) and not windows._is_cloaked(h)
+        if (h not in mine and _user32.IsWindowVisible(h) and not _user32.IsIconic(h) and not windows._is_cloaked(h)
                 and not _user32.GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TRANSPARENT):
             try:
                 r = windows._frame_bounds(h)
@@ -223,11 +310,13 @@ def cover_rects(viewer: int, client: st.Box, own: int = 0) -> list[st.Box]:
 class SeeThrough:
     """The see-through window and its thread (see the module's notes). Made with `start` (None where there can be
     none), told which viewer to lie over (`follow`), handed the patches of the pages (`present`, `forget`, `clear`),
-    hidden and shown by the reader's hot key (`set_on`), ended with `close`. Its notes (`notes`) are numbers and
-    flags only: when it showed what, from which frame, and how long its work took."""
+    hidden and shown by the reader's hot key (`set_on`), handed the side panes (`set_panes`; the clicks on the left
+    one: `take_clicks`), ended with `close`. Its notes (`notes`) are numbers and flags only: when it showed what, from
+    which frame, and how long its work took."""
 
     def __init__(self) -> None:
         self.hwnd = 0
+        self.panes: dict[str, int] = {}  # "left", "right" -> the side pane's window
         self._viewer = 0
         self._on = True
         self._lock = threading.Lock()
@@ -240,7 +329,14 @@ class SeeThrough:
         self._arrived: dict[int, float] = {}  # frame count -> when the capture told of it
         self.notes: deque[dict[str, Any]] = deque(maxlen=LOG_KEPT)
         self.counts = {"frames": 0, "looks": 0, "draws": 0, "hides": 0, "moves": 0, "errors": 0,
-                       "compare_ms": 0.0, "draw_ms": 0.0}
+                       "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
+                       "clicks": 0}
+        # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels) or None, from
+        # the Tk thread; what shows of each, (serial, screen origin, size) or None, the window thread's own
+        self._pane_want: dict[str, tuple[int, np.ndarray, st.Box] | None] = {side: None for side in PANES}
+        self._pane_serial = 0
+        self._pane_shown: dict[str, tuple[int, tuple[int, int], tuple[int, int]] | None] = {s: None for s in PANES}
+        self._clicks: deque[tuple[str, int, int, float]] = deque(maxlen=CLICKS_KEPT)
         # the window thread's own state
         self._shown: tuple[Any, ...] | None = None  # (set serial, indices, origin, size) on show; None: hidden
         self._seq = -1
@@ -311,6 +407,54 @@ class SeeThrough:
         """(set serial, patch indices, screen origin, size) of what shows now; None when nothing does."""
         return self._shown
 
+    def set_panes(self, left: tuple[np.ndarray, st.Box] | None, right: tuple[np.ndarray, st.Box] | None) -> None:
+        """The side panes as they are to be: each (its picture - premultiplied BGRA (H, W, 4), not changed after -,
+        its box in the viewer's client pixels) or None (hidden). The same picture handed again is not drawn again."""
+        with self._lock:
+            changed = False
+            for side, want in (("left", left), ("right", right)):
+                old = self._pane_want.get(side)
+                if want is None:
+                    new = None
+                else:
+                    bgra, box = want
+                    if old is not None and old[1] is bgra:
+                        serial = old[0]
+                    else:
+                        self._pane_serial += 1
+                        serial = self._pane_serial
+                    new = (serial, bgra, tuple(int(v) for v in box))
+                if (None if old is None else (old[0], old[2])) != (None if new is None else (new[0], new[2])):
+                    self._pane_want[side] = new  # type: ignore[assignment]
+                    changed = True
+            if changed:
+                self._changed += 1
+        if changed:
+            self._wake.set()
+
+    def take_clicks(self) -> list[tuple[str, int, int, float]]:
+        """The clicks on the left pane since the last call: (side, x, y in the pane's picture, when), the oldest
+        first."""
+        out = []
+        while self._clicks:
+            try:
+                out.append(self._clicks.popleft())
+            except IndexError:
+                break
+        return out
+
+    def pane_shown(self, side: str) -> tuple[int, int, int, int] | None:
+        """The screen box of the side pane *side* as it shows now; None while it is hidden."""
+        shown = self._pane_shown.get(side)
+        if shown is None:
+            return None
+        (x, y), (w, h) = shown[1], shown[2]
+        return x, y, x + w, y + h
+
+    def own_windows(self) -> frozenset[int]:
+        """The see-through windows: the lettering's and the side panes'."""
+        return frozenset(h for h in (self.hwnd, *self.panes.values()) if h)
+
     def close(self) -> None:
         self._stop.set()
         self._wake.set()
@@ -329,10 +473,25 @@ class SeeThrough:
                     self._arrived.pop(old, None)
             self._wake.set()
 
+    def _clicked(self, side: str, x: int, y: int) -> None:
+        """(the window thread, from the left pane's window procedure) a click on the pane, kept for the Tk thread."""
+        self._clicks.append((side, int(x), int(y), time.monotonic()))
+        self.counts["clicks"] += 1
+        self._note("click", side=side, x=int(x), y=int(y))
+
     def _run(self) -> None:
+        instance = _kernel32.GetModuleHandleW(None)
         hwnd = _user32.CreateWindowExW(EX_STYLE, CLASS, "TASlation see-through", WS_POPUP, 0, 0, 1, 1, None, None,
-                                       _kernel32.GetModuleHandleW(None), None)
+                                       instance, None)
         self.hwnd = int(hwnd or 0)
+        if self.hwnd:  # the side panes: the left one takes clicks, the right one is click-through as this one is
+            for side, cls, ex in (("left", PANE_CLASS, PANE_EX_STYLE), ("right", CLASS, EX_STYLE)):
+                pane = int(_user32.CreateWindowExW(ex, cls, "TASlation pane", WS_POPUP, 0, 0, 1, 1, None, None,
+                                                   instance, None) or 0)
+                if pane:
+                    self.panes[side] = pane
+                    if side == "left":
+                        _pane_clicks[pane] = lambda x, y, s=side: self._clicked(s, x, y)
         self._ready.set()
         if not self.hwnd:
             return
@@ -353,7 +512,12 @@ class SeeThrough:
         finally:
             wgc.remove_listener(self._on_frame)
             self._hide("closed")
+            self._panes_hide("closed")
             self._free_dib()
+            for pane in self.panes.values():
+                _pane_clicks.pop(pane, None)
+                _user32.DestroyWindow(pane)
+            self.panes = {}
             _user32.DestroyWindow(self.hwnd)
             self.hwnd = 0
 
@@ -363,19 +527,24 @@ class SeeThrough:
         with self._lock:
             viewer, on, changed = self._viewer, self._on, self._changed
             sets = list(self._store.sets)
+            panes = dict(self._pane_want)
         self.counts["looks"] += 1
-        if not viewer or not on:
-            self._hide("off" if viewer else "no viewer")
+        if not viewer:
+            self._hide("no viewer")
+            self._panes_hide("no viewer")
             return
         if not _user32.IsWindow(viewer):
             self._hide("gone")
+            self._panes_hide("gone")
             return
         if _user32.IsIconic(viewer) or not _user32.IsWindowVisible(viewer) or windows._is_cloaked(viewer):
             self._hide("minimised")
+            self._panes_hide("minimised")
             return
         frame = wgc.peek(viewer)
         if frame is None:
             self._hide("no frame")
+            self._panes_hide("no frame")
             return
         client = windows._client_box(viewer)
         bounds = windows._frame_bounds(viewer)
@@ -388,15 +557,20 @@ class SeeThrough:
         box = wgc.crop_box(frame.size, bounds, client)
         if box is None:
             self._hide("size")
+            self._panes_hide("size")
             self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
             return
         origin = (bounds[0] + box[0], bounds[1] + box[1])
         size = (box[2] - box[0], box[3] - box[1])
         if now - self._covers_at >= COVER_S or geometry != self._geometry:
             screen = (origin[0], origin[1], origin[0] + size[0], origin[1] + size[1])
-            self._covers = cover_rects(viewer, screen, self.hwnd)
+            self._covers = cover_rects(viewer, screen, self.own_windows())
             self._covers_at = now
         self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
+        self._place_panes(panes, origin, size)
+        if not on:  # (the F9 key: the lettering hidden, the side panes as they are)
+            self._hide("off")
+            return
         self._new_frame = new_frame
         if new_frame:
             self.counts["frames"] += 1
@@ -418,10 +592,7 @@ class SeeThrough:
 
     def _free_dib(self) -> None:
         if self._dib is not None:
-            dc, bitmap, old, _pixels, _size = self._dib
-            _gdi32.SelectObject(dc, old)
-            _gdi32.DeleteObject(bitmap)
-            _gdi32.DeleteDC(dc)
+            _free_dib(self._dib)
             self._dib = None
 
     def _surface(self, size: tuple[int, int]) -> tuple[int, np.ndarray]:
@@ -429,29 +600,65 @@ class SeeThrough:
         if self._dib is not None and self._dib[4] == size:
             return self._dib[0], self._dib[3]
         self._free_dib()
-        width, height = size
-        info = BITMAPINFO()
-        info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        info.bmiHeader.biWidth = width
-        info.bmiHeader.biHeight = -height  # top-down
-        info.bmiHeader.biPlanes = 1
-        info.bmiHeader.biBitCount = 32
-        info.bmiHeader.biCompression = BI_RGB
-        bits = ctypes.c_void_p()
-        screen = _user32.GetDC(None)
-        try:
-            dc = _gdi32.CreateCompatibleDC(screen)
-            bitmap = _gdi32.CreateDIBSection(screen, ctypes.byref(info), DIB_RGB_COLORS, ctypes.byref(bits), None, 0)
-        finally:
-            _user32.ReleaseDC(None, screen)
-        if not bitmap or not bits.value:
-            _gdi32.DeleteDC(dc)
-            raise OSError("CreateDIBSection failed")
-        old = _gdi32.SelectObject(dc, bitmap)
-        buffer = (ctypes.c_ubyte * (width * height * 4)).from_address(bits.value)
-        pixels = np.frombuffer(buffer, np.uint8).reshape(height, width, 4)
+        dc, bitmap, old, pixels = _make_dib(size)
         self._dib = (dc, bitmap, old, pixels, size)
         return dc, pixels
+
+    # ------------------------------------------------------------------ the side panes (the window's thread)
+    def _place_panes(self, panes: dict[str, Any], origin: tuple[int, int], size: tuple[int, int]) -> None:
+        """Each side pane where the Tk thread put it on the viewer's client area (at *origin* on the screen, *size*),
+        or hidden: none asked for, beyond the client area, or a window above the viewer meets it."""
+        for side in PANES:
+            want = panes.get(side)
+            hwnd = self.panes.get(side, 0)
+            if want is None or not hwnd:
+                self._pane_hide(side, "none")
+                continue
+            serial, bgra, box = want
+            height, width = bgra.shape[:2]
+            if box[0] < 0 or box[1] < 0 or box[0] + width > size[0] or box[1] + height > size[1]:
+                self._pane_hide(side, "beyond")
+                continue
+            if st.covered((box[0], box[1], box[0] + width, box[1] + height), origin, self._covers):
+                self._pane_hide(side, "covered")
+                continue
+            self._pane_draw(side, hwnd, serial, bgra, (origin[0] + box[0], origin[1] + box[1]))
+
+    def _pane_draw(self, side: str, hwnd: int, serial: int, bgra: np.ndarray, at: tuple[int, int]) -> None:
+        before = self._pane_shown.get(side)
+        size = (int(bgra.shape[1]), int(bgra.shape[0]))
+        if before is not None and before[0] == serial and before[1] == at:
+            return
+        if before is None or before[0] != serial:  # a new picture: drawn through a DIB of its own, let go at once
+            dib = _make_dib(size)
+            try:
+                dib[3][:] = bgra
+                _layered(hwnd, dib[0], at, size)
+            finally:
+                _free_dib(dib)
+            self.counts["pane_draws"] += 1
+        else:  # the same picture moved with the viewer
+            _user32.SetWindowPos(hwnd, HWND_TOPMOST, at[0], at[1], 0, 0, SWP_NOSIZE | SWP_NOACTIVATE)
+            self.counts["pane_moves"] += 1
+        if before is None:
+            _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+            _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        self._pane_shown[side] = (serial, at, size)
+        self._note("pane", side=side, set=serial, x=at[0], y=at[1], w=size[0], h=size[1])
+
+    def _pane_hide(self, side: str, why: str) -> None:
+        if self._pane_shown.get(side) is None:
+            return
+        hwnd = self.panes.get(side, 0)
+        if hwnd:
+            _user32.ShowWindow(hwnd, SW_HIDE)
+        self._pane_shown[side] = None
+        self.counts["pane_hides"] += 1
+        self._note("pane_hide", side=side, why=why)
+
+    def _panes_hide(self, why: str) -> None:
+        for side in PANES:
+            self._pane_hide(side, why)
 
     def _draw(self, chosen: st.PatchSet, shown: tuple[int, ...], origin: tuple[int, int], size: tuple[int, int],
               seq: int, compare_ms: float, shares: list[float]) -> None:
@@ -461,14 +668,7 @@ class SeeThrough:
         dc, pixels = self._surface(size)
         if not same_picture:
             st.compose(size, [chosen.patches[i] for i in shown], pixels)
-        blend = BLENDFUNCTION(AC_SRC_OVER, 0, 255, AC_SRC_ALPHA)
-        screen = _user32.GetDC(None)
-        try:
-            ok = _user32.UpdateLayeredWindow(self.hwnd, screen, ctypes.byref(wintypes.POINT(*origin)),
-                                             ctypes.byref(wintypes.SIZE(*size)), dc,
-                                             ctypes.byref(wintypes.POINT(0, 0)), 0, ctypes.byref(blend), ULW_ALPHA)
-        finally:
-            _user32.ReleaseDC(None, screen)
+        ok = _layered(self.hwnd, dc, origin, size)
         if before is None:
             _user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
             _user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)

@@ -5287,7 +5287,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
                                           truth=bool(args.see_through and args.see_truth),
                                           shots=out / "shots" if args.see_truth else None, front_before=front_before,
-                                          activations=activations)
+                                          activations=activations,
+                                          pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None)
         see.install()
         see.start()
     queue_put = app._events.put
@@ -6288,6 +6289,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="with --see-through: copies of the stand-in's place on the screen, every "
                          f"{1000 * 0.033:.0f} ms in memory, checked for old patches over a new page; two of them into "
                          "shots/ (they show the sample pages: delete them after)")
+    ap.add_argument("--see-pane-shot", action="store_true",
+                    help="with --see-through: one copy of the stand-in's place on the screen, taken the first time "
+                         "both side panes show beside a spread whose page is done, into shots/ (it shows a sample page: "
+                         "delete it after)")
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")

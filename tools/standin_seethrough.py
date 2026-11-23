@@ -48,6 +48,8 @@ INK_LEVEL = 100  # a patch's pixel darker than this (every channel) is of its le
 SHOTS_KEPT = 2
 SRCCOPY, CAPTUREBLT = 0x00CC0020, 0x40000000
 GA_ROOT = 2
+PANE_CLICK_AFTER_S = 8.0  # the lettering's switch on the left pane is clicked (posted to the pane) once after so long
+WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0201, 0x0202, 0x0001
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -56,6 +58,8 @@ _user32.WindowFromPoint.argtypes = [wintypes.POINT]
 _user32.WindowFromPoint.restype = wintypes.HWND
 _user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
 _user32.GetAncestor.restype = wintypes.HWND
+_user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+_user32.PostMessageW.restype = wintypes.BOOL
 _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
 _user32.GetDC.argtypes = [wintypes.HWND]
 _user32.GetDC.restype = wintypes.HDC
@@ -205,9 +209,17 @@ class SeeWatch:
     stand-in's screen it shows, (page, spread) or None; *top*: rows above the page's content in a client capture."""
 
     def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
-                 front_before: int = 0, activations: Activations | None = None) -> None:
+                 front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
         self.truth, self.shots = truth, shots
+        self.pane_shot = pane_shot  # (`_pane_watch`: one copy with both panes beside a spread, into this folder)
+        self.panes: Counter[str] = Counter()  # (side, page kind, shown or hidden) at each look
+        self.pane_overlap: dict[str, int] = {}  # (side, page kind) -> the most px a pane shared with the page box
+        self.pane_gaps: Counter[str] = Counter()  # (side, page kind, px between the pane and the page)
+        self.pane_sizes: Counter[str] = Counter()  # (side, w x h)
+        self.pane_click: dict[str, Any] = {}  # (`_click_lettering`)
+        self.pane_shot_saved: str | None = None
+        self.started = time.monotonic()
         self.front_before = int(front_before)  # (the window in front just before TASlation's window was made)
         self.activations = activations
         self.own_states: Counter = Counter()  # (`_own_states`)
@@ -279,6 +291,8 @@ class SeeWatch:
         over = self.over()
         if over is not None and hwnd == over.hwnd:
             return "overlay"
+        if over is not None and hwnd in set(getattr(over, "panes", {}).values()):
+            return "pane"
         return "own" if window_pid(hwnd) == self.own_pid else "other"
 
     def _run(self) -> None:
@@ -297,7 +311,16 @@ class SeeWatch:
                 next_cpu = now + CPU_EVERY_S
             if now >= next_hit:
                 self._hit_test()
+                try:
+                    self._pane_watch()
+                except Exception:  # noqa: BLE001 - a look that failed is a look less
+                    pass
                 next_hit = now + HIT_EVERY_S
+            if not self.pane_click and now - self.started >= PANE_CLICK_AFTER_S:
+                try:
+                    self._click_lettering()
+                except Exception as e:  # noqa: BLE001 - noted
+                    self.pane_click = {"error": type(e).__name__}
             if self.truth and now >= next_copy:
                 try:
                     self._copy()
@@ -323,6 +346,115 @@ class SeeWatch:
             hwnd = int(_user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) or 0)
             self.hits[f"{where}:{self._who(hwnd)}"] += 1
         self._own_states()
+
+    def _pane_watch(self) -> None:
+        """The side panes, once a second: shown or hidden beside which kind of page (a single page or a spread, by
+        its box), how many px each shares with the page box (none, ever), how far from it, their sizes, and which window
+        `WindowFromPoint` gives on the right pane (the stand-in: it is click-through), on a control of the left one
+        (the pane) and between two of its rows (the stand-in: nothing there). With *pane_shot*, the first time both
+        show beside a spread whose page is done, one copy of the stand-in's place on the screen."""
+        over = self.over()
+        ground = getattr(self.app, "_see_ground", None)
+        if over is None or ground is None:
+            self.panes["no ground"] += 1
+            return
+        from taslation import panes as pn
+        from taslation.capture import windows
+
+        x0, y0, _w, _h = windows._client_box(self.hwnd)
+        page = ground[1]
+        kind = "spread" if page[2] - page[0] > page[3] - page[1] else "cover"
+        screen_page = (x0 + page[0], y0 + page[1], x0 + page[2], y0 + page[3])
+        boxes = {side: over.pane_shown(side) for side in ("left", "right")}
+        for side, box in boxes.items():
+            self.panes[f"{side}:{kind}:{'shown' if box is not None else 'hidden'}"] += 1
+            if box is None:
+                continue
+            key = f"{side}:{kind}"
+            self.pane_overlap[key] = max(self.pane_overlap.get(key, 0), pn.overlap(box, screen_page))
+            gap = screen_page[0] - box[2] if side == "left" else box[0] - screen_page[2]
+            self.pane_gaps[f"{key}:{gap}"] += 1
+            self.pane_sizes[f"{side}:{box[2] - box[0]}x{box[3] - box[1]}"] += 1
+
+            def who(x: int, y: int) -> str:
+                return self._who(int(_user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) or 0))
+
+            if side == "right":
+                self.hits[f"pane_right:{who((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)}"] += 1
+                continue
+            memo = (getattr(self.app, "_see_pane_memo", None) or {}).get("left")
+            if memo is None:
+                continue
+            hits = dict(memo[1].hits)
+            control = hits.get("lettering")
+            if control is not None:
+                self.hits[f"pane_left_control:{who(box[0] + (control[0] + control[2]) // 2, box[1] + (control[1] + control[3]) // 2)}"] += 1
+            first, second = hits.get("translate") or hits.get("stop"), hits.get("auto")
+            if first is not None and second is not None and second[1] > first[3]:
+                self.hits[f"pane_left_gap:{who(box[0] + (first[0] + first[2]) // 2, box[1] + (first[3] + second[1]) // 2)}"] += 1
+        shown = over.shown()
+        if (self.pane_shot is not None and self.pane_shot_saved is None and kind == "spread"
+                and all(b is not None for b in boxes.values()) and shown is not None
+                and any(s.serial == shown[0] and s.final for s in list(over._store.sets))):
+            x, y, w, h = windows._client_box(self.hwnd)
+            self.pane_shot.mkdir(parents=True, exist_ok=True)
+            path = self.pane_shot / "see_through_panes.png"
+            Image.fromarray(screen_copy(x, y, w, h)).save(path)
+            self.pane_shot_saved = str(path)
+
+    def _click_lettering(self) -> None:
+        """The lettering's switch on the left pane clicked twice (off, then on again) once a page is lettered: a left
+        button's press and release POSTED to the pane's own window (no input of the system's, nothing to any other
+        window), each time noting how long until the lettering's state changed and whether the window in front
+        changed."""
+        over = self.over()
+        memo = (getattr(self.app, "_see_pane_memo", None) or {}).get("left")
+        if over is None or memo is None or over.pane_shown("left") is None or over.shown() is None:
+            return
+        box = dict(memo[1].hits).get("lettering")
+        pane = over.panes.get("left", 0)
+        if box is None or not pane:
+            return
+        x, y = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+        lparam = (y << 16) | (x & 0xFFFF)
+        front = int(_user32.GetForegroundWindow() or 0)
+        rows: list[dict[str, Any]] = []
+        others: set[str] = set()  # (any other window in front meanwhile, looked at every 5 ms)
+
+        def wait(seconds: float, until: Callable[[], bool] = lambda: False) -> None:
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not until():
+                now = int(_user32.GetForegroundWindow() or 0)
+                if now != front:
+                    others.add(self._who(now))
+                time.sleep(0.005)
+
+        for _ in range(2):
+            before = over.on
+            t = time.monotonic()
+            _user32.PostMessageW(pane, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
+            _user32.PostMessageW(pane, WM_LBUTTONUP, 0, lparam)
+            wait(2.0, lambda: over.on != before)
+            ms = round((time.monotonic() - t) * 1000, 1)
+            wait(0.4)
+            after = int(_user32.GetForegroundWindow() or 0)
+            rows.append({"on_before": before, "on_after": over.on, "ms": ms, "front_same": after == front,
+                         "front": self._who(after)})
+        rows.append({"other_windows_in_front_meanwhile": sorted(others)})
+        clicked = [n for _t, n in getattr(self.app, "_see_clicked", ())]
+        self.pane_click = {"posted_to_the_pane": 4, "rows": rows, "front_before": self._who(front),
+                           "acted_on": clicked}
+
+    def pane_report(self) -> dict[str, Any]:
+        over = self.over()
+        counts = dict(over.counts) if over is not None else {}
+        return {"looks": dict(self.panes), "overlap_px_max": dict(self.pane_overlap),
+                "gaps_px": dict(self.pane_gaps), "sizes": dict(self.pane_sizes),
+                "hits": {k: v for k, v in self.hits.items() if k.startswith("pane_")},
+                "click": self.pane_click, "shot": self.pane_shot_saved,
+                "window": {k: counts.get(k) for k in ("pane_draws", "pane_moves", "pane_hides", "clicks")},
+                "hides_by_why": dict(Counter(n["why"] for n in (list(over.notes) if over is not None else [])
+                                             if n["ev"] == "pane_hide"))}
 
     def _own_states(self) -> None:
         """How TASlation's own main window is on the screen (shown, minimised, hidden), counted once a second."""
@@ -524,7 +656,7 @@ class SeeWatch:
                 # clock, pages carried over to the frame without them, bubbles left out (cut by a bar: read again)
                 "carries": [[round(t * 1000 + self.delta_ms - (changes[0]["t"] if changes else 0)), c, d]
                             for t, c, d in getattr(self.app, "_see_carries", None) or ()],
-                "frames_per_s": fps, "cpu": cpu,
+                "frames_per_s": fps, "cpu": cpu, "panes": self.pane_report(),
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
                           "max_ms": max((v for v in late if v is not None), default=None),
