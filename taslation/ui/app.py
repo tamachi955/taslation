@@ -124,7 +124,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import area, ime, shortcuts, theme, updates
+from . import area, ime, seethrough, shortcuts, theme, updates
 from .. import devices
 from . import side
 from .side import SideMixin
@@ -327,6 +327,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         # the setup checks and their banner, a book's start, the scan band, a page translation that can be cancelled
         self._init_flow_state()
         self._init_over()  # (its setting is on the View menu)
+        seethrough.start(self)  # the lettering over the viewer's own window, with Settings.see_through (a prototype)
         self._init_selection()  # several regions selected, the reading-order badges (`selection`; View menu too)
         self.keymap = shortcuts.Keymap.load(state_dir)  # the window's keys (`_bind_shortcuts`), Tools > Settings...
         shortcuts.set_current(self.keymap)

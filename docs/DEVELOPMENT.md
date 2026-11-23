@@ -332,6 +332,22 @@ rows' languages.
   click on the ground or the page, the bars in and out, a drag of the knob and a click on the bar (the spinner, the
   washed-out picture), the full screen and back. It prints the page's log and PASS or FAIL for each check, with what
   the e2e tool's decoder reads in each picture (into SCRATCH/shots: the sample pages, scratch only).
+  `--see-through` runs the window in see-through mode (`Settings.see_through`, a prototype off by default: the
+  lettering laid over the viewer's own window by a click-through window of TASlation's, `capture/seethrough.py`), and
+  `tools/standin_seethrough.py` watches it from the tool's own thread, nothing sent to any window: the time from the
+  stand-in's change of screen (its spinner, its washed-out picture or its draw) to the see-through window showing none
+  of the old page's patches, from its own notes; which window `WindowFromPoint` gives on the patches shown, on the
+  page and on the ground (always the stand-in's); who was in front, and each change; the stand-in's frames a second
+  while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
+  for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
+  see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
+  frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
+  them). `--see-truth` adds copies of the stand-in's place on the screen every 33 ms, in memory, checked for patches
+  of another page than the one the copy shows (an old patch counts when its lettering's ink is on the screen and not
+  in the viewer's own frame of that moment) and for how the page's own patches lie (0 px off at 100 %); two of them,
+  of a page lettered in full, go into SCRATCH/shots (the sample pages: delete them after). `--standin-size WxH` gives
+  the stand-in's window another size (1904x1024 for a 1920 x 1080 screen) and `--standin-full-screen` starts it in
+  the browser's own full screen (the reader's area then the whole frame).
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
   window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is

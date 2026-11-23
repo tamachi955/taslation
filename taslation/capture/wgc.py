@@ -31,7 +31,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from PIL import Image
@@ -44,10 +44,12 @@ CHECK_S = 0.25  # how often the session's thread looks at Stop and at whether th
 JOIN_S = 1.0  # at exit, how long the session's thread is given to end the capture
 SIZE_SLACK = 1  # a frame this many pixels off the window's bounds is the window's (rounding at fractional scaling)
 MIN_UPDATE_MS = 50  # the system sends at most one frame in so many ms, the last one of a change included
+FAST_UPDATE_MS = 16  # ... while TASlation's lettering lies over the viewer (see-through mode: `set_update_ms`)
 # What a session asks for, best first: an older system refuses the first ones, and the capture then runs with the
 # border the system draws round a captured window rather than not at all.
 OPTIONS: tuple[dict[str, Any], ...] = ({"draw_border": False, "minimum_update_interval": MIN_UPDATE_MS},
                                        {"draw_border": False}, {})
+_update_ms = MIN_UPDATE_MS  # what the sessions started from now on ask for (`set_update_ms`)
 
 Box = tuple[int, int, int, int]  # left, top, right, bottom
 
@@ -116,7 +118,7 @@ class _Session:
         return self._frame is not None
 
     def _run(self) -> None:
-        for options in OPTIONS:
+        for options in _options():
             try:
                 self._capture(options)
                 self.error = ""
@@ -151,7 +153,17 @@ class _Session:
         with self._changed:
             self._seq += 1
             self._frame = Frame(frame, self._seq)
+            seq = self._seq
             self._changed.notify_all()
+        for listener in tuple(_listeners):  # (told on the capture's own thread: a listener only takes a note)
+            try:
+                listener(self.hwnd, seq)
+            except Exception:  # noqa: BLE001 - a listener's fault never stops the capture
+                pass
+
+    def peek(self) -> Frame | None:
+        with self._changed:
+            return self._frame
 
     def _ended(self) -> None:
         with self._changed:
@@ -174,8 +186,16 @@ class _Session:
             self._thread.join(JOIN_S)
 
 
+def _options() -> tuple[dict[str, Any], ...]:
+    """OPTIONS with the update interval asked for now (`set_update_ms`)."""
+    if _update_ms == MIN_UPDATE_MS:
+        return OPTIONS
+    return ({**OPTIONS[0], "minimum_update_interval": _update_ms}, *OPTIONS[1:])
+
+
 _lock = threading.Lock()
 _session: _Session | None = None
+_listeners: list[Callable[[int, int], None]] = []  # told of every frame: (window, its frame count)
 _restarted: tuple[int, tuple[int, int]] | None = None  # the window and its size the session was last started over for
 _api: Any = None
 _why = ""  # why the package cannot be used
@@ -272,6 +292,50 @@ def close(hwnd: int | None = None, wait: bool = False) -> None:
             return
         _session = None
     session.close(wait)
+
+
+def peek(hwnd: int) -> Frame | None:
+    """The newest frame of the running session of the window *hwnd*, if there is one; nothing is started or waited
+    for (what another thread than Tk's - the see-through window's - may ask)."""
+    with _lock:
+        session = _session
+    if session is None or session.hwnd != hwnd or session.ended:
+        return None
+    return session.peek()
+
+
+def add_listener(listener: Callable[[int, int], None]) -> None:
+    """*listener* told of every frame that comes, as (window, frame count), on the capture's thread: it must only take
+    a note (set an event) and return."""
+    if listener not in _listeners:
+        _listeners.append(listener)
+
+
+def remove_listener(listener: Callable[[int, int], None]) -> None:
+    if listener in _listeners:
+        _listeners.remove(listener)
+
+
+def set_update_ms(ms: int) -> bool:
+    """The least time between two frames the sessions ask the system for, from now on (MIN_UPDATE_MS; FAST_UPDATE_MS
+    while the lettering lies over the viewer); a running session of another interval is started over with it (its
+    frame count goes on). Whether one was."""
+    global _update_ms, _session
+    ms = max(1, int(ms))
+    with _lock:
+        if ms == _update_ms:
+            return False
+        _update_ms = ms
+        session = _session
+        if session is None or session.ended:
+            return False
+        session.close()
+        _session = _Session(session.hwnd, session._api, session.seq)
+        return True
+
+
+def update_ms() -> int:
+    return _update_ms
 
 
 def route() -> str:

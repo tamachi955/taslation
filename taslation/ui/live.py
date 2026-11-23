@@ -130,7 +130,7 @@ from ..messages import Message
 from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
 from ..pipeline import PageGate, turn_away
 from ..regions import PageResult
-from . import area, hover, in_place, order, side
+from . import area, hover, in_place, order, seethrough, side
 from .constants import (
     BLANK_SPREAD,
     BROWSER_MINIMISED,
@@ -303,21 +303,29 @@ def thumbnail_of(image: Image.Image, pixels: np.ndarray | None = None, size: int
 
 
 def _thumb(window: Any, image: Image.Image) -> np.ndarray:
-    """`frames.thumbnail` of *image*."""
+    """`frames.thumbnail` of *image*; in see-through mode the steady part of its page area, or nothing drawn for a
+    frame to wait out (`seethrough.thumb`)."""
     facts = _facts(window, image)
+    if seethrough.on(window):
+        return seethrough.thumb(window, image, facts)
     return facts.get("thumb", lambda: thumbnail_of(image, facts.pixels if image.mode == "RGB" else None))
 
 
 def _detail(window: Any, image: Image.Image, box: Any) -> np.ndarray:
-    """`frames.detail` of *image* in *box*."""
+    """`frames.detail` of *image* in *box* (in see-through mode its part that bars never touch:
+    `seethrough.detail_box`)."""
     facts = _facts(window, image)
+    if seethrough.on(window):
+        box = seethrough.detail_box(window, image, facts, box)
     box = tuple(box) if box is not None else None
     return facts.get(("detail", box), lambda: detail(image, box))
 
 
 def _crisp(window: Any, image: Image.Image, box: Any) -> float:
-    """`frames.crispness` of *image* in *box*."""
+    """`frames.crispness` of *image* in *box* (in see-through mode as `_detail` has it)."""
     facts = _facts(window, image)
+    if seethrough.on(window):
+        box = seethrough.detail_box(window, image, facts, box)
     box = tuple(box) if box is not None else None
     return facts.get(("crisp", box), lambda: crispness(image, box))
 
@@ -568,6 +576,7 @@ class LiveViewMixin(BlackViewerMixin):
         if getattr(self, "_enlarged", None) is not None or getattr(self, "_area_large", False):
             self._sync_area()  # enlarged, or made smaller again by the reader: the area of this frame
         key, size = viewer_key(win), image.size
+        see = seethrough.on(self)
         if self._manual_area:
             hand = self._hand_set()
             inner = getattr(self, "_inner_areas", None)
@@ -575,13 +584,14 @@ class LiveViewMixin(BlackViewerMixin):
                 inner = self._inner_areas = {}
             known = inner.get(key)
             box = known[2] if known is not None and known[:2] == (size, hand) else None
-            inner[key] = (size, hand, joined(box, page_panel(image, hand)))
+            panel = seethrough.page_box(self, image, _facts(self, image)) if see else page_panel(image, hand)
+            inner[key] = (size, hand, joined(box, panel))
             self._apply_found_margins()
             return
         known = self._page_areas.get(key)
         box = known[1] if known is not None and known[0] == size else None
         try:
-            found = find_page_area(image)
+            found = seethrough.page_box(self, image, _facts(self, image)) if see else find_page_area(image)
         except Exception:  # noqa: BLE001 - a frame the finder cannot take changes nothing
             found = None
         self._page_areas[key] = (size, joined(box, found))  # type: ignore[assignment]
@@ -639,6 +649,7 @@ class LiveViewMixin(BlackViewerMixin):
         self.canvas.hint = _(NO_VIEWER) if self.selected is None else ""
         in_place.refresh(self)  # (a bubble showing its other side in its place: drawn with the page, or gone)
         image, overlay, outlines = self._picture()
+        seethrough.present(self)  # (the lettering over the viewer's own window, in see-through mode)
         self.canvas.overlay, self.canvas.outlines = overlay, outlines
         self.canvas.brackets = side.on_picture(self, image)  # (the updated mark: the bubbles changed since last seen)
         # what the canvas may draw cheaply, leaving the very picture of a full draw (`ImageCanvas.set_image`): a new
@@ -747,14 +758,16 @@ class LiveViewMixin(BlackViewerMixin):
         return not frames_differ(self._area_thumb(result.original), self._area_thumb(live))
 
     def _area_thumb(self, image: Image.Image) -> np.ndarray:
-        """The thumbnail of *image*'s capture area (`_margins_of`; remembered for the last few frames)."""
+        """The thumbnail of *image*'s capture area (`_margins_of`; remembered for the last few frames); in see-through
+        mode the steady part of its page (`_thumb`), so that bars over the page's top and bottom - or their rows
+        painted over in a frame read under them - leave it the same page."""
         margins = self._margins_of(image)
         for key, img, thumb in self._thumbs:
             if img is image and key == margins:
                 return thumb
         box = area.margins_to_box(margins, image.size)
         whole = box == (0, 0, image.width, image.height) or box[2] <= box[0] or box[3] <= box[1]
-        thumb = _thumb(self, image) if whole else thumbnail(image.crop(box))
+        thumb = _thumb(self, image) if whole or seethrough.on(self) else thumbnail(image.crop(box))
         self._thumbs = [(margins, image, thumb), *self._thumbs[:3]]
         return thumb
 
@@ -1213,6 +1226,10 @@ class LiveViewMixin(BlackViewerMixin):
         # Every frame of the window passes here, before the capture area (margins) and the pipeline see it: with no
         # area of the reader's, the page panel found in it becomes the capture area.
         self._find_page(image)
+        if seethrough.on(self):  # bars held over the page: read with their rows painted over (`seethrough`)
+            facts = _facts(self, image)
+            seethrough.note_frame(self, image, facts)
+            image = seethrough.reading_frame(self, image, facts)
         if seq is not None:
             self._captured = (hwnd, seq, image)
         return image
@@ -1674,6 +1691,7 @@ class LiveViewMixin(BlackViewerMixin):
         f = getattr(self, "_following", None)
         if f is not None and f.events is not None:
             self._stop_events(f)
+        seethrough.close(self)
         super().destroy()
 
     def _take_notes(self, f: Following) -> None:
@@ -1799,6 +1817,8 @@ class LiveViewMixin(BlackViewerMixin):
             f.retake = None  # the viewer has moved on
         if not self.auto_var.get() or (
                 self._auto_last is not None and not frames_differ(self._auto_last, thumb)):
+            if self.auto_var.get() and seethrough.on(self) and seethrough.read_under_bars(self, image):
+                self._take_retake(image, thumb)  # (the page read under held bars, read once more now they have gone)
             return
         if seen is not None and not frames_differ(seen, thumb, 0.5):
             self._take(image, thumb)
