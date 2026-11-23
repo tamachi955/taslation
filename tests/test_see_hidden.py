@@ -776,7 +776,24 @@ def test_the_viewers_window_is_never_enlarged_while_the_window_is_hidden(monkeyp
     monkeypatch.setattr(viewers, "enlarge_window", lambda hwnd: (_ for _ in ()).throw(AssertionError("moved")))
     monkeypatch.setattr(viewers, "window_shown", lambda hwnd: True)
     window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarging=None, _enlarge_asked=None)
-    assert viewers.ViewerMixin._enlarge_first(window) is True and window._enlarge_asked is None
+    assert viewers.ViewerMixin._enlarge_first(window) is True
+    # looked at for it all the same (read as it is): what early start waits for before it starts a page at once
+    assert window._enlarge_asked == 5 and viewers.ViewerMixin._enlarge_first(window) is True
+
+
+def test_early_start_goes_on_while_the_window_is_hidden_once_the_viewer_was_looked_at(monkeypatch):
+    from taslation.ui import live, viewers
+
+    monkeypatch.setattr(viewers, "enlarge_window", lambda hwnd: (_ for _ in ()).throw(AssertionError("moved")))
+    monkeypatch.setattr(viewers, "window_shown", lambda hwnd: True)
+    window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarging=None, _enlarge_asked=None,
+                             _early=None, ready=True, busy=False, _early_on=lambda: True, _black_open=lambda: False,
+                             auto_var=SimpleNamespace(get=lambda: True), _auto_last=None, _start_pending=None,
+                             _starts_book=lambda image: False, _all_cached=lambda image: False)
+    op = SimpleNamespace(turned_at=None, operation=None)
+    assert not live.LiveViewMixin._early_allowed(window, op, None, None)  # (the viewer's first page: not looked at)
+    viewers.ViewerMixin._enlarge_first(window)
+    assert live.LiveViewMixin._early_allowed(window, op, None, None)
 
 
 def test_no_line_says_taslation_covers_the_viewer_while_its_window_is_hidden():

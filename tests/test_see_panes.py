@@ -450,6 +450,46 @@ def test_a_panes_box_is_known_to_the_tools_only_while_it_shows():
     assert over.pane_shown("left") == (100, 200, 250, 500)
 
 
+def test_shown_again_or_moved_the_windows_go_under_an_open_menu_of_this_process_never_above_it(monkeypatch):
+    import inspect
+    import os
+
+    from taslation.capture import seethrough as window
+
+    if not window.IS_WINDOWS:
+        pytest.skip("Windows only")
+    me = os.getpid()
+    menus = [(41, me + 1, True), (42, me, False), (43, me, True), (44, me, True)]  # (top first: a submenu over its
+    # menu; another program's menu above them, a hidden one of this process's)
+    calls = []
+
+    def find(parent, after, cls, title):
+        assert parent is None and cls == window.MENU_CLASS and title is None
+        order = [m[0] for m in menus]
+        i = 0 if after is None else order.index(after) + 1
+        return order[i] if i < len(order) else None
+
+    def owner(hwnd, pid):
+        pid._obj.value = next(m[1] for m in menus if m[0] == hwnd)
+        return 1
+
+    monkeypatch.setattr(window, "_user32", SimpleNamespace(
+        FindWindowExW=find, GetWindowThreadProcessId=owner,
+        IsWindowVisible=lambda hwnd: next(m[2] for m in menus if m[0] == hwnd),
+        SetWindowPos=lambda *a: calls.append(a) or 1))
+    assert window.own_menu() == 44  # (the lowest of this process's on the screen)
+    window._raise(5)
+    window._raise(6, (100, 200))
+    flags = window.SWP_NOSIZE | window.SWP_NOACTIVATE
+    assert calls == [(5, 44, 0, 0, 0, 0, flags | window.SWP_NOMOVE), (6, 44, 100, 200, 0, 0, flags)]
+    menus[:] = [(41, me + 1, True)]  # (the menu ended: the top of the topmost windows again)
+    calls.clear()
+    window._raise(5)
+    assert window.own_menu() == 0 and calls == [(5, window.HWND_TOPMOST, 0, 0, 0, 0, flags | window.SWP_NOMOVE)]
+    # the lettering's window and both panes come into the order only through `_raise`
+    assert inspect.getsource(window).count("_user32.SetWindowPos(") == 1
+
+
 def test_the_pane_settings_entry_is_known_to_the_settings_file():
     assert "see_through_indicators" in config.setting_names()
 

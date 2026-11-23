@@ -31,12 +31,18 @@ lettering laid over the viewer's own window, which goes on taking every click an
   round them the viewer takes it -, answers WM_MOUSEACTIVATE with MA_NOACTIVATE (a click never activates it: the
   viewer keeps the keyboard), and keeps each click (`take_clicks`: where in the pane) for the Tk thread, which acts on
   it. The panes take no key, and send, post and press nothing either.
+* Topmost, but never above a menu of TASlation's own: shown again or moved, the lettering's window and the panes go
+  just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the notification-area icon's
+  menu, the left pane's Menu and their submenus), since a window made topmost again comes above every other topmost
+  one, an open menu too. (A menu over the viewer is a window above it as well: the patches and the panes it meets are
+  left out meanwhile, `cover_rects`.)
 
 What it shows is decided by one rule (`taslation.seethrough`): a patch belongs to the pixels it was made from."""
 
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 import threading
 import time
@@ -71,6 +77,7 @@ PANE_EX_STYLE = WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWIN
 WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
 IDC_ARROW = 32512
 PANES = ("left", "right")
+MENU_CLASS = "#32768"  # the window class of a popup menu (Tk's menus on Windows are TrackPopupMenu's)
 CLICKS_KEPT = 32  # clicks on the left pane not taken yet by the Tk thread (`take_clicks`): the oldest go first
 
 LOOK_S = 0.05  # with no frame coming, the window looks at the viewer this often (moved, minimised, covered, pointer)
@@ -177,6 +184,10 @@ if IS_WINDOWS:
     _user32.GetLayeredWindowAttributes.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
                                                    ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(wintypes.DWORD)]
     _user32.GetLayeredWindowAttributes.restype = wintypes.BOOL
+    _user32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+    _user32.FindWindowExW.restype = wintypes.HWND
+    _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
 MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 0, 2, 0
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
@@ -370,6 +381,33 @@ def cover_rects(viewer: int, client: st.Box, own: int | frozenset[int] | set[int
                 out.append(tuple(int(v) for v in r))  # type: ignore[arg-type]
         above = _user32.GetWindow(above, GW_HWNDPREV)
     return out
+
+
+def own_menu() -> int:
+    """The lowest popup menu of this process's that is on the screen (Windows' menu class, MENU_CLASS: the
+    notification-area icon's menu, the left pane's Menu, a submenu of theirs), 0 while none is."""
+    if not IS_WINDOWS:
+        return 0
+    me, lowest, hwnd = os.getpid(), 0, None
+    for _ in range(64):
+        hwnd = _user32.FindWindowExW(None, hwnd, MENU_CLASS, None)  # (top to bottom in the order of the windows)
+        if not hwnd:
+            break
+        pid = wintypes.DWORD(0)
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == me and _user32.IsWindowVisible(hwnd):
+            lowest = int(hwnd)
+    return lowest
+
+
+def _raise(hwnd: int, at: tuple[int, int] | None = None) -> None:
+    """*hwnd* (the lettering's window, a side pane) to the top of the topmost windows, moved to the screen point *at*
+    as well (None: where it is) - but just under a menu of this process's that is open (`own_menu`), never above it;
+    not activated."""
+    menu = own_menu()
+    x, y = at if at is not None else (0, 0)
+    flags = SWP_NOSIZE | SWP_NOACTIVATE | (0 if at is not None else SWP_NOMOVE)
+    _user32.SetWindowPos(hwnd, menu or HWND_TOPMOST, x, y, 0, 0, flags)
 
 
 class SeeThrough:
@@ -759,11 +797,11 @@ class SeeThrough:
                 _free_dib(dib)
             self.counts["pane_draws"] += 1
         else:  # the same picture moved with the viewer
-            _user32.SetWindowPos(hwnd, HWND_TOPMOST, at[0], at[1], 0, 0, SWP_NOSIZE | SWP_NOACTIVATE)
+            _raise(hwnd, at)
             self.counts["pane_moves"] += 1
         if before is None:
             _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-            _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            _raise(hwnd)
         self._pane_shown[side] = (serial, at, size)
         self._note("pane", side=side, set=serial, x=at[0], y=at[1], w=size[0], h=size[1])
 
@@ -792,7 +830,7 @@ class SeeThrough:
         ok = _layered(self.hwnd, dc, origin, size)
         if before is None:
             _user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
-            _user32.SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            _raise(self.hwnd)
         self._shown = (chosen.serial, shown, origin, size)
         draw_ms = (time.perf_counter() - started) * 1000
         self.counts["draws" if not same_picture else "moves"] += 1

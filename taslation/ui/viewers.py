@@ -509,17 +509,19 @@ class ViewerMixin:
         is left alone, and looked at again at the next read. Returns whether the viewer can be read now; False while
         the enlarged window settles, after which *then()* follows (none: Auto looks at the viewer again by itself;
         the last request to name one wins). In see-through mode (TASlation's own window hidden) the viewer's window is
-        never moved nor resized by TASlation: read as it is."""
+        never moved nor resized by TASlation: read as it is - and looked at for it all the same, so that what waits for
+        that look (early start, `LiveViewMixin._early_allowed`, and with it the backlog's pages) goes on as ever."""
         waiting = getattr(self, "_enlarging", None)
         if waiting is not None:
             if then is not None:
                 waiting["then"] = then
             return False
         win = self.selected
-        if (win is None or getattr(self, "_see_hidden", False) or getattr(self, "_enlarge_asked", None) == win.hwnd
-                or not window_shown(win.hwnd)):
+        if win is None or getattr(self, "_enlarge_asked", None) == win.hwnd or not window_shown(win.hwnd):
             return True
         self._enlarge_asked = win.hwnd
+        if getattr(self, "_see_hidden", False):
+            return True
         enlarged = enlarge_window(win.hwnd)
         if enlarged is None:
             return True
