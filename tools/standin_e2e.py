@@ -6,7 +6,7 @@ part of a release.
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
-                                [--wait-done CAP_S] [--soft-first on|off]
+                                [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
 
 What runs, all on this computer:
 
@@ -5082,7 +5082,7 @@ def run(args: argparse.Namespace) -> int:
     standin_rect, app_rect = Monitors().places()
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
-    page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first)
+    page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first, slider=args.standin_slider)
     report["standin_draws_covered"] = bool(args.standin_draws_covered)
     browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale,
                                 draws_covered=args.standin_draws_covered)
@@ -6169,6 +6169,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "indicator beside the page is looked at from the window as the events come (`SideCheck`), "
                          "pictured after the flips and the reads back of scenario k, and dropped at the end to see "
                          "it cleared")
+    ap.add_argument("--standin-slider", type=int, default=0, choices=(0, 1, 2),
+                    help="the stand-in's page slider under the page: 0 none (default), 1 a bar with a knob, 2 the "
+                         "pages drawn as the knob is dragged")
     return ap.parse_args(argv)
 
 

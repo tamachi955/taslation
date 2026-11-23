@@ -272,6 +272,15 @@ rows' languages.
   only; `timing` says that the stand-in drew nothing soft and how often the window learnt it all the same (never, or
   the figures are not sharp mode's). x needs soft frames: it is left out of all and refused by name. The correctness
   runs, here and on the runners (`.github/gpu-checks`), keep the default, `on`.
+  `--standin-slider 1` gives the stand-in a page slider under its page (`slider=1` in its page's query; off by default,
+  so the scenarios and their figures stay as they were; `2` also draws the pages as the knob moves): a bar with a
+  round knob, the first page at its right end, as a web reader's slider takes the pointer - the canvas listens to
+  `pointerdown`, `pointermove` (its coalesced events counted), `pointerup`, `pointercancel` and `lostpointercapture`,
+  and to the DOM's `click`; a press on the knob or the bar takes the pointer (`setPointerCapture`), the release goes
+  to the page at the knob's place (a press on the bar without a move jumps there), a cancel or a lost capture goes
+  back to the page it came from. Its log says each jump (`ev=jump`: from, to, by drag or click, the moves), every
+  press elsewhere and every click. The page area leaves the bar out (`fingerprint.page_box`: background lies between
+  it and the page) and the reading finds no page unit in it.
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
   window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is
