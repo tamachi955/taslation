@@ -985,6 +985,19 @@ def test_the_browser_command_keeps_its_own_profile_and_window():
     assert "--disable-backgrounding-occluded-windows" in covered and covered[-1] == "--app=file:///p.html"
 
 
+def test_the_browser_never_offers_to_translate_the_page(tmp_path):
+    import json
+
+    html = sv.HTML.read_text(encoding="utf-8")
+    assert '<html lang="en" translate="no">' in html and '<meta name="google" content="notranslate">' in html
+    profile = sv.make_profile(tmp_path / "profile")
+    assert json.loads((profile / "Default" / "Preferences").read_text(encoding="utf-8")) == {
+        "translate": {"enabled": False}}
+    assert sorted(p.name for p in profile.rglob("*")) == ["Default", "Preferences"]  # (nothing else written)
+    with pytest.raises(FileExistsError):
+        sv.make_profile(profile)  # (a profile is always a new one)
+
+
 # ---------------------------------------------------------------------------------------------------- the window
 def test_the_window_is_found_in_the_tree_started_and_by_its_token():
     windows = [(11, 500), (12, 600), (13, 601), (14, 700)]  # (window, process)

@@ -217,8 +217,7 @@ class Headless:
     """The headless browser on a throwaway *profile* (made here, deleted at `close`), its debugging port its own."""
 
     def __init__(self, program: Path, profile: Path):
-        self.profile = Path(profile)
-        self.profile.mkdir(parents=True, exist_ok=False)
+        self.profile = sv.make_profile(profile)  # (the offer to translate off, as for the stand-in on the screen)
         flags = [f for f in sv.FLAGS if not f.startswith(("--enable-logging", "--v="))]
         self.proc = subprocess.Popen([str(program), f"--user-data-dir={self.profile}", "--headless=new",
                                       "--remote-debugging-port=0", "--hide-scrollbars", *flags,

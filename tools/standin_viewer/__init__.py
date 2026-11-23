@@ -12,9 +12,9 @@ docstring says how); this module starts it in a throwaway browser window and tal
   `write_control`), never anywhere else: the list names the pictures by file URL where they are (a dataset read in
   place, or the repository's test fixtures), and no picture is copied or written;
 * the browser: Chrome or Edge as found on this computer (`find_browser`), started on a scratch profile with its own
-  window (`browser_command`, `StandinBrowser`), found again by the process tree it started AND the token in its
-  title (`find_window`: a window of another process is never asked its title), closed with that process tree alone,
-  and its profile deleted;
+  window (`browser_command`, `StandinBrowser`) and its offer to translate the page off (`make_profile`), found
+  again by the process tree it started AND the token in its title (`find_window`: a window of another process is
+  never asked its title), closed with that process tree alone, and its profile deleted;
 * what the page says (`parse_line`: its console lines, from the browser's log on standard error) and the cells it
   draws in its band (`decode`: which screen a captured frame shows, soft or sharp, with the spinner or black);
 * the guard on what TASlation chose (`SelectionGuard`): anything but the stand-in's window stops the run.
@@ -246,6 +246,24 @@ FLAGS = ("--no-first-run", "--no-default-browser-check", "--disable-sync", "--di
 DRAWS_COVERED = ("--disable-backgrounding-occluded-windows",)
 OCCLUSION_FEATURE = "CalculateNativeWinOcclusion"
 
+# The browser's offer to translate the page (its own bubble: a window of its own over the page's top corner, so never
+# in a frame of the stand-in's window, but on the screen) is turned off at both ends: the page says it is not to be
+# translated (standin.html: translate="no" and the "notranslate" meta), and the throwaway profile is made with the
+# offer off (`make_profile`: "translate.enabled", the setting the browser's own settings page turns off). Each end
+# alone keeps the offer away in Chrome 157 and Edge 158; neither has a switch for it ("--disable-features=Translate"
+# in FLAGS leaves it on, and their programs hold no "--disable-translate" any more: checked on 2026-11-23).
+PREFERENCES = {"translate": {"enabled": False}}
+
+
+def make_profile(profile: Path) -> Path:
+    """The throwaway *profile* made (it must not exist yet) with PREFERENCES in its default profile, and nothing else
+    written: the browser makes the rest at its start."""
+    profile = Path(profile)
+    profile.mkdir(parents=True, exist_ok=False)
+    (profile / "Default").mkdir()
+    (profile / "Default" / "Preferences").write_text(json.dumps(PREFERENCES), encoding="utf-8")
+    return profile
+
 
 def browser_command(program: Path, url: str, profile: Path, rect: tuple[int, int, int, int],
                     scale: float = 1.0, draws_covered: bool = False) -> list[str]:
@@ -368,16 +386,15 @@ def find_window(pids: set[int], token: str, windows: Iterable[tuple[int, int]] |
 
 
 class StandinBrowser:
-    """The throwaway browser that shows the stand-in page: started on *profile* (a scratch folder made here and
-    deleted at `close`), its log on standard error read line by line into `events` (what the page said, with the time
-    it came), its window found by `wait_window`. `close` asks the window to close, then ends what is left of the
-    process tree it started, and of nothing else."""
+    """The throwaway browser that shows the stand-in page: started on *profile* (a scratch folder made here, its
+    offer to translate off, `make_profile`, and deleted at `close`), its log on standard error read line by line into
+    `events` (what the page said, with the time it came), its window found by `wait_window`. `close` asks the window
+    to close, then ends what is left of the process tree it started, and of nothing else."""
 
     def __init__(self, program: Path, url: str, profile: Path, rect: tuple[int, int, int, int], token: str,
                  scale: float = 1.0, draws_covered: bool = False):
-        self.profile = Path(profile)
+        self.profile = make_profile(profile)
         self.token = token
-        self.profile.mkdir(parents=True, exist_ok=False)
         self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered),
                                      stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8",
@@ -563,4 +580,5 @@ class SelectionGuard:
 
 __all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "PROFILES", "PROFILE_OPTIONS", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
            "browser_command", "cells_of", "decode", "file_url", "find_browser", "find_window", "format_script",
-           "page_url", "parse_line", "parse_options", "parse_script", "process_tree", "write_control", "write_page_list"]
+           "make_profile", "page_url", "parse_line", "parse_options", "parse_script", "process_tree", "write_control",
+           "write_page_list"]
