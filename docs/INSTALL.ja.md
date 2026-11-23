@@ -5,6 +5,7 @@ English: [INSTALL.md](INSTALL.md)
 ## 動作環境
 
 * Windows 10/11（64 ビット）
+* 1920×1080 以上で、16:9 かそれより横長の画面
 * 空きディスク約 7.5 GB（ポルトガル語（ブラジル）とトルコ語に翻訳する場合は約 9.0 GB。翻訳モデルは PLaMo 3 Translate 2B が約 1.8 GB（取り込むあいだだけ約 3.8 GB）、ポルトガル語（ブラジル）とトルコ語に使う Qwen3.5 4B が約 3.3 GB で、入れるのは翻訳先に要るどちらか一方です）。
   NVIDIA の GPU があるパソコンでは、PyTorch の GPU 版の分がさらに約 3.7 GB（インストールのあいだだけ、もう約 2.6 GB）要ります
 * RAM 16 GB 推奨（実測では、TASlation 本体が最大約 2.5 GB、翻訳を受け持つ Ollama が GPU ありで最大約 2 GB、GPU なしで最大約 4 GB を使いました。Ollama のキャッシュを切った状態（TASlation が起動する Ollama にはそう設定して渡します）の値です。キャッシュを切らないと、Ollama は GPU ありで最大約 10 GB、GPU なしで最大約 7.4 GB を使いました。TASlation を閉じると、TASlation が起動した Ollama も止まるので、その分の RAM は空きます。8 GB のパソコンでは試していません）

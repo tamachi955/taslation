@@ -7,6 +7,7 @@ This is a translation. The Japanese text, [INSTALL.ja.md](INSTALL.ja.md), is the
 ## Requirements
 
 * Windows 10/11 (64-bit)
+* A screen of 1920×1080 or larger, 16:9 or wider
 * About 7.5 GB of free disk space (about 9.0 GB when you translate into Portuguese (Brazil) or Turkish; of the translation models, PLaMo 3 Translate 2B takes about 1.8 GB (about 3.8 GB only while it is being imported), and Qwen3.5 4B, used for Portuguese (Brazil) and Turkish, about 3.3 GB; only one of the two is installed, whichever your target language needs).
   On a computer with an NVIDIA GPU, PyTorch's GPU build needs about 3.7 GB more (and, during the installation only, about 2.6 GB more again)
 * 16 GB of RAM recommended (measured: TASlation itself used up to about 2.5 GB, and Ollama, which does the translating, up to about 2 GB with a GPU and about 4 GB without one. Those are the figures with Ollama's cache switched off (TASlation sets it so for the Ollama it starts). With the cache, Ollama used up to about 10 GB with a GPU and about 7.4 GB without. When you close TASlation, the Ollama it started stops too, and that RAM is free again. It has not been tried on a computer with 8 GB)

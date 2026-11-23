@@ -56,6 +56,7 @@ Double-click `uninstall.cmd`, and delete the folder when it has finished.
 |---|---|
 | OS | Windows 10 / 11 (64-bit) |
 | GPU | An NVIDIA GPU (6 GB of memory) recommended. It runs without one |
+| Screen | 1920×1080 or larger, 16:9 or wider |
 | RAM | 16 GB recommended |
 | Free disk space | About 7.5 GB (the translation model, about 1.8 GB, included). On a computer with an NVIDIA GPU, about 3.7 GB more |
 | Network | Used only when installing and updating |
