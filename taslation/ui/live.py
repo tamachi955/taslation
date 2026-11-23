@@ -642,6 +642,11 @@ class LiveViewMixin(BlackViewerMixin):
     def _redisplay(self) -> None:
         reading = self.reading
         self._status_follows_page()  # (a line about the page before goes with it)
+        if seethrough.hidden(self):  # (see-through mode: the window's page is never on the screen, so it is not drawn
+            # - the lettering over the viewer is the see-through window's; the picture on show is only noted)
+            seethrough.present(self)
+            self.canvas.keep(self._hidden_picture())
+            return
         self.canvas.enlarge = reading
         self.canvas.message = _("This viewer cannot be read behind the full screen; press F11") if (
             reading and self._viewer_hidden) else ""
@@ -697,6 +702,18 @@ class LiveViewMixin(BlackViewerMixin):
                 return (live if live is not None else result.original), self._overlay_items(), []
             return self._lettered(result, live), self._overlay_items(), []
         return live, [], []
+
+    def _hidden_picture(self) -> Image.Image | None:
+        """What the page would show (`_picture`) with TASlation's own window off the screen (see-through mode), made
+        with no picture work: the page filling in as it is lettered so far, else the last translated page as it was
+        lettered (not laid over the viewer's latest frame), else the viewer's latest frame."""
+        fill = self._fill
+        if fill is not None and self._fill_on_show():
+            return fill.final if fill.final is not None else fill.page if fill.page is not None else fill.base
+        result, live = self.last_result, self._live
+        if result is not None and (live is None or self._same_page(result, live)):
+            return result.image
+        return live
 
     def _status_follows_page(self) -> None:
         """The status line speaks of the page on show: a line about one page (`_page_status`, a page job's line,

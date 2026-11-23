@@ -362,10 +362,11 @@ rows' languages.
   cost (`cost`: the working set, the CPU of the stand-in's processes together - its sandboxed ones too, read with
   `NtQuerySystemInformation` -, the GPU memory of this process and of the stand-in's from Windows' own counter, and
   PyTorch's peak); the stand-in's own frame times (`viewer_frames`: its `anim` and `painted` lines, and each change's
-  draw to the first frame captured after it); the Tk thread's steps (`tk_steps`: `seethrough.make_patches`,
-  see-through mode's tick, the patches handed over, the panes' rows, sizes and pictures, the window's redisplay and
-  its canvas' picture - each call's ms, and the per cent of a processor each took at rest, while a job ran and while
-  following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
+  draw to the first frame captured after it); the Tk thread's steps (`tk_steps`: see-through mode's tick, the
+  patches handed over - `seethrough.make_patches` itself runs on the patch thread, `ui.seethrough.Patcher`, and is
+  timed in `pipeline` as `make_patches_ms` -, the panes' rows, sizes and pictures, the window's redisplay and its canvas' picture, which
+  see-through mode no longer draws - each call's ms, and the per cent of a processor each took at rest, while a job
+  ran and while following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
   them). The side panes (`taslation/panes.py`, at the capture area's two outer edges) are watched once a second
@@ -378,9 +379,11 @@ rows' languages.
   looked at every 5 ms meanwhile (the stand-in throughout). The see-through window's reading of the pointer is the
   tool's for the whole run (`capture.seethrough.cursor_pos` put in its place: none, so the real pointer, wherever it
   rests, changes nothing; the tool never moves it); some 14 s in, it is put on a patch shown and off it again five
-  times (`hover`: the ms until the patch is gone and until it is back, the other patches staying) and then at the
-  edge of a patch with no other one near that side (4 px off hides it, 10 px off keeps it hidden, 12 px off shows it
-  again, 5 px off keeps it shown, 4 px off hides it again, at 100 %). `--see-pane-shot` keeps one copy of the
+  times (`hover`: the ms until the patch is gone - once the pointer has rested `hover_delay_ms` on it, `delay_ms` -
+  and until it is back, the other patches staying, the ms until the right pane holds the bubble's block, and whether
+  the block stays once the pointer has left the patch) and then at the edge of a patch with no other one near that
+  side (4 px off hides it, 10 px off keeps it hidden, 12 px off shows it again, 5 px off keeps it shown, 4 px off
+  hides it again, at 100 %; each point held 0.3 s and the delay). `--see-pane-shot` keeps one copy of the
   stand-in's place on the screen the first time both panes show with a spread whose page is done and the copy shows
   nothing of another program's (outside where TASlation's windows draw it must be the viewer's own frame: a
   notification lies in a band of the window order that `cover_rects` does not walk; else put off to a later look,

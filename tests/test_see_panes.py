@@ -221,9 +221,21 @@ class FakeOver:
         self.on = True
         self.handed = []
         self.clicks = list(clicks)
+        self.hover = None  # (key, box) of the patch left out under the pointer
+        self.key = None  # the key of the set the last look chose
+        self.delay_ms = None
 
     def set_panes(self, left, right):
         self.handed.append((left, right))
+
+    def hovered(self):
+        return self.hover
+
+    def look_key(self):
+        return self.key
+
+    def set_hover_delay(self, ms):
+        self.delay_ms = ms
 
     def take_clicks(self):
         out, self.clicks = self.clicks, []
@@ -263,8 +275,9 @@ def test_panes_tick_hands_both_panes_beside_the_page_and_the_right_one_only_when
     ui.panes_tick(app)
     left, right = app._see_through.handed[-1]
     assert left is not None and right is not None
-    for bgra, box in (left, right):
+    for bgra, box, *_plates in (left, right):
         assert pn.overlap(box, SPREAD) == 0 and bgra.shape[1] == box[2] - box[0]
+    assert right[2] == ()  # (no bubble under the pointer yet: the right pane has no plate to take a click)
     ui.panes_tick(app)
     assert app._see_through.handed[-1][0][0] is left[0]  # (nothing changed: the same picture, not made again)
     app.settings.see_through_indicators = False
@@ -569,6 +582,7 @@ def test_the_patch_under_the_pointer_is_found_with_a_margin_and_kept_a_little_fa
 class FakeSet:
     def __init__(self, boxes):
         self.serial = 7
+        self.key = 5
         self.patches = [SimpleNamespace(box=b) for b in boxes]
 
 

@@ -204,13 +204,16 @@ def in_force(tmp_path, monkeypatch):
 
 
 def test_every_number_row_s_words_are_in_every_language():
-    assert [row.key for row in dlg.NUMBER_ROWS] == ["panel_font_size", "hover_delay_ms"]
+    assert [(row.key, row.mode) for row in dlg.NUMBER_ROWS] == [
+        ("panel_font_size", "window"), ("hover_delay_ms", "window"), ("hover_delay_ms", "see")]
     for row in dlg.NUMBER_ROWS:
         for english in (row.label, row.tip, row.problem):
             assert sorted(texts.TEXTS[english]) == sorted(FEATURE_LANGUAGES), english
         assert all("{low}" in t and "{high}" in t for t in texts.TEXTS[row.problem].values())
-        assert row.section == "window" and row.after == "bubble_zoom" and row.key in dlg.KEYS
+        after = "bubble_zoom" if row.mode == "window" else "see_through_indicators"  # (see-through mode's own row)
+        assert row.section == "window" and row.after == after and row.key in dlg.KEYS
         assert row.key not in dlg.PAGE_SETTINGS  # (the page is not lettered again for them)
+    assert dlg.KEYS.count("hover_delay_ms") == 1
     set_language("ja")
     try:
         assert _(dlg.NUMBER_ROWS[0].label) == "パネルの文字の大きさ（ポイント、0: 自動）:"

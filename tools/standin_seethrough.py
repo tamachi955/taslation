@@ -18,8 +18,9 @@ click, no message; the foreground is only read):
 * the process's CPU time and working set, every CPU_EVERY_S, with whether a page job ran, and the CPU time of the
   stand-in's processes (`process_seconds`: its sandboxed ones too); every GPU_EVERY_S, the GPU memory this process
   and the stand-in's hold (`GpuMemory`: Windows' own counter);
-* the Tk thread's steps, each call's ms (`install`: `seethrough.make_patches`, see-through mode's tick, its patches
-  handed over, the panes' rows, sizes and pictures, the window's redisplay and its canvas' picture);
+* the Tk thread's steps, each call's ms (`install`: see-through mode's tick, its patches handed over, the panes' rows,
+  sizes and pictures, the window's redisplay and its canvas' picture), and `seethrough.make_patches` on the patch
+  thread (`ui.seethrough.Patcher`);
 * which screen of the stand-in's each patch set was made from (its frame's code cells, `standin_viewer.decode`);
 * with *truth*: a copy of the stand-in's place on the screen every TRUTH_EVERY_S (in memory; two of them written as
   PNG into the scratch folder for the developer's eyes - they show the public sample pages and the lettering -, to be
@@ -405,7 +406,7 @@ class SeeWatch:
         self.memory: list[tuple[float, float]] = []  # (ms, this process's working set in MiB)
         self.gpu: list[tuple[float, float, float]] = []  # (ms, this process's GPU memory MiB, the stand-in's)
         self._gpu: GpuMemory | None = None
-        self.patch_ms: list[float] = []  # `seethrough.make_patches`, each call's ms (the Tk thread)
+        self.patch_ms: list[float] = []  # `seethrough.make_patches`, each call's ms (the patch thread)
         self.tk_steps: dict[str, list[tuple[float, float]]] = {}  # step -> (ms since the epoch at its end, its ms)
         self.truth, self.shots = truth, shots
         self.pane_shot = pane_shot  # (`_pane_watch`: one copy with both panes beside a spread, into this folder)
@@ -774,9 +775,12 @@ class SeeWatch:
     def _hover_measure(self) -> None:
         """(a thread of its own, from HOVER_AFTER_S on) The pointer on a patch and off it again, HOVER_ROUNDS times,
         as the see-through window reads it (this tool's `fake_point`: the real pointer is never moved): how long until
-        the patch is gone and until it is back, whether the others stay; then at the edge of a patch with no other one
+        the patch is gone (the hover delay, ``hover_delay_ms``, and the look after it) and until it is back, whether the
+        others stay, how long until the right pane holds the bubble's block and whether it is still there once the
+        pointer has left the patch; then at the edge of a patch with no other one
         near that side (HOVER_IN_PX off hides it, HOVER_OUT_PX off keeps it hidden, farther shows it again, a px farther
-        than HOVER_IN_PX keeps it shown). Each round takes the page shown then (two patches or
+        than HOVER_IN_PX keeps it shown; each point held 0.3 s and the hover delay). Each round takes the page shown
+        then (two patches or
         more); a round in which another page came is begun again, for HOVER_FOR_S at the most."""
         from taslation import seethrough as st
         from taslation.capture import seethrough as window
@@ -851,13 +855,17 @@ class SeeWatch:
                     self.fake_point = centre
                     gone = wait(lambda: now() is None or index not in now())
                     during = now()
+                    block = wait(lambda: getattr(self.app, "_see_right_used", "") == "bubble", 1.0)  # (the right pane
+                    # with the bubble's block: Tk's next tick)
                     time.sleep(0.25)
                     self.fake_point = None
                     back = wait(lambda: now() is None or index in now())
                     if during is None or now() is None:
                         turned += 1
                         continue
-                    rounds.append({"gone_ms": gone, "back_ms": back, "others_stayed": all(i in during for i in rest)})
+                    rounds.append({"gone_ms": gone, "back_ms": back, "others_stayed": all(i in during for i in rest),
+                                   "bubble_block_ms": block,
+                                   "bubble_kept": getattr(self.app, "_see_right_used", "") == "bubble"})
                     time.sleep(0.25)
                     continue
                 dpi = getattr(over, "_dpi", st.BASE_DPI)
@@ -873,7 +881,7 @@ class SeeWatch:
                 steps: list[dict[str, Any]] = []
                 for (label, off), (px, py) in zip(labels, points):
                     self.fake_point = (origin[0] + px, origin[1] + py)
-                    time.sleep(0.3)
+                    time.sleep(0.3 + float(getattr(over, "_hover_delay", 0.0)))  # (left out once it has rested so long)
                     current = now()
                     steps.append({"at": label, "px_off_patch": off,
                                   "patch_shown": None if current is None else index in current,
@@ -888,7 +896,11 @@ class SeeWatch:
                               "expected_shown": [False, False, True, True, False]})
         finally:
             self.fake_point = None
-        self.hover = {"rounds": rounds, "gone_ms": spread([r["gone_ms"] for r in rounds]),
+        over = self.over()
+        self.hover = {"delay_ms": round(float(getattr(over, "_hover_delay", 0.0)) * 1000) if over is not None else None,
+                      "rounds": rounds, "gone_ms": spread([r["gone_ms"] for r in rounds]),
+                      "bubble_block_ms": spread([r["bubble_block_ms"] for r in rounds]),
+                      "bubble_kept": all(r["bubble_kept"] for r in rounds) if rounds else None,
                       "back_ms": spread([r["back_ms"] for r in rounds]),
                       "others_stayed": all(r["others_stayed"] for r in rounds) if rounds else None,
                       "edge": edges[0] if edges else None, "begun_again_for_another_page": turned,
@@ -1358,7 +1370,7 @@ class SeeWatch:
         return out
 
     def _pipeline(self, notes: list[dict[str, Any]]) -> dict[str, Any]:
-        """See-through mode's own steps for a page: `seethrough.make_patches` per call (ms, the Tk thread), from each set
+        """See-through mode's own steps for a page: `seethrough.make_patches` per call (ms, the patch thread), from each set
         handed over (``present``) to its first showing (``show``, the window's thread), and when each set was handed
         over (ms since the epoch: the e2e puts them against the window's displays, `see_lags`)."""
         handed: dict[Any, float] = {}

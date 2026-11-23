@@ -1145,7 +1145,8 @@ class JobsMixin:
                 return
             self._hide_busy()
             if data.get("edited") and data["result"] is not self.last_result:
-                self.say("Saved on the page the editor was opened on.")  # the page on show stays
+                if not data.get("quiet"):  # (a bubble asked again from the right pane of see-through mode: no editor)
+                    self.say("Saved on the page the editor was opened on.")  # the page on show stays
                 return
             # (the page job's page is on show: what the job does after it gives way to another page at once,
             # `LiveViewMixin._tail_gives_way`)

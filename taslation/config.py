@@ -301,9 +301,9 @@ class Settings:
     # there is of it - the Reader role always, no full screen of its own, the viewer's window never moved nor resized.
     # In that mode its Settings dialog has a row for it (from the next start)
     see_through: bool = False
-    # see-through mode's right side pane, the indicators at the right edge of the viewer's area (`ui.seethrough`):
-    # shown or not; the switch in its left pane and the Settings dialog in that mode write it here, kept for the next
-    # starts
+    # see-through mode's right side pane at the right edge of the viewer's area (`ui.seethrough`): the block of the
+    # bubble last under the pointer (its original, its translation, Copy and Ask again) and the indicators, shown or
+    # not; the switch in its left pane and the Settings dialog in that mode write it here, kept for the next starts
     see_through_indicators: bool = True
     # the translation on the page (the Reader role by hover_shows, the Translator role always; on the full screen as
     # in the window): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its
@@ -325,7 +325,8 @@ class Settings:
     panel_font_size: int = 0
     # how long the pointer rests on a bubble before its other side shows (`ui.zoom.hover_delays`): this long on a
     # bubble hard to read where it is and on every one with the original on the page, 8/3 as long on the others
-    # (450: 0.45 s and 1.2 s; 0: at once; HOVER_DELAY_RANGE)
+    # (450: 0.45 s and 1.2 s; 0: at once; HOVER_DELAY_RANGE); in see-through mode, how long the pointer rests on a
+    # patch before it hides (`capture.seethrough.SeeThrough.set_hover_delay`), once for every patch
     hover_delay_ms: int = 450
     follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
     # whether the window looks for a new version when it starts (`ui.updates`): "off" (the default: only Help > Check

@@ -7,6 +7,25 @@ review below" row (ja 「要確認」).
 Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
+    # (see-through mode's tip of the same delay: the patch under the pointer and the right pane's bubble)
+    "How long the pointer rests on a bubble before its translation gives way to the original under it, and the pane at the right shows that bubble. 0: at once.": {
+        "ja": "ポインターを吹き出しに置いてから、その訳文が下の原文に替わり、右の欄にその吹き出しが出るまでの時間。0：すぐに。",
+        "es": "Cuánto descansa el puntero sobre un globo antes de que su traducción deje ver el original debajo y el panel de la derecha muestre ese globo. 0: al instante.",
+        "pt": "Quanto tempo o ponteiro fica sobre um balão antes que a tradução dê lugar ao original por baixo e o painel à direita mostre esse balão. 0: na hora.",
+        "fr": "Combien de temps le pointeur reste sur une bulle avant que sa traduction laisse voir l'original dessous et que le volet de droite montre cette bulle. 0 : aussitôt.",
+        "de": "Wie lange der Zeiger auf einer Sprechblase ruht, bevor ihre Übersetzung dem Original darunter weicht und die Leiste rechts diese Sprechblase zeigt. 0: sofort.",
+        "it": "Quanto il puntatore resta su un balloon prima che la sua traduzione lasci vedere l'originale sotto e il riquadro a destra mostri quel balloon. 0: subito.",
+        "nl": "Hoe lang de aanwijzer op een ballon rust voordat de vertaling plaatsmaakt voor het origineel eronder en het paneel rechts die ballon toont. 0: meteen.",
+        "pl": "Jak długo wskaźnik spoczywa na dymku, zanim tłumaczenie ustąpi oryginałowi pod nim, a panel po prawej pokaże ten dymek. 0: od razu.",
+        "ru": "Сколько указатель задерживается на пузыре, прежде чем перевод уступит место оригиналу под ним, а панель справа покажет этот пузырь. 0: сразу.",
+        "tr": "İşaretçi bir balonun üzerinde ne kadar durunca çevirisinin yerini altındaki asıl metne bıraktığı ve sağdaki bölmenin o balonu gösterdiği. 0: hemen.",
+        "id": "Berapa lama penunjuk diam di atas balon sebelum terjemahannya memberi tempat bagi aslinya di bawah dan panel di kanan menampilkan balon itu. 0: langsung.",
+        "vi": "Thời gian con trỏ dừng trên một bong bóng trước khi bản dịch nhường chỗ cho bản gốc bên dưới và ô bên phải hiện bong bóng đó. 0: ngay lập tức.",
+        "zh": "指针在气泡上停留多久后，其译文让位于下面的原文，右侧面板显示该气泡。0：立即。",
+        "zh-tw": "指標在對話框上停留多久後，其譯文讓位於下方的原文，右側面板顯示該對話框。0：立即。",
+        "ko": "포인터가 말풍선 위에 머문 뒤 번역이 그 아래 원문으로 바뀌고 오른쪽 창에 그 말풍선이 표시되기까지의 시간. 0: 바로.",
+        "th": "ระยะเวลาที่ตัวชี้ค้างบนลูกโป่งคำพูดก่อนที่คำแปลจะเปิดให้เห็นต้นฉบับด้านล่าง และแผงทางขวาแสดงลูกโป่งคำพูดนั้น 0: ทันที",
+    },
     "Panel text size (points, 0: automatic):": {
         "ja": "パネルの文字の大きさ（ポイント、0: 自動）:", "es": "Tamaño del texto del panel (puntos, 0: automático):",
         "pt": "Tamanho do texto do painel (pontos, 0: automático):",

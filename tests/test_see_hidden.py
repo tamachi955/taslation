@@ -606,6 +606,9 @@ class FakeOver:
     def follow(self, hwnd):
         pass
 
+    def set_hover_delay(self, ms):
+        pass
+
     def take_clicks(self):
         return []
 
@@ -904,8 +907,9 @@ def test_the_settings_dialog_leaves_out_what_acts_on_the_windows_page_and_shows_
     got = []
     see = dlg.SettingsDialog(owner, settings, on_saved=got.append)
     assert [see.pages.tab(t, "text") for t in see.pages.tabs()] == ["General", "System"]
-    assert not window_only & (set(see.extra) | set(see.numbers))
+    assert not (window_only - {"hover_delay_ms"}) & (set(see.extra) | set(see.numbers))
     assert {"see_through", "see_through_indicators"} <= set(see.extra)
+    assert set(see.numbers) == {"hover_delay_ms"}  # (the mode's own row of the delay: the patch under the pointer)
     values = see.values()
     assert all(values[key] == getattr(settings, key) for key in window_only)  # (left out: kept as they are)
     assert see.changed() == {}

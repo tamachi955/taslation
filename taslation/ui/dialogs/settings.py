@@ -100,6 +100,10 @@ class SettingRow:
 # the key (a part not merged yet shows nothing), Save writes it into taslation.toml with the others and sets it on the
 # window's settings at once (`App._settings_saved`), and the part reads ``settings.<key>`` whenever it acts. Its label
 # and tip need the 16 languages (`locales/features/settings_dialog.py`; `tests/test_settings_rows.py` checks them).
+SEE_INDICATORS_TIP = ("The pane at the right of the viewer's page: the bubble last under the pointer (its Japanese "
+                      "and its translation, to copy or to ask the model again), what TASlation is doing, how far the "
+                      "page on show is, the pages turned past. Off: none of these. Also the Indicators switch in the "
+                      "controls at the left.")
 EXTRA_ROWS: tuple[SettingRow, ...] = (
     SettingRow("hover_shows", "On the page:",
                "In the Reader role: the page translated, a bubble under the pointer showing its original; or the page as the viewer shows it, a bubble under the pointer showing its translation. Also in the View menu.",
@@ -124,8 +128,7 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                "The translation laid over the viewer's own window, with TASlation's controls at its left and the indicators at its right; TASlation's own window is not shown. Off: TASlation's own window, as before. Takes effect at the next start.",
                mode="see"),
     SettingRow("see_through_indicators", "Indicators at the right of the viewer",
-               "The pane at the right of the viewer's page: what TASlation is doing, how far the page on show is, the pages turned past. Also the Indicators switch in the controls at the left.",
-               mode="see"),
+               SEE_INDICATORS_TIP, mode="see"),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 
@@ -161,6 +164,8 @@ class NumberRow:
         return (self.zero and value == 0) or self.bounds[0] <= value <= self.bounds[1]
 
 
+SEE_DELAY_TIP = ("How long the pointer rests on a bubble before its translation gives way to the original under it, and "
+                 "the pane at the right shows that bubble. 0: at once.")
 # the panel beside a bubble under the pointer (`ui.zoom`), under the rows of how a bubble shows its other side
 NUMBER_ROWS: tuple[NumberRow, ...] = (
     NumberRow("panel_font_size", "Panel text size (points, 0: automatic):",
@@ -171,6 +176,10 @@ NUMBER_ROWS: tuple[NumberRow, ...] = (
               "How long the pointer rests on a bubble before its other side shows: this long on a bubble that is hard to read and on every bubble while the original is on the page, about 2.7 times as long on the others. 450: 0.45 and 1.2 seconds. 0: at once.",
               HOVER_DELAY_RANGE, "The delay under the pointer: a whole number from {low} to {high} milliseconds.",
               step=50),
+    # (see-through mode: the same setting, as that mode takes it - `ui.seethrough.hover_delay`)
+    NumberRow("hover_delay_ms", "Delay under the pointer (milliseconds):", SEE_DELAY_TIP,
+              HOVER_DELAY_RANGE, "The delay under the pointer: a whole number from {low} to {high} milliseconds.",
+              step=50, after="see_through_indicators", mode="see"),
 )
 
 
@@ -199,7 +208,8 @@ SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # `update_check`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
         "theme", "always_on_top", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
-        *(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on", "gpu_short",
+        *dict.fromkeys(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
+        "gpu_short",
         "ollama_window_cache", "update_check")
 SIZE_KEYS = ("min_font_size", "max_font_size", "readable_font_size")
 # what changes the page: the page on show is lettered again (from the cache, nothing translated anew) once they are set

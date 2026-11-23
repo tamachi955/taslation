@@ -2,7 +2,9 @@
 ground, and their pictures (`ui.seethrough` fills them, `capture.seethrough` shows them).
 
 * Two panes on the viewer's ground at the two outer edges of the capture area: the LEFT one holds the controls
-  (`Row`s a click acts on), the RIGHT one the indicators (rows of text only). Each is placed from the capture area's
+  (`Row`s a click acts on), the RIGHT one the indicators (rows of text) under the bubble last under the pointer (three
+  plates a click acts on, then its Japanese and its translation, each in its own script's font: `Row.lang`). Each is
+  placed from the capture area's
   columns and the steady band of the viewer's frame (`place`): the left one GAP px in from the area's left edge, the
   right one GAP px in from its right edge, from the band's top GAP px down (the band: where a viewer's bars never
   come, so a pane never lies over them). So a pane stays where it is whatever the page's width (a cover alone, a
@@ -66,7 +68,9 @@ class Row:
     ticked when *on*), "choice" (an arrow each side: *name* + "_prev" / "_next") or "text" (words only); a row not
     *enabled* is drawn dim and takes no click; a *warn* row's words are orange (the page that could not be
     translated). *square*: the name of a button at the row's right end, a square plate of the row's height with a
-    glyph (`GLYPHS`) and no words ("" for none), dim and taking no click when not *square_enabled*."""
+    glyph (`GLYPHS`) and no words ("" for none), dim and taking no click when not *square_enabled*. *lang*: the
+    language whose script the words are set in (`font`; "" the pane's: the window's language) - a bubble's Japanese,
+    its translation; *lines*: a text row wrapped into at most so many lines (0: TEXT_LINES)."""
 
     name: str
     text: str
@@ -76,6 +80,8 @@ class Row:
     warn: bool = False
     square: str = ""
     square_enabled: bool = True
+    lang: str = ""
+    lines: int = 0
 
 
 @dataclass(frozen=True)
@@ -181,7 +187,7 @@ def width_for(rows: list[Row], language: str, dpi: float, room: int | None = Non
     need = scaled(MIN_W, dpi)
     square = row_height(face, dpi) + scaled(ROW_GAP, dpi)  # (a row's square button and the gap before it)
     for row in rows:
-        text = _text_w(face, row.text)
+        text = _text_w(font(row.lang, scaled(FONT_PX, dpi)) if row.lang else face, row.text)
         extra = _lead(row, dpi) + (scaled(ARROW_PX, dpi) if row.kind == "choice" else 0) + \
             (square if row.square else 0)
         width = text + extra + 2 * scaled(PAD, dpi)
@@ -295,21 +301,23 @@ def glyph(name: str, size: int, ink: tuple[int, int, int], dpi: float) -> Image.
 
 def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colours) -> Picture:
     """The picture of a pane of *rows*, *width* px wide (`width_for`), at *dpi*, in *scheme*'s colours."""
-    face = font(language, scaled(FONT_PX, dpi))
+    pane_face = font(language, scaled(FONT_PX, dpi))
     pad, gap = scaled(PAD, dpi), scaled(ROW_GAP, dpi)
-    plates: list[tuple[Row, list[str], int]] = []
+    plates: list[tuple[Row, Any, list[str], int]] = []
     for row in rows:
-        lines = wrap(face, row.text, width - 2 * pad - _lead(row, dpi)) if row.kind == "text" else [row.text]
-        plates.append((row, lines, row_height(face, dpi, len(lines))))
-    height = sum(h for _r, _l, h in plates) + gap * max(0, len(plates) - 1)
+        face = font(row.lang, scaled(FONT_PX, dpi)) if row.lang else pane_face
+        lines = (wrap(face, row.text, width - 2 * pad - _lead(row, dpi), row.lines or TEXT_LINES)
+                 if row.kind == "text" else [row.text])
+        plates.append((row, face, lines, row_height(face, dpi, len(lines))))
+    height = sum(h for _r, _f, _l, h in plates) + gap * max(0, len(plates) - 1)
     image = Image.new("RGBA", (width, max(1, height)), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    ascent, descent = face.getmetrics()
-    line_h = ascent + descent
     hits: list[tuple[str, Box]] = []
     y = 0
     radius = scaled(RADIUS, dpi)
-    for row, lines, h in plates:
+    for row, face, lines, h in plates:
+        ascent, descent = face.getmetrics()
+        line_h = ascent + descent
         plate_w = width - (h + gap if row.square else 0)  # (a square button takes the row's right end)
         draw.rounded_rectangle((0, y, plate_w - 1, y + h - 1), radius=radius, fill=(*scheme.plate, ALPHA))
         if row.square:

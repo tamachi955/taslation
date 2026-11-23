@@ -67,10 +67,19 @@ class PatchSet:
     final: bool = False
 
 
+_ONES = np.ones((1, 3), np.float32)  # (`changed_mask`: the three channels' differences summed, saturated)
+
+
 def changed_mask(original: np.ndarray, lettered: np.ndarray) -> np.ndarray:
-    """Where *lettered* (H, W, 3) differs from *original* (the same shape)."""
+    """Where *lettered* (H, W, 3) differs from *original* (the same shape): exactly where any channel differs at all.
+    For uint8 pictures with OpenCV, the channels' absolute differences summed (saturated at 255: nonzero exactly where
+    one is), some 5 ms for a full-HD page against 25 ms for numpy's comparison."""
     if original.shape != lettered.shape:
         raise ValueError("the lettered page and its frame differ in size")
+    if (cv2 is not None and original.dtype == np.uint8 and lettered.dtype == np.uint8 and original.ndim == 3
+            and original.shape[2] == 3 and original.size):
+        diff = cv2.absdiff(np.ascontiguousarray(original), np.ascontiguousarray(lettered))
+        return cv2.transform(diff, _ONES).reshape(original.shape[:2]) > 0
     return np.any(original != lettered, axis=2)
 
 

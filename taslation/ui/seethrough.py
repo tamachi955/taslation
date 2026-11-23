@@ -7,9 +7,12 @@ and the viewer takes every click and key itself.
   hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode holds no hot
   key: every key goes to the viewer, and the lettering is hidden and shown again with the left pane's switch.
 * The patches are where the lettered page differs from the frame it was read from - the page filling in (drafts,
-  then the final page) and the last translated page -, made on the Tk thread and handed over as immutable arrays.
-  Whether a patch shows is the see-through window's own decision, at every frame of the viewer's
-  (`taslation.seethrough`: a patch belongs to the pixels it was made from).
+  then the final page) and the last translated page -, made by a thread of their own once per change of the page
+  (`Patcher`; the Tk thread only notes the change, `present`) and handed over as immutable arrays. Whether a patch
+  shows is the see-through window's own decision, at every frame of the viewer's (`taslation.seethrough`: a patch
+  belongs to the pixels it was made from), and the patch under the pointer gives way to the original once the pointer
+  has rested on it ``hover_delay_ms`` (`hover_delay`). TASlation's own page is not drawn (`LiveViewMixin._redisplay`:
+  the window is never on the screen here).
 * Which frames start a page job (`frame_look`, `waits`, `reading_frame`): another page only when the steady part of
   the page area changed (`seethrough.steady_thumb` of `steady_area`: bars at its top and bottom come and go without a
   job), never on a frame to wait out (a black with a spinner, half a spread, a washed-out preview), nor on one with
@@ -29,9 +32,14 @@ and the viewer takes every click and key itself.
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
   filling in is (lines lettered of the lines read), the status line, the backlog, the pages that went by too fast and
   those updated since they were seen (the indicator's own lines), where the translator runs - the window's words with
-  what they say of keys left out (`panes.without_keys`: the keys are the viewer's here). `panes_tick` (every TICK_MS)
-  acts on the clicks on the left pane and draws a pane again only when what it says changed. A pane that would come
-  near the page hides (`panes.place`).
+  what they say of keys left out (`panes.without_keys`: the keys are the viewer's here) -, under the bubble last under
+  the pointer (`bubble_rows`: Copy the Japanese, Copy the translation and Ask again, then its Japanese and its
+  translation; kept once the pointer has left it, so that the pointer can go to the pane, until another bubble is
+  under it or the viewer shows another page: `bubble_tick`; Ask again asks the translator for that line alone, with
+  no question first: `ask_bubble`). The right pane takes a click on those plates alone; with the indicators switched
+  off the block goes with them. `panes_tick` (every TICK_MS) acts on the clicks on the panes and draws a pane again
+  only when what it says changed. A pane that would come near the page hides (`panes.place`); the right one leaves
+  the bubble's block out where it does not fit with it.
 * TASlation's own window is never on the screen in this mode (`hidden`): the Tk root stays the host of the widgets
   and the dialogs, mapped in its normal state - so that its widgets are laid out at their sizes, and its dialogs (Tk
   transients of it) show: Tk keeps a transient of a withdrawn or minimised window hidden - but off every monitor
@@ -54,6 +62,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 import tkinter as tk
 from typing import Any
@@ -68,8 +77,16 @@ from ..capture import seethrough as window
 from ..capture import wgc
 from ..i18n import _
 from ..i18n import current as ui_language
+from ..render.lettering import strip_marks
 
 log = logging.getLogger(__name__)
+# what the bubble's block says (the window's own words: its popup's buttons and lines, the region editor's)
+COPY_JAPANESE, COPY_TRANSLATION = "Copy the Japanese", "Copy the translation"
+JAPANESE_COPIED = "The bubble's Japanese is on the clipboard."
+TRANSLATION_COPIED = "The bubble's translation is on the clipboard."
+READING = "Reading the Japanese..."
+NOT_READ = {"none": "No Japanese was read in this region.",
+            "no-ocr": "The reading model is not loaded yet. Try again in a moment."}
 
 TICK_MS = 50
 BAR_WAIT_S = 3.5  # a frame with bars over the page is read only once they have stayed so long (a viewer's own bars go
@@ -389,6 +406,11 @@ def start(app: Any) -> bool:
     app._see_root_hwnd = 0  # the hidden window's handle, for the tools (`keep_hidden`)
     app._see_hidden_fixes = {}  # what `keep_hidden` put back, counted
     app._see_handed_back = 0  # how often `hand_back` gave the foreground back to the viewer
+    app._see_patcher = None  # the patch thread (`Patcher`)
+    app._see_bubble = None  # (its page's key, its patch's box, chosen when, last on show when): the bubble the right
+    # pane shows (`bubble_tick`)
+    app._see_reads = {}  # id of a region from the cache -> (its Japanese's reading: "asked", "" done, or why not, when)
+    app._see_right_used = "right"  # the right pane's picture handed over: "bubble" (with the bubble's block) or not
     if not bool(getattr(app.settings, "see_through", False)):
         return False
     over = window.SeeThrough.start()
@@ -396,6 +418,7 @@ def start(app: Any) -> bool:
         unhide(app)
         return False
     app._see_through = over
+    app._see_patcher = Patcher(over)
     wgc.set_update_ms(wgc.FAST_UPDATE_MS)
     if hidden(app):
         from . import see_menu
@@ -418,6 +441,9 @@ def close(app: Any) -> None:
     tray, app._see_tray = getattr(app, "_see_tray", None), None
     if tray is not None:
         tray.close()
+    patcher, app._see_patcher = getattr(app, "_see_patcher", None), None
+    if patcher is not None:
+        patcher.close()
     over = getattr(app, "_see_through", None)
     if over is not None:
         app._see_through = None
@@ -447,6 +473,7 @@ def tick(app: Any) -> None:
     hwnd = int(win.hwnd) if win is not None else 0
     over.follow(hwnd)
     app._see_dpi = window.viewer_dpi(hwnd)
+    over.set_hover_delay(hover_delay(app))
     present(app)
     panes_tick(app)
     if not on(app) or not hidden(app):  # (Quit on the left pane: the window has gone)
@@ -460,6 +487,17 @@ def tick(app: Any) -> None:
         keep_hidden(app)
         see_menu.chooser_tick(app)
     hand_back(app)
+
+
+def hover_delay(app: Any) -> int:
+    """How long (ms) the pointer rests on a patch before it is left out, the original showing there
+    (``Settings.hover_delay_ms``, its bounds; 0: at once)."""
+    low, high = config.HOVER_DELAY_RANGE
+    try:
+        value = int(getattr(getattr(app, "settings", None), "hover_delay_ms", 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(low, min(high, value))
 
 
 def toggle(app: Any) -> None:
@@ -606,7 +644,7 @@ def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, 
     it says: only its height changes with its words."""
     if not rows:
         return None
-    width = pn.width_for(rows, language, dpi, room, fill=side == "right")
+    width = pn.width_for(rows, language, dpi, room, fill=side in ("right", "bubble"))
     if width is None:
         return None
     key = (tuple(rows), width, language, dpi, scheme)
@@ -619,15 +657,18 @@ def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, 
 
 
 def panes_tick(app: Any) -> None:
-    """The clicks on the left pane acted on, then both panes handed to the see-through window as they are to be: on
-    the ground at the capture area's outer edges, beside the page at the last rest, or hidden (no page on a flat
-    ground yet, no room, the right one switched off)."""
+    """The clicks on the side panes acted on, the bubble the right one shows followed (`bubble_tick`), then both panes
+    handed to the see-through window as they are to be: on the ground at the capture area's outer edges, beside the
+    page at the last rest, or hidden (no page on a flat ground yet, no room, the right one switched off). The right
+    one holds the bubble's block above the indicators when they fit with it, else the indicators alone; its plates'
+    boxes go with it (the window lets it take a click there alone)."""
     over = getattr(app, "_see_through", None)
     if over is None:
         return
     for side, x, y, _t in over.take_clicks():
         if pane_click(app, side, x, y) == "quit":
             return  # (the window has gone)
+    bubble_tick(app, over)
     ground = getattr(app, "_see_ground", None)
     if ground is None:
         for side, memo in list(app._see_pane_memo.items()):
@@ -640,21 +681,31 @@ def panes_tick(app: Any) -> None:
     scheme = pn.colours(colour)
     room_left, room_right = pn.rooms(size, page, dpi, columns)
     left = _picture(app, "left", left_rows(app), room_left, language, dpi, scheme)
-    right = _picture(app, "right", right_rows(app), room_right, language, dpi, scheme) if indicators_on(app) else None
-    box_left, box_right = pn.place(size, page, band, left.size if left else None, right.size if right else None, dpi,
-                                   columns)
-    for side, picture, box in (("left", left, box_left), ("right", right, box_right)):
+    left_size = left.size if left else None
+    words = right_rows(app) if indicators_on(app) else []
+    block = bubble_rows(app) if indicators_on(app) else []
+    used = "bubble"
+    right = _picture(app, used, block + words, room_right, language, dpi, scheme) if block else None
+    box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
+    if right is None or box_right is None:  # (no bubble, or no room for its block: the indicators alone)
+        used = "right"
+        right = _picture(app, used, words, room_right, language, dpi, scheme)
+        box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
+    app._see_right_used = used
+    for side, picture, box in (("left", left, box_left), ("right", right if used == "right" else None, box_right),
+                               ("bubble", right if used == "bubble" else None, box_right)):
         memo = app._see_pane_memo.get(side)
         if memo is not None:
             app._see_pane_memo[side] = (memo[0], memo[1], box if picture is not None else None)
     over.set_panes((left.bgra, box_left) if left is not None and box_left is not None else None,
-                   (right.bgra, box_right) if right is not None and box_right is not None else None)
+                   (right.bgra, box_right, tuple(b for _name, b in right.hits))
+                   if right is not None and box_right is not None else None)
 
 
 def pane_click(app: Any, side: str, x: int, y: int) -> str:
     """A click on the pane *side* at (*x*, *y*) of its picture as last handed over: the control there acted on; its
     name ("" for none)."""
-    memo = app._see_pane_memo.get(side) if side == "left" else None
+    memo = app._see_pane_memo.get(side if side == "left" else getattr(app, "_see_right_used", "right"))
     if memo is None or memo[2] is None:
         return ""
     name = memo[1].hit(x, y)
@@ -766,6 +817,206 @@ def _again(app: Any) -> None:
     app.retranslate_page()
 
 
+# ------------------------------------------------------------------ the bubble last under the pointer (the right pane)
+BUBBLE_GONE_S = 0.6  # the bubble's block goes once the viewer has shown another page (or none of its patches) so long
+READ_AFTER_S = 0.3  # a bubble from the cache shown so long has its Japanese read (once; in memory only)
+NOT_READ_AGAIN_S = 5.0  # ... and once more so long after the reading model was not there yet
+BUBBLE_LINES = 5  # the bubble's Japanese and its translation are wrapped into at most so many lines each
+BUBBLE_STATES = ("translated", "untranslated")  # the regions a bubble's block may show (one with a translation, one
+# read and left without one)
+# the target languages (`constants.LANGUAGES`) whose script the panes' fonts set (`panes.FONTS`; others: Segoe UI) ...
+TARGET_FONTS = {"Chinese (Simplified)": "zh", "Chinese (Traditional)": "zh-tw", "Korean": "ko", "Thai": "th"}
+# ... and those the panes cannot set as they are written (right to left, or shaped): their translation is not shown in
+# the block (it is on the page; Copy the translation copies it all the same)
+NOT_PLAIN = frozenset({"Arabic", "Hebrew", "Hindi", "Bengali"})
+
+
+def bubble_tick(app: Any, over: Any) -> None:
+    """The bubble the right pane shows (``_see_bubble``): the patch left out under the pointer
+    (`SeeThrough.hovered`) once one is, kept after the pointer has left it - so that the pointer can go to the pane -
+    until another one is, or until the viewer has shown another page (or none of the page's patches: a turn, a jump)
+    for BUBBLE_GONE_S (`SeeThrough.look_key`); none while the lettering is switched off."""
+    if not over.on:
+        app._see_bubble = None
+        return
+    now = time.monotonic()
+    hovered = over.hovered()
+    held = getattr(app, "_see_bubble", None)
+    if hovered is not None and (held is None or (held[0], held[1]) != tuple(hovered)):
+        app._see_bubble = (hovered[0], tuple(hovered[1]), now, now)
+        return
+    if held is None:
+        return
+    if hovered is not None or over.look_key() == held[0]:
+        app._see_bubble = (held[0], held[1], held[2], now)
+    elif now - held[3] > BUBBLE_GONE_S:
+        app._see_bubble = None
+
+
+def _meets(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    return max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def bubble_target(app: Any) -> tuple[Any, Any] | None:
+    """What the bubble the right pane shows (``_see_bubble``) is: (the last translated page, its region the patch's
+    box meets most) while that page's frame is the patch's; (None, the index of the box of the page filling in) while
+    the page filling in is; None otherwise."""
+    held = getattr(app, "_see_bubble", None)
+    if held is None:
+        return None
+    key, box = held[0], held[1]
+    result = getattr(app, "last_result", None)
+    if result is not None and result.original is not None and id(result.original) == key:
+        regions = [r for r in getattr(result, "regions", None) or () if getattr(r, "status", "") in BUBBLE_STATES]
+        best = max(regions, key=lambda r: _meets(tuple(r.bbox), box), default=None)
+        return (result, best) if best is not None and _meets(tuple(best.bbox), box) > 0 else None
+    fill = getattr(app, "_fill", None)
+    if fill is not None and id(fill.frame) == key:
+        lettered = [i for i, s in enumerate(fill.states) if s == "lettered" and i < len(fill.boxes)]
+        best = max(lettered, key=lambda i: _meets(tuple(fill.boxes[i]), box), default=None)
+        return (None, best) if best is not None and _meets(tuple(fill.boxes[best]), box) > 0 else None
+    return None
+
+
+def bubble_japanese(app: Any, found: tuple[Any, Any]) -> tuple[str, str]:
+    """(the Japanese of the bubble *found* (`bubble_target`), what its row says while there is none). A region of a
+    page from the cache has none (the cache keeps no Japanese): it is read from its crop of the capture in memory
+    (`BubbleTextMixin._japanese_of`, as Copy the Japanese of the window does) once the bubble has been shown
+    READ_AFTER_S, and kept with the region in memory only. A box of the page filling in has none yet."""
+    result, region = found
+    if result is None:
+        return "", ""
+    text = str(getattr(region, "source_text", "") or "").strip()
+    if text:
+        return text, ""
+    reads: dict[int, tuple[str, float]] = app.__dict__.setdefault("_see_reads", {})
+    state = reads.get(id(region))
+    now = time.monotonic()
+    if state is not None and state[0] == "no-ocr" and now - state[1] > NOT_READ_AGAIN_S:
+        state = None
+    held = getattr(app, "_see_bubble", None)
+    read = getattr(app, "_japanese_of", None)
+    if state is None:
+        if read is None or held is None or now - held[2] < READ_AFTER_S:
+            return "", ""
+        if len(reads) > 256:
+            reads.clear()
+        key = id(region)
+        reads[key] = ("asked", now)
+
+        def done(got: str, error: str) -> None:
+            reads[key] = ("" if got else (error or "none"), time.monotonic())
+
+        read(result, region, done)
+        state = reads[key]
+        text = str(getattr(region, "source_text", "") or "").strip()
+        if text:
+            return text, ""
+    if state[0] == "asked":
+        return "", _(READING)
+    return "", _(NOT_READ.get(state[0], NOT_READ["none"])) if state[0] else ""
+
+
+def bubble_translation(app: Any, found: tuple[Any, Any]) -> str:
+    """The translation of the bubble *found* (`bubble_target`), without the lettering's marks."""
+    result, target = found
+    if result is None:
+        fill = getattr(app, "_fill", None)
+        text = str(fill.texts.get(target, "")) if fill is not None else ""
+    else:
+        text = str(getattr(target, "translated_text", "") or "")
+    return strip_marks(text).strip()
+
+
+def bubble_again_enabled(app: Any, found: tuple[Any, Any]) -> bool:
+    """Whether the bubble's Ask again is live: a region of the last translated page, nothing at work (the circular
+    arrow's rule, `again_enabled`, and no job of the worker's)."""
+    result = found[0]
+    return (result is not None and result is getattr(app, "last_result", None) and not getattr(app, "busy", False)
+            and getattr(app, "pipeline", None) is not None and again_enabled(app))
+
+
+def bubble_rows(app: Any) -> list[pn.Row]:
+    """The bubble's block at the top of the right pane, while there is a bubble to show (`bubble_target`): Copy the
+    Japanese, Copy the translation and Ask again - the plates first, where they stay whatever the bubble says -, then
+    its Japanese and its translation, each wrapped into BUBBLE_LINES lines at the most (the last cut with an
+    ellipsis) and set in its own script's font. Its words are in memory only, and the clipboard takes them only on
+    a click."""
+    found = bubble_target(app)
+    if found is None:
+        return []
+    source, note = bubble_japanese(app, found)
+    translation = bubble_translation(app, found)
+    target = str(_get(getattr(app, "lang_var", None), "") or "")
+    rows = [pn.Row("bubble_source", _(COPY_JAPANESE), enabled=bool(source)),
+            pn.Row("bubble_translation", _(COPY_TRANSLATION), enabled=bool(translation)),
+            pn.Row("bubble_again", _("Ask again"), enabled=bubble_again_enabled(app, found))]
+    if source or note:
+        rows.append(pn.Row("", source or note, "text", lang="ja" if source else "", lines=BUBBLE_LINES))
+    if translation and target not in NOT_PLAIN:
+        rows.append(pn.Row("", translation, "text", lang=TARGET_FONTS.get(target, "en"), lines=BUBBLE_LINES))
+    return rows
+
+
+def _copy_source(app: Any) -> None:
+    found = bubble_target(app)
+    text = bubble_japanese(app, found)[0] if found is not None else ""
+    if text:
+        app._to_clipboard(text, JAPANESE_COPIED)
+
+
+def _copy_translation(app: Any) -> None:
+    found = bubble_target(app)
+    text = bubble_translation(app, found) if found is not None else ""
+    if text:
+        app._to_clipboard(text, TRANSLATION_COPIED)
+
+
+def _ask_bubble(app: Any) -> None:
+    """The bubble's Ask again: its line asked of the translator anew (`ask_bubble`), with no question first."""
+    found = bubble_target(app)
+    if found is not None and bubble_again_enabled(app, found):
+        ask_bubble(app, found[0], found[1])
+
+
+def ask_bubble(app: Any, result: Any, region: Any) -> bool:
+    """One bubble of the page on show translated again: its line asked of the translator anew (`Pipeline.ask_again`,
+    the Japanese read first where the page came from the cache: `Pipeline.read_source`), the answer replacing the
+    cache's as the model's own (`Pipeline.set_translation`, not marked as the reader's: the page translated again
+    replaces it as ever), the page lettered again and its patches made anew. The status line says "Asking the
+    model..." meanwhile, and what came: nothing, or the model's error. False when it cannot be asked now."""
+    pipeline = getattr(app, "pipeline", None)
+    if pipeline is None or result is None or getattr(app, "busy", False):
+        return False
+    from ..messages import message_of
+    from ..translate import TranslationError
+    from .progress import rendered
+
+    app._go_busy()
+    app.say("Asking the model...")
+
+    def job() -> None:
+        try:
+            if not str(getattr(region, "source_text", "") or "").strip():
+                pipeline.read_source(result, region)
+            text = pipeline.ask_again(result, region)
+            if not text:
+                app._post("status", key="The model gave no other translation.")
+            elif pipeline.set_translation(result, region, text, edited=False):
+                app._post("result", result=result, edited=True, quiet=True)
+            else:
+                app._post("status", key="Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+        except TranslationError as e:
+            app._post("status", key="No answer from the model: {error}", values={"error": rendered(message_of(e))})
+        except Exception:  # noqa: BLE001 - the page stays as it was
+            log.debug("see-through mode: a bubble could not be asked again", exc_info=True)
+        finally:
+            app._post("translate_done")
+
+    app._jobs.put(job)
+    return True
+
+
 PANE_ACTIONS: dict[str, Any] = {
     "translate": lambda app: app.translate_now(),
     "again": _again,  # (the circular arrow: the page on show translated again, the cache's lines replaced)
@@ -779,12 +1030,82 @@ PANE_ACTIONS: dict[str, Any] = {
     "settings": _dialog("open_settings"),
     "menu": _menu,
     "quit": lambda app: app._on_close(),
+    "bubble_source": _copy_source,  # (the right pane: the bubble last under the pointer)
+    "bubble_translation": _copy_translation,
+    "bubble_again": _ask_bubble,
 }
 
 
 # ------------------------------------------------------------------ the patches
 def _rgb(image: Image.Image) -> np.ndarray:
     return np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
+
+
+class Patcher:
+    """The patches made off the Tk thread (`present` hands each changed page here; `seethrough.make_patches`, some
+    15 ms a full-HD page, would hold the Tk thread up a dozen times a page as its lines are lettered): a thread of its
+    own makes them and hands them to the see-through window (`SeeThrough.present`, which takes them under its lock).
+    Each page waits once: a newer state of a page not made yet replaces the one waiting and goes last, as a set handed
+    over later is the newer. The frames' pixels are kept for the last MEMO_KEPT frames (a frame never changes); the
+    lettered page comes as the picture it is (a finished page or a page's result is never changed) or as a copy (the
+    page filling in, which the Tk thread letters in place). Nothing is written anywhere."""
+
+    def __init__(self, over: Any, run: bool = True) -> None:
+        self.over = over
+        self._lock = threading.Lock()
+        self._waiting: dict[int, tuple[Any, ...]] = {}  # frame key -> (frame, lettered, final, margin, gap), in order
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._pixels: list[tuple[Image.Image, np.ndarray]] = []  # (frame, its RGB pixels), the patch thread's own
+        self.made = 0
+        self._thread: threading.Thread | None = None
+        if run:
+            self._thread = threading.Thread(target=self._run, name="taslation-patches", daemon=True)
+            self._thread.start()
+
+    def put(self, original: Image.Image, lettered: Image.Image, final: bool, margin: int, gap: int) -> None:
+        with self._lock:
+            key = id(original)
+            self._waiting.pop(key, None)
+            self._waiting[key] = (original, lettered, final, margin, gap)
+        self._wake.set()
+
+    def close(self) -> None:
+        self._stop.set()
+        self._wake.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._wake.wait(1.0)
+            self._wake.clear()
+            self.drain()
+
+    def drain(self) -> None:
+        """Every page waiting made, the oldest first (the patch thread; a test calls it itself)."""
+        while not self._stop.is_set():
+            with self._lock:
+                if not self._waiting:
+                    return
+                key = next(iter(self._waiting))
+                job = self._waiting.pop(key)
+            try:
+                self._make(key, *job)
+            except Exception:  # noqa: BLE001 - that state of the page shows no patches; the next one is made
+                log.debug("see-through mode: the patches of a page could not be made", exc_info=True)
+
+    def _frame_pixels(self, original: Image.Image) -> np.ndarray:
+        for image, pixels in self._pixels:
+            if image is original:
+                return pixels
+        pixels = _rgb(original)
+        self._pixels = [(original, pixels), *self._pixels[:MEMO_KEPT - 1]]
+        return pixels
+
+    def _make(self, key: int, original: Image.Image, lettered: Image.Image, final: bool, margin: int,
+              gap: int) -> None:
+        patches = st.make_patches(self._frame_pixels(original), _rgb(lettered), margin=margin, gap=gap)
+        self.over.present(key, original.size, patches, final)
+        self.made += 1
 
 
 def pairs(app: Any) -> list[tuple[Image.Image, Image.Image, bool, tuple[Any, ...]]]:
@@ -806,20 +1127,27 @@ def pairs(app: Any) -> list[tuple[Image.Image, Image.Image, bool, tuple[Any, ...
 
 def present(app: Any) -> None:
     """The patches of the page filling in and of the last translated page handed to the see-through window, each when
-    it changed (made here, on the Tk thread: some 5-10 ms for a full-HD page)."""
+    it changed (what it is, `pairs`): made by the patch thread (`Patcher`), the page filling in copied first, since
+    the Tk thread letters it in place; without that thread, here."""
     over = getattr(app, "_see_through", None)
     if over is None:
         return
     memo: list[tuple[Image.Image, tuple[Any, ...]]] = app._see_memo
+    fill = getattr(app, "_fill", None)
+    patcher = getattr(app, "_see_patcher", None)
     for original, lettered, final, state in pairs(app):
         known = next((s for img, s in memo if img is original), None)
         if known == state:
             continue
         if original.size != lettered.size:
             continue
-        patches = st.make_patches(_rgb(original), _rgb(lettered), margin=px(app, st.MARGIN),
-                                  gap=px(app, st.GROUP_PX))
-        over.present(id(original), original.size, patches, final)
+        margin, gap = px(app, st.MARGIN), px(app, st.GROUP_PX)
+        if patcher is not None:
+            patcher.put(original, lettered.copy() if fill is not None and lettered is fill.page else lettered, final,
+                        margin, gap)
+        else:
+            over.present(id(original), original.size, st.make_patches(_rgb(original), _rgb(lettered), margin=margin,
+                                                                      gap=gap), final)
         memo[:] = [(original, state), *[(img, s) for img, s in memo if img is not original]][:MEMO_KEPT]
 
 

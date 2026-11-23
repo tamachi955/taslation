@@ -12,10 +12,13 @@ lettering laid over the viewer's own window, which goes on taking every click an
   DPI aware (`windows.enable_dpi_awareness`), so the client rectangle, the frame and this window are all in the screen's
   own pixels. It follows the viewer's moves and sizes at every look; while the viewer is minimised, hidden or cloaked
   it shows nothing, and a patch that a window above the viewer meets is left out (`cover_rects`).
-* The patch under the pointer is left out too, so that the viewer's own pixels - the original - show there; it comes
+* The patch under the pointer is left out too, so that the viewer's own pixels - the original - show there, once the
+  pointer has rested on it the hover delay (`set_hover_delay`: ``Settings.hover_delay_ms``, 0 at once); it comes
   back once the pointer has gone (`seethrough.hovered`: its box and HOVER_IN_PX about it to hide it, HOVER_OUT_PX to
-  show it again). The pointer is only read (`cursor_pos`, at every look: no hook, no input taken; the window stays
-  click-through); it counts only over the viewer, not over a side pane nor over a window above the viewer.
+  show it again). Which one is left out is told to the Tk thread (`hovered`, with the key of the page whose patches
+  the last look chose: `look_key`), whose right pane shows that bubble's words. The pointer is only read
+  (`cursor_pos`, at every look: no hook, no input taken; the window stays click-through); it counts only over the
+  viewer, not over a side pane nor over a window above the viewer.
 * Its own thread runs the window and its message loop, and looks at the viewer's frames as they come: the capture
   tells it of each one (`wgc.add_listener`: an event set on the capture's thread), and it compares the frame there and
   then (`seethrough.visible`), with no wait for Tk. The Tk thread only hands it the patches of the page as they are
@@ -25,12 +28,15 @@ lettering laid over the viewer's own window, which goes on taking every click an
   layered windows of this thread's, topmost, never activated (WS_EX_NOACTIVATE), with no taskbar button: they lie on
   the viewer's ground at the capture area's outer edges, follow the viewer's moves as the lettering does, hide while
   it is minimised, hidden or cloaked and where a window above the viewer meets them; the lettering's switch on the
-  left one hides the lettering only (`set_on`). The RIGHT one
-  (the indicators) is click-through as the lettering's window is. The LEFT one (the controls) takes the clicks on its
+  left one hides the lettering only (`set_on`). The LEFT one (the controls) takes the clicks on its
   plates - no WS_EX_TRANSPARENT; a layered window passes on a click on a pixel of alpha 0, so between its rows and
   round them the viewer takes it -, answers WM_MOUSEACTIVATE with MA_NOACTIVATE (a click never activates it: the
   viewer keeps the keyboard), and keeps each click (`take_clicks`: where in the pane) for the Tk thread, which acts on
-  it. The panes take no key, and send, post and press nothing either.
+  it. The RIGHT one (the indicators, and the plates of the bubble last under the pointer) is click-through as the
+  lettering's window is, but while the pointer is on one of the plates the Tk thread named (`set_panes`): then it
+  takes the click as the left one does (`_right_plates`: WS_EX_TRANSPARENT off, at the look that finds the pointer
+  there; on again at the look that finds it elsewhere), so that its words never keep a click from the viewer. The
+  panes take no key, and send, post and press nothing either.
 * Topmost, but never above a menu of TASlation's own: shown again or moved, the lettering's window and the panes go
   just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the notification-area icon's
   menu, the left pane's Menu and their submenus), since a window made topmost again comes above every other topmost
@@ -71,14 +77,15 @@ GW_HWNDPREV, GA_ROOT, GWL_EXSTYLE = 3, 2, -20
 BI_RGB, DIB_RGB_COLORS = 0, 0
 CLASS = "TASlationSeeThrough"
 ERROR_CLASS_ALREADY_EXISTS = 1410
-# the left side pane: takes the clicks on its plates (no WS_EX_TRANSPARENT), never activated, no taskbar button
+# the side panes: take the clicks on their plates (no WS_EX_TRANSPARENT; the right one only while the pointer is on
+# one of its plates), never activated, no taskbar button
 PANE_CLASS = "TASlationSeeThroughPane"
 PANE_EX_STYLE = WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
 WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
 IDC_ARROW = 32512
 PANES = ("left", "right")
 MENU_CLASS = "#32768"  # the window class of a popup menu (Tk's menus on Windows are TrackPopupMenu's)
-CLICKS_KEPT = 32  # clicks on the left pane not taken yet by the Tk thread (`take_clicks`): the oldest go first
+CLICKS_KEPT = 32  # clicks on the side panes not taken yet by the Tk thread (`take_clicks`): the oldest go first
 
 LOOK_S = 0.05  # with no frame coming, the window looks at the viewer this often (moved, minimised, covered, pointer)
 HOVER_IN_PX, HOVER_OUT_PX = 4, 10  # the pointer this near a patch's box hides it, and it shows again once the pointer
@@ -158,6 +165,8 @@ if IS_WINDOWS:
     _user32.GetAncestor.restype = wintypes.HWND
     _user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
     _user32.GetWindowLongW.restype = wintypes.LONG
+    _user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.LONG]
+    _user32.SetWindowLongW.restype = wintypes.LONG
     _gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
     _gdi32.CreateCompatibleDC.restype = wintypes.HDC
     _gdi32.CreateDIBSection.argtypes = [wintypes.HDC, ctypes.POINTER(BITMAPINFO), wintypes.UINT,
@@ -293,7 +302,7 @@ _class_ready = False
 
 
 def _register_class() -> bool:
-    """The window classes of the lettering's window (click-through: the right pane's too) and of the left pane."""
+    """The window classes of the lettering's window (click-through) and of the side panes (taking clicks)."""
     global _class_ready
     if _class_ready:
         return True
@@ -413,8 +422,9 @@ def _raise(hwnd: int, at: tuple[int, int] | None = None) -> None:
 class SeeThrough:
     """The see-through window and its thread (see the module's notes). Made with `start` (None where there can be
     none), told which viewer to lie over (`follow`), handed the patches of the pages (`present`, `forget`, `clear`),
-    hidden and shown by the reader's switch (`set_on`), handed the side panes (`set_panes`; the clicks on the left
-    one: `take_clicks`), ended with `close`. Its notes (`notes`) are numbers and flags only: when it showed what, from
+    hidden and shown by the reader's switch (`set_on`), handed the side panes (`set_panes`; the clicks on them:
+    `take_clicks`) and the hover delay (`set_hover_delay`), asked which patch is left out under the pointer
+    (`hovered`, `look_key`), ended with `close`. Its notes (`notes`) are numbers and flags only: when it showed what, from
     which frame, and how long its work took."""
 
     def __init__(self) -> None:
@@ -434,9 +444,11 @@ class SeeThrough:
         self.counts = {"frames": 0, "looks": 0, "draws": 0, "hides": 0, "moves": 0, "errors": 0,
                        "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
                        "clicks": 0, "hovers": 0}
-        # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels) or None, from
-        # the Tk thread; what shows of each, (serial, screen origin, size) or None, the window thread's own
-        self._pane_want: dict[str, tuple[int, np.ndarray, st.Box] | None] = {side: None for side in PANES}
+        # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels, the boxes of
+        # its plates that take a click) or None, from the Tk thread; what shows of each, (serial, screen origin, size)
+        # or None, the window thread's own
+        self._pane_want: dict[str, tuple[int, np.ndarray, st.Box, tuple[st.Box, ...]] | None] = {
+            side: None for side in PANES}
         self._pane_serial = 0
         self._pane_shown: dict[str, tuple[int, tuple[int, int], tuple[int, int]] | None] = {s: None for s in PANES}
         self._clicks: deque[tuple[str, int, int, float]] = deque(maxlen=CLICKS_KEPT)
@@ -451,6 +463,11 @@ class SeeThrough:
         self._dib: tuple[int, int, int, np.ndarray, tuple[int, int]] | None = None  # (dc, bitmap, old, pixels, size)
         self._pointer: tuple[int, int] | None = None  # where the pointer was at the last look (screen pixels)
         self._hover_box: st.Box | None = None  # the box of the patch left out under the pointer
+        self._hover_delay = 0.0  # s the pointer rests on a patch before it is left out (`set_hover_delay`)
+        self._hover_wait: tuple[st.Box, float] | None = None  # (the patch the pointer came to, since when)
+        self._hovered: tuple[int, st.Box] | None = None  # (its set's key, its box) of the patch left out, for Tk
+        self._look_key: int | None = None  # the key of the set the last look chose (None: none), for Tk
+        self._right_takes = False  # the right pane takes clicks now (the pointer on one of its plates)
         self._dpi = st.BASE_DPI  # the viewer's (`viewer_dpi`), at each change of its place or size
         self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, shares, frame, ms)
 
@@ -515,9 +532,24 @@ class SeeThrough:
         """(set serial, patch indices, screen origin, size) of what shows now; None when nothing does."""
         return self._shown
 
-    def set_panes(self, left: tuple[np.ndarray, st.Box] | None, right: tuple[np.ndarray, st.Box] | None) -> None:
+    def set_hover_delay(self, ms: float) -> None:
+        """How long the pointer rests on a patch before it is left out (`Settings.hover_delay_ms`; 0: at once)."""
+        self._hover_delay = max(0.0, float(ms or 0) / 1000)
+
+    def hovered(self) -> tuple[int, st.Box] | None:
+        """(the key of its page's set, its box) of the patch left out under the pointer at the last look; None while
+        none is."""
+        return self._hovered
+
+    def look_key(self) -> int | None:
+        """The key of the set the last look chose (the page whose patches match the viewer's frame); None for none."""
+        return self._look_key
+
+    def set_panes(self, left: tuple[Any, ...] | None, right: tuple[Any, ...] | None) -> None:
         """The side panes as they are to be: each (its picture - premultiplied BGRA (H, W, 4), not changed after -,
-        its box in the viewer's client pixels) or None (hidden). The same picture handed again is not drawn again."""
+        its box in the viewer's client pixels[, the boxes of its plates that take a click, in its picture's pixels:
+        the right one takes clicks there alone]) or None (hidden). The same picture handed again is not drawn
+        again."""
         with self._lock:
             changed = False
             for side, want in (("left", left), ("right", right)):
@@ -525,13 +557,14 @@ class SeeThrough:
                 if want is None:
                     new = None
                 else:
-                    bgra, box = want
+                    bgra, box = want[0], want[1]
+                    plates = tuple(tuple(int(v) for v in b) for b in want[2]) if len(want) > 2 else ()
                     if old is not None and old[1] is bgra:
                         serial = old[0]
                     else:
                         self._pane_serial += 1
                         serial = self._pane_serial
-                    new = (serial, bgra, tuple(int(v) for v in box))
+                    new = (serial, bgra, tuple(int(v) for v in box), plates)
                 if (None if old is None else (old[0], old[2])) != (None if new is None else (new[0], new[2])):
                     self._pane_want[side] = new  # type: ignore[assignment]
                     changed = True
@@ -541,7 +574,7 @@ class SeeThrough:
             self._wake.set()
 
     def take_clicks(self) -> list[tuple[str, int, int, float]]:
-        """The clicks on the left pane since the last call: (side, x, y in the pane's picture, when), the oldest
+        """The clicks on the side panes since the last call: (side, x, y in the pane's picture, when), the oldest
         first."""
         out = []
         while self._clicks:
@@ -582,7 +615,7 @@ class SeeThrough:
             self._wake.set()
 
     def _clicked(self, side: str, x: int, y: int) -> None:
-        """(the window thread, from the left pane's window procedure) a click on the pane, kept for the Tk thread."""
+        """(the window thread, from a side pane's window procedure) a click on the pane, kept for the Tk thread."""
         self._clicks.append((side, int(x), int(y), time.monotonic()))
         self.counts["clicks"] += 1
         self._note("click", side=side, x=int(x), y=int(y))
@@ -592,14 +625,14 @@ class SeeThrough:
         hwnd = _user32.CreateWindowExW(EX_STYLE, CLASS, "TASlation see-through", WS_POPUP, 0, 0, 1, 1, None, None,
                                        instance, None)
         self.hwnd = int(hwnd or 0)
-        if self.hwnd:  # the side panes: the left one takes clicks, the right one is click-through as this one is
-            for side, cls, ex in (("left", PANE_CLASS, PANE_EX_STYLE), ("right", CLASS, EX_STYLE)):
-                pane = int(_user32.CreateWindowExW(ex, cls, "TASlation pane", WS_POPUP, 0, 0, 1, 1, None, None,
+        if self.hwnd:  # the side panes: the left one takes clicks; the right one is click-through as this one is but
+            # while the pointer is on one of its plates (`_right_plates`)
+            for side, ex in (("left", PANE_EX_STYLE), ("right", EX_STYLE)):
+                pane = int(_user32.CreateWindowExW(ex, PANE_CLASS, "TASlation pane", WS_POPUP, 0, 0, 1, 1, None, None,
                                                    instance, None) or 0)
                 if pane:
                     self.panes[side] = pane
-                    if side == "left":
-                        _pane_clicks[pane] = lambda x, y, s=side: self._clicked(s, x, y)
+                    _pane_clicks[pane] = lambda x, y, s=side: self._clicked(s, x, y)
         self._ready.set()
         if not self.hwnd:
             return
@@ -638,21 +671,17 @@ class SeeThrough:
             panes = dict(self._pane_want)
         self.counts["looks"] += 1
         if not viewer:
-            self._hide("no viewer")
-            self._panes_hide("no viewer")
+            self._nothing("no viewer")
             return
         if not _user32.IsWindow(viewer):
-            self._hide("gone")
-            self._panes_hide("gone")
+            self._nothing("gone")
             return
         if _user32.IsIconic(viewer) or not _user32.IsWindowVisible(viewer) or windows._is_cloaked(viewer):
-            self._hide("minimised")
-            self._panes_hide("minimised")
+            self._nothing("minimised")
             return
         frame = wgc.peek(viewer)
         if frame is None:
-            self._hide("no frame")
-            self._panes_hide("no frame")
+            self._nothing("no frame")
             return
         client = windows._client_box(viewer)
         bounds = windows._frame_bounds(viewer)
@@ -663,14 +692,15 @@ class SeeThrough:
         moved, self._pointer = pointer != self._pointer, pointer
         if not new_frame and changed == self._seen_changed and geometry == self._geometry and \
                 now - self._covers_at < COVER_S:
-            if moved and on and self._last_look is not None:  # only the pointer moved: the last look, less the patch
-                self._new_frame = False  # under it now (no frame compared again)
+            self._right_plates(pointer, panes)
+            waiting = self._hover_wait is not None  # (a patch the pointer rests on, to be left out once its wait is over)
+            if (moved or waiting) and on and self._last_look is not None:  # only the pointer moved: the last look,
+                self._new_frame = False  # less the patch under it now (no frame compared again)
                 self._show_look(*self._last_look)
             return
         box = wgc.crop_box(frame.size, bounds, client)
         if box is None:
-            self._hide("size")
-            self._panes_hide("size")
+            self._nothing("size")
             self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
             self._last_look = None
             return
@@ -684,9 +714,10 @@ class SeeThrough:
             self._dpi = viewer_dpi(viewer)
         self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
         self._place_panes(panes, origin, size)
+        self._right_plates(pointer, panes)
         if not on:  # (the left pane's Lettering switched off: the lettering hidden, the side panes as they are)
             self._last_look = None
-            self._set_hover(None)
+            self._unhover()
             self._hide("off")
             return
         self._new_frame = new_frame
@@ -705,9 +736,10 @@ class SeeThrough:
     def _show_look(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], any_sets: bool) -> None:
         """What a look found shown (*shown* of the set *chosen*, none covered), less the patch under the pointer."""
+        self._look_key = chosen.key if chosen is not None else None
         if chosen is None or not shown:
             why = "covered" if chosen is not None else ("no match" if any_sets else "no patches")
-            self._set_hover(None)
+            self._unhover()
             self._hide(why, seq, compare_ms, shares)
             return
         under = self._under_pointer(chosen, shown, origin)
@@ -723,7 +755,9 @@ class SeeThrough:
 
     def _under_pointer(self, chosen: st.PatchSet, shown: tuple[int, ...], origin: tuple[int, int]) -> int | None:
         """The one of the patches *shown* the pointer is over (`seethrough.hovered`, HOVER_IN_PX and HOVER_OUT_PX at
-        the viewer's DPI), None for none - nor while the pointer is over a side pane or a window above the viewer."""
+        the viewer's DPI), None for none - nor while the pointer is over a side pane or a window above the viewer.
+        A patch the pointer comes to is left out once it has rested there the hover delay (`set_hover_delay`; the
+        looks go on meanwhile, `_step`); one left out stays so while the pointer is near it, as ever."""
         point = self._pointer
         index, box = None, None
         if point is not None and not self._pointer_elsewhere(point):
@@ -732,8 +766,20 @@ class SeeThrough:
                             st.scaled(HOVER_IN_PX, self._dpi), st.scaled(HOVER_OUT_PX, self._dpi))
             if at is not None:
                 index, box = shown[at], boxes[at]
-        self._set_hover(box)
+        if box is not None and box != self._hover_box and self._hover_delay > 0:
+            now = time.monotonic()
+            if self._hover_wait is None or self._hover_wait[0] != box:
+                self._hover_wait = (box, now)
+            if now - self._hover_wait[1] < self._hover_delay:
+                self._set_hover(None)  # (the one left out before, if any, is back: the pointer has left it)
+                return None
+        self._hover_wait = None
+        self._set_hover(box, chosen.key)
         return index
+
+    def _unhover(self) -> None:
+        self._hover_wait = None
+        self._set_hover(None)
 
     def _pointer_elsewhere(self, point: tuple[int, int]) -> bool:
         """Whether the pointer at *point* (screen pixels) is over a side pane or a window above the viewer."""
@@ -741,13 +787,42 @@ class SeeThrough:
         boxes = [self.pane_shown(side) for side in PANES] + list(self._covers)
         return any(b is not None and b[0] <= x < b[2] and b[1] <= y < b[3] for b in boxes)
 
-    def _set_hover(self, box: st.Box | None) -> None:
+    def _set_hover(self, box: st.Box | None, key: int | None = None) -> None:
+        self._hovered = (int(key), box) if box is not None and key is not None else None
         if box == self._hover_box:
             return
         self._hover_box = box
         if box is not None:
             self.counts["hovers"] += 1
         self._note("hover", on=int(box is not None))
+
+    def _nothing(self, why: str) -> None:
+        """Nothing to lie over (no viewer, gone, minimised, no frame, no size): the lettering and the panes hidden."""
+        self._hide(why)
+        self._panes_hide(why)
+        self._look_key = None
+        self._unhover()
+
+    def _right_plates(self, point: tuple[int, int] | None, panes: dict[str, Any]) -> None:
+        """The right pane takes a click while the pointer at *point* (screen pixels) is on one of its plates that
+        take one (WS_EX_TRANSPARENT off), and lets every other one through to the viewer (on), as the lettering's
+        window does."""
+        hwnd = self.panes.get("right", 0)
+        want, shown = panes.get("right"), self._pane_shown.get("right")
+        takes = False
+        if hwnd and point is not None and want is not None and shown is not None and shown[0] == want[0] and want[3]:
+            x, y = point[0] - shown[1][0], point[1] - shown[1][1]
+            takes = any(b[0] <= x < b[2] and b[1] <= y < b[3] for b in want[3])
+        self._right_take(takes)
+
+    def _right_take(self, takes: bool) -> None:
+        hwnd = self.panes.get("right", 0)
+        if takes == self._right_takes or not hwnd:
+            return
+        style = int(_user32.GetWindowLongW(hwnd, GWL_EXSTYLE))
+        _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, (style & ~WS_EX_TRANSPARENT) if takes else (style | WS_EX_TRANSPARENT))
+        self._right_takes = takes
+        self._note("plates", on=int(takes))
 
     def _free_dib(self) -> None:
         if self._dib is not None:
@@ -773,7 +848,7 @@ class SeeThrough:
             if want is None or not hwnd:
                 self._pane_hide(side, "none")
                 continue
-            serial, bgra, box = want
+            serial, bgra, box = want[:3]
             height, width = bgra.shape[:2]
             if box[0] < 0 or box[1] < 0 or box[0] + width > size[0] or box[1] + height > size[1]:
                 self._pane_hide(side, "beyond")
@@ -811,6 +886,8 @@ class SeeThrough:
         hwnd = self.panes.get(side, 0)
         if hwnd:
             _user32.ShowWindow(hwnd, SW_HIDE)
+        if side == "right":
+            self._right_take(False)
         self._pane_shown[side] = None
         self.counts["pane_hides"] += 1
         self._note("pane_hide", side=side, why=why)

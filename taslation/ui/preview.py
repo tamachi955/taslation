@@ -213,6 +213,13 @@ class ImageCanvas(tk.Canvas):
             self._moved_at = now
         self._redraw(quick)
 
+    def keep(self, image: Image.Image | None) -> None:
+        """*image* noted as the picture on show without drawing anything (see-through mode: TASlation's own window is
+        never on the screen, so its page is not drawn - what reads the picture on show, `_image`, reads it all the
+        same)."""
+        self.changed, self.moving = None, False
+        self._image = image
+
     def set_patch(self, patch: Patch | None) -> None:
         """*patch* over the picture now (None: none), with nothing else drawn again: just above the picture, under
         the outlines, the labels, the badges and the notes; kept for every later redraw (`patch`)."""
