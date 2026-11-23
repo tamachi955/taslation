@@ -366,3 +366,85 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     ui.quiet_start(app, Settings(see_through=True))
     ui.quiet_end(app)  # (the legal notice: the reader's to answer)
     assert not ui.quiet(app)
+
+
+# ------------------------------------------------------------------ the bars gone: only the bubbles they cut read again
+def _units():
+    from taslation import fingerprint as fp
+
+    n = fp.FINGERPRINT_HEX_LEN
+    # read with the bars' rows (0-40) painted over on a dark ground: the page's box starts below them, and the
+    # fingerprint is another; without them the same page has its whole box
+    painted = fp.PageUnit(box=(100, 40, 300, 300), fingerprint="0" * n)
+    plain = fp.PageUnit(box=(100, 0, 300, 300), fingerprint="f" * n)
+    return painted, plain
+
+
+def _carry(tmp_path, painted, plain, rows=((0, 40),)):
+    from PIL import Image
+
+    from taslation.cache import BookCache, CachedBubble, CachedPage
+    from taslation.pipeline import Pipeline
+
+    cache = BookCache(tmp_path / "cache.json", "Book", "model")
+    cut = CachedBubble(box=painted.normalize((120, 40, 170, 80)), text="cut",
+                       poly=[painted.normalize((120, 40, 120, 40))[:2]])
+    whole = CachedBubble(box=painted.normalize((120, 120, 170, 160)), text="whole",
+                         poly=[painted.normalize((130, 125, 130, 125))[:2]])
+    cache.add(CachedPage(fingerprint=painted.fingerprint, aspect=painted.aspect, bubbles=[cut, whole], seq=3))
+    saved = []
+    pipe = SimpleNamespace(cache=cache, units_of=lambda rgb: [plain], _save_store=lambda kind, store: saved.append(kind),
+                           settings=SimpleNamespace(fingerprint_max_distance=36))
+    got = Pipeline.carry_over(pipe, SimpleNamespace(units=[painted]), Image.new("RGB", (W, H)), rows, 3)
+    return got, cache, saved
+
+
+def test_a_page_read_under_bars_is_carried_over_to_the_frame_without_them_less_the_bubbles_they_cut(tmp_path):
+    painted, plain = _units()
+    (carried, dropped), cache, saved = _carry(tmp_path, painted, plain)
+    assert (carried, dropped) == (1, 1) and saved == ["cache"]
+    page, = cache.pages  # (the painted frame's own entry gone)
+    assert page.fingerprint == plain.fingerprint and page.seq == 3
+    assert page.incomplete  # (its next reading reads and asks for the cut bubble alone)
+    bubble, = page.bubbles
+    # the same place on the screen, in the plain unit's terms
+    assert bubble.text == "whole" and plain.denormalize(bubble.box) == (120, 120, 170, 160)
+    x, y = bubble.poly[0]
+    assert (round(plain.box[0] + x * plain.width), round(plain.box[1] + y * plain.height)) == (130, 125)
+
+
+def test_nothing_cut_carries_the_page_over_whole_and_another_page_is_not_carried(tmp_path):
+    from taslation import fingerprint as fp
+
+    painted, plain = _units()
+    (carried, dropped), cache, _saved = _carry(tmp_path, painted, plain, rows=((0, 20),))  # (above every bubble)
+    assert (carried, dropped) == (1, 0)
+    page, = cache.pages
+    assert page.fingerprint == plain.fingerprint and not page.incomplete and len(page.bubbles) == 2
+    elsewhere = fp.PageUnit(box=(300, 0, 400, 300), fingerprint=plain.fingerprint)  # (boxes that hardly meet)
+    (carried, dropped), cache, saved = _carry(tmp_path / "x", painted, elsewhere)
+    assert (carried, dropped) == (0, 0) and saved == [] and [p.fingerprint for p in cache.pages] == [painted.fingerprint]
+
+
+def test_after_the_bars_the_page_is_read_again_only_when_bubbles_were_left_out_and_once():
+    from PIL import Image
+
+    from taslation.ui import seethrough as ui
+
+    plain = Image.new("RGB", (W, H))
+    calls = []
+
+    def app_with(answer, busy=False):
+        read = Image.new("RGB", (W, H))
+        read.info[ui.PAINTED_INFO] = ((0, 40),)
+        cut = SimpleNamespace(bbox=(120, 40, 170, 80))
+        pipeline = SimpleNamespace(carry_over=lambda result, image, rows, near: calls.append(rows) or answer)
+        return SimpleNamespace(last_result=SimpleNamespace(original=read, regions=[cut], units=[]), pipeline=pipeline,
+                               busy=busy, _shows_page=lambda image, frame: True, _see_carries=[])
+
+    app = app_with((1, 1))
+    assert ui.after_bars(app, plain) and calls == [((0, 40),)] and app._see_carries[0][1:] == (1, 1)
+    assert not ui.after_bars(app, plain) and len(calls) == 1  # (once: the read frame's mark is gone)
+    assert not ui.after_bars(app_with((1, 0)), plain)  # carried over whole: nothing to ask
+    assert ui.after_bars(app_with((0, 0)), plain)  # nothing carried and a bubble cut: read anew
+    assert not ui.after_bars(app_with((1, 1), busy=True), plain) and len(calls) == 3  # (a job runs: later)

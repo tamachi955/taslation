@@ -520,6 +520,10 @@ class SeeWatch:
                                "own_activations": None if self.activations is None else self.activations.count,
                                "own_activations_from": None if self.activations is None else self.activations.wheres,
                                "own_window": dict(self.own_states)},
+                # each time the bars went from a page read under them (`ui.seethrough.after_bars`): ms on the run's
+                # clock, pages carried over to the frame without them, bubbles left out (cut by a bar: read again)
+                "carries": [[round(t * 1000 + self.delta_ms - (changes[0]["t"] if changes else 0)), c, d]
+                            for t, c, d in getattr(self.app, "_see_carries", None) or ()],
                 "frames_per_s": fps, "cpu": cpu,
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,

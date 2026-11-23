@@ -1817,8 +1817,8 @@ class LiveViewMixin(BlackViewerMixin):
             f.retake = None  # the viewer has moved on
         if not self.auto_var.get() or (
                 self._auto_last is not None and not frames_differ(self._auto_last, thumb)):
-            if self.auto_var.get() and seethrough.on(self) and seethrough.read_under_bars(self, image):
-                self._take_retake(image, thumb)  # (the page read under held bars, read once more now they have gone)
+            if self.auto_var.get() and seethrough.on(self) and seethrough.after_bars(self, image):
+                self._take_retake(image, thumb)  # (the bubbles held bars cut, read now they have gone: `after_bars`)
             return
         if seen is not None and not frames_differ(seen, thumb, 0.5):
             self._take(image, thumb)

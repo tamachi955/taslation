@@ -340,7 +340,9 @@ rows' languages.
   page and on the ground (always the stand-in's); who was in front, and each change, with the activations of
   TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
   window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
-  window was on the screen once a second (shown, minimised, hidden); the stand-in's frames a second
+  window was on the screen once a second (shown, minimised, hidden); each time the bars went from a page read under
+  them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
+  read and asked for again); the stand-in's frames a second
   while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
   for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new

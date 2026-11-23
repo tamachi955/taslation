@@ -14,9 +14,10 @@ and the viewer takes every click and key itself.
   the page area changed (`seethrough.steady_thumb` of `steady_area`: bars at its top and bottom come and go without a
   job), never on a frame to wait out (a black with a spinner, half a spread, a washed-out preview), nor on one with
   bars over it until they have stayed BAR_WAIT_S - then it is read with the bars' rows painted over (their words are
-  not the book's), and once more when they have gone if a bubble read reaches those rows (cut by a bar:
-  `read_under_bars`). The page on a flat ground of any colour is the capture area (`seethrough.ground_box`: a white
-  ground too).
+  not the book's). Once they have gone (`after_bars`), the page's cached translations are carried over to the frame
+  without them, the bubbles that reach those rows (cut by a bar) left out, and the page is read once more for those
+  alone (`Pipeline.carry_over`: the lines kept are not asked again). The page on a flat ground of any colour is the
+  capture area (`seethrough.ground_box`: a white ground too).
 
 Nothing here presses a key, posts a message or moves the foreground."""
 
@@ -111,6 +112,7 @@ def start(app: Any) -> bool:
     app._see_bars_since = None
     app._see_rest_box = None
     app._see_job = None
+    app._see_carries = []  # (when, pages carried over, bubbles left out), see after_bars
     if not bool(getattr(app.settings, "see_through", False)):
         return False
     over = window.SeeThrough.start()
@@ -326,9 +328,7 @@ def reading_frame(app: Any, image: Image.Image, facts: Any) -> Image.Image:
 def read_under_bars(app: Any, image: Image.Image) -> bool:
     """Whether the page on show in *image* (a frame with no bars painted over: they have gone) was last read from a
     frame with bars painted over (`reading_frame`) and a bubble read reaches the rows painted over (CUT_PX: cut at a
-    bar's edge, and its lettering's patch, whose margin takes in those rows, never shown): then it is read once more
-    from this one, so that the bubbles the bars cut are read whole (the lines read alike come from the cache). Once
-    read so, the page's frame has no bars: never again."""
+    bar's edge, and its lettering's patch, whose margin takes in those rows, never shown)."""
     if PAINTED_INFO in getattr(image, "info", {}):
         return False
     result = getattr(app, "last_result", None)
@@ -339,6 +339,37 @@ def read_under_bars(app: Any, image: Image.Image) -> bool:
     boxes = [tuple(getattr(r, "bbox", ())) for r in getattr(result, "regions", None) or ()]
     cut = any(len(b) == 4 and b[1] < end + CUT_PX and b[3] > start - CUT_PX for b in boxes for start, end in rows)
     return cut and bool(app._shows_page(image, original))
+
+
+def after_bars(app: Any, image: Image.Image) -> bool:
+    """The bars have gone from the page last read with them painted over (`read_under_bars` aside, any such page on
+    show again in *image*, nothing running): its cached pages carried over to the units of *image*
+    (`Pipeline.carry_over`: the painted frame's units have fingerprints of their own - and on a dark ground boxes of
+    their own -, so that the page would not be found again), the bubbles that reach the painted rows left out and the
+    page marked as lacking them. Whether it is to be read once more now: some were left out (that reading reads and
+    asks for those alone, and for a bubble the bars hid whole), or none could be carried over and a bubble was cut
+    (then the page is read anew). Done once: the read frame's mark goes."""
+    if PAINTED_INFO in getattr(image, "info", {}) or getattr(app, "busy", False):
+        return False
+    result = getattr(app, "last_result", None)
+    original = getattr(result, "original", None)
+    if original is None or PAINTED_INFO not in getattr(original, "info", {}) or original.size != image.size:
+        return False
+    if not app._shows_page(image, original):
+        return False
+    cut = read_under_bars(app, image)
+    rows = original.info.pop(PAINTED_INFO)
+    carried = dropped = 0
+    pipeline = getattr(app, "pipeline", None)
+    if pipeline is not None:
+        try:
+            carried, dropped = pipeline.carry_over(result, image, rows, CUT_PX)
+        except Exception:  # noqa: BLE001 - the cache stays as it was; the page is read anew if a bubble was cut
+            carried = dropped = 0
+    notes = getattr(app, "_see_carries", None)
+    if notes is not None:
+        notes.append((time.monotonic(), carried, dropped))
+    return dropped > 0 or (carried == 0 and cut)
 
 
 def steady_area(app: Any, image: Image.Image, facts: Any) -> tuple[int, int, int, int]:
