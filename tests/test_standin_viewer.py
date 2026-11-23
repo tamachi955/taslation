@@ -65,6 +65,12 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert turns["f2"] == [(69, False), (70, False)]  # single pages once the window is narrow
     assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
+    # f3 (by its name only): a's slow reading on single pages, after f2 when both are asked
+    assert "f3" not in names and standin_e2e.wanted("f3,f2") == ["f2", "f3"]
+    narrow, _steps = standin_e2e.build_plan(["f3"], standin_e2e.pages_needed(["f3"]))
+    assert narrow[0].screens == [(k, False) for k in range(1, 10)]
+    both, _steps = standin_e2e.build_plan(["f2", "f3"], standin_e2e.pages_needed(["f2", "f3"]))
+    assert both[1].screens == [(k, False) for k in range(3, 12)]
     assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
         standin_e2e.wanted("a,y")  # (q is scenario q, for a stand-in with a profile)

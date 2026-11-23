@@ -15,7 +15,11 @@ click, no message; the foreground is only read):
   this tool's for the whole run, `install`; the real pointer is never moved);
 * every HIT_EVERY_S, which window `WindowFromPoint` gives at the middle of each patch shown, at the page's middle and
   on the ground beside it: the stand-in's, never the see-through window;
-* the process's CPU time, every CPU_EVERY_S, with whether a page job ran;
+* the process's CPU time and working set, every CPU_EVERY_S, with whether a page job ran, and the CPU time of the
+  stand-in's processes (`process_seconds`: its sandboxed ones too); every GPU_EVERY_S, the GPU memory this process
+  and the stand-in's hold (`GpuMemory`: Windows' own counter);
+* the Tk thread's steps, each call's ms (`install`: `seethrough.make_patches`, see-through mode's tick, its patches
+  handed over, the panes' rows, sizes and pictures, the window's redisplay and its canvas' picture);
 * which screen of the stand-in's each patch set was made from (its frame's code cells, `standin_viewer.decode`);
 * with *truth*: a copy of the stand-in's place on the screen every TRUTH_EVERY_S (in memory; two of them written as
   PNG into the scratch folder for the developer's eyes - they show the public sample pages and the lettering -, to be
@@ -26,14 +30,18 @@ click, no message; the foreground is only read):
 
 `report` turns the notes and the see-through window's own (`SeeThrough.notes`) into the run's ``see_through`` block:
 the time from the stand-in's change of screen (its spinner, its washed-out picture or its draw) to the window showing
-none of the old page's patches (median, p90, max), the hits, the foreground's changes, the frames a second, the CPU
-and the truth check's findings."""
+none of the old page's patches (median, p90, max), the hits, the foreground's changes, the frames a second, the CPU,
+what the run cost (`_cost`), the stand-in's own frame times (`_viewer_frames`: its ``anim`` and ``painted`` lines),
+see-through mode's steps (`_pipeline`, `_tk_steps`), each change of screen's first and whole page over the viewer
+(``on_screen``) and the truth check's findings."""
 
 from __future__ import annotations
 
+import bisect
 import ctypes
 import os
 import statistics
+import sys
 import threading
 import time
 from collections import Counter
@@ -47,6 +55,7 @@ from PIL import Image
 FRONT_EVERY_S = 0.05
 HIT_EVERY_S = 1.0
 CPU_EVERY_S = 0.5
+GPU_EVERY_S = 5.0  # the GPU memory of this process and the stand-in's (Windows' counter, `GpuMemory`)
 TRUTH_EVERY_S = 0.033
 VISIBLE_TOL = 8  # a patch's pixel is on the screen when every channel is within this
 VISIBLE_SHARE = 0.9  # a patch is on the screen when so many of its opaque pixels looked at are
@@ -231,6 +240,149 @@ class Activations:
             self._hook = None
 
 
+class _MemoryCounters(ctypes.Structure):
+    _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t)]
+
+
+_kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+_kernel32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(_MemoryCounters), wintypes.DWORD]
+_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_kernel32.OpenProcess.restype = wintypes.HANDLE
+_kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE, *[ctypes.POINTER(wintypes.FILETIME)] * 4]
+_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def working_set_mib() -> tuple[float, float] | None:
+    """This process's working set and its peak so far, MiB (read only)."""
+    counters = _MemoryCounters()
+    counters.cb = ctypes.sizeof(counters)
+    if not _kernel32.K32GetProcessMemoryInfo(_kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        return None
+    return counters.WorkingSetSize / 2 ** 20, counters.PeakWorkingSetSize / 2 ** 20
+
+
+_ntdll = ctypes.WinDLL("ntdll")
+_ntdll.NtQuerySystemInformation.argtypes = [ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong,
+                                            ctypes.POINTER(ctypes.c_ulong)]
+_ntdll.NtQuerySystemInformation.restype = ctypes.c_long
+SYSTEM_PROCESS_INFORMATION = 5
+# (SYSTEM_PROCESS_INFORMATION on 64 bits: NextEntryOffset at 0, UserTime at 40, KernelTime at 48, UniqueProcessId at 80)
+_SPI_NEXT, _SPI_USER, _SPI_KERNEL, _SPI_PID = 0, 40, 48, 80
+
+
+def process_seconds(pids: set[int]) -> dict[int, float]:
+    """The CPU seconds (kernel and user) each process of *pids* has used so far: one look at every process's times
+    (NtQuerySystemInformation, read only - a browser's sandboxed processes cannot be opened by another), or, where that
+    fails, those of *pids* that can be opened (PROCESS_QUERY_LIMITED_INFORMATION)."""
+    wanted = {int(p) for p in pids}
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        size = 1 << 19
+        for _ in range(4):
+            buffer = ctypes.create_string_buffer(size)
+            needed = ctypes.c_ulong(0)
+            status = _ntdll.NtQuerySystemInformation(SYSTEM_PROCESS_INFORMATION, buffer, size, ctypes.byref(needed))
+            if status == 0:
+                out: dict[int, float] = {}
+                raw, offset = buffer.raw, 0
+                while True:
+                    pid = int.from_bytes(raw[offset + _SPI_PID:offset + _SPI_PID + 8], "little")
+                    if pid in wanted:
+                        user = int.from_bytes(raw[offset + _SPI_USER:offset + _SPI_USER + 8], "little", signed=True)
+                        kernel = int.from_bytes(raw[offset + _SPI_KERNEL:offset + _SPI_KERNEL + 8], "little",
+                                                signed=True)
+                        out[pid] = (user + kernel) / 1e7
+                    step = int.from_bytes(raw[offset + _SPI_NEXT:offset + _SPI_NEXT + 4], "little")
+                    if not step:
+                        return out
+                    offset += step
+            size = max(size * 2, int(needed.value) + 65536)
+    out = {}
+    for pid in wanted:
+        handle = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            continue
+        try:
+            times = [wintypes.FILETIME() for _ in range(4)]
+            if _kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+                kernel, user = ((t.dwHighDateTime << 32 | t.dwLowDateTime) for t in times[2:])
+                out[int(pid)] = (kernel + user) / 1e7
+        finally:
+            _kernel32.CloseHandle(handle)
+    return out
+
+
+class _PdhValue(ctypes.Union):
+    _fields_ = [("longValue", ctypes.c_long), ("doubleValue", ctypes.c_double), ("largeValue", ctypes.c_longlong),
+                ("text", ctypes.c_void_p)]
+
+
+class _PdhFmtValue(ctypes.Structure):
+    _fields_ = [("CStatus", wintypes.DWORD), ("value", _PdhValue)]
+
+
+class _PdhItem(ctypes.Structure):
+    _fields_ = [("szName", ctypes.c_wchar_p), ("FmtValue", _PdhFmtValue)]
+
+
+class GpuMemory:
+    """The GPU memory each process holds, read from Windows' own counter (``\\GPU Process Memory(*)\\Dedicated
+    Usage``, by its English name: PDH, read only); `read` gives pid -> MiB, {} where the counter is not there."""
+
+    PDH_FMT_LARGE, PDH_MORE_DATA = 0x400, 0x800007D2
+
+    def __init__(self) -> None:
+        self._query = self._counter = None
+        try:
+            self._pdh = ctypes.WinDLL("pdh")
+            query, counter = ctypes.c_void_p(), ctypes.c_void_p()
+            if self._pdh.PdhOpenQueryW(None, None, ctypes.byref(query)) != 0:
+                return
+            if self._pdh.PdhAddEnglishCounterW(query, "\\GPU Process Memory(*)\\Dedicated Usage", None,
+                                               ctypes.byref(counter)) != 0:
+                self._pdh.PdhCloseQuery(query)
+                return
+            self._query, self._counter = query, counter
+        except (OSError, AttributeError):
+            self._query = self._counter = None
+
+    def read(self) -> dict[int, float]:
+        if self._query is None:
+            return {}
+        if self._pdh.PdhCollectQueryData(self._query) != 0:
+            return {}
+        size, count = wintypes.DWORD(0), wintypes.DWORD(0)
+        status = self._pdh.PdhGetFormattedCounterArrayW(self._counter, self.PDH_FMT_LARGE, ctypes.byref(size),
+                                                        ctypes.byref(count), None) & 0xFFFFFFFF
+        if status != self.PDH_MORE_DATA or not size.value:
+            return {}
+        buffer = (ctypes.c_byte * size.value)()
+        if self._pdh.PdhGetFormattedCounterArrayW(self._counter, self.PDH_FMT_LARGE, ctypes.byref(size),
+                                                  ctypes.byref(count), buffer) != 0:
+            return {}
+        items = ctypes.cast(buffer, ctypes.POINTER(_PdhItem * count.value)).contents
+        out: dict[int, float] = {}
+        for item in items:
+            name = item.szName or ""
+            if not name.startswith("pid_"):
+                continue
+            try:
+                pid = int(name.split("_")[1])
+            except (IndexError, ValueError):
+                continue
+            out[pid] = out.get(pid, 0.0) + item.FmtValue.value.largeValue / 2 ** 20
+        return out
+
+    def close(self) -> None:
+        if self._query is not None:
+            self._pdh.PdhCloseQuery(self._query)
+            self._query = None
+
+
 def spread(values: list[float]) -> dict[str, Any]:
     vals = sorted(v for v in values if v is not None)
     if not vals:
@@ -245,8 +397,16 @@ class SeeWatch:
     stand-in's screen it shows, (page, spread) or None; *top*: rows above the page's content in a client capture."""
 
     def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
-                 front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None) -> None:
+                 front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None,
+                 viewer_pids: Callable[[], set[int]] | None = None) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
+        self.viewer_pids = viewer_pids  # (the stand-in's processes: their CPU and GPU memory, `cost`)
+        self.viewer_cpu: list[tuple[float, bool, dict[int, float]]] = []  # (ms, a job ran, pid -> CPU seconds)
+        self.memory: list[tuple[float, float]] = []  # (ms, this process's working set in MiB)
+        self.gpu: list[tuple[float, float, float]] = []  # (ms, this process's GPU memory MiB, the stand-in's)
+        self._gpu: GpuMemory | None = None
+        self.patch_ms: list[float] = []  # `seethrough.make_patches`, each call's ms (the Tk thread)
+        self.tk_steps: dict[str, list[tuple[float, float]]] = {}  # step -> (ms since the epoch at its end, its ms)
         self.truth, self.shots = truth, shots
         self.pane_shot = pane_shot  # (`_pane_watch`: one copy with both panes beside a spread, into this folder)
         self.panes: Counter[str] = Counter()  # (side, page kind, shown or hidden) at each look
@@ -311,6 +471,42 @@ class SeeWatch:
             return out
 
         ui.pairs = noted
+        from taslation import seethrough as st
+
+        make = st.make_patches
+
+        def timed(*a: Any, **k: Any) -> Any:
+            t = time.perf_counter()
+            try:
+                return make(*a, **k)
+            finally:
+                self.patch_ms.append((time.perf_counter() - t) * 1000)
+
+        st.make_patches = timed
+        # the Tk thread's own steps, each call timed (`tk_steps`): what see-through mode and the window spend there
+        from taslation import panes as pn
+
+        for owner, name, label in ((ui, "tick", "see.tick"), (ui, "present", "see.present"),
+                                   (ui, "panes_tick", "see.panes_tick"), (ui, "left_rows", "see.left_rows"),
+                                   (ui, "right_rows", "see.right_rows"), (pn, "width_for", "panes.width_for"),
+                                   (pn, "render", "panes.render"), (self.app, "_redisplay", "window._redisplay"),
+                                   (getattr(self.app, "canvas", None), "set_image", "canvas.set_image")):
+            if owner is not None and callable(getattr(owner, name, None)):
+                self._time_calls(owner, name, label)
+
+    def _time_calls(self, owner: Any, name: str, label: str) -> None:
+        """*owner*'s *name* (a module's function, or an object's method put on the object itself) timed at each call."""
+        inner = getattr(owner, name)
+        calls = self.tk_steps.setdefault(label, [])
+
+        def timed(*a: Any, **k: Any) -> Any:
+            t = time.perf_counter()
+            try:
+                return inner(*a, **k)
+            finally:
+                calls.append((time.time() * 1000, (time.perf_counter() - t) * 1000))
+
+        setattr(owner, name, timed)
 
     def _frame(self, hwnd: int, _seq: int) -> None:
         if hwnd == self.hwnd:
@@ -329,6 +525,8 @@ class SeeWatch:
         wgc.remove_listener(self._frame)
         if self.activations is not None:
             self.activations.release()
+        if self._gpu is not None:
+            self._gpu.close()
 
     def over(self) -> Any:
         over = getattr(self.app, "_see_through", None) if self.app is not None else None
@@ -350,6 +548,7 @@ class SeeWatch:
 
     def _run(self) -> None:
         next_hit = next_cpu = next_copy = 0.0
+        next_gpu = time.monotonic() + GPU_EVERY_S
         last_front = None
         while not self.stop.wait(0.01):
             now = time.monotonic()
@@ -360,8 +559,29 @@ class SeeWatch:
                 last_front = who
             self.over()  # (kept)
             if now >= next_cpu:
-                self.cpu.append((time.time() * 1000, time.process_time(), bool(getattr(self.app, "busy", False))))
+                at = time.time() * 1000
+                self.cpu.append((at, time.process_time(), bool(getattr(self.app, "busy", False))))
+                memory = working_set_mib()
+                if memory is not None:
+                    self.memory.append((at, memory[0]))
+                if self.viewer_pids is not None:
+                    try:
+                        self.viewer_cpu.append((at, self.cpu[-1][2], process_seconds(set(self.viewer_pids()))))
+                    except Exception:  # noqa: BLE001 - a look that failed is a look less
+                        pass
                 next_cpu = now + CPU_EVERY_S
+            if now >= next_gpu:
+                try:
+                    if self._gpu is None:
+                        self._gpu = GpuMemory()
+                    held = self._gpu.read()
+                    viewer = set(self.viewer_pids()) if self.viewer_pids is not None else set()
+                    if held:
+                        self.gpu.append((time.time() * 1000, held.get(self.own_pid, 0.0),
+                                         sum(v for p, v in held.items() if p in viewer)))
+                except Exception:  # noqa: BLE001 - a look that failed is a look less
+                    pass
+                next_gpu = now + GPU_EVERY_S
             if now >= next_hit:
                 self._hit_test()
                 try:
@@ -934,6 +1154,22 @@ class SeeWatch:
                     "max": round(v[-1], 4)}
         fps = self._fps(events, offset)
         cpu = self._cpu(changes, end_ms)
+        cost = self._cost(changes)
+        viewer_frames = self._viewer_frames(events, changes)
+        pipeline = self._pipeline(notes)
+        # what the reader sees of each change of screen: from its draw to the first patches of the new screen shown
+        # over the viewer, and to its whole page's (a set handed over as final) - before the next change
+        final_of = {n["set"]: bool(n.get("final")) for n in notes if n["ev"] == "present"}
+        shows = [(n["t"] * 1000 + self.delta_ms, n["set"]) for n in notes if n["ev"] == "show" and n.get("shown")]
+        on_screen = []
+        for i, c in enumerate(changes):
+            until = changes[i + 1]["t"] if i + 1 < len(changes) else float("inf")
+            mine = [(t, s) for t, s in shows if c["draw_t"] <= t < until and screen_of(s) == c["to"]]
+            first = mine[0][0] - c["draw_t"] if mine else None
+            final = next((t - c["draw_t"] for t, s in mine if final_of.get(s)), None)
+            on_screen.append({"t": round(c["draw_t"]), "to": list(c["to"]), "why": c["why"],
+                              "first_ms": None if first is None else round(first),
+                              "final_ms": None if final is None else round(final)})
         return {"counts": {k: (round(v, 1) if isinstance(v, float) else v) for k, v in counts.items()},
                 "stale_ms": spread(stale), "stale_rows": rows, "changes_with_nothing_shown": nothing,
                 "own_frame_to_change_ms": spread(own_ms),
@@ -959,7 +1195,9 @@ class SeeWatch:
                 # clock, pages carried over to the frame without them, bubbles left out (cut by a bar: read again)
                 "carries": [[round(t * 1000 + self.delta_ms - (changes[0]["t"] if changes else 0)), c, d]
                             for t, c, d in getattr(self.app, "_see_carries", None) or ()],
-                "frames_per_s": fps, "cpu": cpu, "panes": self.pane_report(),
+                "frames_per_s": fps, "cpu": cpu, "cost": cost, "viewer_frames": viewer_frames, "pipeline": pipeline,
+                "tk_steps": self._tk_steps(changes), "on_screen": on_screen,
+                "panes": self.pane_report(),
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
                           "max_ms": max((v for v in late if v is not None), default=None),
@@ -1015,3 +1253,120 @@ class SeeWatch:
             elif not busy0 and not busy1:
                 rest.append(share)
         return {"rest": spread(rest), "following": spread(follow)}
+
+    def _cost(self, changes: list[dict[str, Any]]) -> dict[str, Any]:
+        """What the run cost: this process's working set (MiB, each CPU_EVERY_S, and its peak), the stand-in's CPU (per
+        cent of one processor, its processes together, at rest and while following as `_cpu` tells them), the GPU memory
+        this process and the stand-in held (Windows' counter, MiB, each GPU_EVERY_S) and PyTorch's own peak here."""
+        times = [c["t"] for c in changes]
+        rest, follow = [], []
+        spans = {"rest": [0.0, 0.0], "following": [0.0, 0.0]}  # (CPU s, wall s) - its mean: the median of a viewer
+        # idle between its draws is 0
+        for (t0, busy0, c0), (t1, busy1, c1) in zip(self.viewer_cpu, self.viewer_cpu[1:]):
+            both = set(c0) & set(c1)
+            if t1 <= t0 or not both:
+                continue
+            used = sum(c1[p] - c0[p] for p in both)
+            share = 100 * used * 1000 / (t1 - t0)
+            kind = None
+            if any(t1 - 3000 <= t <= t1 for t in times):
+                follow.append(share)
+                kind = "following"
+            elif not busy0 and not busy1:
+                rest.append(share)
+                kind = "rest"
+            if kind is not None:
+                spans[kind][0] += used
+                spans[kind][1] += (t1 - t0) / 1000
+        peak = None
+        torch = sys.modules.get("torch")
+        try:
+            if torch is not None and torch.cuda.is_available():
+                peak = round(torch.cuda.max_memory_reserved() / 2 ** 20)
+        except Exception:  # noqa: BLE001 - not told
+            peak = None
+        memory = working_set_mib()
+        return {"working_set_mib": spread([m for _t, m in self.memory]),
+                "peak_working_set_mib": round(memory[1]) if memory is not None else None,
+                "viewer_cpu": {"rest": spread(rest), "following": spread(follow),
+                               **{f"{k}_mean": round(100 * c / w, 1) if w else None for k, (c, w) in spans.items()},
+                               "all_s": round(sum(sum(c.values()) for _t, _b, c in self.viewer_cpu[-1:]) - sum(
+                                   sum(c.values()) for _t, _b, c in self.viewer_cpu[:1]), 1) if self.viewer_cpu else None},
+                "gpu_mib": {"own": spread([g[1] for g in self.gpu]), "viewer": spread([g[2] for g in self.gpu])},
+                "torch_peak_reserved_mib": peak}
+
+    def _viewer_frames(self, events: list[dict[str, Any]], changes: list[dict[str, Any]]) -> dict[str, Any]:
+        """The stand-in's own frames: from each change of screen's draw to the first frame its capture session
+        delivered after it (ms: the system's composition and the capture), its own time from a turn's draw to the frame
+        after the one that showed it (``ev=painted``), and the gaps between its animation frames (``ev=anim``: the bars'
+        fade, the spinner) - each animation's median, p90 and longest gap, and the frames a second over all."""
+        frames = sorted(self.frames)
+        to_frame = []
+        for c in changes:
+            i = bisect.bisect_left(frames, c["draw_t"])
+            if i < len(frames) and frames[i] - c["draw_t"] < 1000:
+                to_frame.append(frames[i] - c["draw_t"])
+
+        def number(e: dict[str, Any], key: str) -> float | None:
+            try:
+                return float(e[key])
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        painted = [number(e, "ms") for e in events if e["ev"] == "painted"]
+        anim: dict[str, Any] = {}
+        for kind in ("bars", "spinner"):
+            rows = [e for e in events if e["ev"] == "anim" and e.get("kind") == kind]
+            frames_n = sum(number(e, "frames") or 0 for e in rows)
+            ms_sum = sum(number(e, "ms") or 0 for e in rows)
+            anim[kind] = {"animations": len(rows), "frames_per_s": round(frames_n * 1000 / ms_sum, 1) if ms_sum else None,
+                          "median_gap_ms": spread([number(e, "median") for e in rows]),
+                          "p90_gap_ms": spread([number(e, "p90") for e in rows]),
+                          "max_gap_ms": spread([number(e, "max") for e in rows])}
+        return {"draw_to_captured_frame_ms": spread(to_frame), "painted_ms": spread([p for p in painted if p is not None]),
+                "anim": anim}
+
+    def _tk_steps(self, changes: list[dict[str, Any]]) -> dict[str, Any]:
+        """The Tk thread's steps timed (`install`): per step, each call's ms, its calls a second over the run, their
+        seconds together, and the per cent of one processor it took at rest, while a page job ran and while following
+        (a change of screen in the 3 s before), the spans told apart as `_cpu` does."""
+        times = sorted(c["t"] for c in changes)
+        spans: list[tuple[float, float, str]] = []
+        for (t0, _c0, busy0), (t1, _c1, busy1) in zip(self.cpu, self.cpu[1:]):
+            if t1 <= t0:
+                continue
+            i = bisect.bisect_left(times, t1 - 3000)
+            kind = ("following" if i < len(times) and times[i] <= t1 else "rest" if not busy0 and not busy1 else "job")
+            spans.append((t0, t1, kind))
+        wall: Counter[str] = Counter()
+        for t0, t1, kind in spans:
+            wall[kind] += t1 - t0
+        starts = [s[0] for s in spans]
+        whole_s = (spans[-1][1] - spans[0][0]) / 1000 if spans else 0.0
+        out: dict[str, Any] = {}
+        for label, calls in self.tk_steps.items():
+            used: Counter[str] = Counter()
+            for at, ms in calls:
+                i = bisect.bisect_right(starts, at) - 1
+                if 0 <= i < len(spans) and at <= spans[i][1]:
+                    used[spans[i][2]] += ms
+            out[label] = {"ms": spread([ms for _at, ms in calls]),
+                          "per_s": round(len(calls) / whole_s, 1) if whole_s else None,
+                          "total_s": round(sum(ms for _at, ms in calls) / 1000, 2),
+                          **{f"{kind}_pct": round(100 * used[kind] / wall[kind], 1) if wall[kind] else None
+                             for kind in ("rest", "job", "following")}}
+        return out
+
+    def _pipeline(self, notes: list[dict[str, Any]]) -> dict[str, Any]:
+        """See-through mode's own steps for a page: `seethrough.make_patches` per call (ms, the Tk thread), from each set
+        handed over (``present``) to its first showing (``show``, the window's thread), and when each set was handed
+        over (ms since the epoch: the e2e puts them against the window's displays, `see_lags`)."""
+        handed: dict[Any, float] = {}
+        lags, times = [], []
+        for n in notes:
+            if n["ev"] == "present":
+                handed[n["set"]] = n["t"]
+                times.append(round(n["t"] * 1000 + self.delta_ms))
+            elif n["ev"] == "show" and n.get("set") in handed:
+                lags.append((n["t"] - handed.pop(n["set"])) * 1000)
+        return {"make_patches_ms": spread(self.patch_ms), "present_to_show_ms": spread(lags), "presents_t": times}

@@ -69,7 +69,9 @@ ground|page|script`` (a click's place, x= y= in the canvas's pixels), ``ev=key``
 ``ev=bars_done on=``, ``ev=arrows on= why=``, ``ev=spinner on=1 why=jump|resize ms=`` and ``on=0`` (the viewer's area
 black with a small spinner: its cells say spinner), ``ev=preview on=1 ms=`` and ``on=0``, ``ev=draw ... kind=half|preview
 pages=N`` (one page of a spread first, the other black; the target washed out: both said and coded soft), ``ev=size ...
-full= band=``, ``ev=blur``. Two more steps of the script: ``vN`` the bars shown for N ms (2000), as the pointer shows
+full= band=``, ``ev=blur``, and the page's own frame times: ``ev=anim kind=bars|spinner frames= ms= median= p90= max=``
+as a fade or a spinner ends (the gaps between its animation frames), ``ev=painted why= ms=`` after a turn's draw (until
+the frame after the one that showed it; without a profile too). Two more steps of the script: ``vN`` the bars shown for N ms (2000), as the pointer shows
 them, not waited on; ``a`` the side arrows shown as a pointer move shows them. Its n and p hide the bars as a key does.
 
 What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch; a draw with the page's
@@ -540,15 +542,32 @@ function setArrows(on, why) {
 function animate() {  // the bars' fade and the spinner, frame by frame while either goes on
   if (animating) return;
   animating = true;
-  const frame = () => {
+  const times = { last: null, gaps: [], loading: false };  // the page's own frame times meanwhile (ev=anim)
+  const frame = (stamp) => {
+    if (times.last !== null) times.gaps.push(stamp - times.last);
+    times.last = stamp;
+    times.loading = times.loading || !!loading;
     const fade = P.bar_fade_ms > 0 ? Math.min(1, (now() - bars.at) / P.bar_fade_ms) : 1;
     const target = bars.on ? 1 : 0, before = bars.alpha;
     bars.alpha = bars.from + (target - bars.from) * fade;
     if (before !== target && bars.alpha === target) say("bars_done", "on=" + target);
     compose();
-    if (bars.alpha !== target || loading) requestAnimationFrame(frame); else animating = false;
+    if (bars.alpha !== target || loading) requestAnimationFrame(frame);
+    else { animating = false; frameTimes(times.loading ? "spinner" : "bars", times.gaps); }
   };
   requestAnimationFrame(frame);
+}
+function frameTimes(kind, gaps) {  // the page's own frame times through an animation: how many, how long, the longest
+  if (!gaps.length) return;
+  const s = [...gaps].sort((a, b) => a - b), sum = s.reduce((a, b) => a + b, 0);
+  say("anim", "kind=" + kind + " frames=" + s.length + " ms=" + sum.toFixed(1) + " median=" +
+      s[Math.floor((s.length - 1) / 2)].toFixed(1) + " p90=" + s[Math.floor(0.9 * (s.length - 1))].toFixed(1) +
+      " max=" + s[s.length - 1].toFixed(1));
+}
+function painted(why) {  // a turn's draw: the page's own time until the frame after the one that showed it (ev=painted)
+  if (!["next", "previous", "jump", "slider"].includes(why)) return;
+  const t0 = now();
+  requestAnimationFrame(() => requestAnimationFrame(() => say("painted", "why=" + why + " ms=" + (now() - t0).toFixed(1))));
 }
 
 function chevron(x, y, s, left, colour, width) {
@@ -658,6 +677,7 @@ async function drawProfile(soft, why, kind, half) {  // the screen on show into 
                Math.max(...rs.map(r => r.x + r.w)), Math.max(...rs.map(r => r.y + r.h))];
   say("draw", "state=" + shown + (kind ? " kind=" + kind : "") + " why=" + why + " wait=" + Math.round(now() - began) +
       " box=" + box.join(",") + " band=" + bandPx() + " pages=" + pics.length);
+  painted(why);
   return true;
 }
 function load_then(why, ms, then) {  // the black with its spinner for ms, then *then* (none if another draw came)
@@ -800,6 +820,7 @@ async function drawScreen(soft, why) {
                Math.max(...rs.map(r => r.x + r.w)), Math.max(...rs.map(r => r.y + r.h))];
   say("draw", "state=" + shown + " why=" + why + " wait=" + Math.round(now() - began) + " box=" + box.join(",") +
       " band=" + Math.round(cfg.band * dpr()));
+  painted(why);
   return true;
 }
 

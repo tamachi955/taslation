@@ -221,7 +221,8 @@ rows' languages.
   at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
   at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
   dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
-  dark theme). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
+  dark theme); f3, never in all, a's slow reading in that narrow window (nine screens of one page where f2 has two;
+  after f2 when both are asked, else the stand-in made narrow first). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
   1 and 2 s a page (k5, k1, k2; `k` is the three, each once the backlog of the one before has nothing left; k3, 3 s
   a page, only by its name), then a
   jump back to the first of them and `--k-read` of them read at `--k-read-ms` a page (8 s); the tool tells, per pace,
@@ -245,7 +246,7 @@ rows' languages.
   -, and after scenario k drops the backlog as another book does and looks that nothing is left, with pictures after
   the flips, after the reads back and on each side of the drop; the report gives the event pump's times
   (`_poll_events`) either way. `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's
-  runners): each rest of a, d, e, r, o, z, x, f and f2, the one at a scenario's end too, is held until the page on
+  runners): each rest of a, d, e, r, o, z, x, f, f2 and f3, the one at a scenario's end too, is held until the page on
   show is finished, or the window rests with it unfinished, or CAP_S have passed (the stand-in waits at an `hN` step
   of its script until the tool's word), and x's soft frames stay on show until the window has asked on them (15 s and
   CAP_S at most); the report keeps the holds and their reasons (`waits`). Without it the script and the stand-in's
@@ -263,7 +264,7 @@ rows' languages.
   `--soft-first off` makes the stand-in draw every turn sharp at once and nothing after it, so that no wait of the
   viewer's is in what is timed: the published timing figures (the README's and the installation guide's table of a
   screen's time and the first bubble) are measured with it, `--scenario a,f --wait-done 120` on a quiet computer
-  (screens of two pages from a and f, of one page from f2), from the report's `timing`: per screen of one page and of
+  (screens of two pages from a and f, of one page from f2; `a,f,f3` adds f3's nine), from the report's `timing`: per screen of one page and of
   two, over the turns rested on to a page the cache did not hold, the first lettered bubble and the finished page from
   the turn and from the sharp picture's draw (the same in this mode), the first request, and the way from the turn to
   the finishing job's start (the window's first capture, its first capture of the sharp picture, from there to the
@@ -322,7 +323,9 @@ rows' languages.
   each event with its time: `turn` with its cause (`by=key|arrow|ground|page|script`) and a click's place, `key`,
   `bars`/`bars_done`, `arrows`, `spinner` (`why=jump|resize`), `preview`, `draw` (`kind=half|preview`, both coded
   soft for the e2e tool's decoder; the black with the spinner decodes as `spinner`, or black in the full screen),
-  `size` (`full=`, `band=`), `pointer` and `click`. Its script has `vN` (the bars for N ms) and `a` (the side arrows),
+  `size` (`full=`, `band=`), `pointer` and `click`, and its own frame times: `anim` as a bar fade or a spinner ends
+  (its frames, and the median, p90 and longest gap between them) and `painted` after every turn's draw, also
+  without a profile (until the frame after the one that showed it). Its script has `vN` (the bars for N ms) and `a` (the side arrows),
   and its n and p hide the bars as a key does. Scenario q (by its name only) is written for a profile: turns, two
   jumps, the bars at rest and just after a turn, the arrows.
   `tools/standin_selfcheck.py --out SCRATCH` drives the stand-in alone, no TASlation, in a headless browser (no
@@ -333,7 +336,8 @@ rows' languages.
   washed-out picture), the full screen and back. It prints the page's log and PASS or FAIL for each check, with what
   the e2e tool's decoder reads in each picture (into SCRATCH/shots: the sample pages, scratch only).
   `--see-through` runs the window in see-through mode (`Settings.see_through`, a prototype off by default: the
-  lettering laid over the viewer's own window by a click-through window of TASlation's, `capture/seethrough.py`), and
+  lettering laid over the viewer's own window by a click-through window of TASlation's, `capture/seethrough.py`;
+  `--see-indicators off` with the indicators' pane switched off, `Settings.see_through_indicators`), and
   `tools/standin_seethrough.py` watches it from the tool's own thread, nothing sent to any window: the time from the
   stand-in's change of screen (its spinner, its washed-out picture or its draw) to the see-through window showing none
   of the old page's patches, from its own notes; which window `WindowFromPoint` gives on the patches shown, on the
@@ -354,7 +358,14 @@ rows' languages.
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
   read and asked for again); the stand-in's frames a second
   while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
-  for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
+  for the frames as often as see-through mode does); the process's CPU at rest and while following; what the run
+  cost (`cost`: the working set, the CPU of the stand-in's processes together - its sandboxed ones too, read with
+  `NtQuerySystemInformation` -, the GPU memory of this process and of the stand-in's from Windows' own counter, and
+  PyTorch's peak); the stand-in's own frame times (`viewer_frames`: its `anim` and `painted` lines, and each change's
+  draw to the first frame captured after it); the Tk thread's steps (`tk_steps`: `seethrough.make_patches`,
+  see-through mode's tick, the patches handed over, the panes' rows, sizes and pictures, the window's redisplay and
+  its canvas' picture - each call's ms, and the per cent of a processor each took at rest, while a job ran and while
+  following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
   them). The side panes (`taslation/panes.py`, at the capture area's two outer edges) are watched once a second

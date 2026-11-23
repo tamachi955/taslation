@@ -72,9 +72,11 @@ The scenarios, in this order (each released once the window has come to rest aft
      lines, by its annotation's counts) drawn soft for --cancel-soft-ms at half resolution, so that the window reads
      the soft frame and asks on it before the sharp one comes; then back (needs the dataset)
   f  the dark theme, then a narrow window (single pages)
+  f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page, the
+     stand-in made narrow once the window has had its viewer's window as large as it makes it
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
-the OCR on four logical processors, the model on them too): each rest of a, d, e, r, o, z, x, f and f2, the one at
+the OCR on four logical processors, the model on them too): each rest of a, d, e, r, o, z, x, f, f2 and f3, the one at
 its end too (the driver changes the window for the next scenario as soon as the stand-in waits for it), is held until
 the page on show is finished - the window shows it translated -, or the window has been at rest without it, or CAP_S
 has gone by (``hN`` in the stand-in's script, let go through its control file); x's screens of little text are kept
@@ -106,7 +108,8 @@ the stand-in is what it always was.
 own window by a click-through window of TASlation's), watched by `standin_seethrough.SeeWatch` (``run.see_through``:
 the time from the stand-in's change of screen to the old page's patches gone, the hits, the foreground, the frames a
 second, the CPU; with *--see-truth* copies of the stand-in's place on the screen in memory, checked for old patches
-over a new page, two of them into shots/). With a profile and without it the frames a second and the CPU are noted all
+over a new page, two of them into shots/; *--see-indicators off* with the indicators' pane switched off,
+``Settings.see_through_indicators``). With a profile and without it the frames a second and the CPU are noted all
 the same, for the comparison (*--capture-ms 16* asks for the frames as often as see-through mode does). *--standin-size
 WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
 reader's area the whole frame). In see-through mode TASlation's own window is never on the screen: the watch reads its
@@ -235,6 +238,9 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "x": ("cancelled in flight", []),  # (its steps: `cancel_steps`, on the screens of little text added for it)
     "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
+    # (by its name only: a's slow reading on single pages - the stand-in made narrow first, as for f2, after the
+    # window has had its viewer's window as large as it makes it; the timing figures' screens of one page)
+    "f3": ("narrow window, slow reading", ["n", "w6000-8000"] * 9),
     # (scenario k: its steps from `k_steps`, on pages no scenario before it turned to)
     "k5": ("flipped past at 0.5 s a page, read back", []),
     "k1": ("flipped past at 1 s a page, read back", []),
@@ -250,12 +256,14 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
 ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
-NAMED_ONLY = ("q",)  # scenarios never in "all", only by their names
+NAMED_ONLY = ("q", "f3")  # scenarios never in "all", only by their names
+NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
 # draws, kept in the report with its time (`stand_in_profile_events`; words and numbers only)
-PROFILE_EVENTS = ("bars", "bars_done", "arrows", "spinner", "preview", "turn", "jump", "size", "draw", "key")
+PROFILE_EVENTS = ("bars", "bars_done", "arrows", "spinner", "preview", "turn", "jump", "size", "draw", "key", "anim",
+                  "painted")
 PROFILE_EVENT_WORDS = ("on", "why", "by", "dir", "side", "state", "kind", "page", "pages", "ms", "full", "band", "box",
-                       "from", "to")
+                       "from", "to", "frames", "median", "p90", "max")
 K_READ_MS = 8000  # ... the pages read back at this pace
 K_KEY_GIVE_UP_S = 3.0  # --k-keys: a key the window has not handed on so long after it was pressed releases its turn
 K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
@@ -283,7 +291,7 @@ CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the wi
 # their page is finished (`held`, `hold_over`), and scenario x's soft frames kept until the window asked on them,
 # KEEP_SOFT_S at most. Not c (turns while the model loads), b (quick turns), t and t2 (a turn each, released by the
 # window's page key).
-HOLD_SCENARIOS = ("a", "d", "e", "r", "o", "z", "x", "f", "f2")
+HOLD_SCENARIOS = ("a", "d", "e", "r", "o", "z", "x", "f", "f2", "f3")
 KEEP_SOFT_S = 15.0
 
 
@@ -427,7 +435,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
             steps = held(steps, holds + 1)
             holds += sum(1 for s in steps if s.startswith("h"))
         segment = Segment(name, go, steps)
-        if name == "f2":
+        if name in NARROW:
             spread = False
         for step in steps:
             if step in ("n", "p") or (step.startswith("j") and step[1:].isdigit()):
@@ -450,7 +458,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
 
 
 def pages_needed(names: list[str], k_turns: int = 20) -> int:
-    turns = sum(SCENARIOS[n][1].count("n") * (1 if n == "f2" else 2) for n in names)
+    turns = sum(SCENARIOS[n][1].count("n") * (1 if n in NARROW else 2) for n in names)
     turns += sum(2 * (k_turns + 2) for n in names if n in K_PACES)
     turns += max((int(s[1:]) for n in names for s in SCENARIOS[n][1] if s[:1] == "j" and s[1:].isdigit()), default=0)
     return turns + 8
@@ -3352,7 +3360,7 @@ class Director:
             mode = self.entered.get(seg.name)
             if seg.name == "c":
                 go = ready_go and getattr(app, "selected", None) is not None
-            elif seg.name == "f2":
+            elif seg.name in NARROW:
                 go = ready_go and rested and self.resized()
             elif seg.name in K_PACES:  # (each pace on its own: the backlog of the one before done)
                 first = seg is next(x for x in self.segments if x.name in K_PACES)
@@ -3467,8 +3475,8 @@ class Director:
             self.theme["before"] = theme.mode()
             self.app._settings_saved({"theme": "dark"})
             self.theme["after"] = theme.mode()
-        elif seg.name == "f2":
-            self.resize_from = len(self.events)
+        elif seg.name in NARROW and seg is next(x for x in self.segments if x.name in NARROW):
+            self.resize_from = len(self.events)  # (f3 after f2: the stand-in is narrow already, resized since)
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
                 self.notes.act(seg.name, "narrow window")
@@ -5321,6 +5329,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
                         ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
                         ollama_num_gpu=args.ollama_num_gpu, see_through=bool(getattr(args, "see_through", False)),
+                        see_through_indicators=getattr(args, "see_indicators", "on") == "on",
                         **({"side_indicator": args.side_indicator} if args.side_indicator else {}))
     settings.validate()
     if getattr(settings, "side_indicator", "off") != "off":
@@ -5335,7 +5344,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         import standin_seethrough
 
         activations = standin_seethrough.Activations()
+    made_t = now_ms()  # (the window's start: what follows is timed from here, `start_clock`)
     app = app_mod.App(settings, window_query=browser.token, book=BOOK_UNNAMED if args.book_asked else BOOK, auto=True)
+    built_t = now_ms()
     if args.capture_ms:  # (the window's frames asked for this often, as see-through mode asks for them: the comparison)
         from taslation.capture import wgc
 
@@ -5348,7 +5359,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                           truth=bool(args.see_through and args.see_truth),
                                           shots=out / "shots" if args.see_truth else None, front_before=front_before,
                                           activations=activations,
-                                          pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None)
+                                          pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
+                                          viewer_pids=lambda: {pid, *browser.tree})
         see.install()
         see.start()
     queue_put = app._events.put
@@ -5402,7 +5414,50 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         lat = [e["recv"] - e["t"] for e in director.events]
         run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
         run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
+        pipeline = run_["see_through"].get("pipeline") or {}
+        pipeline["present_to_display_ms"] = see_lags(notes, pipeline.get("presents_t", []))
+        pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
+    run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
     return run_
+
+
+def see_lags(notes: Notes, presents: list[float]) -> dict[str, Any]:
+    """See-through mode: from the set of patches handed to the see-through window last before each lettered display of
+    the window (`ui.seethrough.present`, which `_redisplay` calls before it sets the page's picture) to that display,
+    within 300 ms: what making the patches holds the window's own page back."""
+    import bisect
+
+    presents = sorted(presents)
+    lags = []
+    for d in notes.displays:
+        if not d.get("lettered"):
+            continue
+        i = bisect.bisect_right(presents, d["t"]) - 1
+        if i >= 0 and d["t"] - presents[i] < 300:
+            lags.append(d["t"] - presents[i])
+    return dist(lags)
+
+
+def start_clock(notes: Notes, see: Any, made_t: float, built_t: float, began: float) -> dict[str, Any]:
+    """The window's start, ms from the call that makes it (`App`): made, its main loop begun, the translator ready,
+    the first page lettered in the window, and with the see-through watch the first side pane and the first patches
+    shown over the viewer (the see-through window's own notes)."""
+    def since(t: float | None) -> int | None:
+        return None if t is None else round(t - made_t)
+
+    ready = next((e["t"] for e in notes.app_events if e["kind"] == "ready"), None)
+    lettered = next((d["t"] for d in notes.displays if d.get("lettered")), None)
+    out: dict[str, Any] = {"built_ms": since(built_t), "loop_ms": since(began), "ready_ms": since(ready),
+                           "first_lettered_ms": since(lettered), "began_epoch_ms": round(began)}
+    over = see.over() if see is not None else None
+    if over is not None:
+        firsts: dict[str, float] = {}
+        for n in list(over.notes):
+            if n["ev"] in ("pane", "show") and n["ev"] not in firsts:
+                firsts[n["ev"]] = n["t"] * 1000 + see.delta_ms
+        out["first_pane_ms"] = since(firsts.get("pane"))
+        out["first_patches_ms"] = since(firsts.get("show"))
+    return out
 
 
 def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.StandinBrowser, patched: dict[str, Any],
@@ -6348,6 +6403,9 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--see-through", action="store_true",
                     help="the window's see-through mode (Settings.see_through): the lettering over the stand-in's own "
                          "window; the see-through window is watched (`standin_seethrough`, run.see_through)")
+    ap.add_argument("--see-indicators", default="on", choices=("on", "off"),
+                    help="with --see-through: the setting see_through_indicators (off: no indicators pane at the "
+                         "right)")
     ap.add_argument("--see-truth", action="store_true",
                     help="with --see-through: copies of the stand-in's place on the screen, every "
                          f"{1000 * 0.033:.0f} ms in memory, checked for old patches over a new page; two of them into "
