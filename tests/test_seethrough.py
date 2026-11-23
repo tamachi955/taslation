@@ -306,3 +306,63 @@ def test_the_window_is_click_through_never_activated_and_shows_nothing_until_it_
     finally:
         over.close()
     assert over.hwnd == 0
+
+
+# ------------------------------------------------------------------ nothing goes to the viewer, nothing takes the front
+def test_in_see_through_mode_no_key_and_no_click_is_passed_on_to_the_viewer(monkeypatch):
+    from taslation.ui import reading, translator
+
+    sent = []
+    for module, names in ((reading, ("post_key", "press_briefly")), (translator, ("post_click",))):
+        for name in names:
+            monkeypatch.setattr(module, name, lambda *a, _n=name, **k: sent.append(_n))
+    app = SimpleNamespace(_see_through=object())  # (nothing else: a path past the first line would fail here)
+    reading.ReadingMixin.forward_key(app, "Left")
+    translator.TranslatorMixin._forward_click(app, SimpleNamespace(x=10, y=10))
+    assert sent == []
+
+
+def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and_drops_it(monkeypatch):
+    from taslation.ui import seethrough as ui
+
+    made = []
+
+    class Widget:
+        def __init__(self, master, **options):
+            self.options = options
+            made.append(self)
+
+        def winfo_id(self):
+            return 4242
+
+        def destroy(self):
+            made.append(("gone", type(self).__name__))
+
+    class Frame(Widget):
+        pass
+
+    class Toplevel(Widget):
+        pass
+
+    monkeypatch.setattr(ui.tk, "Frame", Frame)
+    monkeypatch.setattr(ui.tk, "Toplevel", Toplevel)
+    monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
+    later = []
+    app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)))
+    ui.quiet_start(app, Settings())
+    assert made == [] and not ui.quiet(app)
+    ui.quiet_started(app)
+    assert later == []
+    ui.quiet_start(app, Settings(see_through=True))
+    box, decoy = made
+    # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
+    assert box.options == {"container": True} and decoy.options == {"use": "4242"}
+    assert ui.quiet(app)  # (not maximised at the start then)
+    ui.quiet_started(app)
+    (ms, drop), = later
+    assert ms == ui.QUIET_MS
+    drop()
+    assert made[2:] == [("gone", "Toplevel"), ("gone", "Frame")] and not ui.quiet(app)
+    ui.quiet_start(app, Settings(see_through=True))
+    ui.quiet_end(app)  # (the legal notice: the reader's to answer)
+    assert not ui.quiet(app)

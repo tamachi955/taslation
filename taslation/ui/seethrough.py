@@ -23,6 +23,7 @@ Nothing here presses a key, posts a message or moves the foreground."""
 from __future__ import annotations
 
 import time
+import tkinter as tk
 from typing import Any
 
 import numpy as np
@@ -46,9 +47,60 @@ GONE_LOOK_MS = 150  # once the bars have gone, the viewer is looked at so soon (
 CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`read_under_bars`)
 
 
+QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
+
+
 def on(app: Any) -> bool:
     """Whether see-through mode runs in the window *app*."""
     return getattr(app, "_see_through", None) is not None
+
+
+def quiet_start(app: Any, settings: Any) -> None:
+    """At the very start of the window, before Tk first shows it, in see-through mode (Windows): Tk activates the
+    first top-level window it makes (SetActiveWindow when it is first shown - Tk 8.6.15, whatever its state: hidden
+    or minimised alike), which takes the foreground from the viewer; so the first one it makes is a decoy put inside
+    a frame of the window's own (``-use``), a child window, which nothing activates. The window itself is then shown
+    as Tk shows every later one, not activated (SW_SHOWNOACTIVATE): the viewer stays in front and takes the reader's
+    keys, F9 among them, with no click first. Nothing moves the foreground. The decoy goes once the window is shown
+    (`quiet_started`)."""
+    app._quiet_decoy = None
+    app._quiet_ended = False
+    if not (bool(getattr(settings, "see_through", False)) and window.IS_WINDOWS):
+        return
+    try:
+        box = tk.Frame(app, container=True)  # (never shown)
+        decoy = tk.Toplevel(app, use=str(box.winfo_id()))
+        app._quiet_decoy = (decoy, box)
+    except tk.TclError:  # (no decoy: the window takes the foreground at its start as ever)
+        pass
+
+
+def quiet(app: Any) -> bool:
+    """Whether the window starts quietly (`quiet_start`): not maximised then, for Windows activates a window it
+    maximises."""
+    return getattr(app, "_quiet_decoy", None) is not None and not getattr(app, "_quiet_ended", False)
+
+
+def quiet_started(app: Any) -> None:
+    """The window's start made (Tk shows it at its first idle, the decoy first): the decoy goes QUIET_MS later."""
+    if getattr(app, "_quiet_decoy", None) is None:
+        return
+
+    def drop() -> None:
+        decoy, app._quiet_decoy = app._quiet_decoy, None
+        for widget in decoy or ():
+            try:
+                widget.destroy()
+            except tk.TclError:
+                pass
+
+    app.after(QUIET_MS, drop)
+
+
+def quiet_end(app: Any) -> None:
+    """No quiet start after all (the legal notice, which is the reader's to answer: it and the window after it take
+    the foreground as ever)."""
+    app._quiet_ended = True
 
 
 def start(app: Any) -> bool:

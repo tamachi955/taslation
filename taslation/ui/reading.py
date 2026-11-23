@@ -55,6 +55,7 @@ from .constants import (
 )
 from .layout import place_window
 from .order import turn_asked
+from . import seethrough
 from .viewers import looks_like_browser
 from .bubble_text import BubbleTextMixin
 from .hover import HoverChoiceMixin
@@ -477,7 +478,11 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         here. In the Translator role the status line names the key as the reader knows it (`key_label`), in the window
         and on the full screen; the Reader role sees the page turn and says nothing of it. The key goes on as the
         viewer's own key of the same meaning (`_key_for_viewer`): the window's next and previous keys as the keys saved
-        for the viewer in Page keys..., one press one key."""
+        for the viewer in Page keys..., one press one key. In see-through mode nothing is passed on (`seethrough`):
+        the reader turns the pages in the viewer, which takes its own keys; no key is posted or pressed, and the
+        foreground is never handed over."""
+        if seethrough.on(self):
+            return
         hwnd = self._key_viewer()
         if hwnd is None:
             return

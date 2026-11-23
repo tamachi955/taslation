@@ -40,7 +40,7 @@ from .. import review as checks
 from ..review import rendering_changes, sheet_item_for
 from ..translate import TranslationError
 from ..translate.base import HINT_FOLLOWS, hint_support
-from . import area, shortcuts, theme
+from . import area, seethrough, shortcuts, theme
 from .constants import FIRST_PAGE, FORWARDED_KEYS, THIS_PAGE
 from .dialogs import caches as boxes
 from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, review_rows
@@ -1790,7 +1790,10 @@ class TranslatorMixin:
         is not the translated one (`_editing`: there a click selects and edits the text areas, and the page keys turn
         the pages). On the full screen in the Translator role no click goes on (`hover.clicks_kept`). It is followed as
         a page-turn key is (`_follow_change`): from the frame Auto took last, else from the frame on show - also before
-        Auto has taken any page. In the Translator role the status line says so, as it does for a key."""
+        Auto has taken any page. In the Translator role the status line says so, as it does for a key. In see-through
+        mode no click goes on (`seethrough`): the reader clicks in the viewer itself."""
+        if seethrough.on(self):
+            return
         if self.selected is None or (self.last_result is None and self._live is None):
             return
         if clicks_kept(self):

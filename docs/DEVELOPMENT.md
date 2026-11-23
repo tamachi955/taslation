@@ -337,7 +337,10 @@ rows' languages.
   `tools/standin_seethrough.py` watches it from the tool's own thread, nothing sent to any window: the time from the
   stand-in's change of screen (its spinner, its washed-out picture or its draw) to the see-through window showing none
   of the old page's patches, from its own notes; which window `WindowFromPoint` gives on the patches shown, on the
-  page and on the ground (always the stand-in's); who was in front, and each change; the stand-in's frames a second
+  page and on the ground (always the stand-in's); who was in front, and each change, with the activations of
+  TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
+  window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
+  window was on the screen once a second (shown, minimised, hidden); the stand-in's frames a second
   while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
   for the frames as often as see-through mode does); the process's CPU at rest and while following; and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new

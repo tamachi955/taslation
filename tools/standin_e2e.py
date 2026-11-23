@@ -5269,6 +5269,12 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     tap = LogTap(notes, url if mode.startswith("real") else None)
     logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer, as the window has it
+    front_before = int(ctypes.windll.user32.GetForegroundWindow() or 0)  # (read only: who is in front before the start)
+    activations = None
+    if args.see_through:  # (TASlation's own windows' activations counted from before the window is made; none refused)
+        import standin_seethrough
+
+        activations = standin_seethrough.Activations()
     app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
     if args.capture_ms:  # (the window's frames asked for this often, as see-through mode asks for them: the comparison)
         from taslation.capture import wgc
@@ -5280,7 +5286,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
 
         see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
                                           truth=bool(args.see_through and args.see_truth),
-                                          shots=out / "shots" if args.see_truth else None)
+                                          shots=out / "shots" if args.see_truth else None, front_before=front_before,
+                                          activations=activations)
         see.install()
         see.start()
     queue_put = app._events.put

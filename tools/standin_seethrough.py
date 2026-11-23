@@ -130,6 +130,67 @@ def visible_share(copy: np.ndarray, patch: Any, dx: int = 0, dy: int = 0, step: 
     return float(same[alpha].mean())
 
 
+WH_CBT, HCBT_ACTIVATE = 5, 5
+HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+_user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD]
+_user32.SetWindowsHookExW.restype = wintypes.HHOOK
+_user32.UnhookWindowsHookEx.argtypes = [wintypes.HHOOK]
+_user32.CallNextHookEx.argtypes = [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+_user32.CallNextHookEx.restype = ctypes.c_ssize_t
+_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+_user32.IsIconic.argtypes = [wintypes.HWND]
+_user32.IsWindowVisible.argtypes = [wintypes.HWND]
+_user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+_user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+_user32.GetWindow.restype = wintypes.HWND
+_user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+_kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+
+
+ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+_user32.EnumWindows.argtypes = [ENUMPROC, wintypes.LPARAM]
+
+
+class Activations:
+    """The activations of the calling thread's own windows (TASlation's window and its dialogs: the Tk thread), told
+    by a CBT hook of that thread alone that refuses none of them; taken before the window is made, so that its first
+    showing is counted too. `count`: how many; `release` takes the hook away."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.wheres: list[dict[str, Any]] = []  # each: the window's code that asked (file:line), the window's class,
+        # whether it is TASlation's main window (its title is never kept), its owner, rectangle, minimised, shown
+
+        def proc(code, wparam, lparam):  # type: ignore[no-untyped-def]
+            if code == HCBT_ACTIVATE:
+                self.count += 1
+                import traceback
+
+                name = ctypes.create_unicode_buffer(64)
+                _user32.GetClassNameW(wparam, name, 64)
+                title = ctypes.create_unicode_buffer(16)
+                _user32.GetWindowTextW(wparam, title, 16)
+                r = wintypes.RECT()
+                _user32.GetWindowRect(wparam, ctypes.byref(r))
+                self.wheres.append({"stack": [f"{Path(f.filename).name}:{f.lineno} {f.name}"
+                                              for f in traceback.extract_stack()[-12:-1]],
+                                    "class": name.value, "main": title.value.startswith("TASlation"),
+                                    "owner": int(_user32.GetWindow(wparam, 4) or 0),
+                                    "rect": [r.left, r.top, r.right, r.bottom],
+                                    "iconic": bool(_user32.IsIconic(wparam)),
+                                    "visible": bool(_user32.IsWindowVisible(wparam))})
+            return _user32.CallNextHookEx(None, code, wparam, lparam)
+
+        self._proc = HOOKPROC(proc)
+        self._hook = _user32.SetWindowsHookExW(WH_CBT, self._proc, None, _kernel32.GetCurrentThreadId())
+
+    def release(self) -> None:
+        if self._hook:
+            _user32.UnhookWindowsHookEx(self._hook)
+            self._hook = None
+
+
 def spread(values: list[float]) -> dict[str, Any]:
     vals = sorted(v for v in values if v is not None)
     if not vals:
@@ -143,9 +204,16 @@ class SeeWatch:
     """The notes of a run with the see-through window (see the module's notes). *decode*: a frame (PIL) to the
     stand-in's screen it shows, (page, spread) or None; *top*: rows above the page's content in a client capture."""
 
-    def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None) -> None:
+    def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
+                 front_before: int = 0, activations: Activations | None = None) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
         self.truth, self.shots = truth, shots
+        self.front_before = int(front_before)  # (the window in front just before TASlation's window was made)
+        self.activations = activations
+        self.own_states: Counter = Counter()  # (`_own_states`)
+        self.own_pid = os.getpid()
+        self._over = None
+        self.front_before_who = self._who(self.front_before)
         self.delta_ms = time.time() * 1000 - time.monotonic() * 1000
         self.own_pid = os.getpid()
         self.lock = threading.Lock()
@@ -194,6 +262,8 @@ class SeeWatch:
         from taslation.capture import wgc
 
         wgc.remove_listener(self._frame)
+        if self.activations is not None:
+            self.activations.release()
 
     def over(self) -> Any:
         over = getattr(self.app, "_see_through", None) if self.app is not None else None
@@ -252,6 +322,26 @@ class SeeWatch:
         for where, x, y in points:
             hwnd = int(_user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) or 0)
             self.hits[f"{where}:{self._who(hwnd)}"] += 1
+        self._own_states()
+
+    def _own_states(self) -> None:
+        """How TASlation's own main window is on the screen (shown, minimised, hidden), counted once a second."""
+        found: list[str] = []
+
+        def each(hwnd, _l):  # type: ignore[no-untyped-def]
+            if window_pid(hwnd) != self.own_pid:
+                return True
+            name = ctypes.create_unicode_buffer(32)
+            _user32.GetClassNameW(hwnd, name, 32)
+            title = ctypes.create_unicode_buffer(16)
+            _user32.GetWindowTextW(hwnd, title, 16)
+            if name.value == "TkTopLevel" and title.value.startswith("TASlation"):
+                found.append("minimised" if _user32.IsIconic(hwnd) else
+                             "shown" if _user32.IsWindowVisible(hwnd) else "hidden")
+            return True
+
+        _user32.EnumWindows(ENUMPROC(each), 0)
+        self.own_states[",".join(found) or "none"] += 1
 
     def _viewer_frame(self) -> np.ndarray | None:
         """The viewer's newest captured frame, cut to its client area as the see-through window lies on it (RGB)."""
@@ -419,6 +509,17 @@ class SeeWatch:
                 "shares": {"shown_worst": shares(worst), "hidden_least": shares(least)},
                 "hits": dict(self.hits), "front_changes": len(self.fronts) - 1 if self.fronts else 0,
                 "fronts": [[round(t - (changes[0]["t"] if changes else t)), w] for t, w in self.fronts],
+                # the window in front before TASlation's was made, how often one of TASlation's came in front after,
+                # how often none was, and the activations of TASlation's own windows from before it was made
+                # (`Activations`: none refused)
+                "foreground": {"before": self.front_before_who,
+                               "first_seen": self.fronts[0][1] if self.fronts else None,
+                               "own_came_in_front": sum(1 for _t, w in self.fronts if w in ("own", "overlay", "pane")),
+                               "none_in_front": sum(1 for _t, w in self.fronts if w == "none"),
+                               "not_standin": sorted({w for _t, w in self.fronts if w != "standin"}),
+                               "own_activations": None if self.activations is None else self.activations.count,
+                               "own_activations_from": None if self.activations is None else self.activations.wheres,
+                               "own_window": dict(self.own_states)},
                 "frames_per_s": fps, "cpu": cpu,
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
