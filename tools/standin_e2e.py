@@ -6,7 +6,10 @@ part of a release.
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
-                                [--wait-done CAP_S] [--soft-first on|off]
+                                [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
+                                [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
+                                [--see-through] [--see-truth] [--standin-size WxH] [--standin-full-screen]
+                                [--capture-ms MS]
 
 What runs, all on this computer:
 
@@ -88,6 +91,25 @@ Scenario x (a request cancelled on a soft frame) is left out of all and refused 
 timed from the sharp draw, which is the turn; d's flashes and spinners, e's turns back to cached pages, r, o and z
 change only in that their turns have no soft time; --k-soft changes nothing. The default, on, keeps the scenarios and
 the runners' checks exactly as they are.
+
+*--standin-profile dark|light* has the stand-in behave as one of two kinds of web viewer (standin.html says how: the
+page fitted to the height of the viewer's area, the cover alone, bars over the page, side arrows, a slider in the
+bottom bar, a jump drawn black with a spinner or washed out first), each of its parts given another value by
+*--standin-option NAME=VALUE*; it draws every turn sharp at once unless *--soft-first on* is given. The screens
+foreseen follow its cover alone. Scenario q (by its name only) is written for it: turns, two jumps by the script's
+``j``, the bars shown at rest, just after a turn and as a turn comes (``v``), the side arrows shown (``a``), and a jump
+with the bars held over the page for 15 s. The report keeps what the stand-in said of its bars, arrows, spinner,
+washed-out pictures, turns, jumps, sizes and draws, with their times (``run.stand_in_profile_events``). Without it
+the stand-in is what it always was.
+
+*--see-through* runs the window in see-through mode (``Settings.see_through``: the lettering laid over the stand-in's
+own window by a click-through window of TASlation's), watched by `standin_seethrough.SeeWatch` (``run.see_through``:
+the time from the stand-in's change of screen to the old page's patches gone, the hits, the foreground, the frames a
+second, the CPU; with *--see-truth* copies of the stand-in's place on the screen in memory, checked for old patches
+over a new page, two of them into shots/). With a profile and without it the frames a second and the CPU are noted all
+the same, for the comparison (*--capture-ms 16* asks for the frames as often as see-through mode does). *--standin-size
+WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
+reader's area the whole frame).
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -212,10 +234,22 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "k1": ("flipped past at 1 s a page, read back", []),
     "k2": ("flipped past at 2 s a page, read back", []),
     "k3": ("flipped past at 3 s a page, read back (by its name only)", []),
+    # (by its name only; for a stand-in with a profile, --standin-profile: its bars come over the page at rest, just
+    # after a turn and as a turn comes, its jumps draw its black with the spinner or its washed-out picture, its side
+    # arrows come before a turn; at the end a jump with the bars held over the page for 15 s, then gone)
+    "q": ("profile: jumps, bars and arrows", ["n", "w7000", "v2500", "w6000", "n", "w300", "v1500", "w7000", "j30",
+                                             "w9000", "a", "w500", "n", "w7000", "v2000", "w600", "n", "w7000", "j44",
+                                             "w9000", "p", "w6000", "j56", "v15000", "w17000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
+NAMED_ONLY = ("q",)  # scenarios never in "all", only by their names
+# a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
+# draws, kept in the report with its time (`stand_in_profile_events`; words and numbers only)
+PROFILE_EVENTS = ("bars", "bars_done", "arrows", "spinner", "preview", "turn", "jump", "size", "draw", "key")
+PROFILE_EVENT_WORDS = ("on", "why", "by", "dir", "side", "state", "kind", "page", "pages", "ms", "full", "band", "box",
+                       "from", "to")
 K_READ_MS = 8000  # ... the pages read back at this pace
 K_KEY_GIVE_UP_S = 3.0  # --k-keys: a key the window has not handed on so long after it was pressed releases its turn
 K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
@@ -232,7 +266,8 @@ SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5)
          ("t", 1): (5.2, "t_rest_after_the_key"), ("t2", 1): (1.5, "t2_back_cached"),
          ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
          ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
-         ("f2", 2): (5.0, "f_narrow_rest")}
+         ("f2", 2): (5.0, "f_narrow_rest"), ("q", 1): (8.0, "q_bars_at_rest"), ("q", 2): (1.0, "q_bars_after_a_turn"),
+         ("q", 4): (0.3, "q_arrows"), ("q", 8): (9.0, "q_bars_held")}
 RESIZE_SHOT_S = 3.0  # the picture of the window this long after the stand-in drew its page at a new size
 TEXT_SIZE = 1.5  # scenario z: TASlation's text size, times the run's
 CANCEL_SCREENS = 3  # scenario x: the screens of little text (spreads of pages with 1 to CANCEL_LINES lines of text)
@@ -266,7 +301,7 @@ def wanted(text: str) -> list[str]:
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
     asked |= {other for one, other in PAIRS if one in asked}
-    return [n for n in [*ORDER, *K_PACES] if n in asked]
+    return [n for n in [*ORDER, *K_PACES, *NAMED_ONLY] if n in asked]
 
 
 def soft_first_scenarios(names: list[str], text: str, soft_first: bool) -> tuple[list[str], str | None]:
@@ -345,15 +380,23 @@ def held(steps: list[str], first: int) -> list[str]:
     return out
 
 
+def profile_screen(n: int, count: int, spread: bool) -> int:
+    """The first page of the screen that holds page *n* on a stand-in with a profile: the cover alone, then the
+    spreads 1-2, 3-4, ... (as standin.html's ``screenOf`` with cover 1)."""
+    n = max(0, min(count - 1, n))
+    return n if not spread or n == 0 else n - (n - 1) % 2
+
+
 def build_plan(names: list[str], count: int, cancel_first: int | None = None, soft_ms: int = 700,
-               wait_done: float | None = None, k: dict[str, Any] | None = None
+               wait_done: float | None = None, k: dict[str, Any] | None = None, cover: bool = False
                ) -> tuple[list[Segment], list[sv.Step]]:
     """The segments of the stand-in's script (each held at ``gN`` until the driver releases it, ``mN`` to mark it)
     and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window).
     Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`); scenario k's
     segments (`k_steps`, *k*: turns, read, soft, narrow) to pages after the farthest one turned to before. With
     *wait_done* (--wait-done's cap, seconds) the rests of HOLD_SCENARIOS are held (`held`) and x's soft frames kept
-    until the window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever."""
+    until the window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever. *cover*: the
+    screens of a stand-in with a profile, the cover alone (`profile_screen`)."""
     segments: list[Segment] = []
     index, spread, farthest = 0, True, 0
     text: list[str] = []
@@ -383,9 +426,15 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
         for step in steps:
             if step in ("n", "p") or (step.startswith("j") and step[1:].isdigit()):
                 width = 2 if spread else 1
-                index = int(step[1:]) if step.startswith("j") else index + (width if step == "n" else -width)
-                index = max(0, min(count - 1, index))
-                index = index - index % 2 if spread else index
+                if cover:
+                    shown = 1 if not spread or index == 0 or index + 1 >= count else 2
+                    to = int(step[1:]) if step.startswith("j") else index + shown if step == "n" else index - 1
+                    index = profile_screen(to, count, spread)
+                    width = 1 if not spread or index == 0 or index + 1 >= count else 2
+                else:
+                    index = int(step[1:]) if step.startswith("j") else index + (width if step == "n" else -width)
+                    index = max(0, min(count - 1, index))
+                    index = index - index % 2 if spread else index
                 farthest = max(farthest, index + width - 1)
                 segment.screens.append((index, spread))
         segments.append(segment)
@@ -397,6 +446,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
 def pages_needed(names: list[str], k_turns: int = 20) -> int:
     turns = sum(SCENARIOS[n][1].count("n") * (1 if n == "f2" else 2) for n in names)
     turns += sum(2 * (k_turns + 2) for n in names if n in K_PACES)
+    turns += max((int(s[1:]) for n in names for s in SCENARIOS[n][1] if s[:1] == "j" and s[1:].isdigit()), default=0)
     return turns + 8
 
 
@@ -5031,7 +5081,13 @@ def run(args: argparse.Namespace) -> int:
               "soft": args.k_soft == "on" and soft_first, "narrow": bool(args.k_narrow),
               "backlog": args.k_backlog == "on",
               "read_ms": args.k_read_ms, "keys": bool(args.k_keys), "stay_ms": args.k_stay_ms}
-    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan)
+    profile_options = sv.parse_options(args.standin_option)
+    if profile_options and not args.standin_profile:
+        raise SystemExit("--standin-option is for a stand-in with a profile (--standin-profile)")
+    cover = bool(args.standin_profile) and profile_options.get("cover", "1") != "0"
+    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan, cover)
+    if args.standin_profile:
+        report["standin_profile"] = {"name": args.standin_profile, "options": profile_options}
     if any(n in K_PACES for n in names):
         report["k_plan"] = k_plan
     sv.write_page_list(standin_dir, pictures)
@@ -5079,19 +5135,30 @@ def run(args: argparse.Namespace) -> int:
         ollama_start.DEFAULT_PORT = args.start_ollama  # (this process alone: the port its starter starts Ollama on)
         keep_server_log(ollama_start, out / "ollama_server.log")
     enable_dpi_awareness()
-    standin_rect, app_rect = Monitors().places()
+    monitors = Monitors()
+    standin_rect, app_rect = monitors.places()
+    if args.standin_size:
+        w_, h_ = (int(v) for v in args.standin_size.lower().split("x"))
+        (l_, t_, r_, b_), _p = monitors.areas[0] if monitors.areas else ((0, 0, 1920, 1040), True)
+        standin_rect = (l_, t_, min(w_, r_ - l_), min(h_, b_ - t_))
+    report["standin_rect"] = list(standin_rect)
+    report["see_through"] = bool(args.see_through)
+    report["capture_ms"] = args.capture_ms or None
+    report["standin_full_screen"] = bool(args.standin_full_screen)
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
-    page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first)
+    page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first, slider=args.standin_slider,
+                       profile=args.standin_profile, options=profile_options)
     report["standin_draws_covered"] = bool(args.standin_draws_covered)
     browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale,
-                                draws_covered=args.standin_draws_covered)
+                                draws_covered=args.standin_draws_covered, full_screen=args.standin_full_screen)
     closed: dict[str, Any] = {}
     try:
         hwnd = browser.wait_window()
         ready = browser.wait_event("ready", 30)
         since = len(browser.said())
-        place_own(hwnd, standin_rect, top=True)
+        if not args.standin_full_screen:  # (the full screen is the browser's own place)
+            place_own(hwnd, standin_rect, top=True)
         ready = placed_view(browser, ready, since)
         report["run"] = run_app(args, report, browser, hwnd, ready, segments, out, standin_dir, url, app_rect,
                                 narrow_rect, mode)
@@ -5162,6 +5229,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     dpr = float(ready.get("dpr", 1) or 1)
     top = client_h - round(float(ready["vh"]) * dpr)
     area = (AREA[0], round(AREA[1] * args.scale), AREA[2], AREA[3])  # (the reader's area, set at their scale)
+    if getattr(args, "standin_full_screen", False):
+        area = (0, 0, 0, 0)  # (no title bar, no band: the whole frame is the viewer's)
     report["area"] = list(area)
     sv.write_control(standin_dir, 0, band=round((area[1] - top) / dpr))
     selection = sv.SelectionGuard(hwnd)
@@ -5188,7 +5257,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                         always_on_top=False, ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
                         ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
-                        ollama_num_gpu=args.ollama_num_gpu,
+                        ollama_num_gpu=args.ollama_num_gpu, see_through=bool(getattr(args, "see_through", False)),
                         **({"side_indicator": args.side_indicator} if args.side_indicator else {}))
     settings.validate()
     if getattr(settings, "side_indicator", "off") != "off":
@@ -5197,7 +5266,28 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     tap = LogTap(notes, url if mode.startswith("real") else None)
     logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer, as the window has it
+    front_before = int(ctypes.windll.user32.GetForegroundWindow() or 0)  # (read only: who is in front before the start)
+    activations = None
+    if args.see_through:  # (TASlation's own windows' activations counted from before the window is made; none refused)
+        import standin_seethrough
+
+        activations = standin_seethrough.Activations()
     app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
+    if args.capture_ms:  # (the window's frames asked for this often, as see-through mode asks for them: the comparison)
+        from taslation.capture import wgc
+
+        wgc.set_update_ms(args.capture_ms)
+    see = None
+    if args.see_through or args.standin_profile:  # (the frames a second and the CPU with it off too)
+        import standin_seethrough
+
+        see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
+                                          truth=bool(args.see_through and args.see_truth),
+                                          shots=out / "shots" if args.see_truth else None, front_before=front_before,
+                                          activations=activations,
+                                          pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None)
+        see.install()
+        see.start()
     queue_put = app._events.put
 
     def tagged(item: Any, *a: Any, **k: Any) -> Any:
@@ -5241,8 +5331,15 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
             demo_video.finish_app(app)
         director.close_saver()
         logging.getLogger().removeHandler(tap)
-    return summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode,
+        if see is not None:
+            see.close()
+    run_ = summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode,
                      cache_at_end(settings))
+    if see is not None:
+        lat = [e["recv"] - e["t"] for e in director.events]
+        run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
+        run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
+    return run_
 
 
 def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.StandinBrowser, patched: dict[str, Any],
@@ -5539,6 +5636,10 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                   "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
         "shots": director.shots,
         "stand_in_events": dict(Counter(e["ev"] for e in events)),
+        **({"stand_in_profile_events": [[rel(float(e["t"]) + offset), e["ev"],
+                                         {k: e[k] for k in PROFILE_EVENT_WORDS if k in e}]
+                                        for e in events if e["ev"] in PROFILE_EVENTS]}
+           if getattr(director.args, "standin_profile", "") else {}),
         "rested_pages": rested_pages(rows),
     }
 
@@ -6076,8 +6177,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
     ap.add_argument("--scenario", default="all",
-                    help="all, or some of c,a,b,d,e,r,t,o,z,x,f,f2,k (f brings f2 with it, t brings t2; k is "
-                         "k5,k1,k2 and never in all)")
+                    help="all, or some of c,a,b,d,e,r,t,o,z,x,f,f2,k,q (f brings f2 with it, t brings t2; k is "
+                         "k5,k1,k2 and never in all, nor is q: for --standin-profile)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
@@ -6141,11 +6242,11 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "page read afresh on show while the pages turned past wait")
     ap.add_argument("--k-soft", default="on", choices=("on", "off"),
                     help="scenario k: the stand-in draws each page soft first (on, its own soft time) or sharp at once")
-    ap.add_argument("--soft-first", default="on", choices=("on", "off"),
-                    help="on (default): the stand-in draws every turn soft first and sharp a while later, as the "
-                         "correctness runs have it; off: every turn sharp at once and nothing after it, for the timing "
-                         "figures (what TASlation takes, with no wait of the viewer's in it); x is left out of all and "
-                         "refused by name, and --k-soft changes nothing")
+    ap.add_argument("--soft-first", default=None, choices=("on", "off"),
+                    help="on (default without --standin-profile): the stand-in draws every turn soft first and sharp a "
+                         "while later, as the correctness runs have it; off (default with a profile): every turn sharp "
+                         "at once and nothing after it, for the timing figures (what TASlation takes, with no wait of "
+                         "the viewer's in it); x is left out of all and refused by name, and --k-soft changes nothing")
     ap.add_argument("--standin-draws-covered", action="store_true",
                     help="the stand-in browser goes on drawing while other windows hide it wholly (its occlusion "
                          "tracking off): a run that does not depend on the windows of a person at the machine")
@@ -6169,7 +6270,39 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "indicator beside the page is looked at from the window as the events come (`SideCheck`), "
                          "pictured after the flips and the reads back of scenario k, and dropped at the end to see "
                          "it cleared")
-    return ap.parse_args(argv)
+    ap.add_argument("--standin-slider", type=int, default=0, choices=(0, 1, 2),
+                    help="the stand-in's page slider under the page: 0 none (default), 1 a bar with a knob, 2 the "
+                         "pages drawn as the knob is dragged")
+    ap.add_argument("--standin-profile", default="", choices=("", *sv.PROFILES),
+                    help="the stand-in behaves as one of two kinds of web viewer (standin.html says how): dark or "
+                         "light; default none, the stand-in as it always was (scenario q is written for a profile)")
+    ap.add_argument("--standin-option", action="append", default=[], metavar="NAME=VALUE",
+                    help="with --standin-profile: one of its parts given another value (again for more; the names: "
+                         + ", ".join(sv.PROFILE_OPTIONS) + ")")
+    ap.add_argument("--see-through", action="store_true",
+                    help="the window's see-through mode (Settings.see_through): the lettering over the stand-in's own "
+                         "window; the see-through window is watched (`standin_seethrough`, run.see_through)")
+    ap.add_argument("--see-truth", action="store_true",
+                    help="with --see-through: copies of the stand-in's place on the screen, every "
+                         f"{1000 * 0.033:.0f} ms in memory, checked for old patches over a new page; two of them into "
+                         "shots/ (they show the sample pages: delete them after)")
+    ap.add_argument("--see-pane-shot", action="store_true",
+                    help="with --see-through: one copy of the stand-in's place on the screen, taken the first time "
+                         "both side panes show beside a spread whose page is done and the copy shows nothing of another "
+                         "program's, into shots/ (it shows a sample page: delete it after)")
+    ap.add_argument("--standin-size", default="", metavar="WxH",
+                    help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
+                         "primary monitor's work area")
+    ap.add_argument("--standin-full-screen", action="store_true",
+                    help="the stand-in in the browser's own full screen from its start; the reader's area is then the "
+                         "whole frame")
+    ap.add_argument("--capture-ms", type=int, default=0, metavar="MS",
+                    help="the window's frames asked for at most this often (wgc.set_update_ms; see-through mode asks "
+                         "for 16): a run without see-through to compare the frames a second with")
+    args = ap.parse_args(argv)
+    if args.soft_first is None:
+        args.soft_first = "off" if args.standin_profile else "on"
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:

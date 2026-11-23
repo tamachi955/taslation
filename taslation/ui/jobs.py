@@ -1232,6 +1232,7 @@ class JobsMixin:
             offer_standard_name(self)  # a book kept under an older spelling of its name (`book_fields`)
             self._run_queued()
         elif kind == "compute":  # where Ollama translates, from its log: the processor gets a line on the banner
+            self._compute_where = str(data.get("where") or "")  # (see-through mode's indicators say it too)
             if data.get("where") == "cpu":
                 self._on_cpu = cpu_page_seconds()
                 self._show_banner()

@@ -67,7 +67,7 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
     assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
-        standin_e2e.wanted("a,q")
+        standin_e2e.wanted("a,y")  # (q is scenario q, for a stand-in with a profile)
 
 
 def _plan(wait_done=None):
@@ -983,6 +983,19 @@ def test_the_browser_command_keeps_its_own_profile_and_window():
     features = [a for a in covered if a.startswith("--disable-features=")]
     assert len(features) == 1 and features[0].endswith(",CalculateNativeWinOcclusion")  # (one list: the last would win)
     assert "--disable-backgrounding-occluded-windows" in covered and covered[-1] == "--app=file:///p.html"
+
+
+def test_the_browser_never_offers_to_translate_the_page(tmp_path):
+    import json
+
+    html = sv.HTML.read_text(encoding="utf-8")
+    assert '<html lang="en" translate="no">' in html and '<meta name="google" content="notranslate">' in html
+    profile = sv.make_profile(tmp_path / "profile")
+    assert json.loads((profile / "Default" / "Preferences").read_text(encoding="utf-8")) == {
+        "translate": {"enabled": False}}
+    assert sorted(p.name for p in profile.rglob("*")) == ["Default", "Preferences"]  # (nothing else written)
+    with pytest.raises(FileExistsError):
+        sv.make_profile(profile)  # (a profile is always a new one)
 
 
 # ---------------------------------------------------------------------------------------------------- the window

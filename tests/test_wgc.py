@@ -111,6 +111,43 @@ def test_the_session_takes_the_window_by_handle_and_keeps_the_newest_frame(api):
     assert newest.seq == 2 and newest.bgra.max() == 200 and len(capture.made) == 1  # (no second session)
 
 
+def test_listeners_are_told_of_every_frame_and_a_peek_starts_nothing(api):
+    capture = api(stand_in())
+    assert wgc.peek(0x52) is None and capture.made == []  # (no session: none started)
+    told = []
+
+    def listener(hwnd, seq):
+        told.append((hwnd, seq))
+
+    def broken(hwnd, seq):
+        raise RuntimeError("a listener's fault")
+
+    wgc.add_listener(broken)
+    wgc.add_listener(listener)
+    try:
+        wgc.latest(0x52)
+        capture.made[0].send((4, 3), 9)
+        assert told == [(0x52, 1), (0x52, 2)]  # (the broken one stopped nothing)
+        assert wgc.peek(0x52).seq == 2 and wgc.peek(0x53) is None
+    finally:
+        wgc.remove_listener(listener)
+        wgc.remove_listener(broken)
+
+
+def test_a_new_update_interval_starts_the_session_over_with_it(api):
+    capture = api(stand_in())
+    try:
+        wgc.latest(0x54)
+        assert capture.made[0].options["minimum_update_interval"] == wgc.MIN_UPDATE_MS
+        assert wgc.set_update_ms(wgc.FAST_UPDATE_MS) and wgc.update_ms() == wgc.FAST_UPDATE_MS
+        wait_until(lambda: len(capture.made) == 2)
+        assert capture.made[1].options["minimum_update_interval"] == wgc.FAST_UPDATE_MS
+        assert not wgc.set_update_ms(wgc.FAST_UPDATE_MS)  # (as it is: nothing started over)
+        assert wgc.latest(0x54).seq >= 2  # (the count goes on)
+    finally:
+        wgc.set_update_ms(wgc.MIN_UPDATE_MS)
+
+
 def test_a_frame_is_a_copy_of_its_own(api):
     capture = api(stand_in())
     wgc.latest(1)

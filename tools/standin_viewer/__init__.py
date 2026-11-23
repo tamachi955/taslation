@@ -6,13 +6,15 @@ docstring says how); this module starts it in a throwaway browser window and tal
 
 * the script the page runs by itself (`Step`, `format_script`, `parse_script`): no key, no click, nothing sent to
   any window;
+* the page's behaviour profiles (`PROFILES`, ``profile=dark|light``: two kinds of web viewer, their parts each
+  switchable alone, `PROFILE_OPTIONS`, `parse_options`), off unless asked for;
 * the page list and the control file, both written into a scratch folder given (`write_page_list`,
   `write_control`), never anywhere else: the list names the pictures by file URL where they are (a dataset read in
   place, or the repository's test fixtures), and no picture is copied or written;
 * the browser: Chrome or Edge as found on this computer (`find_browser`), started on a scratch profile with its own
-  window (`browser_command`, `StandinBrowser`), found again by the process tree it started AND the token in its
-  title (`find_window`: a window of another process is never asked its title), closed with that process tree alone,
-  and its profile deleted;
+  window (`browser_command`, `StandinBrowser`) and its offer to translate the page off (`make_profile`), found
+  again by the process tree it started AND the token in its title (`find_window`: a window of another process is
+  never asked its title), closed with that process tree alone, and its profile deleted;
 * what the page says (`parse_line`: its console lines, from the browser's log on standard error) and the cells it
   draws in its band (`decode`: which screen a captured frame shows, soft or sharp, with the spinner or black);
 * the guard on what TASlation chose (`SelectionGuard`): anything but the stand-in's window stops the run.
@@ -40,11 +42,20 @@ HTML = Path(__file__).resolve().with_name("standin.html")
 TITLE = "Stand-in reader"  # the page's title, the token after it
 PAGE_LIST, CONTROL = "pages.js", "control.js"
 REPLACE_TRIES_S = 2.0  # the control file's rename is tried again so long while the browser holds it open
-# go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released
-OPS = "gwnpjfstbmehku"
+# go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released, the
+# bars shown for a while (a profile), the side arrows shown (a profile)
+OPS = "gwnpjfstbmehkuva"
 WITH_NUMBER = "gwjmh"  # steps that need a number
 CELL, CODE_X, CODE_Y = 6, 12, 12  # the page's code cells (CSS pixels from the content's top left), as standin.html
 LEAD = (1, 0, 1, 0)
+# the page's behaviour profiles (``profile=``) and the names of their parts, each switchable alone in the query (as
+# PROFILES in standin.html, whose docstring says what each does)
+PROFILES = ("dark", "light")
+PROFILE_OPTIONS = ("ground", "cover", "bars", "bar_top", "bar_bottom", "bar_style", "bar_fade_ms", "bar_hide_ms",
+                   "bar_key_hide", "arrows", "arrow_show", "arrow_hide_ms", "arrow_inset", "page_clicks",
+                   "ground_clicks", "jump", "jump_ms", "jump_half", "half_ms", "preview", "preview_ms", "resize",
+                   "resize_ms", "focus_black", "counter")
+OPTION_VALUE = re.compile(r"[A-Za-z0-9_.\-]*")
 DARK = 16  # a frame no brighter than this at every point looked at is black
 
 
@@ -152,16 +163,49 @@ def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int 
             time.sleep(0.02)
 
 
+def parse_options(texts: Iterable[str]) -> dict[str, str]:
+    """``NAME=VALUE`` words (a profile's parts, `PROFILE_OPTIONS`) as a dict; a name not known or a value with other
+    than letters, digits, ``_ . -`` refused."""
+    out: dict[str, str] = {}
+    for text in texts:
+        name, sep, value = str(text).partition("=")
+        name = name.strip()
+        if not sep or name not in PROFILE_OPTIONS or not OPTION_VALUE.fullmatch(value.strip()):
+            names = ", ".join(PROFILE_OPTIONS)
+            raise ValueError(f"not a profile option: {text!r} (NAME=VALUE, NAME one of {names})")
+        out[name] = value.strip()
+    return out
+
+
 def page_url(token: str, steps: Sequence[Step], folder: Path, seed: int = 1, band: int = 54,
              soft: tuple[int, int] = (150, 400), factor: int = 6, flash_ms: int = 800, layout: str = "auto",
-             soft_first: bool = True) -> str:
+             soft_first: bool | None = None, slider: int = 0, profile: str = "",
+             options: dict[str, Any] | None = None) -> str:
     """The stand-in page's URL: the page itself (`HTML`), its token, the page list and the control file in the
-    scratch *folder*, its draws; the script in the hash. Without *soft_first* (``soft_first=0`` in the query) the page
-    draws every turn sharp at once and nothing after it; with it the URL is what it always was."""
+    scratch *folder*, its draws; the script in the hash. *soft_first* False (``soft_first=0`` in the query): the page
+    draws every turn sharp at once and nothing after it; *slider* 1 or 2 (``slider=N``): the page slider under the
+    page, 2 with the pages drawn as its knob is dragged (standin.html says how). *profile* "dark" or "light"
+    (``profile=``): it behaves as that kind of web viewer, each of its parts in *options* (`PROFILE_OPTIONS`) given
+    another value; a profile draws every turn sharp at once unless *soft_first* is True (``soft_first=1``). With none
+    of them the URL is what it always was."""
+    if slider not in (0, 1, 2):
+        raise ValueError("slider is 0, 1 or 2")
+    if profile not in ("", *PROFILES):
+        raise ValueError(f"profile is one of {PROFILES} or none")
+    options = dict(options or {})
+    if options and not profile:
+        raise ValueError("options are a profile's")
+    parse_options(f"{k}={v}" for k, v in options.items())
     folder = Path(folder).resolve()
+    if profile:
+        first = {"soft_first": 1} if soft_first else {}
+    else:
+        first = {} if soft_first is None or soft_first else {"soft_first": 0}
     query = urlencode({"token": token, "pages": file_url(folder / PAGE_LIST), "control": file_url(folder / CONTROL),
                        "seed": seed, "band": band, "soft_min": soft[0], "soft_max": soft[1], "factor": factor,
-                       "flash_ms": flash_ms, "layout": layout, **({} if soft_first else {"soft_first": 0})})
+                       "flash_ms": flash_ms, "layout": layout, **first,
+                       **({"slider": slider} if slider else {}), **({"profile": profile} if profile else {}),
+                       **{k: options[k] for k in PROFILE_OPTIONS if k in options}})
     return file_url(HTML) + "?" + query + "#s=" + format_script(steps)
 
 
@@ -202,21 +246,41 @@ FLAGS = ("--no-first-run", "--no-default-browser-check", "--disable-sync", "--di
 DRAWS_COVERED = ("--disable-backgrounding-occluded-windows",)
 OCCLUSION_FEATURE = "CalculateNativeWinOcclusion"
 
+# The browser's offer to translate the page (its own bubble: a window of its own over the page's top corner, so never
+# in a frame of the stand-in's window, but on the screen) is turned off at both ends: the page says it is not to be
+# translated (standin.html: translate="no" and the "notranslate" meta), and the throwaway profile is made with the
+# offer off (`make_profile`: "translate.enabled", the setting the browser's own settings page turns off). Each end
+# alone keeps the offer away in Chrome 157 and Edge 158; neither has a switch for it ("--disable-features=Translate"
+# in FLAGS leaves it on, and their programs hold no "--disable-translate" any more: checked on 2026-11-23).
+PREFERENCES = {"translate": {"enabled": False}}
+
+
+def make_profile(profile: Path) -> Path:
+    """The throwaway *profile* made (it must not exist yet) with PREFERENCES in its default profile, and nothing else
+    written: the browser makes the rest at its start."""
+    profile = Path(profile)
+    profile.mkdir(parents=True, exist_ok=False)
+    (profile / "Default").mkdir()
+    (profile / "Default" / "Preferences").write_text(json.dumps(PREFERENCES), encoding="utf-8")
+    return profile
+
 
 def browser_command(program: Path, url: str, profile: Path, rect: tuple[int, int, int, int],
-                    scale: float = 1.0, draws_covered: bool = False) -> list[str]:
+                    scale: float = 1.0, draws_covered: bool = False, full_screen: bool = False) -> list[str]:
     """The command that opens *url* in a window of its own (``--app``) at *rect* (x, y, width, height) on the
     throwaway *profile*; *scale* other than 1: the browser draws as on a display of that scale
     (``--force-device-scale-factor``: its own window and the page's devicePixelRatio, no setting of the system's);
     *draws_covered*: it goes on drawing while other windows hide it wholly (DRAWS_COVERED, and the occlusion
-    feature added to the one list of features turned off)."""
+    feature added to the one list of features turned off); *full_screen*: the window in the browser's full screen
+    from its start (``--start-fullscreen``, as the reader's F11 has it)."""
     x, y, w, h = rect
     scaled = [f"--force-device-scale-factor={scale:g}"] if scale != 1.0 else []
     flags = list(FLAGS)
     if draws_covered:
         flags = [f + "," + OCCLUSION_FEATURE if f.startswith("--disable-features=") else f for f in flags]
         flags += DRAWS_COVERED
-    return [str(program), f"--user-data-dir={profile}", *flags, *scaled, f"--window-position={x},{y}",
+    full = ["--start-fullscreen"] if full_screen else []
+    return [str(program), f"--user-data-dir={profile}", *flags, *scaled, *full, f"--window-position={x},{y}",
             f"--window-size={w},{h}", f"--app={url}"]
 
 
@@ -324,17 +388,17 @@ def find_window(pids: set[int], token: str, windows: Iterable[tuple[int, int]] |
 
 
 class StandinBrowser:
-    """The throwaway browser that shows the stand-in page: started on *profile* (a scratch folder made here and
-    deleted at `close`), its log on standard error read line by line into `events` (what the page said, with the time
-    it came), its window found by `wait_window`. `close` asks the window to close, then ends what is left of the
-    process tree it started, and of nothing else."""
+    """The throwaway browser that shows the stand-in page: started on *profile* (a scratch folder made here, its
+    offer to translate off, `make_profile`, and deleted at `close`), its log on standard error read line by line into
+    `events` (what the page said, with the time it came), its window found by `wait_window`. `close` asks the window
+    to close, then ends what is left of the process tree it started, and of nothing else."""
 
     def __init__(self, program: Path, url: str, profile: Path, rect: tuple[int, int, int, int], token: str,
-                 scale: float = 1.0, draws_covered: bool = False):
-        self.profile = Path(profile)
+                 scale: float = 1.0, draws_covered: bool = False, full_screen: bool = False):
+        self.profile = make_profile(profile)
         self.token = token
-        self.profile.mkdir(parents=True, exist_ok=False)
-        self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered),
+        self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered,
+                                                     full_screen),
                                      stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                      errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -517,6 +581,7 @@ class SelectionGuard:
         return self.stopped
 
 
-__all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
+__all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "PROFILES", "PROFILE_OPTIONS", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
            "browser_command", "cells_of", "decode", "file_url", "find_browser", "find_window", "format_script",
-           "page_url", "parse_line", "parse_script", "process_tree", "write_control", "write_page_list"]
+           "make_profile", "page_url", "parse_line", "parse_options", "parse_script", "process_tree", "write_control",
+           "write_page_list"]

@@ -491,6 +491,8 @@ class ScannedRegion:
                             self.bbox[3] - self.bbox[1])
 
 
+CARRY_IOU = 0.7  # (see-through mode) a unit read with bars painted over is the one on show when their boxes meet so
+CARRY_SAME_BITS = 6  # ... and its entry is the same one within so many bits (`BookCache.add`'s *replace_within*)
 CORRECTIONS_HELD = 500  # readings a person corrected that a session keeps (`Pipeline.corrected_readings`)
 
 
@@ -3422,6 +3424,53 @@ class Pipeline:
             self._save_store("cache", self.cache)
         self.reset_context()
         return gone
+
+    def carry_over(self, result: PageResult, image: Image.Image, rows: Sequence[tuple[int, int]],
+                   near: int = 3) -> tuple[int, int]:
+        """(see-through mode) The page *result* read from a frame with a viewer's bars painted over
+        (`ui.seethrough.reading_frame`: the bars' *rows*, frame pixels), on show again without them in *image*: its
+        cached pages are carried over to the units *image* gives - the painted frame's units have fingerprints of
+        their own, and on a dark ground boxes of their own (the painted rows are ground there) -, each bubble's box and
+        outline taken from the painted unit's terms into the new unit's; the bubbles that reach the painted rows
+        (within *near* px: cut by a bar) are left out and the page marked as lacking them (`CachedPage.incomplete`),
+        so that its next reading reads and asks for those alone (`_complete_page`), and for a bubble the bars hid
+        whole with them. The painted unit's own entry goes. Returns (pages carried over, bubbles left out)."""
+        if self.cache is None or not result.units:
+            return 0, 0
+        new_units = self.units_of(np.asarray(image.convert("RGB")))
+        distance = self.settings.fingerprint_max_distance
+        carried = dropped = 0
+        for old in result.units:
+            hit = self.cache.lookup(old.fingerprint, old.aspect, distance, None)
+            match = max(new_units, key=lambda u: box_iou(u.box, old.box), default=None)
+            if hit is None or match is None or box_iou(match.box, old.box) < CARRY_IOU:
+                continue
+            page = hit[0]
+
+            def moved(x: float, y: float) -> tuple[float, float]:  # (the old unit's terms into the new one's)
+                fx = old.box[0] + x * max(1, old.width)
+                fy = old.box[1] + y * max(1, old.height)
+                return (fx - match.box[0]) / max(1, match.width), (fy - match.box[1]) / max(1, match.height)
+
+            kept: list[CachedBubble] = []
+            for b in page.bubbles:
+                top = old.box[1] + b.box[1] * old.height
+                bottom = old.box[1] + b.box[3] * old.height
+                if any(top < end + near and bottom > start - near for start, end in rows):
+                    dropped += 1
+                    continue
+                bubble = copy.deepcopy(b)
+                bubble.box = (*moved(b.box[0], b.box[1]), *moved(b.box[2], b.box[3]))
+                bubble.poly = [moved(x, y) for x, y in b.poly]
+                kept.append(bubble)
+            if fp.hamming(page.fingerprint, match.fingerprint) > CARRY_SAME_BITS:
+                self.cache.remove(page.fingerprint)
+            self.cache.add(CachedPage(fingerprint=match.fingerprint, aspect=match.aspect, bubbles=kept, seq=page.seq,
+                                      incomplete=page.incomplete or len(kept) < len(page.bubbles)))
+            carried += 1
+        if carried:
+            self._save_store("cache", self.cache)
+        return carried, dropped
 
     def corrections_on(self, result: PageResult) -> int:
         """How many translations of this capture's page units a person wrote (`CachedBubble.edited`)."""

@@ -294,6 +294,13 @@ class Settings:
     # over a viewer in full screen on the same monitor, the window stays on top without taking the foreground (the
     # viewer keeps the keys); View > Over the full-screen viewer turns it off for the next starts too (`ui.overbook`)
     over_book: bool = True
+    # a prototype, off by default: the lettering laid over the viewer's own window by a click-through window of
+    # TASlation's, the viewer taking every click and key itself (TASlation holds no key then); the Lettering switch of
+    # the left side pane hides it or shows it again (`ui.seethrough`)
+    see_through: bool = False
+    # see-through mode's right side pane, the indicators at the right edge of the viewer's area (`ui.seethrough`):
+    # shown or not; the switch in its left pane writes it here, kept for the next starts
+    see_through_indicators: bool = True
     # the translation on the page (the Reader role by hover_shows, the Translator role always; on the full screen as
     # in the window): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its
     # place, `ui.in_place`); off, nothing shows under the pointer

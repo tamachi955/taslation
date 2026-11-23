@@ -124,7 +124,7 @@ from .progress import (
 from .hover import HOVER_LABELS, HOVER_TIPS, REVEAL_LABELS, REVEAL_TIPS, hover_reveal, hover_shows, original_idle
 from .reading import ReadingMixin, bubbles_away
 from .scaling import DpiWatch, apply_scale
-from . import area, ime, shortcuts, theme, updates
+from . import area, ime, seethrough, shortcuts, theme, updates
 from .. import devices
 from . import side
 from .side import SideMixin
@@ -204,6 +204,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
                  on_top: bool = False, reading: bool = False):
         set_app_id()
         super().__init__()
+        seethrough.quiet_start(self, settings)  # see-through mode: shown without taking the foreground from the viewer
         self._apply_alpha()  # before the window is first shown: an alpha set later makes a browser behind it flicker
         apply_icon(self)
         give_icons(self)  # the taskbar takes the big one
@@ -230,6 +231,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         first_start = load_ui_language(state_dir) is None
         code = settings.ui_language or load_ui_language(state_dir)
         if notice_due(state_dir):  # the legal notice, where the first start also chooses the country and language
+            seethrough.quiet_end(self)  # (the notice is the reader's to answer: it takes the foreground as ever)
             self.withdraw()
             dialog = NoticeDialog(self, state_dir, code)  # (it gives itself its icons and its place on the screen)
             try:
@@ -327,6 +329,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         # the setup checks and their banner, a book's start, the scan band, a page translation that can be cancelled
         self._init_flow_state()
         self._init_over()  # (its setting is on the View menu)
+        seethrough.start(self)  # the lettering over the viewer's own window, with Settings.see_through (a prototype)
         self._init_selection()  # several regions selected, the reading-order badges (`selection`; View menu too)
         self.keymap = shortcuts.Keymap.load(state_dir)  # the window's keys (`_bind_shortcuts`), Tools > Settings...
         shortcuts.set_current(self.keymap)
@@ -338,7 +341,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.geometry(self._normal_geometry)
         if self.state() == "withdrawn":
             self.deiconify()
-        self._restore_geometry((self._normal_geometry, self._opening_zoomed))
+        # (a quiet start is not maximised: Windows activates a window it maximises)
+        self._restore_geometry((self._normal_geometry, self._opening_zoomed and not seethrough.quiet(self)))
         self.bind("<Configure>", self._track_geometry, add="+")
         # moved to a monitor of another scale: the text follows (`scaling`)
         self._dpi_watch = DpiWatch(self, lambda: self.settings.ui_scale)
@@ -352,6 +356,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self._put_back_left_enlarged()  # a viewer's window a session that ended without closing left enlarged
         self.refresh_windows(select=window_query)
         self._redisplay()  # with no viewer yet, the hint says what to do
+        seethrough.quiet_started(self)
         self.after(WINDOW_WATCH_MS, self._watch_windows)
         threading.Thread(target=self._worker_loop, daemon=True).start()
         self._jobs.put(self._job_init)

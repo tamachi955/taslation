@@ -1,7 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
+<meta name="google" content="notranslate">
 <title>Stand-in reader</title>
 <style>
 html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2b2b; }
@@ -42,6 +43,35 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
+With ``slider=1`` in the query a page slider lies under the page, as a viewer's own: a thin bar with a round knob at
+the place of the screen on show, the first page at the right end (a book read right to left). It listens to the
+pointer events on the canvas (pointerdown, pointermove, pointerup, pointercancel, lostpointercapture) as a common web
+slider does: a press on the knob takes the pointer (setPointerCapture) and the knob follows it while the button is
+held; a press on the bar puts the knob there and takes the pointer as well; the release goes to the page at the
+knob's place (``ev=jump from=.. to=.. by=drag|click``; the same page: ``ev=stay``). With ``slider=2`` the page under
+the knob is drawn as it moves (``why=preview``, sharp at once), as a viewer that previews the pages while its slider is
+dragged; the release turns to it as ``slider=1`` does. A press elsewhere does nothing but is said (``ev=pointer``,
+with the moves counted at its release), and so are the DOM's click events (``ev=click``). Without it nothing of this
+is drawn or listened to.
+
+With ``profile=dark`` or ``profile=light`` in the query it behaves as one of two kinds of web viewer (as recordings of
+them showed; their look is not copied): the band stands for the browser's own tabs and address bar and is drawn only
+while the window does not fill the screen (a browser's full screen has none); under it the viewer's area, the page
+fitted to its height, a spread centred on the ground (black or white), the cover and a last page alone single and
+centred; every turn drawn sharp at once (``soft_first=1`` brings the soft first back); bars that lie OVER the page and
+fade in and out, side arrows, a slider in the bottom bar (drag the knob or click the bar), what a jump and a resize
+draw. Each part has its own name in the query (`PROFILES` gives both profiles' values, `PROFILE_CHOICES` the words a
+part takes): ground, cover, bars (none, edge, click, move), bar_top, bar_bottom, bar_style (solid, glass), bar_fade_ms,
+bar_hide_ms, bar_key_hide, arrows (none, edge, inset), arrow_show (move, always), arrow_hide_ms, arrow_inset,
+page_clicks, ground_clicks, jump (plain, spinner), jump_ms (A-B), jump_half, half_ms, preview, preview_ms, resize
+(plain, spinner), resize_ms (A-B), focus_black, counter. With a profile the page also says: ``ev=turn dir= by=key|arrow|
+ground|page|script`` (a click's place, x= y= in the canvas's pixels), ``ev=key``, ``ev=bars on= why= fade=`` and
+``ev=bars_done on=``, ``ev=arrows on= why=``, ``ev=spinner on=1 why=jump|resize ms=`` and ``on=0`` (the viewer's area
+black with a small spinner: its cells say spinner), ``ev=preview on=1 ms=`` and ``on=0``, ``ev=draw ... kind=half|preview
+pages=N`` (one page of a spread first, the other black; the target washed out: both said and coded soft), ``ev=size ...
+full= band=``, ``ev=blur``. Two more steps of the script: ``vN`` the bars shown for N ms (2000), as the pointer shows
+them, not waited on; ``a`` the side arrows shown as a pointer move shows them. Its n and p hide the bars as a key does.
+
 What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch; a draw with the page's
 rectangle and the band's height in the canvas's pixels), which the driver reads from the browser's log; the title
 stays as it is, as a reader's tab title does. A strip of cells in the band carries the screen on show (its first
@@ -66,8 +96,122 @@ const cfg = {
   band: num("band", 54),
   layout: query.get("layout") || "auto",  // "auto" (spreads while the window is wider than high), "spread", "single"
   softFirst: query.get("soft_first") !== "0",  // false: every turn drawn sharp at once, nothing after it
+  slider: ["1", "2"].includes(query.get("slider")) ? Number(query.get("slider")) : 0,  // the page slider under the page
   script: hashed.get("s") || "",
+  focusBlack: query.get("focus_black") !== "0",  // false: the focus draws no black
 };
+
+// ------------------------------------------------------------------------------------------------ the profiles
+/* PROFILE LOGIC BEGIN - pure functions and tables, nothing drawn (tests/test_standin_profiles.py runs them in node) */
+// The behaviour of two kinds of web viewer (``profile=dark|light`` in the query), each part switchable alone by its
+// own name in the query (`PROFILE_OPTIONS`); ``bar_hide_ms`` empty: by the bars' way (edge 1000, move 3000 ms).
+const PROFILES = {
+  dark: { ground: "black", cover: 1, bars: "edge", bar_top: 94, bar_bottom: 56, bar_style: "solid",
+          bar_fade_ms: 200, bar_hide_ms: "", bar_key_hide: 1, arrows: "edge", arrow_show: "move",
+          arrow_hide_ms: 3000, arrow_inset: 0, page_clicks: 0, ground_clicks: 1, jump: "spinner", jump_ms: "500-1100",
+          jump_half: 0.25, half_ms: 2000, preview: 0, preview_ms: 200, resize: "spinner", resize_ms: "400-500",
+          focus_black: 0, counter: "percent" },
+  light: { ground: "white", cover: 1, bars: "move", bar_top: 40, bar_bottom: 40, bar_style: "glass",
+           bar_fade_ms: 200, bar_hide_ms: "", bar_key_hide: 0, arrows: "inset", arrow_show: "always",
+           arrow_hide_ms: 3000, arrow_inset: 180, page_clicks: 1, ground_clicks: 0, jump: "plain", jump_ms: "0",
+           jump_half: 0,
+           half_ms: 2000, preview: 1, preview_ms: 200, resize: "plain", resize_ms: "0", focus_black: 0,
+           counter: "pages" },
+};
+const PROFILE_CHOICES = { ground: ["black", "white"], bars: ["none", "edge", "click", "move"],
+                          bar_style: ["solid", "glass"], arrows: ["none", "edge", "inset"],
+                          arrow_show: ["move", "always"], jump: ["plain", "spinner"], resize: ["plain", "spinner"],
+                          counter: ["percent", "pages"] };
+const PROFILE_OPTIONS = Object.keys(PROFILES.dark);
+const BAR_HIDE_MS = { edge: 1000, move: 3000, click: 0, none: 0 };
+
+function rangeOf(text, fallback) {  // "A-B" or "A" (ms) -> [low, high]
+  const m = /^(\d+)(?:-(\d+))?$/.exec(String(text).trim());
+  if (!m) return fallback;
+  const a = Number(m[1]), b = m[2] === undefined ? a : Number(m[2]);
+  return [Math.min(a, b), Math.max(a, b)];
+}
+function profileOptions(name, get) {  // the profile *name* with what get(option) gives instead (null: its own)
+  const base = PROFILES[name];
+  if (!base) return null;
+  const out = {};
+  for (const key of PROFILE_OPTIONS) {
+    const given = get(key), fallback = base[key];
+    let value = given === null || given === undefined || given === "" ? fallback : given;
+    if (PROFILE_CHOICES[key]) value = PROFILE_CHOICES[key].includes(String(value)) ? String(value) : fallback;
+    else if (key === "jump_ms" || key === "resize_ms") value = rangeOf(value, rangeOf(fallback, [0, 0]));
+    else if (key === "bar_hide_ms") value = value === "" ? null : (isFinite(Number(value)) ? Number(value) : null);
+    else value = isFinite(Number(value)) ? Number(value) : Number(fallback);
+    out[key] = value;
+  }
+  if (out.bar_hide_ms === null) out.bar_hide_ms = BAR_HIDE_MS[out.bars];
+  out.jump_half = Math.max(0, Math.min(1, out.jump_half));
+  return out;
+}
+function screenOf(n, count, spreads, cover) {  // the first page of the screen that holds page n
+  n = Math.max(0, Math.min(Math.max(0, count - 1), n));
+  if (!spreads) return n;
+  if (!cover) return n - (n % 2);
+  return n === 0 ? 0 : n - ((n - 1) % 2);  // the cover alone, then pages 1-2, 3-4, ...
+}
+function screenPagesOf(f, count, spreads, cover) {
+  if (!spreads || (cover && f === 0) || f + 1 >= count) return [f];
+  return [f, f + 1];
+}
+function nextScreen(f, count, spreads, cover) {
+  return screenOf(f + screenPagesOf(f, count, spreads, cover).length, count, spreads, cover);
+}
+function previousScreen(f, count, spreads, cover) {
+  return f <= 0 ? 0 : screenOf(f - 1, count, spreads, cover);
+}
+function fitRects(sizes, area) {  // pages [w, h] fitted to the area's height (or its width, if narrower), centred;
+  const tall = Math.max(...sizes.map(s => s[1]));  // the first page on the right (a book read right to left)
+  const widths = sizes.map(s => s[0] * tall / s[1]);
+  const total = widths.reduce((a, b) => a + b, 0);
+  const scale = Math.min(area.h / tall, area.w / total);
+  const h = Math.max(1, Math.round(tall * scale));
+  const ws = widths.map(w => Math.max(1, Math.round(w * scale)));
+  const all = ws.reduce((a, b) => a + b, 0);
+  let right = area.x + Math.round((area.w + all) / 2);
+  const top = area.y + Math.round((area.h - h) / 2);
+  return ws.map(w => { const r = { x: right - w, y: top, w, h }; right -= w; return r; });
+}
+function thirdOf(x, x0, x1) {  // where on the page (from x0 to x1) a click at x is: left, middle, right; null beside it
+  if (x < x0 || x > x1) return null;
+  const t = (x - x0) / Math.max(1, x1 - x0);
+  return t < 1 / 3 ? "left" : t > 2 / 3 ? "right" : "middle";
+}
+function inEdge(y, area, top, bottom) {  // the pointer in the band of the top bar or of the bottom bar
+  return (y >= area.y && y < area.y + top) || (y >= area.y + area.h - bottom && y <= area.y + area.h);
+}
+function arrowRects(area, kind, inset, d) {  // the side arrows: tabs at the very edges, or round buttons set in
+  if (kind === "edge") {
+    const w = Math.round(32 * d), h = Math.round(70 * d), y = area.y + Math.round((area.h - h) / 2);
+    return { left: { x: area.x, y, w, h }, right: { x: area.x + area.w - w, y, w, h } };
+  }
+  if (kind === "inset") {
+    const s = Math.round(30 * d), y = area.y + Math.round((area.h - s) / 2), x = Math.round(inset * d);
+    return { left: { x: area.x + x, y, w: s, h: s }, right: { x: area.x + area.w - x - s, y, w: s, h: s } };
+  }
+  return null;
+}
+function arrowsAllowed(f, count, spreads, cover) {  // right to left: the left arrow goes on, the right one back
+  return { left: nextScreen(f, count, spreads, cover) !== f, right: f > 0 };
+}
+function inside(r, x, y) { return !!r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
+/* PROFILE LOGIC END */
+
+const P = profileOptions(query.get("profile") || "", key => query.get(key));
+if (P) {
+  cfg.focusBlack = query.has("focus_black") ? query.get("focus_black") !== "0" : !!P.focus_black;
+  cfg.softFirst = query.get("soft_first") === "1";  // (a profile draws every turn sharp at once unless asked)
+  if (!cfg.slider) cfg.slider = 1;  // (its slider lies in the bottom bar)
+}
+// the slider (CSS pixels): the foot under the page it lies in, the bar's ends (shares of the width; the counter on
+// the right stays clear), its height, the knob's radius and how far round the knob and the bar a press takes them
+const SLIDER_FOOT = 56, SLIDER_Y = 26, SLIDER_X0 = 0.12, SLIDER_X1 = 0.80, SLIDER_BAR = 4, KNOB = 8, KNOB_REACH = 14,
+      BAR_REACH = 10;
+const SLIDER_BAR_COLOUR = "#8a8d92", SLIDER_KNOB_COLOUR = "#e8e8e8";
 const softQuery = [cfg.softMin, cfg.softMax], factorQuery = cfg.factor;  // (a script's "t" and "b" put them back)
 document.title = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
 
@@ -149,8 +293,12 @@ function sizeCanvas() {
 function spreadNow() {
   return cfg.layout === "spread" || (cfg.layout !== "single" && view.width > view.height * 1.05);
 }
-function first(n) { return spread ? Math.max(0, n - (n % 2)) : Math.max(0, n); }
+function first(n) {
+  if (P) return screenOf(n, entries.length, spread, P.cover);
+  return spread ? Math.max(0, n - (n % 2)) : Math.max(0, n);
+}
 function screenPages() {
+  if (P) return screenPagesOf(index, entries.length, spread, P.cover);
   const out = [index];
   if (spread && index + 1 < entries.length) out.push(index + 1);
   return out;
@@ -177,7 +325,7 @@ function code(soft, spin) {  // the screen on show, as cells: 1010, 12 bits (pag
 
 function rects(pics) {
   const d = dpr(), W = view.width, H = view.height, B = Math.round(cfg.band * d), m = Math.round(14 * d);
-  const foot = Math.round(20 * d);
+  const foot = Math.round((cfg.slider ? SLIDER_FOOT : 20) * d);
   const tall = Math.max(...pics.map(p => high(p.img)));
   const widths = pics.map(p => wide(p.img) * tall / high(p.img));
   const total = widths.reduce((a, b) => a + b, 0);
@@ -219,7 +367,420 @@ function counter() {
   g.fillText(pages.join("-") + " / " + entries.length, W - Math.round(16 * d), H - Math.round(6 * d));
 }
 
+// ------------------------------------------------------------------------------------------------ the slider
+let dragging = null;  // a press the slider took: {id, from, by, offset, knob, moves, events}
+let pressed = null;   // a press elsewhere: {id, moves}
+function track() {  // the bar in the canvas's pixels: its ends and its middle's row
+  const d = dpr(), W = view.width, H = view.height;
+  if (P) {  // in the bottom bar: across nearly all of it (dark), or in its middle (light)
+    const a = viewerArea(), foot = Math.round(P.bar_bottom * d);
+    if (P.bar_style === "solid")
+      return { x0: a.x + Math.round(a.w * 0.03), x1: a.x + Math.round(a.w * 0.97), y: a.y + a.h - foot + Math.round(20 * d) };
+    return { x0: a.x + Math.round(a.w * 0.30), x1: a.x + Math.round(a.w * 0.70), y: a.y + a.h - Math.round(foot / 2) };
+  }
+  return { x0: Math.round(W * SLIDER_X0), x1: Math.round(W * SLIDER_X1), y: H - Math.round(SLIDER_Y * d) };
+}
+function knobX(n) {  // the knob's place for page n: the first page at the right end
+  const t = track(), last = Math.max(1, entries.length - 1);
+  return Math.round(t.x1 - (Math.max(0, Math.min(last, n)) / last) * (t.x1 - t.x0));
+}
+function pageAtX(x) {  // the screen whose place on the bar is nearest x
+  const t = track(), last = Math.max(1, entries.length - 1);
+  const share = (t.x1 - Math.max(t.x0, Math.min(t.x1, x))) / Math.max(1, t.x1 - t.x0);
+  return first(Math.round(share * last));
+}
+function slider() {  // the bar and the knob (where the pointer holds it, else at the screen's place), over the foot
+  if (P) { compose(); return; }  // (a profile's slider is drawn with its bottom bar)
+  if (!cfg.slider) return;
+  const d = dpr(), t = track(), r = Math.round(KNOB * d), h = Math.max(1, Math.round(SLIDER_BAR * d));
+  g.fillStyle = GROUND; g.fillRect(t.x0 - r - 2, t.y - r - 2, t.x1 - t.x0 + 2 * r + 4, 2 * r + 4);
+  g.fillStyle = SLIDER_BAR_COLOUR; g.fillRect(t.x0, t.y - Math.floor(h / 2), t.x1 - t.x0, h);
+  g.fillStyle = SLIDER_KNOB_COLOUR;
+  g.beginPath(); g.arc(dragging ? dragging.knob : knobX(index), t.y, r, 0, Math.PI * 2); g.fill();
+}
+function sliderPart(x, y) {  // what of the slider a press at (x, y), canvas pixels, is on: knob, bar or else
+  const d = dpr(), t = track();
+  if (Math.hypot(x - knobX(index), y - t.y) <= KNOB_REACH * d) return "knob";
+  if (x >= t.x0 - KNOB * d && x <= t.x1 + KNOB * d && Math.abs(y - t.y) <= BAR_REACH * d) return "bar";
+  return "else";
+}
+function pointerWords(e) {
+  const d = dpr();
+  return "x=" + Math.round(e.clientX * d) + " y=" + Math.round(e.clientY * d) + " buttons=" + e.buttons + " id=" +
+         e.pointerId + " type=" + (e.pointerType || "") + " trusted=" + (e.isTrusted ? 1 : 0);
+}
+function moveKnob(x) {  // the knob held at x (canvas pixels); with slider=2 the page under it drawn
+  const t = track();
+  dragging.knob = Math.max(t.x0, Math.min(t.x1, Math.round(x - dragging.offset)));
+  slider();
+  if (cfg.slider !== 2) return;
+  const n = pageAtX(dragging.knob);
+  if (n === index || black) return;
+  stopSharp();
+  spinning = false;
+  index = n;
+  keepNear(index);
+  drawScreen(false, "preview");
+}
+function endDrag(how) {  // the press the slider took is over: the release goes to the page at the knob's place
+  const held = dragging, to = pageAtX(held.knob);
+  dragging = null;
+  try { if (view.hasPointerCapture(held.id)) view.releasePointerCapture(held.id); } catch (err) { /* (gone) */ }
+  const words = "from=" + held.from + " to=" + to + " by=" + held.by + " moves=" + held.moves + " events=" +
+                held.events + " how=" + how;
+  if (how !== "up") {  // cancelled: no jump, the screen before the press back
+    say("slider_cancel", words);
+    if (index !== held.from) turnTo(held.from, "slider_cancel"); else slider();
+    return;
+  }
+  say(to === held.from ? "stay" : "jump", words);
+  if (to !== held.from) turnTo(to, "slider"); else if (index !== to) turnTo(to, "slider"); else slider();
+}
+if (cfg.slider && !P) {
+  view.addEventListener("pointerdown", e => {
+    const d = dpr(), x = e.clientX * d, y = e.clientY * d;
+    const part = black ? "else" : sliderPart(x, y);
+    say("pointer", "kind=down on=" + part + " " + pointerWords(e));
+    e.preventDefault();
+    if (part === "else") { pressed = { id: e.pointerId, moves: 0 }; return; }
+    dragging = { id: e.pointerId, from: index, by: part === "knob" ? "drag" : "click",
+                 offset: part === "knob" ? x - knobX(index) : 0, knob: knobX(index), moves: 0, events: 0 };
+    try { view.setPointerCapture(e.pointerId); } catch (err) { say("pointer", "kind=no_capture"); }
+    moveKnob(x);
+  });
+  view.addEventListener("pointermove", e => {
+    const many = typeof e.getCoalescedEvents === "function" ? Math.max(1, e.getCoalescedEvents().length) : 1;
+    if (dragging && e.pointerId === dragging.id) {
+      dragging.events++; dragging.moves += many;
+      moveKnob(e.clientX * dpr());
+    } else if (pressed && e.pointerId === pressed.id && e.buttons) {
+      pressed.moves += many;
+    }
+  });
+  view.addEventListener("pointerup", e => {
+    say("pointer", "kind=up " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) {
+      moveKnob(e.clientX * dpr());
+      endDrag("up");
+    } else if (pressed && e.pointerId === pressed.id) {
+      say("pointer", "kind=released on=else moves=" + pressed.moves);
+      pressed = null;
+    }
+  });
+  view.addEventListener("pointercancel", e => {
+    say("pointer", "kind=cancel " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) endDrag("cancel");
+    if (pressed && e.pointerId === pressed.id) pressed = null;
+  });
+  view.addEventListener("lostpointercapture", e => {
+    say("pointer", "kind=lost " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) endDrag("lost");
+  });
+  view.addEventListener("click", e => {
+    const d = dpr();
+    say("click", "on=" + (black ? "else" : sliderPart(e.clientX * d, e.clientY * d)) + " " + pointerWords(e));
+  });
+}
+
+// ------------------------------------------------------------------------------------------------ a profile's view
+// The view is the page layer (ground and pages) with the bars, the side arrows, the black and its spinner over it,
+// composed again whenever one of them changes (`compose`); the band (the browser's own tabs and address bar) and the
+// code cells over all. The band is drawn while the window does not fill the screen (a browser's full screen has none).
+const layer = document.createElement("canvas");
+const lg = layer.getContext("2d");
+let shownRects = [];  // the pages on show (canvas pixels)
+let bars = { on: false, alpha: 0, from: 0, at: 0, why: "", hide: null };
+let arrows = { on: false, hide: null };
+let loading = null;  // the black with its spinner: {why, start, ms}
+let animating = false;
+let ptr = null;  // a press of a profile: {id, x, y, moves, on, side}
+const GROUNDS = { black: "#000000", white: "#ffffff" };
+
+function fullScreen() { return innerWidth >= screen.width && innerHeight >= screen.height; }
+function bandPx() { return P && fullScreen() ? 0 : Math.round(cfg.band * dpr()); }
+function viewerArea() { const B = bandPx(); return { x: 0, y: B, w: view.width, h: Math.max(1, view.height - B) }; }
+function pageBox() {
+  if (!shownRects.length) return null;
+  return { x0: Math.min(...shownRects.map(r => r.x)), x1: Math.max(...shownRects.map(r => r.x + r.w)),
+           y0: Math.min(...shownRects.map(r => r.y)), y1: Math.max(...shownRects.map(r => r.y + r.h)) };
+}
+function barRects() {
+  const a = viewerArea(), d = dpr(), t = Math.round(P.bar_top * d), b = Math.round(P.bar_bottom * d);
+  return { top: { x: a.x, y: a.y, w: a.w, h: t }, bottom: { x: a.x, y: a.y + a.h - b, w: a.w, h: b } };
+}
+function barsUp() { return P.bars !== "none" && bars.on && bars.alpha > 0.5; }
+function arrowsShown() {
+  if (P.arrows === "none" || loading) return { left: false, right: false };
+  const ok = arrowsAllowed(index, entries.length, spread, P.cover);
+  const on = P.arrow_show === "always" || arrows.on;
+  return { left: on && ok.left, right: on && ok.right };
+}
+
+function setBars(on, why) {  // the bars fade in or out over bar_fade_ms (said as they begin and as they end)
+  if (P.bars === "none") return;
+  if (bars.hide !== null) { clearTimeout(bars.hide); bars.hide = null; }
+  if (bars.on === on) return;
+  bars = { ...bars, on, from: bars.alpha, at: now(), why };
+  say("bars", "on=" + (on ? 1 : 0) + " why=" + why + " fade=" + P.bar_fade_ms);
+  animate();
+}
+function hideBarsLater(why) {
+  if (P.bars === "none" || !bars.on || bars.hide !== null) return;
+  bars.hide = setTimeout(() => { bars.hide = null; if (dragging) hideBarsLater(why); else setBars(false, why); }, P.bar_hide_ms);
+}
+function setArrows(on, why) {
+  if (P.arrows === "none" || P.arrow_show === "always") return;
+  if (arrows.hide !== null) { clearTimeout(arrows.hide); arrows.hide = null; }
+  if (on) arrows.hide = setTimeout(() => { arrows.hide = null; setArrows(false, "time"); }, P.arrow_hide_ms);
+  if (arrows.on === on) return;
+  arrows.on = on;
+  say("arrows", "on=" + (on ? 1 : 0) + " why=" + why);
+  compose();
+}
+function animate() {  // the bars' fade and the spinner, frame by frame while either goes on
+  if (animating) return;
+  animating = true;
+  const frame = () => {
+    const fade = P.bar_fade_ms > 0 ? Math.min(1, (now() - bars.at) / P.bar_fade_ms) : 1;
+    const target = bars.on ? 1 : 0, before = bars.alpha;
+    bars.alpha = bars.from + (target - bars.from) * fade;
+    if (before !== target && bars.alpha === target) say("bars_done", "on=" + target);
+    compose();
+    if (bars.alpha !== target || loading) requestAnimationFrame(frame); else animating = false;
+  };
+  requestAnimationFrame(frame);
+}
+
+function chevron(x, y, s, left, colour, width) {
+  g.strokeStyle = colour; g.lineWidth = width; g.lineCap = "round"; g.lineJoin = "round";
+  g.beginPath(); g.moveTo(x + (left ? s / 2 : -s / 2), y - s); g.lineTo(x + (left ? -s / 2 : s / 2), y);
+  g.lineTo(x + (left ? s / 2 : -s / 2), y + s); g.stroke();
+}
+function drawBars() {
+  if (P.bars === "none" || bars.alpha <= 0) return;
+  const d = dpr(), r = barRects(), solid = P.bar_style === "solid";
+  const ink = solid ? "#3a3a3a" : "#f2f2f2", faint = solid ? "#9a9a9a" : "#c8c8c8";
+  g.save();
+  g.globalAlpha = bars.alpha;
+  g.fillStyle = solid ? "#ffffff" : "rgba(70,70,70,0.78)";
+  g.fillRect(r.top.x, r.top.y, r.top.w, r.top.h);
+  g.fillRect(r.bottom.x, r.bottom.y, r.bottom.w, r.bottom.h);
+  g.fillStyle = ink; g.textAlign = "center"; g.textBaseline = "middle";
+  const T = r.top, row = solid ? Math.round(T.y + 26 * d) : Math.round(T.y + T.h / 2);
+  chevron(T.x + 24 * d, row, 7 * d, true, ink, 2 * d);  // back at the left
+  if (solid) {  // a mark in the middle, three small controls at the right; the title and a button under them
+    g.fillRect(T.x + T.w / 2 - 9 * d, row - 9 * d, 18 * d, 18 * d);
+    for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(T.x + T.w - (24 + 34 * k) * d, row, 7 * d, 0, Math.PI * 2); g.fill(); }
+    g.font = Math.round(14 * d) + "px sans-serif";
+    g.fillText("Sample pages", T.x + T.w / 2 - 30 * d, T.y + 70 * d);
+    g.strokeStyle = ink; g.lineWidth = 1.5 * d; g.strokeRect(T.x + T.w / 2 + 40 * d, T.y + 60 * d, 56 * d, 20 * d);
+  } else {  // small icons at the left, the title in the middle, a search mark at the right
+    for (let k = 1; k < 3; k++) g.fillRect(T.x + (24 + 30 * k) * d - 7 * d, row - 7 * d, 14 * d, 14 * d);
+    g.font = Math.round(13 * d) + "px sans-serif";
+    g.fillText("Sample pages", T.x + T.w / 2, row);
+    g.strokeStyle = ink; g.lineWidth = 2 * d;
+    g.beginPath(); g.arc(T.x + T.w - 30 * d, row - 2 * d, 6 * d, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.moveTo(T.x + T.w - 26 * d, row + 2 * d); g.lineTo(T.x + T.w - 21 * d, row + 7 * d); g.stroke();
+  }
+  const t = track(), B = r.bottom, count = entries.length, pages = screenPages().map(p => p + 1);
+  const words = pages[pages.length - 1] + "/" + count;
+  g.fillStyle = faint; g.fillRect(t.x0, t.y - Math.round(d), t.x1 - t.x0, Math.max(1, Math.round(2 * d)));
+  if (solid) {  // a few fixed dots on the line, the counter with the share read under it
+    g.fillStyle = faint;
+    for (const share of [0.25, 0.5, 0.75]) { g.beginPath(); g.arc(t.x0 + (t.x1 - t.x0) * share, t.y, 3 * d, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = ink; g.font = Math.round(12 * d) + "px sans-serif";
+    g.fillText(words + " \u00b7 " + Math.round(100 * pages[pages.length - 1] / Math.max(1, count)) + "%",
+               B.x + B.w / 2, B.y + B.h - 14 * d);
+  } else {  // the zoom figure and two zoom marks at the left, the counter beside the slider
+    g.fillStyle = ink; g.font = Math.round(12 * d) + "px sans-serif"; g.textAlign = "left";
+    g.fillText("100%", B.x + 16 * d, B.y + B.h / 2);
+    g.strokeStyle = ink; g.lineWidth = 1.5 * d;
+    for (let k = 0; k < 2; k++) { g.beginPath(); g.arc(B.x + (70 + 24 * k) * d, B.y + B.h / 2, 7 * d, 0, Math.PI * 2); g.stroke(); }
+    g.fillText(words, t.x1 + 16 * d, B.y + B.h / 2);
+  }
+  g.fillStyle = solid ? "#3a3a3a" : "#ffffff";
+  g.beginPath(); g.arc(dragging ? dragging.knob : knobX(index), t.y, KNOB * d, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+function drawArrows() {
+  const on = arrowsShown(), d = dpr(), rs = arrowRects(viewerArea(), P.arrows, P.arrow_inset, d);
+  if (!rs) return;
+  for (const side of ["left", "right"]) {
+    if (!on[side]) continue;
+    const r = rs[side], cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    if (P.arrows === "edge") {
+      g.fillStyle = "#ffffff"; g.fillRect(r.x, r.y, r.w, r.h);
+      chevron(cx, cy, 8 * d, side === "left", "#3a3a3a", 2.5 * d);
+    } else {
+      g.fillStyle = "rgba(40,40,40,0.85)"; g.beginPath(); g.arc(cx, cy, r.w / 2, 0, Math.PI * 2); g.fill();
+      chevron(cx, cy, 6 * d, side === "left", "#ffffff", 2 * d);
+    }
+  }
+}
+function drawLoading() {  // the viewer's area black, a small spinner in its middle
+  const a = viewerArea(), d = dpr();
+  g.fillStyle = "#000000"; g.fillRect(a.x, a.y, a.w, a.h);
+  const x = a.x + a.w / 2, y = a.y + a.h / 2, r = 14 * d, turn = ((now() - loading.start) / 900) * Math.PI * 2;
+  g.lineCap = "round"; g.strokeStyle = "rgba(255,255,255,0.9)"; g.lineWidth = 3 * d;
+  g.beginPath(); g.arc(x, y, r, turn, turn + Math.PI * 1.4); g.stroke();
+}
+function compose() {
+  if (!P || black) return;
+  if (layer.width === view.width && layer.height === view.height) g.drawImage(layer, 0, 0);
+  else { g.fillStyle = GROUNDS[P.ground] || GROUND; g.fillRect(0, 0, view.width, view.height); }  // (resized: no layer yet)
+  if (loading) drawLoading();
+  drawBars();
+  drawArrows();
+  if (bandPx() > 0) band();
+  code(shown === "soft", !!loading);
+}
+
+async function drawProfile(soft, why, kind, half) {  // the screen on show into the page layer, then composed;
+  const token = ++drawToken;                            // kind "preview" washed out, "half" one page of a spread
+  const began = now();
+  const pics = await Promise.all(screenPages().map(load));
+  if (token !== drawToken || black) return false;
+  sizeCanvas();
+  if (layer.width !== view.width || layer.height !== view.height) { layer.width = view.width; layer.height = view.height; }
+  lg.fillStyle = GROUNDS[P.ground] || GROUND; lg.fillRect(0, 0, layer.width, layer.height);
+  const rs = fitRects(pics.map(p => [wide(p.img), high(p.img)]), viewerArea());
+  pics.forEach((p, k) => {
+    if (kind === "half" && k !== half) { lg.fillStyle = "#000000"; lg.fillRect(rs[k].x, rs[k].y, rs[k].w, rs[k].h); return; }
+    if (kind === "preview") lg.filter = "grayscale(1) contrast(0.55) brightness(1.2) blur(" + (2 * dpr()) + "px)";
+    drawPicture(lg, p, rs[k], soft && !kind);  // (half and preview: the page drawn sharp, the cells say soft)
+    lg.filter = "none";
+  });
+  shownRects = rs;
+  shown = soft ? "soft" : "sharp";
+  base = layer;
+  compose();
+  const box = [Math.min(...rs.map(r => r.x)), Math.min(...rs.map(r => r.y)),
+               Math.max(...rs.map(r => r.x + r.w)), Math.max(...rs.map(r => r.y + r.h))];
+  say("draw", "state=" + shown + (kind ? " kind=" + kind : "") + " why=" + why + " wait=" + Math.round(now() - began) +
+      " box=" + box.join(",") + " band=" + bandPx() + " pages=" + pics.length);
+  return true;
+}
+function load_then(why, ms, then) {  // the black with its spinner for ms, then *then* (none if another draw came)
+  stopSharp();
+  const token = ++drawToken;
+  loading = { why, start: now(), ms };
+  shown = "black";
+  say("spinner", "on=1 why=" + why + " ms=" + ms);
+  animate();
+  setTimeout(() => {
+    if (token !== drawToken) return;
+    loading = null;
+    say("spinner", "on=0 why=" + why);
+    then();
+  }, ms);
+}
+function jumpTo(n, why) {  // a jump by the slider (or the script's j): as the profile has it
+  stopSharp();
+  index = first(Math.max(0, Math.min(entries.length - 1, n)));
+  keepNear(index);
+  if (P.jump === "spinner") {
+    load_then("jump", between(P.jump_ms[0], P.jump_ms[1]), () => {
+      if (screenPages().length === 2 && random() < P.jump_half) {  // one page of the spread first, the other later
+        const half = random() < 0.5 ? 0 : 1;
+        drawProfile(true, why, "half", half).then(done => {
+          if (!done) return;
+          const token = drawToken;
+          setTimeout(() => { if (token === drawToken) drawProfile(false, "sharp"); }, P.half_ms);
+        });
+      } else drawProfile(false, why);
+    });
+  } else if (P.preview) {
+    say("preview", "on=1 ms=" + P.preview_ms);
+    drawProfile(true, why, "preview").then(done => {
+      if (!done) return;
+      const token = drawToken;
+      setTimeout(() => {
+        if (token !== drawToken) return;
+        say("preview", "on=0");
+        drawProfile(false, "sharp");
+      }, P.preview_ms);
+    });
+  } else drawProfile(false, why);
+}
+function turnBy(dir, by, words) {  // a turn a person asked for, said with its cause (and where a click was)
+  say("turn", "dir=" + dir + " by=" + by + (words ? " " + words : ""));
+  if ((by === "key" || by === "script") && P.bar_key_hide) setBars(false, by);
+  if (dir === "next") next(); else previous();
+}
+
+function profileInput() {  // pointer events on the page, as a web viewer takes them
+  const at = e => [Math.round(e.clientX * dpr()), Math.round(e.clientY * dpr())];
+  view.addEventListener("pointermove", e => {
+    const [x, y] = at(e);
+    const many = typeof e.getCoalescedEvents === "function" ? Math.max(1, e.getCoalescedEvents().length) : 1;
+    if (dragging && e.pointerId === dragging.id) { dragging.events++; dragging.moves += many; moveKnob(x); return; }
+    if (ptr && e.pointerId === ptr.id && e.buttons) ptr.moves += many;
+    if (P.bars === "edge") {
+      if (inEdge(y, viewerArea(), Math.round(P.bar_top * dpr()), Math.round(P.bar_bottom * dpr()))) setBars(true, "edge");
+      else hideBarsLater("edge_left");
+    } else if (P.bars === "move") { setBars(true, "move"); hideBarsLater("time"); }
+    if (P.arrow_show === "move") setArrows(true, "move");
+  });
+  view.addEventListener("pointerleave", () => { if (P.bars === "edge") hideBarsLater("edge_left"); });
+  view.addEventListener("pointerdown", e => {
+    const [x, y] = at(e), r = barRects(), sides = arrowRects(viewerArea(), P.arrows, P.arrow_inset, dpr());
+    const on = arrowsShown();
+    let part = "page";
+    if (loading || black) part = "else";
+    else if (barsUp() && cfg.slider && sliderPart(x, y) !== "else") part = sliderPart(x, y);
+    else if (barsUp() && (inside(r.top, x, y) || inside(r.bottom, x, y))) part = "bar_area";
+    else if (sides && on.left && inside(sides.left, x, y)) part = "arrow_left";
+    else if (sides && on.right && inside(sides.right, x, y)) part = "arrow_right";
+    say("pointer", "kind=down on=" + part + " " + pointerWords(e));
+    e.preventDefault();
+    if (part === "knob" || part === "bar") {
+      dragging = { id: e.pointerId, from: index, by: part === "knob" ? "drag" : "click",
+                   offset: part === "knob" ? x - knobX(index) : 0, knob: knobX(index), moves: 0, events: 0 };
+      try { view.setPointerCapture(e.pointerId); } catch (err) { say("pointer", "kind=no_capture"); }
+      moveKnob(x);
+      return;
+    }
+    ptr = { id: e.pointerId, x, y, moves: 0, on: part };
+  });
+  view.addEventListener("pointerup", e => {
+    const [x, y] = at(e);
+    say("pointer", "kind=up " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) { moveKnob(x); endDrag("up"); return; }
+    if (!ptr || e.pointerId !== ptr.id) return;
+    const press = ptr;
+    ptr = null;
+    if (Math.hypot(x - press.x, y - press.y) > 6 * dpr()) { say("pointer", "kind=released on=" + press.on + " moved=1"); return; }
+    const where = "x=" + x + " y=" + y;
+    if (press.on === "arrow_left") { turnBy("next", "arrow", "side=left " + where); return; }
+    if (press.on === "arrow_right") { turnBy("previous", "arrow", "side=right " + where); return; }
+    if (press.on !== "page") { say("pointer", "kind=released on=" + press.on); return; }
+    const box = pageBox();
+    const third = box ? thirdOf(x, box.x0, box.x1) : null;
+    if (third === null && box && P.ground_clicks) {  // on the ground beside the page: left goes on, right back
+      turnBy(x < box.x0 ? "next" : "previous", "ground", "side=" + (x < box.x0 ? "left" : "right") + " " + where);
+    } else if (third === "middle" && P.bars === "click") {
+      setBars(!bars.on, "click");
+    } else if ((third === "left" || third === "right") && P.page_clicks) {
+      turnBy(third === "left" ? "next" : "previous", "page", "third=" + third + " " + where);
+    } else say("pointer", "kind=released on=" + (third === null ? "ground" : "page_" + third) + " " + where);
+  });
+  view.addEventListener("pointercancel", e => {
+    say("pointer", "kind=cancel " + pointerWords(e));
+    if (dragging && e.pointerId === dragging.id) endDrag("cancel");
+    if (ptr && e.pointerId === ptr.id) ptr = null;
+  });
+  view.addEventListener("lostpointercapture", e => {
+    if (dragging && e.pointerId === dragging.id) { say("pointer", "kind=lost " + pointerWords(e)); endDrag("lost"); }
+  });
+  view.addEventListener("click", e => {
+    const [x, y] = at(e);
+    say("click", "x=" + x + " y=" + y + " trusted=" + (e.isTrusted ? 1 : 0));
+  });
+}
+if (P) profileInput();
+
 async function drawScreen(soft, why) {
+  if (P) return drawProfile(soft, why);
   const token = ++drawToken;
   const began = now();
   const pics = await Promise.all(screenPages().map(load));
@@ -228,7 +789,7 @@ async function drawScreen(soft, why) {
   g.fillStyle = GROUND; g.fillRect(0, 0, view.width, view.height);
   const rs = rects(pics);
   pics.forEach((p, k) => drawPicture(g, p, rs[k], soft));
-  band(); counter(); code(soft, false);
+  band(); counter(); slider(); code(soft, false);
   shown = soft ? "soft" : "sharp";
   if (!soft) {
     base = document.createElement("canvas"); base.width = view.width; base.height = view.height;
@@ -264,6 +825,8 @@ function keepSoft(token) {  // the turn on show kept soft until the control file
 
 function turnTo(n, why) {
   if (black) { say("lost", "why=" + why); return; }  // a key in the black: gone
+  if (P && loading) { loading = null; say("spinner", "on=0 why=cut"); }  // (a turn while it loads: it goes on)
+  if (P && (why === "slider" || why === "jump")) { spinning = false; jumpTo(n, "jump"); return; }
   stopSharp();
   spinning = false;
   index = first(Math.max(0, Math.min(entries.length - 1, n)));
@@ -278,8 +841,12 @@ function turnTo(n, why) {
     }, between(cfg.softMin, cfg.softMax));
   });
 }
-function next() { turnTo(index + (spread ? 2 : 1), "next"); }
-function previous() { turnTo(index - (spread ? 2 : 1), "previous"); }
+function next() {
+  turnTo(P ? nextScreen(index, entries.length, spread, P.cover) : index + (spread ? 2 : 1), "next");
+}
+function previous() {
+  turnTo(P ? previousScreen(index, entries.length, spread, P.cover) : index - (spread ? 2 : 1), "previous");
+}
 
 let blackUntil = 0;
 function flash(ms) {  // the window drew black, as a browser does as it gets the foreground
@@ -364,7 +931,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfstbmehku])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbmehkuva])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -377,8 +944,12 @@ async function run(steps) {
     const s = steps[k];
     if (s.op === "g") { say("wait", "go=" + s.a); await until(() => control.go >= s.a); say("go", "go=" + s.a); }
     else if (s.op === "w") await sleep(s.b === null ? s.a : between(s.a, s.b));
-    else if (s.op === "n") next();
-    else if (s.op === "p") previous();
+    else if (s.op === "n") { if (P) turnBy("next", "script"); else next(); }
+    else if (s.op === "p") { if (P) turnBy("previous", "script"); else previous(); }
+    else if (s.op === "v") {  // (a profile) the bars shown as the pointer shows them, for N ms (2000), then let go
+      if (P) { setBars(true, "script"); const ms = s.a === null ? 2000 : s.a; setTimeout(() => setBars(false, "script"), ms); }
+    }
+    else if (s.op === "a") { if (P) setArrows(true, "script"); }  // (a profile) the side arrows as a pointer move shows them
     else if (s.op === "j") turnTo(s.a || 0, "jump");
     else if (s.op === "f") flash(s.a === null ? cfg.flashMs : s.a);
     else if (s.op === "s") await spinner(s.a || 1000);
@@ -398,17 +969,28 @@ async function run(steps) {
 
 // ------------------------------------------------------------------------------------------------ by hand
 addEventListener("keydown", e => {
+  if (P && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {  // (a profile: said, with what it turned)
+    e.preventDefault();
+    say("key", "key=" + e.key + " trusted=" + (e.isTrusted ? 1 : 0));
+    if (black) { say("lost", "why=key"); return; }
+    turnBy(e.key === "ArrowLeft" ? "next" : "previous", "key");
+    return;
+  }
   if (e.key === "ArrowLeft") { e.preventDefault(); black ? say("lost", "why=key") : next(); }
   else if (e.key === "ArrowRight") { e.preventDefault(); black ? say("lost", "why=key") : previous(); }
 });
-addEventListener("focus", () => { say("focus"); flash(cfg.flashMs); });
+addEventListener("focus", () => { say("focus"); if (cfg.focusBlack) flash(cfg.flashMs); });
+addEventListener("blur", () => { if (P) say("blur"); });
 addEventListener("resize", () => {
   if (!sizeCanvas()) return;
   const was = spread;
   spread = spreadNow();
-  if (was !== spread) index = first(index);
-  say("size", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr());
-  if (!black && !spinning) drawScreen(false, "resize");
+  if (was !== spread || P) index = first(index);
+  say("size", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +
+      (P ? " full=" + (fullScreen() ? 1 : 0) + " band=" + bandPx() : ""));
+  if (black || spinning) return;
+  if (P && P.resize === "spinner") load_then("resize", between(P.resize_ms[0], P.resize_ms[1]), () => drawProfile(false, "resize"));
+  else drawScreen(false, "resize");
 });
 
 // ------------------------------------------------------------------------------------------------ the start
@@ -416,6 +998,7 @@ window.standinPages = function (list) {
   if (list && Array.isArray(list.files)) entries = list.files.map(f => (typeof f === "string" ? { url: f } : f));
 };
 function begin() {
+  if (P) document.documentElement.style.background = document.body.style.background = GROUNDS[P.ground] || GROUND;
   if (!entries.length) entries = Array.from({ length: 40 }, (_v, n) => ({ placeholder: n }));
   sizeCanvas();
   spread = spreadNow();
@@ -423,7 +1006,7 @@ function begin() {
   drawScreen(false, "start").then(() => {
     say("ready", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +
         " count=" + entries.length + " cell=" + CELL + " x=" + CODE_X + " y=" + CODE_Y +
-        " soft_first=" + (cfg.softFirst ? 1 : 0));
+        " soft_first=" + (cfg.softFirst ? 1 : 0) + (P ? " profile=" + query.get("profile") + " band=" + bandPx() : ""));
     setInterval(poll, CONTROL_MS);
     poll();
     let steps = [];
