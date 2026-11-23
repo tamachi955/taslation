@@ -721,6 +721,10 @@ class TranslatorMixin:
         self._apply_role(start_role(int(pages) > 0), chosen=False)
 
     def _apply_role(self, role: str, chosen: bool) -> None:
+        """The role a book opens in (*chosen*: the reader's for it). In see-through mode the Reader role always: the
+        Translator role's page and regions are TASlation's own window, which is not on the screen."""
+        if getattr(self, "_see_hidden", False):
+            role = "reader"
         if self.role_var.get() == role:
             return
         self.role_var.set(role)

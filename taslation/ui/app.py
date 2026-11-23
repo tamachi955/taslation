@@ -192,19 +192,20 @@ def first_target(state_dir: Path, configured: str, window_language: str, first_s
 
 
 class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, ReplaceMixin, FormatMixin, SelectionMixin,
-          ViewerMixin, SideMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, tk.Tk):
+          ViewerMixin, SideMixin, OverBookMixin, ModelSwitchMixin, AreaMixin, seethrough.HiddenWindowMixin, tk.Tk):
     """The reader window. Its state is made here (`__init__`), and its widgets (`_build_ui`, again after a language
     switch); the small dialogs open from here. What it does comes from the mixins: the status line and the busy badge
     (`status`), the capture, the live picture and Auto (`live`), the worker, its events and the requests (`jobs`),
     the full screen and the window's size and place (`reading`), translator mode (`translator`; several regions selected
     and the reading-order badges: `selection`), the viewer list, the area and the offline guard (`viewers`), the
-    window over a full-screen viewer (`overbook`)."""
+    window over a full-screen viewer (`overbook`), the window never on the screen in see-through mode
+    (`seethrough.HiddenWindowMixin`)."""
 
     def __init__(self, settings: Settings, window_query: str | None = None, book: str | None = None, auto: bool = True,
                  on_top: bool = False, reading: bool = False):
         set_app_id()
         super().__init__()
-        seethrough.quiet_start(self, settings)  # see-through mode: shown without taking the foreground from the viewer
+        seethrough.quiet_start(self, settings)  # see-through mode: never on the screen, nor taking the foreground
         self._apply_alpha()  # before the window is first shown: an alpha set later makes a browser behind it flicker
         apply_icon(self)
         give_icons(self)  # the taskbar takes the big one
@@ -501,6 +502,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         holds the window while the popup is up puts it away until that dialog is answered (`_first_steps_wait`)."""
         if getattr(self, "_first_steps", None) is not None or not first_steps_due(self.settings.state_dir):
             return
+        if seethrough.hidden(self):  # (its lines speak of the window, which this mode never shows: a later start's)
+            return
         starting = getattr(self, "_start_dialog", None) is not None or getattr(self, "_start_pending", None) is not None
         if self.reading or starting or modal_up(self):
             self.after(FIRST_STEPS_RETRY_MS, self._offer_first_steps)
@@ -591,7 +594,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.auto_var = tk.BooleanVar(value=False)
         self.original_var = tk.BooleanVar(value=False)
         self.top_var = tk.BooleanVar(value=False)
-        self.role_var = tk.StringVar(value=self.settings.role)
+        # (see-through mode: the Reader role always, `seethrough.without_the_window`)
+        self.role_var = tk.StringVar(value="reader" if seethrough.hidden(self) else self.settings.role)
         self.book_var.trace_add("write", lambda *_a: self._book_for_role())  # a book opens in its role
         self._build_menus()
         # View > Show original greyed while the page shows the original anyway (`hover.original_idle`)
@@ -1022,6 +1026,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
             self._colours_again()
         if "side_indicator" in changed:  # the indicator beside the page in its new form, the page with its room
             self._side_setting_changed()
+        if "see_through_indicators" in changed:  # (see-through mode: the banner's lines in that pane or a dialog)
+            self._show_banner()
         if set(changed) & PAGE_SETTINGS:
             self._jobs.put(self._job_settings_changed)
             if self.last_result is not None and not self.busy:

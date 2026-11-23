@@ -296,10 +296,14 @@ class Settings:
     over_book: bool = True
     # a prototype, off by default: the lettering laid over the viewer's own window by a click-through window of
     # TASlation's, the viewer taking every click and key itself (TASlation holds no key then); the Lettering switch of
-    # the left side pane hides it or shows it again (`ui.seethrough`)
+    # the left side pane hides it or shows it again (`ui.seethrough`). TASlation's own window is never on the screen
+    # then: the side panes, their Menu and the icon in the notification area (`ui.see_menu`) and its dialogs are all
+    # there is of it - the Reader role always, no full screen of its own, the viewer's window never moved nor resized.
+    # In that mode its Settings dialog has a row for it (from the next start)
     see_through: bool = False
     # see-through mode's right side pane, the indicators at the right edge of the viewer's area (`ui.seethrough`):
-    # shown or not; the switch in its left pane writes it here, kept for the next starts
+    # shown or not; the switch in its left pane and the Settings dialog in that mode write it here, kept for the next
+    # starts
     see_through_indicators: bool = True
     # the translation on the page (the Reader role by hover_shows, the Translator role always; on the full screen as
     # in the window): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its

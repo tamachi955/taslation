@@ -1,8 +1,9 @@
 """See-through mode's side panes: where they go at the capture area's outer edges (never over the page, nor near it),
 how wide they are, their pictures and the controls' hit boxes - the ask-again button's square among them -, the
 window's words with their keys left out (`taslation.panes`); on the Tk side what they say, what a click does, the
-indicators' switch kept in the settings file, the window put aside shown again for a dialog of its own, and no hot
-key held (`ui.seethrough`); the patch under the pointer left out (`seethrough.hovered`, `capture.seethrough`).
+indicators' switch kept in the settings file, the Menu row in place of a way back to TASlation's window, and no hot
+key held (`ui.seethrough`; the window never on the screen: tests/test_see_hidden.py); the patch under the pointer
+left out (`seethrough.hovered`, `capture.seethrough`).
 Synthetic sizes and fake windows only; the pointer is never moved (the window's reading of it is put in its place)."""
 
 from types import SimpleNamespace
@@ -26,7 +27,7 @@ def controls():
     return [pn.Row("translate", "Translate", square="again"), pn.Row("auto", "Auto", "toggle", on=True),
             pn.Row("language", "English", "choice"), pn.Row("lettering", "Lettering", "toggle", on=True),
             pn.Row("indicators", "Indicators", "toggle", on=True), pn.Row("area", "Set area..."),
-            pn.Row("settings", "Settings..."), pn.Row("window", "TASlation window"), pn.Row("quit", "Quit")]
+            pn.Row("settings", "Settings..."), pn.Row("menu", "Menu"), pn.Row("quit", "Quit")]
 
 
 def words():
@@ -305,17 +306,36 @@ def test_the_left_pane_says_stop_while_a_page_can_be_stopped(tmp_path):
     assert ui.left_rows(app)[0].name == "stop" and ui.left_rows(app)[0].square == "again"  # (the arrow stays)
 
 
-def test_a_click_on_the_circular_arrow_asks_for_the_page_again_once_as_f5_does_in_the_window(tmp_path):
-    # (the window's "try again" - its status slot's "This page could not be translated. F5 tries again." - is
-    # `translate_now`, which the arrow calls; its words are not shown on it)
+def test_a_click_on_the_circular_arrow_has_the_page_translated_again_as_translate_again_does(tmp_path):
+    # (not `translate_now`, which answers from the cache: the window's Translate again, whose lines are asked of the
+    # translator anew and replace the cache's, in the Reader role too; its question takes the keys)
     app = fake_app(tmp_path)
+    app.retranslate_page = lambda: app.asked.append(("retranslate_page", app._see_asked))
     ui.panes_tick(app)
     picture = app._see_pane_memo["left"][1]
     box = dict(picture.hits)["again"]
     app._see_through.clicks = [("left", (box[0] + box[2]) // 2, (box[1] + box[3]) // 2, 0.0)]
     ui.panes_tick(app)
-    assert app.asked == ["translate_now"] and [n for _t, n in app._see_clicked] == ["again"]
-    assert ui.PANE_ACTIONS["again"] is not ui.PANE_ACTIONS["translate"]  # (its own entry, the same call)
+    (name, when), = app.asked
+    assert name == "retranslate_page" and when > 0 and [n for _t, n in app._see_clicked] == ["again"]
+    ui.PANE_ACTIONS["translate"](app)
+    assert app.asked[-1] == "translate_now"  # (Translate itself: the page from the cache when it is there)
+
+
+def test_translate_again_reads_the_page_anew_in_the_reader_role_too(monkeypatch):
+    from taslation.ui import translator
+
+    started, queued = [], []
+    result = SimpleNamespace(original="frame", units=[])
+    window = SimpleNamespace(busy=False, pipeline=SimpleNamespace(), last_result=result,
+                             _page_to_work_on=lambda: True, role_var=Var("reader"),
+                             _start_translate=lambda image, **k: started.append((image, k)),
+                             _jobs=SimpleNamespace(put=queued.append),
+                             _kept_after_reading=lambda kind, r: (SimpleNamespace(before=None), lambda: None))
+    monkeypatch.setattr(translator.boxes, "ask", lambda *a, **k: True)
+    translator.TranslatorMixin.retranslate_page(window)
+    (image, options), = started
+    assert image == "frame" and options["again"] is result and options["complete"] is True
 
 
 def test_the_circular_arrow_is_dim_until_a_page_was_lettered_and_while_the_windows_translate_is(tmp_path):
@@ -349,7 +369,7 @@ def test_see_through_mode_holds_no_hot_key(tmp_path, monkeypatch):
 
     monkeypatch.setattr(overlay.HotKeys, "start", classmethod(refused))
     monkeypatch.setattr(ui.window, "viewer_dpi", lambda hwnd: 96)
-    app = fake_app(tmp_path, selected=SimpleNamespace(hwnd=1234), _see_memo=[], _see_aside=False)
+    app = fake_app(tmp_path, selected=SimpleNamespace(hwnd=1234), _see_memo=[])
     app._see_through.follow = lambda hwnd: None
     monkeypatch.setattr(ui, "present", lambda app: None)
     ui.tick(app)
@@ -377,26 +397,17 @@ def test_the_language_arrows_show_at_once_and_the_choice_is_taken_once(tmp_path)
     assert picked and app.lang_shown.get() != "English"
 
 
-def test_the_window_put_aside_is_shown_again_for_a_dialog_of_its_own(hidden_root):
-    import tkinter as tk
-
-    dialog = tk.Toplevel(hidden_root)
-    dialog.withdraw()
-    dialog.transient(hidden_root)
-    tip = tk.Toplevel(hidden_root)
-    tip.withdraw()
-    tip.overrideredirect(True)
-    shown = []
-    app = SimpleNamespace(_see_aside=True, _quiet_decoy=None, _opening_zoomed=False, state=lambda *a: "iconic",
-                          winfo_children=lambda: [tip], deiconify=lambda: shown.append("deiconify"),
-                          lift=lambda: None, focus_force=lambda: shown.append("focus"))
-    ui._dialog_waits(app)
-    assert shown == [] and app._see_aside  # (a tip is not a dialog)
-    app.winfo_children = lambda: [tip, dialog]
-    ui._dialog_waits(app)
-    assert shown == ["deiconify", "focus"] and not app._see_aside
-    ui._dialog_waits(app)  # (the window is the reader's again: not looked at)
-    assert shown == ["deiconify", "focus"]
+def test_the_left_pane_ends_with_menu_and_quit_and_offers_no_way_to_taslations_window(tmp_path):
+    app = fake_app(tmp_path)
+    names = [r.name for r in ui.left_rows(app)]
+    assert names[-4:] == ["area", "settings", "menu", "quit"] and "window" not in names
+    assert "window" not in ui.PANE_ACTIONS and not hasattr(ui, "window_up") and not hasattr(ui, "aside")
+    opened = []
+    app.set_area = lambda: opened.append(("area", app._see_asked))
+    app.open_settings = lambda: opened.append(("settings", app._see_asked))
+    ui.PANE_ACTIONS["area"](app)
+    ui.PANE_ACTIONS["settings"](app)
+    assert [n for n, _t in opened] == ["area", "settings"] and all(t > 0 for _n, t in opened)  # (asked for)
 
 
 def test_the_pane_windows_are_layered_topmost_and_never_activated_the_right_one_click_through():

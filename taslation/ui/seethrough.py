@@ -21,28 +21,39 @@ and the viewer takes every click and key itself.
 * The side panes (`taslation.panes`, shown by `capture.seethrough`): on the viewer's ground at the capture area's two
   outer edges (`note_frame` keeps the page box at rest, the area's columns, the steady band and the ground's colour),
   LEFT the controls - Translate (Stop while a page can be stopped) with, at the row's right end, a square button drawn
-  as a circular arrow that asks for the page on show again (`translate_now`, what F5 does in the window; dim until a
-  page was lettered and while the window's Translate is), Auto, the target language (an arrow each side; taken once no
+  as a circular arrow that has the page on show translated again (`_again`: the window's Translate again, its lines
+  asked of the translator anew; dim until a page was lettered and while the window's Translate is), Auto, the target
+  language (an arrow each side; taken once no
   arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
-  file: ``see_through_indicators``), Set area..., Settings..., the way back to TASlation's window, Quit -, RIGHT the
-  indicators: what the status slot says, how far the page filling in is (lines lettered of the lines read), the status
-  line, the backlog, the pages that went by too fast and those updated since they were seen (the indicator's own
-  lines), where the translator runs - the window's words with what they say of keys left out (`panes.without_keys`:
-  the keys are the viewer's here). `panes_tick` (every TICK_MS) acts on the clicks on the left pane and draws a pane
-  again only when what it says changed. A pane that would come near the page hides (`panes.place`).
-* TASlation's own window is put aside: shown at a quiet start (never activated, so that its widgets are laid out)
-  and minimised QUIET_MS later (`quiet_started`; minimising a window that is not active moves no foreground), reached
-  again from the left pane (TASlation window) or the taskbar. A dialog of its own that comes up meanwhile - the
-  book's name asked for, a model offered - would wait unseen behind the minimised window (Tk keeps a transient of a
-  minimised window hidden), so the window is shown again for it (`_dialog_waits`). A control that opens a dialog
-  (Set area..., Settings..., a language whose model is not there) shows the window first, and that is the one time a
-  click on a pane brings TASlation in front: the reader asked for its dialog.
+  file: ``see_through_indicators``), Set area..., Settings..., Menu (`see_menu`: what the window's menus and toolbar
+  offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
+  filling in is (lines lettered of the lines read), the status line, the backlog, the pages that went by too fast and
+  those updated since they were seen (the indicator's own lines), where the translator runs - the window's words with
+  what they say of keys left out (`panes.without_keys`: the keys are the viewer's here). `panes_tick` (every TICK_MS)
+  acts on the clicks on the left pane and draws a pane again only when what it says changed. A pane that would come
+  near the page hides (`panes.place`).
+* TASlation's own window is never on the screen in this mode (`hidden`): the Tk root stays the host of the widgets
+  and the dialogs, mapped in its normal state - so that its widgets are laid out at their sizes, and its dialogs (Tk
+  transients of it) show: Tk keeps a transient of a withdrawn or minimised window hidden - but off every monitor
+  (`root_geometry`: up and left of the virtual screen by its own size; every size and place given to it goes there,
+  `App.wm_geometry`), at alpha 0, and a tool window (no taskbar button, not in Alt+Tab); never minimised, maximised or
+  full screen. Its first showing is a quiet one (`quiet_start`'s decoy) and takes no foreground. `keep_hidden` puts
+  each of those back should anything have changed it (counted); `hand_back` gives the foreground back to the viewer
+  when Windows gave it to the root (a dialog of its own closed, a menu ended). Its dialogs come up alone, over the
+  viewer (`dialog_centre`, `layout.dialog_area`), on the viewer's monitor (`layout.book_monitor`); one the reader asked
+  for (from a pane, the menu or the notification-area icon: `asked`) takes the keys as it shows (`_mapped`), the others
+  keep their own way (the start's ones leave the foreground where it is: `layout.dialog_keys`). With no viewer chosen
+  the viewer chooser comes by itself (`see_menu.chooser_due`), and the setup banner's lines come as a small dialog of
+  their own (`see_menu.show_banner`). The notification-area icon (`capture.tray`) opens the same menu with Settings...
+  and Quit, for when no viewer is in front and the panes are hidden.
 
-Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, or a
-dialog of TASlation's own, moves the foreground."""
+Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, the
+menu or the icon, or a dialog of TASlation's own, moves the foreground."""
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 import tkinter as tk
 from typing import Any
@@ -58,6 +69,8 @@ from ..capture import wgc
 from ..i18n import _
 from ..i18n import current as ui_language
 
+log = logging.getLogger(__name__)
+
 TICK_MS = 50
 BAR_WAIT_S = 3.5  # a frame with bars over the page is read only once they have stayed so long (a viewer's own bars go
 # by themselves in 1-3 s once the pointer rests; bars held longer are painted over in the frame read)
@@ -69,10 +82,13 @@ CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`re
 # (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
 
 
-QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made, and the
-# window is minimised then (once it has been shown: its widgets laid out at their sizes)
-ASIDE_TRIES = 10  # ... looked at again every QUIET_MS so many times while it is not shown yet
+QUIET_MS = 500  # (see-through mode) the decoy of `quiet_start` goes so long after the window's start is made
 LANGUAGE_SETTLE_MS = 1200  # the language chosen with the left pane's arrows is taken once none was clicked so long
+OFF_GAP = 400  # px between the hidden window's bottom right and the virtual screen's top left (its frame: some 40)
+HIDE_EVERY = 10  # ticks (0.5 s) between the looks of `keep_hidden`
+ASKED_S = 1.5  # a dialog that shows so soon after the reader asked for something (`asked`) takes the keys
+HAND_BACK_WAIT_S = 0.4  # ... and `hand_back` leaves the foreground where it is so long after such a request (the
+# dialog it opens is on its way)
 
 
 def px(app: Any, size: int) -> int:
@@ -87,22 +103,29 @@ def on(app: Any) -> bool:
 
 
 def quiet_start(app: Any, settings: Any) -> None:
-    """At the very start of the window, before Tk first shows it, in see-through mode (Windows): Tk activates the
-    first top-level window it makes (SetActiveWindow when it is first shown - Tk 8.6.15, whatever its state: hidden
-    or minimised alike), which takes the foreground from the viewer; so the first one it makes is a decoy put inside
-    a frame of the window's own (``-use``), a child window, which nothing activates. The window itself is then shown
-    as Tk shows every later one, not activated (SW_SHOWNOACTIVATE): the viewer stays in front and takes the reader's
-    keys with no click first. Nothing moves the foreground. The decoy goes once the window is shown
-    (`quiet_started`)."""
+    """At the very start of the window, before Tk first shows it, in see-through mode (Windows): the window made one
+    that is never on the screen (`hidden`: a tool window here, alpha 0 and off every monitor with `App._apply_alpha`
+    and `App.wm_geometry`, before it is first shown), and Tk kept from taking the foreground from the viewer as it
+    shows it: Tk activates the first top-level window it makes (SetActiveWindow when it is first shown - Tk 8.6.15,
+    whatever its state: hidden or minimised alike), so the first one it makes is a decoy put inside a frame of the
+    window's own (``-use``), a child window, which nothing activates. The window itself is then shown as Tk shows
+    every later one, not activated (SW_SHOWNOACTIVATE): the viewer stays in front and takes the reader's keys with no
+    click first. Nothing moves the foreground. The decoy goes once the window is shown (`quiet_started`)."""
     app._quiet_decoy = None
     app._quiet_ended = False
+    app._see_hidden = False
     if not (bool(getattr(settings, "see_through", False)) and window.IS_WINDOWS):
         return
+    app._see_hidden = True
     try:
         box = tk.Frame(app, container=True)  # (never shown)
         decoy = tk.Toplevel(app, use=str(box.winfo_id()))
         app._quiet_decoy = (decoy, box)
     except tk.TclError:  # (no decoy: the window takes the foreground at its start as ever)
+        pass
+    try:
+        app.wm_attributes("-toolwindow", True)  # (before the window is shown: no taskbar button ever)
+    except tk.TclError:
         pass
 
 
@@ -113,12 +136,9 @@ def quiet(app: Any) -> bool:
 
 
 def quiet_started(app: Any) -> None:
-    """The window's start made (Tk shows it at its first idle, the decoy first): the decoy goes QUIET_MS later, and
-    in see-through mode the window is put aside then (`aside`) - unless the start was not quiet after all (the legal
-    notice)."""
+    """The window's start made (Tk shows it at its first idle, the decoy first): the decoy goes QUIET_MS later."""
     if getattr(app, "_quiet_decoy", None) is None:
         return
-    put_aside = quiet(app) and on(app)
 
     def drop() -> None:
         decoy, app._quiet_decoy = app._quiet_decoy, None
@@ -127,67 +147,225 @@ def quiet_started(app: Any) -> None:
                 widget.destroy()
             except tk.TclError:
                 pass
-        if put_aside and not getattr(app, "_quiet_ended", False):
-            aside(app)
 
     app.after(QUIET_MS, drop)
 
 
-def aside(app: Any, tries: int = ASIDE_TRIES) -> None:
-    """TASlation's own window minimised, once it has been shown (never activated: minimising it moves no foreground),
-    so that the viewer stands alone with the panes; it is reached again from the left pane (`window_up`) or the
-    taskbar."""
+def quiet_end(app: Any) -> None:
+    """No quiet start after all (the legal notice, which is the reader's to answer: it takes the foreground as
+    ever). In see-through mode the window stays off the screen all the same (`hidden`)."""
+    app._quiet_ended = True
+
+
+# ------------------------------------------------------------------ TASlation's own window, never on the screen
+def hidden(app: Any) -> bool:
+    """Whether TASlation's own window is kept off the screen (see-through mode: see the module's notes)."""
+    return bool(getattr(app, "_see_hidden", False))
+
+
+def off_screen(screen: tuple[int, int, int, int] | None = None) -> tuple[int, int]:
+    """Where the hidden window's top left goes: up and left of the virtual screen *screen* ((left, top, width,
+    height), every monitor together; `capture.seethrough.virtual_screen` when not given) by its size and OFF_GAP, so
+    that a window no larger than every monitor together meets none."""
+    left, top, width, height = screen if screen is not None else window.virtual_screen()
+    return left - max(width, 1) - OFF_GAP, top - max(height, 1) - OFF_GAP
+
+
+GEOMETRY_PARTS = re.compile(r"^\s*(?:(\d+)x(\d+))?\s*(?:[+-]-?\d+[+-]-?\d+)?\s*$")
+
+
+def root_geometry(geometry: str, screen: tuple[int, int, int, int] | None = None) -> str:
+    """The size and place *geometry* (Tk's "WxH+X+Y", "WxH" or "+X+Y") as the hidden window takes it: its size kept,
+    its place replaced by `off_screen`'s. "" (the size the widgets ask for) and what is no geometry stay as they
+    are."""
+    text = str(geometry or "")
+    m = GEOMETRY_PARTS.match(text)
+    if not text.strip() or m is None:
+        return text
+    x, y = off_screen(screen)
+    size = f"{m.group(1)}x{m.group(2)}" if m.group(1) else ""
+    return f"{size}+{x}+{y}"
+
+
+def dialog_centre(app: Any) -> tuple[int, int] | None:
+    """Where a dialog of the hidden window is centred (`layout.dialog_area`): the middle of the viewer's window, or,
+    with none, the middle of the primary monitor's work area; None while the window is on the screen (its dialogs go
+    over it, as ever)."""
+    if not hidden(app):
+        return None
+    win = getattr(app, "selected", None)
+    if win is not None:
+        try:
+            from ..capture import window_exists, window_rect
+
+            if window_exists(win.hwnd):
+                left, top, right, bottom = window_rect(win.hwnd)
+                return (left + right) // 2, (top + bottom) // 2
+        except Exception:  # noqa: BLE001 - (the viewer gone meanwhile: the primary monitor)
+            pass
+    from .layout import work_area
+
+    left, top, right, bottom = work_area(app)
+    return (left + right) // 2, (top + bottom) // 2
+
+
+def root_hwnd(app: Any) -> int:
+    """The hidden window's own top-level handle (0 where there is none yet)."""
     try:
-        if not app.winfo_ismapped():
-            if tries > 0:
-                app.after(QUIET_MS, lambda: aside(app, tries - 1))
-            return
-        if app.state() == "normal":
-            app.iconify()
-            app._see_aside = True
-    except tk.TclError:
-        pass
+        return int(app._own_hwnd() or 0)
+    except (tk.TclError, AttributeError, OSError):
+        return 0
 
 
-def window_up(app: Any) -> None:
-    """TASlation's own window shown again and brought in front (the reader asked for it, or for one of its dialogs):
-    maximised again when it opened so."""
-    app._see_aside = False
+def keep_hidden(app: Any) -> None:
+    """The hidden window as it is to be, every HIDE_EVERY ticks: in its normal state (never minimised nor maximised:
+    Tk keeps a transient of a minimised window hidden), alpha 0, a tool window, on no monitor - each put back where
+    anything changed it, and counted (``_see_hidden_fixes``). Its handle is kept for the tools (``_see_root_hwnd``)."""
+    if not hidden(app):
+        return
+    fixes = app.__dict__.setdefault("_see_hidden_fixes", {})
+    hwnd = root_hwnd(app)
+    app._see_root_hwnd = hwnd
     try:
-        if app.state() in ("iconic", "withdrawn"):
-            app.deiconify()
-            if getattr(app, "_opening_zoomed", False):
-                app.state("zoomed")
-        app.lift()
-        app.focus_force()
-    except tk.TclError:
-        pass
+        state = str(app.tk.call("wm", "state", app._w))
+        if state in ("iconic", "zoomed"):
+            app.tk.call("wm", "state", app._w, "normal")
+            fixes["state"] = fixes.get("state", 0) + 1
+        if float(app.tk.call("wm", "attributes", app._w, "-alpha")) != 0.0:
+            app.tk.call("wm", "attributes", app._w, "-alpha", 0.0)
+            fixes["alpha"] = fixes.get("alpha", 0) + 1
+        if not int(app.tk.call("wm", "attributes", app._w, "-toolwindow")):
+            app.tk.call("wm", "attributes", app._w, "-toolwindow", 1)
+            fixes["tool"] = fixes.get("tool", 0) + 1
+    except (tk.TclError, ValueError):
+        return
+    facts = window.window_facts(hwnd) if hwnd else None
+    if facts is not None and facts["on_monitor"]:
+        try:
+            app.wm_geometry(root_geometry("+0+0"))
+            fixes["place"] = fixes.get("place", 0) + 1
+        except tk.TclError:
+            pass
 
 
-def _dialog_waits(app: Any) -> None:
-    """While the window is put aside (`aside`), a dialog of its own that is to show (a transient top-level, neither
-    shown nor a tip): Tk keeps it hidden behind the minimised window, so the window is shown again for it."""
-    if not getattr(app, "_see_aside", False):
+def asked(app: Any) -> None:
+    """The reader asked for something from a pane, the menu or the icon: a dialog that shows within ASKED_S takes the
+    keys (`_mapped`), and `hand_back` waits HAND_BACK_WAIT_S."""
+    app._see_asked = time.monotonic()
+
+
+def _recently_asked(app: Any, within: float) -> bool:
+    return time.monotonic() - float(getattr(app, "_see_asked", -1e9)) < within
+
+
+def _mapped(app: Any, event: Any) -> None:
+    """(a top-level of the window's is shown) One the reader asked for (`asked`) is lifted and given the keys: it is
+    what they wait for. The others are left as their own code has them; tips (no frame) and the start's decoy too."""
+    widget = getattr(event, "widget", None)
+    if not hidden(app) or not isinstance(widget, tk.Toplevel) or not _recently_asked(app, ASKED_S):
         return
     try:
-        if app.state() != "iconic":
-            app._see_aside = False  # (the reader showed it again: theirs from now on)
+        if widget.wm_overrideredirect() or widget in (getattr(app, "_quiet_decoy", None) or ()):
             return
-        decoy = getattr(app, "_quiet_decoy", None) or ()
-        for child in app.winfo_children():
-            if not isinstance(child, tk.Toplevel) or child in decoy:
-                continue
-            if child.wm_transient() and not child.wm_overrideredirect() and not child.winfo_viewable():
-                window_up(app)
-                return
+        widget.lift()
+        widget.focus_force()
     except tk.TclError:
         pass
 
 
-def quiet_end(app: Any) -> None:
-    """No quiet start after all (the legal notice, which is the reader's to answer: it and the window after it take
-    the foreground as ever)."""
-    app._quiet_ended = True
+def menu_up(app: Any) -> bool:
+    """Whether a menu of TASlation's is up (`see_menu.popup`): the window holds the foreground for it meanwhile."""
+    return bool(getattr(app, "_see_menu_up", False))
+
+
+def hand_back(app: Any) -> bool:
+    """The hidden window in front (Windows gives it the foreground when a dialog of its own closes, or a menu ended):
+    the foreground given back to the viewer, so that the reader's next key goes to the book - not while a menu of
+    TASlation's is up, nor just after the reader asked for a dialog (it is on its way: HAND_BACK_WAIT_S). Whether it
+    was given back."""
+    if not hidden(app) or menu_up(app) or _recently_asked(app, HAND_BACK_WAIT_S):
+        return False
+    win = getattr(app, "selected", None)
+    if win is None:
+        return False
+    from ..capture import foreground_window, give_foreground, window_exists
+
+    try:
+        hwnd = root_hwnd(app)
+        if not hwnd or foreground_window() != hwnd or not window_exists(win.hwnd):
+            return False
+        give_foreground(win.hwnd)
+    except (OSError, RuntimeError):
+        return False
+    app._see_handed_back = int(getattr(app, "_see_handed_back", 0)) + 1
+    return True
+
+
+def unhide(app: Any) -> None:
+    """See-through mode could not start after all (no see-through window): TASlation's own window is the window it
+    always was."""
+    if not hidden(app):
+        return
+    app._see_hidden = False
+    try:
+        app.wm_attributes("-toolwindow", False)
+    except tk.TclError:
+        pass
+    app._apply_alpha()
+    normal = getattr(app, "_normal_geometry", "")
+    if normal:
+        try:
+            app.wm_geometry(normal)
+        except tk.TclError:
+            pass
+
+
+class HiddenWindowMixin:
+    """TASlation's own window (`app.App`, before ``tk.Tk``) as see-through mode keeps it off the screen (`hidden`):
+    every size and place given it keeps its size and goes off every monitor (`root_geometry`), it is never minimised
+    nor maximised (Tk keeps a transient of a minimised window hidden; Windows brings a maximised one onto a monitor),
+    and its dialogs say where they go instead of over it (`dialog_centre`, read by `layout.dialog_area`). Without the
+    mode each of these is Tk's own."""
+
+    def wm_geometry(self, newGeometry: str | None = None) -> Any:  # noqa: N803 - (Tk's own name)
+        if newGeometry and hidden(self):
+            newGeometry = root_geometry(newGeometry)
+        return super().wm_geometry(newGeometry)  # type: ignore[misc]
+
+    geometry = wm_geometry
+
+    def wm_state(self, newstate: str | None = None) -> Any:
+        if newstate in ("iconic", "zoomed") and hidden(self):
+            return ""
+        return super().wm_state(newstate)  # type: ignore[misc]
+
+    state = wm_state
+
+    def wm_iconify(self) -> Any:
+        if hidden(self):
+            return ""
+        return super().wm_iconify()  # type: ignore[misc]
+
+    iconify = wm_iconify
+
+    def dialog_centre(self) -> tuple[int, int] | None:
+        """Where a dialog over this window is centred instead (`layout.dialog_area`): while it is off the screen,
+        over the viewer; None otherwise."""
+        return dialog_centre(self)
+
+
+def without_the_window(app: Any) -> None:
+    """At the start of see-through mode with TASlation's own window hidden: what needs that window is not used, each
+    said once in the log - the full screen asked for at the start (``gui --full-screen``: the viewer's own full screen
+    is the one here), and the Translator role (its page and its regions are the window's canvas: the Reader role
+    always, `start_role` and a role kept for a book too, `TranslatorMixin._apply_role`; ``gui --role translator``
+    and ``role = "translator"`` in the settings file give the Reader role)."""
+    if getattr(app, "_reading_at_start", False):
+        app._reading_at_start = False
+        log.info("see-through mode: TASlation's own full screen is not used (the full screen asked for at the start "
+                 "left out)")
+    if str(getattr(getattr(app, "settings", None), "role", "reader")) == "translator":
+        log.info("see-through mode: the Reader role (the Translator role needs TASlation's own window)")
 
 
 def start(app: Any) -> bool:
@@ -204,14 +382,31 @@ def start(app: Any) -> bool:
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
     app._see_language = None  # (language, after job) while the left pane's arrows are being clicked
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
-    app._see_aside = False  # the window was put aside (`aside`)
+    app._see_ticks = 0
+    app._see_asked = -1e9  # when the reader last asked for something (`asked`)
+    app._see_menu_up = False  # a menu of TASlation's is up (`see_menu.popup`)
+    app._see_tray = None  # the notification-area icon (`capture.tray`)
+    app._see_root_hwnd = 0  # the hidden window's handle, for the tools (`keep_hidden`)
+    app._see_hidden_fixes = {}  # what `keep_hidden` put back, counted
+    app._see_handed_back = 0  # how often `hand_back` gave the foreground back to the viewer
     if not bool(getattr(app.settings, "see_through", False)):
         return False
     over = window.SeeThrough.start()
     if over is None:
+        unhide(app)
         return False
     app._see_through = over
     wgc.set_update_ms(wgc.FAST_UPDATE_MS)
+    if hidden(app):
+        from . import see_menu
+
+        without_the_window(app)
+        see_menu.init(app)
+        app._see_tray = see_menu.start_tray(app)
+        try:
+            app.bind_class("Toplevel", "<Map>", lambda e: _mapped(app, e), add="+")
+        except tk.TclError:
+            pass
     try:
         app._see_job = app.after(TICK_MS, lambda: _tick(app))
     except Exception:  # noqa: BLE001 - no Tk loop (a test): the window runs all the same
@@ -220,6 +415,9 @@ def start(app: Any) -> bool:
 
 
 def close(app: Any) -> None:
+    tray, app._see_tray = getattr(app, "_see_tray", None), None
+    if tray is not None:
+        tray.close()
     over = getattr(app, "_see_through", None)
     if over is not None:
         app._see_through = None
@@ -242,7 +440,8 @@ def _tick(app: Any) -> None:
 
 def tick(app: Any) -> None:
     """The viewer followed, the patches handed over when they changed, the side panes' clicks acted on and the panes
-    drawn again when they changed."""
+    drawn again when they changed; with TASlation's own window hidden, the icon's clicks acted on, the window kept as
+    it is to be (`keep_hidden`, `hand_back`) and the viewer chooser offered while no viewer is chosen."""
     over = app._see_through
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
@@ -250,8 +449,17 @@ def tick(app: Any) -> None:
     app._see_dpi = window.viewer_dpi(hwnd)
     present(app)
     panes_tick(app)
-    if on(app):  # (not after Quit on the left pane: the window has gone)
-        _dialog_waits(app)
+    if not on(app) or not hidden(app):  # (Quit on the left pane: the window has gone)
+        return
+    from . import see_menu
+
+    if see_menu.tray_tick(app) == "quit" or not on(app):
+        return
+    app._see_ticks = int(getattr(app, "_see_ticks", 0)) + 1
+    if app._see_ticks % HIDE_EVERY == 1:
+        keep_hidden(app)
+        see_menu.chooser_tick(app)
+    hand_back(app)
 
 
 def toggle(app: Any) -> None:
@@ -305,8 +513,8 @@ def _language_shown(app: Any) -> str:
 
 
 def again_enabled(app: Any) -> bool:
-    """Whether the left pane's circular arrow (ask for the page on show again: `translate_now`, F5 in the window) is
-    live: once a page was lettered, and not while the window's Translate is greyed (a job at work for a while)."""
+    """Whether the left pane's circular arrow (the page on show translated again: `_again`) is live: once a page was
+    lettered, and not while the window's Translate is greyed (a job at work for a while)."""
     if getattr(app, "last_result", None) is None:
         return False
     button = getattr(app, "translate_btn", None)
@@ -328,22 +536,34 @@ def left_rows(app: Any) -> list[pn.Row]:
             pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
             pn.Row("area", _("Set area...")),
             pn.Row("settings", _("Settings...")),
-            pn.Row("window", _("TASlation window")),
+            pn.Row("menu", _("Menu")),
             pn.Row("quit", _("Quit"))]
 
 
 def right_rows(app: Any) -> list[pn.Row]:
-    """The right pane, words only, each row only when it has something to say: the status slot (`status_slot`: what
-    the page cannot show itself), how far the page filling in is, the status line, the indicator's lines on the pages
-    behind (the backlog, those that went by too fast, those updated since they were seen: `side_model`), where the
-    translator runs. The window's words name no key here (`panes.without_keys`: every key is the viewer's)."""
+    """The right pane, words only, each row only when it has something to say: the setup banner's lines (the setup's
+    problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their buttons
+    do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; the
+    status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status line, the
+    indicator's lines on the pages behind (the backlog, those that went by too fast, those updated since they were
+    seen: `side_model`), where the translator runs. The window's words name no key and no menu of its own here
+    (`panes.pane_words`: every key is the viewer's, the window's menus are not on the screen). The reader's notes on a
+    page (`_show_notes`, the window's strip under the page) are left out."""
     from . import status_slot
+    from .banner import PROBLEM_COLOURS
 
     rows: list[pn.Row] = []
+    for line, colours, _button in getattr(app, "_see_banner_rows", ()) or ():
+        text = pn.pane_words(str(line))
+        if text:
+            rows.append(pn.Row("", text, "text", warn=colours == PROBLEM_COLOURS))
+    guard = pn.pane_words(str(_get(getattr(app, "guard_var", None), "") or "").strip())
+    if guard:
+        rows.append(pn.Row("", guard, "text", warn=True))
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None
-    slot = pn.without_keys(status_slot.slot_text(want[0])) if want else ""
+    slot = pn.pane_words(status_slot.slot_text(want[0])) if want else ""
     if slot:
         rows.append(pn.Row("", slot, "text", warn=bool(want and want[1])))
     fill = getattr(app, "_fill", None)
@@ -352,7 +572,9 @@ def right_rows(app: Any) -> list[pn.Row]:
         if total:
             rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
                                "text"))
-    status = pn.without_keys(str(_get(getattr(app, "status_var", None), "") or "").strip())
+    status = pn.pane_words(str(_get(getattr(app, "status_var", None), "") or "").strip())
+    if status and any(status == row.text for row in rows):
+        status = ""  # (the status line saying a banner's line again: once)
     if status:
         rows.append(pn.Row("", status, "text"))
     model = getattr(side, "model", None)
@@ -468,7 +690,8 @@ def _pick_language(app: Any, step: int) -> None:
 
 def _language_settled(app: Any) -> None:
     """The language chosen with the arrows taken, as the "To:" box takes one chosen there (`_target_picked`); a
-    language whose model is not there is offered in a dialog of the window's, which is shown first."""
+    language whose model is not there is offered in a dialog of the window's, which takes the keys as it shows: the
+    reader asked for it (`asked`)."""
     picking, app._see_language = getattr(app, "_see_language", None), None
     if picking is None:
         return
@@ -478,10 +701,10 @@ def _language_settled(app: Any) -> None:
     plan = getattr(app, "_plan", None)
     try:
         offered = plan is not None and plan(language) is not None
-    except Exception:  # noqa: BLE001 - not known: the window shown, as for an offer
+    except Exception:  # noqa: BLE001 - not known: taken as an offer
         offered = True
     if offered:
-        window_up(app)
+        asked(app)
     from .constants import LANGUAGES
 
     shown = getattr(app, "lang_shown", None)
@@ -497,6 +720,12 @@ def _flip_indicators(app: Any) -> None:
     (as the window's other choices are: `config.write_settings`)."""
     value = not indicators_on(app)
     app.settings.see_through_indicators = value
+    banner = getattr(app, "_show_banner", None)
+    if banner is not None:  # (the setup banner's lines: in the right pane, or with it off in a dialog of their own)
+        try:
+            banner()
+        except tk.TclError:
+            pass
     try:
         config.write_settings(config.settings_file(app.settings), {"see_through_indicators": value})
     except (config.ConfigError, OSError) as e:
@@ -507,13 +736,19 @@ def _flip_indicators(app: Any) -> None:
             say(NOT_KEPT, error=getattr(e, "strerror", None) or str(e))
 
 
-def _with_window(step: str) -> Any:
-    """An action that opens a dialog of the window's: the window shown first (put aside, its dialogs would not
-    show)."""
+def _dialog(step: str) -> Any:
+    """An action that opens a dialog of the window's: it comes up alone and takes the keys (`asked`)."""
     def act(app: Any) -> None:
-        window_up(app)
+        asked(app)
         getattr(app, step)()
     return act
+
+
+def _menu(app: Any) -> None:
+    """The left pane's Menu: the menu at the pane's right edge, level with the row (`see_menu.popup`)."""
+    from . import see_menu
+
+    see_menu.popup_at_pane(app)
 
 
 def _flip_auto(app: Any) -> None:
@@ -522,18 +757,27 @@ def _flip_auto(app: Any) -> None:
         var.set(not bool(_get(var, False)))
 
 
+def _again(app: Any) -> None:
+    """The circular arrow: the page on show translated again as the window's Translate again does it
+    (`TranslatorMixin.retranslate_page`, in the Reader role too: its lines asked of the translator anew, and what that
+    translates replaces the cache's; the lines the reader corrected are kept unless its question's box says
+    otherwise). Its question is the reader's to answer: it takes the keys (`asked`)."""
+    asked(app)
+    app.retranslate_page()
+
+
 PANE_ACTIONS: dict[str, Any] = {
     "translate": lambda app: app.translate_now(),
-    "again": lambda app: app.translate_now(),  # (the circular arrow: what F5 does in the window, for the page on show)
+    "again": _again,  # (the circular arrow: the page on show translated again, the cache's lines replaced)
     "stop": lambda app: app.stop_page(),
     "auto": _flip_auto,
     "language_prev": lambda app: _pick_language(app, -1),
     "language_next": lambda app: _pick_language(app, 1),
     "lettering": toggle,
     "indicators": _flip_indicators,
-    "area": _with_window("set_area"),
-    "settings": _with_window("open_settings"),
-    "window": window_up,
+    "area": _dialog("set_area"),
+    "settings": _dialog("open_settings"),
+    "menu": _menu,
     "quit": lambda app: app._on_close(),
 }
 

@@ -9,7 +9,7 @@ part of a release.
                                 [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
                                 [--see-through] [--see-truth] [--standin-size WxH] [--standin-full-screen]
-                                [--capture-ms MS]
+                                [--capture-ms MS] [--no-viewer-s S] [--book-asked]
 
 What runs, all on this computer:
 
@@ -109,7 +109,11 @@ second, the CPU; with *--see-truth* copies of the stand-in's place on the screen
 over a new page, two of them into shots/). With a profile and without it the frames a second and the CPU are noted all
 the same, for the comparison (*--capture-ms 16* asks for the frames as often as see-through mode does). *--standin-size
 WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
-reader's area the whole frame).
+reader's area the whole frame). In see-through mode TASlation's own window is never on the screen: the watch reads its
+handle once a second (on no monitor, alpha 0, a tool window: ``run.see_through.hidden_window``). *--no-viewer-s S*
+gives the window no viewer to find for its first S seconds (the viewer chooser comes by itself meanwhile), and
+*--book-asked* starts it with a name that names no book, so that the start dialog asks it at Auto's first page; the
+driver answers it through the dialog's own object (``run.no_viewer``, ``run.book_asked``).
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -193,6 +197,8 @@ REAL_STATE = Path.home() / ".taslation"
 DATASET = REAL_STATE / "datasets" / "openmantra"  # read only: its pages, by file URL
 FIXTURES = ROOT / "tests" / "fixtures"
 BOOK = "Stand-in sample"
+BOOK_UNNAMED = "untitled"  # --book-asked: the name the window begins with, which names no book (the start asks)
+BOOK_ANSWER_S = 1.5  # --book-asked: the start dialog is answered so long after it is on the screen
 PLAMO = "taslation-plamo3-translate-2b"
 AREA = (0, 85, 0, 0)  # the owner's capture area on the browser reader: the browser's title bar and the band
 TICK_MS = 40  # the director looks this often (the Tk loop)
@@ -756,6 +762,10 @@ class Notes:
         # window's "Loading the models..." (``_models_loading``) as it came and went
         self.gpu_dialogs: list[dict[str, Any]] = []
         self.models_loading: list[list[Any]] = []
+        # --book-asked: the start dialog asking the book's name, as the driver met and answered it; --no-viewer-s: when
+        # the stand-in was first offered to the window's look for windows, and when the window chose it
+        self.book_dialogs: list[dict[str, Any]] = []
+        self.no_viewer: dict[str, Any] = {}
         self.ocr: list[dict[str, Any]] = []
         self.ocr_log: list[dict[str, Any]] = []
         self.owners: Counter[str] = Counter()
@@ -2507,8 +2517,17 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
     table = {name: (("never" if allow == "viewer" else allow), target)
              for name, (allow, target) in demo_video.GUARDED.items()}  # (TASlation sends no key, no click here)
-    done = {"list_windows": demo_video.replace_everywhere(windows.list_windows,
-                                                          lambda include_own=False: [w for w in [viewer_info()] if w])}
+    hidden_for = float(getattr(args, "no_viewer_s", 0) or 0)
+    hidden_until = time.monotonic() + hidden_for  # (--no-viewer-s: no window to choose until then)
+
+    def listed(include_own: bool = False) -> list[Any]:
+        if hidden_for and time.monotonic() < hidden_until:
+            return []
+        if hidden_for and "offered_t" not in notes.no_viewer:
+            notes.no_viewer["offered_t"] = now_ms()
+        return [w for w in [viewer_info()] if w]
+
+    done = {"list_windows": demo_video.replace_everywhere(windows.list_windows, listed)}
     for name, (allow, target) in table.items():
         original = getattr(windows, name)
         done[name] = demo_video.replace_everywhere(original, guard.wrap(name, original, allow, target))
@@ -3046,6 +3065,7 @@ class Director:
             with self.notes.lock:  # (this runs on the Tk thread: its CPU time so far, a page job running or not)
                 self.notes.tk_cpu.append((time.monotonic(), time.thread_time(), bool(getattr(self.app, "busy", False))))
             self.start_dialog()
+            self.book_dialog()
             self.check()
             if not self.over:
                 self.pull()
@@ -3082,6 +3102,47 @@ class Director:
                                           "parts": list(getattr(dialog, "parts", ()) or ()), "answer": answer})
         if answer != "none":
             dialog.choose(answer)
+
+    def book_dialog(self) -> None:
+        """--book-asked: the start dialog that asks the book's name (`ui.dialogs.start.StartDialog`: the window began
+        with a name that names no book), noted as it comes (when, whether Tk shows it, its place on a monitor and
+        whether it is topmost, read from its handle; which of TASlation's windows had the foreground then) and
+        answered BOOK_ANSWER_S later through the dialog's own object - its Series field set to BOOK, its OK (no input
+        to the computer). --no-viewer-s: when the window chose the stand-in."""
+        app, notes = self.app, self.notes
+        if getattr(self.args, "no_viewer_s", 0) and "chosen_t" not in notes.no_viewer \
+                and getattr(app, "selected", None) is not None:
+            notes.no_viewer["chosen_t"] = now_ms()
+        if not getattr(self.args, "book_asked", False):
+            return
+        from taslation.ui.dialogs.start import StartDialog
+
+        dialog = getattr(app, "_start_dialog", None)
+        if not isinstance(dialog, StartDialog) or dialog.answered:
+            return
+        row = notes.book_dialogs[-1] if notes.book_dialogs and notes.book_dialogs[-1]["dialog"] == id(dialog) else None
+        if row is None:
+            row = {"t": now_ms(), "dialog": id(dialog), "answered_t": None}
+            notes.book_dialogs.append(row)
+        try:
+            viewable = bool(dialog.winfo_viewable())
+        except Exception:  # noqa: BLE001 - (gone meanwhile)
+            return
+        if viewable and "shown_t" not in row:
+            from taslation.capture import seethrough as window
+
+            hwnd = int(dialog.wm_frame(), 16)
+            facts = window.window_facts(hwnd) or {}
+            ex = int(ctypes.windll.user32.GetWindowLongW(hwnd, -20)) & 0xFFFFFFFF
+            front = int(ctypes.windll.user32.GetForegroundWindow() or 0)
+            row.update({"shown_t": now_ms(), "on_monitor": facts.get("on_monitor"), "tool": facts.get("tool"),
+                        "topmost": bool(ex & 0x8), "front_is_dialog": front == hwnd,
+                        "front_is_standin": front == self.browser.hwnd})
+        if "shown_t" in row and now_ms() - row["shown_t"] >= BOOK_ANSWER_S * 1000:
+            dialog.fields.set_parts(BOOK, "")
+            dialog._answer("ok")
+            row["answered_t"] = now_ms()
+            row["answered"] = bool(dialog.answered)
 
     def check(self) -> None:
         """The guard first: anything chosen but the stand-in, a call refused, the stand-in gone - the run stops."""
@@ -3281,6 +3342,8 @@ class Director:
             self.phase, self.phase_at = "settle", now
             return
         if self.phase == "settle":
+            if getattr(self.args, "no_viewer_s", 0) and getattr(self.app, "selected", None) is None:
+                return  # (--no-viewer-s: nothing is released before the window has found the stand-in)
             ready_go = self.waiting_go >= seg.go
             if seg.name in ("r", "t", "o", "z") and seg.name not in self.entered and ready_go and rested:
                 self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
@@ -5272,7 +5335,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         import standin_seethrough
 
         activations = standin_seethrough.Activations()
-    app = app_mod.App(settings, window_query=browser.token, book=BOOK, auto=True)
+    app = app_mod.App(settings, window_query=browser.token, book=BOOK_UNNAMED if args.book_asked else BOOK, auto=True)
     if args.capture_ms:  # (the window's frames asked for this often, as see-through mode asks for them: the comparison)
         from taslation.capture import wgc
 
@@ -5621,6 +5684,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "gpu_start": {"dialogs": [{k: (rel(v) if k == "t" else v) for k, v in d.items() if k != "dialog"}
                                   for d in notes.gpu_dialogs],
                       "models_loading": [[rel(t), on] for t, on in notes.models_loading]},
+        "book_asked": [{k: (rel(v) if k.endswith("_t") or k == "t" else v) for k, v in d.items() if k != "dialog"}
+                       for d in notes.book_dialogs],
+        "no_viewer": {k: rel(v) for k, v in notes.no_viewer.items()},
         "front_owner_counts": dict(notes.owners),
         "errors": {"hooks": dict(notes.errors), "log_records": dict(tap.levels)},
         "no_answer": [{**n, "t": rel(n["t"])} for n in tap.no_answer],
@@ -6299,6 +6365,14 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--capture-ms", type=int, default=0, metavar="MS",
                     help="the window's frames asked for at most this often (wgc.set_update_ms; see-through mode asks "
                          "for 16): a run without see-through to compare the frames a second with")
+    ap.add_argument("--no-viewer-s", type=float, default=0.0, metavar="S",
+                    help="the window finds no viewer for its first S seconds (its look for windows given none), then "
+                         "the stand-in; nothing is released before it has chosen it (run.no_viewer; in see-through "
+                         "mode the viewer chooser comes by itself meanwhile: run.see_through.hidden_window.dialogs)")
+    ap.add_argument("--book-asked", action="store_true",
+                    help=f"the window begins with the name {BOOK_UNNAMED!r}, which names no book, so that Auto's first "
+                         f"page asks it (the start dialog); answered {BOOK_ANSWER_S:g} s after it is on the screen, "
+                         f"through its own object, with {BOOK!r} (run.book_asked)")
     args = ap.parse_args(argv)
     if args.soft_first is None:
         args.soft_first = "off" if args.standin_profile else "on"

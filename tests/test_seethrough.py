@@ -387,10 +387,11 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     monkeypatch.setattr(ui.tk, "Frame", Frame)
     monkeypatch.setattr(ui.tk, "Toplevel", Toplevel)
     monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
-    later = []
-    app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)))
+    later, attributes = [], []
+    app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)),
+                          wm_attributes=lambda *a: attributes.append((len(made), a)))
     ui.quiet_start(app, Settings())
-    assert made == [] and not ui.quiet(app)
+    assert made == [] and not ui.quiet(app) and not ui.hidden(app) and attributes == []
     ui.quiet_started(app)
     assert later == []
     ui.quiet_start(app, Settings(see_through=True))
@@ -398,14 +399,18 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
     assert box.options == {"container": True} and decoy.options == {"use": "4242"}
     assert ui.quiet(app)  # (not maximised at the start then)
+    # ... and the window itself is never on the screen in this mode: a tool window (no taskbar button), made so
+    # after the decoy, before it is first shown
+    assert ui.hidden(app) and attributes == [(2, ("-toolwindow", True))]
     ui.quiet_started(app)
     (ms, drop), = later
     assert ms == ui.QUIET_MS
     drop()
     assert made[2:] == [("gone", "Toplevel"), ("gone", "Frame")] and not ui.quiet(app)
+    assert ui.hidden(app) and len(later) == 1  # (nothing put aside, nothing minimised: it never was on the screen)
     ui.quiet_start(app, Settings(see_through=True))
     ui.quiet_end(app)  # (the legal notice: the reader's to answer)
-    assert not ui.quiet(app)
+    assert not ui.quiet(app) and ui.hidden(app)  # (off the screen all the same)
 
 
 # ------------------------------------------------------------------ the bars gone: only the bubbles they cut read again

@@ -303,9 +303,11 @@ def turned_away(window: Any, st: SideState) -> bool:
 def on_picture(window: Any, image: Any) -> list[tuple[int, int, int, int]]:
     """The page area is drawn again (`LiveViewMixin._redisplay`): what the person sees lettered on the screen on show
     taken in (`Seen.look`), its diamond set or gone, and the brackets to draw on its changed bubbles (image pixels;
-    none on a window without the indicator)."""
+    none on a window without the indicator). In see-through mode nothing is taken in: the brackets are the window's
+    page's, which is not on the screen there, so no page would count as read with its changed bubbles marked - none
+    counts as updated either."""
     st = state(window)
-    if st is None:
+    if st is None or getattr(window, "_see_hidden", False):
         return []
     try:
         seq = st.model.on_show

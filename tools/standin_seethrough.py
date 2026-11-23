@@ -7,6 +7,9 @@ click, no message; the foreground is only read):
 * every frame the stand-in's capture session delivers (`wgc.add_listener`: when), so that the frames a second of the
   browser while its bars fade or its spinner turns can be told with the see-through window on and off;
 * which window is in front, every FRONT_EVERY_S, and each change (the stand-in, this process, another);
+* TASlation's own window once a second (`_own_states`): never on a monitor, at alpha 0, a tool window with no taskbar
+  button (it stays shown in Windows' sense), the dialogs of the process on the screen, and when the viewer chooser or
+  the banner's dialog came and went;
 * the side panes once a second (`_pane_watch`), one click on the left pane's lettering switch posted to the pane
   (`_click_lettering`), and the patch under the pointer (`_hover_measure`: the pointer the see-through window reads is
   this tool's for the whole run, `install`; the real pointer is never moved);
@@ -264,6 +267,9 @@ class SeeWatch:
         self.front_before = int(front_before)  # (the window in front just before TASlation's window was made)
         self.activations = activations
         self.own_states: Counter = Counter()  # (`_own_states`)
+        self.dialogs: dict[str, list[list[Any]]] = {}  # (`_own_states`: "chooser", "banner" -> [ms shown, ms gone,
+        # came by itself], ms from the watch's start)
+        self._tray: Any = None  # (the notification-area icon, kept for the report)
         self.own_pid = os.getpid()
         self._over = None
         self.front_before_who = self._who(self.front_before)
@@ -684,7 +690,59 @@ class SeeWatch:
                                              if n["ev"] == "pane_hide"))}
 
     def _own_states(self) -> None:
-        """How TASlation's own main window is on the screen (shown, minimised, hidden), counted once a second."""
+        """How TASlation's own main window is on the screen, counted once a second. With it hidden (see-through mode,
+        `ui.seethrough.hidden`): its handle (``_see_root_hwnd``) read with `capture.seethrough.window_facts` - "off" when
+        it lies on no monitor (MonitorFromRect, MONITOR_DEFAULTTONULL), at alpha 0, a tool window not marked for the
+        taskbar and not minimised; "not shown" before Tk first shows it (IsWindowVisible false); else the aspects that
+        fail (once shown it is shown in Windows' sense all the while: Tk's dialogs need a master in its normal state) -,
+        and the other top-level windows of this process that are shown on a
+        monitor (TASlation's dialogs; tips and menus have no frame and are not Tk's top-levels), how many at each look.
+        Without it: the window titled TASlation shown, minimised or hidden, as before. The viewer chooser that came by
+        itself and the banner's dialog are noted with their times (`self.dialogs`)."""
+        from taslation.capture import seethrough as window
+
+        app = self.app
+        if app is not None and getattr(app, "_see_hidden", False):
+            root = int(getattr(app, "_see_root_hwnd", 0) or 0)
+            if getattr(app, "_see_tray", None) is not None:
+                self._tray = app._see_tray  # (kept for the report: the window lets go of it at its close)
+            facts = window.window_facts(root) if root else None
+            if facts is None:
+                state = "no handle yet"
+            elif not facts["visible"]:
+                state = "not shown"  # (not yet shown by Tk: before that its handle is not the window's frame)
+            else:
+                wrong = [name for name, bad in (("on a monitor", facts["on_monitor"]), ("alpha", facts["alpha"] != 0),
+                                                ("not a tool window", not facts["tool"]), ("taskbar", facts["app"]),
+                                                ("minimised", facts["iconic"])) if bad]
+                state = "off" if not wrong else "+".join(wrong)
+            self.own_states[f"hidden:{state}"] += 1
+            shown = 0
+
+            def each_dialog(hwnd, _l):  # type: ignore[no-untyped-def]
+                nonlocal shown
+                if hwnd == root or window_pid(hwnd) != self.own_pid:
+                    return True
+                name = ctypes.create_unicode_buffer(32)
+                _user32.GetClassNameW(hwnd, name, 32)
+                if name.value == "TkTopLevel" and _user32.IsWindowVisible(hwnd):
+                    facts = window.window_facts(hwnd)
+                    if facts is not None and facts["on_monitor"] and not facts["iconic"] and facts["alpha"] != 0:
+                        shown += 1
+                return True
+
+            _user32.EnumWindows(ENUMPROC(each_dialog), 0)
+            self.own_states[f"dialogs shown:{shown}"] += 1
+            now = round((time.monotonic() - self.started) * 1000)
+            for what in ("_see_chooser", "_see_banner"):
+                dialog = getattr(app, what, None)
+                key = what.removeprefix("_see_")
+                seen = self.dialogs.setdefault(key, [])
+                if dialog is not None and (not seen or seen[-1][1] is not None):
+                    seen.append([now, None, bool(getattr(dialog, "by_itself", False))])
+                elif dialog is None and seen and seen[-1][1] is None:
+                    seen[-1][1] = now
+            return
         found: list[str] = []
 
         def each(hwnd, _l):  # type: ignore[no-untyped-def]
@@ -701,6 +759,21 @@ class SeeWatch:
 
         _user32.EnumWindows(ENUMPROC(each), 0)
         self.own_states[",".join(found) or "none"] += 1
+
+    def _hidden_report(self) -> dict[str, Any] | None:
+        app = self.app
+        if app is None or not getattr(app, "_see_hidden", False) and not getattr(app, "_see_root_hwnd", 0):
+            return None
+        tray = getattr(app, "_see_tray", None) or self._tray
+        looks = {k.split(":", 1)[1]: v for k, v in self.own_states.items() if k.startswith("hidden:")}
+        dialogs = Counter({k.split(":", 1)[1]: v for k, v in self.own_states.items() if k.startswith("dialogs shown:")})
+        return {"looks": looks, "looks_off": looks.get("off", 0), "looks_not_off": sum(
+                    v for k, v in looks.items() if k not in ("off", "no handle yet", "not shown")),
+                "dialogs_shown_at_looks": dict(dialogs), "dialogs": self.dialogs,
+                "fixes": dict(getattr(app, "_see_hidden_fixes", {}) or {}),
+                "handed_back": int(getattr(app, "_see_handed_back", 0) or 0),
+                "tray": None if tray is None else dict(tray.counts),
+                "menus_opened": len(getattr(app, "_see_menu_opened", []) or [])}
 
     def _viewer_frame(self) -> np.ndarray | None:
         """The viewer's newest captured frame, cut to its client area as the see-through window lies on it (RGB)."""
@@ -879,6 +952,9 @@ class SeeWatch:
                                "own_activations": None if self.activations is None else self.activations.count,
                                "own_activations_from": None if self.activations is None else self.activations.wheres,
                                "own_window": dict(self.own_states)},
+                # TASlation's own window hidden (`_own_states`): what kept it so, the dialogs that came by themselves,
+                # the notification-area icon and the menus opened
+                "hidden_window": self._hidden_report(),
                 # each time the bars went from a page read under them (`ui.seethrough.after_bars`): ms on the run's
                 # clock, pages carried over to the frame without them, bubbles left out (cut by a bar: read again)
                 "carries": [[round(t * 1000 + self.delta_ms - (changes[0]["t"] if changes else 0)), c, d]

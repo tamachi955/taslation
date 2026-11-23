@@ -168,9 +168,53 @@ if IS_WINDOWS:
     _user32.LoadCursorW.restype = wintypes.HANDLE
     _user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
     _user32.GetCursorPos.restype = wintypes.BOOL
+    _user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    _user32.GetSystemMetrics.restype = ctypes.c_int
+    _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    _user32.GetWindowRect.restype = wintypes.BOOL
+    _user32.MonitorFromRect.argtypes = [ctypes.POINTER(wintypes.RECT), wintypes.DWORD]
+    _user32.MonitorFromRect.restype = wintypes.HMONITOR
+    _user32.GetLayeredWindowAttributes.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
+                                                   ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(wintypes.DWORD)]
+    _user32.GetLayeredWindowAttributes.restype = wintypes.BOOL
 
-MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 2, 0
+MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 0, 2, 0
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
+WS_EX_APPWINDOW, LWA_ALPHA = 0x00040000, 0x2
 _shcore: Any = None  # (shcore.dll, loaded at the first `viewer_dpi`)
+
+
+def virtual_screen() -> tuple[int, int, int, int]:
+    """(left, top, width, height) of the virtual screen - every monitor's rectangle together; (0, 0, 0, 0) outside
+    Windows."""
+    if not IS_WINDOWS:
+        return 0, 0, 0, 0
+    metric = _user32.GetSystemMetrics
+    return (int(metric(SM_XVIRTUALSCREEN)), int(metric(SM_YVIRTUALSCREEN)), int(metric(SM_CXVIRTUALSCREEN)),
+            int(metric(SM_CYVIRTUALSCREEN)))
+
+
+def window_facts(hwnd: int) -> dict[str, Any] | None:
+    """How the top-level window *hwnd* is on the screen, read only (any thread): shown (``IsWindowVisible``),
+    minimised, whether any part of its rectangle lies on a monitor (``MonitorFromRect``, MONITOR_DEFAULTTONULL), its
+    layered alpha (0-255; None when it has none: opaque), a tool window (no taskbar button, not in Alt+Tab) or one
+    marked for the taskbar. None for no window. (TASlation's own window in see-through mode, `ui.seethrough`: never on
+    a monitor, alpha 0, a tool window.)"""
+    if not IS_WINDOWS or not hwnd or not _user32.IsWindow(hwnd):
+        return None
+    rect = wintypes.RECT()
+    _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    on_monitor = bool(_user32.MonitorFromRect(ctypes.byref(rect), MONITOR_DEFAULTTONULL))
+    ex = int(_user32.GetWindowLongW(hwnd, GWL_EXSTYLE)) & 0xFFFFFFFF
+    alpha: int | None = None
+    if ex & WS_EX_LAYERED:
+        key, value, flags = wintypes.DWORD(0), ctypes.c_ubyte(255), wintypes.DWORD(0)
+        if _user32.GetLayeredWindowAttributes(hwnd, ctypes.byref(key), ctypes.byref(value), ctypes.byref(flags)) \
+                and flags.value & LWA_ALPHA:
+            alpha = int(value.value)
+    return {"visible": bool(_user32.IsWindowVisible(hwnd)), "iconic": bool(_user32.IsIconic(hwnd)),
+            "on_monitor": on_monitor, "rect": (rect.left, rect.top, rect.right, rect.bottom), "alpha": alpha,
+            "tool": bool(ex & WS_EX_TOOLWINDOW), "app": bool(ex & WS_EX_APPWINDOW)}
 
 
 def cursor_pos() -> tuple[int, int] | None:

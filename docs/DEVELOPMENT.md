@@ -340,8 +340,17 @@ rows' languages.
   page and on the ground (always the stand-in's); who was in front, and each change, with the activations of
   TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
   window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
-  window was on the screen once a second (shown, minimised, hidden: put aside, minimised is expected once it has been
-  shown); each time the bars went from a page read under
+  window was on the screen once a second (`hidden_window`: in see-through mode it is never on the screen - its handle
+  read with `capture.seethrough.window_facts`, "off" when it lies on no monitor, at alpha 0, a tool window not marked
+  for the taskbar and not minimised, "not shown" before Tk first shows it; once shown it stays shown in Windows'
+  sense, since Tk's dialogs need a master in its normal state - every look "off" (or "not shown") is expected, with what `keep_hidden` put back, how often the foreground went back to the
+  viewer, the notification-area icon's counts, how many dialogs of the process were on a monitor at each look, and
+  when the viewer chooser and the banner's dialog came and went). `--no-viewer-s S` gives the window no viewer to find
+  for its first S seconds (the viewer chooser comes by itself after 2.5 s and goes once the window has found the
+  stand-in: `run.no_viewer`), and `--book-asked` starts it with a name that names no book, so that Auto's first page
+  asks it in the start dialog, which the driver answers 1.5 s after it is on the screen through the dialog's own
+  object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground); each time the
+  bars went from a page read under
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
   read and asked for again); the stand-in's frames a second
   while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks

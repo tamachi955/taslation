@@ -1514,8 +1514,9 @@ class LiveViewMixin(BlackViewerMixin):
         """The viewer draws nothing behind TASlation (or draws again): the page keeps the last good frame, and a band
         over it in the busy badge's style and the status bar say what to do; when the viewer draws again both go (the
         status line gives way to the normal window's own, unless something else was said meanwhile). Meanwhile the
-        viewer is looked at every auto_interval_ms (with follow = "events" too: nothing else would notice)."""
-        if covered == self._covered:
+        viewer is looked at every auto_interval_ms (with follow = "events" too: nothing else would notice). In
+        see-through mode TASlation's window is never on the screen and covers nothing: none of it."""
+        if covered == self._covered or (covered and getattr(self, "_see_hidden", False)):
             return
         self._covered = covered
         if covered:

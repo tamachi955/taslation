@@ -192,7 +192,12 @@ def dialog_area(win: tk.Misc, parent: tk.Misc | None = None,
                 at: tuple[int, int] | None = None) -> tuple[tuple[int, int, int, int], tuple[int, int]]:
     """The work area (left, top, right, bottom) a dialog is kept on and the screen point it is centred on, as
     `place_window` takes them: the middle of *parent* and the work area of the monitor there (with *at*: that point;
-    with neither: the primary monitor's work area and its middle)."""
+    with neither: the primary monitor's work area and its middle). A parent that says where its dialogs go instead
+    (``dialog_centre``: the main window while see-through mode keeps it off the screen) is not looked at."""
+    if at is None and parent is not None:
+        centre = _centre_instead(parent)
+        if centre is not None:
+            at = centre
     if at is not None:
         cx, cy = int(at[0]), int(at[1])
         return work_area(win, cx, cy), (cx, cy)
@@ -202,6 +207,15 @@ def dialog_area(win: tk.Misc, parent: tk.Misc | None = None,
         return work_area(win, cx, cy), (cx, cy)
     left, top, right, bottom = work_area(win)
     return (left, top, right, bottom), ((left + right) // 2, (top + bottom) // 2)
+
+
+def _centre_instead(parent: tk.Misc) -> tuple[int, int] | None:
+    """Where *parent*'s window says its dialogs go (its ``dialog_centre``), None when it says nothing."""
+    try:
+        say = getattr(parent.winfo_toplevel(), "dialog_centre", None)
+        return say() if callable(say) else None
+    except (tk.TclError, AttributeError, TypeError):
+        return None
 
 
 def dialog_spot(size: tuple[int, int], centre: tuple[int, int], area: tuple[int, int, int, int]) -> tuple[int, int]:
@@ -289,15 +303,17 @@ def place_again(win: tk.Toplevel, parent: tk.Misc | None = None, before: tuple[i
 def book_monitor(parent: tk.Misc) -> tuple[int, int, int, int] | None:
     """The monitor of the viewer chosen in the window *parent* belongs to, when the window is on another one: where
     the reader looks (a book full screen there, say). None when they share a monitor, with no viewer, outside
-    Windows."""
+    Windows. (See-through mode, the window never on the screen: always the viewer's monitor.)"""
     app = parent._root()
     viewer = getattr(getattr(app, "selected", None), "hwnd", 0) or 0
     own_hwnd = getattr(app, "_own_hwnd", None)
     if not IS_WINDOWS or not viewer or own_hwnd is None:
         return None
     try:
-        own = own_hwnd()
         theirs = monitor_rect(viewer) if window_exists(viewer) else None
+        if getattr(app, "_see_hidden", False):
+            return theirs
+        own = own_hwnd()
         mine = monitor_rect(own) if own else None
     except (OSError, tk.TclError, ValueError):
         return None

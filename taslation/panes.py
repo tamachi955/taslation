@@ -441,3 +441,19 @@ def without_keys(text: str) -> str:
         if clause is not None and not KEY.search(clause.group(1)) and KEY.search(clause.group(2)):
             kept.append(clause.group(1) + clause.group(3) + clause.group(4))
     return "".join(kept).strip(_TRIM)
+
+
+# a bracketed aside that names one of the window's menus, in the window's languages ("(Page menu)", "(menú Página)",
+# "（ページメニュー）", ...): the panes have no menu bar - Set area... and the rest are in the controls at the left
+_MENU_WORD = re.compile(r"(?i)men[uúü]|меню|メニュー|菜单|選單|메뉴|เมนู")
+
+
+def pane_words(text: str) -> str:
+    """*text* as a side pane says it (see-through mode, where TASlation's own window is not on the screen): what it
+    says of keys left out (`without_keys`), and a bracketed aside that names one of the window's menus too. "" when
+    nothing is left."""
+    text = without_keys(text)
+    if not _MENU_WORD.search(text):
+        return text
+    text = _ASIDE.sub(lambda m: "" if _MENU_WORD.search(m.group()) else m.group(), text)
+    return re.sub(r"\s+([.,;:。、])", r"\1", text).strip(_TRIM)

@@ -115,7 +115,14 @@ def setup_button(window: Any, message: Any) -> tuple[str, Callable[[], None]] | 
 
 # ------------------------------------------------------------------ what the buttons do
 def choose_viewer(window: Any) -> None:
-    """Choose viewer: the Viewer list opens (as a click on it), rescanned (its postcommand)."""
+    """Choose viewer: the Viewer list opens (as a click on it), rescanned (its postcommand); in see-through mode,
+    where the window is never on the screen, the viewer chooser (`see_menu.ViewerDialog`)."""
+    if getattr(window, "_see_hidden", False):
+        from . import see_menu, seethrough
+
+        seethrough.asked(window)
+        see_menu.open_viewer(window)
+        return
     box = getattr(window, "window_box", None)
     if box is None:
         return

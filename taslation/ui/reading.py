@@ -105,8 +105,8 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
     def _track_geometry(self, event: tk.Event) -> None:
         """Keep the window's size and place while it is neither maximised nor full screen: what a maximised window
         returns to, and what the full screen and a language switch put back."""
-        if event.widget is not self or self.reading or self._restoring:
-            return
+        if event.widget is not self or self.reading or self._restoring or getattr(self, "_see_hidden", False):
+            return  # (see-through mode: the window is off the screen, where it is never put back to)
         try:
             if self.state() == "normal":
                 self._normal_geometry = self.geometry()
@@ -174,7 +174,7 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
         and address bar, Set area... is offered first (`_offer_area`; *offered*: it was); the viewer's window is
         enlarged before either (`_enlarge_first`). Show original rests while it is on: the full screen has no menu to
         turn it off with. A faint close button shows at the top edge (`_top_edge_moved`)."""
-        if self.reading:
+        if self.reading or getattr(self, "_see_hidden", False):  # (see-through mode: the viewer's own full screen)
             return
         if self.selected is None:
             self.say("Pick the viewer window first (open your e-book viewer, then choose it in the Viewer list).")
@@ -442,18 +442,21 @@ class ReadingMixin(BubbleZoomMixin, InPlaceMixin, HoverChoiceMixin, BubbleTextMi
     # ------------------------------------------------------------------ single-screen use
     def _apply_alpha(self) -> None:
         """On Windows the window is not quite opaque: a Chromium viewer that an opaque window covers entirely stops
-        drawing (it would give a blank frame), one under a window it can see through a little goes on drawing."""
+        drawing (it would give a blank frame), one under a window it can see through a little goes on drawing. In
+        see-through mode, where the window is never on the screen (`seethrough.hidden`), it is not seen at all: 0."""
         if IS_WINDOWS:
             try:
-                self.attributes("-alpha", WINDOW_ALPHA)
+                self.attributes("-alpha", 0.0 if getattr(self, "_see_hidden", False) else WINDOW_ALPHA)
             except tk.TclError:
                 pass
 
     def _apply_on_top(self) -> None:
         """Always on top (or the full screen) as the reader has it; over the book the window stays topmost whatever
-        it is (`overbook`), set again with SWP_NOACTIVATE after Tk's own call."""
+        it is (`overbook`), set again with SWP_NOACTIVATE after Tk's own call. (See-through mode: never topmost, it is
+        off the screen.)"""
         try:
-            self.attributes("-topmost", bool(self.top_var.get()) or self.reading)
+            self.attributes("-topmost", (bool(self.top_var.get()) or self.reading)
+                            and not getattr(self, "_see_hidden", False))
         except tk.TclError:
             pass
         if getattr(self, "_over_on", False):

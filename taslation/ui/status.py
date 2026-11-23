@@ -174,12 +174,17 @@ class StatusMixin:
         then what keeps the window from reading the viewer, with its button (`trouble.viewer_trouble`, `_trouble`:
         Choose viewer, Show viewer, Move TASlation aside); the translator on the processor (`_on_cpu`, with Close);
         a target language whose script this computer cannot shape (`render.shaping.letter_by_letter`, with Close:
-        once a session)."""
+        once a session). In see-through mode, where the window is never on the screen, the same lines come in the
+        right side pane (``_see_banner_rows``, `seethrough.right_rows`) with their buttons in the Menu
+        (`see_menu.build`) - or, with that pane switched off, in a dialog of their own (`see_menu.show_banner`)."""
         rows: list[tuple[str, tuple[str, str], Any]] = [
             (trouble.setup_line(m), NOTICE_COLOURS if is_notice(m) else PROBLEM_COLOURS, trouble.setup_button(self, m))
             for m in self._health]
         kind = getattr(self, "_trouble", None)
-        if kind is not None:
+        # (see-through mode: no line asks to choose a viewer - the chooser comes by itself - nor to move a window that
+        # is not on the screen)
+        hidden = getattr(self, "_see_hidden", False)
+        if kind is not None and not (hidden and trouble.TROUBLE_ACTIONS[kind] in (trouble.CHOOSE, trouble.ASIDE)):
             rows.append((trouble.trouble_line(kind), PROBLEM_COLOURS,
                          trouble.action_button(self, trouble.TROUBLE_ACTIONS[kind])))
         seconds = getattr(self, "_on_cpu", None)
@@ -192,6 +197,11 @@ class StatusMixin:
                 language=_(language)), NOTICE_COLOURS, (_("Close"), self._close_unshaped_line)))
         self.setup_banner.show_rows(rows)
         self._place_strip(self.setup_banner, bool(rows))
+        if hidden and getattr(self, "_see_through", None) is not None:  # (the right pane, or a dialog: `see_menu`)
+            from . import see_menu, seethrough
+
+            self._see_banner_rows = list(rows)
+            see_menu.show_banner(self, [] if seethrough.indicators_on(self) else rows)
 
     def _close_cpu_line(self) -> None:
         """The processor's notice closed: not said again this session."""

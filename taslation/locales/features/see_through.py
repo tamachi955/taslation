@@ -1,9 +1,11 @@
 """The window's strings for see-through mode's side panes (`ui.seethrough`, a prototype behind ``see_through``): the
-controls left of the page (Stop while a page is translated, the indicators' switch, the way back to TASlation's own
-window) and the indicators right of it (how far the page on show is, where the translator runs). The other words of
-the panes are the window's own (Translate, Auto, Lettering - the Settings dialog's, ja 「写植」 -, Set area...,
-Settings..., Quit, the status line, the indicator's lines); the processor is worded as in the System page's (ja
-「CPU」).
+controls left of the page (Stop while a page is translated, the indicators' switch, the Menu row and the two entries
+of its menu that stand in for the toolbar of TASlation's own window, which this mode never shows: the viewer chooser
+and the book's Series and Volume) and the indicators right of it (how far the page on show is, where the translator
+runs). The other words of the panes and of the menu are the window's own (Translate, Auto, Lettering - the Settings
+dialog's, ja 「写植」 -, Set area..., Settings..., Quit, the status line, the indicator's lines, the menu's entries);
+the processor is worded as in the System page's (ja 「CPU」); the viewer as in the toolbar's "Viewer:" (ja 「ビューア」),
+the book's two fields as in their labels (ja 「シリーズ」「巻」).
 
 Machine-translated; no native review."""
 
@@ -18,12 +20,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "it": "Indicatori", "nl": "Indicatoren", "pl": "Wskaźniki", "ru": "Индикаторы", "tr": "Göstergeler",
         "id": "Indikator", "vi": "Chỉ báo", "zh": "指示器", "zh-tw": "指示器", "ko": "표시기", "th": "ตัวบ่งชี้",
     },
-    "TASlation window": {
-        "ja": "TASlation のウィンドウ", "es": "Ventana de TASlation", "pt": "Janela do TASlation",
-        "fr": "Fenêtre de TASlation", "de": "TASlation-Fenster", "it": "Finestra di TASlation",
-        "nl": "TASlation-venster", "pl": "Okno TASlation", "ru": "Окно TASlation", "tr": "TASlation penceresi",
-        "id": "Jendela TASlation", "vi": "Cửa sổ TASlation", "zh": "TASlation 窗口", "zh-tw": "TASlation 視窗",
-        "ko": "TASlation 창", "th": "หน้าต่าง TASlation",
+    "Menu": {
+        "ja": "メニュー", "es": "Menú", "pt": "Menu", "fr": "Menu", "de": "Menü", "it": "Menu", "nl": "Menu",
+        "pl": "Menu", "ru": "Меню", "tr": "Menü", "id": "Menu", "vi": "Menu", "zh": "菜单", "zh-tw": "選單",
+        "ko": "메뉴", "th": "เมนู",
+    },
+    "Viewer...": {
+        "ja": "ビューア...", "es": "Visor...", "pt": "Visualizador...", "fr": "Visionneuse...", "de": "Viewer...",
+        "it": "Visualizzatore...", "nl": "Viewer...", "pl": "Czytnik...", "ru": "Просмотрщик...",
+        "tr": "Görüntüleyici...", "id": "Penampil...", "vi": "Trình xem...", "zh": "查看器...", "zh-tw": "檢視器...",
+        "ko": "뷰어...", "th": "โปรแกรมอ่าน...",
+    },
+    "Series and Volume...": {
+        "ja": "シリーズと巻...", "es": "Serie y tomo...", "pt": "Série e volume...", "fr": "Série et tome...",
+        "de": "Serie und Band...", "it": "Serie e volume...", "nl": "Serie en deel...", "pl": "Seria i tom...",
+        "ru": "Серия и том...", "tr": "Seri ve cilt...", "id": "Seri dan volume...", "vi": "Bộ truyện và tập...",
+        "zh": "系列与卷...", "zh-tw": "系列與卷...", "ko": "시리즈와 권...", "th": "ซีรีส์และเล่ม...",
     },
     "This page: {done} of {total} lines": {
         "ja": "このページ: {total} 行中 {done} 行",

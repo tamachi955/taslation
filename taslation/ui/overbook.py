@@ -205,7 +205,7 @@ class OverBookMixin:
     def _over_sync(self) -> None:
         """The mode on or off (on near the book, not while typing or a dialog is open), the style put on again where Tk made its window anew, the hot
         keys as `wanted_hotkeys` says, and the hot keys pressed since the last time acted on."""
-        if not IS_WINDOWS:
+        if not IS_WINDOWS or getattr(self, "_see_hidden", False):  # (see-through mode: the window is never there)
             return
         if self._over_typing and not self._typing_on():
             self._over_typing = False
@@ -338,6 +338,8 @@ class OverBookMixin:
     def _remember_place(self) -> None:
         """The window's size and place kept for the next start (`keep_place`), once it has been over the book in this
         session or an earlier one: what it returns to when it is neither maximised nor full screen."""
+        if getattr(self, "_see_hidden", False):  # (see-through mode: the window's place off the screen is not one)
+            return
         if not (getattr(self, "_over_placed", False) or load_ui_table(Path(self.settings.state_dir), PLACE_TABLE)):
             return
         hwnd = self._own_hwnd()

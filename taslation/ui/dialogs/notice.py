@@ -10,7 +10,7 @@ from tkinter import ttk
 
 from ... import jurisdictions, notice
 from ...i18n import CATALOGS, UI_LANGUAGES, save_ui_language, set_language
-from ..layout import fit_combobox, frame_extents, give_icons, place_window, work_area
+from ..layout import dialog_area, fit_combobox, frame_extents, give_icons, place_window, work_area
 from ..wrap import wrap_line
 
 TEXT_LINES = 31  # the text box's height in lines, where the screen has room for it
@@ -119,9 +119,8 @@ class NoticeDialog(tk.Toplevel):
         screen above the taskbar; the box scrolls. The width stays: the text is broken into lines for it."""
         try:
             self.update_idletasks()
-            if parent is not None and parent.winfo_viewable():
-                _left, top, _right, bottom = work_area(self, parent.winfo_rootx() + parent.winfo_width() // 2,
-                                                       parent.winfo_rooty() + parent.winfo_height() // 2)
+            if parent is not None and parent.winfo_viewable():  # (where `place_window` puts it)
+                _left, top, _right, bottom = dialog_area(self, parent)[0]
             else:
                 _left, top, _right, bottom = work_area(self)
             border, caption = frame_extents()
