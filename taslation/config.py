@@ -297,8 +297,8 @@ class Settings:
     # a prototype, off by default: the lettering laid over the viewer's own window by a click-through window of
     # TASlation's, the viewer taking every click and key itself (TASlation holds no key then); the Lettering switch of
     # the left side pane hides it or shows it again (`ui.seethrough`). TASlation's own window is never on the screen
-    # then: the side panes, their Menu and the icon in the notification area (`ui.see_menu`) and its dialogs are all
-    # there is of it - the Reader role always, no full screen of its own, the viewer's window never moved nor resized.
+    # then: the side panes, their Menu (`ui.see_menu`), its taskbar button and its dialogs are all there is of it - the
+    # Reader role always, no full screen of its own, the viewer's window never moved nor resized.
     # In that mode its Settings dialog has a row for it (from the next start)
     see_through: bool = False
     # see-through mode's right side pane at the right edge of the viewer's area (`ui.seethrough`): the block of the

@@ -44,19 +44,27 @@ and the viewer takes every click and key itself.
   and the dialogs, mapped in its normal state - so that its widgets are laid out at their sizes, and its dialogs (Tk
   transients of it) show: Tk keeps a transient of a withdrawn or minimised window hidden - but off every monitor
   (`root_geometry`: up and left of the virtual screen by its own size; every size and place given to it goes there,
-  `App.wm_geometry`), at alpha 0, and a tool window (no taskbar button, not in Alt+Tab); never minimised, maximised or
-  full screen. Its first showing is a quiet one (`quiet_start`'s decoy) and takes no foreground. `keep_hidden` puts
-  each of those back should anything have changed it (counted); `hand_back` gives the foreground back to the viewer
-  when Windows gave it to the root (a dialog of its own closed, a menu ended). Its dialogs come up alone, over the
-  viewer (`dialog_centre`, `layout.dialog_area`), on the viewer's monitor (`layout.book_monitor`); one the reader asked
-  for (from a pane, the menu or the notification-area icon: `asked`) takes the keys as it shows (`_mapped`), the others
-  keep their own way (the start's ones leave the foreground where it is: `layout.dialog_keys`). With no viewer chosen
-  the viewer chooser comes by itself (`see_menu.chooser_due`), and the setup banner's lines come as a small dialog of
-  their own (`see_menu.show_banner`). The notification-area icon (`capture.tray`) opens the same menu with Settings...
-  and Quit, for when no viewer is in front and the panes are hidden.
+  `App.wm_geometry`), at alpha 0, and an application's window: its taskbar button (the title "TASlation" whatever is
+  given it, `HiddenWindowMixin.wm_title`, the program's icon; in Alt+Tab as an application is; left out of the
+  taskbar's peek, `capture.seethrough.no_peek`) is the way to the program while the panes are hidden, and its Close
+  (the button's menu, its thumbnail's X, Alt+F4) quits as the left pane's Quit does (``WM_DELETE_WINDOW``,
+  `App._on_close`). Never minimised, maximised or full screen. Its first showing is a quiet one (`quiet_start`'s decoy)
+  and takes no foreground. `keep_hidden` puts each of those back should anything have changed it (counted; a
+  minimised one at once, `_unmapped`, without activating it). Whenever the window is in front (`front_tick`): a
+  dialog of its own on show comes to the front instead; else, the reader having clicked the button (the pointer on
+  a taskbar or a button's thumbnails, `capture.seethrough.shell_at`, and no dialog nor menu of TASlation's gone just
+  before, CLOSED_S), the viewer chooser while no viewer is chosen, the Menu with the left pane's controls, Settings...
+  and Quit at the pointer while the left pane has no room beside the page (`see_menu.popup`, "button"); and
+  otherwise the foreground goes back to the viewer (`hand_back`: a dialog of its own closed, a menu ended, the button
+  clicked with the panes on the screen). Its dialogs come up alone, over the viewer (`dialog_centre`,
+  `layout.dialog_area`), on the viewer's monitor (`layout.book_monitor`); one the reader asked for (from a pane, the
+  menu or the button: `asked`) takes the keys as it shows (`_mapped`), the others keep their own way (the start's
+  ones leave the foreground where it is: `layout.dialog_keys`). With no viewer chosen the viewer chooser comes by
+  itself (`see_menu.chooser_due`), and the setup banner's lines come as a small dialog of their own
+  (`see_menu.show_banner`).
 
 Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, the
-menu or the icon, or a dialog of TASlation's own, moves the foreground."""
+menu or the taskbar button, or a dialog of TASlation's own, moves the foreground."""
 
 from __future__ import annotations
 
@@ -106,6 +114,9 @@ HIDE_EVERY = 10  # ticks (0.5 s) between the looks of `keep_hidden`
 ASKED_S = 1.5  # a dialog that shows so soon after the reader asked for something (`asked`) takes the keys
 HAND_BACK_WAIT_S = 0.4  # ... and `hand_back` leaves the foreground where it is so long after such a request (the
 # dialog it opens is on its way)
+CLOSED_S = 0.6  # the window in front so soon after a dialog of its own went or a menu ended is Windows' doing (it
+# activates the owner), not a click on its taskbar button (`front_tick`)
+BUTTON_TITLE = "TASlation"  # the hidden window's title: its taskbar button's, Alt+Tab's
 
 
 def px(app: Any, size: int) -> int:
@@ -121,9 +132,9 @@ def on(app: Any) -> bool:
 
 def quiet_start(app: Any, settings: Any) -> None:
     """At the very start of the window, before Tk first shows it, in see-through mode (Windows): the window made one
-    that is never on the screen (`hidden`: a tool window here, alpha 0 and off every monitor with `App._apply_alpha`
-    and `App.wm_geometry`, before it is first shown), and Tk kept from taking the foreground from the viewer as it
-    shows it: Tk activates the first top-level window it makes (SetActiveWindow when it is first shown - Tk 8.6.15,
+    that is never on the screen (`hidden`: titled BUTTON_TITLE here for its taskbar button, alpha 0 and off every
+    monitor with `App._apply_alpha` and `App.wm_geometry`, before it is first shown), and Tk kept from taking the
+    foreground from the viewer as it shows it: Tk activates the first top-level window it makes (SetActiveWindow when it is first shown - Tk 8.6.15,
     whatever its state: hidden or minimised alike), so the first one it makes is a decoy put inside a frame of the
     window's own (``-use``), a child window, which nothing activates. The window itself is then shown as Tk shows
     every later one, not activated (SW_SHOWNOACTIVATE): the viewer stays in front and takes the reader's keys with no
@@ -141,8 +152,8 @@ def quiet_start(app: Any, settings: Any) -> None:
     except tk.TclError:  # (no decoy: the window takes the foreground at its start as ever)
         pass
     try:
-        app.wm_attributes("-toolwindow", True)  # (before the window is shown: no taskbar button ever)
-    except tk.TclError:
+        app.wm_title(BUTTON_TITLE)
+    except (tk.TclError, AttributeError):
         pass
 
 
@@ -235,9 +246,12 @@ def root_hwnd(app: Any) -> int:
 
 
 def keep_hidden(app: Any) -> None:
-    """The hidden window as it is to be, every HIDE_EVERY ticks: in its normal state (never minimised nor maximised:
-    Tk keeps a transient of a minimised window hidden), alpha 0, a tool window, on no monitor - each put back where
-    anything changed it, and counted (``_see_hidden_fixes``). Its handle is kept for the tools (``_see_root_hwnd``)."""
+    """The hidden window as it is to be, every HIDE_EVERY ticks and at once when it was minimised (`_unmapped`): in
+    its normal state (never minimised nor maximised: Tk keeps a transient of a minimised window hidden; Tk's ``wm
+    state normal`` neither raises nor activates it), alpha 0, an application's window (no tool window: its taskbar
+    button), on no monitor - each put back where anything changed it, and counted (``_see_hidden_fixes``) -, and left
+    out of the taskbar's peek once its handle is known (`capture.seethrough.no_peek`). Its handle is kept for the
+    tools (``_see_root_hwnd``)."""
     if not hidden(app):
         return
     fixes = app.__dict__.setdefault("_see_hidden_fixes", {})
@@ -251,11 +265,13 @@ def keep_hidden(app: Any) -> None:
         if float(app.tk.call("wm", "attributes", app._w, "-alpha")) != 0.0:
             app.tk.call("wm", "attributes", app._w, "-alpha", 0.0)
             fixes["alpha"] = fixes.get("alpha", 0) + 1
-        if not int(app.tk.call("wm", "attributes", app._w, "-toolwindow")):
-            app.tk.call("wm", "attributes", app._w, "-toolwindow", 1)
+        if int(app.tk.call("wm", "attributes", app._w, "-toolwindow")):
+            app.tk.call("wm", "attributes", app._w, "-toolwindow", 0)
             fixes["tool"] = fixes.get("tool", 0) + 1
     except (tk.TclError, ValueError):
         return
+    if hwnd and getattr(app, "_see_no_peek", 0) != hwnd and window.no_peek(hwnd):
+        app._see_no_peek = hwnd
     facts = window.window_facts(hwnd) if hwnd else None
     if facts is not None and facts["on_monitor"]:
         try:
@@ -265,9 +281,159 @@ def keep_hidden(app: Any) -> None:
             pass
 
 
+def _unmapped(app: Any, event: Any) -> None:
+    """(the hidden window unmapped: minimised) Put back in its normal state at once (`keep_hidden`), not activated;
+    and when that was a click on its taskbar button while it was in front - the pointer on a taskbar or a button's
+    thumbnails, the viewer not minimised with it (Show desktop, Win+M) - what the click asked for done
+    (`front_tick`, *clicked*: Windows has given the foreground to another window meanwhile)."""
+    if getattr(event, "widget", None) is not app or not hidden(app):
+        return
+    try:
+        if str(app.tk.call("wm", "state", app._w)) != "iconic":
+            return
+    except tk.TclError:
+        return
+    clicked = window.shell_at(window.cursor_pos()) and not _viewer_minimised(app)
+
+    def back() -> None:
+        keep_hidden(app)
+        if clicked:
+            front_tick(app, clicked=True)
+
+    try:
+        app.after_idle(back)
+    except (tk.TclError, RuntimeError):
+        pass
+
+
+def _viewer_minimised(app: Any) -> bool:
+    win = getattr(app, "selected", None)
+    if win is None:
+        return False
+    facts = window.window_facts(int(win.hwnd))
+    return facts is None or bool(facts["iconic"])
+
+
+def _closed(app: Any, event: Any) -> None:
+    """(a top-level of the window's unmapped or destroyed) When, for `front_tick`: Windows then activates its owner,
+    the hidden window, which is no click of the reader's. Tips and popups without a frame are not counted."""
+    widget = getattr(event, "widget", None)
+    if not isinstance(widget, tk.Toplevel):
+        return
+    try:
+        if widget.wm_overrideredirect():
+            return
+    except tk.TclError:
+        pass
+    app._see_closed_at = time.monotonic()
+
+
+def recently_closed(app: Any, within: float = CLOSED_S) -> bool:
+    """Whether a dialog of the window's went, or a menu of TASlation's ended, within *within* seconds."""
+    return time.monotonic() - float(getattr(app, "_see_closed_at", -1e9)) < within
+
+
+def own_dialogs(app: Any) -> list[Any]:
+    """The dialogs of the hidden window's on the screen (Tk's ``wm stackorder``: mapped, lowest first), each a frame
+    of its own - no tip, no popup without a frame, not the start's decoy, not the window itself."""
+    try:
+        names = app.tk.splitlist(app.tk.call("wm", "stackorder", app._w))
+    except (tk.TclError, AttributeError):
+        return []
+    decoy = getattr(app, "_quiet_decoy", None) or ()
+    out = []
+    for name in names:
+        try:
+            widget = app.nametowidget(str(name))
+        except (KeyError, tk.TclError):
+            continue
+        try:
+            if widget is app or widget in decoy or not isinstance(widget, tk.Toplevel) or widget.wm_overrideredirect():
+                continue
+        except tk.TclError:
+            continue
+        out.append(widget)
+    return out
+
+
+def left_room(app: Any) -> bool:
+    """Whether the left pane had room beside the page at the last look (`panes_tick`: its place, None where the
+    ground leaves it none or no page on a flat ground was found yet)."""
+    memo = (getattr(app, "_see_pane_memo", None) or {}).get("left")
+    return memo is not None and memo[2] is not None
+
+
+def front_tick(app: Any, clicked: bool = False) -> str:
+    """The hidden window in front (every tick), or minimised by a click on its taskbar button (*clicked*): what the
+    reader is to get instead (see the module's notes) - a dialog of the window's on show comes to the front
+    ("dialog"); after a click on the button (the pointer on a taskbar or a button's thumbnails, and no dialog nor menu
+    of TASlation's gone just before: CLOSED_S) the viewer chooser while no viewer is chosen ("chooser"), the Menu at
+    the pointer while the left pane has no room beside the page ("menu"); else the foreground back to the viewer
+    (`hand_back`, "viewer"). Not while a menu of TASlation's is up, nor just after the reader asked for a dialog. ""
+    when nothing was done."""
+    if not hidden(app) or menu_up(app) or _recently_asked(app, HAND_BACK_WAIT_S):
+        return ""
+    from ..capture import foreground_window, give_foreground, window_exists
+
+    try:
+        hwnd = root_hwnd(app)
+        if not hwnd or (not clicked and foreground_window() != hwnd):
+            return ""
+    except (OSError, RuntimeError):
+        return ""
+    dialogs = own_dialogs(app)
+    if dialogs:
+        try:
+            if clicked:
+                give_foreground(hwnd)  # (Windows gave the foreground away as it minimised the window)
+            dialogs[-1].lift()
+            dialogs[-1].focus_force()
+        except (tk.TclError, OSError, RuntimeError):
+            return ""
+        _count(app, "dialog")
+        return "dialog"
+    point = window.cursor_pos()
+    if not (clicked or (not recently_closed(app) and window.shell_at(point))):
+        return "viewer" if hand_back(app) else ""
+    from . import see_menu
+
+    win = getattr(app, "selected", None)
+    try:
+        gone = win is None or not window_exists(win.hwnd)
+    except (OSError, RuntimeError):
+        gone = True
+    try:
+        if gone:
+            if clicked:
+                give_foreground(hwnd)
+            asked(app)
+            see_menu.open_viewer(app)
+            _count(app, "chooser")
+            return "chooser"
+        if not left_room(app) and point is not None:
+            if clicked:
+                give_foreground(hwnd)  # (a menu needs its window in front)
+            _count(app, "menu")
+            see_menu.popup(app, point[0], point[1], "button")
+            return "menu"
+        if clicked:
+            give_foreground(win.hwnd)
+            _count(app, "viewer")
+            return "viewer"
+    except (OSError, RuntimeError):
+        return ""
+    return "viewer" if hand_back(app) else ""
+
+
+def _count(app: Any, what: str) -> None:
+    """What `front_tick` did, counted for the tools (``_see_front``)."""
+    counts = app.__dict__.setdefault("_see_front", {})
+    counts[what] = counts.get(what, 0) + 1
+
+
 def asked(app: Any) -> None:
-    """The reader asked for something from a pane, the menu or the icon: a dialog that shows within ASKED_S takes the
-    keys (`_mapped`), and `hand_back` waits HAND_BACK_WAIT_S."""
+    """The reader asked for something from a pane, the menu or the taskbar button: a dialog that shows within ASKED_S
+    takes the keys (`_mapped`), and `hand_back` waits HAND_BACK_WAIT_S."""
     app._see_asked = time.monotonic()
 
 
@@ -341,8 +507,16 @@ class HiddenWindowMixin:
     """TASlation's own window (`app.App`, before ``tk.Tk``) as see-through mode keeps it off the screen (`hidden`):
     every size and place given it keeps its size and goes off every monitor (`root_geometry`), it is never minimised
     nor maximised (Tk keeps a transient of a minimised window hidden; Windows brings a maximised one onto a monitor),
-    and its dialogs say where they go instead of over it (`dialog_centre`, read by `layout.dialog_area`). Without the
-    mode each of these is Tk's own."""
+    its title is BUTTON_TITLE whatever is given it (its taskbar button's: no busy title), and its dialogs say where
+    they go instead of over it (`dialog_centre`, read by `layout.dialog_area`). Without the mode each of these is Tk's
+    own."""
+
+    def wm_title(self, string: str | None = None) -> Any:
+        if string is not None and hidden(self):
+            string = BUTTON_TITLE
+        return super().wm_title(string)  # type: ignore[misc]
+
+    title = wm_title
 
     def wm_geometry(self, newGeometry: str | None = None) -> Any:  # noqa: N803 - (Tk's own name)
         if newGeometry and hidden(self):
@@ -402,10 +576,12 @@ def start(app: Any) -> bool:
     app._see_ticks = 0
     app._see_asked = -1e9  # when the reader last asked for something (`asked`)
     app._see_menu_up = False  # a menu of TASlation's is up (`see_menu.popup`)
-    app._see_tray = None  # the notification-area icon (`capture.tray`)
     app._see_root_hwnd = 0  # the hidden window's handle, for the tools (`keep_hidden`)
     app._see_hidden_fixes = {}  # what `keep_hidden` put back, counted
     app._see_handed_back = 0  # how often `hand_back` gave the foreground back to the viewer
+    app._see_front = {}  # what `front_tick` did instead, counted
+    app._see_closed_at = -1e9  # when a dialog of the window's went or a menu ended last (`_closed`)
+    app._see_no_peek = 0  # the handle left out of the taskbar's peek (`keep_hidden`)
     app._see_patcher = None  # the patch thread (`Patcher`)
     app._see_bubble = None  # (its page's key, its patch's box, chosen when, last on show when): the bubble the right
     # pane shows (`bubble_tick`)
@@ -425,9 +601,11 @@ def start(app: Any) -> bool:
 
         without_the_window(app)
         see_menu.init(app)
-        app._see_tray = see_menu.start_tray(app)
         try:
             app.bind_class("Toplevel", "<Map>", lambda e: _mapped(app, e), add="+")
+            for sequence in ("<Unmap>", "<Destroy>"):
+                app.bind_class("Toplevel", sequence, lambda e: _closed(app, e), add="+")
+            app.bind_class("Tk", "<Unmap>", lambda e: _unmapped(app, e), add="+")
         except tk.TclError:
             pass
     try:
@@ -438,9 +616,6 @@ def start(app: Any) -> bool:
 
 
 def close(app: Any) -> None:
-    tray, app._see_tray = getattr(app, "_see_tray", None), None
-    if tray is not None:
-        tray.close()
     patcher, app._see_patcher = getattr(app, "_see_patcher", None), None
     if patcher is not None:
         patcher.close()
@@ -466,8 +641,9 @@ def _tick(app: Any) -> None:
 
 def tick(app: Any) -> None:
     """The viewer followed, the patches handed over when they changed, the side panes' clicks acted on and the panes
-    drawn again when they changed; with TASlation's own window hidden, the icon's clicks acted on, the window kept as
-    it is to be (`keep_hidden`, `hand_back`) and the viewer chooser offered while no viewer is chosen."""
+    drawn again when they changed; with TASlation's own window hidden, the window kept as it is to be (`keep_hidden`),
+    the viewer chooser offered while no viewer is chosen, and what the reader gets when the window is in front
+    (`front_tick`: a click on its taskbar button, a dialog of its own gone)."""
     over = app._see_through
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
@@ -480,13 +656,11 @@ def tick(app: Any) -> None:
         return
     from . import see_menu
 
-    if see_menu.tray_tick(app) == "quit" or not on(app):
-        return
     app._see_ticks = int(getattr(app, "_see_ticks", 0)) + 1
     if app._see_ticks % HIDE_EVERY == 1:
         keep_hidden(app)
         see_menu.chooser_tick(app)
-    hand_back(app)
+    front_tick(app)
 
 
 def hover_delay(app: Any) -> int:

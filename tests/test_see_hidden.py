@@ -1,16 +1,15 @@
 """See-through mode without TASlation's own window on the screen (`ui.seethrough.hidden`): its size and place always
-off every monitor, never minimised nor maximised, alpha 0 and a tool window, each put back when changed; the
-foreground handed back to the viewer when Windows gave it to the window; its dialogs over the viewer and on the
-viewer's monitor, the ones the reader asked for taking the keys; the Menu (`ui.see_menu`) with the window's entries
-that still mean something, the viewer chooser and Series and Volume as small dialogs, the chooser coming by itself
-with no viewer, the setup banner's lines in the right pane with their buttons in the Menu (a dialog with that pane
-off); the notification-area icon (`capture.tray`) with no real icon and the left pane's controls in its menu; what
-needs the window left out (over the book and its hot keys, the full screen, the Translator role, the viewer's window
+off every monitor, never minimised nor maximised, alpha 0 and an application's window with its taskbar button titled
+TASlation, each put back when changed; the foreground handed back to the viewer when Windows gave it to the window,
+and a click on its taskbar button giving a dialog on show, the chooser, the Menu with the left pane's controls or the
+viewer; its Close quitting as Quit does; its dialogs over the viewer and on the viewer's monitor, the ones the reader
+asked for taking the keys; the Menu (`ui.see_menu`) with the window's entries that still mean something, the viewer
+chooser and Series and Volume as small dialogs, the chooser coming by itself with no viewer, the setup banner's lines
+in the right pane with their buttons in the Menu (a dialog with that pane off); what needs the window left out (over the book and its hot keys, the full screen, the Translator role, the viewer's window
 enlarged, the line that TASlation covers the viewer, the pages seen), the panes' words naming no menu and no key, and
 the Settings dialog without the window's rows; and with the mode off, nothing of it. Fake windows and a withdrawn Tk
 root only: nothing is shown, no key, no click, the foreground only read."""
 
-import sys
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -56,6 +55,10 @@ class Wm:
     def wm_iconify(self):
         self.calls.append(("iconify",))
         return ""
+
+    def wm_title(self, string=None):
+        self.calls.append(("title", string))
+        return string or "TASlation"
 
 
 class Root(ui.HiddenWindowMixin, Wm):
@@ -120,14 +123,14 @@ def test_unhide_gives_the_window_back_when_the_see_through_window_could_not_star
                           _apply_alpha=lambda: alpha.append(app._see_hidden))
     assert ui.start(app) is False
     assert not ui.hidden(app) and attributes == [("-toolwindow", False)] and alpha == [False]
-    assert geometry == ["1180x920+40+40"] and app._see_tray is None
+    assert geometry == ["1180x920+40+40"]
 
 
 # ------------------------------------------------------------------ kept as it is to be
 class Calls:
     """Tk's ``wm`` calls of a fake window: what each reads, and what was set."""
 
-    def __init__(self, state="normal", alpha=0.0, tool=1):
+    def __init__(self, state="normal", alpha=0.0, tool=0):
         self.values = {"state": state, "-alpha": alpha, "-toolwindow": tool}
         self.set = []
 
@@ -149,15 +152,18 @@ def test_keep_hidden_puts_back_what_changed_and_counts_it(monkeypatch):
     facts = {"on_monitor": True}
     monkeypatch.setattr(ui.window, "window_facts", lambda hwnd: dict(facts) if hwnd == 77 else None)
     monkeypatch.setattr(ui.window, "virtual_screen", lambda: SCREEN)
-    calls, placed = Calls(state="iconic", alpha="0.5", tool=0), []
+    peeks = []
+    monkeypatch.setattr(ui.window, "no_peek", lambda hwnd: peeks.append(hwnd) or True)
+    calls, placed = Calls(state="iconic", alpha="0.5", tool=1), []  # (a tool window has no taskbar button)
     app = SimpleNamespace(_see_hidden=True, tk=calls, _w=".", _own_hwnd=lambda: 77, wm_geometry=placed.append)
     ui.keep_hidden(app)
-    assert calls.set == [("state", "normal"), ("-alpha", 0.0), ("-toolwindow", 1)]
+    assert calls.set == [("state", "normal"), ("-alpha", 0.0), ("-toolwindow", 0)]
     assert placed == [ui.root_geometry("+0+0", SCREEN)] and app._see_root_hwnd == 77
     assert app._see_hidden_fixes == {"state": 1, "alpha": 1, "tool": 1, "place": 1}
     app.tk, facts["on_monitor"], placed[:] = Calls(), False, []
     ui.keep_hidden(app)
     assert app.tk.set == [] and placed == [] and sum(app._see_hidden_fixes.values()) == 4  # (as it is to be)
+    assert peeks == [77]  # (left out of the taskbar's peek once for its handle)
 
 
 def handing(monkeypatch, front):
@@ -345,15 +351,14 @@ def test_the_menu_has_the_windows_entries_that_still_mean_something_and_each_is_
     assert entries(menu)[-1] == "Help" and len(entries(language)) == len(sm.UI_LANGUAGES)
 
 
-def test_the_icons_menu_adds_the_left_panes_controls_settings_and_quit_and_quit_is_no_asking(hidden_root,
-                                                                                               monkeypatch):
-    # (the panes hide where the viewer's ground leaves them no room, and with no viewer in front: the icon has what
-    # the left pane has)
+def test_the_buttons_menu_adds_the_left_panes_controls_settings_and_quit_and_quit_is_no_asking(hidden_root,
+                                                                                                 monkeypatch):
+    # (the taskbar button opens it while the left pane has no room beside the page: it has what the left pane has)
     toggled = []
     monkeypatch.setattr(ui, "toggle", lambda a: toggled.append(a))
     app = menu_app(hidden_root)
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
-    sm.build(app, menu, language, help_menu, tray=True)
+    sm.build(app, menu, language, help_menu, full=True)
     assert entries(menu)[:5] == ["Translate", "Auto", "Lettering", "Set area...", "-"]
     assert entries(menu)[-4:] == ["Help", "-", "Settings...", "Quit"]
     menu.invoke(len(entries(menu)) - 1)
@@ -400,6 +405,7 @@ def test_a_menu_opens_with_the_hidden_window_in_front_and_is_taken_to_be_up_unti
     shown[0] = False
     later[-1][1]()
     assert not ui.menu_up(app) and [k for _t, k in app._see_menu_opened] == ["pane"]
+    assert ui.recently_closed(app)  # (the window in front now is Windows' doing: no click on its button)
 
 
 def test_the_menu_row_opens_the_menu_at_the_panes_right_edge_level_with_the_row(monkeypatch):
@@ -415,16 +421,132 @@ def test_the_menu_row_opens_the_menu_at_the_panes_right_edge_level_with_the_row(
     assert sm.popup_at_pane(app) is False and len(popped) == 2
 
 
-def test_a_click_on_the_icon_opens_its_menu_at_the_pointer(monkeypatch):
-    popped = []
-    monkeypatch.setattr(sm, "popup", lambda app, x, y, kind: popped.append((x, y, kind)))
-    clicks = [("left", 10, 20, 1.0), ("right", 1800, 1050, 2.0)]
-    app = SimpleNamespace(_see_tray=SimpleNamespace(take_clicks=lambda: [clicks.pop(0) for _ in list(clicks)]),
-                          _see_through=object())
-    assert sm.tray_tick(app) == "menu" and popped == [(1800, 1050, "tray")]  # (the last click)
-    assert sm.tray_tick(app) == "" and len(popped) == 1
-    app._see_tray = None
-    assert sm.tray_tick(app) == ""
+# ------------------------------------------------------------------ the taskbar button
+def front_app(monkeypatch, front, shell, dialogs=()):
+    """A hidden window (handle 77) with the viewer 5, the left pane with room; what `front_tick` opens, noted."""
+    given = handing(monkeypatch, front)
+    opened = []
+    monkeypatch.setattr(ui.window, "cursor_pos", lambda: (500, 1060))
+    monkeypatch.setattr(ui.window, "shell_at", lambda point: shell[0] and point == (500, 1060))
+    monkeypatch.setattr(ui, "own_dialogs", lambda app: list(dialogs))
+    monkeypatch.setattr(sm, "open_viewer", lambda app: opened.append("chooser"))
+    monkeypatch.setattr(sm, "popup", lambda app, x, y, kind: opened.append((x, y, kind)))
+    app = SimpleNamespace(_see_hidden=True, _own_hwnd=lambda: 77, selected=SimpleNamespace(hwnd=5),
+                          _see_pane_memo={"left": (None, None, (8, 100, 128, 500))})
+    return app, given, opened
+
+
+def test_a_click_on_the_taskbar_button_brings_the_viewer_or_opens_what_the_reader_needs(monkeypatch):
+    front, shell = [77], [True]
+    app, given, opened = front_app(monkeypatch, front, shell)
+    assert ui.front_tick(app) == "viewer" and given == [5] and opened == []  # (the panes beside the page)
+    app._see_pane_memo["left"] = (None, None, None)  # (the left pane with no room: its controls at the pointer)
+    assert ui.front_tick(app) == "menu" and opened == [(500, 1060, "button")] and given == [5]
+    app.selected = None  # (no viewer chosen: the chooser, taking the keys)
+    assert ui.front_tick(app) == "chooser" and opened[-1] == "chooser" and ui._recently_asked(app, ui.ASKED_S)
+    assert app._see_front == {"menu": 1, "chooser": 1}
+
+
+def test_the_window_in_front_by_windows_doing_hands_the_foreground_back_as_before(monkeypatch):
+    front, shell = [77], [False]
+    app, given, opened = front_app(monkeypatch, front, shell)
+    app._see_pane_memo["left"] = (None, None, None)
+    assert ui.front_tick(app) == "viewer" and given == [5] and opened == []  # (the pointer on no taskbar)
+    shell[0] = True
+    app._see_closed_at = time.monotonic()  # (a dialog of its own just went: Windows activated its owner)
+    assert ui.front_tick(app) == "viewer" and given == [5, 5] and opened == []
+    app._see_closed_at -= ui.CLOSED_S + 0.1
+    app._see_menu_up = True  # (a menu of TASlation's is up: it needs the window in front)
+    assert ui.front_tick(app) == "" and len(given) == 2
+    app._see_menu_up = False
+    front[0] = 99  # (another window in front)
+    assert ui.front_tick(app) == "" and len(given) == 2 and opened == []
+    app.selected = None
+    front[0], shell[0] = 77, False  # (no viewer, no click: left as it is, as before)
+    assert ui.front_tick(app) == "" and opened == []
+
+
+def test_a_dialog_of_its_own_on_show_comes_to_the_front_instead(monkeypatch):
+    done = []
+    dialog = SimpleNamespace(lift=lambda: done.append("lift"), focus_force=lambda: done.append("focus"))
+    app, given, opened = front_app(monkeypatch, [77], [True], dialogs=[object(), dialog])
+    assert ui.front_tick(app) == "dialog" and done == ["lift", "focus"] and given == [] and opened == []
+
+
+def test_a_click_that_minimised_the_window_puts_it_back_unactivated_and_brings_the_viewer(monkeypatch):
+    front, shell = [99], [True]  # (Windows gave the foreground away as it minimised the window)
+    app, given, opened = front_app(monkeypatch, front, shell)
+    assert ui.front_tick(app, clicked=True) == "viewer" and given == [5]
+    app._see_pane_memo["left"] = (None, None, None)
+    assert ui.front_tick(app, clicked=True) == "menu" and given == [5, 77] and opened == [(500, 1060, "button")]
+    later, done = [], []
+    monkeypatch.setattr(ui, "keep_hidden", lambda a: done.append("normal"))
+    monkeypatch.setattr(ui, "front_tick", lambda a, clicked=False: done.append(("front", clicked)))
+    viewer_iconic = [False]
+    monkeypatch.setattr(ui.window, "window_facts", lambda hwnd: {"iconic": viewer_iconic[0]} if hwnd == 5 else None)
+    app.tk = SimpleNamespace(call=lambda *a: "iconic")
+    app._w, app.after_idle = ".", later.append
+    ui._unmapped(app, SimpleNamespace(widget=app))
+    later.pop()()
+    assert done == ["normal", ("front", True)]
+    viewer_iconic[0] = True  # (the viewer minimised with it: Show desktop, Win+M - only put back)
+    ui._unmapped(app, SimpleNamespace(widget=app))
+    later.pop()()
+    assert done == ["normal", ("front", True), "normal"]
+    viewer_iconic[0], shell[0] = False, False  # (the pointer on no taskbar: no click on the button)
+    ui._unmapped(app, SimpleNamespace(widget=app))
+    later.pop()()
+    assert done == ["normal", ("front", True), "normal", "normal"]
+    ui._unmapped(app, SimpleNamespace(widget=object()))  # (another widget unmapped: nothing)
+    app.tk = SimpleNamespace(call=lambda *a: "normal")
+    ui._unmapped(app, SimpleNamespace(widget=app))  # (not minimised)
+    assert later == []
+
+
+def test_a_dialog_gone_is_noted_and_the_dialogs_on_show_are_the_ones_with_a_frame(hidden_root):
+    dialog, tip = tk.Toplevel(hidden_root), tk.Toplevel(hidden_root)
+    for each in (dialog, tip):
+        each.withdraw()
+    tip.overrideredirect(True)
+    try:
+        app = SimpleNamespace(_see_closed_at=-1e9)
+        ui._closed(app, SimpleNamespace(widget=tip))
+        ui._closed(app, SimpleNamespace(widget=ttk.Frame(dialog)))
+        assert not ui.recently_closed(app)
+        ui._closed(app, SimpleNamespace(widget=dialog))
+        assert ui.recently_closed(app) and not ui.recently_closed(app, 0.0)
+        names = (str(hidden_root), str(tip), str(dialog))
+        fake = SimpleNamespace(tk=SimpleNamespace(call=lambda *a: names, splitlist=tuple), _w=".",
+                               nametowidget=hidden_root.nametowidget, _quiet_decoy=None)
+        assert ui.own_dialogs(fake) == [dialog]  # (not the window, not the tip)
+    finally:
+        dialog.destroy()
+        tip.destroy()
+
+
+def test_the_hidden_window_is_titled_for_its_taskbar_button_and_its_close_quits_as_quit_does():
+    import inspect
+
+    root = Root()
+    root._see_hidden = True
+    root.title("TASlation - translating...")
+    assert root.calls[-1] == ("title", ui.BUTTON_TITLE)
+    root.title()
+    assert root.calls[-1] == ("title", None)
+    del root._see_hidden
+    root.wm_title("Any")
+    assert root.calls[-1] == ("title", "Any")
+    from taslation.ui import app as app_mod
+
+    for name in ("title", "wm_title"):
+        assert getattr(app_mod.App, name) is getattr(ui.HiddenWindowMixin, name), name
+    # the button's Close, its thumbnail's X and Alt+F4 send WM_CLOSE, which Tk turns into WM_DELETE_WINDOW: the
+    # window's close, as the left pane's Quit and the Menu's Quit
+    source = inspect.getsource(app_mod.App)
+    assert 'self.protocol("WM_DELETE_WINDOW", self._on_close)' in source
+    calls = []
+    ui.PANE_ACTIONS["quit"](SimpleNamespace(_on_close=lambda: calls.append("close")))
+    assert calls == ["close"]
 
 
 # ------------------------------------------------------------------ the viewer chooser, Series and Volume, the banner
@@ -619,102 +741,48 @@ class FakeOver:
         pass
 
 
-def test_the_start_makes_the_icon_and_listens_for_dialogs_and_the_close_takes_it_away(monkeypatch):
+def test_the_start_listens_for_dialogs_and_the_window_minimised_and_makes_no_icon(monkeypatch):
     from taslation.capture import wgc
 
-    over, tray, binds = FakeOver(), SimpleNamespace(closed=[]), []
-    tray.close = lambda: tray.closed.append(True)
+    over, binds = FakeOver(), []
     monkeypatch.setattr(ui.window.SeeThrough, "start", classmethod(lambda cls: over))
-    monkeypatch.setattr(sm, "start_tray", lambda app: tray)
     monkeypatch.setattr(wgc, "set_update_ms", lambda ms: None)
     app = SimpleNamespace(settings=Settings(see_through=True), _see_hidden=True, after=lambda ms, f: "job",
                           bind_class=lambda *a, **k: binds.append(a[:2]))
     assert ui.start(app) is True
-    assert app._see_tray is tray and binds == [("Toplevel", "<Map>")] and app._see_chooser is None
+    assert binds == [("Toplevel", "<Map>"), ("Toplevel", "<Unmap>"), ("Toplevel", "<Destroy>"), ("Tk", "<Unmap>")]
+    assert app._see_chooser is None and not hasattr(app, "_see_tray") and app._see_front == {}
     ui.close(app)
-    assert tray.closed == [True] and app._see_tray is None and app._see_through is None
+    assert app._see_through is None
 
 
-def test_a_tick_of_the_hidden_window_keeps_it_hidden_offers_the_chooser_and_hands_the_foreground_back(monkeypatch):
+def test_a_tick_of_the_hidden_window_keeps_it_hidden_offers_the_chooser_and_looks_at_who_is_in_front(monkeypatch):
     done = []
     monkeypatch.setattr(ui.window, "viewer_dpi", lambda hwnd: 96)
     monkeypatch.setattr(ui, "present", lambda app: None)
     monkeypatch.setattr(ui, "panes_tick", lambda app: None)
     monkeypatch.setattr(ui, "keep_hidden", lambda app: done.append("keep"))
-    monkeypatch.setattr(ui, "hand_back", lambda app: done.append("back"))
+    monkeypatch.setattr(ui, "front_tick", lambda app, clicked=False: done.append("front"))
     monkeypatch.setattr(sm, "chooser_tick", lambda app: done.append("chooser"))
-    monkeypatch.setattr(sm, "tray_tick", lambda app: done.append("tray") or "")
     app = SimpleNamespace(_see_through=FakeOver(), selected=None, _see_hidden=True, _see_ticks=0)
     for _ in range(ui.HIDE_EVERY + 1):
         ui.tick(app)
-    assert done.count("tray") == done.count("back") == ui.HIDE_EVERY + 1
+    assert done.count("front") == ui.HIDE_EVERY + 1
     assert done.count("keep") == done.count("chooser") == 2  # (the first tick and every HIDE_EVERY-th)
     app._see_hidden, done[:] = False, []
     ui.tick(app)
     assert done == []  # (the mode with the window on the screen: none of it)
 
 
-# ------------------------------------------------------------------ the notification-area icon
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
-def test_the_icon_is_added_its_clicks_noted_put_back_when_explorer_starts_again_and_taken_away(monkeypatch):
-    import ctypes
-    from ctypes import wintypes
-
-    from taslation.capture import tray
-
-    calls = []
-
-    def noted(action, data):  # (no icon of the test's in the notification area)
-        calls.append((action, data.uFlags, data.uCallbackMessage, data.szTip, data.uID, bool(data.hIcon)))
-        return True
-
-    monkeypatch.setattr(tray, "shell_notify", noted)
-    icon = tray.Tray.start(layout.ICON_ICO, "TASlation")
-    assert icon is not None and icon.hwnd and icon.added
-    try:
-        add = calls[0]
-        assert add[0] == tray.NIM_ADD and add[1] == tray.NIF_MESSAGE | tray.NIF_TIP | tray.NIF_ICON
-        assert add[2:5] == (tray.CALLBACK, "TASlation", tray.ICON_ID) and add[5]
-        user32 = ctypes.WinDLL("user32")
-        user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-        user32.RegisterWindowMessageW.restype = wintypes.UINT
-        user32.IsWindowVisible.argtypes = [wintypes.HWND]
-        assert not user32.IsWindowVisible(icon.hwnd)  # (its window is never shown)
-        user32.PostMessageW(icon.hwnd, tray.CALLBACK, tray.ICON_ID, 0x0200)  # (the pointer over it: nothing)
-        user32.PostMessageW(icon.hwnd, tray.CALLBACK, tray.ICON_ID, tray.WM_RBUTTONUP)
-        user32.PostMessageW(icon.hwnd, tray.CALLBACK, tray.ICON_ID, tray.WM_LBUTTONUP)
-        user32.PostMessageW(icon.hwnd, user32.RegisterWindowMessageW("TaskbarCreated"), 0, 0)
-        clicks, until = [], time.monotonic() + 3
-        while len(clicks) < 2 and time.monotonic() < until:
-            clicks += icon.take_clicks()
-            time.sleep(0.02)
-        assert [c[0] for c in clicks] == ["right", "left"] and icon.counts["clicks"] == 2
-        until = time.monotonic() + 3
-        while icon.counts["readds"] < 1 and time.monotonic() < until:
-            time.sleep(0.02)
-        assert icon.counts["readds"] == 1 and [c[0] for c in calls] == [tray.NIM_ADD, tray.NIM_ADD]
-    finally:
-        icon.close()
-    assert calls[-1][0] == tray.NIM_DELETE and icon.hwnd == 0 and not icon.added
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
-def test_an_icon_the_shell_refuses_leaves_nothing_behind(monkeypatch):
-    from taslation.capture import tray
-
-    monkeypatch.setattr(tray, "shell_notify", lambda action, data: False)
-    assert tray.Tray.start(None, "TASlation") is None
-
-
-def test_the_icon_and_the_menu_press_nothing_and_move_no_pointer():
+def test_no_icon_in_the_notification_area_and_the_menu_presses_nothing_and_moves_no_pointer():
+    import importlib.util
     import inspect
 
-    from taslation.capture import tray
-
-    for module in (tray, sm):
+    assert importlib.util.find_spec("taslation.capture.tray") is None
+    for module in (sm, ui):
         source = inspect.getsource(module)
-        for call in ("SendInput", "keybd_event", "mouse_event", "SetCursorPos", "AttachThreadInput",
-                     "SetWindowsHookEx"):
+        for call in ("SendInput", "keybd_event", "mouse_event", "SetCursorPos", "SetWindowsHookEx",
+                     "Shell_NotifyIcon"):
             assert call not in source, (module.__name__, call)
 
 

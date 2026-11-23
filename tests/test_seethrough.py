@@ -388,10 +388,11 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     monkeypatch.setattr(ui.tk, "Toplevel", Toplevel)
     monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
     later, attributes = [], []
+    titles = []
     app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)),
-                          wm_attributes=lambda *a: attributes.append((len(made), a)))
+                          wm_attributes=lambda *a: attributes.append((len(made), a)), wm_title=titles.append)
     ui.quiet_start(app, Settings())
-    assert made == [] and not ui.quiet(app) and not ui.hidden(app) and attributes == []
+    assert made == [] and not ui.quiet(app) and not ui.hidden(app) and attributes == [] and titles == []
     ui.quiet_started(app)
     assert later == []
     ui.quiet_start(app, Settings(see_through=True))
@@ -399,9 +400,9 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
     assert box.options == {"container": True} and decoy.options == {"use": "4242"}
     assert ui.quiet(app)  # (not maximised at the start then)
-    # ... and the window itself is never on the screen in this mode: a tool window (no taskbar button), made so
-    # after the decoy, before it is first shown
-    assert ui.hidden(app) and attributes == [(2, ("-toolwindow", True))]
+    # ... and the window itself is never on the screen in this mode, an application's window with its taskbar
+    # button (no tool window) titled for it
+    assert ui.hidden(app) and attributes == [] and titles == [ui.BUTTON_TITLE]
     ui.quiet_started(app)
     (ms, drop), = later
     assert ms == ui.QUIET_MS

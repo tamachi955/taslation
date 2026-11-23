@@ -113,7 +113,8 @@ over a new page, two of them into shots/; *--see-indicators off* with the indica
 the same, for the comparison (*--capture-ms 16* asks for the frames as often as see-through mode does). *--standin-size
 WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
 reader's area the whole frame). In see-through mode TASlation's own window is never on the screen: the watch reads its
-handle once a second (on no monitor, alpha 0, a tool window: ``run.see_through.hidden_window``). *--no-viewer-s S*
+handle once a second (on no monitor, alpha 0, an application's window with its taskbar button titled TASlation:
+``run.see_through.hidden_window``). *--no-viewer-s S*
 gives the window no viewer to find for its first S seconds (the viewer chooser comes by itself meanwhile), and
 *--book-asked* starts it with a name that names no book, so that the start dialog asks it at Auto's first page; the
 driver answers it through the dialog's own object (``run.no_viewer``, ``run.book_asked``).

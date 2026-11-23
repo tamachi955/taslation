@@ -38,8 +38,8 @@ lettering laid over the viewer's own window, which goes on taking every click an
   there; on again at the look that finds it elsewhere), so that its words never keep a click from the viewer. The
   panes take no key, and send, post and press nothing either.
 * Topmost, but never above a menu of TASlation's own: shown again or moved, the lettering's window and the panes go
-  just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the notification-area icon's
-  menu, the left pane's Menu and their submenus), since a window made topmost again comes above every other topmost
+  just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the left pane's Menu, the
+  one the taskbar button opens and their submenus), since a window made topmost again comes above every other topmost
   one, an open menu too. (A menu over the viewer is a window above it as well: the patches and the panes it meets are
   left out meanwhile, `cover_rects`.)
 
@@ -197,11 +197,23 @@ if IS_WINDOWS:
     _user32.FindWindowExW.restype = wintypes.HWND
     _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _user32.WindowFromPoint.argtypes = [wintypes.POINT]
+    _user32.WindowFromPoint.restype = wintypes.HWND
+    _user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetClassNameW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetWindowTextW.restype = ctypes.c_int
 
 MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 0, 2, 0
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
 WS_EX_APPWINDOW, LWA_ALPHA = 0x00040000, 0x2
+GW_OWNER = 4
+DWMWA_DISALLOW_PEEK = 11
+# the shell's windows a click on a taskbar button is made on: the taskbars (the primary's and the others'), a button's
+# thumbnails (Windows 10's, and Windows 11's island that holds them)
+SHELL_CLASSES = ("Shell_TrayWnd", "Shell_SecondaryTrayWnd", "TaskListThumbnailWnd", "XamlExplorerHostIslandWindow")
 _shcore: Any = None  # (shcore.dll, loaded at the first `viewer_dpi`)
+_dwmapi: Any = None  # (dwmapi.dll, loaded at the first `no_peek`)
 
 
 def virtual_screen() -> tuple[int, int, int, int]:
@@ -218,8 +230,9 @@ def window_facts(hwnd: int) -> dict[str, Any] | None:
     """How the top-level window *hwnd* is on the screen, read only (any thread): shown (``IsWindowVisible``),
     minimised, whether any part of its rectangle lies on a monitor (``MonitorFromRect``, MONITOR_DEFAULTTONULL), its
     layered alpha (0-255; None when it has none: opaque), a tool window (no taskbar button, not in Alt+Tab) or one
-    marked for the taskbar. None for no window. (TASlation's own window in see-through mode, `ui.seethrough`: never on
-    a monitor, alpha 0, a tool window.)"""
+    marked for the taskbar, owned by another window, whether it has a taskbar button (shown, no tool window, and
+    marked for the taskbar or owned by none: Windows' rule) and its title. None for no window. (TASlation's own window
+    in see-through mode, `ui.seethrough`: never on a monitor, alpha 0, an application's window with its button.)"""
     if not IS_WINDOWS or not hwnd or not _user32.IsWindow(hwnd):
         return None
     rect = wintypes.RECT()
@@ -232,9 +245,49 @@ def window_facts(hwnd: int) -> dict[str, Any] | None:
         if _user32.GetLayeredWindowAttributes(hwnd, ctypes.byref(key), ctypes.byref(value), ctypes.byref(flags)) \
                 and flags.value & LWA_ALPHA:
             alpha = int(value.value)
-    return {"visible": bool(_user32.IsWindowVisible(hwnd)), "iconic": bool(_user32.IsIconic(hwnd)),
+    visible, tool, app = bool(_user32.IsWindowVisible(hwnd)), bool(ex & WS_EX_TOOLWINDOW), bool(ex & WS_EX_APPWINDOW)
+    owned = bool(_user32.GetWindow(hwnd, GW_OWNER))
+    title = ctypes.create_unicode_buffer(64)
+    _user32.GetWindowTextW(hwnd, title, 64)
+    return {"visible": visible, "iconic": bool(_user32.IsIconic(hwnd)),
             "on_monitor": on_monitor, "rect": (rect.left, rect.top, rect.right, rect.bottom), "alpha": alpha,
-            "tool": bool(ex & WS_EX_TOOLWINDOW), "app": bool(ex & WS_EX_APPWINDOW)}
+            "tool": tool, "app": app, "owned": owned, "button": visible and not tool and (app or not owned),
+            "title": title.value}
+
+
+def shell_at(point: tuple[int, int] | None) -> bool:
+    """Whether the screen *point* lies on a taskbar or on a taskbar button's thumbnails (`SHELL_CLASSES`: the
+    top-level window there, ``WindowFromPoint``), read only: where the pointer is as a taskbar button is clicked."""
+    if not IS_WINDOWS or point is None:
+        return False
+    try:
+        hwnd = _user32.WindowFromPoint(wintypes.POINT(int(point[0]), int(point[1])))
+        root = _user32.GetAncestor(hwnd, GA_ROOT) if hwnd else None
+        if not root:
+            return False
+        name = ctypes.create_unicode_buffer(64)
+        _user32.GetClassNameW(root, name, 64)
+        return name.value in SHELL_CLASSES
+    except OSError:
+        return False
+
+
+def no_peek(hwnd: int) -> bool:
+    """The window *hwnd* left out of the taskbar's peek (``DWMWA_DISALLOW_PEEK``: the pointer resting on its
+    thumbnail hides no other window to show it - TASlation's own window has nothing to show). Whether it was set."""
+    global _dwmapi
+    if not IS_WINDOWS or not hwnd:
+        return False
+    try:
+        if _dwmapi is None:
+            _dwmapi = ctypes.WinDLL("dwmapi")
+            _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+            _dwmapi.DwmSetWindowAttribute.restype = ctypes.c_long
+        value = wintypes.BOOL(True)
+        return _dwmapi.DwmSetWindowAttribute(hwnd, DWMWA_DISALLOW_PEEK, ctypes.byref(value),
+                                             ctypes.sizeof(value)) == 0
+    except OSError:
+        return False
 
 
 def cursor_pos() -> tuple[int, int] | None:

@@ -2,9 +2,9 @@
 do not, in places of their own.
 
 * The menu (`build`, `popup`): the left pane's Menu row opens it at the pane's right edge, level with the row
-  (`popup_at_pane`), and the notification-area icon (`capture.tray`, `start_tray`, `tray_tick`) at the pointer, with
-  the left pane's controls (Translate, Auto, Lettering, Set area...: the panes hide where the viewer's ground leaves
-  them no room, and with no viewer in front) and Settings... and Quit added. While the setup banner has buttons
+  (`popup_at_pane`), and a click on TASlation's taskbar button while the left pane has no room beside the page opens
+  it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Lettering,
+  Set area...) and Settings... and Quit added. While the setup banner has buttons
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
   in the right pane). Its entries are the window's own commands and dialogs that still mean something here -
   the viewer chooser and the book's Series and Volume (`ViewerDialog`, `BookDialog`: the toolbar's two controls as
@@ -14,10 +14,10 @@ do not, in places of their own.
   on top, Over the full-screen viewer, Reading-order numbers, Full screen, Page keys..., Help > Keys..., the role and
   translator mode's tools). Every entry but Quit counts as the reader asking (`seethrough.asked`): a dialog it opens
   takes the keys.
-* A menu needs its window in front for a click outside it to close it (Windows' rule for a menu opened from a
-  notification icon): the hidden window is made the foreground first - the click that opened the menu was the
-  reader's, on a window of TASlation's -, and `seethrough.hand_back` gives the foreground back to the viewer once the
-  menu has ended (``_see_menu_up`` until then).
+* A menu needs its window in front for a click outside it to close it (Windows' rule for a menu of a window that is
+  not in front): the hidden window is made the foreground first - the click that opened the menu was the reader's,
+  on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the
+  viewer once the menu has ended (``_see_menu_up`` until then).
 * No viewer chosen: the viewer chooser comes by itself (`chooser_tick`, CHOOSER_DUE_S after the start, never while a
   dialog holds the window), on the viewer's monitor or the primary one, topmost, taking no key while another program
   is in front (`layout.dialog_keys`: a click gives it the keys), and closes itself once a viewer is chosen - by the
@@ -56,7 +56,7 @@ IS_WINDOWS = sys.platform == "win32"
 
 def init(app: Any) -> None:
     """The state of this module's parts, at see-through mode's start."""
-    app._see_menus = {}  # kind ("pane", "tray") -> (its menu, the Language menu, the Help menu), kept and refilled
+    app._see_menus = {}  # kind ("pane", "button") -> (its menu, the Language menu, the Help menu), kept and refilled
     app._see_menu_opened = []  # (when, kind) of each menu opened, for the tools
     app._see_chooser = None  # the viewer chooser while it is open
     app._see_chooser_declined = False  # one that came by itself was closed with no choice
@@ -90,11 +90,11 @@ def banner_actions(app: Any) -> list[tuple[str, Callable[[], None]]]:
     return out
 
 
-def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, tray: bool = False) -> None:
+def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: bool = False) -> None:
     """*menu* filled anew with the entries (see the module's notes), its cascades *language* and *help_menu* too;
-    *tray*: the icon's menu, with the left pane's controls first (Translate, Auto, Lettering, Set area...: the panes
-    may be hidden) and Settings... and Quit at its end. The setup banner's buttons come first while it has some
-    (`banner_actions`)."""
+    *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Lettering, Set area...:
+    the left pane is not on the screen) and Settings... and Quit at its end. The setup banner's buttons come first
+    while it has some (`banner_actions`)."""
     from . import updates
     from .gpu_release import RELEASE_ENTRY, release_now
 
@@ -105,7 +105,7 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, tray: 
         menu.add_command(label=text, command=_asking(app, command))
     if actions:
         menu.add_separator()
-    if tray:
+    if full:
         over = getattr(app, "_see_through", None)
         menu.add_command(label=_("Translate"), command=_asking(app, app.translate_now))
         menu.add_checkbutton(label=_("Auto"), variable=app.auto_var)
@@ -131,14 +131,14 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, tray: 
     help_menu.add_command(label=updates.menu_label(app), command=_asking(app, app.open_updates))
     help_menu.add_command(label=_("About TASlation"), command=_asking(app, app.open_about))
     menu.add_cascade(label=_("Help"), menu=help_menu)
-    if tray:
+    if full:
         menu.add_separator()
         menu.add_command(label=_("Settings..."), command=_asking(app, app.open_settings))
         menu.add_command(label=_("Quit"), command=app._on_close)
 
 
 def menu_for(app: Any, kind: str) -> tuple[tk.Menu, tk.Menu, tk.Menu]:
-    """The menu of *kind* ("pane" or "tray") with its two cascades, made once and filled anew before each opening
+    """The menu of *kind* ("pane" or "button") with its two cascades, made once and filled anew before each opening
     (`build`): a menu is never destroyed while one of its commands may still be on its way."""
     menus = app.__dict__.setdefault("_see_menus", {})
     made = menus.get(kind)
@@ -157,7 +157,7 @@ def popup(app: Any, x: int, y: int, kind: str) -> None:
     """The menu of *kind* at the screen point (*x*, *y*), the hidden window in front while it is up (see the module's
     notes). On Windows Tk's menu runs until it ends (Tk's timers go on meanwhile)."""
     menu, language, help_menu = menu_for(app, kind)
-    build(app, menu, language, help_menu, tray=kind == "tray")
+    build(app, menu, language, help_menu, full=kind == "button")
     app._see_menu_up = True
     app.__dict__.setdefault("_see_menu_opened", []).append((time.monotonic(), kind))
     _front(seethrough.root_hwnd(app))
@@ -177,7 +177,8 @@ def popup(app: Any, x: int, y: int, kind: str) -> None:
 
 
 def _menu_down(app: Any) -> None:
-    """The menu taken to have ended - unless a menu of this process is still on the screen (looked at again)."""
+    """The menu taken to have ended - unless a menu of this process is still on the screen (looked at again); when, for
+    `seethrough.front_tick` (the window is in front then, by no click of the reader's)."""
     if _menus_shown():
         try:
             app.after(MENU_GRACE_MS, lambda: _menu_down(app))
@@ -185,6 +186,7 @@ def _menu_down(app: Any) -> None:
         except (tk.TclError, RuntimeError):
             pass
     app._see_menu_up = False
+    app._see_closed_at = time.monotonic()
 
 
 def popup_at_pane(app: Any) -> bool:
@@ -198,32 +200,6 @@ def popup_at_pane(app: Any) -> bool:
     top = next((hit[1] for name, hit in memo[1].hits if name == "menu"), 0)
     popup(app, box[2], box[1] + top, "pane")
     return True
-
-
-# ------------------------------------------------------------------ the notification-area icon
-def start_tray(app: Any) -> Any:
-    """The icon in the notification area (`capture.tray`), or None where there can be none."""
-    from ..capture import tray
-    from .layout import ICON_ICO
-
-    try:
-        return tray.Tray.start(ICON_ICO, "TASlation")
-    except Exception:  # noqa: BLE001 - no icon: the panes and the start dialogs remain
-        return None
-
-
-def tray_tick(app: Any) -> str:
-    """The icon's clicks since the last tick: the last one opens the icon's menu at the pointer. "quit" when the
-    window has gone (Quit chosen), "menu" when a menu was opened, else ""."""
-    icon = getattr(app, "_see_tray", None)
-    if icon is None:
-        return ""
-    clicks = icon.take_clicks()
-    if not clicks:
-        return ""
-    _button, x, y, _when = clicks[-1]
-    popup(app, x, y, "tray")
-    return "menu" if seethrough.on(app) else "quit"
 
 
 # ------------------------------------------------------------------ the foreground for a menu

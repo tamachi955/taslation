@@ -345,11 +345,14 @@ rows' languages.
   TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
   window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
   window was on the screen once a second (`hidden_window`: in see-through mode it is never on the screen - its handle
-  read with `capture.seethrough.window_facts`, "off" when it lies on no monitor, at alpha 0, a tool window not marked
-  for the taskbar and not minimised, "not shown" before Tk first shows it; once shown it stays shown in Windows'
-  sense, since Tk's dialogs need a master in its normal state - every look "off" (or "not shown") is expected, with what `keep_hidden` put back, how often the foreground went back to the
-  viewer, the notification-area icon's counts, how many dialogs of the process were on a monitor at each look, and
-  when the viewer chooser and the banner's dialog came and went). `--no-viewer-s S` gives the window no viewer to find
+  read with `capture.seethrough.window_facts`, "off" when it lies on no monitor, at alpha 0, an application's window
+  with its taskbar button (no tool window, owned by none) titled "TASlation" and not minimised, "not shown" before Tk
+  first shows it; once shown it stays shown in Windows' sense, since Tk's dialogs need a master in its normal state -
+  every look "off" (or "not shown") is expected, with what `keep_hidden` put back, how often the foreground went
+  back to the viewer, what the window being in front gave instead (`front`: a dialog brought up, the chooser, the
+  Menu at the pointer, the viewer - after a click on its taskbar button, which only the owner's own click makes),
+  how many dialogs of the process were on a monitor at each look, and when the viewer chooser and the banner's
+  dialog came and went). `--no-viewer-s S` gives the window no viewer to find
   for its first S seconds (the viewer chooser comes by itself after 2.5 s and goes once the window has found the
   stand-in: `run.no_viewer`), and `--book-asked` starts it with a name that names no book, so that Auto's first page
   asks it in the start dialog, which the driver answers 1.5 s after it is on the screen through the dialog's own
