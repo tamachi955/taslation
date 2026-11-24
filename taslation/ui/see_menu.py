@@ -17,11 +17,13 @@ hosts the dialogs), in places of their own.
   not in front): the hidden window is made the foreground first - the click that opened the menu was the reader's,
   on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the
   viewer once the menu has ended (``_see_menu_up`` until then).
-* No viewer chosen: the viewer chooser comes by itself (`chooser_tick`, CHOOSER_DUE_S after the start, never while a
-  dialog holds the window), on the viewer's monitor or the primary one, topmost, taking no key while another program
-  is in front (`layout.dialog_keys`: a click gives it the keys), and closes itself once a viewer is chosen - by the
-  reader there or by TASlation, which goes on looking for one (`ViewerMixin._watch_windows`). Closed without a
-  choice, it comes again only once a viewer has been chosen and lost.
+* No viewer followed: the viewer chooser (`ViewerDialog`) is on the screen (`chooser_tick`) - at every start, once
+  the legal notice and the GPU's dialog are over, alone; again when the viewer's window was closed (saying so); never
+  while a dialog holds the window, nor for a viewer named with --window (`ViewerMixin._watch_windows` looks for that
+  one). TASlation chooses no viewer by itself: the windows that look like it come first and one is preselected,
+  Enter or OK chooses it, Quit ends TASlation. Centred over the window preselected, else on the primary monitor,
+  topmost; at the start it takes the keys as it shows, after a viewer was closed only while TASlation's window has
+  them (`layout.dialog_keys`: a click gives it the keys).
 * The setup banner's lines (`StatusMixin._show_banner`): in the right side pane, their buttons in the Menu; with that
   pane switched off, as a small dialog of their own while there is something to say (`show_banner`, `BannerDialog`),
   with the buttons the banner has (Start translator again, Download model, Show viewer, Close). The lines that ask to
@@ -34,16 +36,17 @@ import os
 import sys
 import time
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Any, Callable, Sequence
 
 from ..i18n import UI_LANGUAGES, _
 from . import seethrough
 from .banner import break_lines
+from .constants import VIEWER_CLOSED, WINDOW_WATCH_MS
 
-CHOOSER_DUE_S = 2.5  # with no viewer chosen so long after the start, the chooser comes by itself
 MENU_GRACE_MS = 300  # a menu is taken to be up so long after it ended (`_menu_down`)
-VIEWER_LIST_CHARS = 40  # the chooser's list, in "0" widths (the toolbar's list as it opens)
+VIEWER_LIST_CHARS = 48  # the chooser's list, in "0" widths: its entries are shortened in the middle to it
 WRAP_PX = 460  # the dialogs' lines are broken this wide (px at the window's scale)
 BOOK_CHARS = 30  # the book dialog's Series field
 BANNER_LATER_MS = 500  # the banner's lines before Tk has shown the window: their dialog comes so much later
@@ -57,11 +60,9 @@ def init(app: Any) -> None:
     app._see_menus = {}  # kind ("pane", "button") -> (its menu, the Language menu, the Help menu), kept and refilled
     app._see_menu_opened = []  # (when, kind) of each menu opened, for the tools
     app._see_chooser = None  # the viewer chooser while it is open
-    app._see_chooser_declined = False  # one that came by itself was closed with no choice
     app._see_book_dialog = None
     app._see_banner = None  # the banner's dialog while it is open
     app._see_banner_closed = ()  # the lines it had when the reader closed it
-    app._see_started = time.monotonic()
 
 
 # ------------------------------------------------------------------ the menu
@@ -271,21 +272,34 @@ class _Dialog(tk.Toplevel):
         self.frame = ttk.Frame(self, padding=14)
         self.frame.pack(fill="both", expand=True)
 
-    def show(self, focus: tk.Misc | None = None) -> None:
+    def show(self, focus: tk.Misc | None = None, at: tuple[int, int] | None = None, keys: bool = False) -> None:
+        """Shown, placed over the viewer (*at*: centred on that screen point instead); one that came by itself
+        topmost, taking the keys only while TASlation's own window has them (`layout.dialog_keys`) - unless *keys*:
+        it takes them as it shows (the start's viewer chooser, the one thing on the screen)."""
         from .layout import dialog_keys, place_by_book, place_window
 
         if self.by_itself:
-            place_by_book(self, self.app)
+            if at is not None:
+                place_window(self, self.app, at=at)
+            else:
+                place_by_book(self, self.app)
             try:
                 self.attributes("-topmost", True)
             except tk.TclError:
                 pass
         else:
-            place_window(self, self.app)
+            place_window(self, self.app, at=at)
         if self.app.winfo_viewable():  # (a window not on the screen, as the tests' root: it stays out of sight)
             self.deiconify()
-        if self.by_itself:
+        if self.by_itself and not keys:
             dialog_keys(self, self.app, focus)
+        elif keys and self.winfo_viewable():
+            try:
+                self.lift()
+                self.focus_force()
+                (focus or self).focus_set()
+            except tk.TclError:
+                pass
         elif focus is not None:
             focus.focus_set()
 
@@ -296,49 +310,137 @@ class _Dialog(tk.Toplevel):
 
 
 class ViewerDialog(_Dialog):
-    """The toolbar's Viewer list as a dialog: the windows that may show the book, rescanned as the list opens (as
-    the toolbar's is: `ViewerMixin._rescan_windows`), the one chosen in the window first; OK chooses it as a pick in
-    the toolbar does (`ViewerMixin._on_window_selected`, *picked*)."""
+    """The viewer chooser: a drop-down list of the windows on the screen, each named as its taskbar button is (a
+    browser window by its tab and the browser's name: `viewers.entry_titles`, shortened in the middle to the list's
+    width), the ones that look like the viewer first and one of them preselected (`viewers.offered`: the viewer
+    followed, else the one remembered from an earlier choice, else one with a viewer's part or a reading word in its
+    title; none ranking: none, and OK greyed until the person picks one). List again lists the windows again (as the
+    list does as it opens, and every WINDOW_WATCH_MS by itself: a viewer opened meanwhile comes into the list,
+    preselected while the person has picked nothing). OK (Enter) chooses the window as a pick in the toolbar does
+    (`ViewerMixin._on_window_selected`, *picked*: remembered in viewers.json, followed from then on). The last button
+    is Quit while no viewer is followed - TASlation then has nothing to do: it ends, as the left pane's Quit does -,
+    else Close (the viewer stays as it is); Escape and the dialog's own close do what it does. Nothing is followed,
+    shown or read of any window before OK."""
 
     def __init__(self, app: Any, by_itself: bool = False):
         super().__init__(app, by_itself)
         self.windows: list[Any] = []
+        self.pick: int | None = None  # the window the person picked in the list (kept when it is listed again)
+        self._seen: tuple[Any, ...] = ()  # the windows as last listed
+        self._watch_id: str | None = None
+        start = getattr(app, "selected", None) is None and getattr(app, "_viewer_closed", None) is None
+        if getattr(app, "selected", None) is None and not start:
+            self.wrapped(self.frame, _(VIEWER_CLOSED)).pack(anchor="w", pady=(0, 8))
         self.wrapped(self.frame, _("The window that shows your book. TASlation reads the page from it.")).pack(
             anchor="w")
         row = ttk.Frame(self.frame)
         row.pack(fill="x", pady=(10, 0))
         ttk.Label(row, text=_("Viewer:")).pack(side="left")
-        self.box = ttk.Combobox(row, state="readonly", width=VIEWER_LIST_CHARS, postcommand=self.rescan)
+        self.box = ttk.Combobox(row, state="readonly", width=VIEWER_LIST_CHARS, postcommand=self.relist)
         self.box.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        self.box.bind("<<ComboboxSelected>>", self._picked, add="+")
         buttons = ttk.Frame(self.frame)
         buttons.pack(fill="x", pady=(14, 0))
-        ttk.Button(buttons, text=_("Close"), command=self.close).pack(side="right")
-        ttk.Button(buttons, text=_("OK"), command=self.ok).pack(side="right", padx=(0, 6))
+        self.last_button = ttk.Button(buttons, command=self.close)
+        self.last_button.pack(side="right")
+        self.ok_button = ttk.Button(buttons, text=_("OK"), command=self.ok)
+        self.ok_button.pack(side="right", padx=(0, 6))
+        self.again_button = ttk.Button(buttons, text=_("List again"), command=self.relist)
+        self.again_button.pack(side="left")
         for key in ("<Return>", "<KP_Enter>"):
             self.bind(key, lambda _e: self.ok())
         self.bind("<Escape>", lambda _e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Destroy>", self._gone, add="+")
-        self.rescan()
-        self.show(self.box)
+        self.relist()
+        self.show(self.box, at=self._over_preselected(), keys=by_itself and start)
+        self._watch_id = self.after(WINDOW_WATCH_MS, self._watch)
 
-    def rescan(self) -> None:
-        """The list as the windows are now (the window's own list rescanned), the one chosen in the window first."""
+    # ---- the list
+    def _width_px(self) -> tuple[Callable[[str], int], int]:
+        try:
+            font = tkfont.nametofont(str(self.box.cget("font")) or "TkTextFont")
+        except tk.TclError:
+            font = tkfont.nametofont("TkTextFont")
+        return font.measure, VIEWER_LIST_CHARS * max(1, font.measure("0"))
+
+    def relist(self) -> None:
+        """The list as the windows are now (the window's own list rescanned): ordered and preselected by
+        `viewers.offered`, the person's own pick kept while it is listed."""
+        from .viewers import entry_titles, middle_cut, offered
+
         try:
             self.app._rescan_windows()
         except Exception:  # noqa: BLE001 - the list stays as it was
             pass
-        self.windows = list(getattr(self.app, "windows", []) or [])
-        self.box.configure(values=[w.label() for w in self.windows])
-        chosen = getattr(self.app, "selected", None)
-        index = next((i for i, w in enumerate(self.windows) if chosen is not None and w.hwnd == chosen.hwnd), None)
-        if index is not None:
+        windows = list(getattr(self.app, "windows", []) or [])
+        self.windows, first = offered(windows, getattr(self.app, "selected", None))
+        self._seen = tuple((w.hwnd, w.title) for w in self.windows)
+        measure, room = self._width_px()
+        self.box.configure(values=[middle_cut(t, lambda s: measure(s) <= room) for t in entry_titles(self.windows)])
+        keep = self.pick if any(w.hwnd == self.pick for w in self.windows) else None
+        if keep is None:
+            self.pick = None
+            keep = first.hwnd if first is not None else None
+        index = next((i for i, w in enumerate(self.windows) if w.hwnd == keep), -1)
+        if index >= 0:
             self.box.current(index)
-        elif self.windows and self.box.current() < 0:
-            self.box.current(0)
+        else:
+            self.box.set("")
+        self._sync()
 
+    def _picked(self, _event: Any = None) -> None:
+        index = self.box.current()
+        self.pick = self.windows[index].hwnd if 0 <= index < len(self.windows) else None
+        self._sync()
+
+    def _sync(self) -> None:
+        """OK greyed while nothing is chosen in the list; the last button Quit while no viewer is followed, else
+        Close."""
+        chosen = 0 <= self.box.current() < len(self.windows)
+        self.ok_button.state(["!disabled"] if chosen else ["disabled"])
+        quits = getattr(self.app, "selected", None) is None
+        self.last_button.configure(text=_("Quit") if quits else _("Close"))
+
+    def _over_preselected(self) -> tuple[int, int] | None:
+        """Where the dialog is centred: over the window preselected when it lies on a monitor (none: the primary
+        monitor's middle, `layout.dialog_area`)."""
+        from .layout import monitor_at
+
+        index = self.box.current()
+        if not 0 <= index < len(self.windows):
+            return None
+        left, top, right, bottom = self.windows[index].rect
+        centre = ((left + right) // 2, (top + bottom) // 2)
+        return centre if monitor_at(*centre) is not None else None
+
+    def _listed_open(self) -> bool:
+        try:
+            down = self.box.tk.call("ttk::combobox::PopdownWindow", self.box)
+            return bool(int(self.box.tk.call("winfo", "ismapped", down)))
+        except (tk.TclError, ValueError):
+            return False
+
+    def _watch(self) -> None:
+        """(every WINDOW_WATCH_MS while it is open) The list again when the windows changed - not while it is open."""
+        self._watch_id = None
+        try:
+            if not self._listed_open():
+                try:
+                    self.app._rescan_windows()
+                except Exception:  # noqa: BLE001 - looked at again next time
+                    pass
+                windows = list(getattr(self.app, "windows", []) or [])
+                if {(w.hwnd, w.title) for w in windows} != set(self._seen):
+                    self.relist()
+            self._sync()
+            self._watch_id = self.after(WINDOW_WATCH_MS, self._watch)
+        except tk.TclError:  # (gone meanwhile)
+            pass
+
+    # ---- the buttons
     def ok(self) -> None:
-        """The window in the list chosen as the viewer, as the toolbar's list chooses one."""
+        """The window chosen in the list becomes the viewer, as the toolbar's list chooses one."""
         index = self.box.current()
         if not 0 <= index < len(self.windows):
             self.bell()
@@ -349,7 +451,7 @@ class ViewerDialog(_Dialog):
             self.app.refresh_windows()
             found = next((i for i, w in enumerate(self.app.windows) if w.hwnd == hwnd), None)
         if found is None:  # (the window has gone meanwhile)
-            self.rescan()
+            self.relist()
             self.bell()
             return
         self.app.window_box.current(found)
@@ -357,13 +459,22 @@ class ViewerDialog(_Dialog):
         self.destroy()
 
     def close(self) -> None:
-        """Closed with no choice: one that came by itself comes again only once a viewer has been chosen and lost."""
-        if self.by_itself and getattr(self.app, "selected", None) is None:
-            self.app._see_chooser_declined = True
+        """Quit while no viewer is followed (TASlation ends, as the left pane's Quit ends it), else Close."""
+        quits = getattr(self.app, "selected", None) is None
         self.destroy()
+        if quits:
+            self.app._on_close()
 
     def _gone(self, event: tk.Event) -> None:
-        if event.widget is self and getattr(self.app, "_see_chooser", None) is self:
+        if event.widget is not self:
+            return
+        if self._watch_id is not None:
+            try:
+                self.after_cancel(self._watch_id)
+            except tk.TclError:
+                pass
+            self._watch_id = None
+        if getattr(self.app, "_see_chooser", None) is self:
             self.app._see_chooser = None
 
 
@@ -373,7 +484,7 @@ def open_viewer(app: Any, by_itself: bool = False) -> ViewerDialog:
     try:
         if dialog is not None and dialog.winfo_exists():
             if not by_itself:
-                dialog.by_itself = False  # (asked for now: it stays once a viewer is chosen)
+                dialog.by_itself = False  # (asked for now)
                 dialog.lift()
                 dialog.focus_force()
             return dialog
@@ -384,26 +495,16 @@ def open_viewer(app: Any, by_itself: bool = False) -> ViewerDialog:
     return dialog
 
 
-def chooser_tick(app: Any, now: float | None = None) -> None:
-    """(every half second) With no viewer chosen CHOOSER_DUE_S after the start, the chooser comes by itself (not
-    while a dialog holds the window, nor again after the reader closed it - until a viewer is chosen and lost); once
-    a viewer is chosen, the one that came by itself goes."""
+def chooser_tick(app: Any) -> None:
+    """(every half second) While no viewer is followed, the viewer chooser is on the screen: from the start's end on
+    - the legal notice, then the GPU's memory judged and its dialog answered (``_start_judged``) -, never while a
+    dialog holds the window, and again once a viewer chosen was closed; it goes as a viewer is chosen in it. Not for
+    a viewer named with --window: the window looks for that one itself (`ViewerMixin._watch_windows`)."""
     from .dialogs.help import modal_up
 
-    now = time.monotonic() if now is None else now
-    dialog = getattr(app, "_see_chooser", None)
-    if getattr(app, "selected", None) is not None:
-        app._see_chooser_declined = False
-        if dialog is not None and dialog.by_itself:
-            try:
-                dialog.destroy()
-            except tk.TclError:
-                pass
-            app._see_chooser = None
+    if getattr(app, "selected", None) is not None or getattr(app, "_see_chooser", None) is not None:
         return
-    if dialog is not None or getattr(app, "_see_chooser_declined", False):
-        return
-    if now - float(getattr(app, "_see_started", now)) < CHOOSER_DUE_S or modal_up(app):
+    if getattr(app, "window_query", "") or not getattr(app, "_start_judged", True) or modal_up(app):
         return
     open_viewer(app, by_itself=True)
 

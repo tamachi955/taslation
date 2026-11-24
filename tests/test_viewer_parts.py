@@ -1,7 +1,7 @@
 """What TASlation learns of the viewers on the reader's computer (`taslation.viewerparts`): TASlation lists no store
 or viewer, so which window is the reader's viewer, and what of its title is the viewer's rather than the book's, is
 learned from the reader's own choices and kept in the state folder's viewers.json only. The learning rules, a viewer
-remembered and chosen by itself at the next start, a choice by mistake undone, a title that may be the viewer's own
+remembered and first (preselected, never chosen) in the next start's viewer chooser, a choice by mistake undone, a title that may be the viewer's own
 name held back until the reader names the book, and a state folder of an earlier version (whose lists of names had
 cut the viewers' names off the books') opened as before. Every store, viewer and book named here is invented."""
 from __future__ import annotations
@@ -17,7 +17,7 @@ from taslation.bookid import generic_book_name, last_name, remember_name
 from taslation.cache import CachedBubble, CachedPage, CacheStore, book_key_from_title, viewer_key_from_title
 from taslation.capture import WindowInfo, viewer_rank
 from taslation.ui import viewers
-from taslation.ui.viewers import choose_viewer
+from taslation.ui.viewers import offered
 
 CHROME = "Chrome_WidgetWin_1"
 
@@ -122,37 +122,41 @@ def test_the_shared_programs_are_never_remembered_by_their_program(state):
 
 
 # ------------------------------------------------------------------ the next start
-def test_a_remembered_viewer_is_picked_automatically_at_the_next_start(state):
+def test_a_remembered_viewer_comes_first_preselected_at_the_next_start(state):
     chat = _win(1, "Yomizuq画面翻訳アプリ - Chat - Google Chrome")
     notepad = _win(2, "notes.txt - Notepad", "Notepad", "notepad.exe")
     first = _win(3, "見本の物語 1 - Yomizuq - Google Chrome")
-    assert choose_viewer([chat, notepad, first]) == (None, [])  # first use on this computer: the reader picks it
+    assert offered([chat, notepad, first]) == ([chat, notepad, first], None)  # first use: the reader picks it
     viewerparts.chosen(first)
     viewerparts.use(state)  # the next start: what was learned is read from the state folder
     again = _win(13, first.title)
-    assert choose_viewer([chat, notepad, again]) == (again, [])  # the same tab: by its title
+    assert offered([chat, notepad, again]) == ([again, chat, notepad], again)  # the same tab: by its title
     second = _win(14, "Star Road 2 - Yomizuq - Google Chrome")  # another book in it: by the end the titles share
-    assert viewer_rank(second) == 1 and choose_viewer([chat, notepad, second]) == (second, [])
+    assert viewer_rank(second) == 1 and offered([chat, notepad, second]) == ([second, chat, notepad], second)
     viewerparts.chosen(second)  # "Yomizuq" learned: every book in it is the viewer for sure
     viewerparts.use(state)
     third = _win(15, "Third Book - Yomizuq - Google Chrome")
-    assert viewer_rank(third) == 0 and choose_viewer([chat, notepad, third]) == (third, [])
-    assert choose_viewer([chat, notepad, third, _win(16, "Book club - Google Chrome")]) == (third, [])
+    club = _win(16, "Book club - Google Chrome")
+    assert viewer_rank(third) == 0 and offered([chat, notepad, club, third]) == ([third, club, chat, notepad], third)
+    # two of the viewer's windows: the tab chosen last first
+    back = _win(17, first.title)
+    assert offered([chat, back, _win(18, second.title)])[0][:2] == [_win(18, second.title), back]
 
 
-def test_a_remembered_viewer_app_is_picked_by_its_program_whatever_its_title(state):
+def test_a_remembered_viewer_app_comes_first_by_its_program_whatever_its_title(state):
     viewerparts.chosen(_win(5, "Mekurix", "MekurixWindow", "mekurix.exe"))
     viewerparts.use(state)
     shown = _win(6, "Star Road 1", "MekurixWindow", "mekurix.exe")
-    assert choose_viewer([_win(1, "notes.txt - Notepad", "Notepad", "notepad.exe"), shown]) == (shown, [])
+    notepad = _win(1, "notes.txt - Notepad", "Notepad", "notepad.exe")
+    assert offered([notepad, shown]) == ([shown, notepad], shown)
 
 
 def test_nothing_remembered_reading_words_or_the_readers_choice(state):
     notepad = _win(2, "notes.txt - Notepad", "Notepad", "notepad.exe")
     viewer = _win(3, "見本の物語 1 - Yomizuq - Google Chrome")
     shelf = _win(4, "見本の物語 1 - 電子書籍 - Google Chrome")
-    assert choose_viewer([notepad, viewer]) == (None, [])
-    assert choose_viewer([notepad, viewer, shelf]) == (shelf, [])
+    assert offered([notepad, viewer]) == ([notepad, viewer], None)
+    assert offered([notepad, viewer, shelf]) == ([shelf, notepad, viewer], shelf)
     assert not (state / viewerparts.STATE_FILE).read_text(encoding="utf-8").count("Yomizuq")
 
 

@@ -183,6 +183,20 @@ def test_only_a_key_that_changes_the_book_box_makes_it_the_readers(before, after
     assert w._book_edited is edited
 
 
+def test_a_viewer_picked_in_the_chooser_is_said_in_the_right_pane_for_a_few_seconds(gone, monkeypatch):
+    import time
+
+    monkeypatch.setattr(viewers, "show_minimised", lambda app, win: False)  # (no window of the computer's is touched)
+    w = Chooser([BOOK_A, BOOK_B], selected=BOOK_A, book="Book A")
+    w.window_box.index = 1
+    w._on_window_selected(picked=True)
+    title, until = w._see_viewer_note
+    assert title == "Book B" and 0 < until - time.monotonic() <= viewers.VIEWER_NOTE_S
+    w = Chooser([BOOK_A], book="")
+    w.pick(BOOK_A)  # (not picked by the person: the list shown again, a viewer named): no note
+    assert getattr(w, "_see_viewer_note", None) is None
+
+
 # ------------------------------------------------------------------ the viewer closed
 def test_a_viewer_closed_is_said_and_watched_for_again(gone):
     w = Chooser([BOOK_A], selected=BOOK_A, book="Book A")

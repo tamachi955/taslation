@@ -436,15 +436,17 @@ class JobsMixin:
         self._ollama = OllamaStarter(s.ollama_url,
                                      lambda: self._post("status", key="Starting the translation program..."),
                                      state_dir=s.state_dir, own=own_models(s), settings=s)
-        failed = self._ollama.start()
-        if failed is not None and failed.code in POPUP_CODES:
-            self._post("ollama_failed", message=failed)
-        problems, models = self._check_setup()  # the setup banner from the start on (nothing is loaded for it)
-        self._post("health", problems=problems)
+        going = True
         try:
+            failed = self._ollama.start()
+            if failed is not None and failed.code in POPUP_CODES:
+                self._post("ollama_failed", message=failed)
+            problems, models = self._check_setup()  # the setup banner from the start on (nothing is loaded for it)
+            self._post("health", problems=problems)
             going = self._judge_gpu(asks_ollama=models is not None)
         finally:
             placed.set()
+            self._start_judged = going  # the viewer chooser may come now (`see_menu.chooser_tick`); not after Quit
         if not going:  # Quit at the GPU's dialog: the window closes, nothing loads
             return
         self._post("models_loading", on=True)

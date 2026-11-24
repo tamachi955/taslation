@@ -135,7 +135,7 @@ def _guide(start: str) -> str:
 
 
 NAMED = (  # (the start of a topic paragraph, the window's words it names)
-    ("TASlation finds the viewer", ("Menu", "Viewer...")),
+    ("At every start TASlation asks", ("OK", "Quit", "Menu", "Viewer...")),
     ("Translate translates the page", ("Translate", "Lettering")),
     ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Edit", "Add area", "Set area...",
                            "Settings...", "Menu", "Quit")),

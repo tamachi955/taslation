@@ -202,6 +202,22 @@ def browser_tab(title: str) -> str:
     return MORE_PAGES.sub("", " - ".join(parts)).strip()
 
 
+def taskbar_title(window: "WindowInfo") -> str:
+    """What a list to choose a window from calls *window*, as its taskbar button does: a browser window by the title of
+    the tab it shows and the browser's name ("<tab> - Google Chrome": without the profile Edge names before its own,
+    nor its "and 2 more pages": `browser_tab`), any other by its title; its spaces as single spaces, without
+    zero-width characters."""
+    title = " ".join(window.title.translate(INVISIBLE).split())
+    if window.class_name not in BROWSER_CLASSES:
+        return title
+    parts, marks = SEPARATOR.split(title), SEPARATOR.findall(title)
+    at = next((i for i in range(len(parts) - 1, 0, -1) if _is_browser_name(parts[i])), None)
+    if at is None:
+        return title
+    tab = browser_tab(title)
+    return f"{tab} {marks[at - 1].strip()} {parts[at]}" if tab else parts[at]
+
+
 def _has_word(text: str, name: str) -> bool:
     return _word(name).search(text.translate(INVISIBLE)) is not None
 

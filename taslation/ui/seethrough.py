@@ -776,9 +776,10 @@ def left_rows(app: Any) -> list[pn.Row]:
 def right_rows(app: Any) -> list[pn.Row]:
     """The right pane, words only, each row only when it has something to say: the setup banner's lines (the setup's
     problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their buttons
-    do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; the
-    status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status line, the
-    indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`), where the
+    do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; for a
+    few seconds after a choice in the viewer chooser, "Viewer: <title>" (``_see_viewer_note``, `viewers.VIEWER_NOTE_S`);
+    the status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status
+    line, the indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`), where the
     translator runs, in the window's words as they are (they name the panes' controls and the Menu's entries, no
     key). The reader's notes on a
     page (`_show_notes`, the window's strip under the page) are left out."""
@@ -793,6 +794,12 @@ def right_rows(app: Any) -> list[pn.Row]:
     guard = str(_get(getattr(app, "guard_var", None), "") or "").strip()
     if guard:
         rows.append(pn.Row("", guard, "text", warn=True))
+    status = str(_get(getattr(app, "status_var", None), "") or "").strip()
+    note = getattr(app, "_see_viewer_note", None)  # (the viewer chosen in the chooser: `ViewerMixin._on_window_selected`)
+    if note is not None and time.monotonic() < note[1]:
+        said = _("Viewer: {title}").format(title=note[0])
+        if not status.startswith(said):  # (the status line saying it already, perhaps with more: once)
+            rows.append(pn.Row("", said, "text"))
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None
@@ -805,7 +812,6 @@ def right_rows(app: Any) -> list[pn.Row]:
         if total:
             rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
                                "text"))
-    status = str(_get(getattr(app, "status_var", None), "") or "").strip()
     if status and any(status == row.text for row in rows):
         status = ""  # (the status line saying a banner's line again: once)
     if status:

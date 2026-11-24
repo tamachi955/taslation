@@ -1,6 +1,7 @@
 """Which window is the viewer: a browser window's tab title, the rules a --window query is matched by (one window or
 the several it fits, never a guess), what looks like a viewer - by what was learned on this computer, or by a reading
-word of its title when nothing was - and the incident behind them: `taslation batch --window <viewer>` drove a chat
+word of its title when nothing was: it comes first in the viewer chooser and is preselected, never chosen - and the
+incident behind them: `taslation batch --window <viewer>` drove a chat
 page whose title began with the viewer's name instead of the reader's tab. The titles below have the shapes of real
 windows'; every store and viewer in them is invented (test data)."""
 from __future__ import annotations
@@ -16,10 +17,11 @@ from taslation.capture import (
     looks_like_viewer,
     match_windows,
     tab_title,
+    taskbar_title,
     viewer_candidates,
     viewer_rank,
 )
-from taslation.ui.viewers import choose_viewer
+from taslation.ui.viewers import entry_titles, middle_cut, named_window, offered
 
 CHROME, FIREFOX = "Chrome_WidgetWin_1", "MozillaWindowClass"
 
@@ -55,6 +57,31 @@ def test_a_browser_windows_tab_title():
     assert tab_title("Yomizuq - Google Chrome", "Notepad") == "Yomizuq - Google Chrome"
     assert tab_title("main.py - TASlation - Visual Studio Code", CHROME) == "main.py - TASlation - Visual Studio Code"
     assert NOTEPAD.tab_title == NOTEPAD.title and APP.tab_title == "Yomizuq for PC"
+
+
+def test_the_chooser_names_a_window_as_its_taskbar_button_does():
+    assert taskbar_title(READER) == "Yomizuq - Google Chrome"
+    assert taskbar_title(STORE) == "見本の物語 1 - FOLIO☆QAT - Microsoft Edge"  # (no zero-width space)
+    assert taskbar_title(_win(20, "Yomizuq - 個人 - Microsoft​ Edge")) == "Yomizuq - Microsoft Edge"
+    assert taskbar_title(_win(21, "Yomizuq and 2 more pages - Personal - Microsoft Edge")) == "Yomizuq - Microsoft Edge"
+    assert taskbar_title(_win(22, "Yomizuq — Mozilla Firefox", FIREFOX)) == "Yomizuq — Mozilla Firefox"
+    assert taskbar_title(_win(23, "Yomizuq - Google Chrome - Work")) == "Yomizuq - Google Chrome"
+    assert taskbar_title(NOTEPAD) == NOTEPAD.title and taskbar_title(APP) == "Yomizuq for PC"
+    assert taskbar_title(_win(24, "main.py - TASlation - Visual Studio Code")) == "main.py - TASlation - Visual Studio Code"
+    twin = _win(8, "Yomizuq - 個人 - Microsoft Edge", size=700)
+    edge = _win(25, "Yomizuq - Microsoft Edge", size=500)
+    assert entry_titles([twin, NOTEPAD, edge]) == ["Yomizuq - Microsoft Edge  (700x700)", NOTEPAD.title,
+                                                   "Yomizuq - Microsoft Edge  (500x500)"]  # (alike: their sizes)
+
+
+def test_a_long_entry_is_shortened_in_the_middle():
+    def fits(text):
+        return len(text) <= 12
+
+    assert middle_cut("Yomizuq", fits) == "Yomizuq"
+    cut = middle_cut("見本の物語 1 - FOLIO☆QAT - Microsoft Edge", fits)
+    assert cut == "見本の物語…t Edge" and fits(cut)
+    assert middle_cut("abcdefghijklmnop", lambda text: len(text) <= 1) == "…"
 
 
 NEVER = ("Facebook - Google Chrome", "Book1 - Excel", "Bookmarks", "Notebook - OneNote", "e-book",
@@ -135,22 +162,25 @@ def test_the_rules_in_their_order_and_several_windows_named_alike():
         assert match_windows("nothing like it", wins) == [] and match_windows("  ", wins) == []
 
 
-def test_with_nothing_learned_the_window_chooses_by_a_reading_word_or_leaves_the_choice_to_the_reader():
+def test_with_nothing_learned_a_reading_word_comes_first_and_is_preselected_never_chosen():
     shelf = _win(9, "見本の物語 1 - Yomizuq Books - Google Chrome")
-    assert choose_viewer([CHAT, NOTEPAD, READER]) == (None, [])  # the reader picks it in the Viewer list
-    assert choose_viewer([CHAT, NOTEPAD, READER, shelf]) == (shelf, [])  # "Books": a reading word
-    assert choose_viewer([CHAT, READER], "Yomizuq画面") == (CHAT, [])  # named: taken, whatever it looks like
-    assert choose_viewer([NOTEPAD, READER], "Yomizuq - Google") == (READER, [])
+    assert offered([CHAT, NOTEPAD, READER]) == ([CHAT, NOTEPAD, READER], None)  # nothing ranks: the reader picks
+    assert offered([CHAT, NOTEPAD, READER, shelf]) == ([shelf, CHAT, NOTEPAD, READER], shelf)  # "Books"
+    assert named_window([CHAT, NOTEPAD, READER, shelf], "") is None  # without --window nothing is chosen
+    assert named_window([CHAT, READER], "Yomizuq画面") == CHAT  # named: taken, whatever it looks like
+    assert named_window([NOTEPAD, READER], "Yomizuq - Google") == READER
 
 
-def test_the_windows_own_choice_takes_the_remembered_viewer_and_never_guesses():
+def test_the_remembered_viewer_comes_first_and_a_name_chooses_without_a_guess():
     _learned(*VIEWERS)
-    assert choose_viewer([CHAT, NOTEPAD, READER]) == (READER, [])
-    assert choose_viewer([CHAT, NOTEPAD]) == (None, [])
-    assert choose_viewer([READER, STORE, NOTEPAD]) == (None, [READER, STORE])
-    assert choose_viewer([CHAT, READER], "Yomizuq画面") == (CHAT, [])  # named: taken, whatever it looks like
-    assert choose_viewer([NOTEPAD, READER], "yomiz") == (READER, [])  # named alike: the viewer among them
-    assert choose_viewer([CHAT, READER, STORE], "nothing like it") == (None, [READER, STORE])
+    assert offered([CHAT, NOTEPAD, READER]) == ([READER, CHAT, NOTEPAD], READER)
+    assert offered([CHAT, NOTEPAD]) == ([CHAT, NOTEPAD], None)
+    assert offered([READER, STORE, NOTEPAD]) == ([READER, STORE, NOTEPAD], READER)  # equals: the first, preselected
+    assert offered([READER, STORE, NOTEPAD], chosen=STORE)[1] == STORE  # the viewer followed: preselected
+    assert named_window([CHAT, READER], "Yomizuq画面") == CHAT  # named: taken, whatever it looks like
+    assert named_window([NOTEPAD, READER], "yomiz") == READER  # named alike: the viewer among them
+    assert named_window([CHAT, READER, STORE], "nothing like it") is None  # (no fall back on the viewer-like ones)
+    assert named_window([READER, _win(8, "Yomizuq - Google Chrome")], "Yomizuq") is None  # two alike: none
 
 
 # ------------------------------------------------------------------ the command line

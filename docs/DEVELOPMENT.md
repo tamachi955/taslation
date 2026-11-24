@@ -356,9 +356,11 @@ rows' languages.
   back to the viewer, what the window being in front gave instead (`front`: a dialog brought up, the chooser, the
   Menu at the pointer, the viewer - after a click on its taskbar button, which only the owner's own click makes),
   how many dialogs of the process were on a monitor at each look, and when the viewer chooser and the banner's
-  dialog came and went). `--no-viewer-s S` gives the window no viewer to find
-  for its first S seconds (the viewer chooser comes by itself after 2.5 s and goes once the window has found the
-  stand-in: `run.no_viewer`), and `--book-asked` starts it with a name that names no book, so that Auto's first page
+  dialog came and went). The tools choose the stand-in with `App(settings, window_query=browser.token, ...)`, as
+  `gui --window` does: a viewer named that way brings no viewer chooser (the dialog the person chooses the viewer in
+  at every start), so no dialog of TASlation's takes the foreground in a tool's run. `--no-viewer-s S` gives the
+  window no viewer to find for its first S seconds (the window looks for the stand-in named every 2 s and chooses it
+  once it is listed: `run.no_viewer`; no chooser comes meanwhile), and `--book-asked` starts it with a name that names no book, so that Auto's first page
   asks it in the start dialog, which the driver answers 1.5 s after it is on the screen through the dialog's own
   object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground). `--see-edit`
   keeps the book's role as the Translator's, so that the left pane's Edit is on from the start (`ui/see_edit.py`:

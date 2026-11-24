@@ -47,6 +47,6 @@ READY = "Ready. Turn the pages in the viewer: with Auto on, each page you turn i
 # A browser window minimised after it was chosen: its frames are blank, and it is not restored again by itself
 BROWSER_MINIMISED = "Waiting: the browser window with the book is minimised. Click it on the taskbar to bring it back."
 VIEWER_RESTORED = "Viewer: {title}  (restored from the taskbar)"  # the viewer chosen was minimised: it is shown again
-VIEWER_CLOSED = "The viewer was closed. Open your book again; TASlation finds it by itself."
+VIEWER_CLOSED = "The viewer was closed. Open your book again and choose its window."  # (the viewer chooser comes again)
 FIRST_PAGE = "Translate a page first: press Translate."  # the page tools with no page translated
 THIS_PAGE = "Translate this page first: press Translate."  # ... and with another page on show than the one translated

@@ -226,6 +226,24 @@ def test_the_start_checks_then_loads_ollama_s_model_while_the_ocr_model_loads(st
     assert w.translator.keep_alive == -1 and w.pipeline.ocr is not None
 
 
+def test_the_viewer_chooser_waits_for_the_starts_judgement_of_the_gpu_and_never_comes_after_quit(start, monkeypatch):
+    seen = []
+    judge = jobs.JobsMixin._judge_gpu
+
+    def judging(self, asks_ollama=True):
+        seen.append(getattr(self, "_start_judged", None))  # (not yet while the GPU's memory is judged)
+        return judge(self, asks_ollama)
+
+    monkeypatch.setattr(Start, "_judge_gpu", judging)
+    w = start(([], ["qwen3.5:4b"]))
+    w._job_init()
+    assert seen == [None] and w._start_judged is True  # (`see_menu.chooser_tick` may bring it now)
+    monkeypatch.setattr(Start, "_judge_gpu", lambda self, asks_ollama=True: False)  # Quit at the GPU's dialog
+    w = start(([], ["qwen3.5:4b"]))
+    w._job_init()
+    assert w._start_judged is False
+
+
 def test_the_start_loads_nothing_of_ollama_unless_the_settings_keep_the_model(start):
     for setting in ("5m", "30m", "0"):
         start.order.clear()

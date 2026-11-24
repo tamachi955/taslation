@@ -36,8 +36,9 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
    On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses both on the GPU by default),
    and on a computer without a GPU, Enter does not ([y/N]; on such a computer they are models not used by default). A run without a console, and `-Yes`, do not install them on either kind of computer.
    The questions are shown in Japanese if Windows' display language is Japanese, and in English otherwise.
-4. Start it from "TASlation" in the Start menu. Open the book in its viewer first: TASlation finds the viewer's window
-   and lays the translation over the page the viewer shows (real-time translation). You turn the pages in the viewer as always.
+4. Start it from "TASlation" in the Start menu. Open the book in its viewer first: at every start TASlation asks which window is the viewer
+   (choose it in the list and press OK; the viewer you chose before comes first, already selected), then lays the translation
+   over the page the viewer shows (real-time translation). You turn the pages in the viewer as always.
    There is no account and no limit on the pages you translate, and nothing of the book leaves this computer.
    Menu > Help > "How to use..." explains the rest.
 

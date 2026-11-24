@@ -1,6 +1,8 @@
-"""A viewer opened after TASlation: the list rescans as it opens, and a watch picks the viewer until one is chosen -
-one remembered on this computer, or one whose title has a reading word; a viewer used for the first time is left to
-the reader. Every store and viewer named below is invented (test data)."""
+"""The windows TASlation may follow: the list rescans as it opens; TASlation chooses no viewer by itself - not one
+remembered on this computer, not one whose title has a reading word: the person chooses in the viewer chooser
+(tests/test_viewer_chooser.py), where those come first and one is preselected. Only a window named with --window is
+chosen, and watched for until it is there (again after it was closed). Every store and viewer named below is invented
+(test data)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -37,10 +39,11 @@ class Box(dict):
 
 
 class Window:
-    """The parts of the App that the list and the watch use."""
+    """The parts of the App that the list and the watch use: the App's own list, its stand-ins recorded."""
 
     _rescan_windows = app_mod.App._rescan_windows
     _watch_windows = app_mod.App._watch_windows
+    refresh_windows = app_mod.App.refresh_windows
 
     def __init__(self, windows=(), selected=None, grab="", query=""):
         self.windows = list(windows)
@@ -49,18 +52,16 @@ class Window:
         self.selected = selected
         self.window_query = query
         self.tk = SimpleNamespace(call=lambda *args: grab)
-        self.refreshed: list[str | None] = []
+        self.chosen: list[tuple[WindowInfo, bool]] = []
         self.scheduled = 0
-        self._tied_said: tuple[int, ...] = ()
-
-    def refresh_windows(self, select=None):  # as the App's: the named window, else the one viewer (several: said)
-        self.refreshed.append(select)
-        self.selected, tied = viewers.choose_viewer(viewers.list_windows(), select or "")
-        if tied:
-            self._tied_said = tuple(w.hwnd for w in tied)
+        self.said: list[str] = []
 
     def _on_window_selected(self, picked=False, named=False):  # as the App's: the window the list shows becomes the viewer
         self.selected = self.windows[self.window_box.current()]
+        self.chosen.append((self.selected, named))
+
+    def say(self, key, **_values):
+        self.said.append(key)
 
     def after(self, ms, func):
         assert ms == app_mod.WINDOW_WATCH_MS and func == self._watch_windows
@@ -85,7 +86,7 @@ def test_the_list_rescans_as_it_opens_and_keeps_the_choice(screen, monkeypatch):
     screen[:] = [YOMIZUQ, NOTEPAD]
     w._rescan_windows()
     assert w.windows == [YOMIZUQ, NOTEPAD] and w.window_box["values"] == [YOMIZUQ.label(), NOTEPAD.label()]
-    assert w.window_box.current() == 1 and w.selected is NOTEPAD and not w.refreshed
+    assert w.window_box.current() == 1 and w.selected is NOTEPAD and not w.chosen
     values = w.window_box["values"]
     w._rescan_windows()  # nothing changed: nothing replaced
     assert w.window_box["values"] is values
@@ -94,71 +95,74 @@ def test_the_list_rescans_as_it_opens_and_keeps_the_choice(screen, monkeypatch):
     assert w.windows == [YOMIZUQ, NOTEPAD]
 
 
-def test_the_watch_picks_a_viewer_opened_later_then_stops(screen):
+def test_without_a_name_nothing_is_chosen_nor_watched_for_remembered_or_with_a_reading_word(screen):
     _learned()
-    screen[:] = [NOTEPAD]
-    w = Window([NOTEPAD])
-    w._watch_windows()
-    assert not w.refreshed and w.selected is None and w.scheduled == 1  # no viewer yet: look again
-    screen[:] = [YOMIZUQ, NOTEPAD]
-    w._watch_windows()
-    assert w.refreshed == [""] and w.selected == YOMIZUQ and w.scheduled == 1  # chosen: no more looking
-    w._watch_windows()
-    assert w.refreshed == [""] and w.scheduled == 1
-
-
-def test_with_nothing_remembered_the_watch_leaves_a_new_viewer_to_the_reader_but_takes_a_reading_word(screen):
-    screen[:] = [YOMIZUQ, NOTEPAD]  # a viewer used for the first time on this computer
-    w = Window([YOMIZUQ, NOTEPAD])
-    w._watch_windows()
-    assert not w.refreshed and w.selected is None and w.scheduled == 1  # the reader picks it in the Viewer list
     shelf = WindowInfo(hwnd=11, title="見本の物語 1 - Zumo Books - Google Chrome", class_name="Chrome_WidgetWin_1",
                        pid=11, rect=(0, 0, 1000, 800))
-    screen[:] = [YOMIZUQ, NOTEPAD, shelf]
+    screen[:] = [YOMIZUQ, NOTEPAD, shelf]  # a remembered viewer and a reading word: both only offered first
+    w = Window()
+    w.refresh_windows()
+    assert w.selected is None and not w.chosen and not w.said and w.windows == [YOMIZUQ, NOTEPAD, shelf]
     w._watch_windows()
-    assert w.refreshed == [""] and w.selected == shelf  # "Books": a reading word
+    assert w.selected is None and w.scheduled == 0  # (no watch: the viewer chooser is on the screen)
+    assert viewers.offered(w.windows) == ([YOMIZUQ, shelf, NOTEPAD], YOMIZUQ)
 
 
-def test_the_watch_looks_for_the_named_window_too(screen):
-    screen[:] = [READER, NOTEPAD]
+def test_the_watch_looks_for_the_named_window_until_it_is_there_then_stops(screen):
+    screen[:] = [NOTEPAD]
     w = Window(query="my reader")
     w._watch_windows()
-    assert w.refreshed == ["my reader"] and w.selected == READER and w.scheduled == 0
+    assert w.selected is None and w.scheduled == 1  # not there yet: looked for again
+    screen[:] = [READER, NOTEPAD]
+    w._watch_windows()
+    assert w.selected == READER and w.chosen == [(READER, True)] and w.scheduled == 1  # chosen, named: no more looking
+    w._watch_windows()
+    assert w.scheduled == 1
+
+
+def test_a_name_that_names_nothing_falls_back_on_no_viewer(screen):
+    _learned()
+    screen[:] = [YOMIZUQ, NOTEPAD]  # a remembered viewer, but not the one named
+    w = Window(query="my reader")
+    w.refresh_windows(select="my reader")
+    w._watch_windows()
+    assert w.selected is None and not w.chosen and w.scheduled == 1
 
 
 def test_the_watch_waits_while_the_list_is_open_and_outlives_errors(screen, monkeypatch):
-    screen[:] = [YOMIZUQ]
-    w = Window(grab=".!combobox.popdown")
+    screen[:] = [READER]
+    w = Window(grab=".!combobox.popdown", query="my reader")
     w._watch_windows()
-    assert not w.refreshed and w.selected is None and w.scheduled == 1
+    assert w.selected is None and w.scheduled == 1
     monkeypatch.setattr(viewers, "list_windows", _fail)
-    w = Window()
+    w = Window(query="my reader")
     w._watch_windows()
     assert w.selected is None and w.scheduled == 1
 
 
 def test_no_watch_without_window_capture(monkeypatch):
     monkeypatch.setattr(viewers, "IS_WINDOWS", False)
-    w = Window()
+    w = Window(query="my reader")
     w._watch_windows()
     w._rescan_windows()
-    assert w.scheduled == 0 and not w.refreshed
+    assert w.scheduled == 0 and not w.chosen
 
 
-def test_a_viewer_closed_and_opened_again_is_chosen_again_as_the_list_opens(screen, monkeypatch):
+def test_a_viewer_closed_and_opened_again_is_chosen_again_only_when_it_was_named(screen, monkeypatch):
     reopened = WindowInfo(hwnd=7, title=YOMIZUQ.title, class_name=YOMIZUQ.class_name, pid=9, rect=YOMIZUQ.rect)
     closed = {YOMIZUQ.hwnd}
     monkeypatch.setattr(viewers, "window_exists", lambda hwnd: hwnd not in closed)
-    w = Window([YOMIZUQ, NOTEPAD], selected=YOMIZUQ)
-    w.window_box.index = 0
-    screen[:] = [NOTEPAD]  # closed: nothing showing the book yet, the choice stays as it was
-    w._rescan_windows()
-    assert w.selected is YOMIZUQ and w.window_box["values"] == [NOTEPAD.label()]
-    screen[:] = [NOTEPAD, reopened]
-    w._rescan_windows()
-    assert w.selected is reopened and w.window_box.current() == 1
+    for query, again in (("Yomizuq", True), ("", False)):
+        w = Window([YOMIZUQ, NOTEPAD], selected=YOMIZUQ, query=query)
+        w.window_box.index = 0
+        screen[:] = [NOTEPAD]  # closed: nothing showing the book yet, the choice stays as it was
+        w._rescan_windows()
+        assert w.selected is YOMIZUQ and w.window_box["values"] == [NOTEPAD.label()]
+        screen[:] = [NOTEPAD, reopened]
+        w._rescan_windows()
+        assert (w.selected is reopened) == again, query  # (not named: the chooser preselects it, the person chooses)
     hidden = WindowInfo(hwnd=8, title="My Reader", class_name="Reader", pid=3, rect=(0, 0, 10, 10))
-    w = Window([hidden], selected=hidden)  # not listed (on another desktop) but still there: left alone
+    w = Window([hidden], selected=hidden, query="My Reader")  # not listed (on another desktop) but still there: left
     screen[:] = [READER]
     w._rescan_windows()
     assert w.selected is hidden
@@ -192,64 +196,28 @@ def test_what_looks_like_a_viewer():
     assert looks_like_viewer(YOMIZUQ) and looks_like_viewer(STORE)
 
 
-class Choosing(Window):
-    """The App's own choice of the viewer, over the stand-in's list, its status line recorded."""
-
-    refresh_windows = app_mod.App.refresh_windows
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.said: list[str] = []
-
-    def say(self, key, **_values):
-        self.said.append(key)
-
-
-def test_the_window_chooses_the_readers_tab_not_a_chat_page_about_the_viewer(screen):
+def test_the_readers_tab_comes_first_not_a_chat_page_about_the_viewer(screen):
     _learned()
-    screen[:] = [CHAT, NOTEPAD, YOMIZUQ]  # the chat page is the largest window, as in the incident
-    w = Choosing()
-    w.refresh_windows()
-    assert w.selected == YOMIZUQ and w.window_box.current() == 2 and not w.said
-    screen[:] = [CHAT, NOTEPAD]  # no reader: the chat page is not taken for one
-    w = Choosing()
-    w.refresh_windows()
-    assert w.selected is None and not w.said
+    assert viewers.offered([CHAT, NOTEPAD, YOMIZUQ]) == ([YOMIZUQ, CHAT, NOTEPAD], YOMIZUQ)  # (the chat page is larger)
+    assert viewers.offered([CHAT, NOTEPAD]) == ([CHAT, NOTEPAD], None)  # no reader: the chat page is not taken for one
+    assert viewers.offered([BOOKISH, YOMIZUQ])[1] == YOMIZUQ  # the viewer learned before a page with "Book" in it
+    assert viewers.offered([YOMIZUQ, STORE, NOTEPAD])[1] == YOMIZUQ  # two readers: the first, for the person to confirm
 
 
 def test_a_named_window_is_chosen_by_its_tab_title(screen):
     screen[:] = [CHAT, YOMIZUQ]  # (nothing learned: a name given needs nothing learned)
-    w = Choosing(query="Yomizuq")
+    w = Window(query="Yomizuq")
     w.refresh_windows(select="Yomizuq")
-    assert w.selected == YOMIZUQ
-    w = Choosing(query="Yomizuq画面")
-    w.refresh_windows(select="Yomizuq画面")
+    assert w.selected == YOMIZUQ and w.chosen == [(YOMIZUQ, True)]
+    w = Window(query="Yomizuq画面")
+    w.refresh_windows()  # (no viewer followed: the name the window was started with)
     assert w.selected == CHAT
-
-
-def test_a_surer_viewer_wins_and_equals_are_left_to_the_reader_said_once(screen):
-    _learned()
-    screen[:] = [BOOKISH, YOMIZUQ]  # the viewer learned before a page with "Book" in its title
-    w = Choosing()
-    w.refresh_windows()
-    assert w.selected == YOMIZUQ
-    screen[:] = [YOMIZUQ, STORE, NOTEPAD]  # two readers: TASlation does not guess
-    w = Choosing()
-    w.refresh_windows()
-    assert w.selected is None and w.window_box.current() == -1
-    assert w.said == ["Several windows look like a viewer: choose the right one in Menu > Viewer..."]
-    assert w._tied_said == (YOMIZUQ.hwnd, STORE.hwnd)
-    w._watch_windows()  # the same two: not said again, the watch goes on
-    assert len(w.said) == 1 and w.selected is None and w.scheduled == 1
-    screen[:] = [YOMIZUQ, NOTEPAD]  # one of them closed: the other is chosen
-    w._watch_windows()
-    assert w.selected == YOMIZUQ and w._tied_said == ()
 
 
 def test_a_name_that_fits_several_windows_takes_the_viewer_among_them(screen):
     _learned()
     other = WindowInfo(hwnd=9, title="Yomizuqメモ.txt - Notepad", class_name="Notepad", pid=9, rect=(0, 0, 500, 400))
     screen[:] = [other, YOMIZUQ]
-    w = Choosing()
+    w = Window()
     w.refresh_windows(select="yomiz")  # starts both titles: the one that looks like a viewer
     assert w.selected == YOMIZUQ

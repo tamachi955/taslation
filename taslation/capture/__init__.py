@@ -53,6 +53,7 @@ from .windows import (  # noqa: F401
     screen_shows_own,
     still_the_book,
     tab_title,
+    taskbar_title,
     unminimise_window,
     viewer_candidates,
     viewer_rank,

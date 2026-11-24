@@ -3,8 +3,8 @@ never minimised nor maximised, alpha 0 and an application's window with its task
 back when changed; the foreground handed back to the viewer when Windows gave it to the window, and a click on its
 taskbar button giving a dialog on show, the chooser, the Menu with the left pane's controls or the viewer; its Close
 quitting as Quit does; its dialogs over the viewer and on the viewer's monitor, the ones the reader asked for taking
-the keys; the Menu (`ui.see_menu`) with the window's entries that still mean something, the viewer chooser and Series
-and Volume as small dialogs, the chooser coming by itself with no viewer, the setup banner's lines in the right pane
+the keys; the Menu (`ui.see_menu`) with the window's entries that still mean something, Series and Volume as a small
+dialog (the viewer chooser: tests/test_viewer_chooser.py), the setup banner's lines in the right pane
 with their buttons in the Menu (a dialog with that pane off); a start whose see-through window could not be made said
 in a box and ended; the Translator role as the left pane's Edit, the viewer's window looked at as it is (never
 enlarged), no line that TASlation covers the viewer, the panes' words naming no menu and no key, and the Settings
@@ -565,56 +565,6 @@ def keys(monkeypatch):
     return given
 
 
-def test_the_viewer_chooser_chooses_as_the_toolbars_list_does(hidden_root, keys):
-    app = FakeApp(hidden_root)
-    dialog = sm.open_viewer(app)
-    assert app._see_chooser is dialog and not dialog.by_itself and keys == []  # (asked for: `_mapped` gives keys)
-    assert list(dialog.box.cget("values")) == ["Sample viewer one", "Sample viewer two"] and app.rescans == 1
-    assert sm.open_viewer(app) is dialog  # (the one open brought up)
-    dialog.box.current(1)
-    dialog.ok()
-    assert app.picked == [(1, True)] and app.selected.hwnd == 12 and app._see_chooser is None
-    assert not dialog.winfo_exists()
-
-
-def test_with_no_viewer_the_chooser_comes_by_itself_and_goes_once_one_is_chosen(hidden_root, keys):
-    app = FakeApp(hidden_root)
-    start = app._see_started
-    sm.chooser_tick(app, now=start + 1.0)
-    assert app._see_chooser is None  # (not at once: a viewer may be found first)
-    sm.chooser_tick(app, now=start + sm.CHOOSER_DUE_S + 0.1)
-    dialog = app._see_chooser
-    assert dialog is not None and dialog.by_itself and keys == [dialog]  # (no key while another program is in front)
-    assert dialog.attributes("-topmost")
-    app.selected = app.windows[0]  # (TASlation found the viewer meanwhile)
-    sm.chooser_tick(app, now=start + 10)
-    assert app._see_chooser is None and not dialog.winfo_exists()
-
-
-def test_a_chooser_closed_with_no_choice_comes_again_only_once_a_viewer_was_chosen_and_lost(hidden_root, keys):
-    app = FakeApp(hidden_root)
-    late = app._see_started + 10
-    sm.chooser_tick(app, now=late)
-    app._see_chooser.close()
-    assert app._see_chooser is None and app._see_chooser_declined
-    sm.chooser_tick(app, now=late + 1)
-    assert app._see_chooser is None
-    app.selected = app.windows[0]
-    sm.chooser_tick(app, now=late + 2)
-    app.selected = None  # (lost)
-    sm.chooser_tick(app, now=late + 3)
-    assert app._see_chooser is not None and app._see_chooser.by_itself
-
-
-def test_no_chooser_comes_while_a_dialog_holds_the_window(hidden_root, keys, monkeypatch):
-    from taslation.ui.dialogs import help as help_dialogs
-
-    monkeypatch.setattr(help_dialogs, "modal_up", lambda window: True)
-    app = FakeApp(hidden_root)
-    sm.chooser_tick(app, now=app._see_started + 10)
-    assert app._see_chooser is None
-
-
 def test_the_trouble_lines_choose_viewer_opens_the_chooser_while_the_window_is_hidden(monkeypatch):
     from taslation.ui import trouble
 
@@ -687,7 +637,7 @@ def banner_window(**more):
     return window, shown
 
 
-@pytest.mark.parametrize("kind, kept", [("closed", False), ("tied", False), ("minimised", True), ("black", True)])
+@pytest.mark.parametrize("kind, kept", [("closed", False), ("minimised", True), ("black", True)])
 def test_the_banners_dialog_leaves_choosing_a_viewer_to_the_chooser(monkeypatch, kind, kept):
     from taslation.ui import status
 

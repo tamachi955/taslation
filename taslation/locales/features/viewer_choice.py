@@ -1,25 +1,44 @@
-"""The window's strings for its own choice of the viewer when none was named (`ui.viewers.choose_viewer`): the
-status line when several windows look like a viewer equally well, so that none is chosen and the reader picks.
+"""The viewer chooser's own words (`ui.see_menu.ViewerDialog`), the dialog in which the person chooses the viewer's
+window at every start - TASlation chooses none by itself: its List again, and its line (and the status line's) once
+the viewer's window was closed. Its OK, Quit and Close are the window's words for them elsewhere.
 
 Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
-    "Several windows look like a viewer: choose the right one in Menu > Viewer...": {
-        "ja": "ビューアらしいウィンドウが複数あります。「メニュー」>「ビューア...」で正しいものを選んでください。",
-        "es": "Varias ventanas parecen un visor: elige la correcta en Menú > Visor...",
-        "pt": "Várias janelas parecem um visualizador: escolha a certa em Menu > Visualizador...",
-        "fr": "Plusieurs fenêtres ressemblent à une visionneuse : choisissez la bonne dans Menu > Visionneuse...",
-        "de": "Mehrere Fenster sehen nach einem Viewer aus: Wählen Sie das richtige unter Menü > Viewer...",
-        "it": "Più finestre sembrano un visualizzatore: scegli quella giusta in Menu > Visualizzatore...",
-        "nl": "Meerdere vensters lijken op een viewer: kies het juiste in Menu > Viewer...",
-        "pl": "Kilka okien wygląda na czytnik: wybierz właściwe w Menu > Czytnik...",
-        "ru": "Несколько окон похожи на просмотрщик: выберите нужное в «Меню» > «Просмотрщик...».",
-        "tr": "Birden çok pencere görüntüleyiciye benziyor: doğru olanı Menü > Görüntüleyici... ile seçin.",
-        "id": "Beberapa jendela tampak seperti penampil: pilih yang benar di Menu > Penampil...",
-        "vi": "Có nhiều cửa sổ trông giống trình xem: hãy chọn đúng cửa sổ trong Menu > Trình xem...",
-        "zh": "有多个窗口看起来像查看器：请在“菜单 > 查看器...”中选择正确的一个。",
-        "zh-tw": "有多個視窗看起來像檢視器：請在「選單 > 檢視器...」中選擇正確的一個。",
-        "ko": "뷰어처럼 보이는 창이 여러 개 있습니다. 메뉴 > 뷰어...에서 맞는 창을 고르세요.",
-        "th": "มีหลายหน้าต่างที่ดูเหมือนโปรแกรมอ่าน: กรุณาเลือกหน้าต่างที่ถูกต้องใน เมนู > โปรแกรมอ่าน...",
+    "List again": {
+        "ja": "一覧を更新",
+        "es": "Actualizar lista",
+        "pt": "Atualizar lista",
+        "fr": "Actualiser la liste",
+        "de": "Liste aktualisieren",
+        "it": "Aggiorna elenco",
+        "nl": "Lijst vernieuwen",
+        "pl": "Odśwież listę",
+        "ru": "Обновить список",
+        "tr": "Listeyi yenile",
+        "id": "Muat ulang daftar",
+        "vi": "Làm mới danh sách",
+        "zh": "刷新列表",
+        "zh-tw": "重新整理清單",
+        "ko": "목록 새로 고침",
+        "th": "รีเฟรชรายการ",
+    },
+    "The viewer was closed. Open your book again and choose its window.": {
+        "ja": "ビューアが閉じられました。本をもう一度開き、そのウィンドウを選んでください。",
+        "es": "Se cerró el visor. Abre tu libro de nuevo y elige su ventana.",
+        "pt": "O visualizador foi fechado. Abra seu livro de novo e escolha a janela dele.",
+        "fr": "La visionneuse a été fermée. Rouvrez votre livre et choisissez sa fenêtre.",
+        "de": "Der Viewer wurde geschlossen. Öffnen Sie Ihr Buch erneut und wählen Sie sein Fenster.",
+        "it": "Il visualizzatore è stato chiuso. Riapri il libro e scegli la sua finestra.",
+        "nl": "De viewer is gesloten. Open je boek opnieuw en kies het venster ervan.",
+        "pl": "Czytnik został zamknięty. Otwórz książkę ponownie i wybierz jej okno.",
+        "ru": "Окно просмотра закрыто. Откройте книгу снова и выберите её окно.",
+        "tr": "Görüntüleyici kapatıldı. Kitabınızı yeniden açın ve penceresini seçin.",
+        "id": "Penampil ditutup. Buka lagi buku Anda dan pilih jendelanya.",
+        "vi": "Trình xem đã đóng. Hãy mở lại sách và chọn cửa sổ của nó.",
+        "zh": "阅读器已关闭。请重新打开书，并选择它的窗口。",
+        "zh-tw": "閱讀器已關閉。請重新開啟書，並選擇它的視窗。",
+        "ko": "뷰어가 닫혔습니다. 책을 다시 열고 그 창을 고르세요.",
+        "th": "ปิดตัวอ่านแล้ว เปิดหนังสืออีกครั้งแล้วเลือกหน้าต่างของมัน",
     },
 }

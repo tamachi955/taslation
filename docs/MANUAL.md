@@ -15,11 +15,16 @@ There is no account to make and no limit on the pages it translates. Nothing of 
 1. Open the book in the viewer and show the page where you want to start.
 2. Start TASlation from "TASlation" in the Start menu. TASlation has no window of its own on the screen: it lays its lettering over the viewer's window
    and puts two side panes on the viewer's ground beside the page (see "The side panes").
-3. TASlation looks for the viewer's window by itself. It carries no list of stores or viewers, so a viewer you use for the first time on this computer is not found by itself
-   (only a window whose title has a word such as "book", "電子書籍" or "本棚" is); then a small dialog comes. Choose the viewer's window in the "Viewer" list.
-   Once you have chosen it, that viewer's window is chosen automatically from then on, even if you open it after TASlation; "Menu > Viewer..." opens the dialog again.
-   When several windows look like viewers, none is chosen automatically, and the dialog comes. A browser window is judged by its tab title without the browser's name,
-   and a title in which a word such as "book", or a viewer's name it has learned, is only part of a longer word is not taken for a viewer. In a browser-based reader,
+3. At every start, after the legal notice (and the box that comes when the GPU's memory is short), TASlation asks which window is the viewer: a small dialog
+   with a "Viewer" list of the windows on the screen, each named as its taskbar button is (a browser window by its tab's title and the browser's name;
+   a long name is shortened in the middle). TASlation never chooses a window by itself. It carries no list of stores or viewers: the viewer you chose before
+   comes first in the list and is already selected, so Enter or "OK" is enough; then come the windows whose titles look like a viewer's (without the viewer you chose before, the first of them
+   is selected), then the rest.
+   When none looks like one, nothing is selected and "OK" is greyed until you choose the viewer's window in the list. "List again" lists the windows again
+   (a window opened while the dialog is up comes into the list by itself too), and "Quit" ends TASlation. Nothing of any window is followed, shown or read
+   before you press "OK"; then the right pane says "Viewer: <title>" for a few seconds. When the viewer's window is closed, the lettering and the side panes go
+   and the same dialog comes again, saying so: a new window of the same viewer is selected in it, not chosen by itself. "Menu > Viewer..." opens the dialog
+   to choose another window (its last button is then "Close"). A browser window is judged by its tab title without the browser's name. In a browser-based reader,
    the part that is the page, without the tabs, the address bar and the reader's own frame, is found automatically, and only that part is read. If that does not work, use "Set area..." in the left pane once
    and drag a rectangle around the page on the picture it shows (it is remembered per window). The area you set is treated as an outer frame,
    and the page part is looked for and read inside it as well (the part found is shown with a dashed line). The rectangle is resized with its eight handles, moved by dragging inside it,
@@ -653,7 +658,8 @@ Global options: `--model NAME` (the default is the setting `ollama_model = "auto
 
 `--window` is matched against, in this order: the window's whole title; in a browser, the tab's whole title; the beginning of the tab's title; part of a tab title that looks like a viewer;
 part of the window's title. When several windows match, it does not guess: it shows the candidates and exits (exit code 2).
-Give a somewhat longer title.
+Give a somewhat longer title. `gui --window` brings no viewer dialog at the start: the window named is chosen as soon as it is there,
+and again when it is opened anew after it was closed.
 
 ### Choosing the model
 

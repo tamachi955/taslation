@@ -98,7 +98,8 @@ WxH* gives the stand-in's window another size, *--standin-full-screen* starts it
 reader's area the whole frame). TASlation's own window is never on the screen: the watch reads its handle once a
 second (on no monitor, alpha 0, an application's window with its taskbar button titled TASlation:
 ``run.see_through.hidden_window``). *--no-viewer-s S*
-gives the window no viewer to find for its first S seconds (the viewer chooser comes by itself meanwhile), and
+gives the window no viewer to find for its first S seconds (it names the stand-in, ``window_query``, as gui --window
+does: no viewer chooser comes, the window looks for the window named until it is listed), and
 *--book-asked* starts it with a name that names no book, so that the start dialog asks it at Auto's first page; the
 driver answers it through the dialog's own object (``run.no_viewer``, ``run.book_asked``).
 
@@ -5482,8 +5483,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "whole frame")
     ap.add_argument("--no-viewer-s", type=float, default=0.0, metavar="S",
                     help="the window finds no viewer for its first S seconds (its look for windows given none), then "
-                         "the stand-in; nothing is released before it has chosen it (run.no_viewer; the viewer "
-                         "chooser comes by itself meanwhile: run.see_through.hidden_window.dialogs)")
+                         "the stand-in; nothing is released before it has chosen it (run.no_viewer; the stand-in is "
+                         "named, window_query: no viewer chooser comes)")
     ap.add_argument("--book-asked", action="store_true",
                     help=f"the window begins with the name {BOOK_UNNAMED!r}, which names no book, so that Auto's first "
                          f"page asks it (the start dialog); answered {BOOK_ANSWER_S:g} s after it is on the screen, "

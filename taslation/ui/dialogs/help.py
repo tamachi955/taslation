@@ -19,7 +19,7 @@ from .notice import NoticeDialog
 TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs): the keys of the window's catalogs
     ("Getting started", (
         "Open your book in its viewer. A viewer in a browser works best in a browser window of its own.",
-        "TASlation finds the viewer by itself and lays its lettering over the viewer's window. If it does not find it, it asks you to choose the viewer's window; Menu > Viewer... chooses another one.",
+        "At every start TASlation asks which window shows your book; the viewer you chose before comes first in the list. Choose it and press OK or Enter (Quit ends TASlation). It lays its lettering over that window; Menu > Viewer... chooses another one.",
         "Choose your language with the arrows in the left pane. The first time, TASlation may ask for the book's name.",
         "Read in the viewer as it is: turn the pages there, with its own keys, buttons or clicks. TASlation presses no key and sends no click to the viewer, turns no page by itself and reads only the page the viewer shows. With Auto on, each page you turn is lettered in your language.",
         "Translate translates the page on show now; the circular arrow beside it translates it again, asking every line anew. Lettering hides the translation, so that the page shows as the viewer has it, and shows it again.",

@@ -1,4 +1,6 @@
-"""The viewer's window: the list of windows (rescanned as it opens, watched until a viewer is chosen), the one
+"""The viewer's window: the list of windows (rescanned as it opens), the one the person chose in the viewer chooser
+(`see_menu.ViewerDialog`: TASlation never chooses one by itself; the windows that look like the viewer only come first
+and one is preselected, `offered`) or named with --window (`named_window`, watched for until it is there), the one
 chosen and whether it still shows the book, the capture area set by hand (the outer
 bound of what is read, the page panel found inside it read of it: `live.LiveViewMixin._find_page`), the viewer's
 window shown again when it is chosen minimised (`show_minimised`) and otherwise read as it is (never moved nor
@@ -6,6 +8,7 @@ resized: `_enlarge_first`), and the offline guard's warning once it has blocked 
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Sequence
 
 from .. import netguard, viewerparts
@@ -20,8 +23,10 @@ from ..capture import (
     same_book_window,
     still_the_book,
     stop_capture,
+    taskbar_title,
     unminimise_window,
     viewer_candidates,
+    viewer_rank,
     window_exists,
     window_shown,
     window_title,
@@ -49,24 +54,75 @@ def show_minimised(app: Any, win: WindowInfo) -> bool:
         return False
 
 
-def choose_viewer(windows: Sequence[WindowInfo], query: str = "") -> tuple[WindowInfo | None, list[WindowInfo]]:
-    """The window to choose as the viewer, and when there is none to choose, the ones the reader has to pick from.
-    The window *query* names (`match_windows`: the window's --window); when it names several, the one of them that
-    looks most surely like a viewer; when it names none, or without a query, the one window that looks most surely
-    like a viewer (`viewer_candidates`: a window the viewer by what was learned on this computer - chosen before, or
-    a viewer's part at an end of its tab title - before any other title with a viewer's part or a reading word in it;
-    Auto follows it from the start). Several of equal rank: (None, them) - TASlation never guesses between them (a
-    chat page about the viewer beside the reader's tab). (None, []) when nothing fits: on the first use of a viewer
-    on a computer, unless its title has a reading word, the reader picks it in the Viewer list."""
-    if query.strip():
-        named = match_windows(query, windows)
-        if len(named) == 1:
-            return named[0], []
-        if named:
-            best = viewer_candidates(named)
-            return (best[0], []) if len(best) == 1 else (None, best or named)
-    best = viewer_candidates(windows)
-    return (best[0], []) if len(best) == 1 else (None, best)
+VIEWER_NOTE_S = 5.0  # after a choice in the viewer chooser, the right pane says "Viewer: <title>" so long
+
+
+def named_window(windows: Sequence[WindowInfo], query: str) -> WindowInfo | None:
+    """The window the --window *query* names (`match_windows`); when it names several, the one of them that looks
+    most surely like a viewer (`viewer_candidates`) when one alone does. None when it names none (yet) or several
+    that only the person can tell apart - and without a query: TASlation chooses no viewer by itself, the person does
+    in the viewer chooser (`offered`)."""
+    if not query.strip():
+        return None
+    named = match_windows(query, windows)
+    if len(named) == 1:
+        return named[0]
+    best = viewer_candidates(named)
+    return best[0] if len(best) == 1 else None
+
+
+def offered(windows: Sequence[WindowInfo], chosen: WindowInfo | None = None) -> tuple[list[WindowInfo],
+                                                                                      WindowInfo | None]:
+    """The windows as the viewer chooser lists them, and the one it preselects. First the ones the viewer by what was
+    learned on this computer (`viewer_rank` 0: chosen before by their title or their program, or a viewer's part at
+    an end of the tab title; the tab chosen last first), then the others that look like a viewer (`viewer_rank` 1: a
+    viewer's part or a reading word in the title), then the rest, each group in the order given (`list_windows`: the
+    largest first). Preselected: *chosen*, the viewer followed, when it is listed; else the first window when it
+    ranks; else none (the person picks, OK waits for it). The ranking orders and preselects only: nothing is chosen
+    before the person presses OK."""
+    from .. import viewerparts
+
+    titles = [viewerparts.plain(t) for t in viewerparts.current().titles]  # (the latest last)
+
+    def latest(win: WindowInfo) -> int:
+        tab = viewerparts.plain(" ".join(win.tab_title.split()))
+        return max((i for i, t in enumerate(titles) if t == tab), default=-1)
+
+    ranks = [viewer_rank(w) for w in windows]
+    order = sorted(range(len(windows)), key=lambda i: (2 if ranks[i] is None else ranks[i],
+                                                       -latest(windows[i]) if ranks[i] == 0 else 0, i))
+    ordered = [windows[i] for i in order]
+    keep = next((w for w in ordered if chosen is not None and w.hwnd == chosen.hwnd), None)
+    if keep is None and order and ranks[order[0]] is not None:
+        keep = ordered[0]
+    return ordered, keep
+
+
+def entry_titles(windows: Sequence[WindowInfo]) -> list[str]:
+    """What the viewer chooser's list says of each of *windows*: its taskbar title (`taskbar_title`), the size of
+    each window beside a title that two of them share."""
+    titles = [taskbar_title(w) for w in windows]
+    return [f"{t}  ({w.width}x{w.height})" if titles.count(t) > 1 else t for t, w in zip(titles, windows)]
+
+
+def middle_cut(text: str, fits: Callable[[str], bool], mark: str = "…") -> str:
+    """*text* as it is when it *fits*, else shortened in the middle - its start and its end kept, as much of them as
+    fits, *mark* between them (the start one character longer than the end)."""
+    if fits(text):
+        return text
+
+    def kept(n: int) -> str:
+        head, tail = (n + 1) // 2, n // 2
+        return text[:head].rstrip() + mark + (text[len(text) - tail:].lstrip() if tail else "")
+
+    low, high = 0, len(text) - 1
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(kept(middle)):
+            low = middle
+        else:
+            high = middle - 1
+    return kept(low)
 
 
 def another_book(left: WindowInfo, chosen: WindowInfo, query: str = "") -> bool:
@@ -105,31 +161,30 @@ class ViewerMixin:
 
     # ------------------------------------------------------------------ windows
     def refresh_windows(self, select: str | None = None) -> None:
+        """The list of windows as they are now, the viewer followed kept; the window *select* names (--window, or
+        the one the window was started with while it follows none: `named_window`) chosen. Nothing else is chosen:
+        without a name the person chooses in the viewer chooser (`see_menu.ViewerDialog`)."""
         if not IS_WINDOWS:
             self.say("Window capture needs Windows; use `taslation translate IMAGE` on this OS.")
             return
         self.windows = list_windows()
         self.window_box["values"] = [w.label() for w in self.windows]
         target: WindowInfo | None = None
-        tied: list[WindowInfo] = []
         if not select and self.selected:
             target = next((w for w in self.windows if w.hwnd == self.selected.hwnd), None)
         named = False
-        if target is None:
-            target, tied = choose_viewer(self.windows, select or "")
-            named = target is not None and bool(select) and any(
-                w.hwnd == target.hwnd for w in match_windows(select or "", self.windows))
+        query = select or ("" if self.selected is not None else getattr(self, "window_query", ""))
+        if target is None and query:
+            target = named_window(self.windows, query)
+            named = target is not None
         if target is not None:
-            self._tied_said = ()
             self.window_box.current(self.windows.index(target))
             self._on_window_selected(named=named)
-        elif tied and self._tied_said != tuple(w.hwnd for w in tied):  # said once for these windows
-            self._tied_said = tuple(w.hwnd for w in tied)
-            self.say("Several windows look like a viewer: choose the right one in Menu > Viewer...")
 
     def _rescan_windows(self) -> None:
         """The viewer list as it opens: the windows as they are now, the chosen one kept. When the chosen window was
-        closed, a window showing its book again (reopened) is chosen in its place."""
+        closed, a window showing its book again (reopened) is chosen in its place - only for a viewer named with
+        --window: else the person chooses again in the viewer chooser, the new window preselected there."""
         if not IS_WINDOWS:
             return
         try:
@@ -142,7 +197,7 @@ class ViewerMixin:
         self.window_box["values"] = [w.label() for w in new]
         if self.selected is not None:
             index = next((i for i, w in enumerate(new) if w.hwnd == self.selected.hwnd), None)
-            if index is None and not window_exists(self.selected.hwnd):
+            if index is None and getattr(self, "window_query", "") and not window_exists(self.selected.hwnd):
                 index = next((i for i, w in enumerate(new)
                               if same_book_window(w.title, self.selected.title, self.window_query)), None)
                 if index is not None:
@@ -153,29 +208,28 @@ class ViewerMixin:
                 self.window_box.current(index)
 
     def _watch_windows(self) -> None:
-        """Until a viewer is chosen: every 2 s, look for one and choose it as the start does (`choose_viewer`), so a
-        viewer opened after TASlation is chosen by itself; windows that only the reader can tell apart are said once
-        (the status line), and the reader picks. The list is left alone while it is open or a dialog holds the
-        window."""
-        if not IS_WINDOWS or self.selected is not None:
+        """With a viewer named (--window) and none followed: every 2 s, look for the window named and choose it
+        (`named_window`), so that one opened after TASlation, or again after it was closed, is chosen. Without a name
+        nothing is watched for: the viewer chooser is on the screen (`see_menu.chooser_tick`). The list is left alone
+        while it is open or a dialog holds the window."""
+        if not IS_WINDOWS or self.selected is not None or not getattr(self, "window_query", ""):
             return
         try:
-            if not self.tk.call("grab", "current"):
-                target, tied = choose_viewer(list_windows(), self.window_query)
-                if target is not None or (tied and tuple(w.hwnd for w in tied) != self._tied_said):
-                    self.refresh_windows(select=self.window_query)
+            if not self.tk.call("grab", "current") and named_window(list_windows(), self.window_query) is not None:
+                self.refresh_windows(select=self.window_query)
         except Exception:  # a failed scan must not end the watch
             pass
         if self.selected is None:
             self.after(WINDOW_WATCH_MS, self._watch_windows)
 
     def _on_window_selected(self, picked: bool = False, named: bool = False) -> None:
-        """A viewer chosen in the Viewer list (*picked*: by the person; *named*: by the --window the person gave; else
-        by TASlation, as it finds the viewer): remembered for the next start (`_learn_viewer`), its book (the name its
-        title gives: `_title_book`) and area, its line on the status line, its window shown again when it is
-        minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window followed; once it
-        has settled whether it draws while covered is found out (`_learn_covered_soon`). A window chosen again keeps
-        what it has."""
+        """A viewer chosen in the Viewer list (*picked*: by the person, in the viewer chooser or the toolbar's list;
+        *named*: by the --window the person gave; else the list shown again, the viewer kept): remembered for the next
+        start (`_learn_viewer`, viewers.json), its book (the name its title gives: `_title_book`) and area, its line on
+        the status line (and, picked, in the right pane for VIEWER_NOTE_S: ``_see_viewer_note``), its window shown
+        again when it is minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window
+        followed; once it has settled whether it draws while covered is found out (`_learn_covered_soon`). A window
+        chosen again keeps what it has."""
         idx = self.window_box.current()
         if idx < 0 or idx >= len(self.windows):
             return
@@ -208,6 +262,8 @@ class ViewerMixin:
         self._auto_last = None
         self._live_thumb = None  # the next tick shows this viewer
         title = self.selected.title
+        if picked:
+            self._see_viewer_note = (title, time.monotonic() + VIEWER_NOTE_S)  # (`seethrough.right_rows`)
         if restored:
             self.status(lambda: _(VIEWER_RESTORED).format(title=title))
         elif margins is not None and any(margins):
@@ -231,8 +287,9 @@ class ViewerMixin:
 
     def _viewer_gone(self) -> None:
         """The chosen viewer's window was closed: it is left as when another is chosen (`_viewer_left`), none is chosen
-        any more, the status line says what to do, and the watch for a viewer starts again (`_watch_windows`). Nothing
-        while the window is still there."""
+        any more (nothing is followed or shown: no lettering, no side pane), the status line says what to do, and the
+        viewer chooser comes again (`see_menu.chooser_tick`, saying the viewer was closed) - or, for a viewer named
+        with --window, the watch for it starts again (`_watch_windows`). Nothing while the window is still there."""
         win = self.selected
         if win is None or window_exists(win.hwnd):
             return

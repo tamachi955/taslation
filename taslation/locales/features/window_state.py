@@ -1,5 +1,5 @@
-"""The window's lines on where it stands: a page that is not the one a tool would act on, a viewer that was closed, the
-"Select one" of the lists, and what is still to come on a page.
+"""The window's lines on where it stands: a page that is not the one a tool would act on, the "Select one" of the
+lists, and what is still to come on a page (a viewer that was closed: the viewer chooser's, `viewer_choice`).
 
 Machine-translated; no native review."""
 
@@ -39,24 +39,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "已儲存到開啟編輯器時的頁面。",
         "ko": "편집기를 연 페이지에 저장했습니다.",
         "th": "บันทึกลงในหน้าที่เปิดตัวแก้ไขไว้แล้ว",
-    },
-    "The viewer was closed. Open your book again; TASlation finds it by itself.": {
-        "ja": "ビューアが閉じられました。本をもう一度開いてください。TASlation が自動で見つけます。",
-        "es": "Se cerró el visor. Abre tu libro de nuevo; TASlation lo encuentra solo.",
-        "pt": "O visualizador foi fechado. Abra seu livro de novo; o TASlation o encontra sozinho.",
-        "fr": "La visionneuse a été fermée. Rouvrez votre livre ; TASlation le retrouve tout seul.",
-        "de": "Der Viewer wurde geschlossen. Öffnen Sie Ihr Buch erneut; TASlation findet es von selbst.",
-        "it": "Il visualizzatore è stato chiuso. Riapri il libro; TASlation lo trova da solo.",
-        "nl": "De viewer is gesloten. Open je boek opnieuw; TASlation vindt het vanzelf.",
-        "pl": "Czytnik został zamknięty. Otwórz książkę ponownie; TASlation znajdzie ją sam.",
-        "ru": "Окно просмотра закрыто. Откройте книгу снова; TASlation найдёт её сам.",
-        "tr": "Görüntüleyici kapatıldı. Kitabınızı yeniden açın; TASlation onu kendisi bulur.",
-        "id": "Penampil ditutup. Buka lagi buku Anda; TASlation menemukannya sendiri.",
-        "vi": "Trình xem đã đóng. Hãy mở lại sách; TASlation sẽ tự tìm thấy.",
-        "zh": "阅读器已关闭。请重新打开书，TASlation 会自动找到它。",
-        "zh-tw": "閱讀器已關閉。請重新開啟書，TASlation 會自動找到它。",
-        "ko": "뷰어가 닫혔습니다. 책을 다시 여세요. TASlation이 알아서 찾습니다.",
-        "th": "ปิดตัวอ่านแล้ว เปิดหนังสืออีกครั้ง TASlation จะหาเจอเอง",
     },
     "Reading order cancelled: another page came.": {
         "ja": "読み順の設定を取り消しました: 別のページになりました。",

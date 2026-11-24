@@ -117,7 +117,7 @@ from .replace import ReplaceMixin
 from .formats import FormatMixin
 from .selection import SelectionMixin
 from .translator import TOOLBAR_GAP, TranslatorMixin
-from .viewers import ViewerMixin, choose_viewer
+from .viewers import ViewerMixin, named_window
 from .wrap import is_cjk, wrap_line, wrap_text
 
 
@@ -242,7 +242,10 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self.windows: list[WindowInfo] = []
         self.selected: WindowInfo | None = None
         self.window_query = (window_query or "").strip()
-        self._tied_said: tuple[int, ...] = ()  # the windows said to look like a viewer equally well (the reader picks)
+        # the start's judgement of the GPU's memory made (`JobsMixin._job_init`): the viewer chooser may come from then
+        # on (`see_menu.chooser_tick`), after the legal notice and the GPU's dialog, alone
+        self._start_judged = False
+        self._see_viewer_note: tuple[str, float] | None = None  # (the viewer's title, until when the right pane says it)
         self._waiting = False  # the viewer window shows another tab; Auto mode is holding back
         self.annotation_store = AnnotationStore(settings.annotations_dir)
         self.glossary_store = GlossaryStore(settings.glossary_dir)
@@ -786,7 +789,7 @@ __all__ = [
     "wrap_label", "is_cjk", "wrap_line", "wrap_text", "FILL_COLOUR", "LOADING", "STATUS_WORDS",
     "WORK_STAGES", "Filling", "busy_line", "progress_line", "reads_page", "stage_of", "status_word",
     "BLANK_SPREAD", "LANGUAGES", "LIVE_CHANGE", "QUEUE_RANK", "READY",
-    "WINDOW_WATCH_MS", "choose_viewer", "AreaDialog", "BookSettingsDialog", "CachesDialog",
+    "WINDOW_WATCH_MS", "named_window", "AreaDialog", "BookSettingsDialog", "CachesDialog",
     "EditBubbleDialog", "GlossaryDialog", "NoticeDialog", "PassphraseDialog", "ReviewDialog",
     "import_error_text", "notice_due", "review_rows",
 ]
