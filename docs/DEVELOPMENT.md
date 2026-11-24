@@ -130,19 +130,30 @@ rows' languages.
   From then to November 21, 2026 the README's recording, `docs/media/taslation-intro.gif`, was made with this tool's
   guard and scratch state by a longer script that is not in the repository; since then it is made by
   `tools/intro_video.py` (the next entry), the first time with version 0.9.0. Each of these recordings holds
-  CC BY-NC 4.0 material. Since version 0.9.4 the README shows a video instead (an attachment kept by GitHub) and the
-  repository holds no recording. With the whole-book run gone (2026-11-22) the tool only says so and ends (exit code 2).
-* `tools/intro_video.py` makes the README's introduction (a dev tool, never part of a release). Before 2.0.0 its
-  `record` ran the real window in English beside a stand-in viewer of its own (a Tk window of a child process showing
-  OpenMantra pages, turned only by the page key the window passed on to it), through scenes acted on the window's own
-  Tk widgets. From 2.0.0 on that window is hidden - the lettering lies over the viewer's own window - and no key is
-  passed on, so `record` went with it; a recording of an earlier version can still be rendered. A recording keeps no
-  page text. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
-  cards whose figures come from the code's constants - refuses one over 5 MB (`--allow-large`), and deletes the
+  CC BY-NC 4.0 material. From version 0.9.4 to 1.0.1 the README showed a video instead (an attachment kept by GitHub)
+  and the repository held no recording; since the one mode it holds the GIF `tools/intro_video.py` makes (the next
+  entry). With the whole-book run gone (2026-11-22) this tool only says so and ends (exit code 2).
+* `tools/intro_video.py` makes the README's introduction, `docs/media/taslation-intro.gif` (a dev tool, never part
+  of a release; the repository holds that GIF again since the program's one mode). `record --out SCRATCH/intro.zip`
+  is a run of `tools/standin_e2e.py` on a scenario of its own: the stand-in viewer on OpenMantra pages drawn sharp at
+  once, the real program in English with its lettering over the stand-in and its two side panes, the translator's
+  server started by TASlation's own starter on a port of its own (`--start-ollama`, 11435 by default), a scratch
+  state. It acts four scenes - a page the stand-in turns by its own script filling in, the side panes, the pointer on
+  a bubble (the original in its place, the bubble's block in the right pane), Edit switched on with a box dragged and
+  dragged back - with a pointer of its own (the see-through window is told where it is: the real pointer never moves)
+  and clicks and drags posted to TASlation's own pane and lettering windows; nothing is sent to the stand-in or to any
+  other window, and the tool never changes the foreground (the stand-in's browser takes it as it starts, as in every
+  stand-in run, and keeps it to the end). Its frames are copies of the screen in the stand-in's client area,
+  each kept only when no other program's window lies over the stand-in and, outside where TASlation's own windows
+  draw, it shows the stand-in's own frame of that moment (as the stand-in run's pane shot is checked); a frame that
+  fails is never kept, and six in a row stop the run with the recording deleted. It says how long the screen was in
+  use. A recording keeps no page text. `render FILE --out GIF` makes a 960x620 GIF of about 30 to 60 s - a title
+  card, the numbered scenes with the tool's pointer drawn in, a closing card - where git ignores it or outside the
+  repository (it is copied to `docs/media` by hand), refuses one over 5 MB (`--allow-large`), and deletes the
   recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
-  4.0 material. Each card line and step names the sentences of README.md, docs/MANUAL.md or docs/THIRD_PARTY.md it
-  follows, or is marked as the tool's own words; `tests/test_intro_video.py` fails when one of those sentences no
-  longer stands word for word, so change the line with the document.
+  4.0 material. Each card line and step names the sentences of docs/MANUAL.md it follows, or is marked as the tool's
+  own words; `tests/test_intro_video.py` fails when one of those sentences no longer stands word for word, so change
+  the line with the document.
 * `tools/judge_order_check.py` reads pages with each region judged as soon as it is read and with all of a unit's
   regions read first (`pipeline.JUDGE_AT_READ`), with one pipeline and the book's sizes put back between the two, and
   compares every field of every region, the progress told and the book's sizes after, counts only: the repository's
