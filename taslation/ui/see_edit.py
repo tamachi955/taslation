@@ -109,6 +109,25 @@ def _editor_region(app: Any) -> Any:
     return None
 
 
+def _probe(app: Any, original: Any, box: st.Box, size: tuple[int, int], dpi: int) -> st.Patch | None:
+    """The frame's pixels round *box* (`seethrough.probe`), kept for the page *original* (the frame read, RGB): what
+    tells the see-through window whether a box with no patch is still over the page it was read from."""
+    kept: dict[Any, Any] = app.__dict__.setdefault("_see_probes", {})
+    if kept.get("frame") != id(original):
+        kept.clear()
+        kept["frame"] = id(original)
+    near = st.grow(box, st.scaled(st.MARGIN, dpi), size)
+    found = kept.get(near)
+    if found is None and near[2] > near[0] and near[3] > near[1]:
+        try:
+            import numpy as np
+
+            found = kept[near] = st.probe(near, np.asarray(original.crop(near).convert("RGB"))[:, :, ::-1])
+        except Exception:  # noqa: BLE001 - (no pixels to go by: the box takes the mouse as ever)
+            return None
+    return found
+
+
 def marks_for(app: Any) -> st.Marks | None:
     """The marks of the page on show while Edit is on and the page on show is the last translated one (`_editing`):
     its regions, numbered in the reading order (while it is being clicked, the place each has been given, "?" for
@@ -167,7 +186,8 @@ def marks_for(app: Any) -> st.Marks | None:
     marks = st.Marks(key=id(result.original), boxes=boxes, plates=tuple(plates),
                      chosen=tuple(i for i in (index(r) for r in chosen) if i is not None),
                      held=index(held) if held is not None else None, bare=index(bare) if bare is not None else None,
-                     locked=locked, adding=adding, ghosts=tuple(pending), seen=seen, serial=serial)
+                     locked=locked, adding=adding, ghosts=tuple(pending), seen=seen, serial=serial,
+                     probes=tuple(_probe(app, result.original, box, size, dpi) for box in boxes))
     app._see_edit_memo = (content, marks, list(regions))
     kept = app.__dict__.setdefault("_see_edit_regions", {})
     kept[serial] = list(regions)

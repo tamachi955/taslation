@@ -284,7 +284,8 @@ class Marks:
     an editor open, a change being stored, the reading order being clicked), whether the next drag draws a region to
     add (*adding*: the whole page takes the mouse meanwhile), the boxes a change was made to, outlined until the page
     has them (*ghosts*), and the newest press the Tk thread had taken when it made these (*seen*). *serial* tells one
-    set of marks from the next."""
+    set of marks from the next. *probes* holds, for each box, the frame's pixels round it (`probe`, or None): a box
+    with no patch takes nothing while the viewer's pixels there are not those (its bars over it, another page)."""
 
     key: int
     boxes: tuple[Box, ...]
@@ -297,6 +298,14 @@ class Marks:
     ghosts: tuple[Box, ...] = ()
     seen: int = 0
     serial: int = 0
+    probes: tuple[Patch | None, ...] = ()
+
+
+def probe(near: Box, pixels: np.ndarray, step: int = STEP) -> Patch:
+    """What a region's box with no patch of its own is checked by in Edit (`Marks.probes`): a patch with no picture
+    that keeps the frame's pixels in *near* (the box with MARGIN about it, within the frame) - *pixels* the frame's
+    there, (h, w, >=3) BGR as the viewer's come -, every *step*-th one, as `make_patches` keeps them."""
+    return Patch(near, np.zeros((0, 0, 4), np.uint8), near, np.ascontiguousarray(pixels[::step, ::step, :3]))
 
 
 def plate_box(plate: tuple[np.ndarray, tuple[int, int]] | None) -> Box | None:

@@ -192,6 +192,33 @@ def test_a_page_with_no_patch_has_its_marks_while_no_set_is_chosen(over):
     assert over._patchless is None and over._marks_for(None) is None
 
 
+def test_a_box_with_no_patch_takes_nothing_while_the_viewer_has_other_pixels_round_it(over):
+    page = np.zeros((SIZE[1], SIZE[0], 3), np.uint8)
+    page[90:170, 290:390] = (30, 120, 200)  # (RGB: what lies round B in the frame read)
+    original = Image.fromarray(page)
+    app = SimpleNamespace()
+    probe = see_edit._probe(app, original, B, SIZE, 96)
+    assert probe.near == st.grow(B, st.MARGIN, SIZE) and see_edit._probe(app, original, B, SIZE, 96) is probe
+    view = np.zeros((SIZE[1], SIZE[0], 4), np.uint8)
+    view[..., :3] = page[:, :, ::-1]  # (the viewer's frame: BGRA)
+    assert st.changed_share(probe, view) == 0.0
+    marks = st.Marks(key=5, boxes=(A, B), probes=(None, probe), serial=1)
+    chosen = FakeSet([A])  # (B has no patch: nothing lettered in it)
+    over.set_edit(marks)
+    over._edit_take(True, [chosen])
+    assert over._failed_probes(chosen, view) == frozenset()
+    barred = view.copy()
+    barred[80:140] = (255, 255, 255, 255)  # (the viewer's bar laid over B)
+    assert over._failed_probes(chosen, barred) == frozenset({B})
+    over._probes_failed = over._failed_probes(chosen, barred)
+    look(over, chosen, (0,))
+    assert over._left_out == frozenset({1})  # (B takes nothing: a click there is the viewer's)
+    over._probes_failed = over._failed_probes(chosen, view)
+    over.set_edit(st.Marks(key=5, boxes=(A, B), probes=(None, probe), serial=2))
+    look(over, chosen, (0,))
+    assert over._left_out == frozenset()
+
+
 def press(over, x, y, shift=False):
     over._edit_message(window.WM_LBUTTONDOWN, window.MK_SHIFT if shift else 0, lparam(x, y))
 

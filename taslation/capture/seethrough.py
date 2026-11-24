@@ -518,6 +518,10 @@ def _raise(hwnd: int, at: tuple[int, int] | None = None) -> None:
     _user32.SetWindowPos(hwnd, menu or HWND_TOPMOST, x, y, 0, 0, flags)
 
 
+def _meets(a: st.Box, b: st.Box) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
 class SeeThrough:
     """The see-through window and its thread (see the module's notes). Made with `start` (None where there can be
     none), told which viewer to lie over (`follow`), handed the patches of the pages (`present`, `forget`, `clear`),
@@ -579,6 +583,7 @@ class SeeThrough:
         self._marks_live: st.Marks | None = None
         self._left_out: frozenset[int] = frozenset()
         self._patchless: int | None = None  # the key of the marks' page while its set has no patch
+        self._probes_failed: frozenset[st.Box] = frozenset()  # boxes with no patch not over their page (last look)
         self._press: dict[str, Any] | None = None
         self._edits: deque[dict[str, Any]] = deque(maxlen=EDITS_KEPT)
         self._edit_serial = 0
@@ -899,6 +904,7 @@ class SeeThrough:
         self.counts["compare_ms"] += compare_ms
         if chosen is not None:
             shown = tuple(i for i in shown if not st.covered(chosen.patches[i].box, origin, self._covers))
+        self._probes_failed = self._failed_probes(chosen, view)
         self._last_look = (chosen, shown, shares, frame.seq, compare_ms, origin, size, bool(sets))
         self._show_look(*self._last_look)
 
@@ -961,6 +967,21 @@ class SeeThrough:
             return marks if chosen.key == marks.key else None
         return marks if self._patchless == marks.key else None
 
+    def _failed_probes(self, chosen: st.PatchSet | None, view: Any) -> frozenset[st.Box]:
+        """(a full look) The boxes of Edit's marks with no patch of their own whose pixels round them the viewer's
+        frame *view* has not (`Marks.probes`): bars over them, another page. They take nothing (`_show_edit`)."""
+        marks = self._marks_for(chosen)
+        if marks is None or not marks.probes:
+            return frozenset()
+        patches = chosen.patches if chosen is not None else ()
+        out = set()
+        for box, probe in zip(marks.boxes, marks.probes):
+            if probe is None or any(_meets(p.box, box) for p in patches):
+                continue
+            if st.changed_share(probe, view) > st.CHANGED_SHARE:
+                out.add(box)
+        return frozenset(out)
+
     def _edit_point(self, origin: tuple[int, int]) -> tuple[int, int] | None:
         """The pointer in the frame's pixels; None when it is not over the viewer's page (a side pane, a window over
         the viewer) or not known."""
@@ -974,13 +995,13 @@ class SeeThrough:
         """A look in Edit: the patches the frame has (*shown*), and also those of the region in the editor and of a
         region being dragged whatever the frame says, less those of the region whose original is shown (*bare*); no
         patch gives way under the pointer - the box there is outlined instead, with its corner handles -, and the
-        right pane is told of that region (`hovered`). The boxes a window over the viewer meets, and those whose
-        patches the frame has none of, take nothing."""
+        right pane is told of that region (`hovered`). The boxes a window over the viewer meets, those whose patches
+        the frame has none of, and those with no patch whose pixels round them it has not (`_failed_probes`), take
+        nothing."""
         patches = chosen.patches if chosen is not None else ()
         press = self._press if self._press is not None and self._press["marks"] is marks else None
-
-        def meets(a: st.Box, b: st.Box) -> bool:
-            return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+        meets = _meets
+        failed = getattr(self, "_probes_failed", frozenset())
 
         held = {marks.held} if marks.held is not None else set()
         if press is not None and "index" in press:
@@ -999,7 +1020,7 @@ class SeeThrough:
                 left_out.add(i)
             elif i not in held:
                 own = [k for k, p in enumerate(patches) if meets(p.box, box)]
-                if own and not any(k in shown for k in own):
+                if (own and not any(k in shown for k in own)) or (not own and box in failed):
                     left_out.add(i)
         left_out_set = frozenset(left_out)
         self._marks_live, self._left_out = marks, left_out_set
