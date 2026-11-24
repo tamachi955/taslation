@@ -48,11 +48,9 @@ PARAMS: dict[str, tuple[str, ...]] = {
     "batch.note_incomplete": ("incomplete", "units"),
     "batch.note_unit_incomplete": ("unit",),
     # window capture (CaptureError.message)
-    "viewer.covered": (),
     "viewer.gone": (),
     "viewer.no_area": (),
     "viewer.windows_only": (),
-    "viewer.unknown_key": ("key",),
     "viewer.api_failed": ("call",),
     "viewer.window_api_failed": ("call", "hwnd"),
     "viewer.empty_rect": (),
@@ -132,12 +130,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "{incomplete} of {units} page unit(s) came back incomplete; asking again for those",
     "batch.note_unit_incomplete": ("page unit {unit}: incomplete translation; what is missing is translated when its "
                                    "page is read"),
-    "viewer.covered": ("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or "
-                       "move it so that a strip of the viewer stays visible."),
     "viewer.gone": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.no_area": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.windows_only": "window capture is only available on Windows",
-    "viewer.unknown_key": "unknown key name: {key!r} (use Left, Right, PageDown, Space, ... or a single letter)",
     "viewer.api_failed": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.window_api_failed": "TASlation cannot see the viewer's window. Check it is open and not minimised.",
     "viewer.empty_rect": "TASlation cannot see the viewer's window. Check it is open and not minimised.",

@@ -11,13 +11,9 @@ TEMPLATES: dict[str, str] = {
                               "neue Anfrage dafür"),
     "batch.note_unit_incomplete": ("Seiteneinheit {unit}: unvollständige Übersetzung; was fehlt, wird beim Lesen "
                                    "ihrer Seite übersetzt"),
-    "viewer.covered": ("Der Viewer zeichnet nicht mehr, weil TASlation ihn vollständig verdeckt. Heben Sie die Maximierung "
-                       "von TASlation auf oder verschieben Sie es so, dass ein Streifen des Viewers sichtbar bleibt."),
     "viewer.gone": "TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.",
     "viewer.no_area": "TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.",
     "viewer.windows_only": "Fensteraufnahme gibt es nur unter Windows",
-    "viewer.unknown_key": ("unbekannter Tastenname: „{key}“ (Left, Right, PageDown, Space, ... oder ein einzelnes "
-                           "Zeichen verwenden)"),
     "viewer.api_failed": "TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.",
     "viewer.window_api_failed": "TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.",
     "viewer.empty_rect": "TASlation kann das Viewer-Fenster nicht sehen. Prüfen Sie, ob es offen und nicht minimiert ist.",

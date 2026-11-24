@@ -1,8 +1,8 @@
-"""A viewer's window left enlarged by a session of an older version that ended without closing TASlation's window (a
-crash, the process ended): the window and its rectangle before are kept in the state folder's ui.json while it is
-enlarged, and the next start puts it back - only a window that still exists with the same process and class and still
-has the size it was given -, then forgets it. TASlation itself no longer enlarges a viewer: the entries are made by
-hand here, as 1.0.1 left them. No key is pressed for it, and Windows' side is a fake."""
+"""A viewer's window left enlarged by a session of a version up to 1.0.1 that ended without closing its window (a
+crash, the process ended): such a version kept the window and its rectangle before in the state folder's ui.json while
+it was enlarged, and the next start puts it back - only a window that still exists with the same process and class and
+still has the size it was given -, then forgets it. TASlation itself enlarges no viewer: the entries are written here
+as 1.0.1 left them. No key is pressed for it, and Windows' side is a fake."""
 from __future__ import annotations
 
 import json
@@ -33,22 +33,19 @@ def screen(monkeypatch):
     return s
 
 
-def test_an_enlarged_window_is_kept_with_its_process_class_and_rectangles_until_it_is_forgotten(tmp_path, screen):
-    recovery.keep_enlarged(tmp_path, Enlarged(7, SMALL, WORK))
-    entry = json.loads(load_ui_table(tmp_path, TABLE)["7"])
-    assert entry == {"pid": 4100, "class": "ViewerClass", "before": list(SMALL), "given": list(WORK)}
-    recovery.forget_enlarged(tmp_path, 7)
-    assert load_ui_table(tmp_path, TABLE) == {}
-    recovery.forget_enlarged(tmp_path, 9)  # (nothing kept of it: nothing written)
-    assert not (tmp_path / "ui.json").exists() or TABLE not in json.loads((tmp_path / "ui.json").read_text("utf-8"))
+def left_enlarged(state_dir, enlarged, screen):
+    """The entry 1.0.1 kept of a window it enlarged: its process and class, its rectangle before and the one given."""
+    pid, cls = screen["windows"][enlarged.hwnd]
+    save_ui_entry(state_dir, TABLE, str(enlarged.hwnd), json.dumps(
+        {"pid": pid, "class": cls, "before": list(enlarged.before), "given": list(enlarged.given)}))
 
 
 def test_the_next_start_puts_back_only_the_same_window_still_of_the_size_given_and_then_forgets_all(tmp_path, screen):
-    recovery.keep_enlarged(tmp_path, Enlarged(7, SMALL, WORK))
+    left_enlarged(tmp_path, Enlarged(7, SMALL, WORK), screen)
     screen["windows"].update({8: (4200, "ViewerClass"), 9: (4300, "Other"), 10: (4400, "ViewerClass")})
-    recovery.keep_enlarged(tmp_path, Enlarged(8, SMALL, WORK))
-    recovery.keep_enlarged(tmp_path, Enlarged(9, SMALL, WORK))
-    recovery.keep_enlarged(tmp_path, Enlarged(10, SMALL, WORK))
+    left_enlarged(tmp_path, Enlarged(8, SMALL, WORK), screen)
+    left_enlarged(tmp_path, Enlarged(9, SMALL, WORK), screen)
+    left_enlarged(tmp_path, Enlarged(10, SMALL, WORK), screen)
     screen["windows"][8] = (9999, "ViewerClass")  # the handle taken by another process's window since
     screen["windows"][9] = (4300, "Changed")  # ... or by a window of another class
     del screen["windows"][10]  # closed
@@ -59,7 +56,7 @@ def test_the_next_start_puts_back_only_the_same_window_still_of_the_size_given_a
 
 
 def test_a_window_the_person_resized_since_stays_as_it_is(tmp_path, screen):
-    recovery.keep_enlarged(tmp_path, Enlarged(7, SMALL, WORK))
+    left_enlarged(tmp_path, Enlarged(7, SMALL, WORK), screen)
     screen["fits"] = False  # `capture.restore_window`: not of the size given any more
     assert recovery.put_back_enlarged(tmp_path) == 0 and load_ui_table(tmp_path, TABLE) == {}
 
@@ -110,7 +107,7 @@ def test_a_size_the_window_clamped_is_the_size_it_kept():
 
 def test_a_start_after_an_older_session_that_did_not_close_puts_the_viewer_back(tmp_path, screen, monkeypatch):
     monkeypatch.setattr(viewers, "put_back_enlarged", recovery.put_back_enlarged)  # (conftest makes it a no-op)
-    recovery.keep_enlarged(tmp_path, Enlarged(7, SMALL, WORK))  # ... and that session ended here
+    left_enlarged(tmp_path, Enlarged(7, SMALL, WORK), screen)  # ... and that session ended here
     later = SimpleNamespace(settings=SimpleNamespace(state_dir=tmp_path))
     viewers.ViewerMixin._put_back_left_enlarged(later)
     assert [e.hwnd for e in screen["restored"]] == [7] and load_ui_table(tmp_path, TABLE) == {}

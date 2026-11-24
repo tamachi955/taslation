@@ -235,9 +235,6 @@ class Window:
         self._queued = None
         self.status_var = tk.StringVar(root, value="Ready.")
         self._status_render = self._status_key = self._status_page = None
-        self.menu = tk.Menu(root, tearoff=0)
-        self.menu.add_command(label="?")
-        self._update_entry = (self.menu, 0)
         self.later: list = []
 
     def after(self, ms, func=None, *args):
@@ -253,7 +250,8 @@ class Window:
         return ms
 
     def label(self):
-        return str(self.menu.entrycget(0, "label"))
+        """The label Menu > Help gives Check for updates... as the Menu is built (`see_menu`)."""
+        return updates.menu_label(self)
 
 
 class FakeCheck:
@@ -283,7 +281,6 @@ def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet
     before = set(hidden_root.winfo_children())  # (what other tests left on the shared root)
     w = Window(hidden_root, state)
     updates.setup(w)
-    updates.relabel(w)
     assert w.label() == "Check for updates..."
     updates.on_ready(w)
     updates.on_ready(w)  # the window ready again (a model loaded): planned once
@@ -301,7 +298,6 @@ def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet
     assert not w.later  # once
     other = Window(hidden_root, state)  # the next start within the day: nothing asked, the menu says it
     updates.setup(other)
-    updates.relabel(other)
     updates.on_ready(other)
     assert other.label() == "Check for updates... (0.9.0 is available)" and not other.later
 
@@ -342,7 +338,7 @@ def test_a_look_that_fails_says_nothing(hidden_root, state, fake_check):
     fake_check.answers.append(updates.failed("GitHub could not be reached."))
     w.run_later()
     w.run_later()
-    assert w.status_var.get() == "Ready." and w.label() == "?"  # (not relabelled)
+    assert w.status_var.get() == "Ready." and w.label() == "Check for updates..."  # (no newer version named)
     assert updates.load_state(state)["checked"] == NOW and not w.later  # not asked again before tomorrow
     tomorrow = Window(hidden_root, state)
     updates.setup(tomorrow)
@@ -417,7 +413,6 @@ class DialogWindow:
         self.root = root
         self.settings = Settings(state_dir=state_dir)
         self.settings.config_path = config_path
-        self._update_entry = None
 
     def after(self, ms, func=None, *args):
         return self.root.after(ms, func, *args)

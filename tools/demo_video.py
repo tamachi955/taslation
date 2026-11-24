@@ -150,15 +150,13 @@ def hwnd_of_first(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
     return getattr(held, "hwnd", None)
 
 
-# name -> (who it may act on, where its window is): every function of `capture.windows` that captures, moves, raises,
-# enlarges, focuses or sends a key or a click to a window
+# name -> (who it may act on, where its window is): every function of `capture.windows` that captures, moves, raises
+# or focuses a window (`capture.windows` has none that sends a key or a click since 2.0.0)
 GUARDED = {
-    "capture_window": ("ours", first_arg), "enlarge_window": ("ours", first_arg), "move_window": ("ours", first_arg),
+    "capture_window": ("ours", first_arg), "move_window": ("ours", first_arg),
     "unminimise_window": ("ours", first_arg), "raise_window": ("ours", first_arg), "ask_repaint": ("ours", first_arg),
     "give_foreground": ("ours", first_arg),
     "restore_window": ("ours", hwnd_of_first), "lower_window": ("ours", hwnd_of_first),
-    "press_key": ("viewer", first_arg), "press_briefly": ("viewer", first_arg), "post_key": ("viewer", first_arg),
-    "post_click": ("viewer", first_arg),
     "capture_screen_rect": ("never", first_arg),
 }
 

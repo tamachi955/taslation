@@ -50,8 +50,8 @@ def _book(settings, name="Book"):
 def no_keys(monkeypatch):
     """Whatever would reach a window of another program: a key or a click."""
     sent: list[str] = []
-    for name in ("post_key", "post_click", "_send_key"):
-        monkeypatch.setattr(capture_windows, name, lambda *a, name=name, **k: sent.append(name))
+    for name in ("SendInput", "PostMessageW", "keybd_event", "mouse_event"):  # (TASlation has no sender of its own)
+        monkeypatch.setattr(capture_windows.user32, name, lambda *a, name=name, **k: sent.append(name), raising=False)
     return sent
 
 

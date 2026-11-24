@@ -25,8 +25,7 @@ hosts the dialogs), in places of their own.
 * The setup banner's lines (`StatusMixin._show_banner`): in the right side pane, their buttons in the Menu; with that
   pane switched off, as a small dialog of their own while there is something to say (`show_banner`, `BannerDialog`),
   with the buttons the banner has (Start translator again, Download model, Show viewer, Close). The lines that ask to
-  choose a viewer are left to the chooser, and the one that asks to move TASlation aside has no window to move.
-  Closed by the reader, the dialog stays closed until its lines change."""
+  choose a viewer are left to the chooser. Closed by the reader, the dialog stays closed until its lines change."""
 
 from __future__ import annotations
 

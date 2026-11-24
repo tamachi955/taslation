@@ -12,12 +12,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "ページ {unit}: {error}。読むときに翻訳します",
     "batch.note_incomplete": "{units} ページ中 {incomplete} ページの訳が不完全でした。そのページをもう一度依頼します",
     "batch.note_unit_incomplete": "ページ {unit}: 訳が不完全なため、足りない分は読むときに翻訳します",
-    "viewer.covered": ("TASlation がビューアを完全に覆っているため、ビューアが描画を止めました。TASlation の最大化を解除するか、"
-                       "ビューアが少しでも見えるように TASlation を移動してください。"),
     "viewer.gone": "TASlation からビューアのウィンドウが見えません。開いていて、最小化されていないか確かめてください。",
     "viewer.no_area": "TASlation からビューアのウィンドウが見えません。開いていて、最小化されていないか確かめてください。",
     "viewer.windows_only": "ウィンドウのキャプチャは Windows でしか使えません",
-    "viewer.unknown_key": "不明なキー名です: 「{key}」（Left、Right、PageDown、Space など、または英数字 1 文字を指定してください）",
     "viewer.api_failed": "TASlation からビューアのウィンドウが見えません。開いていて、最小化されていないか確かめてください。",
     "viewer.window_api_failed": "TASlation からビューアのウィンドウが見えません。開いていて、最小化されていないか確かめてください。",
     "viewer.empty_rect": "TASlation からビューアのウィンドウが見えません。開いていて、最小化されていないか確かめてください。",

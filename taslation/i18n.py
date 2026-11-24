@@ -32,14 +32,12 @@ _current = DEFAULT
 JA: dict[str, str] = {
     # toolbar
     "Viewer:": "ビューア:",
-    "Book:": "書名:",
     "To:": "翻訳先:",
     "Translate (F5)": "翻訳 (F5)",
     "Stop (Esc)": "停止 (Esc)",
     "Set area...": "範囲設定...",
     "Clear area": "範囲解除",
     "Show original": "原文を表示",
-    "Always on top": "常に手前に表示",
     "Saved translations...": "保存した翻訳...",
     "Reader": "読者",
     "Series sheet...": "シリーズ設定...",
@@ -59,20 +57,12 @@ JA: dict[str, str] = {
     "Getting the Japanese reader ready (the first time takes a few seconds)...": "日本語の読み取り機能を準備しています（初回は数秒かかります）...",
     "\n\nPages already translated still show; new pages cannot be read.":
         "\n\n翻訳済みのページは表示できますが、新しいページは読めません。",
-    "Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen.":
-        "準備完了。このウィンドウでページ送りのキーを押すか、ページをクリックしてめくります。F5: このページを今すぐ翻訳・F11: フルスクリーン",
     "Viewer: {title}": "ビューア: {title}",
-    "Viewer: {error}": "ビューア: {error}",
     "Translating...": "翻訳中...",
     "Storing your changes...": "変更を保存中...",
     "Dropping the region...": "領域を削除中...",
-    "Sent {key} to the viewer...": "ビューアに {key} を送信...",
-    "The viewer did not change (end of book, or the key means nothing there).":
-        "ビューアの表示が変わりません（巻末か、そのキーが効かない画面です）。",
     "Area cleared: TASlation looks for the page in the viewer's window by itself again (the whole window when it finds none).": "範囲を解除しました: TASlation がビューアのウィンドウ内のページを再び自動で探します（見つからなければウィンドウ全体を読みます）。",
     "Reading order cancelled.": "読み順の設定を取り消しました。",
-    "Reading order: click the regions in the order they are read, then press Finish order (Esc cancels).":
-        "読み順: 読む順番に領域をクリックし、「読み順を確定」を押してください（Esc で取り消し）。",
     "Reading order saved for {n} region(s). Translate again applies it.":
         "{n} 領域の読み順を保存しました。「訳し直す」で反映されます。",
     "Page marked as skipped: nothing on it is translated.": "このページを除外しました: 何も翻訳しません。",
@@ -80,7 +70,6 @@ JA: dict[str, str] = {
     "Translate this page again? Its present translations are replaced.":
         "このページを訳し直しますか？ 今の訳文は置き換えられます。",
     "Translate a page first (the book needs a name).": "先にページを翻訳してください（書名が必要です）。",
-    "Reader mode: keys and clicks on the page go to the viewer.": "読者モード: ページ上のキーとクリックはビューアに渡されます。",
     "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).":
         "矩形を記録できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
     "Text rectangle added; reading and translating it...": "文字の矩形を追加しました。読み取って翻訳します...",
@@ -156,7 +145,6 @@ JA: dict[str, str] = {
     "Updated": "更新日時",
     "Delete selected translations": "選択した翻訳を削除",
     "Open folder": "フォルダを開く",
-    "Delete the saved translations of {book}?": "{book} の保存した翻訳を削除しますか？",
     "Series sheet updated; changed in {n} translated line(s). New translations use it.": "シリーズ設定を更新しました。翻訳済みの {n} 行を変更しました。これからの翻訳にも使われます。",
     "You wrote \"{new}\" where the series sheet says \"{old}\". Use \"{new}\" from now on?": "シリーズ設定では「{old}」ですが「{new}」と書きました。以後「{new}」にしますか？",
     "Lettering font:": "描画フォント:",
@@ -198,14 +186,9 @@ JA: dict[str, str] = {
     "asking the model": "モデルに問い合わせ中",
     "Translating... ({seconds} s)": "翻訳中...（{seconds} 秒）",
     "Translating... {stage} ({seconds} s)": "翻訳中... {stage}（{seconds} 秒）",
-    "Full screen": "フルスクリーン",
-    "View": "表示",
     "TASlation blocked {blocked} attempt(s) to reach the internet. Nothing left this computer; you need do nothing.":
         "TASlation はインターネットへの接続の試みを {blocked} 回止めました。このパソコンから外には何も出ていません。何もする必要はありません。",
     "TASlation - translating...": "TASlation - 翻訳中...",
-    "This viewer cannot be read behind the full screen; press F11": "このビューアはフルスクリーンの裏では読み取れません。F11 を押してください",
-    "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it.":
-        "フルスクリーン: ページ送りキーでビューアのページをめくります。F11 か Esc で戻ります。",
     "{done} of {total} line(s) done": "{total} 行中 {done} 行完了",
     "getting the Japanese reader ready": "日本語の読み取り機能を準備中",
     "Translating... {stage}": "翻訳中... {stage}",
@@ -213,12 +196,8 @@ JA: dict[str, str] = {
     # added with the flowing toolbar, the menus, the empty-window hint and the import messages
     "Page":
         "ページ",
-    "Tools":
-        "ツール",
     "Translator":
         "翻訳者",
-    "Open your book in its viewer (a desktop viewer, or a browser-based viewer in a browser window of its own). TASlation finds it by itself - or pick its window in the Viewer list above.":
-        "本をビューアで開いてください（デスクトップのビューア、またはブラウザのビューアを専用のウィンドウで）。TASlation が自動で見つけます。見つからないときは上の「ビューア」一覧から選んでください。",
     "found":
         "検出済み",
     "no text read":

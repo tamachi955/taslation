@@ -1,6 +1,6 @@
-"""Frames from Windows.Graphics.Capture (`capture.wgc`), the viewer raised for a look, a viewer's window enlarged
-and put back with no key (`capture.enlarge_window` / `restore_window`: what a 1.0.1 session left enlarged is put back,
-`tests/test_enlarge_recovery.py`), the foreground handed over for a key and back.
+"""Frames from Windows.Graphics.Capture (`capture.wgc`), the viewer raised for a look, a viewer's window a 1.0.1
+session left enlarged put back with no key (`capture.restore_window`; the start's put-back:
+`tests/test_enlarge_recovery.py`).
 
 The package is a stand-in everywhere but in the gated test at the end, which opens nothing: it reads a window of the
 Windows image viewer if one is open, and writes nothing."""
@@ -334,39 +334,6 @@ def test_a_minimised_window_is_left_to_the_old_route(api, monkeypatch):
     assert windows._compositor_frame(1, True) is None and capture.made == []
 
 
-# ------------------------------------------------------------------ one key, one window
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows")
-def test_a_browser_keeps_its_target_and_a_viewer_with_children_gets_its_largest_child(monkeypatch):
-    rects = {1: (0, 0, 100, 40), 2: (0, 0, 800, 600), 3: (0, 0, 0, 0), 4: (0, 0, 800, 600)}
-    shown = {1, 2, 3, 4}
-    monkeypatch.setattr(windows, "input_target", lambda h: h)
-    classes = {}
-    monkeypatch.setattr(windows, "_class_name", lambda h: classes.get(h, "SomeViewer"))
-    monkeypatch.setattr(windows, "_window_rect", lambda h: rects[h])
-
-    def enumerate_children(parent, callback, _lparam):
-        for child in (1, 2, 3, 4):
-            if not callback(child, 0):
-                break
-
-    monkeypatch.setattr(windows, "user32", SimpleNamespace(
-        EnumChildWindows=enumerate_children, IsWindowVisible=lambda h: h in shown, IsWindowEnabled=lambda h: True))
-    monkeypatch.setattr(windows, "WNDENUMPROC", lambda f: f)
-    assert windows.key_target(99) == 4  # the deepest of the largest
-    classes[3] = windows.KEY_CHILD_CLASS
-    assert windows.key_target(99) == 3  # WinUI's input site, though it is not shown and has no size
-    classes.clear()
-    shown.discard(4)
-    assert windows.key_target(99) == 2
-    shown.clear()
-    assert windows.key_target(99) == 99
-    classes[99] = "Chrome_WidgetWin_1"
-    shown.update(rects)
-    assert windows.key_target(99) == 99  # a browser's window without a render widget is its own target
-    monkeypatch.setattr(windows, "input_target", lambda h: 5)
-    assert windows.key_target(99) == 5
-
-
 # ------------------------------------------------------------------ raised for a moment
 class Desk:
     """user32 as `raise_window` uses it."""
@@ -549,19 +516,15 @@ def test_a_blank_frame_of_the_window_is_looked_at_raised_once_a_spell(live_desk)
     assert live_desk.raised == [5]
 
 
-# ------------------------------------------------------------------ the viewer's window enlarged, no key
-SMALL, MONITOR, WORK = (100, 100, 900, 700), (0, 0, 1920, 1080), (0, 0, 1920, 1032)
+# ------------------------------------------------------------------ a window 1.0.1 left enlarged, put back, no key
+SMALL, WORK = (100, 100, 900, 700), (0, 0, 1920, 1032)
 
 
 class Screen:
-    """The window as `enlarge_window` and `restore_window` see it, and every key that would go to it (none may)."""
+    """The window as `restore_window` sees it."""
 
     def __init__(self):
-        self.rect, self.pressed, self.moved, self.zoomed = SMALL, [], [], False
-
-    def press(self, hwnd, key, *_a, **_k):
-        self.pressed.append(key)
-        return True
+        self.rect, self.moved, self.zoomed = WORK, [], False
 
     def move(self, hwnd, rect):
         self.moved.append(rect)
@@ -575,141 +538,18 @@ def screen(monkeypatch):
     monkeypatch.setattr(windows, "IS_WINDOWS", True)
     monkeypatch.setattr(windows, "user32", SimpleNamespace(IsZoomed=lambda hwnd: s.zoomed))
     monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
-    monkeypatch.setattr(windows, "monitor_rect", lambda hwnd: MONITOR)
-    monkeypatch.setattr(windows, "work_area", lambda hwnd: WORK)
     monkeypatch.setattr(windows, "window_rect", lambda hwnd: s.rect)
     monkeypatch.setattr(windows, "move_window", s.move)
-    for name in ("press_briefly", "press_key", "post_key"):
-        monkeypatch.setattr(windows, name, s.press)
     return s
 
 
-def test_the_window_is_enlarged_to_the_work_area_and_put_back_with_no_key(screen):
-    enlarged = windows.enlarge_window(5)
-    assert enlarged.before == SMALL and enlarged.given == WORK and screen.rect == WORK
-    assert windows.enlarge_window(5) is None  # as large already
+def test_a_window_left_enlarged_is_put_back_and_one_the_reader_resized_or_maximised_is_left_as_it_is(screen):
+    enlarged = windows.Enlarged(5, SMALL, WORK)
     assert windows.restore_window(enlarged) and screen.rect == SMALL
-    assert screen.pressed == []
-
-
-def test_a_window_the_reader_resized_or_maximised_is_left_as_it_is(screen):
-    enlarged = windows.enlarge_window(5)
     screen.rect = (0, 0, 800, 700)  # the reader's doing
     assert not windows.restore_window(enlarged) and screen.rect == (0, 0, 800, 700)
-    screen.rect, screen.zoomed = SMALL, True
-    assert windows.enlarge_window(5) is None and screen.moved == [WORK]
-    assert screen.pressed == []
-
-
-class Foreground:
-    """Who has the foreground, as Windows says: *refusing*, so many requests for it go unanswered."""
-
-    def __init__(self, monkeypatch, refusing=0):
-        self.front, self.refusing, self.calls = 9, refusing, []
-        monkeypatch.setattr(windows, "user32", SimpleNamespace(GetForegroundWindow=lambda: self.front))
-        monkeypatch.setattr(windows, "give_foreground", self.give)
-        monkeypatch.setattr(windows, "press_key", self.press)
-        monkeypatch.setattr(windows, "_redrawn_after_focus", lambda _hwnd: None)
-        monkeypatch.setattr(windows, "_keys_read", lambda hwnd: self.calls.append(("read", hwnd)))
-        monkeypatch.setattr(windows, "FOREGROUND_STEP_S", 0.0)
-        monkeypatch.setattr(windows, "window_class", lambda _hwnd: "Other")
-
-    def give(self, hwnd):
-        self.calls.append(("give", hwnd))
-        if self.refusing and hwnd == 5:
-            self.refusing -= 1
-            return False
-        self.front = hwnd
-        return True
-
-    def press(self, hwnd, key):
-        assert self.front == hwnd  # never a key for a window that has not got the foreground
-        self.calls.append(("press", key))
-        return True
-
-
-def test_the_hand_back_is_no_alt_tap(monkeypatch):
-    f = Foreground(monkeypatch)
-    assert windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("press", "F11"), ("read", 5), ("give", 9)]
-
-
-def test_a_foreground_refused_once_is_asked_for_again_and_the_key_waits_for_it(monkeypatch):
-    f = Foreground(monkeypatch, refusing=1)
-    assert windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("give", 5), ("press", "F11"), ("read", 5), ("give", 9)]
-
-
-def test_a_foreground_that_never_comes_presses_nothing_and_says_so(monkeypatch):
-    f = Foreground(monkeypatch, refusing=10 ** 9)
-    monkeypatch.setattr(windows, "FOREGROUND_WAIT_S", 0.01)
-    assert not windows.press_briefly(5, "F11")
-    assert ("press", "F11") not in f.calls and f.calls[0] == ("give", 5) and f.calls[-1] == ("give", 9)
-
-
-def test_the_hand_back_follows_a_refused_press(monkeypatch):
-    f = Foreground(monkeypatch)
-    monkeypatch.setattr(windows, "press_key", lambda hwnd, key: False)
-    assert not windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("give", 9)]
-
-
-def test_keys_gathered_go_in_one_handover_in_order(monkeypatch):
-    f = Foreground(monkeypatch)
-    monkeypatch.setattr(windows, "KEY_SETTLE_S", 0.0)
-    assert windows.press_briefly(5, ["Left", "Left", "Right"])
-    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Left"), ("press", "Right"), ("read", 5), ("give", 9)]
-
-
-def test_a_key_refused_in_a_handover_ends_it(monkeypatch):
-    f = Foreground(monkeypatch)
-    monkeypatch.setattr(windows, "KEY_SETTLE_S", 0.0)
-    keys = iter([True, False, True])
-    monkeypatch.setattr(windows, "press_key", lambda hwnd, key: f.calls.append(("press", key)) or next(keys))
-    assert windows.press_briefly(5, ["Left", "Right", "Up"])  # the first was delivered
-    assert f.calls == [("give", 5), ("press", "Left"), ("press", "Right"), ("read", 5), ("give", 9)]
-    assert not windows.press_briefly(5, [])  # no key: nothing at all
-
-
-def test_a_window_with_the_foreground_keeps_it(monkeypatch):
-    f = Foreground(monkeypatch)
-    f.front = 5
-    assert windows.press_briefly(5, "F11")
-    assert f.calls == [("give", 5), ("press", "F11")]
-
-
-def _answers(monkeypatch, *answers):
-    """WM_NULL sent to a window that answers as *answers* say, one after the other (a time it takes, or None: it
-    does not answer); what was sent is kept."""
-    sent, clock = [], [0.0]
-
-    def send(hwnd, message, _w, _l, flags, timeout_ms, _result):
-        sent.append((hwnd, message, flags, timeout_ms))
-        took = answers[len(sent) - 1]
-        clock[0] += (timeout_ms / 1000) if took is None else took
-        return 0 if took is None else 1
-
-    monkeypatch.setattr(windows, "user32", SimpleNamespace(SendMessageTimeoutW=send))
-    monkeypatch.setattr(windows, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    return sent
-
-
-def test_the_foreground_goes_back_once_the_window_came_to_its_messages_twice(monkeypatch):
-    sent = _answers(monkeypatch, 0.0, 0.0)
-    windows._keys_read(5)
-    assert sent == [(5, windows.WM_NULL, windows.SMTO_ABORTIFHUNG, 500)] * 2
-
-
-def test_a_window_busy_for_a_while_is_waited_for_within_the_limit(monkeypatch):
-    sent = _answers(monkeypatch, 0.3, 0.0)
-    windows._keys_read(5)
-    assert [timeout for *_, timeout in sent] == [500, 200]  # (one limit for both)
-
-
-def test_a_window_that_does_not_answer_is_not_waited_for_again(monkeypatch):
-    sent = _answers(monkeypatch, None)
-    windows._keys_read(5)
-    assert len(sent) == 1
+    screen.rect, screen.zoomed = WORK, True
+    assert not windows.restore_window(enlarged) and screen.moved == [SMALL]
 
 
 # ------------------------------------------------------------------ the real thing

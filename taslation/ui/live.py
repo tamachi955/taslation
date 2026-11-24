@@ -1116,7 +1116,6 @@ class LiveViewMixin(BlackViewerMixin):
         _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
         if covered and _blank(self, image) and self._blank_behind(hwnd):
             raise ViewerCovered("the viewer draws nothing behind TASlation")
-        self._set_covered(False)
         black = self._see_black(hwnd, image)
         if not _blank(self, image):
             if getattr(self, "_blank_looked", False) and getattr(self, "_raised", None) is not None:
@@ -1342,35 +1341,16 @@ class LiveViewMixin(BlackViewerMixin):
                 pass
         return rects
 
-    def _set_covered(self, covered: bool) -> None:
-        """The viewer draws nothing behind TASlation (or draws again): the page keeps the last good frame, and a band
-        over it in the busy badge's style and the status bar say what to do; when the viewer draws again both go (the
-        status line gives way to the normal window's own, unless something else was said meanwhile). Meanwhile the
-        viewer is looked at every auto_interval_ms (with follow = "events" too: nothing else would notice). In
-        see-through mode TASlation's window is never on the screen and covers nothing: none of it."""
-        if covered == self._covered or (covered and getattr(self, "_see_hidden", False)):
-            return
-        self._covered = covered
-        if covered:
-            self.say("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or move it so that a strip of the viewer stays visible.")
-            self._covered_key = self._status_key
-            self.canvas.set_banner(_(self._covered_key))
-            if self._follows_events():
-                self._following.look_at = time.monotonic() + self.settings.auto_interval_ms / 1000
-            return
-        self.canvas.set_banner("")
-        if self._status_key is not None and self._status_key == getattr(self, "_covered_key", None):
-            self._normal_status()
-
     def _set_viewer_hidden(self, hidden: bool) -> None:
         if hidden != self._viewer_hidden:
             self._viewer_hidden = hidden
             self._redisplay()
 
     def _capture_failed(self, error: CaptureError) -> None:
-        if isinstance(error, ViewerCovered):
-            self._set_covered(True)
-        else:
+        """A capture that failed, said in the status line - but for a viewer drawing nothing where a dialog of
+        TASlation's own lies over it (`ViewerCovered`): the last good frame stays, nothing is said, and the next look
+        once the dialog has gone takes the page again."""
+        if not isinstance(error, ViewerCovered):
             self.say(error.message if error.message.code != "viewer.error" else Message("viewer.gone"))
 
     # ------------------------------------------------------------------ after a page turn

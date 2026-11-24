@@ -9,9 +9,9 @@ key for it, ever (no key the person did not press goes to the viewer):
 
 1. *Wait.* `black_wait_s` with the window's size stable (a change of it starts the wait over). After `SAY_AFTER_S` the
    status line says the viewer is still loading, once. A frame that recovers ends it silently.
-2. *Notice.* Once, in plain words: the person reloads the book in its own window (clicks the book and presses its
-   reload key - F5 in a browser; F5 in TASlation's window is TASlation's translate key). The watch goes on: the next
-   frame that shows something ends the spell, and the page is taken as the viewer shows it then.
+2. *Notice.* Once, in plain words: the person reloads the book in the viewer (its reload key - F5 in a browser).
+   The watch goes on: the next frame that shows something ends the spell, and the page is taken as the viewer shows
+   it then.
 
 No polling of the viewer: `BlackWatch.new_frame` looks about once a second, in memory, at whether the capture session
 delivered a frame (`capture.frame_count`), and only such a frame is taken and judged. Without a session (`PrintWindow`)
@@ -21,13 +21,13 @@ A frame the capture cannot read while the screen shows it cannot be told from a 
 plain retry, and nothing here works around anything (no flags, no change of hardware acceleration or display
 affinity).
 
-TASlation no longer enlarges a viewer's window. Versions up to 1.0.1 did (`capture.enlarge_window`), and kept the
-window and its rectangle before in the state folder's ui.json while it was enlarged (`keep_enlarged`,
-`forget_enlarged`: the table ENLARGED_TABLE, the window's handle -> its process, class, rectangle before and rectangle
-given), so that a session that ended without putting it back - a crash, the process ended - did not leave it large:
-the next start puts back what is still there (`put_back_enlarged`): only a window that still exists with the same
-process and class, shown, not maximised, and still of the size it was given (`capture.restore_window`: the person may
-have resized it since); then the table is cleared. No key is pressed for it.
+TASlation enlarges no viewer's window and moves no window of another program. Versions up to 1.0.1 enlarged the
+viewer's, and kept the window and its rectangle before in the state folder's ui.json while it was enlarged (the table
+ENLARGED_TABLE, the window's handle -> its process, class, rectangle before and rectangle given), so that a session
+that ended without putting it back - a crash, the process ended - did not leave it large. What such a session left
+there is put back once, at the start (`put_back_enlarged`): only a window that still exists with the same process and
+class, shown, not maximised, and still of the size it was given (`capture.restore_window`: the person may have
+resized it since); then the table is cleared. No key is pressed for it.
 """
 
 from __future__ import annotations
@@ -40,8 +40,7 @@ from typing import Any
 from .capture import CaptureError, Enlarged, frame_count, restore_window, window_class, window_exists, window_pid
 from .i18n import load_ui_table, save_ui_entry
 
-ENLARGED_TABLE = "enlarged_windows"  # ui.json: the viewers' windows enlarged and not put back yet
-ENLARGED_KEPT = 8  # at most this many of them (one is enlarged at a time)
+ENLARGED_TABLE = "enlarged_windows"  # ui.json: the viewers' windows a version up to 1.0.1 enlarged and did not put back
 
 SAY_AFTER_S = 8.0  # the viewer black this long: the status line says it is still loading
 STEP_S = 1.0  # how often a spell is looked at (in memory)
@@ -113,24 +112,9 @@ class BlackWatch:
 
 
 # ------------------------------------------------------------------ a viewer's window left enlarged
-def keep_enlarged(state_dir: Path | str, enlarged: Enlarged) -> None:
-    """Keep *enlarged* (the window TASlation enlarged, its rectangle before and the one given) in ui.json until it is
-    put back (`forget_enlarged`): the window's process and class with it, so that a window that took its handle
-    later is never mistaken for it."""
-    hwnd = enlarged.hwnd
-    entry = {"pid": window_pid(hwnd), "class": window_class(hwnd), "before": [int(v) for v in enlarged.before],
-             "given": [int(v) for v in enlarged.given]}
-    save_ui_entry(Path(state_dir), ENLARGED_TABLE, str(hwnd), json.dumps(entry), keep=ENLARGED_KEPT)
-
-
-def forget_enlarged(state_dir: Path | str, hwnd: int) -> None:
-    """The window *hwnd* was put back (or is no longer TASlation's to put back): nothing of it kept any more."""
-    if str(hwnd) in load_ui_table(Path(state_dir), ENLARGED_TABLE):
-        save_ui_entry(Path(state_dir), ENLARGED_TABLE, str(hwnd), None)
-
-
 def put_back_enlarged(state_dir: Path | str) -> int:
-    """At the start: every window a session before enlarged and did not put back, back on its rectangle before - only
+    """At the start: every window a session of a version up to 1.0.1 enlarged and did not put back, back on its
+    rectangle before - only
     one that still exists with the same process and class and has the size it was given (`capture.restore_window`).
     The table is cleared either way. Returns how many were put back."""
     table = load_ui_table(Path(state_dir), ENLARGED_TABLE)

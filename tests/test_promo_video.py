@@ -648,6 +648,10 @@ def test_an_older_packages_input_functions_are_refused():
     assert pv.older_guarded(older, {"click_screen": ("never", target)}, target) == {
         "bring_to_front": ("never", target)}  # (one the table names stays as it says)
     assert pv.older_guarded(SimpleNamespace(), {}, target) == {}  # (today's package has neither)
+    one = SimpleNamespace(press_briefly=lambda hwnd, key: True, post_key=lambda hwnd, key: None,
+                          enlarge_window=lambda hwnd: None)  # (a 1.x package's: keys refused, the stand-in enlarged)
+    assert pv.older_guarded(one, {}, target) == {"press_briefly": ("never", target), "post_key": ("never", target),
+                                                 "enlarge_window": ("ours", target)}
 
 
 def test_the_probe_notes_the_windows_ready_and_acts_once_after_it():

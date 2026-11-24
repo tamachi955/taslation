@@ -94,7 +94,7 @@ def test_without_the_hidden_flag_the_window_is_tks_own(monkeypatch):
     monkeypatch.setattr(ui.window, "IS_WINDOWS", False)  # (off Windows: nothing hides it)
     later, attributes = [], []
     app = SimpleNamespace(after=lambda ms, f: later.append(ms), wm_attributes=lambda *a: attributes.append(a))
-    ui.quiet_start(app, Settings())
+    ui.quiet_start(app)
     assert not ui.hidden(app) and attributes == [] and app._quiet_decoy is None and not ui.quiet(app)
     assert ui.keep_hidden(app) is None and ui.hand_back(app) is False
 
@@ -841,15 +841,6 @@ def test_early_start_goes_on_once_the_viewer_was_looked_at(monkeypatch):
     assert live.LiveViewMixin._early_allowed(window, op, None, None)
     window.auto_var = SimpleNamespace(get=lambda: False)  # (Auto off: nothing starts by itself)
     assert not live.LiveViewMixin._early_allowed(window, op, None, None)
-
-
-def test_no_line_says_taslation_covers_the_viewer_while_its_window_is_hidden():
-    from taslation.ui import live
-
-    said = []
-    window = SimpleNamespace(_covered=False, _see_hidden=True, say=said.append)
-    live.LiveViewMixin._set_covered(window, True)
-    assert said == [] and window._covered is False
 
 
 # ------------------------------------------------------------------ the banner's lines in the right pane

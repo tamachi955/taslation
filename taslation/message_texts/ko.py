@@ -10,12 +10,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "페이지 단위 {unit}: {error}. 그 페이지를 읽을 때 번역합니다",
     "batch.note_incomplete": "페이지 단위 {units}개 중 {incomplete}개가 불완전하게 돌아왔습니다. 해당 단위를 다시 요청합니다",
     "batch.note_unit_incomplete": "페이지 단위 {unit}: 번역이 불완전합니다. 빠진 부분은 그 페이지를 읽을 때 번역합니다",
-    "viewer.covered": ("TASlation가 뷰어를 완전히 가리고 있어서 뷰어가 그리기를 멈췄습니다. "
-                       "TASlation 창의 최대화를 해제하거나, 뷰어가 조금이라도 보이도록 TASlation를 옮기세요."),
     "viewer.gone": "TASlation이 뷰어 창을 볼 수 없습니다. 창이 열려 있고 최소화되지 않았는지 확인하세요.",
     "viewer.no_area": "TASlation이 뷰어 창을 볼 수 없습니다. 창이 열려 있고 최소화되지 않았는지 확인하세요.",
     "viewer.windows_only": "창 캡처는 Windows에서만 사용할 수 있습니다",
-    "viewer.unknown_key": "알 수 없는 키 이름: '{key}' (Left, Right, PageDown, Space 등이나 한 글자를 사용하세요)",
     "viewer.api_failed": "TASlation이 뷰어 창을 볼 수 없습니다. 창이 열려 있고 최소화되지 않았는지 확인하세요.",
     "viewer.window_api_failed": "TASlation이 뷰어 창을 볼 수 없습니다. 창이 열려 있고 최소화되지 않았는지 확인하세요.",
     "viewer.empty_rect": "TASlation이 뷰어 창을 볼 수 없습니다. 창이 열려 있고 최소화되지 않았는지 확인하세요.",

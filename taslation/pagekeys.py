@@ -1,4 +1,4 @@
-"""The capture profiles, kept per viewer, and the names of the keys the tools press in their own stand-in viewer.
+"""The capture profiles, kept per viewer (the module's name is from the versions that kept the page keys here).
 
 The capture profiles (`Profiles`, ``profiles.json`` in the state folder; plain JSON, no images, no text of a book)
 keep per viewer - the viewer being the window's title without the book's name (`cache.viewer_key_from_title`; for
@@ -16,10 +16,7 @@ follows the published rule instead: `capture.covered_by_opaque`).
 What versions up to 1.0.1 kept here besides - the page keys passed on to the viewer ("keys", and "default_keys" and
 "key_presets" beside the viewers), the area set on a window TASlation had enlarged ("margins_large"), how a viewer took
 a key passed on ("key_way"), and older entries still ("fullscreen_reading", "settle_seen") - is left in the file as it
-is and ignored: TASlation passes no key on and never enlarges the viewer's window.
-
-`KEY_CODES` names the keys `capture.windows.key_code` knows (the tools press them in their own stand-in viewer:
-TASlation itself presses none)."""
+is and ignored: TASlation passes no key on and never enlarges the viewer's window."""
 
 from __future__ import annotations
 
@@ -30,13 +27,6 @@ from typing import Any, Callable, Mapping
 
 from .atomic import write_atomic
 
-KEY_CODES: dict[str, int] = {  # (lower-case) name -> Windows virtual-key code (`capture.windows.key_code`)
-    "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
-    "pageup": 0x21, "pagedown": 0x22, "prior": 0x21, "next": 0x22,
-    "home": 0x24, "end": 0x23, "space": 0x20, "enter": 0x0D, "return": 0x0D,
-    "escape": 0x1B, "esc": 0x1B, "tab": 0x09, "backspace": 0x08,
-    **{f"f{i}": 0x6F + i for i in range(1, 13)},
-}
 RESERVED = ("default_keys", "key_presets")  # top-level entries of an older profiles.json that are no viewer
 COVERED = "while_covered"  # a viewer's profile: "draws" or "stops" while other windows hide it wholly
 
@@ -223,6 +213,6 @@ class Profiles:
 
 
 __all__ = [
-    "COVERED", "FILE_TITLE", "KEY_CODES", "RESERVED", "Profiles", "ViewerTitle", "class_key", "names_a_file",
+    "COVERED", "FILE_TITLE", "RESERVED", "Profiles", "ViewerTitle", "class_key", "names_a_file",
     "profile_key", "profile_names", "viewer_key", "viewer_title",
 ]

@@ -86,7 +86,6 @@ class Window(BlackViewerMixin):
     _on_page_event = app_mod.App._on_page_event
     _flush_fill = app_mod.App._flush_fill
     _covers_viewer = app_mod.App._covers_viewer
-    _set_covered = app_mod.App._set_covered
     _run_queued = app_mod.App._run_queued
     _find_page = app_mod.App._find_page
     _apply_found_margins = app_mod.App._apply_found_margins

@@ -207,7 +207,6 @@ class ViewerMixin:
         self.settings.margins = margins if margins is not None else self._found_margins()
         self._auto_last = None
         self._live_thumb = None  # the next tick shows this viewer
-        self._set_covered(False)
         title = self.selected.title
         if restored:
             self.status(lambda: _(VIEWER_RESTORED).format(title=title))
@@ -242,7 +241,6 @@ class ViewerMixin:
         self.selected = None
         self._auto_last = self._auto_candidate = None
         self._waiting = False
-        self._set_covered(False)
         self._show_chosen()
         self._follow_viewer()
         self.say(VIEWER_CLOSED)

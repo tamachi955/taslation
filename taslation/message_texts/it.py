@@ -10,13 +10,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "unità di pagina incomplete: {incomplete} su {units}; nuova richiesta per quelle",
     "batch.note_unit_incomplete": ("unità di pagina {unit}: traduzione incompleta; ciò che manca verrà tradotto "
                                    "durante la lettura della pagina"),
-    "viewer.covered": ("Il visualizzatore ha smesso di disegnare perché TASlation lo copre del tutto. Togli TASlation "
-                       "dalla finestra ingrandita o spostalo in modo che resti visibile una striscia del visualizzatore."),
     "viewer.gone": "TASlation non vede la finestra del visualizzatore. Controlla che sia aperta e non ridotta a icona.",
     "viewer.no_area": "TASlation non vede la finestra del visualizzatore. Controlla che sia aperta e non ridotta a icona.",
     "viewer.windows_only": "la cattura delle finestre è disponibile solo su Windows",
-    "viewer.unknown_key": ("nome di tasto sconosciuto: «{key}» (usa Left, Right, PageDown, Space... o una sola "
-                           "lettera)"),
     "viewer.api_failed": "TASlation non vede la finestra del visualizzatore. Controlla che sia aperta e non ridotta a icona.",
     "viewer.window_api_failed": "TASlation non vede la finestra del visualizzatore. Controlla che sia aperta e non ridotta a icona.",
     "viewer.empty_rect": "TASlation non vede la finestra del visualizzatore. Controlla che sia aperta e non ridotta a icona.",

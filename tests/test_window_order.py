@@ -301,7 +301,7 @@ def test_no_key_no_click_and_no_foreground_go_anywhere(front, monkeypatch):
     """Only the order's call is made: nothing that presses, posts, clicks or hands over the foreground."""
     from taslation.capture import windows as w_mod
 
-    for name in ("press_briefly", "press_key", "post_key", "post_click", "give_foreground", "raise_window"):
+    for name in ("give_foreground", "raise_window"):  # (and TASlation has no key or click sender at all)
         monkeypatch.setattr(w_mod, name, lambda *a, **k: pytest.fail("no key, click or foreground: " + name))
     w = _window()
     for t in (100.0, 100.5, 101.0):

@@ -26,18 +26,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh": "检查更新...（{version} 可用）", "zh-tw": "檢查更新...（{version} 可用）",
         "ko": "업데이트 확인... ({version} 사용 가능)", "th": "ตรวจหาการอัปเดต... (มี {version} แล้ว)",
     },
-    "Ask GitHub whether a newer version is out.": {
-        "ja": "新しいバージョンが出ているか GitHub に問い合わせます。",
-        "es": "Pregunta a GitHub si hay una versión más nueva.", "pt": "Pergunta ao GitHub se há uma versão mais nova.",
-        "fr": "Demande à GitHub si une version plus récente est sortie.",
-        "de": "Fragt GitHub, ob es eine neuere Version gibt.",
-        "it": "Chiede a GitHub se è uscita una versione più recente.", "nl": "Vraagt GitHub of er een nieuwere versie is.",
-        "pl": "Pyta GitHub, czy jest nowsza wersja.", "ru": "Спрашивает у GitHub, вышла ли более новая версия.",
-        "tr": "GitHub'a daha yeni bir sürüm çıkıp çıkmadığını sorar.",
-        "id": "Menanyakan ke GitHub apakah ada versi yang lebih baru.", "vi": "Hỏi GitHub xem đã có phiên bản mới hơn chưa.",
-        "zh": "向 GitHub 询问是否有更新的版本。", "zh-tw": "向 GitHub 詢問是否有更新的版本。",
-        "ko": "더 새로운 버전이 나왔는지 GitHub에 물어봅니다.", "th": "ถาม GitHub ว่ามีเวอร์ชันที่ใหม่กว่าออกมาหรือไม่",
-    },
     'TASlation {version} is available: Menu > Help > Check for updates...': {
         'ja': 'TASlation {version} が公開されています:「メニュー」>「ヘルプ」>「更新を確認...」',
         'es': 'TASlation {version} está disponible: Menú > Ayuda > Buscar actualizaciones...',

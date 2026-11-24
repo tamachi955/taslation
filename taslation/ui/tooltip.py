@@ -90,7 +90,7 @@ class Tooltip:
             self.show()
 
     def _there(self) -> bool:
-        """Whether the control is on the screen (it may have gone meanwhile: a toolbar hidden by the full screen)."""
+        """Whether the control is on the screen (it may have gone meanwhile: its dialog closed)."""
         try:
             return bool(self.widget.winfo_viewable())
         except tk.TclError:
@@ -119,7 +119,7 @@ class Tooltip:
             tip = tk.Toplevel(widget.winfo_toplevel())
             tip.withdraw()
             tip.overrideredirect(True)
-            tip.attributes("-topmost", True)  # the window may be always on top, or full screen
+            tip.attributes("-topmost", True)  # the dialogs come up over the viewer, topmost (`layout.dialog_area`)
             back, fore = tip_colours(widget)
             # (dark: an edge of its own colour; Tk draws a solid relief in a shade of the ground, unseen there)
             edge = ({"borderwidth": 0, "highlightthickness": 1, "highlightbackground": theme.colour("tip_border"),
@@ -161,8 +161,8 @@ def tip(text: str, *widgets: tk.Misc, disabled: str = "") -> None:
 
 def tip_menu(window: tk.Misc, menu: tk.Menu, *tips: str) -> None:
     """*tips*, in the order of *menu*'s entries (separators left out), said in *window*'s status line (`status_var`)
-    while the pointer is on the entry: a menu has no tooltips. To be called before the menu goes on the window: Tk gives
-    the menus of a menu bar clones, which get the bindings their menu has by then."""
+    while the pointer is on the entry: a menu has no tooltips. To be called before the menu is shown: Tk may give a
+    menu clones, which get the bindings their menu has by then."""
     entries = [i for i in range(int(menu.index("end")) + 1) if menu.type(i) != "separator"]
     by_entry = dict(zip(entries, tips))
     menu.bind("<<MenuSelect>>", lambda e: menu_tip(window, str(e.widget), by_entry))

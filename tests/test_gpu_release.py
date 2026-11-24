@@ -289,7 +289,6 @@ def test_the_status_line_names_the_ocr_s_gpu_memory_when_it_held_some():
     assert gpu_release.released_line([], False, True) == (gpu_release.RELEASED_OCR, {})
     assert gpu_release.released_line([MODEL], True, False) == (gpu_release.RELEASED_BOTH, {"model": MODEL})
     assert "processor" not in gpu_release.RELEASED_BOTH  # (readers on the CPU: nothing is said of them)
-    assert "OCR stays" not in gpu_release.RELEASE_TIP and "OCR readers that run on the GPU" in gpu_release.RELEASE_TIP
 
 
 def test_release_now_releases_the_ocr_on_the_gpu_and_says_so():
@@ -316,7 +315,7 @@ def test_the_strings_are_in_every_language():
                 gpu_release.RELEASED_NOTHING, system_page.NUM_GPU_LABEL, system_page.NUM_GPU_TEXT,
                 system_page.NUM_GPU_PROBLEM):
         assert sorted(texts.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
-    for key in (gpu_release.RELEASE_TIP, gpu_release.RELEASED_ALL, gpu_release.RELEASED_MODEL_OCR,
+    for key in (gpu_release.RELEASED_ALL, gpu_release.RELEASED_MODEL_OCR,
                 gpu_release.RELEASED_PAGES_OCR, gpu_release.RELEASED_OCR):
         assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
     set_language("ja")

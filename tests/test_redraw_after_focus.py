@@ -1,94 +1,11 @@
-"""A key waits for a browser reader that draws itself anew when it gets the foreground (`capture.press_briefly`)."""
+"""Which windows hide what lies under them (`capture.fully_opaque`), and so whether a browser may have stopped
+drawing behind them (`capture.covered_by_opaque`): TASlation's see-through windows never count."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PIL import Image
-
 from taslation.capture import windows
-
-BLACK = Image.new("RGB", (64, 64), (0, 0, 0))
-PAGE = Image.effect_noise((64, 64), 80).convert("RGB")
-
-
-def frames(monkeypatch, shown, browser=True):
-    """The window's frames one after the other, the last one for good; the looks are counted."""
-    looks = []
-
-    def capture(_hwnd, allow_screen_fallback=True):
-        looks.append(1)
-        return shown[min(len(looks) - 1, len(shown) - 1)]
-
-    monkeypatch.setattr(windows, "capture_window", capture)
-    monkeypatch.setattr(windows, "window_class", lambda _h: "Chrome_WidgetWin_1" if browser else "Other")
-    monkeypatch.setattr(windows, "REDRAW_STEP_S", 0.001)
-    return looks
-
-
-def test_a_browser_that_goes_black_is_waited_for(monkeypatch):
-    looks = frames(monkeypatch, [PAGE, BLACK, BLACK, PAGE])
-    windows._redrawn_after_focus(5)
-    assert len(looks) == 4
-
-
-def test_a_browser_that_shows_no_black_holds_the_key_only_briefly(monkeypatch):
-    monkeypatch.setattr(windows, "REDRAW_STARTS_S", 0.01)
-    looks = frames(monkeypatch, [PAGE])
-    windows._redrawn_after_focus(5)
-    assert looks
-
-
-def test_a_black_page_ends_the_wait_at_its_limit(monkeypatch):
-    monkeypatch.setattr(windows, "REDRAW_WAIT_S", 0.01)
-    assert frames(monkeypatch, [BLACK]) == []
-    windows._redrawn_after_focus(5)
-
-
-def test_another_window_is_not_looked_at(monkeypatch):
-    looks = frames(monkeypatch, [BLACK], browser=False)
-    windows._redrawn_after_focus(5)
-    assert looks == []
-
-
-def test_a_window_gone_ends_the_wait(monkeypatch):
-    frames(monkeypatch, [PAGE])
-
-    def gone(*_a, **_k):
-        raise windows.CaptureError("gone")
-
-    monkeypatch.setattr(windows, "capture_window", gone)
-    windows._redrawn_after_focus(5)
-
-
-def _press(monkeypatch, front, covered, browser=True):
-    """press_briefly for window 5 with window *front* in front: whether it waited for a redraw."""
-    waited = []
-    monkeypatch.setattr(windows, "_redrawn_after_focus", waited.append)
-    monkeypatch.setattr(windows, "_reach_foreground", lambda _h: True)
-    monkeypatch.setattr(windows, "press_key", lambda _h, _k: True)
-    monkeypatch.setattr(windows, "give_foreground", lambda _h: True)
-    monkeypatch.setattr(windows, "_keys_read", lambda _h: None)
-    monkeypatch.setattr(windows, "KEY_SETTLE_S", 0)
-    monkeypatch.setattr(windows, "window_class", lambda _h: "Chrome_WidgetWin_1" if browser else "Other")
-    monkeypatch.setattr(windows, "covered_by_opaque", lambda _h: covered)
-    monkeypatch.setattr(windows.user32, "GetForegroundWindow", lambda: front, raising=False)
-    assert windows.press_briefly(5, "Left")
-    return waited == [5]
-
-
-def test_the_press_waits_only_when_the_foreground_moved_to_a_browser_opaque_windows_covered(monkeypatch):
-    assert _press(monkeypatch, front=9, covered=True)
-    assert not _press(monkeypatch, front=5, covered=True)  # it had the foreground: nothing to draw anew
-    assert not _press(monkeypatch, front=9, covered=True, browser=False)
-
-
-def test_a_browser_under_see_through_windows_only_gets_the_key_at_once(monkeypatch):
-    """Under TASlation's see-through windows a browser never stops drawing (Chromium counts no layered window
-    with an alpha below 255 as covering it): the redraw wait made every key take 1.1-1.5 s, and the keys pressed
-    meanwhile went to the browser behind TASlation's back (measured 2026-11-06: half of them at 1 key a second)."""
-    assert not _press(monkeypatch, front=9, covered=False)
-
 
 class Win:
     """A top-level window as `fully_opaque` asks Windows about it."""

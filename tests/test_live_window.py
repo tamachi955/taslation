@@ -22,9 +22,8 @@ from taslation.ui import live, preview, seethrough
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.live import BlackViewerMixin
 
-COVERED = ("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or move it so "
-           "that a strip of the viewer stays visible.")
-VIEWER = WindowInfo(hwnd=7, title="Yomizuq - Google Chrome", class_name="Chrome_WidgetWin_1", pid=7, rect=(100, 100, 300, 250))
+
+VIEWER =WindowInfo(hwnd=7, title="Yomizuq - Google Chrome", class_name="Chrome_WidgetWin_1", pid=7, rect=(100, 100, 300, 250))
 
 
 def _frame(ink=(40, 30, 80, 70), toolbar=False, size=(200, 150)):
@@ -111,7 +110,6 @@ class Window(BlackViewerMixin):
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
     _covers_viewer = app_mod.App._covers_viewer
-    _set_covered = app_mod.App._set_covered
     _capture_failed = app_mod.App._capture_failed
     _set_viewer_hidden = app_mod.App._set_viewer_hidden
     translate_now = app_mod.App.translate_now
@@ -159,7 +157,7 @@ class Window(BlackViewerMixin):
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = self._ordering = None
         self._live = self._live_thumb = self._job_frame = self._job_thumb = self._fill = self._queued = None
-        self._fill_dirty = self._covered = False
+        self._fill_dirty = False
         self._thumbs, self._lettered_memo, self._mask_memo = [], None, None
         self._auto_last = self._auto_candidate = None
         self._manual_area, self._page_areas, self._area_hinted = True, {}, False  # the area (0, 20, 0, 0) is the reader's
@@ -440,40 +438,25 @@ def test_a_frame_of_a_new_size_is_read_by_its_own_area_while_the_job_keeps_the_o
     assert tuple(w.settings.margins) == own == w._margins_of(wide)
 
 
-def test_a_viewer_hidden_behind_taslation_keeps_the_last_good_frame(hidden_root, viewer):
-    w = Window(hidden_root, own=[(0, 0, 1920, 1040)])  # TASlation maximised over the viewer
+def test_a_viewer_drawing_nothing_behind_an_own_dialog_keeps_the_last_good_frame_and_says_nothing(
+        hidden_root, viewer):
+    w = Window(hidden_root, own=[(0, 0, 1920, 1040)])  # a window of TASlation's over the whole viewer
     w.auto_var.set(True)
     good = viewer.frame
     w._tick()
     assert w.shown() is good and w._auto_candidate is not None and viewer.asked == [False]  # no screen fallback
     candidate = w._auto_candidate
+    said = list(w.statuses)
     viewer.frame = Image.new("RGB", (200, 150), (255, 255, 255))  # PrintWindow's blank frame: Chrome draws nothing
     w._tick()
+    w._tick()
     assert w.shown() is good and w._live is good  # never a picture of TASlation itself
-    assert w.canvas.banner == COVERED and w.statuses[-1] == COVERED and w.canvas.note == ""  # a band over the page
-    band = w.canvas.find_withtag("banner")
-    assert band and w.canvas.itemcget("banner-text", "fill") == "#ffffff"
-    box = next(i for i in band if w.canvas.type(i) == "polygon")  # in the busy badge's style: dark, rounded
-    assert w.canvas.itemcget(box, "fill") == "#202020" and w.canvas.itemcget(box, "outline") == "#6a6a6a"
-    x0, y0, x1, y1 = w.canvas.bbox("banner")
-    assert x0 > 0 and x1 < 400 and y0 < 150 < y1  # across the middle of the canvas
+    assert w.statuses == said  # nothing said of it
     assert w._auto_candidate is candidate and w._auto_last is None and not w.new_pages  # nothing remembered
+    viewer.frame = good.copy()  # the viewer draws again: Auto takes the page by itself
     w._tick()
-    assert w.statuses.count(COVERED) == 1  # said once
-    viewer.frame = good.copy()  # the viewer draws again: the band and the line go, Auto takes the page by itself
-    w._tick()
-    assert w.canvas.banner == "" and not w.canvas.find_withtag("banner") and w.new_pages and w._jobs.qsize() == 1
-    assert COVERED not in w.statuses[-2:] and "Viewer: Yomizuq - Google Chrome" in w.statuses
+    assert w.new_pages and w._jobs.qsize() == 1
     w._handle_event("translate_done", {})
-    i18n.set_language("ja")
-    try:
-        w._set_covered(True)  # in the window's language
-        assert w.canvas.banner.startswith("TASlation がビューアを完全に覆っているため")
-        w.say("Translating...")  # something else said meanwhile: it stays when the viewer draws again
-        w._set_covered(False)
-        assert w.canvas.banner == "" and w._status_key == "Translating..."
-    finally:
-        i18n.set_language("en")
 
     w.own = [(1000, 0, 1920, 1040)]  # TASlation beside the viewer: the screen there shows the viewer
     viewer.frame = Image.new("RGB", (200, 150), (0, 0, 0))

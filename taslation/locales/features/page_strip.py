@@ -5,10 +5,6 @@ first.)"""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ the stages: a letter each, and a name
-    "R": {
-        "ja": "読", "es": "L", "pt": "L", "fr": "L", "de": "L", "it": "L", "nl": "L", "pl": "O", "ru": "Ч", "tr": "O",
-        "id": "B", "vi": "Đ", "zh": "读", "zh-tw": "讀", "ko": "읽", "th": "อ",
-    },
     "E": {
         "ja": "消", "es": "B", "pt": "A", "fr": "E", "de": "E", "it": "C", "nl": "W", "pl": "U", "ru": "С", "tr": "S",
         "id": "H", "vi": "X", "zh": "擦", "zh-tw": "擦", "ko": "지", "th": "ล",
@@ -17,51 +13,11 @@ TEXTS: dict[str, dict[str, str]] = {
         "ja": "訳", "es": "T", "pt": "T", "fr": "T", "de": "Ü", "it": "T", "nl": "V", "pl": "T", "ru": "П", "tr": "Ç",
         "id": "T", "vi": "B", "zh": "译", "zh-tw": "譯", "ko": "번", "th": "ป",
     },
-    "Reading the text": {
-        "ja": "文字の読み取り", "es": "Leer el texto", "pt": "Ler o texto", "fr": "Lecture du texte", "de": "Lesen des Textes",
-        "it": "Lettura del testo", "nl": "Lezen van de tekst", "pl": "Odczyt tekstu", "ru": "Чтение текста",
-        "tr": "Metni okuma", "id": "Baca teks", "vi": "Đọc chữ", "zh": "读取文字", "zh-tw": "讀取文字", "ko": "읽기",
-        "th": "อ่านข้อความ",
-    },
-    "Erasing the Japanese": {
-        "ja": "日本語の消去", "es": "Borrar el japonés", "pt": "Apagar o japonês", "fr": "Effacement du japonais",
-        "de": "Entfernen des Japanischen", "it": "Cancellazione del giapponese", "nl": "Wissen van het Japans",
-        "pl": "Usuwanie japońskiego", "ru": "Стирание японского", "tr": "Japoncayı silme", "id": "Hapus teks Jepang",
-        "vi": "Xóa chữ Nhật", "zh": "擦除日文", "zh-tw": "擦除日文", "ko": "지우기", "th": "ลบตัวอักษรญี่ปุ่น",
-    },
     # ------------------------------------------------------------------ the state of a bar
-    "not started yet": {
-        "ja": "まだ始まっていません", "es": "aún no ha empezado", "pt": "ainda não começou", "fr": "pas encore commencé",
-        "de": "noch nicht begonnen", "it": "non ancora iniziata", "nl": "nog niet begonnen", "pl": "jeszcze nie zaczęte",
-        "ru": "ещё не начато", "tr": "henüz başlamadı", "id": "belum dimulai", "vi": "chưa bắt đầu", "zh": "尚未开始",
-        "zh-tw": "尚未開始", "ko": "아직 시작 전", "th": "ยังไม่เริ่ม",
-    },
-    "under way": {
-        "ja": "処理中", "es": "en curso", "pt": "em andamento", "fr": "en cours", "de": "läuft", "it": "in corso",
-        "nl": "bezig", "pl": "w toku", "ru": "идёт", "tr": "sürüyor", "id": "sedang berjalan", "vi": "đang làm",
-        "zh": "进行中", "zh-tw": "進行中", "ko": "진행 중", "th": "กำลังทำ",
-    },
     "done": {
         "ja": "完了", "es": "hecho", "pt": "feito", "fr": "terminé", "de": "fertig", "it": "fatto", "nl": "klaar",
         "pl": "gotowe", "ru": "готово", "tr": "bitti", "id": "selesai", "vi": "xong", "zh": "完成", "zh-tw": "完成",
         "ko": "완료", "th": "เสร็จแล้ว",
-    },
-    "did not work": {
-        "ja": "うまくいきませんでした", "es": "no funcionó", "pt": "não deu certo", "fr": "n'a pas marché",
-        "de": "hat nicht geklappt", "it": "non è riuscita", "nl": "is niet gelukt", "pl": "nie udało się",
-        "ru": "не получилось", "tr": "olmadı", "id": "tidak berhasil", "vi": "không thành công", "zh": "未成功",
-        "zh-tw": "未成功", "ko": "실패", "th": "ไม่สำเร็จ",
-    },
-    "not needed": {
-        "ja": "不要", "es": "no hace falta", "pt": "não é preciso", "fr": "pas nécessaire", "de": "nicht nötig",
-        "it": "non serve", "nl": "niet nodig", "pl": "niepotrzebne", "ru": "не нужно", "tr": "gerekmedi",
-        "id": "tidak perlu", "vi": "không cần", "zh": "不需要", "zh-tw": "不需要", "ko": "필요 없음", "th": "ไม่จำเป็น",
-    },
-    "{stage}: {state}": {
-        "ja": "{stage}: {state}", "es": "{stage}: {state}", "pt": "{stage}: {state}", "fr": "{stage} : {state}",
-        "de": "{stage}: {state}", "it": "{stage}: {state}", "nl": "{stage}: {state}", "pl": "{stage}: {state}",
-        "ru": "{stage}: {state}", "tr": "{stage}: {state}", "id": "{stage}: {state}", "vi": "{stage}: {state}",
-        "zh": "{stage}：{state}", "zh-tw": "{stage}：{state}", "ko": "{stage}: {state}", "th": "{stage}: {state}",
     },
     # ------------------------------------------------------------------ the role a book opens in
     "This book has no translations yet, so it opens in translator mode.": {
@@ -101,40 +57,4 @@ TEXTS: dict[str, dict[str, str]] = {
         "th": "หน้าของหนังสือเล่มนี้แปลแล้ว จึงเปิดในโหมดผู้อ่าน",
     },
     # ------------------------------------------------------------------ a page that went by before it was taken
-    "went by before it could be taken: turn back to it": {
-        "ja": "取り込む前にめくられました。戻ってください",
-        "es": "pasó antes de poder tomarla: vuelve a ella",
-        "pt": "passou antes de poder ser capturada: volte a ela",
-        "fr": "passée avant d'avoir pu être prise : revenez-y",
-        "de": "umgeblättert, bevor sie erfasst werden konnte: zurückblättern",
-        "it": "passata prima che si potesse acquisirla: torna indietro",
-        "nl": "voorbijgegaan voordat ze kon worden vastgelegd: ga ernaar terug",
-        "pl": "przewrócona, zanim udało się ją pobrać: wróć do niej",
-        "ru": "перелистнута раньше, чем её удалось снять: вернитесь к ней",
-        "tr": "alınamadan geçildi: ona geri dönün",
-        "id": "terlewat sebelum sempat diambil: kembali ke halaman itu",
-        "vi": "bị lật qua trước khi kịp lấy: hãy lật lại",
-        "zh": "读取前就翻过去了：请翻回去",
-        "zh-tw": "讀取前就翻過去了：請翻回去",
-        "ko": "가져오기 전에 넘어감: 다시 넘겨 오세요",
-        "th": "ถูกพลิกผ่านก่อนจะเก็บได้: ย้อนกลับไปที่หน้านั้น",
-    },
-    "Page {n} went by before it could be taken. Turn back to it in the viewer and it is read like any other.": {
-        "ja": "{n}ページ目は取り込む前にめくられました。ビューアでそのページに戻れば、ほかのページと同じように読み取ります。",
-        "es": "La página {n} pasó antes de poder tomarla. Vuelve a ella en el visor y se lee como cualquier otra.",
-        "pt": "A página {n} passou antes de poder ser capturada. Volte a ela no visualizador e ela é lida como qualquer outra.",
-        "fr": "La page {n} est passée avant d'avoir pu être prise. Revenez-y dans la visionneuse et elle sera lue comme les autres.",
-        "de": "Seite {n} wurde umgeblättert, bevor sie erfasst werden konnte. Blättern Sie im Viewer zu ihr zurück, dann wird sie wie jede andere gelesen.",
-        "it": "La pagina {n} è passata prima che si potesse acquisirla. Torna a quella pagina nel visualizzatore e viene letta come le altre.",
-        "nl": "Pagina {n} ging voorbij voordat ze kon worden vastgelegd. Ga er in de viewer naar terug en ze wordt gelezen zoals elke andere.",
-        "pl": "Strona {n} została przewrócona, zanim udało się ją pobrać. Wróć do niej w czytniku, a zostanie odczytana jak każda inna.",
-        "ru": "Страница {n} перелистнута раньше, чем её удалось снять. Вернитесь к ней в просмотрщике, и она будет прочитана, как любая другая.",
-        "tr": "{n}. sayfa alınamadan geçildi. Görüntüleyicide ona geri dönün; diğerleri gibi okunur.",
-        "id": "Halaman {n} terlewat sebelum sempat diambil. Kembali ke halaman itu di penampil dan halaman itu dibaca seperti yang lain.",
-        "vi": "Trang {n} bị lật qua trước khi kịp lấy. Hãy lật lại trang đó trong trình xem, trang sẽ được đọc như mọi trang khác.",
-        "zh": "第 {n} 页在读取前就翻过去了。在查看器中翻回这一页，它就会像其他页一样被读取。",
-        "zh-tw": "第 {n} 頁在讀取前就翻過去了。在檢視器中翻回這一頁，它就會像其他頁一樣被讀取。",
-        "ko": "{n}페이지는 가져오기 전에 넘어갔습니다. 뷰어에서 그 페이지로 돌아가면 다른 페이지처럼 읽습니다.",
-        "th": "หน้า {n} ถูกพลิกผ่านไปก่อนจะเก็บได้ ย้อนกลับไปที่หน้านั้นในโปรแกรมอ่าน แล้วจะอ่านเหมือนหน้าอื่น",
-    },
 }

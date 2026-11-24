@@ -11,13 +11,9 @@ TEMPLATES: dict[str, str] = {
                               "aanvraag daarvoor"),
     "batch.note_unit_incomplete": ("pagina-eenheid {unit}: onvolledige vertaling; wat ontbreekt wordt vertaald "
                                    "wanneer de pagina wordt gelezen"),
-    "viewer.covered": ("De viewer tekent niet meer omdat TASlation hem helemaal bedekt. Zet TASlation terug naar het "
-                       "vorige formaat (niet gemaximaliseerd) of verplaats het zodat een strook van de viewer zichtbaar "
-                       "blijft."),
     "viewer.gone": "TASlation kan het venster van de viewer niet zien. Controleer of het open is en niet geminimaliseerd.",
     "viewer.no_area": "TASlation kan het venster van de viewer niet zien. Controleer of het open is en niet geminimaliseerd.",
     "viewer.windows_only": "vensteropname is alleen beschikbaar op Windows",
-    "viewer.unknown_key": "onbekende toetsnaam: '{key}' (gebruik Left, Right, PageDown, Space, ... of één letter)",
     "viewer.api_failed": "TASlation kan het venster van de viewer niet zien. Controleer of het open is en niet geminimaliseerd.",
     "viewer.window_api_failed": "TASlation kan het venster van de viewer niet zien. Controleer of het open is en niet geminimaliseerd.",
     "viewer.empty_rect": "TASlation kan het venster van de viewer niet zien. Controleer of het open is en niet geminimaliseerd.",

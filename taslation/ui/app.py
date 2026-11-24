@@ -185,7 +185,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
     def __init__(self, settings: Settings, window_query: str | None = None, book: str | None = None, auto: bool = True):
         set_app_id()
         super().__init__()
-        seethrough.quiet_start(self, settings)  # never on the screen, nor taking the foreground
+        seethrough.quiet_start(self)  # never on the screen, nor taking the foreground
         self._apply_alpha()  # before the window is first shown: an alpha set later makes a browser behind it flicker
         apply_icon(self)
         give_icons(self)  # the taskbar takes the big one
@@ -285,7 +285,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self._job_thumb: np.ndarray | None = None  # ... and its thumbnail, when known
         self._fill: Filling | None = None  # the page filling in while it is translated
         self._fill_dirty = False  # page events came in: the page is drawn again once the queue is empty
-        self._covered = False  # the viewer draws nothing behind TASlation: the last good frame stays, with a line
         self._thumbs: list[tuple[Any, Image.Image, np.ndarray]] = []  # capture-area thumbnails of recent frames
         self._lettered_memo: tuple[Image.Image, Image.Image, Image.Image] | None = None  # (page, frame, both)
         self._mask_memo: tuple[Image.Image, np.ndarray, np.ndarray] | None = None  # (page, where its lettering is, its pixels)
@@ -432,9 +431,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self._sync_stop()
         if self._busy_shown:
             self._show_badge()
-        if self._covered:  # the new canvas says it again
-            self._covered = False
-            self._set_covered(True)
         self._show_banner()  # the setup banner and the band in the new language
         self._show_band()
         self._status_render, self._status_key = render, key

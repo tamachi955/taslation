@@ -10,12 +10,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "đơn vị trang {unit}: {error}; sẽ dịch khi đọc trang",
     "batch.note_incomplete": "{incomplete}/{units} đơn vị trang trả về chưa đầy đủ; đang yêu cầu lại các đơn vị đó",
     "batch.note_unit_incomplete": "đơn vị trang {unit}: bản dịch chưa đầy đủ; phần còn thiếu sẽ dịch khi đọc trang",
-    "viewer.covered": ("Trình xem đã ngừng vẽ vì TASlation che kín nó. Hãy bỏ phóng to cửa sổ TASlation, hoặc di chuyển "
-                       "nó sao cho vẫn thấy một dải của trình xem."),
     "viewer.gone": "TASlation không thấy cửa sổ trình xem. Hãy kiểm tra cửa sổ đang mở và không bị thu nhỏ.",
     "viewer.no_area": "TASlation không thấy cửa sổ trình xem. Hãy kiểm tra cửa sổ đang mở và không bị thu nhỏ.",
     "viewer.windows_only": "chỉ chụp được cửa sổ trên Windows",
-    "viewer.unknown_key": "tên phím không xác định: “{key}” (dùng Left, Right, PageDown, Space, ... hoặc một chữ cái)",
     "viewer.api_failed": "TASlation không thấy cửa sổ trình xem. Hãy kiểm tra cửa sổ đang mở và không bị thu nhỏ.",
     "viewer.window_api_failed": "TASlation không thấy cửa sổ trình xem. Hãy kiểm tra cửa sổ đang mở và không bị thu nhỏ.",
     "viewer.empty_rect": "TASlation không thấy cửa sổ trình xem. Hãy kiểm tra cửa sổ đang mở và không bị thu nhỏ.",

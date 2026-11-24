@@ -51,15 +51,6 @@ def test_capture_a_tk_window_by_handle(tk_root):
         root.destroy()
 
 
-@windows_only
-def test_key_codes():
-    assert capture.windows.key_code("Left") == 0x25
-    assert capture.windows.key_code("pagedown") == 0x22
-    assert capture.windows.key_code("a") == ord("A")
-    with pytest.raises(capture.CaptureError):
-        capture.windows.key_code("NoSuchKey")
-
-
 def test_a_flat_frame_is_blank():
     from PIL import Image
 
@@ -107,49 +98,6 @@ def test_another_window_over_the_viewer_is_seen_but_no_overlay_or_hidden_one(mon
     assert not windows.behind_others(1)
     state[3] = (True, False, 0, (850, 0, 1000, 150))  # over a corner of it
     assert windows.behind_others(1)
-
-
-WORK, SMALL = (0, 0, 1920, 1040), (100, 100, 900, 756)
-
-
-def test_smaller_than_the_work_area():
-    from taslation.capture.windows import smaller_than
-
-    assert smaller_than(SMALL, WORK) and smaller_than((0, 0, 1920, 900), WORK) and smaller_than((0, 0, 1000, 1040), WORK)
-    assert not smaller_than(WORK, WORK) and not smaller_than((-8, -8, 1928, 1048), WORK)
-
-
-def test_a_maximised_large_minimised_or_hidden_window_is_left_alone_and_nothing_else_is_called(monkeypatch):
-    """`enlarge_window` (what a 1.0.1 session did; its windows are put back at the start: `recovery`): only the
-    window's place is changed - the fake has no call that touches the foreground, the order of the windows or a key."""
-    from types import SimpleNamespace
-
-    from taslation.capture import Enlarged, windows
-
-    user32, place, moved = SimpleNamespace(zoomed=False), {"rect": SMALL}, []
-    user32.IsZoomed = lambda hwnd: user32.zoomed
-
-    def move(hwnd, rect):
-        moved.append(rect)
-        place["rect"] = rect
-        return True
-
-    monkeypatch.setattr(windows, "user32", user32, raising=False)
-    monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
-    monkeypatch.setattr(windows, "work_area", lambda hwnd: WORK)
-    monkeypatch.setattr(windows, "window_rect", lambda hwnd: place["rect"])
-    monkeypatch.setattr(windows, "move_window", move)
-    user32.zoomed = True
-    assert windows.enlarge_window(7) is None
-    user32.zoomed = False
-    place["rect"] = WORK
-    assert windows.enlarge_window(7) is None
-    place["rect"] = SMALL
-    monkeypatch.setattr(windows, "window_shown", lambda hwnd: False)
-    assert windows.enlarge_window(7) is None and moved == []
-    monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
-    enlarged = windows.enlarge_window(7)
-    assert enlarged == Enlarged(7, SMALL, WORK) and moved == [WORK] and enlarged.changed
 
 
 @windows_only

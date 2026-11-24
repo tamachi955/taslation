@@ -1,6 +1,7 @@
-"""The window on the screen and its toolbar: the application's icon and taskbar name, the first size and place,
-dialogs placed over their parent and kept on its monitor, comboboxes and tree columns as wide as what they show,
-labels that wrap at a width, and the toolbar whose groups of controls flow into rows (`FlowBar`)."""
+"""The windows' looks and places: the application's icon and taskbar name, the hidden root's first size (it is
+never on the screen: `seethrough.hidden`), dialogs placed over the viewer and kept on its monitor, comboboxes and tree
+columns as wide as what they show, labels that wrap at a width, and the hidden root's toolbar whose groups of controls
+flow into rows (`FlowBar`)."""
 
 from __future__ import annotations
 
@@ -51,8 +52,7 @@ def apply_icon(root: tk.Tk) -> None:
 
 def give_icons(win: tk.Misc) -> None:
     """Windows: once *win* is on the screen, its own small and big icons at the sizes the title bar and the taskbar
-    draw, which Windows picks from the .ico (Tk gives a window the .ico's first picture, the 16 px one, for both).
-    Tk carries a window's icons over when it makes the window anew (full screen)."""
+    draw, which Windows picks from the .ico (Tk gives a window the .ico's first picture, the 16 px one, for both)."""
     if not IS_WINDOWS or not ICON_ICO.is_file():
         return
     done: list[bool] = []
@@ -174,10 +174,10 @@ def kept_place(geometry: str, monitor: Any) -> bool:
 
 def initial_geometry(widget: tk.Misc, size: tuple[int, int] = DEFAULT_SIZE,
                      at: tuple[int, int] | None = None) -> str:
-    """The main window's first size and place: *size*, or as much of the primary monitor's work area as there is
+    """The hidden root's first size and place: *size*, or as much of the primary monitor's work area as there is
     (at most the screen less 40 by 90 pixels), in the middle of that work area - or of the work area of the monitor
-    at the screen point *at* (the window moved to the book's monitor). The size is the inside of the window below
-    its menu bar, as Tk's geometry counts it."""
+    at the screen point *at*; its widgets are laid out at that size (the place itself is off every monitor:
+    `seethrough.HiddenWindowMixin`). The size is the inside of the window, as Tk's geometry counts it."""
     left, top, right, bottom = work_area(widget) if at is None else work_area(widget, *at)
     border, caption = frame_extents()
     menu = 20

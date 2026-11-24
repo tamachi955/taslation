@@ -15,7 +15,7 @@ already.
   colour options alone); the option database gives Tk's classic widgets made from then on (text boxes, lists, the
   menus, the lists of the comboboxes) `DARK`'s colours, and Windows 10 and 11 draw the title bars dark
   (`title_bar`: DwmSetWindowAttribute with DWMWA_USE_IMMERSIVE_DARK_MODE, for the main window and every dialog as it
-  comes on the screen). The menu bar itself stays as Windows draws it.
+  comes on the screen).
 * A change applies at once (`apply` again, from the Settings dialog): ttk's widgets follow their theme by themselves;
   the classic widgets already made, and the colours the window set on its labels, are found by their colours and
   given the new theme's (`_recolour`); the window's own named styles are set again in the new theme (`style`).
@@ -573,9 +573,9 @@ def title_bar(hwnd: int, dark: bool, redraw: bool = False) -> bool:
 
 
 def _title_bar_for(win: Any, again: bool = False) -> None:
-    """*win*'s title bar in the mode the window shows, once Windows has its frame: set when it is drawn otherwise
-    (Tk makes a window's frame anew for the full screen, which comes light), left alone in the light modes for a
-    window never drawn dark. *again*: the mode changed while it may be on the screen."""
+    """*win*'s title bar in the mode the window shows, once Windows has its frame: set when it is drawn otherwise,
+    left alone in the light modes for a window never drawn dark. *again*: the mode changed while it may be on the
+    screen."""
     if not IS_WINDOWS:
         return
     dark = _mode == DARK_MODE

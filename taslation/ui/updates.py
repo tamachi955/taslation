@@ -10,8 +10,8 @@ normal priority, and reads the one line of JSON it prints (`Check`, `parse_answe
 * at the window's start, for who turned it on (``update_check = "daily"``: the installer asks, Settings... and
   the dialog change it), at most once a day (`start_check_due`), no sooner than `START_DELAY_MS` after the window is
   ready and only while nothing is read or translated (`idle`), never in a git clone. A newer version found then is
-  named in the Help menu's item (`menu_label`) and in one quiet status line (`_say_quietly`: the status bar only,
-  nothing on the full screen's page, no dialog, no focus taken); a failure says nothing.
+  named in Menu > Help > Check for updates... (`menu_label`) and in one quiet status line (`_say_quietly`: the
+  right pane's status line only, no dialog, no focus taken); a failure says nothing.
 
 The state file (`STATE_FILE` in the state folder) keeps the time of the last look, whoever asked for it, and the
 newest version seen with its date: nothing else (`load_state`, `save_state`).
@@ -281,19 +281,19 @@ def watch(window: Any, check: Check, on_answer: Callable[[dict[str, Any]], None]
 
 def noted(window: Any, answer: dict[str, Any], now: float | None = None) -> None:
     """A look's answer, whoever asked for it: its time in the state file, and the newest version when it got one; a
-    newer version from then on in the Help menu's item."""
+    newer version from then on in the label of Menu > Help > Check for updates... (the Menu is built anew each time it
+    opens: `see_menu`)."""
     stamp = time.time() if now is None else now
     if answer.get("result") == "could not ask":
         save_state(window.settings.state_dir, stamp)
         return
     save_state(window.settings.state_dir, stamp, answer.get("newest", ""), answer.get("date", ""))
     window._update_known = newer_known(load_state(window.settings.state_dir), installed_version())
-    relabel(window)
 
 
 # ---------------------------------------------------------------- the window's side
 def setup(window: Any) -> None:
-    """At the window's start: a newer version an earlier look found, named in the Help menu at once (no request)."""
+    """At the start: a newer version an earlier look found, named in Menu > Help at once (no request)."""
     window._update_known = newer_known(load_state(window.settings.state_dir), installed_version())
     window._update_planned = False
     window._update_check = None
@@ -306,17 +306,6 @@ def menu_label(window: Any) -> str:
     if known:
         return _("Check for updates... ({version} is available)").format(version=known[0])
     return _("Check for updates...")
-
-
-def relabel(window: Any) -> None:
-    entry = getattr(window, "_update_entry", None)
-    if entry is None:
-        return
-    menu, index = entry
-    try:
-        menu.entryconfigure(index, label=menu_label(window))
-    except Exception:  # noqa: BLE001 - the menu is being rebuilt or gone
-        pass
 
 
 def idle(window: Any) -> bool:
@@ -371,7 +360,7 @@ def quiet_line(version: str) -> str:
 
 def _say_quietly(window: Any, version: str) -> None:
     """(Tk) The newer version in the status line, once, while nothing is read or translated (the line of the work
-    stays the work's): only the status bar's line, which the full screen does not show."""
+    stays the work's): only the status line (the right pane's), no dialog."""
     try:
         if not window.winfo_exists():
             return

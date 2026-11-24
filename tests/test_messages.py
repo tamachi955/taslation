@@ -158,28 +158,14 @@ def test_exceptions_carry_their_message():
     assert str(coded) == str(coded.message) == "TASlation could not reach the translation program. Press F5 in a moment; it starts it by itself."
     assert coded.message.code == "ollama.unreachable" and coded.message.params["url"] == "http://127.0.0.1:11434"
     assert pickle.loads(pickle.dumps(coded)).message.code == "ollama.unreachable"
-    covered = ViewerCovered("the viewer draws nothing behind TASlation")  # as the window raises it today
-    assert covered.message.code == "viewer.covered" and str(covered) == (  # the text given is not kept
-        "The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or move it so that "
-        "a strip of the viewer stays visible.")
+    covered = ViewerCovered()  # (said nowhere: the last good frame stays, `ui.live`)
+    assert covered.message.code == "viewer.error" and str(covered) == "the viewer draws nothing behind a dialog of TASlation"
     assert isinstance(covered, CaptureError)
     assert CaptureError("the viewer gives no picture").message.code == "viewer.error"
     assert ModelNotInstalled(Message("ocr.model_missing", path="x", missing="y", command="z")).message.code == "ocr.model_missing"
     stop = Cancelled()
     assert stop.message.code == "pipeline.cancelled" and str(stop) == "cancelled"
     assert not isinstance(stop, TranslationError)  # a handler of failed requests never takes a cancel for one
-
-
-def test_capture_errors_name_what_failed():
-    from taslation.capture import CaptureError
-    from taslation.capture.windows import IS_WINDOWS, key_code
-
-    if not IS_WINDOWS:
-        pytest.skip("Windows only")
-    with pytest.raises(CaptureError) as info:
-        key_code("NoSuchKey")
-    assert info.value.message.code == "viewer.unknown_key" and info.value.message.params["key"] == "NoSuchKey"
-    assert str(info.value).startswith("unknown key name: 'NoSuchKey'")
 
 
 def test_a_missing_ocr_model_says_how_to_get_it(tmp_path):

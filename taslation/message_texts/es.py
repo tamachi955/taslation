@@ -10,12 +10,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "unidades de página incompletas: {incomplete} de {units}; se vuelven a pedir",
     "batch.note_unit_incomplete": ("unidad de página {unit}: traducción incompleta; lo que falta se traduce al leer "
                                    "su página"),
-    "viewer.covered": ("El visor dejó de dibujar porque TASlation lo cubre por completo. Deja de maximizar TASlation "
-                       "o muévelo de modo que una franja del visor quede a la vista."),
     "viewer.gone": "TASlation no puede ver la ventana del visor. Comprueba que esté abierta y no minimizada.",
     "viewer.no_area": "TASlation no puede ver la ventana del visor. Comprueba que esté abierta y no minimizada.",
     "viewer.windows_only": "la captura de ventanas solo está disponible en Windows",
-    "viewer.unknown_key": "nombre de tecla desconocido: «{key}» (usa Left, Right, PageDown, Space... o una sola letra)",
     "viewer.api_failed": "TASlation no puede ver la ventana del visor. Comprueba que esté abierta y no minimizada.",
     "viewer.window_api_failed": "TASlation no puede ver la ventana del visor. Comprueba que esté abierta y no minimizada.",
     "viewer.empty_rect": "TASlation no puede ver la ventana del visor. Comprueba que esté abierta y no minimizada.",

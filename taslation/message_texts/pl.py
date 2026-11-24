@@ -14,13 +14,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "niekompletnych jednostek stron: {incomplete} z {units}; ponowne żądanie dla nich",
     "batch.note_unit_incomplete": ("jednostka strony {unit}: niekompletne tłumaczenie; brakująca część zostanie "
                                    "przetłumaczona podczas czytania strony"),
-    "viewer.covered": ("Czytnik przestał rysować, bo TASlation zasłania go całkowicie. Wyłącz maksymalizację okna "
-                       "TASlation albo przesuń je tak, aby było widać choćby pasek czytnika."),
     "viewer.gone": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.no_area": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.windows_only": "przechwytywanie okien działa tylko w systemie Windows",
-    "viewer.unknown_key": ("nieznana nazwa klawisza: „{key}” (użyj Left, Right, PageDown, Space... albo pojedynczej "
-                           "litery)"),
     "viewer.api_failed": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.window_api_failed": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",
     "viewer.empty_rect": "TASlation nie widzi okna czytnika. Sprawdź, czy jest otwarte i niezminimalizowane.",

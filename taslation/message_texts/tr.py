@@ -13,13 +13,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "sayfa birimi {unit}: {error}; sayfası okunurken çevrilecek",
     "batch.note_incomplete": "{units} sayfa biriminden {incomplete} tanesi eksik döndü; eksik olanlar yeniden isteniyor",
     "batch.note_unit_incomplete": "sayfa birimi {unit}: eksik çeviri; eksik kalan kısım sayfası okunurken çevrilecek",
-    "viewer.covered": ("TASlation görüntüleyiciyi tamamen kapladığı için görüntüleyici çizmeyi bıraktı. TASlation "
-                       "penceresini ekranı kaplamaktan çıkarın ya da görüntüleyicinin bir şeridi görünür kalacak şekilde "
-                       "taşıyın."),
     "viewer.gone": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.no_area": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.windows_only": "pencere yakalama yalnızca Windows'ta kullanılabilir",
-    "viewer.unknown_key": "bilinmeyen tuş adı: “{key}” (Left, Right, PageDown, Space... ya da tek bir harf kullanın)",
     "viewer.api_failed": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.window_api_failed": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",
     "viewer.empty_rect": "TASlation görüntüleyici penceresini göremiyor. Açık ve simge durumuna küçültülmemiş olduğunu denetleyin.",

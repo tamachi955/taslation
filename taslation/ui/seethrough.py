@@ -30,7 +30,7 @@ page's regions.
   language (an arrow each side; taken once no
   arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
   file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
-  `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the window's menus and toolbar
+  `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the hidden root's controls
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
   filling in is (lines lettered of the lines read), the status line, the backlog and the pages that went by too fast
   (the indicator's own lines), where the translator runs - the window's words with
@@ -133,7 +133,7 @@ def on(app: Any) -> bool:
     return getattr(app, "_see_through", None) is not None
 
 
-def quiet_start(app: Any, settings: Any) -> None:
+def quiet_start(app: Any) -> None:
     """At the very start of the window, before Tk first shows it, in see-through mode (Windows): the window made one
     that is never on the screen (`hidden`: titled BUTTON_TITLE here for its taskbar button, alpha 0 and off every
     monitor with `App._apply_alpha` and `App.wm_geometry`, before it is first shown), and Tk kept from taking the

@@ -14,14 +14,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_incomplete": "unités de page incomplètes : {incomplete} sur {units} ; nouvelle demande pour celles-ci",
     "batch.note_unit_incomplete": ("unité de page {unit} : traduction incomplète ; ce qui manque est traduit à la "
                                    "lecture de sa page"),
-    "viewer.covered": ("La visionneuse a cessé de s'afficher parce que TASlation la recouvre entièrement. Restaurez "
-                       "la fenêtre de TASlation au lieu de l'agrandir, ou déplacez-la pour qu'une bande de la visionneuse "
-                       "reste visible."),
     "viewer.gone": "TASlation ne voit pas la fenêtre de la visionneuse. Vérifiez qu'elle est ouverte et non réduite.",
     "viewer.no_area": "TASlation ne voit pas la fenêtre de la visionneuse. Vérifiez qu'elle est ouverte et non réduite.",
     "viewer.windows_only": "la capture de fenêtre n'est disponible que sous Windows",
-    "viewer.unknown_key": ("nom de touche inconnu : « {key} » (utilisez Left, Right, PageDown, Space... ou une seule "
-                           "lettre)"),
     "viewer.api_failed": "TASlation ne voit pas la fenêtre de la visionneuse. Vérifiez qu'elle est ouverte et non réduite.",
     "viewer.window_api_failed": "TASlation ne voit pas la fenêtre de la visionneuse. Vérifiez qu'elle est ouverte et non réduite.",
     "viewer.empty_rect": "TASlation ne voit pas la fenêtre de la visionneuse. Vérifiez qu'elle est ouverte et non réduite.",

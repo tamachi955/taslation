@@ -10,12 +10,9 @@ TEMPLATES: dict[str, str] = {
     "batch.note_unit_failed": "页面单元 {unit}：{error}；将在阅读该页时翻译",
     "batch.note_incomplete": "{units} 个页面单元中有 {incomplete} 个返回不完整；正在重新请求这些单元",
     "batch.note_unit_incomplete": "页面单元 {unit}：译文不完整；缺少的部分将在阅读该页时翻译",
-    "viewer.covered": ("TASlation 完全遮住了查看器，因此查看器停止了绘制。请取消 TASlation 窗口的最大化，"
-                       "或移动它，让查看器至少露出一条。"),
     "viewer.gone": "TASlation 看不到查看器窗口。请确认窗口已打开且未最小化。",
     "viewer.no_area": "TASlation 看不到查看器窗口。请确认窗口已打开且未最小化。",
     "viewer.windows_only": "窗口捕获仅在 Windows 上可用",
-    "viewer.unknown_key": "未知的按键名：“{key}”（请使用 Left、Right、PageDown、Space 等，或单个字母）",
     "viewer.api_failed": "TASlation 看不到查看器窗口。请确认窗口已打开且未最小化。",
     "viewer.window_api_failed": "TASlation 看不到查看器窗口。请确认窗口已打开且未最小化。",
     "viewer.empty_rect": "TASlation 看不到查看器窗口。请确认窗口已打开且未最小化。",

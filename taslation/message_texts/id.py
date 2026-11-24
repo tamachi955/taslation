@@ -12,13 +12,9 @@ TEMPLATES: dict[str, str] = {
                               "ulang"),
     "batch.note_unit_incomplete": ("unit halaman {unit}: terjemahan tidak lengkap; bagian yang kurang diterjemahkan "
                                    "saat halamannya dibaca"),
-    "viewer.covered": ("Penampil berhenti menggambar karena TASlation menutupinya sepenuhnya. Kembalikan jendela TASlation "
-                       "dari ukuran maksimal, atau geser agar sebagian penampil tetap terlihat."),
     "viewer.gone": "TASlation tidak dapat melihat jendela penampil. Pastikan jendela terbuka dan tidak diminimalkan.",
     "viewer.no_area": "TASlation tidak dapat melihat jendela penampil. Pastikan jendela terbuka dan tidak diminimalkan.",
     "viewer.windows_only": "penangkapan jendela hanya tersedia di Windows",
-    "viewer.unknown_key": ("nama tombol tidak dikenal: “{key}” (gunakan Left, Right, PageDown, Space, ... atau satu "
-                           "huruf)"),
     "viewer.api_failed": "TASlation tidak dapat melihat jendela penampil. Pastikan jendela terbuka dan tidak diminimalkan.",
     "viewer.window_api_failed": "TASlation tidak dapat melihat jendela penampil. Pastikan jendela terbuka dan tidak diminimalkan.",
     "viewer.empty_rect": "TASlation tidak dapat melihat jendela penampil. Pastikan jendela terbuka dan tidak diminimalkan.",

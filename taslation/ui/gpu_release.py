@@ -32,9 +32,6 @@ from typing import Any
 
 RELEASE_ENTRY = "Release the model now"  # the Tools menu's entry
 # (the 16 languages of the tip and the lines that name the OCR: `locales/features/ocr_release.py`)
-RELEASE_TIP = ("Give back the GPU memory of TASlation's models now, for another program: the translation model, the "
-               "page models and the OCR readers that run on the GPU (they go on reading on the processor). The next "
-               "translation loads the model again.")
 RELEASE_REFUSED = "Not now: a translation is going on. Release the model once it has ended."
 RELEASING = "Releasing the model..."
 RELEASED_BOTH = "Released the translation model ({model}) and the page models. Each loads again when it is needed."
@@ -159,5 +156,5 @@ def apply_num_gpu(window: Any, value: Any) -> None:
         translator.num_gpu = layers
 
 
-__all__ = ["RELEASE_ENTRY", "RELEASE_TIP", "apply_num_gpu", "in_use", "ocr_holds_gpu", "release_models", "release_now",
+__all__ = ["RELEASE_ENTRY", "apply_num_gpu", "in_use", "ocr_holds_gpu", "release_models", "release_now",
            "released_line", "translators"]

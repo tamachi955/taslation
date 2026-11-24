@@ -1700,10 +1700,12 @@ class Probe:
         return out
 
 
-# functions an older package's `capture.windows` has that the guard's table no longer names (0.7.0 and before: a real
-# click at a screen position, and a raise with an ALT tap of its own, both input through the system): refused
-# outright where they are there (the program never called them)
-OLDER_GUARDED = {"click_screen": "never", "bring_to_front": "never"}
+# functions an older package's `capture.windows` has that the guard's table no longer names: before 2.0.0 the keys and
+# clicks a page turn passed on, and the viewer's window enlarged (the stand-in's alone); 0.7.0 and before also a real
+# click at a screen position and a raise with an ALT tap of its own. The keys and clicks are refused outright where
+# they are there (here the stand-in is turned by the tool)
+OLDER_GUARDED = {"press_key": "never", "press_briefly": "never", "post_key": "never", "post_click": "never",
+                 "enlarge_window": "ours", "click_screen": "never", "bring_to_front": "never"}
 
 
 def older_guarded(windows: Any, table: dict[str, Any], target: Callable[..., Any]) -> dict[str, tuple[str, Any]]:

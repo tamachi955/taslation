@@ -1,4 +1,5 @@
-"""The strips across the top of the page area, between the toolbar and the page (`Strip`):
+"""The strips across the top of the hidden root's page area, between its toolbar and the page (`Strip`; in the one
+mode their lines come in the right pane and as a small dialog: `see_menu.show_banner`):
 
 * the setup banner (`SetupBanner`): what stands in the way of translating new pages - the Messages of
   `taslation.health.check` (Ollama not running, the model or the OCR model missing) - one line each, in the

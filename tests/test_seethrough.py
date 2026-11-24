@@ -404,12 +404,12 @@ def test_the_quiet_start_makes_a_decoy_first_window_on_windows_and_drops_it(monk
     app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)),
                           wm_attributes=lambda *a: attributes.append((len(made), a)), wm_title=titles.append)
     monkeypatch.setattr(ui.window, "IS_WINDOWS", False)  # (elsewhere than on Windows: no decoy, nothing hidden)
-    ui.quiet_start(app, Settings())
+    ui.quiet_start(app)
     assert made == [] and not ui.quiet(app) and not ui.hidden(app) and attributes == [] and titles == []
     ui.quiet_started(app)
     assert later == []
     monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
-    ui.quiet_start(app, Settings())
+    ui.quiet_start(app)
     box, decoy = made
     # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
     assert box.options == {"container": True} and decoy.options == {"use": "4242"}
@@ -423,7 +423,7 @@ def test_the_quiet_start_makes_a_decoy_first_window_on_windows_and_drops_it(monk
     drop()
     assert made[2:] == [("gone", "Toplevel"), ("gone", "Frame")] and not ui.quiet(app)
     assert ui.hidden(app) and len(later) == 1  # (nothing put aside, nothing minimised: it never was on the screen)
-    ui.quiet_start(app, Settings())
+    ui.quiet_start(app)
     ui.quiet_end(app)  # (the legal notice: the reader's to answer)
     assert not ui.quiet(app) and ui.hidden(app)  # (off the screen all the same)
 

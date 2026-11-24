@@ -918,32 +918,6 @@ def test_a_viewer_chosen_is_watched_and_the_hooks_go_with_the_window(setup):
     assert events.closed and c.destroyed and c._following.mode == "poll"
 
 
-def test_while_taslation_covers_the_viewer_it_is_looked_at_until_it_draws_again(setup):
-    v = setup.viewer
-    w = setup.make(auto=False)
-    w.start()
-    setup.clock.run(2)
-    good = v.frames[0][1]
-    w.own = [(0, 0, 1920, 1040)]  # maximised over the viewer, which stops drawing
-    now = setup.clock.now
-    v.frames.append((now, Image.new("RGB", (960, 720), "white")))
-    w.events.notes.append(("front", OTHER))
-    w.events.notes.append(("front", OWN))  # back to TASlation: one look, which finds the viewer covered
-    setup.clock.run(0.2)
-    covered = ("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or move it "
-               "so that a strip of the viewer stays visible.")
-    assert w._covered and w.canvas.banner == covered and w.statuses[-1] == covered and w._live is good
-    count = len(v.captures)
-    setup.clock.run(7)
-    assert len(v.captures) - count in (9, 10)  # looked at every auto_interval_ms while it lasts
-    v.frames.append((setup.clock.now, good.copy()))  # un-maximised: the viewer draws again
-    setup.clock.run(1)
-    assert not w._covered and w.canvas.banner == "" and w.statuses[-1] == "Viewer: Yomizuq - Google Chrome"
-    count = len(v.captures)
-    setup.clock.run(30)
-    assert len(v.captures) == count  # and no more looks
-
-
 def test_input_over_the_viewer_while_taslation_is_in_front_is_looked_at_once_it_stops(setup):
     v = setup.viewer
     w = setup.make(auto=False)

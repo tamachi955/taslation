@@ -30,8 +30,8 @@ PLACEHOLDER = re.compile(r"\{(\w+)(?::[^}]*)?\}")
 def test_lookup_and_fallback():
     assert set_language("ja") == "ja" and tr("Viewer:") == "ビューア:"
     assert set_language("es") == "es" and tr("Viewer:") == "Visor:"
-    assert set_language("zh-tw") == "zh-tw" and tr("Book:") == "書名："
-    assert set_language("th") == "th" and tr("Book:") == "ชื่อหนังสือ:"
+    assert set_language("zh-tw") == "zh-tw" and tr("Set area...") == "設定區域..."
+    assert set_language("th") == "th" and tr("Set area...") == "กำหนดพื้นที่..."
     assert tr("not in the catalog at all") == "not in the catalog at all"
     assert set_language("xx") == "en" and tr("Viewer:") == "Viewer:"
     assert i18n.current() == "en"

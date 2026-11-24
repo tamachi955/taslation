@@ -17,12 +17,11 @@ changes - no code was taken from it, it is a C# project):
   requires the window to be visible.
 * A viewer that stops drawing while it is covered is raised for a moment
   without activation (`raise_window`) and put back.
-* TASlation sends the viewer no key and no click: in see-through mode, the
-  program's one mode since 2.0.0, the reader turns the pages in the viewer
-  itself. The functions here that could post or send one (`post_key`,
-  `post_click`, `press_key`, `press_briefly`) are called by no module of the
-  program; the tools' guards name them. A window of the program is given the
-  foreground without a key press (`give_foreground`).
+* TASlation sends the viewer no key and no click, and moves or resizes no window
+  of another program: the reader turns the pages in the viewer itself. The one
+  window it puts back is a viewer's that a version up to 1.0.1 left enlarged
+  (`restore_window`, once, at the start: `taslation.recovery`). A window of the
+  program is given the foreground without a key press (`give_foreground`).
 * What happens to windows comes from out-of-context WinEvent hooks
   (`WindowEvents`: which window comes to the front, the viewer's window renamed,
   moved or closed), so that the window need not capture the viewer just to
@@ -39,7 +38,7 @@ changes - no code was taken from it, it is a C# project):
   (`taslation.viewerparts`).
 
 What goes wrong is a `CaptureError` whose ``.message`` is a
-`taslation.messages.Message` (``viewer.gone``, ``viewer.covered``, ...).
+`taslation.messages.Message` (``viewer.gone``, ``viewer.no_area``, ...).
 """
 
 from __future__ import annotations
@@ -49,7 +48,6 @@ import ctypes
 import os
 import re
 import sys
-import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
@@ -57,7 +55,6 @@ import numpy as np
 from PIL import Image
 
 from ..messages import Message, as_message
-from ..pagekeys import KEY_CODES
 from . import wgc
 
 IS_WINDOWS = sys.platform == "win32"
@@ -75,12 +72,12 @@ class CaptureError(RuntimeError):
 
 
 class ViewerCovered(CaptureError):
-    """The viewer draws nothing (PrintWindow gives a blank frame) while a window of TASlation lies over its place on
-    the screen: a copy of the screen there would be a picture of TASlation itself, so none is taken. Its message is
-    always ``viewer.covered`` (a plain text given is not kept: the English of the code says the same)."""
+    """The viewer draws nothing (PrintWindow gives a blank frame) while a dialog of TASlation's own lies over its
+    place on the screen: a copy of the screen there would be a picture of TASlation itself, so none is taken. Nothing
+    is said of it (the last good frame stays: `ui.live`); its message is a ``viewer.error`` for the log."""
 
     def __init__(self, message: Message | str = ""):
-        super().__init__(message if isinstance(message, Message) else Message("viewer.covered"))
+        super().__init__(message or "the viewer draws nothing behind a dialog of TASlation")
 
 
 Rect = tuple[int, int, int, int]  # left, top, right, bottom in screen pixels (right and bottom exclusive)
@@ -307,35 +304,6 @@ if IS_WINDOWS:
     class BITMAPINFO(ctypes.Structure):
         _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
 
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [
-            ("wVk", wintypes.WORD),
-            ("wScan", wintypes.WORD),
-            ("dwFlags", wintypes.DWORD),
-            ("time", wintypes.DWORD),
-            ("dwExtraInfo", ULONG_PTR),
-        ]
-
-    class MOUSEINPUT(ctypes.Structure):
-        _fields_ = [
-            ("dx", wintypes.LONG),
-            ("dy", wintypes.LONG),
-            ("mouseData", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("time", wintypes.DWORD),
-            ("dwExtraInfo", ULONG_PTR),
-        ]
-
-    class HARDWAREINPUT(ctypes.Structure):
-        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD), ("wParamH", wintypes.WORD)]
-
-    class _INPUTUNION(ctypes.Union):
-        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("hi", HARDWAREINPUT)]
-
-    class INPUT(ctypes.Structure):
-        _anonymous_ = ("u",)
-        _fields_ = [("type", wintypes.DWORD), ("u", _INPUTUNION)]
-
     # --- prototypes (explicit so 64-bit handles are never truncated) ---
     user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
     user32.EnumWindows.restype = wintypes.BOOL
@@ -380,26 +348,15 @@ if IS_WINDOWS:
     user32.SetForegroundWindow.restype = wintypes.BOOL
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.ShowWindow.restype = wintypes.BOOL
-    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
-    user32.SendInput.restype = wintypes.UINT
-    user32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
-    user32.MapVirtualKeyW.restype = wintypes.UINT
     user32.GetShellWindow.restype = wintypes.HWND
     user32.EnumChildWindows.argtypes = [wintypes.HWND, WNDENUMPROC, wintypes.LPARAM]
     user32.EnumChildWindows.restype = wintypes.BOOL
-    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-    user32.PostMessageW.restype = wintypes.BOOL
-    user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.POINT)]
-    user32.ScreenToClient.restype = wintypes.BOOL
     user32.GetSystemMetrics.argtypes = [ctypes.c_int]
     user32.GetSystemMetrics.restype = ctypes.c_int
     user32.BringWindowToTop.argtypes = [wintypes.HWND]
     user32.BringWindowToTop.restype = wintypes.BOOL
     user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
     user32.AttachThreadInput.restype = wintypes.BOOL
-    user32.SendMessageTimeoutW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
-                                           wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
-    user32.SendMessageTimeoutW.restype = wintypes.LPARAM
     WINEVENTPROC = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND, wintypes.LONG,
                                       wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
     user32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.HMODULE, WINEVENTPROC,
@@ -478,12 +435,6 @@ if IS_WINDOWS:
     DWMWA_CLOAKED = 14
     DWMWA_EXTENDED_FRAME_BOUNDS = 9
     SW_RESTORE = 9
-    INPUT_KEYBOARD = 1
-    KEYEVENTF_EXTENDEDKEY = 0x0001
-    KEYEVENTF_KEYUP = 0x0002
-
-    VK_CODES = KEY_CODES  # the key names TASlation knows (`pagekeys.KEY_CODES`), also where no key can be pressed
-    EXTENDED_KEYS = {0x25, 0x26, 0x27, 0x28, 0x21, 0x22, 0x24, 0x23, 0x2D, 0x2E}
 
 
 def _require_windows() -> None:
@@ -890,128 +841,9 @@ def capture_window(hwnd: int, client_only: bool = True, allow_screen_fallback: b
     return Image.fromarray(arr)
 
 
-# --- driving a viewer that sits behind the TASlation window ------------------------
+# --- the windows' children, the foreground ----------------------------------------
 
-WM_KEYDOWN, WM_KEYUP = 0x0100, 0x0101
-WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202
-MK_LBUTTON = 0x0001
-INPUT_CHILD_CLASSES = ("Chrome_RenderWidgetHostHWND",)
 CAPTION_CHILD_CLASS = "InputNonClientPointerSource"  # WinUI's child over the title bar it draws (`caption_rows`)
-KEY_CHILD_CLASS = "InputSiteWindowClass"  # WinUI's child that takes the keyboard (`key_target`)
-
-
-def input_target(hwnd: int) -> int:
-    """The window that should receive posted input: Chromium's render widget child if there is one."""
-    _require_windows()
-    found: list[int] = []
-
-    @WNDENUMPROC
-    def callback(child, _lparam):  # type: ignore[no-untyped-def]
-        if _class_name(child) in INPUT_CHILD_CLASSES:
-            found.append(int(child))
-            return False
-        return True
-
-    user32.EnumChildWindows(hwnd, callback, 0)
-    return found[0] if found else hwnd
-
-
-def key_target(hwnd: int) -> int:
-    """The one window a posted key goes to: Chromium's render widget (`input_target`; a browser's window itself when it
-    has none); a WinUI window's input site (KEY_CHILD_CLASS: not shown, and the only child of the Windows image viewer
-    that takes keys at all times); for another viewer the deepest of its largest shown child windows, which is where
-    the keys of a window with children go; a window with no children itself. One window only, however many might take
-    the key: a key must not turn two pages."""
-    target = input_target(hwnd)
-    if target != hwnd or is_browser_class(_class_name(hwnd)):
-        return target
-    best, area = hwnd, 0
-
-    @WNDENUMPROC
-    def callback(child, _lparam):  # type: ignore[no-untyped-def]
-        nonlocal best, area
-        if _class_name(child) == KEY_CHILD_CLASS:
-            best = int(child)
-            return False
-        if user32.IsWindowVisible(child) and user32.IsWindowEnabled(child):
-            left, top, right, bottom = _window_rect(child)
-            if (right - left) * (bottom - top) >= max(area, 1):  # (a child comes after its parent)
-                best, area = int(child), (right - left) * (bottom - top)
-        return True
-
-    user32.EnumChildWindows(hwnd, callback, 0)
-    return best
-
-
-def post_key(hwnd: int, key: str = "Left") -> None:
-    """Post a key press to a window without giving it the foreground (`key_target`)."""
-    _require_windows()
-    vk = key_code(key)
-    target = key_target(hwnd)
-    scan = user32.MapVirtualKeyW(vk, 0)
-    ext = (1 << 24) if vk in EXTENDED_KEYS else 0
-    user32.PostMessageW(target, WM_KEYDOWN, vk, 1 | (scan << 16) | ext)
-    time.sleep(0.03)
-    user32.PostMessageW(target, WM_KEYUP, vk, 1 | (scan << 16) | ext | (1 << 30) | (1 << 31))
-
-
-def post_click(hwnd: int, x: int, y: int) -> None:
-    """Post a left click at client coordinates (x, y) of *hwnd* without giving it the foreground."""
-    _require_windows()
-    target = input_target(hwnd)
-    if target != hwnd:
-        pt = wintypes.POINT(x, y)
-        user32.ClientToScreen(hwnd, ctypes.byref(pt))
-        user32.ScreenToClient(target, ctypes.byref(pt))
-        x, y = pt.x, pt.y
-    lparam = (y & 0xFFFF) << 16 | (x & 0xFFFF)
-    user32.PostMessageW(target, WM_MOUSEMOVE, 0, lparam)
-    time.sleep(0.02)
-    user32.PostMessageW(target, WM_LBUTTONDOWN, MK_LBUTTON, lparam)
-    time.sleep(0.03)
-    user32.PostMessageW(target, WM_LBUTTONUP, 0, lparam)
-
-
-# --- page turning -------------------------------------------------------------
-
-def _send_key(vk: int, up: bool) -> None:
-    inp = INPUT()
-    inp.type = INPUT_KEYBOARD
-    inp.ki.wVk = vk
-    inp.ki.wScan = user32.MapVirtualKeyW(vk, 0)
-    flags = 0
-    if vk in EXTENDED_KEYS:
-        flags |= KEYEVENTF_EXTENDEDKEY
-    if up:
-        flags |= KEYEVENTF_KEYUP
-    inp.ki.dwFlags = flags
-    if user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
-        raise CaptureError(Message("viewer.api_failed", call="SendInput"))
-
-
-def key_code(name: str) -> int:
-    """The virtual-key code of the key named *name* (`pagekeys.KEY_CODES`, any case: Left, PageDown, F11, a letter
-    or a digit, ...)."""
-    key = name.strip().lower()
-    if key in VK_CODES:
-        return VK_CODES[key]
-    if len(key) == 1 and key.isascii() and key.isalnum():
-        return ord(key.upper())
-    raise CaptureError(Message("viewer.unknown_key", key=name))
-
-
-def press_key(hwnd: int, key: str = "Left") -> bool:
-    """Press *key* once in *hwnd*, which must have the foreground (`press_briefly` hands it over; nothing here forces it):
-    no module of the program calls it since 2.0.0 (see the module's docstring). False, and nothing pressed, for a
-    window not in front."""
-    _require_windows()
-    vk = key_code(key)
-    if user32.GetForegroundWindow() != hwnd:
-        return False
-    _send_key(vk, up=False)
-    time.sleep(0.03)
-    _send_key(vk, up=True)
-    return True
 
 
 def give_foreground(hwnd: int) -> bool:
@@ -1088,12 +920,7 @@ def move_window(hwnd: int, rect: Rect) -> bool:
                                     SWP_NOZORDER | SWP_NOACTIVATE))
 
 
-# --- the viewer's window made as large as its monitor allows ---------------------
-
-def smaller_than(rect: Rect, area: Rect) -> bool:
-    """Whether the window rectangle *rect* is narrower or lower than *area*."""
-    return rect[2] - rect[0] < area[2] - area[0] or rect[3] - rect[1] < area[3] - area[1]
-
+# --- a viewer's window a version up to 1.0.1 enlarged, put back -----------------
 
 def _size(rect: Rect) -> tuple[int, int]:
     return rect[2] - rect[0], rect[3] - rect[1]
@@ -1101,10 +928,9 @@ def _size(rect: Rect) -> tuple[int, int]:
 
 @dataclass
 class Enlarged:
-    """A viewer's window TASlation enlarged: its rectangle *before*, and the one it was *given* (what the window made
-    of the size it was offered, once it has settled: a window may clamp it). Kept in memory, and in the state
-    folder's ui.json until it is put back, so that a session that ended without closing the window has it put back
-    at the next start (`recovery.keep_enlarged`, `recovery.put_back_enlarged`)."""
+    """A viewer's window a version up to 1.0.1 enlarged: its rectangle *before*, and the one it was *given* (what the
+    window made of the size it was offered). Such a version kept it in the state folder's ui.json until it was put
+    back; one left there is put back once at the start (`recovery.put_back_enlarged`, `restore_window`)."""
 
     hwnd: int
     before: Rect
@@ -1116,23 +942,11 @@ class Enlarged:
         return _size(self.given) != _size(self.before)
 
     def has_its_size(self, rect: Rect) -> bool:
-        """Whether the window rectangle *rect* still has the size TASlation gave the window."""
+        """Whether the window rectangle *rect* still has the size it was given."""
         return _size(rect) == _size(self.given)
 
 
 FULL_SCREEN_SLACK = 2  # pixels a window may stop short of its monitor and still fill it
-KEY_SETTLE_S = 0.08  # seconds around a brief press, for the window to take the key
-FOREGROUND_WAIT_S = 0.3  # how long a window has to come to the front before a key pressed in it for a moment
-FOREGROUND_STEP_S = 0.03  # ... how often that is tried meanwhile
-# A browser reader that gets the foreground may draw itself anew: black for about 0.8 s, and a key in that time is lost
-# and the same page comes back (measured on a real one: 0.1 s to the black, 0.7 s of it; after it a key turns at once).
-# Only a browser that windows hiding it covered (`covered_by_opaque`) is waited for: it may have stopped drawing
-# (2026-11-03 survey), and the black likely came from that; under TASlation's see-through windows it never stops.
-REDRAW_STARTS_S = 1.0  # no black frame this long after the foreground came: nothing is being drawn anew (late at times)
-REDRAW_WAIT_S = 2.5  # the longest a key waits for it (a black page of the book is black all this time)
-REDRAW_STEP_S = 0.05  # how often the latest frame is looked at meanwhile
-KEY_READ_WAIT_S = 0.5  # the longest the foreground stays after a brief press for the window to come to its messages
-WM_NULL, SMTO_ABORTIFHUNG = 0x0000, 0x0002
 
 
 def is_fullscreen(hwnd: int) -> bool:
@@ -1150,59 +964,6 @@ def is_fullscreen(hwnd: int) -> bool:
     # a browser's full screen stops FULL_SCREEN_SLACK short of the monitor (Chrome: one row, for an auto-hidden taskbar)
     return (rect[0] - monitor[0] <= FULL_SCREEN_SLACK and rect[1] - monitor[1] <= FULL_SCREEN_SLACK
             and monitor[2] - rect[2] <= FULL_SCREEN_SLACK and monitor[3] - rect[3] <= FULL_SCREEN_SLACK)
-
-
-def _reach_foreground(hwnd: int) -> bool:
-    """Whether the window *hwnd* has the foreground, as Windows says after `give_foreground`, asked again for up to
-    FOREGROUND_WAIT_S: Windows may refuse it or be late, and no ALT tap may force it here (a browser takes a lone ALT
-    for its menu, which would swallow the key)."""
-    deadline = time.monotonic() + FOREGROUND_WAIT_S
-    while True:
-        give_foreground(hwnd)
-        if user32.GetForegroundWindow() == hwnd:
-            return True
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(FOREGROUND_STEP_S)
-
-
-def _redrawn_after_focus(hwnd: int) -> None:
-    """Back when the browser window *hwnd*, which has just got the foreground, is ready for a key: it has shown no
-    black frame for `REDRAW_STARTS_S`, or the black one it showed has gone (`REDRAW_WAIT_S` at most). Other windows do
-    not draw themselves anew and go on at once."""
-    if window_class(hwnd) not in BROWSER_CLASSES:
-        return
-    start = time.monotonic()
-    seen = False
-    while True:
-        try:
-            black = is_black(capture_window(hwnd, allow_screen_fallback=False))
-        except CaptureError:
-            return
-        spent = time.monotonic() - start
-        if seen and not black:
-            return
-        seen = seen or black
-        if spent >= REDRAW_WAIT_S or (not seen and spent >= REDRAW_STARTS_S):
-            return
-        time.sleep(REDRAW_STEP_S)
-
-
-def _keys_read(hwnd: int) -> None:
-    """Back once the thread of the window *hwnd*, which keys were just pressed in, has come to its messages twice (a
-    WM_NULL sent and answered each time, `SendMessageTimeoutW`): a thread answers only when it comes to read its
-    messages, so the first answer says it is no longer busy and goes on to the keys waiting in its queue, the second
-    that it has come back from them. KEY_READ_WAIT_S at most for both, no wait for a window that does not answer
-    (SMTO_ABORTIFHUNG). Without it the foreground went back KEY_SETTLE_S after the keys whether the window had read
-    them or not: a window busy a moment longer (a browser drawing itself on getting the foreground, a computer at work
-    on a page) would read them once it had lost the foreground, when they may reach nothing."""
-    deadline = time.monotonic() + KEY_READ_WAIT_S
-    answer = ctypes.c_size_t()
-    for _ in range(2):
-        left = int((deadline - time.monotonic()) * 1000)
-        if left <= 0 or not user32.SendMessageTimeoutW(hwnd, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, left,
-                                                        ctypes.byref(answer)):
-            return
 
 
 LWA_COLORKEY, LWA_ALPHA = 0x1, 0x2
@@ -1258,58 +1019,6 @@ def covered_by_opaque(hwnd: int) -> bool:
     return False
 
 
-def press_briefly(hwnd: int, key: str | Sequence[str]) -> bool:
-    """*key* - or each of a sequence of keys, in order, KEY_SETTLE_S apart - pressed for real in the window *hwnd*,
-    which has the foreground for as short as can be (one handover for all of them): no key goes before the foreground
-    is seen to have reached it (`_reach_foreground`) and - only for a browser that windows hiding it covered
-    (`covered_by_opaque`: it may have stopped drawing, and draws itself anew once in front) - it has drawn itself
-    anew (`_redrawn_after_focus`); a browser under TASlation's own see-through window goes on at once. The foreground
-    is handed back to the window that had it with `give_foreground`, so with no ALT tap, once the window has read the
-    keys (`_keys_read`). The keys are the person's, at the person's pace. Returns whether the keys were delivered:
-    False means nothing was pressed."""
-    keys = [key] if isinstance(key, str) else list(key)
-    if not keys:
-        return False
-    front = int(user32.GetForegroundWindow() or 0)
-    redraw = front != hwnd and window_class(hwnd) in BROWSER_CLASSES and covered_by_opaque(hwnd)
-    try:
-        if not _reach_foreground(hwnd):
-            return False
-        if redraw:
-            _redrawn_after_focus(hwnd)
-        time.sleep(KEY_SETTLE_S)  # a window just activated can lose a key sent at once
-        pressed = False
-        for n, each in enumerate(keys):
-            if n:
-                time.sleep(KEY_SETTLE_S)
-            if not press_key(hwnd, each):
-                break
-            pressed = True
-        if pressed and front and front != hwnd:  # (the foreground goes back: not before the window has read them)
-            _keys_read(hwnd)
-        time.sleep(KEY_SETTLE_S)
-        return pressed
-    finally:
-        if front and front != hwnd:
-            give_foreground(front)
-
-
-def enlarge_window(hwnd: int) -> Enlarged | None:
-    """The window *hwnd* put on the work area of its monitor (`move_window`: neither raised nor activated, no key
-    pressed, so the foreground and the order of the windows stay as they are), and what it was before. None, and
-    nothing touched, for a window that is maximised, as large already, minimised or hidden."""
-    if not window_shown(hwnd) or user32.IsZoomed(hwnd):
-        return None
-    area = work_area(hwnd)
-    try:
-        before = window_rect(hwnd)
-    except CaptureError:
-        return None
-    if area is None or not smaller_than(before, area) or not move_window(hwnd, area):
-        return None
-    return Enlarged(hwnd, before, area)
-
-
 SW_SHOWNOACTIVATE = 4  # shown in its most recent size and position, not activated
 
 
@@ -1339,7 +1048,7 @@ def unminimise_window(hwnd: int, below: int | None = None) -> bool:
 
 
 def restore_window(enlarged: Enlarged) -> bool:
-    """The enlarged window back on its rectangle before, only while it still has the size TASlation gave it (the
+    """The enlarged window back on its rectangle before, only while it still has the size it was given (the
     reader may have resized it since, or minimised, maximised or closed it). No key is pressed for it. Returns whether
     it was put back."""
     hwnd = enlarged.hwnd
