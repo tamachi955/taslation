@@ -96,6 +96,8 @@ READING_TIP = ("What was read here. Correct it where it was misread: Ask again t
                "does this page translated again in this session. Your reading is never saved.")
 NOT_READ = {"none": "No Japanese was read in this region.",
             "no-ocr": "The reading model is not loaded yet. Try again in a moment."}
+# (see-through mode) the editor's Show original, held: the viewer's original under the region
+SHOW_ORIGINAL_TIP = "Hold to see the original under this region."
 # the editor's way to the region before (-1) or after (+1) it in reading order, and its key
 STEP_WORDS = {-1: "Previous", 1: "Next"}  # named with their keys (`shortcuts.with_keys`: "Previous (Alt+↑)")
 STEP_ACTIONS = {-1: "editor_previous", 1: "editor_next"}
@@ -470,7 +472,9 @@ class EditBubbleDialog(tk.Toplevel):
     *place* have no way on) hand *on_step*(-1 or 1, what is to be saved or None when nothing changed, the editor's
     place on the screen) the way to
     the region before or after this one; the editor closes without *on_cancel* (the window ends its preview). *at*:
-    where the editor opens on the screen (the place the one before it had), else over *master*. *note*: a line the
+    where the editor opens on the screen (the place the one before it had, or a function of its width and height that
+    gives it), else over *master*. *on_original*: Show original under the picture, held, calls it with True (the
+    window shows the original under the region) and let go with False. *note*: a line the
     window has to say once (the spellcheck that cannot run), under the header. *hint_support*: how far the translation
     model in use follows the hint for the model (`translate.base.hint_support`); when only sometimes, a line under the
     hint says so (`HINT_SOMETIMES`); for a model that follows it, nothing is said.
@@ -492,9 +496,11 @@ class EditBubbleDialog(tk.Toplevel):
                  crop: Image.Image | None = None,
                  on_read: Callable[[Callable[[str, str], None]], bool] | None = None,
                  on_step: Callable[[int, dict[str, Any] | None, tuple[int, int]], None] | None = None,
-                 at: tuple[int, int] | None = None, note: str = "", clip: Any = None, font_memory: Any = None,
-                 hint_support: str = "follows", sizes: bool = True):
+                 at: Any = None, note: str = "", clip: Any = None, font_memory: Any = None,
+                 hint_support: str = "follows", sizes: bool = True,
+                 on_original: Callable[[bool], None] | None = None):
         super().__init__(master)
+        self.on_original = on_original
         self.title(_("Edit region"))
         self.transient(master)
         self.region = region
@@ -640,6 +646,9 @@ class EditBubbleDialog(tk.Toplevel):
         self.text.focus_set()
         self.update_idletasks()
         self.bar.relayout(max(self.bar.winfo_width(), frm.winfo_reqwidth() - 20))
+        if callable(at):  # (its place from its size: beside a region over the viewer, see-through mode)
+            self.update_idletasks()
+            at = at(self.winfo_reqwidth(), self.winfo_reqheight())
         if at is not None:
             self.geometry(f"+{int(at[0])}+{int(at[1])}")
         else:
@@ -660,6 +669,14 @@ class EditBubbleDialog(tk.Toplevel):
             self.crop_label = ttk.Label(box, image=self._crop_photo, relief="solid", borderwidth=1)
             self.crop_label.pack(anchor="w")
             tip(_("The region as it is on the page."), self.crop_label)
+        self.original_btn: ttk.Button | None = None
+        if self.on_original is not None:  # held, the page shows the original under the region (see-through mode)
+            self.original_btn = ttk.Button(box, text=_("Show original"))
+            self.original_btn.pack(anchor="w", pady=(4, 0))
+            self.original_btn.bind("<ButtonPress-1>", lambda _e: self._show_original(True))
+            self.original_btn.bind("<ButtonRelease-1>", lambda _e: self._show_original(False))
+            self.original_btn.bind("<Leave>", lambda _e: self._show_original(False))
+            tip(_(SHOW_ORIGINAL_TIP), self.original_btn)
         # "Read as:" and the reading, which the person may correct (`ReadingField`); in memory only
         self.source_label = ttk.Frame(box)
         ttk.Label(self.source_label, text=_("Read as: ").strip()).pack(side="left", anchor="n", padx=(0, 4))
@@ -673,6 +690,17 @@ class EditBubbleDialog(tk.Toplevel):
         tip(_("Read the Japanese of this region from the page again, to see it here and to ask the model again. Nothing of it is kept."),
             self.read_btn)
         self._show_source()
+
+    def _show_original(self, shown: bool) -> None:
+        """Show original held (*shown*) or let go: the window shows the original under the region, or its lettering
+        again."""
+        if self.on_original is None or getattr(self, "_original_shown", False) == shown:
+            return
+        self._original_shown = shown
+        try:
+            self.on_original(shown)
+        except tk.TclError:
+            pass
 
     def _region_reading(self) -> str:
         return str(getattr(self.region, "source_text", "") or "")
@@ -1304,6 +1332,7 @@ class EditBubbleDialog(tk.Toplevel):
     def destroy(self) -> None:
         """The editor closes: without Save (or a step to the region before or after it, whose preview the window
         ends), the page shows the region as it was (*on_cancel*)."""
+        self._show_original(False)
         for job in ("_flash_job", "_preview_job"):
             if getattr(self, job, None) is not None:
                 try:

@@ -279,6 +279,7 @@ class TranslatorMixin:
         changed = False
         editor = getattr(self, "_editor", None)  # an editor open by now (Next): the question over it, its grab back after
         parent = editor if editor is not None and editor.winfo_exists() else self
+        seethrough.asked(self)  # (see-through mode: the question the reader's Save brought takes the keys)
         for old, new in changes:
             item = sheet_item_for(merged, old) if merged is not None else None
             if item is None:
@@ -432,6 +433,7 @@ class TranslatorMixin:
             return
         box_parent = parent if parent is not None and parent.winfo_exists() else self
         changes = shown_pairs(pairs)
+        seethrough.asked(self)  # (see-through mode: the question the reader's change of the sheet brought takes the keys)
         if not elsewhere:
             go, series = boxes.ask(box_parent, _(SHEET_OFFER).format(n=here, changes=changes),
                                    _(SHEET_APPLY).format(n=here), _(SHEET_LEAVE)), False
@@ -721,10 +723,11 @@ class TranslatorMixin:
         self._apply_role(start_role(int(pages) > 0), chosen=False)
 
     def _apply_role(self, role: str, chosen: bool) -> None:
-        """The role a book opens in (*chosen*: the reader's for it). In see-through mode the Reader role always: the
-        Translator role's page and regions are TASlation's own window, which is not on the screen."""
-        if getattr(self, "_see_hidden", False):
-            role = "reader"
+        """The role a book opens in (*chosen*: the reader's for it). In see-through mode, where the Translator role is
+        the left pane's Edit (`see_edit`), only the reader's own choice for the book: Edit stays as the start had it
+        otherwise (off, unless the start asked for the Translator role)."""
+        if getattr(self, "_see_hidden", False) and not chosen:
+            return
         if self.role_var.get() == role:
             return
         self.role_var.set(role)
@@ -749,6 +752,13 @@ class TranslatorMixin:
         self._redisplay()
         if getattr(self, "reading", False):
             self._reading_role()
+            if self.role_var.get() == "translator":
+                self._complete_on_show()
+            return
+        if getattr(self, "_see_hidden", False):  # (see-through mode: the left pane's Edit)
+            from .see_edit import EDIT_OFF, EDIT_ON
+
+            self.say(EDIT_ON if self.role_var.get() == "translator" else EDIT_OFF)
             if self.role_var.get() == "translator":
                 self._complete_on_show()
             return
@@ -1238,7 +1248,7 @@ class TranslatorMixin:
         return "\n".join(n for n in (_(REUSED_NOTE) if getattr(region, "reused", False) else "",
                                      self._spelling_note()) if n)
 
-    def _open_editor(self, region: Any, result: Any = None, at: tuple[int, int] | None = None) -> None:
+    def _open_editor(self, region: Any, result: Any = None, at: Any = None) -> None:
         """The region editor, its header naming the bubble's place on the page and its picture the region as the
         capture has it (`editor_crop`, in memory); the model can be asked from it when a translator is there, the
         Japanese read again where the page came from the cache (`_read_source`), and Previous and Next go through the
@@ -1248,8 +1258,12 @@ class TranslatorMixin:
         region of a page gone by now (a review list left open) is refused. *at*: where on the screen it opens. How far
         the translation model in use follows a region's hint (`translate.base.hint_support`: PLaMo only sometimes) the
         editor says under it. A translation reused from an identical line before it (`linememo`) is said to be one
-        (`REUSED_NOTE`, under the header)."""
+        (`REUSED_NOTE`, under the header). In see-through mode it goes beside the region on the viewer
+        (`see_edit.editor_place`), Previous and Next's ones too, and its Show original, held, shows the viewer's
+        original under the region (`see_edit.set_bare`); one the reader asked for takes the keys."""
         result = result if result is not None else self.last_result
+        if seethrough.hidden(self):
+            seethrough.asked(self)
         pipeline = self.pipeline
         if not holds(result, region):
             self.say(NO_REGION)
@@ -1266,6 +1280,12 @@ class TranslatorMixin:
             except Exception:  # noqa: BLE001 - the editor opens all the same
                 pass
         fonts_dir = self.settings.fonts_dir
+        original: Callable[[bool], None] | None = None
+        if seethrough.hidden(self):  # (see-through mode: beside the region on the viewer, its original shown when held)
+            from . import see_edit
+
+            at = see_edit.editor_place(self, region) or at
+            original = lambda shown, r=region: see_edit.set_bare(self, r, shown)  # noqa: E731
         self._editor = EditBubbleDialog(self, region, self._speaker_names(),
                                         on_save=lambda data, r=region: (self._end_preview(preview, keep=holds(result, r)),
                                                                         self._edit_region(r, data, result)),
@@ -1286,7 +1306,8 @@ class TranslatorMixin:
                                         clip=self.format_clip() if hasattr(self, "format_clip") else None,
                                         font_memory=FontMemory(self.settings.state_dir),
                                         hint_support=hint_support(pipeline.translator) if can_ask else HINT_FOLLOWS,
-                                        sizes=bool(getattr(self.settings, "size_emphasis", True)))
+                                        sizes=bool(getattr(self.settings, "size_emphasis", True)),
+                                        on_original=original)
 
     def _step_editor(self, region: Any, result: Any, preview: LivePreview | None, delta: int,
                      data: dict[str, Any] | None, at: tuple[int, int]) -> None:

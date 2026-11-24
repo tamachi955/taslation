@@ -356,7 +356,18 @@ rows' languages.
   for its first S seconds (the viewer chooser comes by itself after 2.5 s and goes once the window has found the
   stand-in: `run.no_viewer`), and `--book-asked` starts it with a name that names no book, so that Auto's first page
   asks it in the start dialog, which the driver answers 1.5 s after it is on the screen through the dialog's own
-  object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground); each time the
+  object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground). `--see-edit`
+  keeps the book's role as the Translator's, so that the left pane's Edit is on from the start (`ui/see_edit.py`:
+  the page's regions take the mouse on the overlay, beside them every click is the viewer's), and from some 14 s in
+  measures it in place of the patch under the pointer (`edit`: messages POSTED to the lettering's own window, no
+  input of the system's, its look at the physical button left out for them): on a region of the page on show,
+  whether the window takes the mouse, which window `WindowFromPoint` gives on the box (the see-through window) and
+  beside every box (the stand-in), the pointer on it (its patches stay, outlined; the right pane holds the bubble's
+  block), a click (the ms until the region editor is on the screen, beside the box or over it, on the box's monitor,
+  whether it took the keys and holds that region; a WM_CLOSE posted to it, and the ms until the stand-in is in front
+  again), a drag of the box by 24 x 12 px (handed over as a move, outlined at its new place meanwhile, the ms until
+  the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize);
+  each time the
   bars went from a page read under
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
   read and asked for again); the stand-in's frames a second

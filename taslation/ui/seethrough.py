@@ -1,6 +1,7 @@
-"""See-through mode on the Tk side (a prototype behind ``Settings.see_through``, off by default; the Reader role, the
-viewer's window or its full screen): TASlation's lettering lies over the viewer's own window (`capture.seethrough`),
-and the viewer takes every click and key itself.
+"""See-through mode on the Tk side (a prototype behind ``Settings.see_through``, off by default; the viewer's window or
+its full screen): TASlation's lettering lies over the viewer's own window (`capture.seethrough`), and the viewer takes
+every click and key itself - but, with the left pane's Edit on (`see_edit`: the Translator role), the clicks on the
+page's regions.
 
 * `start` makes the see-through window at the window's start when the setting is on (and asks the capture for frames
   up to every `wgc.FAST_UPDATE_MS`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
@@ -28,7 +29,8 @@ and the viewer takes every click and key itself.
   asked of the translator anew; dim until a page was lettered and while the window's Translate is), Auto, the target
   language (an arrow each side; taken once no
   arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
-  file: ``see_through_indicators``), Set area..., Settings..., Menu (`see_menu`: what the window's menus and toolbar
+  file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
+  `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the window's menus and toolbar
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
   filling in is (lines lettered of the lines read), the status line, the backlog, the pages that went by too fast and
   those updated since they were seen (the indicator's own lines), where the translator runs - the window's words with
@@ -64,7 +66,7 @@ and the viewer takes every click and key itself.
   (`see_menu.show_banner`).
 
 Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, the
-menu or the taskbar button, or a dialog of TASlation's own, moves the foreground."""
+menu, the taskbar button or a region in Edit, or a dialog of TASlation's own, moves the foreground."""
 
 from __future__ import annotations
 
@@ -546,17 +548,13 @@ class HiddenWindowMixin:
 
 
 def without_the_window(app: Any) -> None:
-    """At the start of see-through mode with TASlation's own window hidden: what needs that window is not used, each
-    said once in the log - the full screen asked for at the start (``gui --full-screen``: the viewer's own full screen
-    is the one here), and the Translator role (its page and its regions are the window's canvas: the Reader role
-    always, `start_role` and a role kept for a book too, `TranslatorMixin._apply_role`; ``gui --role translator``
-    and ``role = "translator"`` in the settings file give the Reader role)."""
+    """At the start of see-through mode with TASlation's own window hidden: what needs that window is not used, said
+    once in the log - the full screen asked for at the start (``gui --full-screen``: the viewer's own full screen is
+    the one here). (The Translator role is the left pane's Edit here: `see_edit`.)"""
     if getattr(app, "_reading_at_start", False):
         app._reading_at_start = False
         log.info("see-through mode: TASlation's own full screen is not used (the full screen asked for at the start "
                  "left out)")
-    if str(getattr(getattr(app, "settings", None), "role", "reader")) == "translator":
-        log.info("see-through mode: the Reader role (the Translator role needs TASlation's own window)")
 
 
 def start(app: Any) -> bool:
@@ -651,6 +649,10 @@ def tick(app: Any) -> None:
     app._see_dpi = window.viewer_dpi(hwnd)
     over.set_hover_delay(hover_delay(app))
     present(app)
+    if hidden(app):
+        from . import see_edit
+
+        see_edit.tick(app, over)
     panes_tick(app)
     if not on(app) or not hidden(app):  # (Quit on the left pane: the window has gone)
         return
@@ -741,11 +743,15 @@ def left_rows(app: Any) -> list[pn.Row]:
     over = getattr(app, "_see_through", None)
     again = {"square": "again", "square_enabled": again_enabled(app)}
     first = pn.Row("stop", _("Stop"), **again) if _stoppable(app) else pn.Row("translate", _("Translate"), **again)
+    from . import see_edit
+
+    edit = [pn.Row("edit", _(see_edit.EDIT), "toggle", on=see_edit.on(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
             pn.Row("language", _language_shown(app), "choice"),
             pn.Row("lettering", _("Lettering"), "toggle", on=bool(over is None or over.on)),
             pn.Row("indicators", _("Indicators"), "toggle", on=indicators_on(app)),
+            *edit,
             pn.Row("area", _("Set area...")),
             pn.Row("settings", _("Settings...")),
             pn.Row("menu", _("Menu")),
@@ -982,6 +988,12 @@ def _flip_auto(app: Any) -> None:
         var.set(not bool(_get(var, False)))
 
 
+def _edit(app: Any) -> None:
+    from . import see_edit
+
+    see_edit.toggle(app)
+
+
 def _again(app: Any) -> None:
     """The circular arrow: the page on show translated again as the window's Translate again does it
     (`TranslatorMixin.retranslate_page`, in the Reader role too: its lines asked of the translator anew, and what that
@@ -1014,8 +1026,17 @@ def bubble_tick(app: Any, over: Any) -> None:
         app._see_bubble = None
         return
     now = time.monotonic()
-    hovered = over.hovered()
     held = getattr(app, "_see_bubble", None)
+    from . import see_edit
+
+    edited = see_edit._editor_region(app) if see_edit.on(app) else None
+    result = getattr(app, "last_result", None)
+    if edited is not None and result is not None and result.original is not None:  # (Edit: the region in the editor,
+        box = tuple(int(v) for v in edited.bbox)  # whatever the pointer is over meanwhile)
+        since = held[2] if held is not None and (held[0], held[1]) == (id(result.original), box) else now
+        app._see_bubble = (id(result.original), box, since, now)
+        return
+    hovered = over.hovered()
     if hovered is not None and (held is None or (held[0], held[1]) != tuple(hovered)):
         app._see_bubble = (hovered[0], tuple(hovered[1]), now, now)
         return
@@ -1203,6 +1224,7 @@ PANE_ACTIONS: dict[str, Any] = {
     "area": _dialog("set_area"),
     "settings": _dialog("open_settings"),
     "menu": _menu,
+    "edit": lambda app: _edit(app),  # (Edit: the Translator role on the overlay, `see_edit`)
     "quit": lambda app: app._on_close(),
     "bubble_source": _copy_source,  # (the right pane: the bubble last under the pointer)
     "bubble_translation": _copy_translation,

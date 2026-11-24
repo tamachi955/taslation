@@ -12,7 +12,9 @@ click, no message; the foreground is only read):
   the banner's dialog came and went;
 * the side panes once a second (`_pane_watch`), one click on the left pane's lettering switch posted to the pane
   (`_click_lettering`), and the patch under the pointer (`_hover_measure`: the pointer the see-through window reads is
-  this tool's for the whole run, `install`; the real pointer is never moved);
+  this tool's for the whole run, `install`; the real pointer is never moved) - or, with *edit* (the left pane's Edit
+  on), Edit on the overlay instead (`_edit_measure`: a click and a drag on a region, posted to the lettering's own
+  window);
 * every HIT_EVERY_S, which window `WindowFromPoint` gives at the middle of each patch shown, at the page's middle and
   on the ground beside it: the stand-in's, never the see-through window;
 * the process's CPU time and working set, every CPU_EVERY_S, with whether a page job ran, and the CPU time of the
@@ -71,6 +73,12 @@ HOVER_AFTER_S = 14.0  # the pointer the see-through window reads (the tool's, `i
 HOVER_ROUNDS = 5
 HOVER_FOR_S = 60.0  # ... for so long at the most (a round in which another page came is begun again)
 WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0201, 0x0202, 0x0001
+WM_MOUSEMOVE, WM_CLOSE = 0x0200, 0x0010
+GWL_EXSTYLE, WS_EX_TRANSPARENT = -20, 0x00000020
+EDIT_FOR_S = 60.0  # (with *edit*) a region to measure Edit on is waited for so long at the most
+EDIT_DRAG = (24, 12)  # px (at 100 %) the region's box is dragged by
+EDIT_MIN_BOX = 24  # px: the least side of a box the measure takes
+EDITOR_TITLE = "Edit region"  # (the region editor's title, the window's language being English in a run)
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -399,8 +407,10 @@ class SeeWatch:
 
     def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
                  front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None,
-                 viewer_pids: Callable[[], set[int]] | None = None) -> None:
+                 viewer_pids: Callable[[], set[int]] | None = None, edit: bool = False) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
+        self.edit = bool(edit)  # (the left pane's Edit on: `_edit_measure` in place of `_hover_measure`)
+        self.edit_result: dict[str, Any] = {}
         self.viewer_pids = viewer_pids  # (the stand-in's processes: their CPU and GPU memory, `cost`)
         self.viewer_cpu: list[tuple[float, bool, dict[int, float]]] = []  # (ms, a job ran, pid -> CPU seconds)
         self.memory: list[tuple[float, float]] = []  # (ms, this process's working set in MiB)
@@ -596,7 +606,8 @@ class SeeWatch:
                 except Exception as e:  # noqa: BLE001 - noted
                     self.pane_click = {"error": type(e).__name__}
             if self.hover_thread is None and now - self.started >= HOVER_AFTER_S:
-                self.hover_thread = threading.Thread(target=self._hover_safe, name="see-hover", daemon=True)
+                self.hover_thread = threading.Thread(target=self._edit_safe if self.edit else self._hover_safe,
+                                                     name="see-hover", daemon=True)
                 self.hover_thread.start()
             if self.truth and now >= next_copy:
                 try:
@@ -908,6 +919,228 @@ class SeeWatch:
                       "front_same": int(_user32.GetForegroundWindow() or 0) == front,
                       "other_windows_in_front_meanwhile": sorted(others_in_front)}
 
+    def _edit_safe(self) -> None:
+        try:
+            self._edit_measure()
+        except Exception as e:  # noqa: BLE001 - noted
+            self.fake_point = None
+            self.edit_result = {**self.edit_result, "error": type(e).__name__}
+
+    def _editor_window(self) -> int:
+        """The region editor on the screen: a shown top-level window of this process titled EDITOR_TITLE; 0: none."""
+        found: list[int] = []
+
+        def each(hwnd, _l):  # type: ignore[no-untyped-def]
+            if window_pid(hwnd) != self.own_pid or not _user32.IsWindowVisible(hwnd):
+                return True
+            title = ctypes.create_unicode_buffer(64)
+            _user32.GetWindowTextW(hwnd, title, 64)
+            if title.value == EDITOR_TITLE:
+                found.append(int(hwnd))
+                return False
+            return True
+
+        _user32.EnumWindows(ENUMPROC(each), 0)
+        return found[0] if found else 0
+
+    def _edit_measure(self) -> None:
+        """(a thread of its own, from HOVER_AFTER_S on, with *edit*: the left pane's Edit on) Edit on the overlay, by
+        messages POSTED to the lettering's own window (no input of the system's, nothing to any other window; the
+        pointer the window reads is this tool's, and its look at the physical button - which a posted press does not
+        hold - is left out, `SeeThrough._edit_held`): on a region of the page on show, its box at least EDIT_MIN_BOX px
+        a side, its middle in no other box nor on a pane: whether the window takes the mouse (no WS_EX_TRANSPARENT),
+        which window `WindowFromPoint` gives on the box (the overlay) and beside every box (the stand-in); the pointer
+        on it (its patches stay, outlined, and the right pane holds the bubble's block); a click: how long until the
+        region editor is on the screen, whether it lies over the box, on a monitor, the box's own, whether it took the
+        foreground (it takes the keys) and the region it holds (the page done: its set handed over as final); a
+        WM_CLOSE posted to it: how long until it is gone and
+        the stand-in is in front again; then a drag of the box by EDIT_DRAG px: the press handed over, the box
+        outlined at its new place meanwhile, how long until the change is stored and the page's marks have the box
+        there, and the fewest patches shown meanwhile against those before; then a drag of its bottom right corner by
+        as much: handed over as a resize, and how long until the page's marks have the box at its new size."""
+        from taslation import seethrough as st
+        from taslation.capture import seethrough as window
+
+        front = int(_user32.GetForegroundWindow() or 0)
+        fronts: set[str] = set()
+        out: dict[str, Any] = {"front_before": self._who(front)}
+        self.edit_result = out
+
+        def wait(until: Callable[[], bool], limit: float) -> float | None:
+            t = time.monotonic()
+            while time.monotonic() - t < limit and not self.stop.is_set():
+                fronts.add(self._who(int(_user32.GetForegroundWindow() or 0)))
+                if until():
+                    return round((time.monotonic() - t) * 1000, 1)
+                time.sleep(0.002)
+            return None
+
+        def pick() -> tuple[Any, ...] | None:
+            over = self.over()
+            if over is None or not over._edit_takes or over._marks_live is None or over._press is not None:
+                return None
+            look, shown, marks = over._last_look, over.shown(), over._marks_live
+            if look is None or shown is None or marks.locked or getattr(self.app, "busy", False):
+                return None
+            if not any(s.serial == shown[0] and s.final for s in list(over._store.sets)):
+                return None  # (a page done, not one filling in: its patches stay the same set)
+            origin, size = look[5], look[6]
+            panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+            dx, dy = st.scaled(EDIT_DRAG[0], over._dpi), st.scaled(EDIT_DRAG[1], over._dpi)
+            for i, b in enumerate(marks.boxes):
+                if i in over._left_out or b[2] - b[0] < EDIT_MIN_BOX or b[3] - b[1] < EDIT_MIN_BOX:
+                    continue
+                cx, cy = (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
+                if any(j != i and o[0] <= cx < o[2] and o[1] <= cy < o[3] for j, o in enumerate(marks.boxes)):
+                    continue
+                if b[2] + dx > size[0] or b[3] + dy > size[1]:
+                    continue
+                sx, sy = origin[0] + cx, origin[1] + cy
+                if any(p[0] <= sx < p[2] and p[1] <= sy < p[3] for p in panes):
+                    continue
+                return over, marks, i, b, (cx, cy), origin, size, (dx, dy)
+            return None
+
+        def lp(x: int, y: int) -> int:
+            return (y & 0xFFFF) << 16 | (x & 0xFFFF)
+
+        def who_at(x: int, y: int) -> str:
+            return self._who(int(_user32.GetAncestor(_user32.WindowFromPoint(wintypes.POINT(x, y)), GA_ROOT) or 0))
+
+        got: list[tuple[Any, ...]] = []
+
+        def picked() -> bool:
+            found = pick()
+            if found is not None:
+                got.append(found)
+            return found is not None
+
+        out["region_wait_ms"] = wait(picked, EDIT_FOR_S)
+        if not got:
+            out["region"] = None
+            return
+        over, marks, index, box, (cx, cy), origin, size, (dx, dy) = got[-1]
+        over._edit_held = lambda: None  # (a posted press holds no button: not given up for that)
+        out["region"] = {"boxes": len(marks.boxes), "size": [box[2] - box[0], box[3] - box[1]]}
+        style = int(window._user32.GetWindowLongW(over.hwnd, GWL_EXSTYLE)) & 0xFFFFFFFF
+        out["takes_the_mouse"] = not style & WS_EX_TRANSPARENT
+        out["hit_box"] = who_at(origin[0] + cx, origin[1] + cy)
+        beside = next(((x, y) for x, y in ((12, size[1] * 93 // 100), (size[0] - 12, size[1] * 93 // 100),
+                                           (size[0] // 2, size[1] - 6))
+                       if not any(b[0] - 8 <= x < b[2] + 8 and b[1] - 8 <= y < b[3] + 8 for b in marks.boxes)), None)
+        out["hit_beside"] = who_at(origin[0] + beside[0], origin[1] + beside[1]) if beside is not None else None
+        # the pointer on the box: its patches stay (none gives way in Edit), the box outlined, the bubble's block
+        first = over.shown()
+        before = tuple(first[1]) if first is not None else ()
+        self.fake_point = (origin[0] + cx, origin[1] + cy)
+        time.sleep(0.3 + float(getattr(over, "_hover_delay", 0.0)))
+        during = over.shown()
+        state = over._shown
+        same = first is not None and during is not None and during[0] == first[0]  # (the same set: comparable)
+        out["hover"] = {"patches_before": len(before), "patches_on_it": None if during is None else len(during[1]),
+                        "kept": (set(before) <= set(during[1])) if same else "another set meanwhile",
+                        "outlined": state is not None and len(state) > 4 and state[4][1] == index,
+                        "bubble_block_ms": wait(lambda: getattr(self.app, "_see_right_used", "") == "bubble", 1.0)}
+        # a click: the region editor beside the box, taking the keys
+        t = time.monotonic()
+        _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
+        _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx, cy))
+        shown_ms = wait(lambda: self._editor_window() != 0, 6.0)
+        editor = self._editor_window()
+        click: dict[str, Any] = {"editor_ms": shown_ms}
+        out["click"] = click
+        if editor:
+            focus_ms = wait(lambda: int(_user32.GetForegroundWindow() or 0) == editor, 1.5)
+            facts = window.window_facts(editor) or {}
+            rect = facts.get("rect") or (0, 0, 0, 0)
+            screen_box = (origin[0] + box[0], origin[1] + box[1], origin[0] + box[2], origin[1] + box[3])
+            overlap = max(0, min(rect[2], screen_box[2]) - max(rect[0], screen_box[0])) * max(
+                0, min(rect[3], screen_box[3]) - max(rect[1], screen_box[1]))
+
+            def monitor(r: tuple[int, ...]) -> int:
+                rc = wintypes.RECT(*r)
+                return int(window._user32.MonitorFromRect(ctypes.byref(rc), 2) or 0)  # (MONITOR_DEFAULTTONEAREST)
+
+            held = getattr(getattr(self.app, "_editor", None), "region", None)
+            click.update(on_monitor=facts.get("on_monitor"), over_the_box_px=overlap,
+                         side="right" if rect[0] >= screen_box[2] else "left" if rect[2] <= screen_box[0] else "over",
+                         same_monitor=monitor(rect) == monitor(screen_box), took_the_keys_ms=focus_ms,
+                         holds_the_region=held is not None and tuple(int(v) for v in held.bbox) == tuple(box),
+                         marks_held=wait(lambda: getattr(over._marks_live, "held", None) == index, 1.0))
+            t = time.monotonic()
+            _user32.PostMessageW(editor, WM_CLOSE, 0, 0)
+            click["closed_ms"] = wait(lambda: not _user32.IsWindowVisible(editor), 3.0)
+            click["viewer_in_front_ms"] = wait(lambda: int(_user32.GetForegroundWindow() or 0) == self.hwnd, 3.0)
+            click["since_close_ms"] = round((time.monotonic() - t) * 1000, 1)
+        self.fake_point = None
+        # a drag of the box: stored as a move, outlined at its new place meanwhile
+        unlocked = wait(lambda: (over._marks_live is not None and not over._marks_live.locked
+                                 and not getattr(self.app, "busy", False)), 5.0)
+        marks = over._marks_live
+        drag: dict[str, Any] = {"unlocked_ms": unlocked}
+        out["drag"] = drag
+        if marks is None or index >= len(marks.boxes) or tuple(marks.boxes[index]) != tuple(box):
+            drag["region"] = "gone"
+        else:
+            to = (box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy)
+            fewest = [len((over.shown() or (0, ()))[1])]
+            before_n = fewest[0]
+            serial_before = over._edit_serial
+            t = time.monotonic()
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(cx, cy))
+            _user32.PostMessageW(over.hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(cx + dx // 2, cy + dy // 2))
+            _user32.PostMessageW(over.hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(cx + dx, cy + dy))
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(cx + dx, cy + dy))
+            drag["handed_ms"] = wait(lambda: over._edit_serial > serial_before, 2.0)
+            drag["handed_as"] = next((n["ev"] for n in reversed(list(over.notes)) if n["ev"].startswith("edit_")
+                                      and n["ev"] != "edit"), None)
+            drag["ghost"] = over._ghost is not None and any(tuple(g) == to for g in over._ghost[1])
+            drag["job_ms"] = wait(lambda: bool(getattr(self.app, "busy", False)), 3.0)
+
+            def stored() -> bool:
+                fewest.append(len((over.shown() or (0, ()))[1]))
+                m = over._marks_live
+                return (not getattr(self.app, "busy", False) and m is not None
+                        and any(max(abs(a - b) for a, b in zip(o, to)) <= 2 for o in m.boxes))
+
+            drag["stored_ms"] = wait(stored, 60.0)
+            drag["since_release_ms"] = round((time.monotonic() - t) * 1000, 1)
+            m = over._marks_live
+            drag["nearest_px"] = None if m is None or not m.boxes else min(
+                max(abs(a - b) for a, b in zip(o, to)) for o in m.boxes)
+            drag["patches_before"], drag["patches_fewest_meanwhile"] = before_n, min(fewest)
+            # then its bottom right corner dragged by EDIT_DRAG px: stored as a resize
+            wait(lambda: over._marks_live is not None and not over._marks_live.locked, 3.0)
+            m = over._marks_live
+            at = None if m is None else next((i for i, o in enumerate(m.boxes) if tuple(o) == to), None)
+            corner = (to[2], to[3])
+            why = ("no marks" if m is None else "locked" if m.locked else "not found" if at is None else
+                   "no room" if to[2] + dx > size[0] or to[3] + dy > size[1] else "")
+            if not why:
+                grown = (to[0], to[1], to[2] + dx, to[3] + dy)
+                serial_before = over._edit_serial
+                t = time.monotonic()
+                _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(*corner))
+                _user32.PostMessageW(over.hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(corner[0] + dx, corner[1] + dy))
+                _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(corner[0] + dx, corner[1] + dy))
+                resize: dict[str, Any] = {"handed_ms": wait(lambda: over._edit_serial > serial_before, 2.0)}
+                resize["handed_as"] = next((n["ev"] for n in reversed(list(over.notes))
+                                            if n["ev"].startswith("edit_") and n["ev"] != "edit"), None)
+                to = grown
+                resize["stored_ms"] = wait(stored, 60.0)
+                m = over._marks_live
+                resize["nearest_px"] = None if m is None or not m.boxes else min(
+                    max(abs(a - b) for a, b in zip(o, grown)) for o in m.boxes)
+                resize["since_release_ms"] = round((time.monotonic() - t) * 1000, 1)
+                drag["resize"] = resize
+            else:
+                drag["resize"] = why
+        kinds = Counter(n["ev"] for n in list(over.notes)
+                        if n["ev"] in ("edit", "press", "edit_click", "edit_move", "edit_resize", "edit_add",
+                                       "press_given_up"))
+        out["window_notes"] = dict(kinds)
+        out["fronts_meanwhile"] = sorted(fronts)
+
     def pane_report(self) -> dict[str, Any]:
         over = self.over()
         counts = dict(over.counts) if over is not None else {}
@@ -1211,6 +1444,7 @@ class SeeWatch:
                 "frames_per_s": fps, "cpu": cpu, "cost": cost, "viewer_frames": viewer_frames, "pipeline": pipeline,
                 "tk_steps": self._tk_steps(changes), "on_screen": on_screen,
                 "panes": self.pane_report(),
+                "edit": self.edit_result if self.edit else None,  # (`_edit_measure`: with the left pane's Edit on)
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,
                           "max_ms": max((v for v in late if v is not None), default=None),

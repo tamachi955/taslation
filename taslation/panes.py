@@ -367,6 +367,32 @@ def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colou
     return Picture(np.ascontiguousarray(bgra), tuple(hits))
 
 
+BADGE_PX = 11  # the text of a region's number plate in Edit (`badge`)
+BADGE_ALPHA = 235
+
+
+def badge(text: str, colour: tuple[int, int, int], dpi: float) -> np.ndarray:
+    """A region's number plate in Edit (see-through mode): *text* (its place in the reading order) in black or white
+    on a small rounded plate of *colour* (RGB: the window's outline colours for what the region is), premultiplied
+    BGRA at *dpi*."""
+    face = font("en", scaled(BADGE_PX, dpi))
+    ascent, descent = face.getmetrics()
+    pad = scaled(4, dpi)
+    width = max(ascent + descent, _text_w(face, text)) + 2 * pad
+    height = ascent + descent + scaled(2, dpi)
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=scaled(4, dpi), fill=(*colour, BADGE_ALPHA))
+    ink = (0, 0, 0) if 0.299 * colour[0] + 0.587 * colour[1] + 0.114 * colour[2] >= 128 else (255, 255, 255)
+    draw.text(((width - _text_w(face, text)) // 2, scaled(1, dpi)), text, font=face, fill=(*ink, 255))
+    rgba = np.asarray(image, dtype=np.uint8)
+    alpha = rgba[..., 3:4].astype(np.uint16)
+    bgra = np.empty_like(rgba)
+    bgra[..., :3] = (rgba[..., 2::-1].astype(np.uint16) * alpha // 255).astype(np.uint8)
+    bgra[..., 3] = rgba[..., 3]
+    return np.ascontiguousarray(bgra)
+
+
 # ------------------------------------------------------------------ where they go
 def place(size: tuple[int, int], page: Box, band: tuple[int, int], left: tuple[int, int] | None,
           right: tuple[int, int] | None, dpi: float,

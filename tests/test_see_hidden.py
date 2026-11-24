@@ -734,6 +734,12 @@ class FakeOver:
     def take_clicks(self):
         return []
 
+    def take_edits(self):
+        return []
+
+    def set_edit(self, marks):
+        self.marks = marks
+
     def set_panes(self, left, right):
         pass
 
@@ -802,7 +808,7 @@ def test_over_the_book_holds_no_hot_key_and_offers_nothing_while_the_window_is_h
     assert said == []
 
 
-def test_the_start_leaves_out_the_full_screen_and_the_translator_role_and_says_so_once(caplog):
+def test_the_start_leaves_out_the_full_screen_and_says_so_once(caplog):
     import logging
 
     app = SimpleNamespace(_reading_at_start=True, settings=Settings(role="translator"))
@@ -812,10 +818,10 @@ def test_the_start_leaves_out_the_full_screen_and_the_translator_role_and_says_s
     assert app._reading_at_start is False
     lines = [r.getMessage() for r in caplog.records]
     assert sum("full screen" in line for line in lines) == 1
-    assert sum("Reader role" in line for line in lines) == 2  # (one a start: once each time the mode starts)
+    assert not any("role" in line for line in lines)  # (the Translator role is the left pane's Edit now)
 
 
-def test_the_role_is_the_reader_s_always_while_the_window_is_hidden():
+def test_edit_follows_only_the_role_kept_for_the_book_while_the_window_is_hidden():
     from taslation.ui import translator
 
     changed = []
@@ -834,11 +840,28 @@ def test_the_role_is_the_reader_s_always_while_the_window_is_hidden():
     window._on_role_changed = lambda chosen=True: changed.append(window.role_var.get())
     window.say = lambda *a, **k: changed.append("said")
     translator.TranslatorMixin._apply_role(window, "translator", chosen=False)  # (a book with no translations)
+    assert window.role_var.get() == "reader" and changed == []  # Edit stays off: never switched on by itself
     translator.TranslatorMixin._apply_role(window, "translator", chosen=True)  # (the role kept for a book)
-    assert window.role_var.get() == "reader" and changed == []
+    assert window.role_var.get() == "translator" and changed == ["translator"]  # Edit on, nothing said of why
+    window.role_var.set("translator")
+    translator.TranslatorMixin._apply_role(window, "reader", chosen=False)  # (a book with translations)
+    assert window.role_var.get() == "translator" and changed == ["translator"]
     window._see_hidden = False  # (the window on the screen: as ever)
+    window.role_var.set("reader")
     translator.TranslatorMixin._apply_role(window, "translator", chosen=False)
-    assert window.role_var.get() == "translator" and changed[0] == "translator"
+    assert window.role_var.get() == "translator" and changed[1:] == ["translator", "said"]
+
+
+def test_the_role_is_the_edit_switch_s_state():
+    from taslation.ui import see_edit
+
+    app = SimpleNamespace(_see_hidden=True, _see_through=object(), role_var=SimpleNamespace(get=lambda: "translator"))
+    assert see_edit.on(app) is True
+    app.role_var = SimpleNamespace(get=lambda: "reader")
+    assert see_edit.on(app) is False
+    assert see_edit.on(SimpleNamespace(_see_hidden=True, _see_through=object())) is False  # (no role yet: off)
+    app.role_var, app._see_hidden = SimpleNamespace(get=lambda: "translator"), False
+    assert see_edit.on(app) is False  # (the window on the screen: its own Translator role, no Edit)
 
 
 def test_the_viewers_window_is_never_enlarged_while_the_window_is_hidden(monkeypatch):

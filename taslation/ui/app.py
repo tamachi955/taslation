@@ -594,8 +594,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, ReadingMixin, TranslatorMixin, 
         self.auto_var = tk.BooleanVar(value=False)
         self.original_var = tk.BooleanVar(value=False)
         self.top_var = tk.BooleanVar(value=False)
-        # (see-through mode: the Reader role always, `seethrough.without_the_window`)
-        self.role_var = tk.StringVar(value="reader" if seethrough.hidden(self) else self.settings.role)
+        # (see-through mode: the Translator role is the left pane's Edit, `see_edit`)
+        self.role_var = tk.StringVar(value=self.settings.role)
         self.book_var.trace_add("write", lambda *_a: self._book_for_role())  # a book opens in its role
         self._build_menus()
         # View > Show original greyed while the page shows the original anyway (`hover.original_idle`)

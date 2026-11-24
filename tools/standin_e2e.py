@@ -5321,7 +5321,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     watch_input(notes)
     state = demo_video.scratch_state()
     info = viewer_info()
-    remember_role(state, BOOK, "reader")
+    edit = bool(getattr(args, "see_through", False) and getattr(args, "see_edit", False))
+    remember_role(state, BOOK, "translator" if edit else "reader")  # (the Translator's: the left pane's Edit on)
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
     profiles.set_margins(info, area, large=True)
@@ -5361,7 +5362,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                           shots=out / "shots" if args.see_truth else None, front_before=front_before,
                                           activations=activations,
                                           pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
-                                          viewer_pids=lambda: {pid, *browser.tree})
+                                          viewer_pids=lambda: {pid, *browser.tree}, edit=edit)
         see.install()
         see.start()
     queue_put = app._events.put
@@ -6415,6 +6416,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="with --see-through: one copy of the stand-in's place on the screen, taken the first time "
                          "both side panes show beside a spread whose page is done and the copy shows nothing of another "
                          "program's, into shots/ (it shows a sample page: delete it after)")
+    ap.add_argument("--see-edit", action="store_true",
+                    help="with --see-through: the book's role kept as the Translator's, so that the left pane's Edit "
+                         "is on from the start; a click and a drag on a region, posted to the lettering's own window, "
+                         "are measured in place of the patch under the pointer (run.see_through.edit)")
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")

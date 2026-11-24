@@ -9,11 +9,13 @@ do not, in places of their own.
   in the right pane). Its entries are the window's own commands and dialogs that still mean something here -
   the viewer chooser and the book's Series and Volume (`ViewerDialog`, `BookDialog`: the toolbar's two controls as
   small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now, the window's
-  language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). Left out: what only
-  concerns the window's own page and canvas (Show original, what the page and a bubble under the pointer show, Always
-  on top, Over the full-screen viewer, Reading-order numbers, Full screen, Page keys..., Help > Keys..., the role and
-  translator mode's tools). Every entry but Quit counts as the reader asking (`seethrough.asked`): a dialog it opens
-  takes the keys.
+  language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). While the left pane's
+  Edit is on, the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the page's tools and
+  what the window's Page menu does to the regions chosen, then Review..., My corrections..., Lines to review..., Find
+  and replace..., Series sheet..., Book settings...). Left out: what only concerns the window's own page and canvas
+  (Show original, what the page and a bubble under the pointer show, Always on top, Over the full-screen viewer,
+  Reading-order numbers - Edit numbers the regions itself -, Full screen, Page keys..., Help > Keys...). Every entry
+  but Quit counts as the reader asking (`seethrough.asked`): a dialog it opens takes the keys.
 * A menu needs its window in front for a click outside it to close it (Windows' rule for a menu of a window that is
   not in front): the hidden window is made the foreground first - the click that opened the menu was the reader's,
   on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the
@@ -105,6 +107,13 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
         menu.add_command(label=text, command=_asking(app, command))
     if actions:
         menu.add_separator()
+    from . import see_edit
+
+    if see_edit.on(app):  # (Edit: Undo, Redo, the page's tools, the editing lists; a cascade kept with the menu)
+        page = getattr(menu, "_see_page", None)
+        if page is None:
+            page = menu._see_page = tk.Menu(menu, tearoff=0)
+        see_edit.build_menu(app, menu, page)
     if full:
         over = getattr(app, "_see_through", None)
         menu.add_command(label=_("Translate"), command=_asking(app, app.translate_now))

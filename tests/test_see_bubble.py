@@ -324,7 +324,9 @@ def test_both_panes_are_made_to_take_clicks_and_only_the_window_s_own_looks_set_
 
     source = inspect.getsource(window.SeeThrough._run)
     assert '("left", PANE_EX_STYLE), ("right", EX_STYLE)' in source and "PANE_CLASS" in source
-    assert inspect.getsource(window).count("SetWindowLongW(") == 1  # (`_right_take` alone)
+    assert inspect.getsource(window).count("SetWindowLongW(") == 2  # (`_right_take` and `_edit_take` alone)
+    for name in ("_right_take", "_edit_take"):
+        assert "SetWindowLongW(" in inspect.getsource(getattr(window.SeeThrough, name))
 
 
 # ------------------------------------------------------------------ the patches
