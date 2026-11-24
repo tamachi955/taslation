@@ -25,13 +25,14 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
         "Translate translates the page on show now; the circular arrow beside it translates it again, asking every line anew. Lettering hides the translation, so that the page shows as the viewer has it, and shows it again.",
     )),
     ("The side panes", (
-        "Left of the page: Translate (Stop while a page is being translated), Auto, your language, Lettering, Indicators, Edit, Set area..., Settings..., Menu and Quit.",
+        "Left of the page: Translate (Stop while a page is being translated), Auto, your language, Lettering, Indicators, Edit, Add area, Set area..., Settings..., Menu and Quit.",
         "Right of the page, while Indicators is on: the bubble last under the pointer, its Japanese and its translation, with Copy the Japanese, Copy the translation and Ask again; under it how much of the page is done, what TASlation is doing and where the translator runs.",
         "Rest the pointer on a bubble to see the original lettering in its place. TASlation puts nothing on the clipboard by itself: only Copy the Japanese and Copy the translation do.",
         "The panes lie on the viewer's ground beside the page, and a pane hides where it would come near the page. TASlation's taskbar button then opens the Menu with the left pane's controls.",
     )),
     ("Edit", (
         "Edit in the left pane shows the page's regions as boxes with numbers in the reading order: click a box to open it in the region editor, drag it to move it, drag a corner to resize it; Shift+click chooses several. Beside the boxes, clicks go to the viewer.",
+        "Add area in the left pane, or Insert while the viewer is in front, adds a text area, Edit on or off: drag a rectangle over the text, and it is read and translated. A right click, Insert or Add area again gives it up. Insert is the only key TASlation takes (Settings... turns it off).",
         "The numbers' colours: green translated, orange not translated, blue your own region, red worth a look (Review...).",
         "While Edit is on, the Menu has the editing: Undo and Redo, the page's tools (Reading order, Add a text area, Skip page), and Review..., My corrections..., Lines to review..., Find and replace..., Series sheet... and Book settings... as dialogs of their own.",
         "The mouse wheel turned over a box does not reach the viewer: move the pointer off the boxes, or turn Edit off, to scroll the viewer.",
@@ -39,7 +40,7 @@ TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs)
     ("When something goes wrong", (
         "The viewer's page reads black: TASlation waits for it to load and, after a while, says so in the right pane. Reload the book in the viewer; TASlation goes on with the page it shows then.",
         "Some viewers do not allow their window to be read and always show black. TASlation leaves that as it is. Such a viewer cannot be used with TASlation.",
-        "A bubble stays untranslated: press Translate. If it is still empty, turn Edit on, choose Add a text area in the Menu and drag a rectangle over the text; if a box is already there, drag or resize it instead.",
+        "A bubble stays untranslated: press Translate. If it is still empty, press Add area in the left pane (or Insert) and drag a rectangle over the text; if a box is already there, turn Edit on and drag or resize it instead.",
         "A line of one character, or lettering far larger than the rest, is not read by itself: add it by hand.",
         "TASlation finds no page, or reads too much of the window: Set area... in the left pane lets you mark the page yourself.",
         "Nothing happens: read the lines in the right pane (Indicators on). Check Menu > Viewer... and that Auto is on.",

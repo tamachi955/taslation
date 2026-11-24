@@ -283,8 +283,12 @@ class Settings:
 
     # --- app ---
     # Edit at the start (the left side pane's switch, `ui.see_edit`): "reader" (off) | "translator" (on: mark text, fix
-    # translations); a book's own choice, kept as it is switched, comes first
+    # translations); a book's own choice, kept as it is switched, comes first (the Settings dialog's "Start with Edit
+    # on")
     role: str = "reader"
+    # the Insert key adds a text area, as the left pane's Add area does (`ui.see_edit`): held only while the viewer
+    # is the window in front, the one key TASlation takes (`capture.seethrough.SeeThrough.set_add_key`); off, none
+    add_area_key: bool = True
     ui_language: str = ""  # language of the window (a code from i18n.UI_LANGUAGES); empty = the first-start choice
     # the size of the text of TASlation's dialogs, times what Windows sets for the monitor (1.0 = as Windows has it;
     # `ui.scaling`); the side panes follow the viewer's monitor's scaling

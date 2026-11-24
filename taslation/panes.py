@@ -61,8 +61,9 @@ LATIN_FONTS = ("segoeui.ttf", "arial.ttf", "DejaVuSans.ttf")
 
 @dataclass(frozen=True)
 class Row:
-    """A row of a pane: *name* what a click on it does ("" for none), *text* its words; *kind* "button", "toggle" (a box
-    ticked when *on*), "choice" (an arrow each side: *name* + "_prev" / "_next") or "text" (words only); a row not
+    """A row of a pane: *name* what a click on it does ("" for none), *text* its words; *kind* "button" (drawn pressed
+    when *on* - its plate in the accent colour: what it began is under way, Add area), "toggle" (a box ticked when
+    *on*), "choice" (an arrow each side: *name* + "_prev" / "_next") or "text" (words only); a row not
     *enabled* is drawn dim and takes no click; a *warn* row's words are orange (the page that could not be
     translated). *square*: the name of a button at the row's right end, a square plate of the row's height with a
     glyph (`GLYPHS`) and no words ("" for none), dim and taking no click when not *square_enabled*. *lang*: the
@@ -316,14 +317,16 @@ def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colou
         ascent, descent = face.getmetrics()
         line_h = ascent + descent
         plate_w = width - (h + gap if row.square else 0)  # (a square button takes the row's right end)
-        draw.rounded_rectangle((0, y, plate_w - 1, y + h - 1), radius=radius, fill=(*scheme.plate, ALPHA))
+        pressed = row.kind == "button" and row.on  # (a button pressed: the accent's plate, the words in the plate's)
+        draw.rounded_rectangle((0, y, plate_w - 1, y + h - 1), radius=radius,
+                               fill=(*(scheme.accent if pressed else scheme.plate), ALPHA))
         if row.square:
             draw.rounded_rectangle((width - h, y, width - 1, y + h - 1), radius=radius, fill=(*scheme.plate, ALPHA))
             mark = glyph(row.square, h, scheme.text if row.square_enabled else scheme.dim, dpi)
             image.alpha_composite(mark, (width - h, y))
             if row.square_enabled:
                 hits.append((row.square, (width - h, y, width, y + h)))
-        ink = scheme.warn if row.warn else scheme.text if row.enabled else scheme.dim
+        ink = scheme.plate if pressed else scheme.warn if row.warn else scheme.text if row.enabled else scheme.dim
         x = pad
         top = y + scaled(ROW_PAD, dpi)
         if row.kind == "toggle":

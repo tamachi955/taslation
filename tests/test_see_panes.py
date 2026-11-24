@@ -377,12 +377,16 @@ def test_the_right_pane_shows_the_window_s_words_as_they_are(tmp_path):
     assert not hasattr(pn, "without_keys") and not hasattr(pn, "pane_words")
 
 
-def test_see_through_mode_holds_no_hot_key(tmp_path, monkeypatch):
+def test_see_through_mode_holds_no_hot_key_but_insert(tmp_path, monkeypatch):
     import importlib.util
     import inspect
+    import re
 
     assert importlib.util.find_spec("taslation.capture.overlay") is None  # (the hot keys' module is gone)
-    assert "RegisterHotKey" not in inspect.getsource(ui) and "RegisterHotKey" not in inspect.getsource(ui.window)
+    assert "RegisterHotKey" not in inspect.getsource(ui)
+    calls = re.findall(r"_user32\.RegisterHotKey\(([^)]*)\)", inspect.getsource(ui.window))
+    assert calls == ["self.hwnd, HOTKEY_ID, MOD_NOREPEAT, VK_INSERT"]  # (Insert alone, Add area: `test_see_add`)
+    assert ui.window.VK_INSERT == 0x2D and "SetWindowsHookEx" not in inspect.getsource(ui.window)
     monkeypatch.setattr(ui.window, "viewer_dpi", lambda hwnd: 96)
     app = fake_app(tmp_path, selected=SimpleNamespace(hwnd=1234), _see_memo=[])
     app._see_through.follow = lambda hwnd: None

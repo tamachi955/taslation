@@ -5,8 +5,10 @@ page's regions.
 
 * `start` makes the see-through window at the window's start (Windows; and asks the capture for frames up to every
   `wgc.FAST_UPDATE_MS`); where it cannot be made the program says so and ends (`could_not_start`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
-  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode holds no hot
-  key: every key goes to the viewer, and the lettering is hidden and shown again with the left pane's switch.
+  hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode's one key is
+  Insert, held only while the viewer is in front and only while ``Settings.add_area_key`` is on (`tick`:
+  `SeeThrough.set_add_key`; Add area, `see_edit`): every other key goes to the viewer, and the lettering is hidden
+  and shown again with the left pane's switch.
 * The patches are where the lettered page differs from the frame it was read from - the page filling in (drafts,
   then the final page) and the last translated page -, made by a thread of their own once per change of the page
   (`Patcher`; the Tk thread only notes the change, `present`) and handed over as immutable arrays. Whether a patch
@@ -30,7 +32,9 @@ page's regions.
   language (an arrow each side; taken once no
   arrow was clicked for LANGUAGE_SETTLE_MS), the lettering's switch, the indicators' switch (kept in the settings
   file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
-  `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the hidden root's controls
+  `see_edit`), Add area (a text area drawn on the page, Edit on or off: `see_edit.toggle_adding`; pressed while one
+  is to be added; "(Insert)" while that key adds one), Set area..., Settings..., Menu (`see_menu`: what the hidden
+  root's controls
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
   filling in is (lines lettered of the lines read), the status line, the backlog and the pages that went by too fast
   (the indicator's own lines), where the translator runs - the window's words as they are: they name the panes'
@@ -655,6 +659,9 @@ def tick(app: Any) -> None:
     over.follow(hwnd)
     app._see_dpi = window.viewer_dpi(hwnd)
     over.set_hover_delay(hover_delay(app))
+    set_add_key = getattr(over, "set_add_key", None)
+    if set_add_key is not None:  # (the Insert key: Add area while the viewer is in front, `see_edit`)
+        set_add_key(hidden(app) and bool(getattr(getattr(app, "settings", None), "add_area_key", True)))
     present(app)
     if hidden(app):
         from . import see_edit
@@ -752,7 +759,8 @@ def left_rows(app: Any) -> list[pn.Row]:
     first = pn.Row("stop", _("Stop"), **again) if _stoppable(app) else pn.Row("translate", _("Translate"), **again)
     from . import see_edit
 
-    edit = [pn.Row("edit", _(see_edit.EDIT), "toggle", on=see_edit.on(app))] if hidden(app) else []
+    edit = [pn.Row("edit", _(see_edit.EDIT), "toggle", on=see_edit.on(app)),
+            pn.Row("add_area", _(see_edit.add_label(app)), on=see_edit.adding(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
             pn.Row("language", _language_shown(app), "choice"),
@@ -998,6 +1006,13 @@ def _edit(app: Any) -> None:
     see_edit.toggle(app)
 
 
+def _add_area(app: Any) -> None:
+    """The left pane's Add area: a text area to add begun, or given up (`see_edit.toggle_adding`), Edit on or off."""
+    from . import see_edit
+
+    see_edit.toggle_adding(app)
+
+
 def _again(app: Any) -> None:
     """The circular arrow: the page on show translated again as the window's Translate again does it
     (`TranslatorMixin.retranslate_page`, in the Reader role too: its lines asked of the translator anew, and what that
@@ -1229,6 +1244,7 @@ PANE_ACTIONS: dict[str, Any] = {
     "settings": _dialog("open_settings"),
     "menu": _menu,
     "edit": lambda app: _edit(app),  # (Edit: the Translator role on the overlay, `see_edit`)
+    "add_area": _add_area,  # (Add area: a text area drawn on the page, Edit on or off)
     "quit": lambda app: app._on_close(),
     "bubble_source": _copy_source,  # (the right pane: the bubble last under the pointer)
     "bubble_translation": _copy_translation,

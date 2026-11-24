@@ -13,13 +13,21 @@ page and regions are a canvas that is never on the screen here).
   there (`act`): a click opens the region editor beside the box (`open_editor`, `editor_place`: alone, on the
   viewer's monitor, taking the keys; the foreground back to the viewer once it closes), Shift+click chooses several
   (`SelectionMixin._toggle_chosen`), a drag moves the box (those chosen with it: `_move_regions`), a drag on a corner
-  resizes it (`_move_region`); while the reading order is clicked, a click numbers the region; with Add a text area
-  chosen in the Menu, the next drag draws a region (`_add_region`). A region in the editor keeps its patches whatever
-  the frame says; the editor's Show original, held, shows the original under it (`set_bare`).
+  resizes it (`_move_region`); while the reading order is clicked, a click numbers the region. A region in the
+  editor keeps its patches whatever the frame says; the editor's Show original, held, shows the original under it
+  (`set_bare`).
+* Adding a text area, Edit on or off (`toggle_adding`): the left pane's Add area, the Insert key while the viewer is
+  in front (``Settings.add_area_key``: the one key TASlation takes, `capture.seethrough.SeeThrough.set_add_key`) and
+  the Menu's Add a text area (Edit on) - once the page on show is the last translated one, no job at work, the
+  lettering shown and the book named (`why_not_adding`). The next drag on the page draws the region (the whole page
+  takes the mouse until then: `marks_for`'s marks, of no box with Edit off), which is read and translated
+  (`_add_region`); a click without a drag, a right click, Insert or Add area again gives it up. With Edit off every
+  click is the viewer's again after it.
 * The Menu has the rest while Edit is on (`build_menu`): Undo and Redo, the page's tools (Reading order, Add a text
   area, Skip page; what the window's Page menu does to the regions chosen), and the lists and sheets (Review..., My
   corrections..., Lines to review..., Find and replace..., Series sheet..., Book settings...), each a dialog alone.
-  No key is TASlation's: every key goes to the viewer, but inside TASlation's own dialogs."""
+  Every key goes to the viewer - Insert alone excepted, while it adds a text area -, but inside TASlation's own
+  dialogs."""
 
 from __future__ import annotations
 
@@ -36,8 +44,13 @@ EDIT_ON = ("Edit: click a bubble to edit it, drag it to move it, drag a corner t
 EDIT_OFF = "Edit is off: every click goes to the viewer."
 ORDERING = "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu."
 ADD_ENTRY = "Add a text area"
-ADDING = "Drag a rectangle over the text to add it; a click without a drag gives it up."
+ADD_AREA, ADD_AREA_KEY = "Add area", "Add area (Insert)"  # (the left pane's row, as the Insert key is on or off)
+ADDING = ("Drag a rectangle over the text to add it. A click without a drag, a right click or Add area again gives "
+          "it up.")
 ADD_GIVEN_UP = "No text area was added."
+ADD_NOT_NOW = "A text area can be added once the page on show is translated."
+ADD_NO_LETTERING = "Turn Lettering on to add a text area."
+ADD_NO_BOOK = "Could not record the rectangle: give the book a name first (Menu > Series and Volume...)."
 CANCEL_ORDER = "Cancel the reading order"
 DROP_CHOSEN = "Drop the chosen regions"
 # the plates' colours (RGB), as the window outlined the regions (`LiveViewMixin._overlay_items`)
@@ -133,33 +146,37 @@ def marks_for(app: Any) -> st.Marks | None:
     its regions, numbered in the reading order (while it is being clicked, the place each has been given, "?" for
     none yet), those chosen, the one in the editor, the one whose original is shown, whether a press only clicks (an
     editor open, a change being stored, the order being clicked), whether a region is to be added, the boxes of a
-    change being stored. Made again only when one of those changed (the same marks are handed again)."""
+    change being stored. With Edit off, while a region is to be added on the page on show (`toggle_adding`): marks of
+    no box, the whole page taking the mouse for the rectangle alone. Made again only when one of those changed (the
+    same marks are handed again)."""
     if not getattr(app, "busy", False) and getattr(app, "_see_pending", ()):  # (the change stored, or none begun:
         app._see_pending = ()  # its boxes are the page's now, or were never anything)
-    if not on(app):
+    edit = on(app)
+    adding = bool(getattr(app, "_see_adding", False))
+    if not edit and not (adding and seethrough.hidden(app) and seethrough.on(app)):
         return None
     result = getattr(app, "last_result", None)
     try:
-        editing = result is not None and result.original is not None and app._editing()
+        editing = result is not None and result.original is not None and (
+            app._editing() if edit else app._result_on_show())
     except Exception:  # noqa: BLE001 - (a page going)
         editing = False
     if not editing:
         return None
     from .translator import chosen_regions
 
-    regions = app._page_regions()
-    ordering = getattr(app, "_ordering", None)
-    chosen = chosen_regions(app)
-    held = _editor_region(app)
+    regions = app._page_regions() if edit else []
+    ordering = getattr(app, "_ordering", None) if edit else None
+    chosen = chosen_regions(app) if edit else []
+    held = _editor_region(app) if edit else None
     bare = getattr(app, "_see_bare", None) if held is not None else None
     busy = bool(getattr(app, "busy", False))
-    pending = getattr(app, "_see_pending", ())
+    pending = getattr(app, "_see_pending", ()) if edit else ()
     dpi = int(getattr(app, "_see_dpi", st.BASE_DPI))
-    adding = bool(getattr(app, "_see_adding", False))
     locked = held is not None or busy or ordering is not None
     seen = int(getattr(app, "_see_edit_seen", 0))
-    content = (id(result), id(result.original), tuple((id(r), tuple(r.bbox), r.status, r.kind, bool(getattr(r, "flags", None)))
-                                                      for r in regions),
+    content = (edit, id(result), id(result.original),
+               tuple((id(r), tuple(r.bbox), r.status, r.kind, bool(getattr(r, "flags", None))) for r in regions),
                None if ordering is None else tuple(id(r) for r in ordering), tuple(id(r) for r in chosen),
                id(held) if held is not None else 0, id(bare) if bare is not None else 0, locked, adding,
                tuple(pending), seen, dpi)
@@ -197,8 +214,12 @@ def marks_for(app: Any) -> st.Marks | None:
 
 
 def tick(app: Any, over: Any) -> None:
-    """Every tick: what the reader did on the regions acted on (`act`), then the marks as they are now handed to the
-    see-through window (None while Edit is off or the page on show is no translated one)."""
+    """Every tick: the presses of the Insert key (`toggle_adding`) and what the reader did on the regions acted on
+    (`act`), then the marks as they are now handed to the see-through window (None while Edit is off and no region
+    is to be added, or the page on show is no translated one)."""
+    take_keys = getattr(over, "take_keys", None)
+    for _when in (take_keys() if take_keys is not None else ()):
+        toggle_adding(app)
     for event in over.take_edits():
         app._see_edit_seen = max(int(getattr(app, "_see_edit_seen", 0)), int(event.get("press", 0)))
         try:
@@ -209,6 +230,18 @@ def tick(app: Any, over: Any) -> None:
     if marks is None:  # (Edit off, or another page on show: a region to add and the original shown go with it)
         app._see_adding = False
         app._see_bare = None
+    over.set_edit(marks)
+
+
+def _hand_over(app: Any) -> None:
+    """The marks as they are now handed to the see-through window at once (the whole page takes the mouse for a
+    region to add before the next tick)."""
+    over = getattr(app, "_see_through", None)
+    if over is None:
+        return
+    marks = marks_for(app)
+    if marks is None:
+        app._see_adding = False
     over.set_edit(marks)
 
 
@@ -290,10 +323,11 @@ def act(app: Any, event: dict[str, Any]) -> None:
 
 
 def _on_page(app: Any, event: dict[str, Any]) -> bool:
+    """Whether the page of *event* is the one on show still, the last translated one (Edit on or off)."""
     result = getattr(app, "last_result", None)
     try:
         return (result is not None and result.original is not None and id(result.original) == event.get("key")
-                and app._editing())
+                and app._result_on_show())
     except Exception:  # noqa: BLE001
         return False
 
@@ -366,16 +400,71 @@ def _asking(app: Any, command: Callable[[], Any]) -> Callable[[], None]:
     return run
 
 
-def add_region(app: Any) -> None:
-    """The Menu's Add a text area: the next drag on the page draws a region of the reader's (the whole page takes the
-    mouse until then; a click without a drag gives it up)."""
+def adding(app: Any) -> bool:
+    """Whether a region is to be added: the next drag on the page draws it (the left pane's Add area shows pressed)."""
+    return bool(getattr(app, "_see_adding", False))
+
+
+def add_label(app: Any) -> str:
+    """The left pane's Add area as it is worded: with the key it has while the Insert key adds a text area
+    (``Settings.add_area_key``)."""
+    return ADD_AREA_KEY if bool(getattr(getattr(app, "settings", None), "add_area_key", True)) else ADD_AREA
+
+
+def why_not_adding(app: Any) -> str | None:
+    """Why no text area can be added now (the line the status says then), None when one can: TASlation's own window
+    hidden (the one mode), the page on show the last translated one (`_result_on_show`), no job at work, the lettering
+    shown (its window takes the drag) and the book named (a region of the reader's is kept with the book)."""
+    if not (seethrough.hidden(app) and seethrough.on(app)):
+        return ADD_NOT_NOW
+    if not getattr(app._see_through, "on", True):
+        return ADD_NO_LETTERING
+    result = getattr(app, "last_result", None)
     try:
-        if not app._editing() or app.busy:
-            return
-    except Exception:  # noqa: BLE001
-        return
+        ready = result is not None and result.original is not None and bool(app._result_on_show())
+    except Exception:  # noqa: BLE001 - (a page going)
+        ready = False
+    if not ready or getattr(app, "busy", False):
+        return ADD_NOT_NOW
+    if getattr(getattr(app, "pipeline", None), "annotations", True) is None:
+        return ADD_NO_BOOK
+    return None
+
+
+def start_adding(app: Any) -> bool:
+    """A region of the reader's to be added on the page on show, Edit on or off: the next drag on the page draws it
+    (the whole page takes the mouse until then, `marks_for`); a click without a drag, a right click, Insert or Add
+    area again gives it up. Where none can be added now, the status says why (`why_not_adding`). Whether it began."""
+    why = why_not_adding(app)
+    if why is not None:
+        app.say(why)
+        return False
     app._see_adding = True
     app.say(ADDING)
+    _hand_over(app)
+    return True
+
+
+def give_up_adding(app: Any) -> None:
+    """The region to be added given up (Add area again, Insert again): nothing is added."""
+    app._see_adding = False
+    app.say(ADD_GIVEN_UP)
+    _hand_over(app)
+
+
+def toggle_adding(app: Any) -> None:
+    """The left pane's Add area and the Insert key: a region to add begun (`start_adding`), or given up while one is
+    to be added (`give_up_adding`)."""
+    if adding(app):
+        give_up_adding(app)
+    else:
+        start_adding(app)
+
+
+def add_region(app: Any) -> None:
+    """The Menu's Add a text area (Edit on): as the left pane's Add area begins it (`start_adding`)."""
+    if not adding(app):
+        start_adding(app)
 
 
 def cancel_order(app: Any) -> None:

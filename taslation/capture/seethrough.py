@@ -47,11 +47,21 @@ taking every click and key itself.
   boxes the viewer takes them) - and gives no patch way under the pointer: the box there is outlined, with its corner
   handles, and numbered as every box is. A press takes hold of a box, and the whole page takes the mouse while it is
   held (the capture besides, which a window not in front has only over its own pixels); a drag moves the box (those
-  chosen with it), a drag on a corner resizes it, a right click gives the drag up, and the release is kept for the
-  Tk thread (`take_edits`: a click, a move, a resize, a rectangle drawn to add a region), which acts on it. The box
+  chosen with it), a drag on a corner resizes it, a right click gives the drag up (and a region to add: an "add" with
+  no box), and the release is kept for the Tk thread (`take_edits`: a click, a move, a resize, a rectangle drawn to
+  add a region), which acts on it. With Edit off, marks of no box while a region is to be added (`Marks.adding`) have
+  the whole page take the mouse for that rectangle alone. The box
   in the editor and one being dragged keep their patches whatever the frame says; the one whose original is shown
   has none. The thread then waits for its messages too (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its
   own window), so a drag follows the pointer at once. It sends, posts and presses nothing to another window.
+* The Insert key (`set_add_key`: ``Settings.add_area_key``; the Tk thread's Add area, `ui.see_edit`) is the one key
+  TASlation takes: a hot key of the lettering's window (``RegisterHotKey``, Insert alone - Shift+Insert and
+  Ctrl+Insert stay the viewer's - with MOD_NOREPEAT), held only while the viewer is the window in front and not
+  minimised (`_key_tick`, at every look: never a keyboard hook), let go at the look that finds another program or a
+  dialog of TASlation's in front, the viewer minimised or gone, or the setting off. Each press is kept for the Tk
+  thread (`take_keys`; ``WM_HOTKEY``, `_hot_key`), and a rectangle being drawn to add a region is given up there and
+  then. A registration that fails (another program holds the key) is harmless: counted, logged once, and not tried
+  again until the key is let go of and wanted once more.
 * Topmost, but never above a menu of TASlation's own: shown again or moved, the lettering's window and the panes go
   just under the lowest popup menu of this process's that is open (`own_menu`, `_raise`: the left pane's Menu, the
   one the taskbar button opens and their submenus), since a window made topmost again comes above every other topmost
@@ -63,6 +73,7 @@ What it shows is decided by one rule (`taslation.seethrough`): a patch belongs t
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import sys
 import threading
@@ -77,6 +88,7 @@ from .. import seethrough as st
 from . import wgc
 
 IS_WINDOWS = sys.platform == "win32"
+log = logging.getLogger(__name__)
 
 WS_POPUP = 0x80000000
 WS_EX_LAYERED, WS_EX_TRANSPARENT, WS_EX_NOACTIVATE = 0x00080000, 0x00000020, 0x08000000
@@ -109,6 +121,10 @@ VK_LBUTTON, VK_RBUTTON, SM_SWAPBUTTON = 0x01, 0x02, 23
 CURSOR_IDS = {"move": 32649, "drag": 32646, "nw": 32642, "se": 32642, "ne": 32643, "sw": 32643, "add": 32515,
               None: IDC_ARROW}  # IDC_HAND (a click edits), IDC_SIZEALL, IDC_SIZENWSE, IDC_SIZENESW, IDC_CROSS
 EDITS_KEPT = 64  # presses on the regions not taken yet by the Tk thread (`take_edits`)
+# the Insert key (`set_add_key`): a hot key of the lettering's window while the viewer is in front (`_key_tick`)
+WM_HOTKEY, VK_INSERT, MOD_NOREPEAT = 0x0312, 0x2D, 0x4000
+HOTKEY_ID = 0x0A11  # (an application's hot key: 0x0000-0xBFFF)
+KEYS_KEPT = 16  # presses of the key not taken yet by the Tk thread (`take_keys`)
 PANES = ("left", "right")
 MENU_CLASS = "#32768"  # the window class of a popup menu (Tk's menus on Windows are TrackPopupMenu's)
 CLICKS_KEPT = 32  # clicks on the side panes not taken yet by the Tk thread (`take_clicks`): the oldest go first
@@ -244,6 +260,12 @@ if IS_WINDOWS:
     _user32.MsgWaitForMultipleObjectsEx.restype = wintypes.DWORD
     _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
     _user32.GetAsyncKeyState.restype = ctypes.c_short
+    _user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    _user32.RegisterHotKey.restype = wintypes.BOOL
+    _user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.UnregisterHotKey.restype = wintypes.BOOL
+    _user32.GetForegroundWindow.argtypes = []
+    _user32.GetForegroundWindow.restype = wintypes.HWND
 
 MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI = 0, 2, 0
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 76, 77, 78, 79
@@ -353,6 +375,20 @@ def button_down() -> bool:
     return bool(_user32.GetAsyncKeyState(button) & 0x8000)
 
 
+def viewer_in_front(viewer: int) -> bool:
+    """Whether the viewer's window *viewer* is the window in front - it, or a window of its own (a popup it owns) -
+    and not minimised, read only (``GetForegroundWindow``); False while a window of TASlation's (a dialog, a menu) or
+    another program's is."""
+    if not IS_WINDOWS or not viewer:
+        return False
+    from . import windows
+
+    if not _user32.IsWindow(viewer) or _user32.IsIconic(viewer):
+        return False
+    front = int(_user32.GetForegroundWindow() or 0)
+    return bool(front) and windows.foreground_owner(front, viewer) == "viewer"
+
+
 def viewer_dpi(viewer: int) -> int:
     """The DPI of the monitor the viewer's window *viewer* is on (its effective DPI: 96 at 100 %, 120 at 125 %, 144 at
     150 %), which is how much larger than at 100 % the viewer's frames show what it draws - whether the viewer scales
@@ -377,9 +413,15 @@ def viewer_dpi(viewer: int) -> int:
 
 
 _edit_hooks: dict[int, Any] = {}  # the lettering's window -> what makes Edit's messages (`SeeThrough._edit_message`)
+_key_hooks: dict[int, Any] = {}  # the lettering's window -> what takes the Insert key's presses (`SeeThrough._hot_key`)
 
 
 def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
+    if message == WM_HOTKEY:
+        take = _key_hooks.get(int(hwnd or 0))
+        if take is not None:
+            take(int(wparam or 0))
+        return 0
     hook = _edit_hooks.get(int(hwnd or 0))
     if hook is not None:
         answer = hook(message, wparam, lparam)
@@ -566,7 +608,8 @@ class SeeThrough:
         self.notes: deque[dict[str, Any]] = deque(maxlen=LOG_KEPT)
         self.counts = {"frames": 0, "looks": 0, "draws": 0, "hides": 0, "moves": 0, "errors": 0,
                        "compare_ms": 0.0, "draw_ms": 0.0, "pane_draws": 0, "pane_moves": 0, "pane_hides": 0,
-                       "clicks": 0, "hovers": 0}
+                       "clicks": 0, "hovers": 0, "keys": 0, "key_registered": 0, "key_released": 0,
+                       "key_failed": 0}
         # the side panes: side -> (picture serial, premultiplied BGRA, box in the viewer's client pixels, the boxes of
         # its plates that take a click) or None, from the Tk thread; what shows of each, (serial, screen origin, size)
         # or None, the window thread's own
@@ -610,6 +653,14 @@ class SeeThrough:
         self._edit_dirty = False  # a press, a move while one is held, its release: the page drawn again
         self._ghost: tuple[int, tuple[st.Box, ...]] | None = None
         self._cursors: dict[int, int] = {}
+        # the Insert key (`set_add_key`): wanted by the Tk thread; the window thread's own: held as the hot key now,
+        # a registration failed (not tried again until the key is let go of), the failure logged (once a session),
+        # its presses for the Tk thread
+        self._key_wanted = False
+        self._key_held = False
+        self._key_failed = False
+        self._key_logged = False
+        self._keys: deque[float] = deque(maxlen=KEYS_KEPT)
 
     # ------------------------------------------------------------------ from the Tk thread
     @classmethod
@@ -761,6 +812,27 @@ class SeeThrough:
                 break
         return out
 
+    def set_add_key(self, wanted: bool) -> None:
+        """Whether the Insert key adds a text area (``Settings.add_area_key``, with TASlation's own window hidden): the
+        key held while the viewer is in front (`_key_tick`); not *wanted*, it is let go of at the next look."""
+        if bool(wanted) != self._key_wanted:
+            self._key_wanted = bool(wanted)
+            self._poke()
+
+    def key_held(self) -> bool:
+        """Whether the Insert key is TASlation's now (held as the hot key: the viewer in front)."""
+        return self._key_held
+
+    def take_keys(self) -> list[float]:
+        """The presses of the Insert key since the last call (when each came), the oldest first."""
+        out = []
+        while self._keys:
+            try:
+                out.append(self._keys.popleft())
+            except IndexError:
+                break
+        return out
+
     def client_origin(self) -> tuple[int, int] | None:
         """The screen point the viewer's client area (and the lettering's window) began at at the last look; None
         before one."""
@@ -824,6 +896,7 @@ class SeeThrough:
         if not self.hwnd:
             return
         _edit_hooks[self.hwnd] = self._edit_message
+        _key_hooks[self.hwnd] = self._hot_key
         wgc.add_listener(self._on_frame)
         msg = wintypes.MSG()
         try:
@@ -840,6 +913,8 @@ class SeeThrough:
         finally:
             wgc.remove_listener(self._on_frame)
             _edit_hooks.pop(self.hwnd, None)
+            self._key_tick(0)  # (the key let go of)
+            _key_hooks.pop(self.hwnd, None)
             self._edit_cancel("closed")
             self._hide("closed")
             self._panes_hide("closed")
@@ -860,6 +935,7 @@ class SeeThrough:
             panes = dict(self._pane_want)
             marks = self._marks
         self.counts["looks"] += 1
+        self._key_tick(viewer)
         self._edit_take(marks is not None and on, sets)
         if not viewer:
             self._nothing("no viewer")
@@ -956,6 +1032,52 @@ class SeeThrough:
         if state == self._shown:
             return
         self._draw(chosen, shown, origin, size, seq, compare_ms, shares)
+
+    # ------------------------------------------------------------------ the Insert key (the window's thread)
+    def _key_tick(self, viewer: int) -> None:
+        """(every look) The Insert key held as the lettering's window's hot key while it is wanted (`set_add_key`) and
+        the viewer *viewer* is the window in front, not minimised (`viewer_in_front`); let go of otherwise (another
+        program or a dialog of TASlation's in front, the viewer minimised or gone, the setting off; *viewer* 0: none).
+        A registration that fails is noted ("key_failed"), logged the first time, and not tried again until the key
+        has been let go of."""
+        if not IS_WINDOWS or not self.hwnd:
+            return
+        wanted = bool(self._key_wanted and viewer and viewer_in_front(viewer))
+        if not wanted:
+            self._key_failed = False
+            if self._key_held:
+                _user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+                self._key_held = False
+                self.counts["key_released"] += 1
+                self._note("key_held", on=0)
+            return
+        if self._key_held or self._key_failed:
+            return
+        if _user32.RegisterHotKey(self.hwnd, HOTKEY_ID, MOD_NOREPEAT, VK_INSERT):
+            self._key_held = True
+            self.counts["key_registered"] += 1
+            self._note("key_held", on=1)
+            return
+        error = ctypes.get_last_error()
+        self._key_failed = True
+        self.counts["key_failed"] += 1
+        self._note("key_failed", error=int(error))
+        if not self._key_logged:
+            self._key_logged = True
+            log.info("the Insert key could not be taken for Add area (Windows error %s; another program may hold "
+                     "it): Add area in the left pane still works", error)
+
+    def _hot_key(self, ident: int) -> None:
+        """(the window thread: ``WM_HOTKEY`` to the lettering's window) Insert pressed while the viewer was in front:
+        kept for the Tk thread (`take_keys`), whose Add area it starts or gives up; a rectangle being drawn to add a
+        region is given up there and then."""
+        if ident != HOTKEY_ID:
+            return
+        self.counts["keys"] += 1
+        if self._press is not None and self._press.get("adding"):
+            self._edit_cancel("key")
+        self._keys.append(time.monotonic())
+        self._note("key")
 
     # ------------------------------------------------------------------ Edit (the window's thread)
     def _edit_take(self, wanted: bool, sets: list[st.PatchSet]) -> None:
@@ -1102,8 +1224,11 @@ class SeeThrough:
                 self._edit_move(point)
             elif message == WM_LBUTTONUP:
                 self._edit_release(point)
-            else:
+            else:  # (a right click: a drag given up - and, with a region to add, the adding too)
+                marks = self._marks_live
                 self._edit_cancel("right")
+                if marks is not None and marks.adding:
+                    self._add_given_up(marks)
             return 0
         if message == WM_CAPTURECHANGED:
             if self._press is not None and int(lparam or 0) != self.hwnd:
@@ -1195,6 +1320,15 @@ class SeeThrough:
             _user32.ReleaseCapture()
         self._note("press_given_up", why=why)
         self._edit_dirty = True
+
+    def _add_given_up(self, marks: st.Marks) -> None:
+        """A right click while a region is to be added: kept for the Tk thread as an "add" that drew nothing (its box
+        None), which gives the adding up."""
+        self._edit_serial += 1
+        self._edits.append({"press": self._edit_serial, "marks": marks.serial, "key": marks.key, "kind": "add",
+                            "box": None})
+        self._note("edit_add", press=self._edit_serial, given_up=1)
+        self._edit_redraw()
 
     def _edit_held(self) -> None:
         """At every look: a press the window holds while the button is up after all (let go over another window

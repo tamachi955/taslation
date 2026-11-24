@@ -94,6 +94,16 @@ def no_real_button_read(monkeypatch):
     monkeypatch.setattr(overlay, "button_down", lambda: False)
 
 
+@pytest.fixture(autouse=True)
+def no_real_hot_key(monkeypatch):
+    """No test takes the Insert key of this machine (`capture.seethrough.SeeThrough._key_tick` holds it only while
+    the viewer is in front: `viewer_in_front`, here never - a window of the tests' that happened to be in front would
+    have Insert taken from the person's own programs while the tests run); the tests of the key patch their own."""
+    from taslation.capture import seethrough as overlay
+
+    monkeypatch.setattr(overlay, "viewer_in_front", lambda viewer: False)
+
+
 def _real_state_folder(state_dir) -> bool:
     """Whether *state_dir* is (or is in) a state folder of this machine's own: the home folder's, by any of the
     project's names."""

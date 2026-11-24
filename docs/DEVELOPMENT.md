@@ -370,7 +370,16 @@ rows' languages.
   block), a click (the ms until the region editor is on the screen, beside the box or over it, on the box's monitor,
   whether it took the keys and holds that region; a WM_CLOSE posted to it, and the ms until the stand-in is in front
   again), a drag of the box by 24 x 12 px (handed over as a move, outlined at its new place meanwhile, the ms until
-  the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize);
+  the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize).
+  `--see-add` measures adding text areas in place of both (`add`; Edit on with `--see-edit`, off without; best with
+  scenario `g`, one page held long): once a page is done and on show, the left pane's Add area and the Insert key
+  (its WM_HOTKEY POSTED to the lettering's own window: no key of the system's is pressed), each followed by a
+  rectangle dragged on the page's empty space - the ms until the row shows pressed and the whole page takes the mouse,
+  which window `WindowFromPoint` gives there, the drag handed over as an "add", the ms until the page has a region of
+  the reader's there, and with Edit off until every click is the viewer's again -, then each way of giving it up (the
+  row again, the key again, a right click); meanwhile who is in front every 50 ms against whether the key is held
+  (read only: the tool moves no foreground) and the hot key's registrations, releases, failures and presses
+  (`SeeThrough.counts`);
   each time the
   bars went from a page read under
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,

@@ -364,6 +364,7 @@ def edit_app(regions=None):
                           busy=False, _ordering=None, _chosen_region=None, _also_chosen=[], _see_dpi=96,
                           calls=calls, said=said)
     app._editing = lambda: True
+    app._result_on_show = lambda: True
     app._page_regions = lambda: list(result.regions)
     app.say = lambda text, **k: said.append(text)
     app._choose = lambda r: (calls.append(("choose", r)), setattr(app, "_chosen_region", r))
@@ -464,7 +465,7 @@ def test_a_drag_stores_the_box_and_the_chosen_move_together_and_a_stale_press_do
     assert app.calls == [] and app._see_edit_seen == 3
 
 
-def test_a_text_area_is_added_only_when_asked_for_in_the_menu():
+def test_a_text_area_is_added_only_when_asked_for_and_edit_off_keeps_the_adding():
     app = edit_app()
     hand(app, kind="add", box=(10, 10, 60, 60))
     assert app.calls == []  # (not asked for)
@@ -475,10 +476,14 @@ def test_a_text_area_is_added_only_when_asked_for_in_the_menu():
     see_edit.add_region(app)
     hand(app, kind="add", box=(10, 10, 60, 60))
     assert app.calls == [("add", (10, 10, 60, 60))] and app._see_pending == ((10, 10, 60, 60),)
+    app.busy = False
     see_edit.add_region(app)
-    app.role_var.set("reader")
+    app.role_var.set("reader")  # (Edit off: the adding kept, marks of no box - Add area works with Edit off)
     see_edit.tick(app, app._see_through)
-    assert app._see_adding is False and app._see_through.marks[-1] is None  # (Edit off: given up)
+    marks = app._see_through.marks[-1]
+    assert app._see_adding is True and marks.adding and marks.boxes == ()
+    see_edit.toggle_adding(app)  # (Add area again)
+    assert app._see_adding is False and app._see_through.marks[-1] is None
 
 
 def test_one_press_s_fault_leaves_the_next_acted_on(monkeypatch):

@@ -70,7 +70,8 @@ class SettingRow:
     """One more setting in the dialog (`EXTRA_ROWS`): the `Settings` field *key*; *label* and *tip* in English, keys
     of the window's catalogs (the 16 languages in a ``locales/features`` module, as every string of the window); in
     the *section* "lettering" or "window", under the rows there; a checkbox, or with *choices* ((value, label), ...)
-    a list to choose from; *page*: a change letters the page on show again (`PAGE_SETTINGS`)."""
+    a list to choose from; *page*: a change letters the page on show again (`PAGE_SETTINGS`). *values*: a checkbox
+    of a setting that is one of two words, (the word unticked, the word ticked) - ticked for the second only."""
 
     key: str
     label: str
@@ -78,6 +79,15 @@ class SettingRow:
     section: str = "window"
     choices: tuple[tuple[str, str], ...] = ()
     page: bool = False
+    values: tuple[str, ...] = ()
+
+    def ticked(self, value: Any) -> bool:
+        """Whether the checkbox of this row is ticked for the setting's *value*."""
+        return value == self.values[1] if self.values else bool(value)
+
+    def value_of(self, ticked: bool) -> Any:
+        """The setting's value for the checkbox *ticked* or not."""
+        return self.values[1 if ticked else 0] if self.values else bool(ticked)
 
 
 # ---------------------------------------------------------------- other parts' settings: one line each
@@ -89,6 +99,11 @@ SEE_INDICATORS_TIP = ("The pane at the right of the viewer's page: the bubble la
                       "and its translation, to copy or to ask the model again), what TASlation is doing, how far the "
                       "page on show is, the pages turned past. Off: none of these. Also the Indicators switch in the "
                       "controls at the left.")
+ADD_KEY_TIP = ("While the viewer is in front, the Insert key starts adding a text area, as Add area in the controls "
+               "at the left does; Insert again gives it up. It is the only key TASlation takes. Off: TASlation takes "
+               "no key at all.")
+START_EDIT_TIP = ("Edit is on when TASlation starts, for a book you have not turned Edit on or off for; a book keeps "
+                  "the choice you made for it. From the next start.")
 EXTRA_ROWS: tuple[SettingRow, ...] = (
     SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
                "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
@@ -96,6 +111,8 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                "Where the original letters part of a bubble larger than the rest, that part is looked for in the translation (one or two short requests beside the page's; the words never change) and lettered larger too, where the bubble holds both sizes. Off: every translation at one size.",
                section="lettering", page=True),
     SettingRow("see_through_indicators", "Indicators at the right of the viewer", SEE_INDICATORS_TIP),
+    SettingRow("add_area_key", "Insert adds a text area", ADD_KEY_TIP),
+    SettingRow("role", "Start with Edit on", START_EDIT_TIP, values=("reader", "translator")),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 
@@ -530,7 +547,7 @@ class SettingsDialog(tk.Toplevel):
                 box.grid(row=row, column=1, sticky="w", padx=(8, 0), pady=(4, 0))
                 widgets: tuple[tk.Misc, ...] = (name, box)
             else:
-                var = tk.BooleanVar(self, value=bool(value))
+                var = tk.BooleanVar(self, value=spec.ticked(value))
                 check = ttk.Checkbutton(frame, text=_(spec.label), variable=var)
                 check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
                 widgets = (check,)
@@ -595,7 +612,7 @@ class SettingsDialog(tk.Toplevel):
             if var is None:
                 out[spec.key] = getattr(self.settings, spec.key)
                 continue
-            out[spec.key] = self._value(spec.choices, var.get()) if spec.choices else bool(var.get())
+            out[spec.key] = self._value(spec.choices, var.get()) if spec.choices else spec.value_of(bool(var.get()))
         for spec in SHOWN_NUMBERS:  # (as typed when it is no whole number: `number_problem` says so on Save)
             var = self.numbers.get(spec.key)
             out[spec.key] = getattr(self.settings, spec.key) if var is None else whole_number(var.get())

@@ -235,11 +235,13 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     # `SeeWatch._follow_slides`), and a slow slide held long; the pointer the window reads follows each slide
     "s": ("the page slid with the pointer", ["n", "w6000", "r700", "w1500", "o", "w7000", "r600-150", "w1500", "o",
                                              "w5000", "l700", "w1500", "o", "w7000", "r1500", "w3000", "o", "w8000"]),
+    # (by its name only) one page held long: room for what is measured on a page done (--see-add)
+    "g": ("one page held long", ["n", "w90000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
-NAMED_ONLY = ("q", "f3", "s")  # scenarios never in "all", only by their names
+NAMED_ONLY = ("q", "f3", "s", "g")  # scenarios never in "all", only by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
@@ -4434,6 +4436,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                       activations=activations,
                                       pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
                                       viewer_pids=lambda: {pid, *browser.tree}, edit=edit,
+                                      add=bool(getattr(args, "see_add", False)),
                                       standin=browser if any(s.name == "s" for s in segments) else None, top=top,
                                       state_of=lambda image: notes.shown(image).state())
     see.install()
@@ -5465,6 +5468,12 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="the book's role kept as the Translator's, so that the left pane's Edit "
                          "is on from the start; a click and a drag on a region, posted to the lettering's own window, "
                          "are measured in place of the patch under the pointer (run.see_through.edit)")
+    ap.add_argument("--see-add", action="store_true",
+                    help="adding text areas measured in place of both (run.see_through.add), Edit on with --see-edit "
+                         "and off without: once a page is done, the left pane's Add area and the Insert key's "
+                         "message, each with a rectangle dragged on the page's empty space, then each way of giving "
+                         "it up, all posted to TASlation's own windows, and who is in front against whether the key "
+                         "is held (read only); best with scenario g")
     ap.add_argument("--standin-size", default="", metavar="WxH",
                     help=f"the stand-in's window size (default {STANDIN_SIZE[0]}x{STANDIN_SIZE[1]}), within the "
                          "primary monitor's work area")

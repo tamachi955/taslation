@@ -137,17 +137,18 @@ def _guide(start: str) -> str:
 NAMED = (  # (the start of a topic paragraph, the window's words it names)
     ("TASlation finds the viewer", ("Menu", "Viewer...")),
     ("Translate translates the page", ("Translate", "Lettering")),
-    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Edit", "Set area...",
+    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Edit", "Add area", "Set area...",
                            "Settings...", "Menu", "Quit")),
     ("Right of the page,", ("Indicators", "Copy the Japanese", "Copy the translation", "Ask again")),
     ("Rest the pointer", ("Copy the Japanese", "Copy the translation")),
     ("The panes lie", ("Menu",)),
     ("Edit in the left pane", ("Edit",)),
+    ("Add area in the left pane", ("Add area", "Edit", "Settings...")),
     ("The numbers' colours", ("Review...",)),
     ("While Edit is on,", ("Edit", "Menu", "Undo", "Redo", "Reading order", "Add a text area", "Skip page",
                            "Review...", "My corrections...", "Lines to review...", "Find and replace...",
                            "Series sheet...", "Book settings...")),
-    ("A bubble stays untranslated", ("Translate", "Edit", "Add a text area", "Menu")),
+    ("A bubble stays untranslated", ("Translate", "Add area", "Edit")),
     ("TASlation finds no page", ("Set area...",)),
     ("Nothing happens", ("Indicators", "Menu", "Viewer...", "Auto")),
     ("A name comes out wrong", ("Edit", "Find and replace...", "Menu")),
@@ -160,7 +161,7 @@ NAMED = (  # (the start of a topic paragraph, the window's words it names)
 def test_the_guide_names_the_controls_by_the_panes_and_the_menus_own_words():
     from taslation.ui import see_edit, seethrough
 
-    assert see_edit.EDIT == "Edit" and see_edit.ADD_ENTRY == "Add a text area"
+    assert see_edit.EDIT == "Edit" and see_edit.ADD_ENTRY == "Add a text area" and see_edit.ADD_AREA == "Add area"
     assert (seethrough.COPY_JAPANESE, seethrough.COPY_TRANSLATION) == ("Copy the Japanese", "Copy the translation")
     for start, words in NAMED:
         key = _guide(start)

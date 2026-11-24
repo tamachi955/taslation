@@ -78,7 +78,8 @@ settle_ms = 400
 early_start = true            # a new page is read from its first frame; it asks the model and is kept once that frame stays (false: wait settle_ms first)
 
 # --- app ---
-role = "reader"               # Edit at the start: "reader" (off) | "translator" (on: mark text, fix translations); a book's own choice comes first
+role = "reader"               # Edit at the start: "reader" (off) | "translator" (on: mark text, fix translations); a book's own choice comes first (Settings...: "Start with Edit on")
+add_area_key = true           # the Insert key adds a text area, as Add area in the controls at the left does, only while the viewer is in front (the one key TASlation takes); false: no key at all (also Settings...)
 ui_language = ""              # language of the controls and dialogs: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
 ui_scale = 1.0                # size of the dialogs' text, times what Windows sets for the monitor (0.5-3.0; also Settings...)
 theme = "system"              # the dialogs' and menus' colours: "system" (as Windows' app mode), "light" or "dark"; Windows' high contrast comes first (also Settings...)

@@ -30,8 +30,9 @@ There is no account to make and no limit on the pages it translates. Nothing of 
    translates it again without using the cache (see "Edit: correcting the page"). If you press Translate while the OCR model is still loading, for example, it runs as soon as it can.
    "Lettering" hides TASlation's lettering, so that the page shows as the viewer has it, and shows it again.
 
-The lettering lies in a window of its own over the viewer's, which takes no click and no key: every click and key goes to the viewer, as without TASlation
-(with "Edit" on, the boxes of the page's regions take the clicks on them; see "Edit: correcting the page"). Each piece of the lettering belongs to the pixels
+The lettering lies in a window of its own over the viewer's, which takes no click and no key: every click and key goes to the viewer, as without TASlation,
+Insert alone excepted, which adds a text area while the viewer is in front (with "Edit" on, the boxes of the page's regions take the clicks on them too;
+see "Edit: correcting the page"). Each piece of the lettering belongs to the pixels
 it was made from, and shows only while the viewer shows those very pixels there: when you turn the page, the old lettering goes at the first picture of the new page,
 and where the viewer draws something over the page (a bar, a menu, a panel) or another window lies over it, the lettering there is left out.
 A page whose translations are all in the cache is lettered as soon as the viewer shows it.
@@ -76,7 +77,7 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
 
 * **The left pane** holds the controls: "Translate" ("Stop" while a page is being translated), with the circular arrow at the right end of its row that translates the page on show again;
   "Auto"; the target language, with an arrow on each side (the language is taken once no arrow has been clicked for about a second); "Lettering"; "Indicators"; "Edit";
-  "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and a click between the rows goes to the viewer.
+  "Add area" ("Add area (Insert)" while the Insert key adds a text area; see "Edit: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and a click between the rows goes to the viewer.
 * **The right pane** (while "Indicators" is on) shows, at its top, the bubble last under the pointer (see "The bubble under the pointer"); under it the lines of the setup
   (what is missing and how to fix it), how far the page on show is, the status line, how many pages turned past are still to do, and whether the translator runs on the GPU or the processor.
   Clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
@@ -269,9 +270,19 @@ the folder where the cache, series sheets and settings are kept, and where the R
 ### Edit: correcting the page
 
 "Edit" in the left pane turns editing on and off. It stays as you left it for each book (a book you have not chosen for starts with it off,
-or on with `--role translator` or `role = "translator"` in the settings file). With "Edit" on, the regions of the page on show appear over the viewer as boxes,
+or on with "Start with Edit on" in "Settings...", `--role translator` or `role = "translator"` in the settings file). With "Edit" on, the regions of the page on show appear over the viewer as boxes,
 each with its number in the reading order on a small plate of its colour (green: translated, orange: not translated, blue: a region you marked yourself,
-red: translated but flagged for review). Beside the boxes every click still goes to the viewer, and so do the keys, except while a dialog of TASlation's (the region editor among them) is open.
+red: translated but flagged for review). Beside the boxes every click still goes to the viewer, and so do the keys (Insert alone excepted: "Adding a text area", below),
+except while a dialog of TASlation's (the region editor among them) is open.
+
+* **Adding a text area** works with "Edit" on or off: press "Add area" in the left pane (it shows pressed), or Insert while the viewer is in front,
+  and drag a rectangle around text that was not detected. It is read, translated and added to the page (later readings use it too), and the page goes back to
+  reading as before. Until the rectangle is drawn, the whole page takes the mouse; a click without a drag, a right click, Insert again or "Add area" again gives it up.
+  A text area can be added once the page on show is translated, with "Lettering" on and the book named (the status line says what is missing).
+  With "Edit" on, "Add a text area" in the Menu's "Page" does the same.
+  Insert is the only key TASlation takes, and only while the viewer is the window in front: not while another program or a dialog of TASlation's is, nor while the viewer
+  is minimised. Only Insert alone is taken (Shift+Insert and Ctrl+Insert stay the viewer's). "Insert adds a text area" in "Settings..." (`add_area_key`) turns it off,
+  and TASlation then takes no key at all. Where another program holds Insert already, the key does nothing and "Add area" still works (the log says so once).
 
 * **The mouse on the boxes**: a click on a box opens the region editor beside it. Like shapes in office software, a region is moved by dragging and resized with its corner handles,
   and it is read again only when the new frame covers a larger area (a right click during a drag gives the drag up). Shift+click adds a box to the chosen regions,
@@ -292,9 +303,8 @@ red: translated but flagged for review). Beside the boxes every click still goes
   "Copy region" remembers the chosen region itself (frame and formatting), and "Paste region" on another page with the same layout
   adds a region at the same place, then reads and translates it (it does not add one where there already is a region, or when the page's size differs).
 
-* **Regions**: every text region has a box with its number. Draw a rectangle around text that was not detected, and it is read, translated
-  and added to the page (later readings use it too). Choose "Add a text area", then drag on the page (a click without a drag gives it up).
-  On the drawing, only the lettering inside it is erased and the drawing under it filled in (by the inpainting model where it runs, otherwise from the drawing around the strokes);
+* **Regions**: every text region has a box with its number (a region of your own is added with "Add area": "Adding a text area", above).
+  On the drawing, only the lettering inside a region is erased and the drawing under it filled in (by the inpainting model where it runs, otherwise from the drawing around the strokes);
   in a bubble or on a flat box, the rectangle is wiped on its paper, and the outline and the drawing beyond it stay.
   A slant is set in the region editor ("Slant"); a slanted region keeps its slant when it is moved or resized.
   "Drop the chosen regions" removes them, and a removed region is remembered as "not text" on that page, so a false detection never comes back.
@@ -741,7 +751,8 @@ the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubb
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
 in the settings file it is `text_scale`, and a book's own value is in "Book settings...", in the Menu while "Edit" is on); whether to letter in capitals; whether to set slanted lettering at the same slant; and whether to set larger what the original sets larger.
 Under "Dialogs" it has the size of the dialogs' text, the dialogs' colours (light, dark, or as Windows is set), reusing the translation of a short line seen before,
-"Indicators at the right of the viewer" (`see_through_indicators`, the same as "Indicators" in the left pane) and "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default; a number out of these bounds is not saved).
+"Indicators at the right of the viewer" (`see_through_indicators`, the same as "Indicators" in the left pane), "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default; a number out of these bounds is not saved),
+"Insert adds a text area" (`add_area_key`, on by default; off, TASlation takes no key at all) and "Start with Edit on" (`role = "translator"`; from the next start, for a book you have not turned "Edit" on or off for).
 Last come the optional page models (the layout model and the inpainting).
 "Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
 that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
@@ -776,7 +787,8 @@ It is made where the settings are read from (the file that was read, or else `ta
 Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation folder (docs/INSTALL.md, "Updating").
 Settings changed in the file take effect from the next start.
 
-TASlation has no keys of its own to set: every key goes to the viewer. In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
+TASlation has no keys of its own to set: every key goes to the viewer, except Insert, which adds a text area while the viewer is in front
+("Insert adds a text area" turns it off; "Edit: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
 Ctrl+Shift+C and Ctrl+Shift+V. Keys an earlier version saved for these in `shortcuts.json` in the state folder still apply, but there is no page to change them any more.
 
 The "System" page of "Settings" shows, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU") and how many seconds a page took.
@@ -839,6 +851,8 @@ font_path = ""               # auto: the series sheet's font where installed, th
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 see_through_indicators = true  # the right pane: the bubble under the pointer, how far the page is, the status line
 hover_delay_ms = 450         # the wait before a bubble under the pointer gives way to the original (0-3000; 0: at once)
+role = "reader"              # Edit at the start: "reader" (off) or "translator" (on); a book keeps its own choice ("Start with Edit on")
+add_area_key = true          # Insert adds a text area while the viewer is in front (the one key TASlation takes); false: no key at all
 update_check = "off"         # "daily": at the start, look for a new version at most once a day (check_update.py asks GitHub); "off": only Menu > Help > Check for updates...
 ```
 
@@ -861,7 +875,7 @@ The lettering on the page is read by three OCR models (about 700 MB in all). man
 it is strong on long lines, but it also tries to read something from drawings with no text. So TASlation first checks this model's confidence
 (the product of the mean likelihood of character centres and the mean certainty of telling the characters apart; `ocr_min_confidence`, 0.65 by default),
 that the text is at most three times the page's usual character size, and that it has 2 characters or more; what fails is treated as not text.
-That is why a line of a single character is skipped. In that case, add the region by hand with "Edit" on ("Add a text area"). A region added by hand
+That is why a line of a single character is skipped. In that case, add the region by hand ("Add area" in the left pane, or Insert). A region added by hand
 is never put through this check.
 
 A region that passes the check is also read by manga-ocr-nar-small. If the two readings are the same, that reading is taken. If not, manga-ocr-base-CPT-flex reads it too,
