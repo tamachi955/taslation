@@ -77,7 +77,7 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
 
 * **The left pane** holds the controls: "Translate" ("Stop" while a page is being translated), with the circular arrow at the right end of its row that translates the page on show again;
   "Auto"; the target language, with an arrow on each side (the language is taken once no arrow has been clicked for about a second); "Lettering"; "Indicators"; "Edit";
-  "Add area" ("Add area (Insert)" while the Insert key adds a text area; see "Edit: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and a click between the rows goes to the viewer.
+  "Add area" (or Insert while the viewer is in front; see "Edit: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and a click between the rows goes to the viewer.
 * **The right pane** (while "Indicators" is on) shows, at its top, the bubble last under the pointer (see "The bubble under the pointer"); under it the lines of the setup
   (what is missing and how to fix it), how far the page on show is, the status line, how many pages turned past are still to do, and whether the translator runs on the GPU or the processor.
   Clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
@@ -89,7 +89,7 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
 A pane needs room beside the page: one that would come near the page, or that the viewer's ground is too short for, hides rather than cover the page
 (beside a two-page spread in a 1920 x 1080 window there is room; in a narrow window, or beside a wide page, there may be none). The panes also hide while the viewer is minimised or hidden,
 and where another window lies over them. While the left pane has no room, a click on TASlation's button on the taskbar opens the Menu at the pointer,
-with the left pane's controls ("Translate", "Auto", "Lettering", "Set area..."), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
+with the left pane's controls ("Translate", "Auto", "Lettering", "Add area", "Set area..."), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
 closing it there (from the button's menu, or with Alt+F4) quits TASlation as "Quit" does.
 
 TASlation's dialogs open over the viewer, on the viewer's monitor. A dialog you asked for takes the keys while it is open; once it closes, the keys go back to the viewer.

@@ -760,7 +760,7 @@ def left_rows(app: Any) -> list[pn.Row]:
     from . import see_edit
 
     edit = [pn.Row("edit", _(see_edit.EDIT), "toggle", on=see_edit.on(app)),
-            pn.Row("add_area", _(see_edit.add_label(app)), on=see_edit.adding(app))] if hidden(app) else []
+            pn.Row("add_area", _(see_edit.ADD_AREA), on=see_edit.adding(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
             pn.Row("language", _language_shown(app), "choice"),

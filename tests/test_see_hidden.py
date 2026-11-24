@@ -327,24 +327,33 @@ def test_the_menu_has_the_windows_entries_that_still_mean_something_and_each_is_
 def test_the_buttons_menu_adds_the_left_panes_controls_settings_and_quit_and_quit_is_no_asking(hidden_root,
                                                                                                  monkeypatch):
     # (the taskbar button opens it while the left pane has no room beside the page: it has what the left pane has)
-    toggled = []
+    from taslation.ui import see_edit
+
+    toggled, adding = [], []
     monkeypatch.setattr(ui, "toggle", lambda a: toggled.append(a))
+    monkeypatch.setattr(see_edit, "toggle_adding", lambda a: adding.append(a._see_asked))
     app = menu_app(hidden_root)
     menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
     sm.build(app, menu, language, help_menu, full=True)
-    assert entries(menu)[:5] == ["Translate", "Auto", "Lettering", "Set area...", "-"]
+    assert entries(menu)[:6] == ["Translate", "Auto", "Lettering", "Add area", "Set area...", "-"]
     assert entries(menu)[-4:] == ["Help", "-", "Settings...", "Quit"]
     menu.invoke(len(entries(menu)) - 1)
     assert app.done == [("_on_close", None)]
     menu.invoke(len(entries(menu)) - 2)
     assert app.done[-1][0] == "open_settings" and app.done[-1][1] is not None
     menu.invoke(0)
-    menu.invoke(3)
+    menu.invoke(4)
     assert [n for n, _t in app.done[-2:]] == ["translate_now", "set_area"]
     menu.invoke(1)
     assert app.auto_var.get() is False
     menu.invoke(2)
     assert toggled == [app]
+    app._see_asked = None
+    menu.invoke(3)  # (Add area, as the left pane's: the Insert key can be switched off; no dialog, no asking)
+    assert adding == [None]
+    app._see_adding = True
+    sm.build(app, menu, language, help_menu, full=True)
+    assert menu._see_adding.get() is True  # (ticked while a text area is to be added)
     pane_menu = tk.Menu(hidden_root, tearoff=0)
     sm.build(app, pane_menu, tk.Menu(pane_menu, tearoff=0), tk.Menu(pane_menu, tearoff=0))
     assert "Translate" not in entries(pane_menu)  # (the pane's own Menu: the controls are beside it)

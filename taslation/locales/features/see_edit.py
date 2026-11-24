@@ -1,5 +1,5 @@
-"""The window's strings for Edit in see-through mode (`ui.see_edit`): the left pane's switch and its Add area (with the
-Insert key's name, as keyboards print it), the lines the status says as it is switched and while the reading order is
+"""The window's strings for Edit in see-through mode (`ui.see_edit`): the left pane's switch and its Add area (as wide as
+the pane's other rows at the most), the lines the status says as it is switched and while the reading order is
 clicked or a region is drawn to add (and why none can be added now), the Menu's entries of its own (Add a text area,
 Cancel the reading order, Drop the chosen regions) and the tip of the region editor's Show original.
 The Menu's other entries are the window's own (Undo, Redo, Page, Reading order, Finish order, Skip page, Set kind...,
@@ -75,31 +75,25 @@ TEXTS: dict[str, dict[str, str]] = {
         "tr": "Metin bölgesi ekle", "id": "Tambah wilayah teks", "vi": "Thêm vùng chữ", "zh": "添加文字区域",
         "zh-tw": "新增文字區域", "ko": "텍스트 영역 추가", "th": "เพิ่มกรอบข้อความ",
     },
-    # the left pane's Add area (with the Insert key's name as keyboards print it: de Einfg, fr Inser, it Ins), what
-    # the status says as it begins, and why it cannot now
+    # the left pane's Add area - no wider than the pane's other rows in any language (de "Neuer Bereich", nl "Nieuw
+    # gebied", ru "Новая область": the pane keeps its width; the key is named in the help and the manual) -, what the
+    # status says as it begins, and why it cannot now
     "Add area": {
         "ja": "領域を追加", "es": "Añadir área", "pt": "Adicionar área", "fr": "Ajouter une zone",
-        "de": "Bereich hinzufügen", "it": "Aggiungi area", "nl": "Gebied toevoegen", "pl": "Dodaj obszar",
-        "ru": "Добавить область", "tr": "Alan ekle", "id": "Tambah area", "vi": "Thêm vùng", "zh": "添加区域",
+        "de": "Neuer Bereich", "it": "Aggiungi area", "nl": "Nieuw gebied", "pl": "Dodaj obszar",
+        "ru": "Новая область", "tr": "Alan ekle", "id": "Tambah area", "vi": "Thêm vùng", "zh": "添加区域",
         "zh-tw": "新增區域", "ko": "영역 추가", "th": "เพิ่มพื้นที่",
-    },
-    "Add area (Insert)": {
-        "ja": "領域を追加 (Insert)", "es": "Añadir área (Insert)", "pt": "Adicionar área (Insert)",
-        "fr": "Ajouter une zone (Inser)", "de": "Bereich hinzufügen (Einfg)", "it": "Aggiungi area (Ins)",
-        "nl": "Gebied toevoegen (Insert)", "pl": "Dodaj obszar (Insert)", "ru": "Добавить область (Insert)",
-        "tr": "Alan ekle (Insert)", "id": "Tambah area (Insert)", "vi": "Thêm vùng (Insert)", "zh": "添加区域 (Insert)",
-        "zh-tw": "新增區域 (Insert)", "ko": "영역 추가 (Insert)", "th": "เพิ่มพื้นที่ (Insert)",
     },
     "Drag a rectangle over the text to add it. A click without a drag, a right click or Add area again gives it up.": {
         "ja": "追加する文字の上を矩形でドラッグしてください。ドラッグせずにクリックするか、右クリックするか、もう一度「領域を追加」を押すと取りやめます。",
         "es": "Arrastra un rectángulo sobre el texto para añadirlo. Un clic sin arrastrar, un clic derecho o Añadir área otra vez lo cancela.",
         "pt": "Arraste um retângulo sobre o texto para adicioná-lo. Um clique sem arrastar, um clique direito ou Adicionar área de novo desiste.",
         "fr": "Faites glisser un rectangle sur le texte pour l'ajouter. Un clic sans glisser, un clic droit ou Ajouter une zone à nouveau y renonce.",
-        "de": "Ziehen Sie ein Rechteck über den Text, um ihn hinzuzufügen. Ein Klick ohne Ziehen, ein Rechtsklick oder erneut Bereich hinzufügen bricht ab.",
+        "de": "Ziehen Sie ein Rechteck über den Text, um ihn hinzuzufügen. Ein Klick ohne Ziehen, ein Rechtsklick oder erneut Neuer Bereich bricht ab.",
         "it": "Trascina un rettangolo sul testo per aggiungerlo. Un clic senza trascinare, un clic destro o di nuovo Aggiungi area annulla.",
-        "nl": "Sleep een rechthoek over de tekst om die toe te voegen. Een klik zonder slepen, een rechtermuisklik of nogmaals Gebied toevoegen ziet ervan af.",
+        "nl": "Sleep een rechthoek over de tekst om die toe te voegen. Een klik zonder slepen, een rechtermuisklik of nogmaals Nieuw gebied ziet ervan af.",
         "pl": "Przeciągnij prostokąt nad tekstem, aby go dodać. Kliknięcie bez przeciągania, prawy przycisk myszy lub ponownie Dodaj obszar rezygnuje.",
-        "ru": "Обведите текст прямоугольником, чтобы добавить его. Щелчок без перетаскивания, щелчок правой кнопкой или повторное «Добавить область» отменяет.",
+        "ru": "Обведите текст прямоугольником, чтобы добавить его. Щелчок без перетаскивания, щелчок правой кнопкой или повторное «Новая область» отменяет.",
         "tr": "Eklemek için metnin üzerine bir dikdörtgen sürükleyin. Sürüklemeden tıklamak, sağ tıklamak ya da yeniden Alan ekle vazgeçer.",
         "id": "Seret persegi di atas teks untuk menambahkannya. Klik tanpa menyeret, klik kanan, atau Tambah area lagi membatalkannya.",
         "vi": "Kéo một hình chữ nhật lên chữ để thêm. Bấm mà không kéo, bấm chuột phải hoặc bấm Thêm vùng lần nữa thì bỏ qua.",

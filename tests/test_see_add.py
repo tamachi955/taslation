@@ -305,12 +305,27 @@ def test_the_left_pane_has_add_area_after_edit_while_hidden_and_it_shows_pressed
     names = [r.name for r in ui.left_rows(app)]
     assert names.index("add_area") == names.index("edit") + 1
     row = {r.name: r for r in ui.left_rows(app)}["add_area"]
-    assert row.text == "Add area (Insert)" and row.kind == "button" and row.on is False
+    assert row.text == "Add area" and row.kind == "button" and row.on is False  # (the key named elsewhere only)
     app._see_adding = True
     assert {r.name: r for r in ui.left_rows(app)}["add_area"].on is True
-    app.settings.add_area_key = False  # (no key: none named)
-    assert {r.name: r for r in ui.left_rows(app)}["add_area"].text == "Add area"
     assert ui.PANE_ACTIONS["add_area"] is ui._add_area
+
+
+@pytest.mark.parametrize("dpi", [96, 144])
+def test_the_add_area_row_makes_the_left_pane_no_wider_in_any_language(tmp_path, dpi):
+    from test_see_panes import fake_app
+
+    from taslation.i18n import set_language
+
+    try:
+        for code in ("en", *FEATURE_LANGUAGES):
+            set_language(code)
+            rows = ui.left_rows(fake_app(tmp_path, role_var=Var("reader"), _see_hidden=True))
+            assert "add_area" in [r.name for r in rows]
+            without = [r for r in rows if r.name != "add_area"]
+            assert pn.width_for(rows, code, dpi) == pn.width_for(without, code, dpi), code
+    finally:
+        set_language("en")
 
 
 def test_a_pressed_button_is_drawn_on_the_accent_plate():
@@ -328,14 +343,13 @@ def test_a_pressed_button_is_drawn_on_the_accent_plate():
 
 # ------------------------------------------------------------------ the words
 def test_the_new_words_are_in_every_language_and_name_the_controls_as_the_window_does():
-    new = (see_edit.ADD_AREA, see_edit.ADD_AREA_KEY, see_edit.ADDING, see_edit.ADD_NOT_NOW,
-           see_edit.ADD_NO_LETTERING)
+    new = (see_edit.ADD_AREA, see_edit.ADDING, see_edit.ADD_NOT_NOW, see_edit.ADD_NO_LETTERING)
     for english in new:
         assert sorted(edit_texts.TEXTS[english]) == sorted(FEATURE_LANGUAGES), english
+    assert "Add area (Insert)" not in edit_texts.TEXTS  # (the row names no key: the pane keeps its width)
     for code in FEATURE_LANGUAGES:
         catalog = CATALOGS[code]
         area = catalog[see_edit.ADD_AREA]
-        assert catalog[see_edit.ADD_AREA_KEY].startswith(area + " ("), code
         assert area.lower() in catalog[see_edit.ADDING].lower(), code
         assert catalog["Lettering"].lower() in catalog[see_edit.ADD_NO_LETTERING].lower(), code
     for english in ("Insert adds a text area", dlg.ADD_KEY_TIP, "Start with Edit on", dlg.START_EDIT_TIP):
@@ -343,6 +357,7 @@ def test_the_new_words_are_in_every_language_and_name_the_controls_as_the_window
     for code in FEATURE_LANGUAGES:
         catalog = CATALOGS[code]
         assert catalog["Edit"].lower() in catalog["Start with Edit on"].lower(), code
+        assert catalog[see_edit.ADD_AREA].lower() in catalog[dlg.ADD_KEY_TIP].lower(), code  # (the row as it reads)
 
 
 # ------------------------------------------------------------------ Settings

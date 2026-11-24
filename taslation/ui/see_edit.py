@@ -44,7 +44,7 @@ EDIT_ON = ("Edit: click a bubble to edit it, drag it to move it, drag a corner t
 EDIT_OFF = "Edit is off: every click goes to the viewer."
 ORDERING = "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu."
 ADD_ENTRY = "Add a text area"
-ADD_AREA, ADD_AREA_KEY = "Add area", "Add area (Insert)"  # (the left pane's row, as the Insert key is on or off)
+ADD_AREA = "Add area"  # (the left pane's row: the Insert key is named in the help and the manual, the pane no wider)
 ADDING = ("Drag a rectangle over the text to add it. A click without a drag, a right click or Add area again gives "
           "it up.")
 ADD_GIVEN_UP = "No text area was added."
@@ -403,12 +403,6 @@ def _asking(app: Any, command: Callable[[], Any]) -> Callable[[], None]:
 def adding(app: Any) -> bool:
     """Whether a region is to be added: the next drag on the page draws it (the left pane's Add area shows pressed)."""
     return bool(getattr(app, "_see_adding", False))
-
-
-def add_label(app: Any) -> str:
-    """The left pane's Add area as it is worded: with the key it has while the Insert key adds a text area
-    (``Settings.add_area_key``)."""
-    return ADD_AREA_KEY if bool(getattr(getattr(app, "settings", None), "add_area_key", True)) else ADD_AREA
 
 
 def why_not_adding(app: Any) -> str | None:

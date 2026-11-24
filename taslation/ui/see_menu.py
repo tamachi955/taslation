@@ -4,7 +4,7 @@ hosts the dialogs), in places of their own.
 * The menu (`build`, `popup`): the left pane's Menu row opens it at the pane's right edge, level with the row
   (`popup_at_pane`), and a click on TASlation's taskbar button while the left pane has no room beside the page opens
   it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Lettering,
-  Set area...) and Settings... and Quit added. While the setup banner has buttons
+  Add area, Set area...) and Settings... and Quit added. While the setup banner has buttons
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
   in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
@@ -90,8 +90,8 @@ def banner_actions(app: Any) -> list[tuple[str, Callable[[], None]]]:
 
 def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: bool = False) -> None:
     """*menu* filled anew with the entries (see the module's notes), its cascades *language* and *help_menu* too;
-    *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Lettering, Set area...:
-    the left pane is not on the screen) and Settings... and Quit at its end. The setup banner's buttons come first
+    *full*: the taskbar button's menu, with the left pane's controls first (Translate, Auto, Lettering, Add area,
+    Set area...: the left pane is not on the screen) and Settings... and Quit at its end. The setup banner's buttons come first
     while it has some (`banner_actions`)."""
     from . import updates
     from .gpu_release import RELEASE_ENTRY, release_now
@@ -117,6 +117,11 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
         menu._see_lettering = tk.BooleanVar(menu, value=bool(over is None or over.on))  # (kept: Tk's variable)
         menu.add_checkbutton(label=_("Lettering"), command=lambda: seethrough.toggle(app),
                              variable=menu._see_lettering)
+        # (Add area as the left pane has it - the Insert key can be switched off -, ticked while a text area is to be
+        # added; no dialog, so not the reader asking: the foreground goes back to the viewer as the menu ends)
+        menu._see_adding = tk.BooleanVar(menu, value=see_edit.adding(app))
+        menu.add_checkbutton(label=_(see_edit.ADD_AREA), command=lambda: see_edit.toggle_adding(app),
+                             variable=menu._see_adding)
         menu.add_command(label=_("Set area..."), command=_asking(app, app.set_area))
         menu.add_separator()
     menu.add_command(label=_("Viewer..."), command=_asking(app, lambda: open_viewer(app)))
