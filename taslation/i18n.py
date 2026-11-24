@@ -9,6 +9,8 @@ English.
 The catalogs are the Japanese one here (``JA``), the positional lists of
 `locales`, and then the modules of `locales.features`, one per feature
 (`load_features`, `merge_features`).
+
+The Japanese catalog here (`JA`): Machine-translated; no native review.
 """
 
 from __future__ import annotations
@@ -33,8 +35,6 @@ JA: dict[str, str] = {
     # toolbar
     "Viewer:": "ビューア:",
     "To:": "翻訳先:",
-    "Translate (F5)": "翻訳 (F5)",
-    "Stop (Esc)": "停止 (Esc)",
     "Set area...": "範囲設定...",
     "Clear area": "範囲解除",
     "Show original": "原文を表示",
@@ -52,8 +52,8 @@ JA: dict[str, str] = {
     "Starting...": "起動中...",
     "Window capture needs Windows; use `taslation translate IMAGE` on this OS.":
         "ウィンドウのキャプチャは Windows 専用です。この OS では `taslation translate 画像` を使ってください。",
-    "Pick the viewer window first (open your e-book viewer, then choose it in the Viewer list).":
-        "先にビューアのウィンドウを選んでください（電子書籍ビューアを開いてから「ビューア」の一覧で選びます）。",
+    "Pick the viewer window first (open your e-book viewer, then choose it in Menu > Viewer...).":
+        "先にビューアのウィンドウを選んでください（電子書籍ビューアを開いてから「メニュー」>「ビューア...」で選びます）。",
     "Getting the Japanese reader ready (the first time takes a few seconds)...": "日本語の読み取り機能を準備しています（初回は数秒かかります）...",
     "\n\nPages already translated still show; new pages cannot be read.":
         "\n\n翻訳済みのページは表示できますが、新しいページは読めません。",
@@ -63,20 +63,20 @@ JA: dict[str, str] = {
     "Dropping the region...": "領域を削除中...",
     "Area cleared: TASlation looks for the page in the viewer's window by itself again (the whole window when it finds none).": "範囲を解除しました: TASlation がビューアのウィンドウ内のページを再び自動で探します（見つからなければウィンドウ全体を読みます）。",
     "Reading order cancelled.": "読み順の設定を取り消しました。",
-    "Reading order saved for {n} region(s). Translate again applies it.":
-        "{n} 領域の読み順を保存しました。「訳し直す」で反映されます。",
+    "Reading order saved for {n} region(s). The circular arrow beside Translate applies it.":
+        "{n} 領域の読み順を保存しました。「翻訳」の横の丸い矢印で反映されます。",
     "Page marked as skipped: nothing on it is translated.": "このページを除外しました: 何も翻訳しません。",
     "Page no longer skipped.": "ページの除外を解除しました。",
     "Translate this page again? Its present translations are replaced.":
         "このページを訳し直しますか？ 今の訳文は置き換えられます。",
     "Translate a page first (the book needs a name).": "先にページを翻訳してください（書名が必要です）。",
-    "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).":
-        "矩形を記録できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
+    "Could not record the rectangle: give the book a name first (Menu > Series and Volume...).":
+        "矩形を記録できません: 先に本の名前を入力してください（「メニュー」>「シリーズと巻...」）。",
     "Text rectangle added; reading and translating it...": "文字の矩形を追加しました。読み取って翻訳します...",
-    "Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).":
-        "訳文を保存できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
-    "Give the book a name first (its series in the Series field, and its volume beside it if it has one).":
-        "先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
+    "Could not keep the translation: give the book a name first (Menu > Series and Volume...).":
+        "訳文を保存できません: 先に本の名前を入力してください（「メニュー」>「シリーズと巻...」）。",
+    "Give the book a name first (Menu > Series and Volume...).":
+        "先に本の名前を入力してください（「メニュー」>「シリーズと巻...」）。",
     # buttons
     "Cancel": "キャンセル",
     "Close": "閉じる",

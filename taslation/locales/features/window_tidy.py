@@ -1,25 +1,27 @@
-"""The window's strings for one place per command: the hint that names the menu Set area... is in, the region editor's
+"""The window's strings for one place per command: the hint that says where Set area... is (the left pane), the region editor's
 fold of its formatting bar, the help's lines on where things went, and the 20 target languages by their names in the
-window's language (the "To:" box: what is kept and what the model is told stay the English names, `constants.LANGUAGES`)."""
+window's language (the "To:" box: what is kept and what the model is told stay the English names, `constants.LANGUAGES`).
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
-    "No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page.": {
-        "ja": "このビューアには範囲が設定されていません。「範囲設定...」（ページメニュー）でページの周りに矩形をドラッグして指定できます。",
-        "es": "Este visor no tiene área definida: Definir área... (menú Página) te deja arrastrar un rectángulo alrededor de la página.",
-        "pt": "Este visualizador não tem área definida: Definir área... (menu Página) deixa você arrastar um retângulo em volta da página.",
-        "fr": "Aucune zone n'est définie pour cette visionneuse : Définir la zone... (menu Page) permet de tracer un rectangle autour de la page.",
-        "de": "Für diesen Viewer ist kein Bereich gesetzt: Mit „Bereich festlegen...“ (Menü Seite) ziehen Sie ein Rechteck um die Seite.",
-        "it": "Per questo visualizzatore non è impostata un'area: Imposta area... (menu Pagina) ti fa trascinare un rettangolo attorno alla pagina.",
-        "nl": "Voor deze viewer is geen gebied ingesteld: met Gebied instellen... (menu Pagina) sleept u een rechthoek om de pagina.",
-        "pl": "Dla tego czytnika nie ustawiono obszaru: Ustaw obszar... (menu Strona) pozwala przeciągnąć prostokąt wokół strony.",
-        "ru": "Для этого просмотрщика область не задана: «Задать область...» (меню «Страница») позволяет обвести страницу прямоугольником.",
-        "tr": "Bu görüntüleyici için alan belirlenmedi: Alan belirle... (Sayfa menüsü) ile sayfanın etrafına bir dikdörtgen sürükleyebilirsiniz.",
-        "id": "Belum ada area untuk penampil ini: Atur area... (menu Halaman) memungkinkan Anda menyeret persegi di sekitar halaman.",
-        "vi": "Trình xem này chưa đặt vùng: Đặt vùng... (menu Trang) cho phép kéo một hình chữ nhật quanh trang.",
-        "zh": "此查看器尚未设置区域：用“设置区域...”（页面菜单）可在页面周围拖出矩形。",
-        "zh-tw": "此檢視器尚未設定區域：用「設定區域...」（頁面選單）可在頁面周圍拖出矩形。",
-        "ko": "이 뷰어에는 영역이 설정되지 않았습니다. 영역 설정...(페이지 메뉴)으로 페이지 주위에 사각형을 드래그할 수 있습니다.",
-        "th": "ยังไม่ได้กำหนดพื้นที่สำหรับโปรแกรมอ่านนี้: “กำหนดพื้นที่...” (เมนู หน้า) ให้คุณลากสี่เหลี่ยมล้อมรอบหน้าได้",
+    "No area is set for this viewer: Set area... in the left pane lets you drag a rectangle around the page.": {
+        "ja": "このビューアには範囲が設定されていません。左のパネルの「範囲設定...」でページの周りに矩形をドラッグして指定できます。",
+        "es": "Este visor no tiene área definida: Definir área..., en el panel izquierdo, te deja arrastrar un rectángulo alrededor de la página.",
+        "pt": "Este visualizador não tem área definida: Definir área..., no painel esquerdo, deixa você arrastar um retângulo em volta da página.",
+        "fr": "Aucune zone n'est définie pour cette visionneuse : Définir la zone..., dans le volet gauche, permet de tracer un rectangle autour de la page.",
+        "de": "Für diesen Viewer ist kein Bereich gesetzt: Mit „Bereich festlegen...“ im linken Bereich ziehen Sie ein Rechteck um die Seite.",
+        "it": "Per questo visualizzatore non è impostata un'area: Imposta area..., nel pannello sinistro, ti fa trascinare un rettangolo attorno alla pagina.",
+        "nl": "Voor deze viewer is geen gebied ingesteld: met Gebied instellen... in het linkerpaneel sleept u een rechthoek om de pagina.",
+        "pl": "Dla tego czytnika nie ustawiono obszaru: Ustaw obszar... w lewym panelu pozwala przeciągnąć prostokąt wokół strony.",
+        "ru": "Для этого просмотрщика область не задана: «Задать область...» в левой панели позволяет обвести страницу прямоугольником.",
+        "tr": "Bu görüntüleyici için alan belirlenmedi: sol bölmedeki Alan belirle... ile sayfanın etrafına bir dikdörtgen sürükleyebilirsiniz.",
+        "id": "Belum ada area untuk penampil ini: Atur area... di panel kiri memungkinkan Anda menyeret persegi di sekitar halaman.",
+        "vi": "Trình xem này chưa đặt vùng: Đặt vùng... ở khung bên trái cho phép kéo một hình chữ nhật quanh trang.",
+        "zh": "此查看器尚未设置区域：用左侧窗格中的“设置区域...”可在页面周围拖出矩形。",
+        "zh-tw": "此檢視器尚未設定區域：用左側窗格中的「設定區域...」可在頁面周圍拖出矩形。",
+        "ko": "이 뷰어에는 영역이 설정되지 않았습니다. 왼쪽 패널의 영역 설정...으로 페이지 주위에 사각형을 드래그할 수 있습니다.",
+        "th": "ยังไม่ได้กำหนดพื้นที่สำหรับโปรแกรมอ่านนี้: “กำหนดพื้นที่...” ในแผงด้านซ้ายให้คุณลากสี่เหลี่ยมล้อมรอบหน้าได้",
     },
     "Formatting": {
         "ja": "書式",

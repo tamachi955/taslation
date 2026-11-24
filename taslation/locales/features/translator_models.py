@@ -1,5 +1,7 @@
 """The window's strings for the translator model: the offer to install the model a target language needs (and to
-remove the one no longer needed), PLaMo's licence step, the install's progress and how it ended."""
+remove the one no longer needed), PLaMo's licence step, the install's progress and how it ended.
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "Translating into {language} needs the translation model {model}, which is not on this computer yet. TASlation can download it now: about {size} GB.": {
@@ -418,22 +420,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "번역 언어는 {before}(으)로 유지됩니다. {language}에는 {model}이(가) 필요하지만 설치되어 있지 않습니다.",
         "th": "ภาษายังคงเป็น{before}: {language}ต้องใช้ {model} ซึ่งยังไม่ได้ติดตั้ง",
     },
-    "Translation is off: {language} needs {model}, which is not installed. Choose {language} in the To list again to install it.": {
-        "ja": "翻訳は止まっています。{language} には {model} が必要ですが、インストールされていません。インストールするには「翻訳先」で {language} をもう一度選んでください。",
-        "es": "La traducción está desactivada: el {language} necesita {model}, que no está instalado. Para instalarlo, vuelve a elegir {language} en la lista «A».",
-        "pt": "A tradução está desligada: {language} precisa de {model}, que não está instalado. Para instalá-lo, escolha {language} de novo na lista «Para».",
-        "fr": "La traduction est désactivée : le {language} demande {model}, qui n'est pas installé. Pour l'installer, choisissez à nouveau {language} dans la liste « Vers ».",
-        "de": "Die Übersetzung ist aus: {language} braucht {model}, das nicht installiert ist. Wählen Sie {language} in der Liste „Nach“ erneut, um es zu installieren.",
-        "it": "La traduzione è disattivata: {language} richiede {model}, che non è installato. Per installarlo, scegli di nuovo {language} nell'elenco «In».",
-        "nl": "Vertalen staat uit: het {language} vraagt {model}, dat niet is geïnstalleerd. Kies {language} opnieuw in de lijst 'Naar' om het te installeren.",
-        "pl": "Tłumaczenie jest wyłączone: {language} wymaga modelu {model}, który nie jest zainstalowany. Aby go zainstalować, wybierz ponownie {language} na liście „Na”.",
-        "ru": "Перевод отключён: для языка {language} нужна модель {model}, которая не установлена. Чтобы установить её, снова выберите {language} в списке «На».",
-        "tr": "Çeviri kapalı: {language} için {model} gerekiyor ve kurulu değil. Kurmak için «Hedef» listesinde {language} dilini yeniden seçin.",
-        "id": "Terjemahan mati: {language} memerlukan {model}, yang belum terpasang. Untuk memasangnya, pilih lagi {language} di daftar \"Ke\".",
-        "vi": "Đang tắt dịch: {language} cần {model}, hiện chưa được cài đặt. Để cài đặt, hãy chọn lại {language} trong danh sách \"Sang\".",
-        "zh": "翻译已关闭：{language}需要 {model}，但它尚未安装。要安装它，请在“译为”列表中再次选择{language}。",
-        "zh-tw": "翻譯已關閉：{language}需要 {model}，但它尚未安裝。要安裝它，請在「譯為」清單中再次選擇{language}。",
-        "ko": "번역이 꺼져 있습니다. {language}에는 {model}이(가) 필요하지만 설치되어 있지 않습니다. 설치하려면 '번역 언어' 목록에서 {language}을(를) 다시 선택하세요.",
-        "th": "การแปลปิดอยู่: {language}ต้องใช้ {model} ซึ่งยังไม่ได้ติดตั้ง หากต้องการติดตั้ง ให้เลือก{language}ในรายการ \"แปลเป็น\" อีกครั้ง",
+    "Translation is off: {language} needs {model}, which is not installed. Download model in the Menu installs it.": {
+        "ja": "翻訳は止まっています。{language} には {model} が必要ですが、インストールされていません。「メニュー」の「モデルをダウンロード」でインストールできます。",
+        "es": "La traducción está desactivada: el {language} necesita {model}, que no está instalado. Descargar el modelo, en el Menú, lo instala.",
+        "pt": "A tradução está desligada: {language} precisa de {model}, que não está instalado. Baixar o modelo, no Menu, o instala.",
+        "fr": "La traduction est désactivée : le {language} demande {model}, qui n'est pas installé. Télécharger le modèle, dans le Menu, l'installe.",
+        "de": "Die Übersetzung ist aus: {language} braucht {model}, das nicht installiert ist. Modell herunterladen im Menü installiert es.",
+        "it": "La traduzione è disattivata: {language} richiede {model}, che non è installato. Scarica il modello, nel Menu, lo installa.",
+        "nl": "Vertalen staat uit: het {language} vraagt {model}, dat niet is geïnstalleerd. Model downloaden in het Menu installeert het.",
+        "pl": "Tłumaczenie jest wyłączone: {language} wymaga modelu {model}, który nie jest zainstalowany. Pobierz model w Menu go zainstaluje.",
+        "ru": "Перевод отключён: для языка {language} нужна модель {model}, которая не установлена. «Скачать модель» в «Меню» установит её.",
+        "tr": "Çeviri kapalı: {language} için {model} gerekiyor ve kurulu değil. Menü'deki Modeli indir onu kurar.",
+        "id": "Terjemahan mati: {language} memerlukan {model}, yang belum terpasang. Unduh model di Menu memasangnya.",
+        "vi": "Đang tắt dịch: {language} cần {model}, hiện chưa được cài đặt. Tải mô hình trong Menu sẽ cài đặt nó.",
+        "zh": "翻译已关闭：{language}需要 {model}，但它尚未安装。用“菜单”中的“下载模型”可以安装它。",
+        "zh-tw": "翻譯已關閉：{language}需要 {model}，但它尚未安裝。用「選單」中的「下載模型」可以安裝它。",
+        "ko": "번역이 꺼져 있습니다. {language}에는 {model}이(가) 필요하지만 설치되어 있지 않습니다. 메뉴의 모델 다운로드로 설치할 수 있습니다.",
+        "th": "การแปลปิดอยู่: {language}ต้องใช้ {model} ซึ่งยังไม่ได้ติดตั้ง ใช้ ดาวน์โหลดโมเดล ใน เมนู เพื่อติดตั้ง",
     },
 }

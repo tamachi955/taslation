@@ -1,6 +1,8 @@
 """Vietnamese (Tiếng Việt) templates for `taslation.messages` (see `taslation.message_texts`): bạn, as the window;
 its buttons as the window names them (Dừng). Nouns do not change after a number,
-so counts need no plural words."""
+so counts need no plural words.
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "không dùng được câu trả lời của mô hình",
@@ -25,24 +27,24 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "đã hủy",
     "pipeline.from_cache": "Đã hiện {bubbles} dòng từ các bản dịch trước.",
     "pipeline.translated": "Đã dịch {bubbles} dòng trong {seconds:.0f} giây.",
-    "pipeline.to_review": "{review} chỗ đáng xem lại (vai trò Người dịch, Rà soát...).",
+    "pipeline.to_review": "{review} chỗ đáng xem lại (bật Sửa, rồi Menu > Rà soát...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Không tìm thấy trang trong trình xem. Hãy kiểm tra sách đang mở, hoặc dùng Đặt vùng... (menu Trang)",
-    "ollama.unreachable": "TASlation không kết nối được với chương trình dịch. Hãy nhấn F5 sau một lát; chương trình tự khởi động.",
+    "pipeline.no_content": "Không tìm thấy trang trong trình xem. Hãy kiểm tra sách đang mở, hoặc dùng Đặt vùng... ở khung bên trái.",
+    "ollama.unreachable": "TASlation không kết nối được với chương trình dịch. Hãy bấm Dịch sau một lát; chương trình tự khởi động.",
     "ollama.model_missing": ("Mô hình dịch {model} chưa được cài đặt. Hãy chạy lại install.cmd để cài đặt."),
-    "ollama.http_error": "Chương trình dịch đã từ chối ({status}). Nhấn F5 để thử lại; nếu lặp lại, hãy khởi động lại máy tính.",
-    "ollama.timeout": "Bản dịch mất quá nhiều thời gian. Nhấn F5 để thử lại.",
-    "ollama.connection_failed": "Chương trình dịch đã ngừng trả lời. Nhấn F5 để thử lại.",
-    "ollama.bad_json": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Nhấn F5 để thử lại.",
-    "ollama.reported_error": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Nhấn F5 để thử lại.",
-    "ollama.broke_off": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Nhấn F5 để thử lại.",
-    "ollama.bad_answer": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Nhấn F5 để thử lại.",
+    "ollama.http_error": "Chương trình dịch đã từ chối ({status}). Bấm Dịch để thử lại; nếu lặp lại, hãy khởi động lại máy tính.",
+    "ollama.timeout": "Bản dịch mất quá nhiều thời gian. Bấm Dịch để thử lại.",
+    "ollama.connection_failed": "Chương trình dịch đã ngừng trả lời. Bấm Dịch để thử lại.",
+    "ollama.bad_json": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Bấm Dịch để thử lại.",
+    "ollama.reported_error": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Bấm Dịch để thử lại.",
+    "ollama.broke_off": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Bấm Dịch để thử lại.",
+    "ollama.bad_answer": "Chương trình dịch đưa ra câu trả lời mà TASlation không dùng được. Bấm Dịch để thử lại.",
     "ollama.not_loopback": "URL của Ollama phải là địa chỉ http(s) loopback (máy này), nhận được: “{url}”",
     "ollama.slow": "Chương trình dịch trả lời chậm (có thể vẫn đang tải). Dừng sẽ hủy trang này.",
     "ollama.no_answer": "Chương trình dịch không trả lời trong {seconds:.0f} giây, nên TASlation hỏi lại.",
     "ollama.restarting": "Chương trình dịch vẫn không trả lời, nên TASlation khởi động lại nó...",
-    "ollama.not_answering": ("Chương trình dịch trên máy tính này không trả lời. Hãy khởi động lại nó (hoặc khởi động lại "
-                             "TASlation), rồi nhấn F5."),
+    "ollama.not_answering": ("Chương trình dịch trên máy tính này không trả lời. Hãy khởi động lại nó (hoặc khởi "
+                             "động lại TASlation), rồi bấm Dịch."),
     "ollama.loaded": "Bộ dịch đã sẵn sàng.",
     "ollama.loading": "Đang chuẩn bị bộ dịch...",
     "ollama.partly_on_gpu": "Chỉ {percent}% bộ dịch nằm vừa trên card đồ họa nên việc dịch sẽ chậm. Hãy đóng các chương trình khác đang dùng card đồ họa.",

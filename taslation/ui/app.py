@@ -530,7 +530,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
             self.lang_box.bind(sequence, lambda _e: self._target_picked(), add="+")
 
         page = bar.group()
-        self.translate_btn = ttk.Button(page, text=_("Translate (F5)"), command=self.translate_now)
+        self.translate_btn = ttk.Button(page, text=_("Translate"), command=self.translate_now)
         self.translate_btn.pack(side="left")
         tip(_("Translate the page in the viewer now."), self.translate_btn, disabled=_("TASlation is at work on a page. Try again when it is done."))
         check = ttk.Checkbutton(page, text=_("Auto"), variable=self.auto_var)
@@ -560,7 +560,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         tip(_("The volume's number (3, 10.5) or 上, 中, 下, 前編, 後編; empty for a book of one volume. 第3巻, Vol. 3 and ③ are taken as 3."), fields.volume_label, fields.volume)
 
         stop = bar.group()
-        self.stop_btn = ttk.Button(stop, text=_("Stop (Esc)"), command=self.stop_page, state="disabled")
+        self.stop_btn = ttk.Button(stop, text=_("Stop"), command=self.stop_page, state="disabled")
         self.stop_btn.pack(side="left")
         tip(_("Stop the page being translated."), self.stop_btn, disabled=_("Nothing is running to stop."))
         self.toolbar = bar

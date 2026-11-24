@@ -110,7 +110,7 @@ class StatusMixin:
                                            if review or s.code != "pipeline.to_review")]
         waiting = sum(1 for r in result.regions if r.status == "untranslated")
         if waiting and result.fingerprints:
-            lines.append(_("{n} line(s) not translated yet: press F5.").format(n=waiting))
+            lines.append(_("{n} line(s) not translated yet: press Translate.").format(n=waiting))
         return JOINER.join(lines)
 
     def _page_line(self, result: PageResult) -> str:

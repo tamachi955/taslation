@@ -30,7 +30,7 @@ WARN = "#e69f00"  # the "!" of a page that could not be translated (orange, Okab
 LOADING_KEY = "Loading the model..."
 READING_KEY = "Reading the page..."
 TRANSLATING_KEY = "Translating..."
-ERROR_KEY = "This page could not be translated. F5 tries again."
+ERROR_KEY = "This page could not be translated. Translate tries again."
 NOTHING_KEY = "Nothing to read on this page."
 MODELS_KEY = "Loading the models..."  # the start's loads (`jobs.JobsMixin._watch_loads`), while no page is under way
 KEYS = (LOADING_KEY, READING_KEY, TRANSLATING_KEY, ERROR_KEY, NOTHING_KEY, MODELS_KEY)
@@ -39,7 +39,7 @@ KEYS = (LOADING_KEY, READING_KEY, TRANSLATING_KEY, ERROR_KEY, NOTHING_KEY, MODEL
 def slot_text(key: str) -> str:
     """A slot's words in the window's language."""
     return {LOADING_KEY: _("Loading the model..."), READING_KEY: _("Reading the page..."),
-            TRANSLATING_KEY: _("Translating..."), ERROR_KEY: _("This page could not be translated. F5 tries again."),
+            TRANSLATING_KEY: _("Translating..."), ERROR_KEY: _("This page could not be translated. Translate tries again."),
             NOTHING_KEY: _("Nothing to read on this page."), MODELS_KEY: _("Loading the models...")}[key]
 
 

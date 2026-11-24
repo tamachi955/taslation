@@ -134,8 +134,8 @@ def test_follow_ups_come_only_when_their_param_is_set():
     failed = Message("pipeline.translated", review=2, error=error, **page)
     assert [s.code for s in failed.sentences()] == ["pipeline.translated", "pipeline.to_review", "pipeline.page_error"]
     assert dict(failed.sentences()[1].params) == {"review": 2} and dict(failed.sentences()[2].params) == {"error": error}
-    assert str(failed) == str(clean) + JOINER + "2 worth a look (Translator role, Review...)." + JOINER + (
-        "The translation took too long. Press F5 to try again.")
+    assert str(failed) == str(clean) + JOINER + "2 worth a look (turn Edit on, then Menu > Review...)." + JOINER + (
+        "The translation took too long. Press Translate to try again.")
 
 
 def test_a_window_renders_with_its_own_catalog():
@@ -143,7 +143,7 @@ def test_a_window_renders_with_its_own_catalog():
     m = Message("pipeline.translated", bubbles=3, seconds=4.0, cached=0, new=1, review=1,
                 error=Message("ollama.unreachable", url="http://127.0.0.1:11434"))
     assert render(m, catalog) == ("3 Zeile(n) übersetzt - 1 ansehen - TASlation could not reach the translation program. "
-                                  "Press F5 in a moment; it starts it by itself.")  # no entry: English
+                                  "Press Translate in a moment; it starts it by itself.")  # no entry: English
     assert render(m) == str(m) and render("plain") == "plain"
 
 
@@ -155,7 +155,7 @@ def test_exceptions_carry_their_message():
     plain = TranslationError("Ollama timed out after 900s")
     assert str(plain) == "Ollama timed out after 900s" == str(plain.message) and plain.message.code == "translator.failed"
     coded = TranslationError(Message("ollama.unreachable", url="http://127.0.0.1:11434"))
-    assert str(coded) == str(coded.message) == "TASlation could not reach the translation program. Press F5 in a moment; it starts it by itself."
+    assert str(coded) == str(coded.message) == "TASlation could not reach the translation program. Press Translate in a moment; it starts it by itself."
     assert coded.message.code == "ollama.unreachable" and coded.message.params["url"] == "http://127.0.0.1:11434"
     assert pickle.loads(pickle.dumps(coded)).message.code == "ollama.unreachable"
     covered = ViewerCovered()  # (said nowhere: the last good frame stays, `ui.live`)

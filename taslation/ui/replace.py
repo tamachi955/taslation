@@ -241,7 +241,7 @@ class ReplaceMixin:
             return [], _("Starting...")
         book, language = self.book_var.get().strip(), self.lang_var.get().strip() or "English"
         if not book or generic_book_name(book):
-            return [], _("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+            return [], _("Give the book a name first (Menu > Series and Volume...).")
         cache = self._book_cache()
         if cache is None:
             if self._find_asked != (book, language):

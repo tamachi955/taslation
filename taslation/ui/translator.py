@@ -74,12 +74,12 @@ TAKEN_BACK = {"edit": "Edit taken back.", "move": "Move taken back.", "resize": 
               "add": "The region you added is gone again.",
               "drop": "The dropped region is back.",
               "skip": "Skip page taken back.", "order": "Reading order taken back.",
-              "again": "Translate again taken back: the earlier translations are back.",
+              "again": "The page's new translation taken back: the earlier translations are back.",
               "paste": "Paste format taken back."}
 MADE_AGAIN = {"edit": "Edit made again.", "move": "Move made again.", "resize": "Resize made again.",
               "rotate": "Rotation made again.", "direction": "Text direction made again.", "add": "Region added again.",
               "drop": "Region dropped again.", "skip": "Skip page made again.", "order": "Reading order made again.",
-              "again": "Translate again made again: its translations are back.", "paste": "Paste format made again."}
+              "again": "The page's new translation made again: its translations are back.", "paste": "Paste format made again."}
 # the changes a page is read again from the stores for, when they are taken back or made again: they touch no region
 # of the window's (the page's regions were made anew by them)
 REREAD_KINDS = frozenset({"add", "skip", "order", "again"})
@@ -512,9 +512,9 @@ class TranslatorMixin:
         before = unit_states(pipeline, result.units) if ordered and result is not None else []
         if ordered and pipeline.set_reading_order(result, ordered):
             self._kept_at_once("order", result, before)
-            self.say("Reading order saved for {n} region(s). Translate again applies it.", n=len(ordered))
+            self.say("Reading order saved for {n} region(s). The circular arrow beside Translate applies it.", n=len(ordered))
         elif ordered:  # nothing can be kept under a name that names no book
-            self.say("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+            self.say("Give the book a name first (Menu > Series and Volume...).")
         self._redisplay()
 
     def _kept_at_once(self, kind: str, result: Any, before: list) -> Step:
@@ -564,7 +564,7 @@ class TranslatorMixin:
             else:
                 self._jobs.put(lambda: self._post("status", key="Page no longer skipped."))
         else:  # nothing can be kept under a name that names no book
-            self.say("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+            self.say("Give the book a name first (Menu > Series and Volume...).")
 
     def retranslate_page(self) -> None:
         """Translator mode's "Translate again": the page is translated again with the premises as they
@@ -1535,7 +1535,7 @@ class TranslatorMixin:
             return
         result, pipeline = self.last_result, self.pipeline
         if pipeline.annotations is None:
-            self.say("Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+            self.say("Could not record the rectangle: give the book a name first (Menu > Series and Volume...).")
             return
         if not result.units:
             return
@@ -1577,7 +1577,7 @@ class TranslatorMixin:
                 step.begin(pipeline, [region])
                 ok = pipeline.move_region(result, region, box, progress=lambda m: self._post("progress", text=m))
                 if not ok:
-                    self._post("status", key="Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                    self._post("status", key="Could not record the rectangle: give the book a name first (Menu > Series and Volume...).")
                 step.settle(pipeline, ok)
                 self._post("result", result=result)
             finally:
@@ -1625,7 +1625,7 @@ class TranslatorMixin:
                     pipeline.set_reader_note(result, region, reader_note)
                 if isinstance(style, RegionStyle) and style != (getattr(region, "style", None) or RegionStyle()):
                     if not pipeline.set_region_style(result, region, style):  # before the page is lettered again
-                        self._post("status", key="Could not store the formatting: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                        self._post("status", key="Could not store the formatting: give the book a name first (Menu > Series and Volume...).")
                 # the part of the translation set larger, as the editor has it (an editor of before: as it follows)
                 large = data["large"] if "large" in data else ...
                 if text and text != region.translated_text:
@@ -1634,7 +1634,7 @@ class TranslatorMixin:
                     # as it came ("asked")
                     if not pipeline.set_translation(result, region, text, edited=not data.get("asked"),
                                                     **({} if large is ... else {"large": large})):
-                        self._post("status", key="Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                        self._post("status", key="Could not keep the translation: give the book a name first (Menu > Series and Volume...).")
                         pipeline.rerender(result)  # the page as it is stored, not as the editor's preview showed it
                     else:
                         changes = rendering_changes(pipeline.check_sheet(), region.source_text, old, text, region.speaker)
@@ -1643,7 +1643,7 @@ class TranslatorMixin:
                 elif (text and large is not ... and large != getattr(region, "large", None)
                       and hasattr(pipeline, "set_large")):  # only the part set larger changed: the text stays whose it is
                     if not pipeline.set_large(result, region, large):
-                        self._post("status", key="Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                        self._post("status", key="Could not keep the translation: give the book a name first (Menu > Series and Volume...).")
                         pipeline.rerender(result)
                 else:
                     pipeline.rerender(result)

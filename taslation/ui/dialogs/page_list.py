@@ -40,7 +40,7 @@ class PageListDialog(tk.Toplevel):
 
     TITLE = ""
     EMPTY = ""
-    NO_BOOK = "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."  # (the window's own line: `locales.keys`)
+    NO_BOOK = "Give the book a name first (Menu > Series and Volume...)."  # (the window's own line: `locales.keys`)
     COUNTED = ""
     EXPLAIN = ""
     COLUMNS: tuple[tuple[str, str, int], ...] = (("text", "Translation", 590),)  # (id, heading key, width)

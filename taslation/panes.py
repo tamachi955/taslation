@@ -22,14 +22,11 @@ ground, and their pictures (`ui.seethrough` fills them, `capture.seethrough` sho
   glyph (`Row.square`: the circular arrow of "translate this page again"); the colours follow the ground's
   (`colours`: light on a dark ground, dark on a light one). The hit boxes of the controls come with it, in the
   picture's pixels.
-* The words the right pane shows from the window (its status line, its status slot) name no key (`without_keys`):
-  in see-through mode the keys go to the viewer, so "F5 tries again" and the like are left out.
 
 Every pixel size here is at 96 DPI and goes with the viewer's (`seethrough.scaled`)."""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -435,59 +432,3 @@ def overlap(a: Box | None, b: Box) -> int:
     h = min(a[3], b[3]) - max(a[1], b[1])
     return max(0, w) * max(0, h)
 
-
-# ------------------------------------------------------------------ words that name no key
-_KEY = r"(?:F(?:1[0-2]|[1-9])|Esc)"
-KEY = re.compile(r"(?<![A-Za-z0-9])" + _KEY + r"(?![A-Za-z0-9])")  # a key named in a text ("F5", "F11", "Esc")
-_ASIDE = re.compile(r"\s*[(（][^()（）]*[)）]")  # a bracketed aside
-_ENDS = re.compile(r"(?<=[.!?])\s+"  # the end of a sentence (and the spaces after it)
-                   r"|(?<=[。！？])"  # ... in Chinese and Japanese
-                   r"|\s*[·・]\s*|\s+-\s+"  # the points between a line's parts, the joiner of a message's follow-ups
-                   r"|(?<=[฀-๿)）])\s+(?=[฀-๿])"  # a space before a Thai word (Thai's sentences)
-                   r"|(?<=[฀-๿])(?<!กด)(?<!และ)(?<!ปุ่ม)\s+(?=" + _KEY + r"\s)"  # ... before "F5 ..." in Thai
-                   r"|\s+(?=" + _KEY + r"\s*[:：])")  # before "F5: ..."
-_CLAUSE = re.compile(r"^(.*[^\s:：])\s*[:：]\s*(.*?)([.。!！]?)(\s*)$", re.S)  # (up to its last colon, after it)
-_TRIM = " \t\n　·・-"
-
-
-def without_keys(text: str) -> str:
-    """*text* (in any of the window's languages) with what it says of keys left out, for see-through mode, where every
-    key goes to the viewer: a bracketed aside naming a key goes ("(F5 in a browser)"); a sentence - or a part of a line
-    between its points, or a Thai phrase - naming one goes, except that one naming it only after its last colon keeps
-    what comes before ("2 line(s) not translated yet: press F5." -> "2 line(s) not translated yet."). "" when nothing
-    is left."""
-    if not KEY.search(text):
-        return text
-    text = _ASIDE.sub(lambda m: "" if KEY.search(m.group()) else m.group(), text)
-    pieces: list[str] = []
-    start = 0
-    for match in _ENDS.finditer(text):
-        if match.end() > start:
-            pieces.append(text[start:match.end()])
-            start = match.end()
-    pieces.append(text[start:])
-    kept: list[str] = []
-    for piece in pieces:
-        if not KEY.search(piece):
-            kept.append(piece)
-            continue
-        clause = _CLAUSE.match(piece)
-        if clause is not None and not KEY.search(clause.group(1)) and KEY.search(clause.group(2)):
-            kept.append(clause.group(1) + clause.group(3) + clause.group(4))
-    return "".join(kept).strip(_TRIM)
-
-
-# a bracketed aside that names one of the window's menus, in the window's languages ("(Page menu)", "(menú Página)",
-# "（ページメニュー）", ...): the panes have no menu bar - Set area... and the rest are in the controls at the left
-_MENU_WORD = re.compile(r"(?i)men[uúü]|меню|メニュー|菜单|選單|메뉴|เมนู")
-
-
-def pane_words(text: str) -> str:
-    """*text* as a side pane says it (see-through mode, where TASlation's own window is not on the screen): what it
-    says of keys left out (`without_keys`), and a bracketed aside that names one of the window's menus too. "" when
-    nothing is left."""
-    text = without_keys(text)
-    if not _MENU_WORD.search(text):
-        return text
-    text = _ASIDE.sub(lambda m: "" if _MENU_WORD.search(m.group()) else m.group(), text)
-    return re.sub(r"\s+([.,;:。、])", r"\1", text).strip(_TRIM)

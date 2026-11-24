@@ -125,7 +125,7 @@ class ViewerMixin:
             self._on_window_selected(named=named)
         elif tied and self._tied_said != tuple(w.hwnd for w in tied):  # said once for these windows
             self._tied_said = tuple(w.hwnd for w in tied)
-            self.say("Several windows look like a viewer: pick the right one in the Viewer list.")
+            self.say("Several windows look like a viewer: choose the right one in Menu > Viewer...")
 
     def _rescan_windows(self) -> None:
         """The viewer list as it opens: the windows as they are now, the chosen one kept. When the chosen window was
@@ -333,7 +333,7 @@ class ViewerMixin:
             self._viewer_gone()
             self.refresh_windows()
         if self.selected is None:
-            boxes.tell(self, _("Pick the viewer window first (open your e-book viewer, then choose it in the Viewer list)."), icon="info")
+            boxes.tell(self, _("Pick the viewer window first (open your e-book viewer, then choose it in Menu > Viewer...)."), icon="info")
         return self.selected
 
     # ------------------------------------------------------------------ the area set by hand

@@ -35,7 +35,7 @@ ALL_REASONS = "All reasons"
 SHOW_TIP = "Only the lines with this reason. A click on a column's heading sorts the list by it."
 EXPLAIN = ("The lines of this book flagged for a look as they were translated, and those with a note for the reader, "
            "page by page, from the saved translations alone; for the page on show, what the checks of its lettering "
-           "found too. Select one to see which page it is on, then turn to it in your viewer: Review... there opens "
+           "found too. Select one to see which page it is on, then turn to it in your viewer: Menu > Review... opens "
            "its editor.")
 NOTE = "note"  # a line with a note for the reader (no flag of its own: the cache keeps the note)
 NOTE_WORDS = "note for the reader"  # (as "Review this page" says it)

@@ -900,7 +900,7 @@ def test_a_status_line_is_told_by_its_kind_and_the_page_it_speaks_of_never_by_it
     progress, reading = Message("ollama.loading"), False
     assert standin_e2e.status_kind(summary, None) == ("page_summary", "result", result)
     assert standin_e2e.status_kind(lambda: progress_line(progress, reading), None)[:2] == ("progress", "job")
-    key = "Stopped: this page was not translated, and nothing of it was kept. F5 translates it again."
+    key = "Stopped: this page was not translated, and nothing of it was kept. Translate translates it again."
     assert standin_e2e.status_kind(lambda: key, key)[:2] == ("say:Stopped_this_page_was", "job")
     assert standin_e2e.status_kind(lambda: "Viewer: x", "Viewer: {title}")[:2] == ("say:Viewer_title", None)
     message = Message("ollama.loading")

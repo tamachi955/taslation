@@ -586,9 +586,9 @@ def test_the_page_summary_reads_as_the_review_asked(flow):
     result.cache_misses = 1
     result.error = Message("ollama.unreachable", url=URL)
     assert flow._summary(result) == ("0 行を翻訳しました（0 秒）。 - "
-                                     "TASlation から翻訳プログラムに接続できませんでした。少し待って F5 を押してください。プログラムは自動で起動します。")
+                                     "TASlation から翻訳プログラムに接続できませんでした。少し待って「翻訳」を押してください。プログラムは自動で起動します。")
     result.fingerprints = []
-    assert flow._summary(result) == "ビューアにページが見つかりません。本が開いているか確かめるか、「範囲設定...」（ページメニュー）を使ってください。"
+    assert flow._summary(result) == "ビューアにページが見つかりません。本が開いているか確かめるか、左のパネルの「範囲設定...」を使ってください。"
     set_language("en")
     result.fingerprints, result.error, result.cache_misses = ["a" * 16], "", 1
     result.regions = [SimpleNamespace(flags=("short",), status="translated", translated_text="Hi")]
@@ -990,7 +990,7 @@ def test_the_openers_ask_for_the_name_first_and_go_on_with_it(flow, monkeypatch)
     flow.open_glossary()
     flow.asked().on_answer(None, "")  # closed: nothing opened, and the status line says why
     assert len(opened) == 2 and flow.book_var.get() == "Yomizuq"
-    assert flow.status_var.get() == "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
+    assert flow.status_var.get() == "Give the book a name first (Menu > Series and Volume...)."
     flow.open_glossary()
     flow.asked().on_answer("ok", "yomizuq")  # (the dialog takes no such name; neither does the prompt)
     assert len(opened) == 2 and flow.book_var.get() == "Yomizuq"

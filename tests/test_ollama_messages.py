@@ -45,7 +45,7 @@ def test_other_http_errors_say_what_the_server_said(server, streamed):
     m = info.value.message
     assert m.code == "ollama.http_error"
     assert dict(m.params) == {"status": 500, "path": "/api/chat", "detail": "llama runner process has terminated"}
-    assert str(m) == "The translation program refused (500). Press F5 to try again; if it repeats, restart your PC."
+    assert str(m) == "The translation program refused (500). Press Translate to try again; if it repeats, restart your PC."
 
 
 def test_error_text_reads_the_error_of_the_json():
@@ -80,7 +80,7 @@ def test_an_answer_that_does_not_come_times_out(server, streamed):
     assert time.monotonic() - started < 3.0
     m = info.value.message
     assert m.code == "ollama.timeout" and m.params["seconds"] == pytest.approx(0.6)
-    assert str(m) == "The translation took too long. Press F5 to try again."
+    assert str(m) == "The translation took too long. Press Translate to try again."
 
 
 def test_an_answer_without_translations_says_how_long_it_was(server):

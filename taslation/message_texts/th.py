@@ -1,7 +1,9 @@
 """Thai (ไทย) templates for `taslation.messages` (see `taslation.message_texts`): polite and neutral, with กรุณา where the
 window asks for something and no gendered ending; its buttons as the window names them (หยุด).
 Thai has no plural: a count stands before its noun or counter and nothing agrees with it ({bubbles} บอลลูน). No full
-stops: sentences are parted by a space, which is also where a line can break, so none runs long without one."""
+stops: sentences are parted by a space, which is also where a line can break, so none runs long without one.
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "ใช้คำตอบของโมเดลไม่ได้",
@@ -26,23 +28,23 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "ยกเลิกแล้ว",
     "pipeline.from_cache": "แสดง {bubbles} บรรทัดจากคำแปลก่อนหน้า",
     "pipeline.translated": "แปล {bubbles} บรรทัดใน {seconds:.0f} วินาที",
-    "pipeline.to_review": "ควรดูสักหน่อย {review} จุด (บทบาทผู้แปล ตรวจทาน...)",
+    "pipeline.to_review": "ควรดูสักหน่อย {review} จุด (เปิด แก้ไข แล้วใช้ เมนู > ตรวจทาน...)",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "ไม่พบหน้าในโปรแกรมอ่าน ตรวจสอบว่าเปิดหนังสืออยู่ หรือใช้ กำหนดพื้นที่... (เมนู หน้า)",
-    "ollama.unreachable": "TASlation เชื่อมต่อโปรแกรมแปลไม่ได้ กด F5 อีกสักครู่ โปรแกรมจะเริ่มเอง",
+    "pipeline.no_content": "ไม่พบหน้าในโปรแกรมอ่าน ตรวจสอบว่าเปิดหนังสืออยู่ หรือใช้ กำหนดพื้นที่... ในแผงด้านซ้าย",
+    "ollama.unreachable": "TASlation เชื่อมต่อโปรแกรมแปลไม่ได้ กด แปล อีกสักครู่ โปรแกรมจะเริ่มเอง",
     "ollama.model_missing": "ยังไม่ได้ติดตั้งโมเดลแปล {model} เรียก install.cmd อีกครั้งเพื่อติดตั้ง",
-    "ollama.http_error": "โปรแกรมแปลปฏิเสธ ({status}) กด F5 เพื่อลองอีกครั้ง หากเกิดซ้ำ ให้รีสตาร์ตคอมพิวเตอร์",
-    "ollama.timeout": "การแปลใช้เวลานานเกินไป กด F5 เพื่อลองอีกครั้ง",
-    "ollama.connection_failed": "โปรแกรมแปลหยุดตอบ กด F5 เพื่อลองอีกครั้ง",
-    "ollama.bad_json": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด F5 เพื่อลองอีกครั้ง",
-    "ollama.reported_error": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด F5 เพื่อลองอีกครั้ง",
-    "ollama.broke_off": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด F5 เพื่อลองอีกครั้ง",
-    "ollama.bad_answer": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด F5 เพื่อลองอีกครั้ง",
+    "ollama.http_error": "โปรแกรมแปลปฏิเสธ ({status}) กด แปล เพื่อลองอีกครั้ง หากเกิดซ้ำ ให้รีสตาร์ตคอมพิวเตอร์",
+    "ollama.timeout": "การแปลใช้เวลานานเกินไป กด แปล เพื่อลองอีกครั้ง",
+    "ollama.connection_failed": "โปรแกรมแปลหยุดตอบ กด แปล เพื่อลองอีกครั้ง",
+    "ollama.bad_json": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด แปล เพื่อลองอีกครั้ง",
+    "ollama.reported_error": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด แปล เพื่อลองอีกครั้ง",
+    "ollama.broke_off": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด แปล เพื่อลองอีกครั้ง",
+    "ollama.bad_answer": "โปรแกรมแปลให้คำตอบที่ TASlation ใช้ไม่ได้ กด แปล เพื่อลองอีกครั้ง",
     "ollama.not_loopback": "URL ของ Ollama ต้องเป็นที่อยู่ http(s) แบบ loopback แต่ได้รับ '{url}'",
     "ollama.slow": "โปรแกรมแปลตอบช้า (อาจยังโหลดอยู่) “หยุด” จะยกเลิกหน้านี้",
     "ollama.no_answer": "โปรแกรมแปลไม่ตอบเป็นเวลา {seconds:.0f} วินาที TASlation จึงถามอีกครั้ง",
     "ollama.restarting": "โปรแกรมแปลยังไม่ตอบ TASlation จึงเริ่มโปรแกรมใหม่...",
-    "ollama.not_answering": "โปรแกรมแปลในคอมพิวเตอร์นี้ไม่ตอบ รีสตาร์ตโปรแกรมแปล (หรือรีสตาร์ต TASlation) แล้วกด F5",
+    "ollama.not_answering": "โปรแกรมแปลในคอมพิวเตอร์นี้ไม่ตอบ รีสตาร์ตโปรแกรมแปล (หรือรีสตาร์ต TASlation) แล้วกด แปล",
     "ollama.loaded": "การแปลพร้อมแล้ว",
     "ollama.loading": "กำลังเตรียมการแปล...",
     "ollama.partly_on_gpu": "ส่วนที่ใช้แปลอยู่บนการ์ดจอได้เพียง {percent}% การแปลจึงจะช้า โปรดปิดโปรแกรมอื่นที่ใช้การ์ดจอ",

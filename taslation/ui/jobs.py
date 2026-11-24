@@ -355,7 +355,7 @@ class JobsMixin:
                     self._post("error", message=carried)
                 else:
                     LOG.exception("a job of the window failed")  # (the reader gets what to do; the log what happened)
-                    self._post("error", text=_("Something went wrong on this page. Press F5 to try again; if it repeats, restart TASlation."))
+                    self._post("error", text=_("Something went wrong on this page. Press Translate to try again; if it repeats, restart TASlation."))
             finally:
                 self._post("idle")
 
@@ -1109,7 +1109,7 @@ class JobsMixin:
             if self._area_hint_due():  # the chosen viewer's frames showed no page panel: Set area... is the way
                 self._area_hinted = True
                 self.status(lambda: _(READY) + "\n"
-                            + _("No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."))
+                            + _("No area is set for this viewer: Set area... in the left pane lets you drag a rectangle around the page."))
             else:
                 self.say(READY)
             self._load_ocr_if_due()
@@ -1167,7 +1167,7 @@ class JobsMixin:
                 self._held_result = None  # (its frame was never confirmed: never shown)
             job_news(self, data)
             if self._cancel_why != "page":
-                self.say("Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.")
+                self.say("Stopped: this page was not translated, and nothing of it was kept. Translate translates it again.")
                 self._status_page = self._job_frame  # (about that page: `_page_status`)
                 self._status_follows_page()
         elif kind == "asked":
@@ -1498,7 +1498,7 @@ class JobsMixin:
             name = kept_name(self, name)  # the one spelling, or an older one the book's files are kept under
             if choice is None or (generic_book_name(name) and not viewerparts.held(name)):
                 self._start_pending, self._start_waits = None, False  # the start that waited asks at the next page
-                self.say("Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                self.say("Give the book a name first (Menu > Series and Volume...).")
                 return
             before = self.book_var.get().strip()
             self._book_named(name)  # (a name held back for the title's is released: the reader's answer stands)
@@ -1538,7 +1538,7 @@ class JobsMixin:
         pending, self._start_pending = self._start_pending, None
         if answer is None:
             if generic or self._name_needed():
-                self.say("Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.")
+                self.say("Nothing was read yet: TASlation asks again at the next page. Translate translates this page now.")
                 return
             if pending is not None:
                 self._translate_pending(pending)

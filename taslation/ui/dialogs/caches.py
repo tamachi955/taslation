@@ -687,7 +687,7 @@ class CachesDialog(tk.Toplevel):
             return
         book = str(entry["book"])
         if getattr(self.master, "_start_dialog", None) is not None:
-            self._say(_("Answer the question in the TASlation window first."), error=True)
+            self._say(_("Answer TASlation's question about the book's name first."), error=True)
             return
         self._ask_name(book, lambda new: self._renaming(entry, new))
 

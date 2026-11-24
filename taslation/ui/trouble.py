@@ -60,7 +60,7 @@ def viewer_trouble(window: Any) -> str | None:
 def trouble_line(kind: str) -> str:
     """The banner's line for *kind*, in the window's language."""
     if kind == TIED:
-        return _("Several windows look like a viewer: pick the right one in the Viewer list.")
+        return _("Several windows look like a viewer: choose the right one in Menu > Viewer...")
     if kind == CLOSED:
         return _(VIEWER_CLOSED)
     if kind == MINIMISED:

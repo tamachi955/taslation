@@ -43,8 +43,8 @@ def test_what_every_reader_meets_has_no_jargon_in_any_language(code):
 
 def test_the_english_says_what_to_do_next():
     for code in ("ollama.http_error", "ollama.timeout", "ollama.connection_failed", "ollama.bad_answer"):
-        assert "Press F5 to try again" in TEMPLATES[code]
-    assert "F5" in TEMPLATES["ollama.unreachable"] and "install.cmd" in TEMPLATES["ocr.model_missing"]
+        assert "Press Translate to try again" in TEMPLATES[code]  # (the left pane's Translate)
+    assert "Press Translate" in TEMPLATES["ollama.unreachable"] and "install.cmd" in TEMPLATES["ocr.model_missing"]
 
 
 def test_the_legal_notice_names_no_command_and_no_program_in_any_language():

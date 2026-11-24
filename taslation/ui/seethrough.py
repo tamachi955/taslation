@@ -33,8 +33,8 @@ page's regions.
   `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the hidden root's controls
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
   filling in is (lines lettered of the lines read), the status line, the backlog and the pages that went by too fast
-  (the indicator's own lines), where the translator runs - the window's words with
-  what they say of keys left out (`panes.without_keys`: the keys are the viewer's here) -, under the bubble last under
+  (the indicator's own lines), where the translator runs - the window's words as they are: they name the panes'
+  controls and the Menu's entries, no key -, under the bubble last under
   the pointer (`bubble_rows`: Copy the Japanese, Copy the translation and Ask again, then its Japanese and its
   translation; kept once the pointer has left it, so that the pointer can go to the pane, until another bubble is
   under it or the viewer shows another page: `bubble_tick`; Ask again asks the translator for that line alone, with
@@ -767,24 +767,24 @@ def right_rows(app: Any) -> list[pn.Row]:
     do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; the
     status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status line, the
     indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`), where the
-    translator runs. The window's words name no key and no menu of its own here
-    (`panes.pane_words`: every key is the viewer's, the window's menus are not on the screen). The reader's notes on a
+    translator runs, in the window's words as they are (they name the panes' controls and the Menu's entries, no
+    key). The reader's notes on a
     page (`_show_notes`, the window's strip under the page) are left out."""
     from . import status_slot
     from .banner import PROBLEM_COLOURS
 
     rows: list[pn.Row] = []
     for line, colours, _button in getattr(app, "_see_banner_rows", ()) or ():
-        text = pn.pane_words(str(line))
+        text = str(line).strip()
         if text:
             rows.append(pn.Row("", text, "text", warn=colours == PROBLEM_COLOURS))
-    guard = pn.pane_words(str(_get(getattr(app, "guard_var", None), "") or "").strip())
+    guard = str(_get(getattr(app, "guard_var", None), "") or "").strip()
     if guard:
         rows.append(pn.Row("", guard, "text", warn=True))
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None
-    slot = pn.pane_words(status_slot.slot_text(want[0])) if want else ""
+    slot = status_slot.slot_text(want[0]).strip() if want else ""
     if slot:
         rows.append(pn.Row("", slot, "text", warn=bool(want and want[1])))
     fill = getattr(app, "_fill", None)
@@ -793,7 +793,7 @@ def right_rows(app: Any) -> list[pn.Row]:
         if total:
             rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
                                "text"))
-    status = pn.pane_words(str(_get(getattr(app, "status_var", None), "") or "").strip())
+    status = str(_get(getattr(app, "status_var", None), "") or "").strip()
     if status and any(status == row.text for row in rows):
         status = ""  # (the status line saying a banner's line again: once)
     if status:
@@ -1199,7 +1199,7 @@ def ask_bubble(app: Any, result: Any, region: Any) -> bool:
             elif pipeline.set_translation(result, region, text, edited=False):
                 app._post("result", result=result, edited=True, quiet=True)
             else:
-                app._post("status", key="Could not keep the translation: give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+                app._post("status", key="Could not keep the translation: give the book a name first (Menu > Series and Volume...).")
         except TranslationError as e:
             app._post("status", key="No answer from the model: {error}", values={"error": rendered(message_of(e))})
         except Exception:  # noqa: BLE001 - the page stays as it was

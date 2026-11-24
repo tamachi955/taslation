@@ -135,7 +135,7 @@ def test_the_window_has_no_mode_box_and_the_toolbar_holds_only_the_shared_state(
     assert not hasattr(w, "menubar") and not hasattr(w, "hint_label")  # (no menu bar, no strip's hint: the panes)
     assert all("Mode" not in text for _kind, text in _texts(w.toolbar))
     shown = [text for _kind, text in _texts(w.toolbar)]
-    assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Reader", "Translator", "Stop (Esc)"])
+    assert sorted(shown) == sorted(["Translate", "Auto", "Reader", "Translator", "Stop"])  # (no key named)
     set_language("en")
 
 
@@ -190,9 +190,9 @@ def test_translator_tools_follow_the_role_on_the_strip(hidden_root):
     w.role_var.set("reader")
     w._sync_tools()
     assert not w._tool_strip.winfo_manager()  # gone again
-    assert w.translate_btn.cget("text") == "Translate (F5)"
+    assert w.translate_btn.cget("text") == "Translate"
     set_language("ja")
-    assert _("Translate (F5)") == "翻訳 (F5)" and _("Translate again") == "訳し直す"
+    assert _("Translate") == "翻訳" and _("Translate again") == "訳し直す"
     w.role_var.set("translator")
     w.build("ja")  # built anew (a language switch) in the translator role: the strip is there at once
     assert w._tool_strip.winfo_manager() == "pack"

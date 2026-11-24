@@ -237,7 +237,7 @@ def test_a_surer_viewer_wins_and_equals_are_left_to_the_reader_said_once(screen)
     w = Choosing()
     w.refresh_windows()
     assert w.selected is None and w.window_box.current() == -1
-    assert w.said == ["Several windows look like a viewer: pick the right one in the Viewer list."]
+    assert w.said == ["Several windows look like a viewer: choose the right one in Menu > Viewer..."]
     assert w._tied_said == (YOMIZUQ.hwnd, STORE.hwnd)
     w._watch_windows()  # the same two: not said again, the watch goes on
     assert len(w.said) == 1 and w.selected is None and w.scheduled == 1

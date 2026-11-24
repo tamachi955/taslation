@@ -201,7 +201,7 @@ class ModelSwitchMixin:
 
     def _off_text(self, language: str) -> str:
         model = tinstall.shown_name(tinstall.model_for_language(language))
-        return _("Translation is off: {language} needs {model}, which is not installed. Choose {language} in the To list again to install it.").format(language=_shown(language), model=model)
+        return _("Translation is off: {language} needs {model}, which is not installed. Download model in the Menu installs it.").format(language=_shown(language), model=model)
 
     def _switch_declined(self, switch: tinstall.Switch, before: str | None) -> None:
         """No to the offer (or a stopped install): when Qwen can translate the language meanwhile (PLaMo's languages,

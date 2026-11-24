@@ -2,6 +2,8 @@
 
 Terms: the series sheet is 「シリーズ設定」; buttons are named as the window names them (「停止」).
 Counts take a counter with spaces around the number (「吹き出し 6 個」, 「3 ページ」, 「2 件」).
+
+Machine-translated; no native review.
 """
 
 TEMPLATES: dict[str, str] = {
@@ -27,24 +29,23 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "中止しました",
     "pipeline.from_cache": "{bubbles} 行を以前の翻訳から表示しました。",
     "pipeline.translated": "{bubbles} 行を翻訳しました（{seconds:.0f} 秒）。",
-    "pipeline.to_review": "確認するとよいものが {review} 件あります（翻訳者の役割、「レビュー...」）。",
+    "pipeline.to_review": "確認するとよいものが {review} 件あります（「編集」をオンにして「メニュー」>「レビュー...」）。",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "ビューアにページが見つかりません。本が開いているか確かめるか、「範囲設定...」（ページメニュー）を使ってください。",
-    "ollama.unreachable": "TASlation から翻訳プログラムに接続できませんでした。少し待って F5 を押してください。プログラムは自動で起動します。",
+    "pipeline.no_content": "ビューアにページが見つかりません。本が開いているか確かめるか、左のパネルの「範囲設定...」を使ってください。",
+    "ollama.unreachable": "TASlation から翻訳プログラムに接続できませんでした。少し待って「翻訳」を押してください。プログラムは自動で起動します。",
     "ollama.model_missing": "翻訳モデル {model} がインストールされていません。install.cmd をもう一度実行してインストールしてください。",
-    "ollama.http_error": "翻訳プログラムが要求を断りました（{status}）。F5 を押してもう一度試してください。繰り返すときはパソコンを再起動してください。",
-    "ollama.timeout": "翻訳に時間がかかりすぎました。F5 を押してもう一度試してください。",
-    "ollama.connection_failed": "翻訳プログラムが応答しなくなりました。F5 を押してもう一度試してください。",
-    "ollama.bad_json": "翻訳プログラムの答えを TASlation が使えませんでした。F5 を押してもう一度試してください。",
-    "ollama.reported_error": "翻訳プログラムの答えを TASlation が使えませんでした。F5 を押してもう一度試してください。",
-    "ollama.broke_off": "翻訳プログラムの答えを TASlation が使えませんでした。F5 を押してもう一度試してください。",
-    "ollama.bad_answer": "翻訳プログラムの答えを TASlation が使えませんでした。F5 を押してもう一度試してください。",
+    "ollama.http_error": "翻訳プログラムが要求を断りました（{status}）。「翻訳」を押してもう一度試してください。繰り返すときはパソコンを再起動してください。",
+    "ollama.timeout": "翻訳に時間がかかりすぎました。「翻訳」を押してもう一度試してください。",
+    "ollama.connection_failed": "翻訳プログラムが応答しなくなりました。「翻訳」を押してもう一度試してください。",
+    "ollama.bad_json": "翻訳プログラムの答えを TASlation が使えませんでした。「翻訳」を押してもう一度試してください。",
+    "ollama.reported_error": "翻訳プログラムの答えを TASlation が使えませんでした。「翻訳」を押してもう一度試してください。",
+    "ollama.broke_off": "翻訳プログラムの答えを TASlation が使えませんでした。「翻訳」を押してもう一度試してください。",
+    "ollama.bad_answer": "翻訳プログラムの答えを TASlation が使えませんでした。「翻訳」を押してもう一度試してください。",
     "ollama.not_loopback": "Ollama の URL はこのパソコン自身（ループバック）を指す http(s) アドレスにしてください（指定された URL: {url}）",
     "ollama.slow": "翻訳プログラムの応答が遅れています（読み込み中かもしれません）。「停止」でこのページを取り消せます。",
     "ollama.no_answer": "翻訳プログラムが {seconds:.0f} 秒間応答しなかったため、TASlation がもう一度問い合わせています。",
     "ollama.restarting": "翻訳プログラムがまだ応答しないため、TASlation が起動し直しています...",
-    "ollama.not_answering": ("このコンピューターの翻訳プログラムが応答しません。翻訳プログラム（または TASlation）を"
-                             "再起動してから F5 を押してください。"),
+    "ollama.not_answering": ("このコンピューターの翻訳プログラムが応答しません。翻訳プログラム（または TASlation）を再起動してから「翻訳」を押してください。"),
     "ollama.loaded": "翻訳の準備ができました。",
     "ollama.loading": "翻訳の準備をしています...",
     "ollama.partly_on_gpu": "翻訳に使う部分のうちグラフィックボードに載ったのは {percent}% だけなので、翻訳が遅くなります。グラフィックボードを使う他のプログラムを閉じてください。",

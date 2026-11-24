@@ -2,7 +2,9 @@
 Previous and Next, and the question before what was typed is dropped; what can be taken back or is asked before it
 goes (Saved translations to the Recycle Bin, the series sheet's Remove selected and Undo, Book settings' Clear all and
 Undo, Skip page, reading order and Translate again taken back), and a rendering changed in the series sheet offered
-to the lines already translated; the keys (the strip's hint, Tab through the regions, Help > Keys... and its list)."""
+to the lines already translated; the keys (the strip's hint, Tab through the regions, Help > Keys... and its list).
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ---------------------------------------------------------------- the region editor: the region as the page has it
@@ -458,41 +460,41 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "읽는 순서를 다시 했습니다.",
         "th": "ทำลำดับการอ่านซ้ำแล้ว",
     },
-    "Translate again taken back: the earlier translations are back.": {
-        "ja": "再翻訳を取り消しました。前の翻訳に戻りました。",
-        "es": "Se deshizo Traducir de nuevo: han vuelto las traducciones anteriores.",
-        "pt": "Traduzir de novo desfeito: as traduções anteriores voltaram.",
-        "fr": "Retraduire annulé : les traductions précédentes sont revenues.",
-        "de": "Neu übersetzen zurückgenommen: die früheren Übersetzungen sind wieder da.",
-        "it": "Traduci di nuovo annullato: sono tornate le traduzioni precedenti.",
-        "nl": "Opnieuw vertalen ongedaan gemaakt: de eerdere vertalingen zijn terug.",
-        "pl": "Cofnięto ponowne tłumaczenie: wróciły wcześniejsze tłumaczenia.",
-        "ru": "Повторный перевод отменён: прежние переводы возвращены.",
-        "tr": "Yeniden çevir geri alındı: önceki çeviriler geri geldi.",
-        "id": "Terjemahkan lagi diurungkan: terjemahan sebelumnya kembali.",
-        "vi": "Đã hoàn tác Dịch lại: các bản dịch trước đã trở lại.",
-        "zh": "已撤销重新翻译：之前的翻译已恢复。",
-        "zh-tw": "已復原重新翻譯：先前的翻譯已恢復。",
-        "ko": "다시 번역을 취소했습니다. 이전 번역으로 돌아왔습니다.",
-        "th": "เลิกทำการแปลใหม่แล้ว: คำแปลเดิมกลับมาแล้ว",
+    "The page's new translation taken back: the earlier translations are back.": {
+        "ja": "ページの新しい訳を取り消しました。前の翻訳に戻りました。",
+        "es": "Se deshizo la nueva traducción de la página: han vuelto las traducciones anteriores.",
+        "pt": "Nova tradução da página desfeita: as traduções anteriores voltaram.",
+        "fr": "Nouvelle traduction de la page annulée : les traductions précédentes sont revenues.",
+        "de": "Neue Übersetzung der Seite zurückgenommen: die früheren Übersetzungen sind wieder da.",
+        "it": "Nuova traduzione della pagina annullata: sono tornate le traduzioni precedenti.",
+        "nl": "Nieuwe vertaling van de pagina ongedaan gemaakt: de eerdere vertalingen zijn terug.",
+        "pl": "Cofnięto ponowne tłumaczenie strony: wróciły wcześniejsze tłumaczenia.",
+        "ru": "Повторный перевод страницы отменён: прежние переводы возвращены.",
+        "tr": "Sayfanın yeni çevirisi geri alındı: önceki çeviriler geri geldi.",
+        "id": "Terjemahan baru halaman diurungkan: terjemahan sebelumnya kembali.",
+        "vi": "Đã hoàn tác bản dịch mới của trang: các bản dịch trước đã trở lại.",
+        "zh": "已撤销本页的新译文：之前的翻译已恢复。",
+        "zh-tw": "已復原本頁的新譯文：先前的翻譯已恢復。",
+        "ko": "페이지의 새 번역을 취소했습니다. 이전 번역으로 돌아왔습니다.",
+        "th": "เลิกทำคำแปลใหม่ของหน้าแล้ว: คำแปลเดิมกลับมาแล้ว",
     },
-    "Translate again made again: its translations are back.": {
-        "ja": "再翻訳をやり直しました。再翻訳した訳に戻りました。",
-        "es": "Se rehízo Traducir de nuevo: han vuelto sus traducciones.",
-        "pt": "Traduzir de novo refeito: as traduções dele voltaram.",
-        "fr": "Retraduire rétabli : ses traductions sont revenues.",
-        "de": "Neu übersetzen wiederhergestellt: seine Übersetzungen sind wieder da.",
-        "it": "Traduci di nuovo ripristinato: sono tornate le sue traduzioni.",
-        "nl": "Opnieuw vertalen opnieuw gedaan: de vertalingen ervan zijn terug.",
-        "pl": "Ponowiono ponowne tłumaczenie: jego tłumaczenia wróciły.",
-        "ru": "Повторный перевод возвращён: его переводы снова на месте.",
-        "tr": "Yeniden çevir yinelendi: onun çevirileri geri geldi.",
-        "id": "Terjemahkan lagi diulangi: terjemahannya kembali.",
-        "vi": "Đã làm lại Dịch lại: các bản dịch của nó đã trở lại.",
-        "zh": "已重做重新翻译：其翻译已恢复。",
-        "zh-tw": "已重做重新翻譯：其翻譯已恢復。",
-        "ko": "다시 번역을 다시 했습니다. 그 번역으로 돌아왔습니다.",
-        "th": "ทำการแปลใหม่ซ้ำแล้ว: คำแปลนั้นกลับมาแล้ว",
+    "The page's new translation made again: its translations are back.": {
+        "ja": "ページの新しい訳をやり直しました。新しい訳に戻りました。",
+        "es": "Se rehízo la nueva traducción de la página: han vuelto sus traducciones.",
+        "pt": "Nova tradução da página refeita: as traduções dela voltaram.",
+        "fr": "Nouvelle traduction de la page rétablie : ses traductions sont revenues.",
+        "de": "Neue Übersetzung der Seite wiederhergestellt: ihre Übersetzungen sind wieder da.",
+        "it": "Nuova traduzione della pagina ripristinata: sono tornate le sue traduzioni.",
+        "nl": "Nieuwe vertaling van de pagina opnieuw gedaan: de vertalingen ervan zijn terug.",
+        "pl": "Ponowiono ponowne tłumaczenie strony: jego tłumaczenia wróciły.",
+        "ru": "Повторный перевод страницы возвращён: его переводы снова на месте.",
+        "tr": "Sayfanın yeni çevirisi yinelendi: onun çevirileri geri geldi.",
+        "id": "Terjemahan baru halaman diulangi: terjemahannya kembali.",
+        "vi": "Đã làm lại bản dịch mới của trang: các bản dịch của nó đã trở lại.",
+        "zh": "已重做本页的新译文：其翻译已恢复。",
+        "zh-tw": "已重做本頁的新譯文：其翻譯已恢復。",
+        "ko": "페이지의 새 번역을 다시 했습니다. 그 번역으로 돌아왔습니다.",
+        "th": "ทำคำแปลใหม่ของหน้าซ้ำแล้ว: คำแปลนั้นกลับมาแล้ว",
     },
     # ---------------------------------------------------------------- the series sheet's renderings given to the lines already translated
     "{n} line(s) already translated use the series sheet's earlier rendering ({changes}). Give them the new one? Menu > Undo takes it back.": {

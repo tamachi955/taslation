@@ -493,7 +493,7 @@ def test_the_cache_of_another_language_is_not_touched_while_the_boxes_differ(win
 
 def test_a_book_with_no_name_or_no_pages_says_so(window, store):
     window.book_var.set("")
-    assert window._find_hits(Query("Anna")) == ([], "Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+    assert window._find_hits(Query("Anna")) == ([], "Give the book a name first (Menu > Series and Volume...).")
     window.book_var.set("New book")
     assert window._find_hits(Query("Anna")) == ([], "Nothing is kept for this book in English yet.")
     assert window._find_hits(Query("Anna"))[0] == [] and window.pipeline.cache.book == "New book"
@@ -504,7 +504,7 @@ def test_a_book_with_no_name_or_no_pages_says_so(window, store):
 def test_a_generic_name_asks_for_a_name_as_the_rest_of_the_window_does(window):
     window.book_var.set("untitled")
     assert jobs_mod.generic_book_name("untitled")
-    assert window._find_hits(Query("Anna")) == ([], "Give the book a name first (its series in the Series field, and its volume beside it if it has one).")
+    assert window._find_hits(Query("Anna")) == ([], "Give the book a name first (Menu > Series and Volume...).")
 
 
 # ------------------------------------------------------------------ the window

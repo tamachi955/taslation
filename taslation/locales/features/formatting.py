@@ -1,7 +1,9 @@
 """The region editor's formatting bar (bold, italic, font, size, condensing to fit, alignment, line and letter spacing,
 Reset formatting), the line under it on what the lettering could not do as formatted, the review list's reasons for
 that and for what the checks of an automatic lettering found, the editor's hint on Enter and Ctrl+Enter, and what the
-status line says when the formatting cannot be stored."""
+status line says when the formatting cannot be stored.
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ---------------------------------------------------------------- the formatting bar
@@ -267,22 +269,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "th": "ตัวอักษรมองเห็นยากบนพื้นหลัง",
     },
     # ---------------------------------------------------------------- the status line
-    "Could not store the formatting: give the book a name first (its series in the Series field, and its volume beside it if it has one).": {
-        "ja": "書式を保存できません: 先に本の名前を入力してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
-        "es": "No se pudo guardar el formato: da primero un nombre al libro (su serie en el campo Serie, y su tomo al lado si tiene uno).",
-        "pt": "Não foi possível salvar a formatação: dê um nome ao livro primeiro (a série no campo Série e, ao lado, o volume, se houver).",
-        "fr": "Impossible d'enregistrer la mise en forme : donnez d'abord un nom au livre (sa série dans le champ Série, et son tome à côté s'il en a un).",
-        "de": "Die Formatierung konnte nicht gespeichert werden: Geben Sie dem Buch zuerst einen Namen (die Serie im Feld Serie und daneben den Band, falls es einen hat).",
-        "it": "Impossibile salvare la formattazione: dai prima un nome al libro (la serie nel campo Serie e, accanto, il volume se ne ha uno).",
-        "nl": "De opmaak kon niet worden opgeslagen: geef het boek eerst een naam (de serie in het veld Serie en ernaast het deel, als het er een heeft).",
-        "pl": "Nie udało się zapisać formatowania: najpierw nadaj książce nazwę (serię w polu Seria, a obok tom, jeśli książka go ma).",
-        "ru": "Не удалось сохранить форматирование: сначала дайте книге имя (серию — в поле «Серия», а том, если он есть, — рядом).",
-        "tr": "Biçimlendirme kaydedilemedi: önce kitaba bir ad verin (serisini Seri alanına, cildi varsa cildini yanındaki alana).",
-        "id": "Format tidak dapat disimpan: beri nama buku dulu (serinya di kolom Seri, dan volumenya di sebelahnya jika ada).",
-        "vi": "Không lưu được định dạng: hãy đặt tên sách trước (tên bộ truyện ở ô Bộ truyện, và số tập ở ô bên cạnh nếu có).",
-        "zh": "无法保存格式：请先为书籍命名（在“系列”栏填系列名；有卷号的书，也在旁边的“卷”栏填卷号）。",
-        "zh-tw": "無法儲存格式：請先為書籍命名（在「系列」欄填系列名；有卷號的書，也在旁邊的「卷」欄填卷號）。",
-        "ko": "서식을 저장할 수 없습니다. 먼저 책에 이름을 지정하세요 (시리즈 칸에 시리즈 이름, 권이 있으면 옆 칸에 권).",
-        "th": "เก็บรูปแบบไม่ได้: กรุณาตั้งชื่อหนังสือก่อน (ชื่อซีรีส์ในช่องซีรีส์ และเลขเล่มในช่องข้าง ๆ ถ้ามี)",
+    "Could not store the formatting: give the book a name first (Menu > Series and Volume...).": {
+        "ja": "書式を保存できません: 先に本の名前を入力してください（「メニュー」>「シリーズと巻...」）。",
+        "es": "No se pudo guardar el formato: da primero un nombre al libro (Menú > Serie y tomo...).",
+        "pt": "Não foi possível salvar a formatação: dê um nome ao livro primeiro (Menu > Série e volume...).",
+        "fr": "Impossible d'enregistrer la mise en forme : donnez d'abord un nom au livre (Menu > Série et tome...).",
+        "de": "Die Formatierung konnte nicht gespeichert werden: Geben Sie dem Buch zuerst einen Namen (Menü > Serie und Band...).",
+        "it": "Impossibile salvare la formattazione: dai prima un nome al libro (Menu > Serie e volume...).",
+        "nl": "De opmaak kon niet worden opgeslagen: geef het boek eerst een naam (Menu > Serie en deel...).",
+        "pl": "Nie udało się zapisać formatowania: najpierw nadaj książce nazwę (Menu > Seria i tom...).",
+        "ru": "Не удалось сохранить форматирование: сначала дайте книге имя («Меню» > «Серия и том...»).",
+        "tr": "Biçimlendirme kaydedilemedi: önce kitaba bir ad verin (Menü > Seri ve cilt...).",
+        "id": "Format tidak dapat disimpan: beri nama buku dulu (Menu > Seri dan volume...).",
+        "vi": "Không lưu được định dạng: hãy đặt tên sách trước (Menu > Bộ truyện và tập...).",
+        "zh": "无法保存格式：请先为书籍命名（“菜单 > 系列与卷...”）。",
+        "zh-tw": "無法儲存格式：請先為書籍命名（「選單 > 系列與卷...」）。",
+        "ko": "서식을 저장할 수 없습니다. 먼저 책에 이름을 지정하세요 (메뉴 > 시리즈와 권...).",
+        "th": "เก็บรูปแบบไม่ได้: กรุณาตั้งชื่อหนังสือก่อน (เมนู > ซีรีส์และเล่ม...)",
     },
 }

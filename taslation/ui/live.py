@@ -567,7 +567,7 @@ class LiveViewMixin(BlackViewerMixin):
             self._area_hinted = True
             title = win.title
             self.status(lambda: _("Viewer: {title}").format(title=title) + "  " + _(
-                "No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."))
+                "No area is set for this viewer: Set area... in the left pane lets you drag a rectangle around the page."))
 
     def _hand_set(self) -> tuple[int, int, int, int]:
         """The chosen viewer's capture area as the reader set it (``_hand_area``; a window without that record - a

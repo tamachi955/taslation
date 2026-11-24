@@ -3,7 +3,9 @@ the line when it is closed, how long a time is (`banner.duration_text`), a book'
 a page translation that Stop cancels or whose model is slow.
 
 Terms as the window's catalogs have them: the series sheet is ja 「シリーズ設定」; Stop is the window's Stop button in
-each language."""
+each language.
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     # ------------------------------------------------------------------ the start dialog
@@ -25,23 +27,23 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "이 책의 이름은 무엇인가요? TASlation은 이 책의 번역을 이 이름으로 보관합니다.",
         "th": "หนังสือเล่มนี้ชื่ออะไร TASlation เก็บคำแปลของหนังสือเล่มนี้ไว้ภายใต้ชื่อนี้",
     },
-    "Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.": {
-        "ja": "まだ何も読み取っていません。次のページで改めて確認します。F5 でこのページを今すぐ翻訳できます。",
-        "es": "Todavía no se ha leído nada: TASlation vuelve a preguntar en la página siguiente. F5 traduce esta página ahora.",
-        "pt": "Nada foi lido ainda: o TASlation pergunta de novo na próxima página. F5 traduz esta página agora.",
-        "fr": "Rien n'a encore été lu : TASlation redemandera à la page suivante. F5 traduit cette page maintenant.",
-        "de": "Noch wurde nichts gelesen: TASlation fragt bei der nächsten Seite erneut. F5 übersetzt diese Seite jetzt.",
-        "it": "Non è stato ancora letto nulla: TASlation lo chiede di nuovo alla pagina successiva. F5 traduce ora questa pagina.",
-        "nl": "Er is nog niets gelezen: TASlation vraagt het opnieuw bij de volgende pagina. F5 vertaalt deze pagina nu.",
-        "pl": "Nic jeszcze nie przeczytano: TASlation zapyta ponownie przy następnej stronie. F5 tłumaczy tę stronę teraz.",
-        "ru": "Пока ничего не прочитано: TASlation спросит снова на следующей странице. F5 переводит эту страницу сейчас.",
-        "tr": "Henüz hiçbir şey okunmadı: TASlation bir sonraki sayfada yeniden sorar. F5 bu sayfayı şimdi çevirir.",
-        "id": "Belum ada yang dibaca: TASlation akan bertanya lagi di halaman berikutnya. F5 menerjemahkan halaman ini sekarang.",
-        "vi": "Chưa đọc gì: TASlation sẽ hỏi lại ở trang tiếp theo. F5 để dịch trang này ngay.",
-        "zh": "尚未读取任何内容：TASlation 会在下一页再次询问。按 F5 立即翻译本页。",
-        "zh-tw": "尚未讀取任何內容：TASlation 會在下一頁再次詢問。按 F5 立即翻譯本頁。",
-        "ko": "아직 아무것도 읽지 않았습니다. 다음 페이지에서 TASlation가 다시 묻습니다. F5를 누르면 이 페이지를 지금 번역합니다.",
-        "th": "ยังไม่ได้อ่านอะไร: TASlation จะถามอีกครั้งที่หน้าถัดไป F5 จะแปลหน้านี้ทันที",
+    "Nothing was read yet: TASlation asks again at the next page. Translate translates this page now.": {
+        "ja": "まだ何も読み取っていません。次のページで改めて確認します。「翻訳」でこのページを今すぐ翻訳できます。",
+        "es": "Todavía no se ha leído nada: TASlation vuelve a preguntar en la página siguiente. Traducir traduce esta página ahora.",
+        "pt": "Nada foi lido ainda: o TASlation pergunta de novo na próxima página. Traduzir traduz esta página agora.",
+        "fr": "Rien n'a encore été lu : TASlation redemandera à la page suivante. Traduire traduit cette page maintenant.",
+        "de": "Noch wurde nichts gelesen: TASlation fragt bei der nächsten Seite erneut. Übersetzen übersetzt diese Seite jetzt.",
+        "it": "Non è stato ancora letto nulla: TASlation lo chiede di nuovo alla pagina successiva. Traduci traduce ora questa pagina.",
+        "nl": "Er is nog niets gelezen: TASlation vraagt het opnieuw bij de volgende pagina. Vertalen vertaalt deze pagina nu.",
+        "pl": "Nic jeszcze nie przeczytano: TASlation zapyta ponownie przy następnej stronie. Przetłumacz tłumaczy tę stronę teraz.",
+        "ru": "Пока ничего не прочитано: TASlation спросит снова на следующей странице. «Перевести» переводит эту страницу сейчас.",
+        "tr": "Henüz hiçbir şey okunmadı: TASlation bir sonraki sayfada yeniden sorar. Çevir bu sayfayı şimdi çevirir.",
+        "id": "Belum ada yang dibaca: TASlation akan bertanya lagi di halaman berikutnya. Terjemahkan menerjemahkan halaman ini sekarang.",
+        "vi": "Chưa đọc gì: TASlation sẽ hỏi lại ở trang tiếp theo. Bấm Dịch để dịch trang này ngay.",
+        "zh": "尚未读取任何内容：TASlation 会在下一页再次询问。按“翻译”立即翻译本页。",
+        "zh-tw": "尚未讀取任何內容：TASlation 會在下一頁再次詢問。按「翻譯」立即翻譯本頁。",
+        "ko": "아직 아무것도 읽지 않았습니다. 다음 페이지에서 TASlation가 다시 묻습니다. 번역을 누르면 이 페이지를 지금 번역합니다.",
+        "th": "ยังไม่ได้อ่านอะไร: TASlation จะถามอีกครั้งที่หน้าถัดไป กด แปล เพื่อแปลหน้านี้ทันที",
     },
     # ------------------------------------------------------------------ how long a time is
     "{minutes} min": {
@@ -115,22 +117,22 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "번역 프로그램의 응답이 느립니다 (아직 불러오는 중일 수 있습니다). 중지를 누르면 이 페이지를 취소합니다.",
         "th": "โปรแกรมแปลตอบช้า (อาจยังโหลดอยู่) “หยุด” จะยกเลิกหน้านี้",
     },
-    "Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.": {
-        "ja": "停止しました: このページは翻訳していません（途中の結果も保存していません）。F5 でもう一度翻訳できます。",
-        "es": "Detenido: esta página no se tradujo y no se guardó nada de ella. F5 la vuelve a traducir.",
-        "pt": "Parado: esta página não foi traduzida e nada dela foi guardado. F5 a traduz de novo.",
-        "fr": "Arrêté : cette page n'a pas été traduite et rien n'en a été conservé. F5 la traduit à nouveau.",
-        "de": "Angehalten: Diese Seite wurde nicht übersetzt, und nichts davon wurde behalten. F5 übersetzt sie erneut.",
-        "it": "Fermato: questa pagina non è stata tradotta e non se n'è conservato nulla. F5 la traduce di nuovo.",
-        "nl": "Gestopt: deze pagina is niet vertaald en er is niets van bewaard. F5 vertaalt hem opnieuw.",
-        "pl": "Zatrzymano: ta strona nie została przetłumaczona i nic z niej nie zachowano. F5 tłumaczy ją ponownie.",
-        "ru": "Остановлено: эта страница не переведена, и ничего из неё не сохранено. F5 переводит её заново.",
-        "tr": "Durduruldu: bu sayfa çevrilmedi ve ondan hiçbir şey saklanmadı. F5 sayfayı yeniden çevirir.",
-        "id": "Dihentikan: halaman ini tidak diterjemahkan dan tidak ada yang disimpan. F5 menerjemahkannya lagi.",
-        "vi": "Đã dừng: trang này chưa được dịch và không có gì được giữ lại. F5 để dịch lại.",
-        "zh": "已停止：本页没有翻译，也没有保留任何内容。按 F5 重新翻译。",
-        "zh-tw": "已停止：本頁沒有翻譯，也沒有保留任何內容。按 F5 重新翻譯。",
-        "ko": "중지했습니다: 이 페이지는 번역하지 않았고 아무것도 저장하지 않았습니다. F5를 누르면 다시 번역합니다.",
-        "th": "หยุดแล้ว: หน้านี้ไม่ได้แปล และไม่ได้เก็บสิ่งใดของหน้านี้ไว้ F5 จะแปลอีกครั้ง",
+    "Stopped: this page was not translated, and nothing of it was kept. Translate translates it again.": {
+        "ja": "停止しました: このページは翻訳していません（途中の結果も保存していません）。「翻訳」でもう一度翻訳できます。",
+        "es": "Detenido: esta página no se tradujo y no se guardó nada de ella. Traducir la vuelve a traducir.",
+        "pt": "Parado: esta página não foi traduzida e nada dela foi guardado. Traduzir a traduz de novo.",
+        "fr": "Arrêté : cette page n'a pas été traduite et rien n'en a été conservé. Traduire la traduit à nouveau.",
+        "de": "Angehalten: Diese Seite wurde nicht übersetzt, und nichts davon wurde behalten. Übersetzen übersetzt sie erneut.",
+        "it": "Fermato: questa pagina non è stata tradotta e non se n'è conservato nulla. Traduci la traduce di nuovo.",
+        "nl": "Gestopt: deze pagina is niet vertaald en er is niets van bewaard. Vertalen vertaalt hem opnieuw.",
+        "pl": "Zatrzymano: ta strona nie została przetłumaczona i nic z niej nie zachowano. Przetłumacz tłumaczy ją ponownie.",
+        "ru": "Остановлено: эта страница не переведена, и ничего из неё не сохранено. «Перевести» переводит её заново.",
+        "tr": "Durduruldu: bu sayfa çevrilmedi ve ondan hiçbir şey saklanmadı. Çevir sayfayı yeniden çevirir.",
+        "id": "Dihentikan: halaman ini tidak diterjemahkan dan tidak ada yang disimpan. Terjemahkan menerjemahkannya lagi.",
+        "vi": "Đã dừng: trang này chưa được dịch và không có gì được giữ lại. Bấm Dịch để dịch lại.",
+        "zh": "已停止：本页没有翻译，也没有保留任何内容。按“翻译”重新翻译。",
+        "zh-tw": "已停止：本頁沒有翻譯，也沒有保留任何內容。按「翻譯」重新翻譯。",
+        "ko": "중지했습니다: 이 페이지는 번역하지 않았고 아무것도 저장하지 않았습니다. 번역을 누르면 다시 번역합니다.",
+        "th": "หยุดแล้ว: หน้านี้ไม่ได้แปล และไม่ได้เก็บสิ่งใดของหน้านี้ไว้ กด แปล เพื่อแปลอีกครั้ง",
     },
 }

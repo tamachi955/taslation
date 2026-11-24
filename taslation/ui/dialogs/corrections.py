@@ -10,10 +10,10 @@ from .page_list import ON_PAGE, PLACE_UNKNOWN, PageListDialog, one_line
 
 TITLE = "My corrections"
 EMPTY = "You have corrected no translation in this book yet. A translation you change in the region editor or with Find and replace is listed here."
-NO_BOOK = "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."  # (the window's own line: `locales.keys`)
+NO_BOOK = "Give the book a name first (Menu > Series and Volume...)."  # (the window's own line: `locales.keys`)
 COUNTED = "{n} translation(s) you corrected."
-EXPLAIN = ("The translations you wrote yourself: \"Translate again\" keeps them unless you ask for them to be replaced. "
-           "Select one to see which page it is on.")
+EXPLAIN = ("The translations you wrote yourself: the circular arrow beside Translate keeps them unless you ask for "
+           "them to be replaced. Select one to see which page it is on.")
 
 
 class CorrectionsDialog(PageListDialog):

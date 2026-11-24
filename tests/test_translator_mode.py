@@ -399,7 +399,7 @@ def test_a_reading_order_is_taken_back_and_made_again(window):
     regions = w._page_regions()
     w._ordering = list(reversed(regions))
     w.toggle_order()
-    assert w.said[-1] == "Reading order saved for {n} region(s). Translate again applies it."
+    assert w.said[-1] == "Reading order saved for {n} region(s). The circular arrow beside Translate applies it."
     assert _skipped_and_order(w) == (False, len(regions))
     w.undo_edit()
     assert w.said[-1] == "Reading order taken back." and _skipped_and_order(w) == (False, 0)
@@ -418,10 +418,10 @@ def test_translate_again_is_taken_back_and_made_again(window, monkeypatch):
     anew = w.state()
     assert anew[1] != start[1] and all(r.translated_text == "Said anew." for r in w.last_result.translated)
     w.undo_edit()
-    assert w.said[-1] == "Translate again taken back: the earlier translations are back."
+    assert w.said[-1] == "The page's new translation taken back: the earlier translations are back."
     assert w.state()[1] == start[1] and w.region("Hello there!")
     w.redo_edit()
-    assert w.said[-1] == "Translate again made again: its translations are back." and w.state()[1] == anew[1]
+    assert w.said[-1] == "The page's new translation made again: its translations are back." and w.state()[1] == anew[1]
 
 
 def test_translate_again_that_changes_nothing_is_no_step(window, monkeypatch):
@@ -442,7 +442,7 @@ def test_a_rectangle_not_written_leaves_nothing_behind(window, monkeypatch):
     assert w.said[-1].startswith("Could not save the rectangle:") and w.state() == start and not len(w.history)
     w.pipeline.annotations = None
     w._add_region((10, 10, 60, 60))
-    assert w.said[-1] == "Could not record the rectangle: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
+    assert w.said[-1] == "Could not record the rectangle: give the book a name first (Menu > Series and Volume...)."
 
 
 # ------------------------------------------------------------------ the stores carried back and forth

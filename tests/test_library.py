@@ -418,7 +418,7 @@ def test_rename_hands_the_new_name_to_the_windows_rename_and_the_list_follows(hi
     assert d.backup_var.get() == f"{OTHER} 1 keeps its name; the status line in the right pane says why."
     window._start_dialog = object()  # the window waits for an answer of its own
     d._rename()
-    assert d.backup_var.get() == "Answer the question in the TASlation window first." and len(window.asked) == 2
+    assert d.backup_var.get() == "Answer TASlation's question about the book's name first." and len(window.asked) == 2
     d.destroy()
     window.destroy()
 

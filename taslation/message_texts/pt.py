@@ -1,5 +1,7 @@
 """Brazilian Portuguese (Português (Brasil)) templates for `taslation.messages` (see `taslation.message_texts`): você,
-as the window; its buttons as the window names them (Parar)."""
+as the window; its buttons as the window names them (Parar).
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "não foi possível usar a resposta do modelo",
@@ -25,26 +27,26 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "cancelado",
     "pipeline.from_cache": "{bubbles:linha mostrada|linhas mostradas} de traduções anteriores.",
     "pipeline.translated": "{bubbles:linha traduzida|linhas traduzidas} em {seconds:.0f} s.",
-    "pipeline.to_review": "{review:linha merece|linhas merecem} uma olhada (papel Tradutor, Revisar...).",
+    "pipeline.to_review": "{review:linha merece|linhas merecem} uma olhada (ligue Editar e depois Menu > Revisar...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Nenhuma página encontrada no visualizador. Verifique se o livro está aberto ou use Definir área... (menu Página)",
-    "ollama.unreachable": "O TASlation não conseguiu chegar ao programa de tradução. Pressione F5 daqui a pouco; ele inicia sozinho.",
+    "pipeline.no_content": "Nenhuma página encontrada no visualizador. Verifique se o livro está aberto ou use Definir área... no painel esquerdo.",
+    "ollama.unreachable": "O TASlation não conseguiu chegar ao programa de tradução. Clique em Traduzir daqui a pouco; ele inicia sozinho.",
     "ollama.model_missing": "O modelo de tradução {model} não está instalado. Execute install.cmd novamente para "
                              "instalá-lo.",
-    "ollama.http_error": "O programa de tradução recusou ({status}). Pressione F5 para tentar de novo; se repetir, reinicie o PC.",
-    "ollama.timeout": "A tradução demorou demais. Pressione F5 para tentar de novo.",
-    "ollama.connection_failed": "O programa de tradução parou de responder. Pressione F5 para tentar de novo.",
-    "ollama.bad_json": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Pressione F5 para tentar de novo.",
-    "ollama.reported_error": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Pressione F5 para tentar de novo.",
-    "ollama.broke_off": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Pressione F5 para tentar de novo.",
-    "ollama.bad_answer": ("O programa de tradução deu uma resposta que o TASlation não pôde usar. Pressione F5 para tentar de novo."),
+    "ollama.http_error": "O programa de tradução recusou ({status}). Clique em Traduzir para tentar de novo; se repetir, reinicie o PC.",
+    "ollama.timeout": "A tradução demorou demais. Clique em Traduzir para tentar de novo.",
+    "ollama.connection_failed": "O programa de tradução parou de responder. Clique em Traduzir para tentar de novo.",
+    "ollama.bad_json": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Clique em Traduzir para tentar de novo.",
+    "ollama.reported_error": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Clique em Traduzir para tentar de novo.",
+    "ollama.broke_off": "O programa de tradução deu uma resposta que o TASlation não pôde usar. Clique em Traduzir para tentar de novo.",
+    "ollama.bad_answer": ("O programa de tradução deu uma resposta que o TASlation não pôde usar. Clique em Traduzir para tentar de novo."),
     "ollama.not_loopback": ("a URL do Ollama deve ser um endereço http(s) de loopback (este computador); recebido: "
                             "“{url}”"),
     "ollama.slow": "O programa de tradução está demorando a responder (talvez ainda esteja carregando). Parar cancela esta página.",
     "ollama.no_answer": "O programa de tradução não respondeu por {seconds:.0f} s, então o TASlation pergunta de novo.",
     "ollama.restarting": "O programa de tradução ainda não responde, então o TASlation o inicia de novo...",
-    "ollama.not_answering": ("O programa de tradução deste computador não responde. Reinicie-o (ou reinicie o TASlation) e "
-                             "depois pressione F5."),
+    "ollama.not_answering": ("O programa de tradução deste computador não responde. Reinicie-o (ou reinicie o "
+                             "TASlation) e depois clique em Traduzir."),
     "ollama.loaded": "Tradutor pronto.",
     "ollama.loading": "Preparando o tradutor...",
     "ollama.partly_on_gpu": "Só {percent}% do tradutor cabe na placa de vídeo, então a tradução ficará lenta. Feche outros programas que usam a placa de vídeo.",

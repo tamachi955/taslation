@@ -1,5 +1,7 @@
 """German (Deutsch) templates for `taslation.messages` (see `taslation.message_texts`): Sie, as the window; its buttons
-as the window names them (Stopp)."""
+as the window names them (Stopp).
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "die Antwort des Modells war nicht verwendbar",
@@ -26,26 +28,26 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "abgebrochen",
     "pipeline.from_cache": "{bubbles:Zeile|Zeilen} aus früheren Übersetzungen angezeigt.",
     "pipeline.translated": "{bubbles:Zeile|Zeilen} in {seconds:.0f} s übersetzt.",
-    "pipeline.to_review": "{review:Zeile ist|Zeilen sind} einen Blick wert (Rolle Übersetzer, Durchsehen...).",
+    "pipeline.to_review": "{review:Zeile ist|Zeilen sind} einen Blick wert (Bearbeiten einschalten, dann Menü > Durchsehen...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Keine Seite im Viewer gefunden. Prüfen Sie, ob das Buch offen ist, oder verwenden Sie Bereich festlegen... (Menü Seite)",
-    "ollama.unreachable": "TASlation konnte das Übersetzungsprogramm nicht erreichen. Drücken Sie gleich F5; es startet von selbst.",
+    "pipeline.no_content": "Keine Seite im Viewer gefunden. Prüfen Sie, ob das Buch offen ist, oder verwenden Sie Bereich festlegen... im linken Bereich.",
+    "ollama.unreachable": "TASlation konnte das Übersetzungsprogramm nicht erreichen. Drücken Sie gleich Übersetzen; es startet von selbst.",
     "ollama.model_missing": ("Das Übersetzungsmodell {model} ist nicht installiert. Führen Sie install.cmd erneut "
                              "aus, um es zu installieren."),
-    "ollama.http_error": "Das Übersetzungsprogramm hat abgelehnt ({status}). Drücken Sie F5, um es noch einmal zu versuchen; wiederholt es sich, starten Sie den PC neu.",
-    "ollama.timeout": "Die Übersetzung hat zu lange gedauert. Drücken Sie F5, um es noch einmal zu versuchen.",
-    "ollama.connection_failed": ("Das Übersetzungsprogramm antwortet nicht mehr. Drücken Sie F5, um es noch einmal zu versuchen."),
-    "ollama.bad_json": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie F5, um es noch einmal zu versuchen.",
-    "ollama.reported_error": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie F5, um es noch einmal zu versuchen.",
-    "ollama.broke_off": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie F5, um es noch einmal zu versuchen.",
-    "ollama.bad_answer": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie F5, um es noch einmal zu versuchen.",
+    "ollama.http_error": "Das Übersetzungsprogramm hat abgelehnt ({status}). Drücken Sie Übersetzen, um es noch einmal zu versuchen; wiederholt es sich, starten Sie den PC neu.",
+    "ollama.timeout": "Die Übersetzung hat zu lange gedauert. Drücken Sie Übersetzen, um es noch einmal zu versuchen.",
+    "ollama.connection_failed": ("Das Übersetzungsprogramm antwortet nicht mehr. Drücken Sie Übersetzen, um es noch einmal zu versuchen."),
+    "ollama.bad_json": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie Übersetzen, um es noch einmal zu versuchen.",
+    "ollama.reported_error": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie Übersetzen, um es noch einmal zu versuchen.",
+    "ollama.broke_off": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie Übersetzen, um es noch einmal zu versuchen.",
+    "ollama.bad_answer": "Das Übersetzungsprogramm gab eine Antwort, die TASlation nicht verwenden konnte. Drücken Sie Übersetzen, um es noch einmal zu versuchen.",
     "ollama.not_loopback": ("die Ollama-URL muss eine Loopback-Adresse (dieser Computer) mit http(s) sein, erhalten: "
                             "„{url}“"),
     "ollama.slow": "Das Übersetzungsprogramm antwortet langsam (es lädt vielleicht noch). Stopp bricht diese Seite ab.",
     "ollama.no_answer": "Das Übersetzungsprogramm hat {seconds:.0f} s lang nicht geantwortet, daher fragt TASlation es noch einmal.",
     "ollama.restarting": "Das Übersetzungsprogramm antwortet immer noch nicht, daher startet TASlation es neu...",
-    "ollama.not_answering": ("Das Übersetzungsprogramm auf diesem Computer antwortet nicht. Starten Sie es (oder TASlation) "
-                             "neu und drücken Sie dann F5."),
+    "ollama.not_answering": ("Das Übersetzungsprogramm auf diesem Computer antwortet nicht. Starten Sie es (oder "
+                             "TASlation) neu und drücken Sie dann Übersetzen."),
     "ollama.loaded": "Übersetzer bereit.",
     "ollama.loading": "Übersetzer wird vorbereitet...",
     "ollama.partly_on_gpu": "Nur {percent} % des Übersetzers passen auf die Grafikkarte, das Übersetzen wird daher langsam. Schließen Sie andere Programme, die die Grafikkarte nutzen.",

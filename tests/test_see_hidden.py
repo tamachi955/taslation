@@ -885,31 +885,6 @@ def test_the_banners_lines_and_the_guards_warning_are_in_the_right_pane_and_thei
     assert [r[0] for r in dialogs[-1]] == [r[0] for r in window._see_banner_rows]
 
 
-@pytest.mark.parametrize("text, left", [
-    ("No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page.",
-     "No area is set for this viewer: Set area... lets you drag a rectangle around the page."),
-    ("このビューアには範囲が設定されていません。「範囲設定...」（ページメニュー）でページの周りに矩形をドラッグして指定できます。",
-     "このビューアには範囲が設定されていません。「範囲設定...」でページの周りに矩形をドラッグして指定できます。"),
-    ("Ready (12 pages kept).", "Ready (12 pages kept)."),
-    ("The translation took too long. Press F5 to try again.", "The translation took too long."),
-])
-def test_the_panes_words_name_no_menu_of_the_window_and_no_key(text, left):
-    from taslation import panes as pn
-
-    assert pn.pane_words(text) == left
-
-
-def test_every_language_s_page_menu_aside_is_left_out_of_the_panes_words():
-    from taslation import panes as pn
-    from taslation.locales.features import window_tidy
-
-    english = "No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."
-    for code, text in window_tidy.TEXTS[english].items():
-        left = pn.pane_words(text)
-        assert left != text and len(left) < len(text), code
-        assert not any(mark in left for mark in "()（）"), code
-
-
 # ------------------------------------------------------------------ the Settings dialog
 def test_the_settings_dialog_has_the_modes_own_rows_and_none_of_the_old_windows(hidden_root, tmp_path, monkeypatch):
     from taslation.ui.dialogs import settings as dlg

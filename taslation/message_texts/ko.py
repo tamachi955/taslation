@@ -1,6 +1,8 @@
 """Korean (한국어) templates for `taslation.messages` (see `taslation.message_texts`): -습니다/-세요, as the window; its
 buttons as the window names them (중지). Counts take a counter (말풍선 {bubbles}개); no particle
-follows a placeholder whose last sound is unknown (it goes on a noun after it: "{model} 모델이", "'{title}' 탭이")."""
+follows a placeholder whose last sound is unknown (it goes on a noun after it: "{model} 모델이", "'{title}' 탭이").
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "모델의 응답을 사용할 수 없었습니다",
@@ -25,24 +27,23 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "취소됨",
     "pipeline.from_cache": "이전 번역에서 {bubbles}줄을 표시했습니다.",
     "pipeline.translated": "{bubbles}줄을 {seconds:.0f}초 만에 번역했습니다.",
-    "pipeline.to_review": "살펴볼 만한 곳 {review}개 (번역자 역할, 검토...).",
+    "pipeline.to_review": "살펴볼 만한 곳 {review}개 (편집을 켜고 메뉴 > 검토...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "뷰어에서 페이지를 찾지 못했습니다. 책이 열려 있는지 확인하거나 영역 설정...(페이지 메뉴)을 사용하세요.",
-    "ollama.unreachable": "TASlation이 번역 프로그램에 연결하지 못했습니다. 잠시 후 F5를 누르세요. 프로그램은 저절로 시작됩니다.",
+    "pipeline.no_content": "뷰어에서 페이지를 찾지 못했습니다. 책이 열려 있는지 확인하거나 왼쪽 패널의 영역 설정...을 사용하세요.",
+    "ollama.unreachable": "TASlation이 번역 프로그램에 연결하지 못했습니다. 잠시 후 번역을 누르세요. 프로그램은 저절로 시작됩니다.",
     "ollama.model_missing": "{model} 번역 모델이 설치되어 있지 않습니다. install.cmd를 다시 실행하여 설치하세요.",
-    "ollama.http_error": "번역 프로그램이 거부했습니다 ({status}). F5를 눌러 다시 시도하세요. 반복되면 PC를 다시 시작하세요.",
-    "ollama.timeout": "번역에 시간이 너무 오래 걸렸습니다. F5를 눌러 다시 시도하세요.",
-    "ollama.connection_failed": "번역 프로그램이 응답을 멈췄습니다. F5를 눌러 다시 시도하세요.",
-    "ollama.bad_json": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. F5를 눌러 다시 시도하세요.",
-    "ollama.reported_error": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. F5를 눌러 다시 시도하세요.",
-    "ollama.broke_off": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. F5를 눌러 다시 시도하세요.",
-    "ollama.bad_answer": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. F5를 눌러 다시 시도하세요.",
+    "ollama.http_error": "번역 프로그램이 거부했습니다 ({status}). 번역을 눌러 다시 시도하세요. 반복되면 PC를 다시 시작하세요.",
+    "ollama.timeout": "번역에 시간이 너무 오래 걸렸습니다. 번역을 눌러 다시 시도하세요.",
+    "ollama.connection_failed": "번역 프로그램이 응답을 멈췄습니다. 번역을 눌러 다시 시도하세요.",
+    "ollama.bad_json": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. 번역을 눌러 다시 시도하세요.",
+    "ollama.reported_error": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. 번역을 눌러 다시 시도하세요.",
+    "ollama.broke_off": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. 번역을 눌러 다시 시도하세요.",
+    "ollama.bad_answer": "번역 프로그램의 답을 TASlation이 사용할 수 없었습니다. 번역을 눌러 다시 시도하세요.",
     "ollama.not_loopback": "Ollama URL은 이 컴퓨터를 가리키는 루프백 http(s) 주소여야 합니다. 받은 값: '{url}'",
     "ollama.slow": "번역 프로그램의 응답이 느립니다 (아직 불러오는 중일 수 있습니다). 중지를 누르면 이 페이지를 취소합니다.",
     "ollama.no_answer": "번역 프로그램이 {seconds:.0f}초 동안 응답하지 않아 TASlation이 다시 요청합니다.",
     "ollama.restarting": "번역 프로그램이 여전히 응답하지 않아 TASlation이 다시 시작합니다...",
-    "ollama.not_answering": ("이 컴퓨터의 번역 프로그램이 응답하지 않습니다. 번역 프로그램(또는 TASlation)을 다시 시작한 "
-                             "다음 F5를 누르세요."),
+    "ollama.not_answering": ("이 컴퓨터의 번역 프로그램이 응답하지 않습니다. 번역 프로그램(또는 TASlation)을 다시 시작한 다음 번역을 누르세요."),
     "ollama.loaded": "번역 준비가 끝났습니다.",
     "ollama.loading": "번역을 준비하는 중...",
     "ollama.partly_on_gpu": "번역에 쓰는 부분의 {percent}%만 그래픽 카드에 올라가서 번역이 느려집니다. 그래픽 카드를 사용하는 다른 프로그램을 닫아 주세요.",

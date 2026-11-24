@@ -1,6 +1,8 @@
 """Indonesian (Bahasa Indonesia) templates for `taslation.messages` (see `taslation.message_texts`): Anda, as the
 window; its buttons as the window names them (Hentikan). Nouns do not change after a
-number, so counts need no plural words."""
+number, so counts need no plural words.
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "balasan model tidak dapat dipakai",
@@ -27,24 +29,24 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "dibatalkan",
     "pipeline.from_cache": "{bubbles} baris ditampilkan dari terjemahan sebelumnya.",
     "pipeline.translated": "{bubbles} baris diterjemahkan dalam {seconds:.0f} dtk.",
-    "pipeline.to_review": "{review} layak dilihat (peran Penerjemah, Tinjau...).",
+    "pipeline.to_review": "{review} layak dilihat (aktifkan Sunting, lalu Menu > Tinjau...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Tidak ada halaman di penampil. Pastikan buku terbuka, atau pakai Atur area... (menu Halaman)",
-    "ollama.unreachable": "TASlation tidak dapat menjangkau program penerjemah. Tekan F5 sebentar lagi; program berjalan sendiri.",
+    "pipeline.no_content": "Tidak ada halaman di penampil. Pastikan buku terbuka, atau pakai Atur area... di panel kiri.",
+    "ollama.unreachable": "TASlation tidak dapat menjangkau program penerjemah. Tekan Terjemahkan sebentar lagi; program berjalan sendiri.",
     "ollama.model_missing": "Model terjemahan {model} belum terpasang. Jalankan install.cmd lagi untuk memasangnya.",
-    "ollama.http_error": "Program penerjemah menolak ({status}). Tekan F5 untuk mencoba lagi; jika terulang, mulai ulang PC Anda.",
-    "ollama.timeout": "Penerjemahan terlalu lama. Tekan F5 untuk mencoba lagi.",
-    "ollama.connection_failed": "Program penerjemah berhenti menjawab. Tekan F5 untuk mencoba lagi.",
-    "ollama.bad_json": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan F5 untuk mencoba lagi.",
-    "ollama.reported_error": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan F5 untuk mencoba lagi.",
-    "ollama.broke_off": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan F5 untuk mencoba lagi.",
-    "ollama.bad_answer": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan F5 untuk mencoba lagi.",
+    "ollama.http_error": "Program penerjemah menolak ({status}). Tekan Terjemahkan untuk mencoba lagi; jika terulang, mulai ulang PC Anda.",
+    "ollama.timeout": "Penerjemahan terlalu lama. Tekan Terjemahkan untuk mencoba lagi.",
+    "ollama.connection_failed": "Program penerjemah berhenti menjawab. Tekan Terjemahkan untuk mencoba lagi.",
+    "ollama.bad_json": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan Terjemahkan untuk mencoba lagi.",
+    "ollama.reported_error": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan Terjemahkan untuk mencoba lagi.",
+    "ollama.broke_off": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan Terjemahkan untuk mencoba lagi.",
+    "ollama.bad_answer": "Program penerjemah memberi jawaban yang tidak dapat dipakai TASlation. Tekan Terjemahkan untuk mencoba lagi.",
     "ollama.not_loopback": "URL Ollama harus berupa alamat http(s) loopback (komputer ini), bukan “{url}”",
     "ollama.slow": "Program penerjemah lambat menjawab (mungkin masih memuat). Hentikan membatalkan halaman ini.",
     "ollama.no_answer": "Program penerjemah tidak menjawab selama {seconds:.0f} dtk, jadi TASlation memintanya lagi.",
     "ollama.restarting": "Program penerjemah masih tidak menjawab, jadi TASlation memulainya lagi...",
-    "ollama.not_answering": ("Program penerjemah di komputer ini tidak menjawab. Mulai ulang program itu (atau mulai ulang "
-                             "TASlation), lalu tekan F5."),
+    "ollama.not_answering": ("Program penerjemah di komputer ini tidak menjawab. Mulai ulang program itu (atau mulai "
+                             "ulang TASlation), lalu tekan Terjemahkan."),
     "ollama.loaded": "Penerjemah siap.",
     "ollama.loading": "Menyiapkan penerjemah...",
     "ollama.partly_on_gpu": "Hanya {percent}% penerjemah yang muat di kartu grafis, jadi penerjemahan akan lambat. Tutup program lain yang memakai kartu grafis.",

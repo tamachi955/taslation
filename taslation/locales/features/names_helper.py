@@ -1,6 +1,8 @@
 """The window's strings for the name consistency helper: the names the pages read rendered in more than one way,
 offered on the band and from the Tools menu, and the dialog that makes one rendering of each (`ui.dialogs.names`,
-`ui.name_check`). "Series sheet" is worded as the window's Series sheet... button is."""
+`ui.name_check`). "Series sheet" is worded as the window's Series sheet... button is.
+
+Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
     "Review names...": {
@@ -237,23 +239,23 @@ TEXTS: dict[str, dict[str, str]] = {
         "ko": "{n}줄을 바꿉니다.",
         "th": "จะเปลี่ยน {n} บรรทัด",
     },
-    "Choose the book first (its series in the Series field, and its volume beside it if it has one).": {
-        "ja": "先に本を指定してください（シリーズ名を「シリーズ」欄に。巻のある本は、その隣の「巻」欄に巻も）。",
-        "es": "Elige primero el libro (su serie en el campo Serie, y su tomo al lado si tiene uno).",
-        "pt": "Escolha primeiro o livro (a série no campo Série e, ao lado, o volume, se houver).",
-        "fr": "Choisissez d'abord le livre (sa série dans le champ Série, et son tome à côté s'il en a un).",
-        "de": "Wählen Sie zuerst das Buch (die Serie im Feld Serie und daneben den Band, falls es einen hat).",
-        "it": "Scegli prima il libro (la serie nel campo Serie e, accanto, il volume se ne ha uno).",
-        "nl": "Kies eerst het boek (de serie in het veld Serie en ernaast het deel, als het er een heeft).",
-        "pl": "Najpierw wybierz książkę (serię w polu Seria, a obok tom, jeśli książka go ma).",
-        "ru": "Сначала выберите книгу (серию — в поле «Серия», а том, если он есть, — рядом).",
-        "tr": "Önce kitabı seçin (serisini Seri alanına, cildi varsa cildini yanındaki alana).",
-        "id": "Pilih dulu bukunya (serinya di kolom Seri, dan volumenya di sebelahnya jika ada).",
-        "vi": "Hãy chọn cuốn sách trước (tên bộ truyện ở ô Bộ truyện, và số tập ở ô bên cạnh nếu có).",
-        "zh": "请先选择这本书（在“系列”栏填系列名；有卷号的书，也在旁边的“卷”栏填卷号）。",
-        "zh-tw": "請先選擇這本書（在「系列」欄填系列名；有卷號的書，也在旁邊的「卷」欄填卷號）。",
-        "ko": "먼저 그 책을 지정하세요 (시리즈 칸에 시리즈 이름, 권이 있으면 옆 칸에 권).",
-        "th": "เลือกหนังสือก่อน (ชื่อซีรีส์ในช่องซีรีส์ และเลขเล่มในช่องข้าง ๆ ถ้ามี)",
+    "Choose the book first (Menu > Series and Volume...).": {
+        "ja": "先に本を指定してください（「メニュー」>「シリーズと巻...」）。",
+        "es": "Elige primero el libro (Menú > Serie y tomo...).",
+        "pt": "Escolha primeiro o livro (Menu > Série e volume...).",
+        "fr": "Choisissez d'abord le livre (Menu > Série et tome...).",
+        "de": "Wählen Sie zuerst das Buch (Menü > Serie und Band...).",
+        "it": "Scegli prima il libro (Menu > Serie e volume...).",
+        "nl": "Kies eerst het boek (Menu > Serie en deel...).",
+        "pl": "Najpierw wybierz książkę (Menu > Seria i tom...).",
+        "ru": "Сначала выберите книгу («Меню» > «Серия и том...»).",
+        "tr": "Önce kitabı seçin (Menü > Seri ve cilt...).",
+        "id": "Pilih dulu bukunya (Menu > Seri dan volume...).",
+        "vi": "Hãy chọn cuốn sách trước (Menu > Bộ truyện và tập...).",
+        "zh": "请先选择这本书（“菜单 > 系列与卷...”）。",
+        "zh-tw": "請先選擇這本書（「選單 > 系列與卷...」）。",
+        "ko": "먼저 그 책을 지정하세요 (메뉴 > 시리즈와 권...).",
+        "th": "เลือกหนังสือก่อน (เมนู > ซีรีส์และเล่ม...)",
     },
     "Take back the change made first, then choose again.": {
         "ja": "先に行った変更を元に戻してから、選び直してください。",

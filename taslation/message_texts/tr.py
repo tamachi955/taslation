@@ -3,6 +3,8 @@ window; its buttons as the window names them (Durdur).
 
 A noun after a number stays singular in Turkish ("3 sayfa"), so counts need no plural words; no suffix is put on a
 placeholder (its sound decides the suffix), it goes on the noun after it ("{model} modeli", "{url} adresinde").
+
+Machine-translated; no native review.
 """
 
 TEMPLATES: dict[str, str] = {
@@ -28,24 +30,24 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "iptal edildi",
     "pipeline.from_cache": "Önceki çevirilerden gösterilen satır: {bubbles}.",
     "pipeline.translated": "Çevrilen satır: {bubbles} ({seconds:.0f} sn).",
-    "pipeline.to_review": "Bakmaya değer: {review} (Çevirmen rolü, Gözden geçir...).",
+    "pipeline.to_review": "Bakmaya değer: {review} (Düzenle'yi açın, sonra Menü > Gözden geçir...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Görüntüleyicide sayfa bulunamadı. Kitabın açık olduğunu denetleyin veya Alan belirle... (Sayfa menüsü) kullanın.",
-    "ollama.unreachable": "TASlation çeviri programına ulaşamadı. Biraz sonra F5'e basın; kendiliğinden başlar.",
+    "pipeline.no_content": "Görüntüleyicide sayfa bulunamadı. Kitabın açık olduğunu denetleyin veya sol bölmedeki Alan belirle... seçeneğini kullanın.",
+    "ollama.unreachable": "TASlation çeviri programına ulaşamadı. Biraz sonra Çevir'e basın; kendiliğinden başlar.",
     "ollama.model_missing": ("{model} çeviri modeli kurulu değil. Kurmak için install.cmd dosyasını yeniden çalıştırın."),
-    "ollama.http_error": "Çeviri programı reddetti ({status}). Yeniden denemek için F5'e basın; tekrarlarsa bilgisayarınızı yeniden başlatın.",
-    "ollama.timeout": "Çeviri çok uzun sürdü. Yeniden denemek için F5'e basın.",
-    "ollama.connection_failed": "Çeviri programı yanıt vermeyi bıraktı. Yeniden denemek için F5'e basın.",
-    "ollama.bad_json": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için F5'e basın.",
-    "ollama.reported_error": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için F5'e basın.",
-    "ollama.broke_off": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için F5'e basın.",
-    "ollama.bad_answer": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için F5'e basın.",
+    "ollama.http_error": "Çeviri programı reddetti ({status}). Yeniden denemek için Çevir'e basın; tekrarlarsa bilgisayarınızı yeniden başlatın.",
+    "ollama.timeout": "Çeviri çok uzun sürdü. Yeniden denemek için Çevir'e basın.",
+    "ollama.connection_failed": "Çeviri programı yanıt vermeyi bıraktı. Yeniden denemek için Çevir'e basın.",
+    "ollama.bad_json": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için Çevir'e basın.",
+    "ollama.reported_error": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için Çevir'e basın.",
+    "ollama.broke_off": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için Çevir'e basın.",
+    "ollama.bad_answer": "Çeviri programı, TASlation'ın kullanamadığı bir yanıt verdi. Yeniden denemek için Çevir'e basın.",
     "ollama.not_loopback": "Ollama URL'si bu bilgisayarı gösteren (loopback) bir http(s) adresi olmalı; verilen: “{url}”",
     "ollama.slow": "Çeviri programı yavaş yanıt veriyor (hâlâ yükleniyor olabilir). Durdur bu sayfayı iptal eder.",
     "ollama.no_answer": "Çeviri programı {seconds:.0f} sn yanıt vermedi, bu yüzden TASlation yeniden soruyor.",
     "ollama.restarting": "Çeviri programı hâlâ yanıt vermiyor, bu yüzden TASlation onu yeniden başlatıyor...",
-    "ollama.not_answering": ("Bu bilgisayardaki çeviri programı yanıt vermiyor. Onu (veya TASlation'ı) yeniden başlatın, "
-                             "sonra F5'e basın."),
+    "ollama.not_answering": ("Bu bilgisayardaki çeviri programı yanıt vermiyor. Onu (veya TASlation'ı) yeniden "
+                             "başlatın, sonra Çevir'e basın."),
     "ollama.loaded": "Çevirici hazır.",
     "ollama.loading": "Çevirici hazırlanıyor...",
     "ollama.partly_on_gpu": "Çeviricinin yalnızca %{percent} kadarı ekran kartına sığıyor, bu yüzden çeviri yavaş olacak. Ekran kartını kullanan diğer programları kapatın.",

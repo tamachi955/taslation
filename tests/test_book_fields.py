@@ -277,23 +277,22 @@ def test_the_offer_waits_while_the_window_is_at_work_and_names_no_book_offers_no
     assert asked == []
 
 
-def test_the_lines_that_ask_for_the_books_name_point_at_the_series_field_in_every_language():
-    """A change kept nowhere for want of a name says where the name goes: the Series field the toolbar shows (the
-    volume beside it), in every language with that field's own label; no line names the Book field the toolbar no
-    longer has."""
+def test_the_lines_that_ask_for_the_books_name_point_at_series_and_volume_in_the_menu_in_every_language():
+    """A change kept nowhere for want of a name says where the name goes: the Menu's Series and Volume... (its dialog
+    has the Series and Volume fields), in every language with the Menu's and that entry's own labels; no line names
+    the Book field or the Series field of the former window."""
     from taslation.i18n import CATALOGS
     from taslation.ui import book_areas, formats, selection
     from taslation.ui.dialogs import corrections, page_list
 
     lines = {book_areas.NO_BOOK, formats.NO_BOOK, selection.NAME_FIRST, corrections.NO_BOOK,
-             page_list.PageListDialog.NO_BOOK, "Could not keep the translation: give the book a name first (its series "
-             "in the Series field, and its volume beside it if it has one).", "Choose the book first (its series in the "
-             "Series field, and its volume beside it if it has one)."}
-    assert len(lines) == 5 and all("Series field" in line and "volume beside it" in line for line in lines)
+             page_list.PageListDialog.NO_BOOK,
+             "Could not keep the translation: give the book a name first (Menu > Series and Volume...).",
+             "Choose the book first (Menu > Series and Volume...)."}
+    assert len(lines) == 5 and all(line.endswith(" (Menu > Series and Volume...).") for line in lines)
     for code, catalog in CATALOGS.items():
-        assert not [key for key in catalog if "Book field" in key or "Book box" in key], code
+        assert not [key for key in catalog if "Book field" in key or "Book box" in key or "Series field" in key], code
         if code == "en":
             continue
-        series = catalog["Series:"].rstrip(":： ")
         for line in lines:
-            assert series in catalog[line], (code, line)
+            assert catalog["Menu"] in catalog[line] and catalog["Series and Volume..."] in catalog[line], (code, line)

@@ -1,11 +1,12 @@
 """See-through mode's side panes: where they go at the capture area's outer edges (never over the page, nor near it),
-how wide they are, their pictures and the controls' hit boxes - the ask-again button's square among them -, the
-window's words with their keys left out (`taslation.panes`); on the Tk side what they say, what a click does, the
+how wide they are, their pictures and the controls' hit boxes - the ask-again button's square among them -, and
+the shown words, which name no key and no place of the former window; on the Tk side what they say, what a click does, the
 indicators' switch kept in the settings file, the Menu row in place of a way back to TASlation's window, and no hot
 key held (`ui.seethrough`; the window never on the screen: tests/test_see_hidden.py); the patch under the pointer
 left out (`seethrough.hovered`, `capture.seethrough`).
 Synthetic sizes and fake windows only; the pointer is never moved (the window's reading of it is put in its place)."""
 
+import re
 from types import SimpleNamespace
 
 import numpy as np
@@ -364,14 +365,16 @@ def test_the_circular_arrow_is_dim_until_a_page_was_lettered_and_while_the_windo
     assert ui.left_rows(app)[0].square_enabled is True
 
 
-def test_the_right_pane_names_no_key_the_viewer_has(tmp_path):
-    app = fake_app(tmp_path, status_var=Var("Stopped: this page was not translated, and nothing of it was kept. "
-                                            "F5 translates it again."))
-    texts = [r.text for r in ui.right_rows(app)]
-    assert "Stopped: this page was not translated, and nothing of it was kept." in texts
-    assert not any(pn.KEY.search(t) for t in texts)
-    app.status_var = Var("This viewer cannot be read behind the full screen; press F11")
-    assert not any("F11" in r.text for r in ui.right_rows(app))  # (nothing left of it: no row)
+def test_the_right_pane_shows_the_window_s_words_as_they_are(tmp_path):
+    """Nothing is left out of a line the right pane shows: the words name the panes' controls and the Menu's entries,
+    no key (`test_no_shown_word_names_a_key_or_a_place_of_the_former_window`)."""
+    line = "Stopped: this page was not translated, and nothing of it was kept. Translate translates it again."
+    app = fake_app(tmp_path, status_var=Var(line))
+    assert line in [r.text for r in ui.right_rows(app)]
+    app.status_var = Var("Read 4 bubbles - 3 worth a look (turn Edit on, then Menu > Review...).")
+    assert "Read 4 bubbles - 3 worth a look (turn Edit on, then Menu > Review...)." in [
+        r.text for r in ui.right_rows(app)]
+    assert not hasattr(pn, "without_keys") and not hasattr(pn, "pane_words")
 
 
 def test_see_through_mode_holds_no_hot_key(tmp_path, monkeypatch):
@@ -506,58 +509,51 @@ def test_the_pane_settings_entry_is_known_to_the_settings_file():
     assert "see_through_indicators" in config.setting_names()
 
 
-# ------------------------------------------------------------------ words that name no key
-@pytest.mark.parametrize("text, left", [
-    ("This page could not be translated. F5 tries again.", "This page could not be translated."),
-    ("Ready. Turn the pages here with the page keys, or click the page. "
-     "F5: translate this page now · F11: full screen.",
-     "Ready. Turn the pages here with the page keys, or click the page."),
-    ("2 line(s) not translated yet: press F5.", "2 line(s) not translated yet."),
-    ("Read 4 bubbles - 2 line(s) not translated yet: press F5.", "Read 4 bubbles - 2 line(s) not translated yet."),
-    ("The pages are kept under Vol. 2 from now on (F5 keeps the page on show too).",
-     "The pages are kept under Vol. 2 from now on."),
-    ("The translation program refused (500). Press F5 to try again; if it repeats, restart your PC.",
-     "The translation program refused (500)."),
-    ("Nothing to read on this page.", "Nothing to read on this page."),  # (no key: as it is)
-    ("This viewer cannot be read behind the full screen; press F11", ""),
-    ("このページを翻訳できませんでした。F5 でもう一度試します。", "このページを翻訳できませんでした。"),
-    ("未翻訳の行が 2 行あります: F5 を押してください。", "未翻訳の行が 2 行あります。"),
-    ("แปลหน้านี้ไม่ได้ กด F5 เพื่อลองอีกครั้ง", "แปลหน้านี้ไม่ได้"),
-    ("หยุดแล้ว: หน้านี้ไม่ได้แปล และไม่ได้เก็บสิ่งใดของหน้านี้ไว้ F5 จะแปลอีกครั้ง",
-     "หยุดแล้ว: หน้านี้ไม่ได้แปล และไม่ได้เก็บสิ่งใดของหน้านี้ไว้"),
-])
-def test_without_keys_leaves_out_what_a_text_says_of_keys(text, left):
-    assert pn.without_keys(text) == left
+# ------------------------------------------------------------------ the shown words: no key or place that is gone
+# what the former window had and the one mode has not, as the English texts named it
+GONE = ("To list", "Viewer list", "Page menu", "Translator role", "Series field", "toolbar", "tool bar", "menu bar",
+        "menubar", "TASlation's window", "TASlation window", "full screen", '"Translate again"',
+        "Translate again applies", "Translate again taken back", "Translate again made again")
+F_KEY = re.compile(r"(?<![A-Za-z0-9])F(?:1[0-2]|[1-9])(?![0-9])")
+ESC = re.compile(r"(?<![A-Za-z])(?:Esc|Échap)(?![A-Za-z])")
 
 
-def test_no_status_text_of_the_window_names_a_key_in_any_language_once_without_keys(hidden_root):
-    import string
-
+def _shown_texts():
+    """(language, English key, text) of every string the window and its messages can show, English included."""
     from taslation import i18n, messages
-    from taslation.i18n import _
-    from taslation.ui import constants, status_slot
-    from taslation.ui.progress import rendered
+    from taslation.message_texts import LANGUAGES, catalog
 
-    texts = [status_slot.ERROR_KEY, constants.READY, constants.VIEWER_BLACK, constants.FIRST_PAGE, constants.THIS_PAGE,
-             "Something went wrong on this page. Press F5 to try again; if it repeats, restart TASlation.",
-             "Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.",
-             "Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.",
-             "{n} line(s) not translated yet: press F5."]
-    codes = [c for c, t in messages.TEMPLATES.items() if pn.KEY.search(t)]
-    assert len(codes) >= 8  # (the translator's errors: "Press F5 to try again" and the like)
+    keys = set().union(*(set(c) for c in i18n.CATALOGS.values()))
+    for key in keys:
+        yield "en", key, key
+        for language, cat in i18n.CATALOGS.items():
+            if key in cat:
+                yield language, key, cat[key]
+    for code, template in messages.TEMPLATES.items():
+        yield "en", template, template
+        for language in LANGUAGES:
+            text = catalog(language).get(code)
+            if text:
+                yield language, template, text
 
-    def filled(template):
-        return {f.split(".")[0]: "2" for _l, f, _s, _c in string.Formatter().parse(template) if f}
 
-    for language in i18n.UI_LANGUAGES:
-        i18n.set_language(language)
-        assert "F9" not in _("Lettering")
-        shown = [_(t).format(**filled(t)) for t in texts]
-        shown += [rendered(messages.Message(c, filled(messages.TEMPLATES[c]))) for c in codes]
-        for text in shown:
-            left = pn.without_keys(text)
-            assert not pn.KEY.search(left), (language, text, left)
-            assert left, (language, text)  # (each says more than its key)
+def test_no_shown_word_names_a_key_or_a_place_of_the_former_window():
+    """In every language: no F key but the viewer's own reload key ("F5 in a browser": a key of the viewer's), no Esc
+    but where the English names it too (inside the area editor and the dialogs, a key's own name); and no English
+    text names the former window's lists, menus, role or bars (the one mode has the panes and the Menu)."""
+    from taslation.ui import constants
+
+    seen = 0
+    for language, english, text in _shown_texts():
+        seen += 1
+        if english != constants.VIEWER_BLACK:
+            assert not F_KEY.search(text), (language, english[:60], text)
+        if not ESC.search(english):
+            assert not ESC.search(text), (language, english[:60], text)
+        if language == "en":
+            assert not any(gone in text for gone in GONE), text
+    assert seen > 15000  # (every language's catalogs were looked at)
+    assert "(F5 in a browser)" in constants.VIEWER_BLACK  # (the viewer's key stays named)
 
 
 # ------------------------------------------------------------------ the patch under the pointer

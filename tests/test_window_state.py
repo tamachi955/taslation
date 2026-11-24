@@ -317,7 +317,7 @@ def test_the_page_tools_with_no_page_say_what_to_do(monkeypatch):
     for tool in ("toggle_order", "toggle_skip", "retranslate_page", "open_review"):
         w = Tools()
         getattr(w, tool)()
-        assert w.said == ["Translate a page first: press F5."]
+        assert w.said == ["Translate a page first: press Translate."]
 
 
 @pytest.mark.parametrize("tool", ["toggle_order", "toggle_skip", "retranslate_page"])
@@ -325,17 +325,17 @@ def test_a_tool_never_acts_on_a_page_that_is_not_on_show(tool, monkeypatch):
     monkeypatch.setattr(caches, "ask", lambda *a, **k: True)
     w = Tools(SimpleNamespace(original="the last result"), on_show=False)
     getattr(w, tool)()
-    assert w.said == ["Translate this page first: press F5."] and not w.read and w._ordering is None
+    assert w.said == ["Translate this page first: press Translate."] and not w.read and w._ordering is None
 
 
 def test_skip_and_finish_order_under_a_generic_name_say_so():
     w = Tools(SimpleNamespace(original="page", units=[]), kept=False)
     w.toggle_skip()
-    assert w.said == ["Give the book a name first (its series in the Series field, and its volume beside it if it has one)."] and not w.read
+    assert w.said == ["Give the book a name first (Menu > Series and Volume...)."] and not w.read
     w.said.clear()
     w._ordering = ["a region"]
     w.toggle_order()
-    assert w.said == ["Give the book a name first (its series in the Series field, and its volume beside it if it has one)."] and w._ordering is None
+    assert w.said == ["Give the book a name first (Menu > Series and Volume...)."] and w._ordering is None
 
 
 def test_edit_with_nothing_selected_says_so(hidden_root):
@@ -464,6 +464,6 @@ def test_a_page_partly_translated_says_what_is_left(hidden_root):
     page = Image.new("RGB", (40, 40), "white")
     regions = [_region(), _region(status="untranslated"), _region(status="untranslated")]
     result = PageResult(image=page, original=page, regions=regions, fingerprints=["f"], cache_misses=1)
-    assert StatusMixin._summary(result).endswith("2 line(s) not translated yet: press F5.")
+    assert StatusMixin._summary(result).endswith("2 line(s) not translated yet: press Translate.")
     regions[1:] = []
     assert "not translated yet" not in StatusMixin._summary(result)

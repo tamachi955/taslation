@@ -1,5 +1,7 @@
 """Dutch (Nederlands) templates for `taslation.messages` (see `taslation.message_texts`): u, as the window; its
-buttons as the window names them (Stop)."""
+buttons as the window names them (Stop).
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "het antwoord van het model was onbruikbaar",
@@ -26,26 +28,26 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "geannuleerd",
     "pipeline.from_cache": "{bubbles:regel|regels} getoond uit eerdere vertalingen.",
     "pipeline.translated": "{bubbles:regel|regels} vertaald in {seconds:.0f} s.",
-    "pipeline.to_review": "{review:regel is|regels zijn} een blik waard (rol Vertaler, Nakijken...).",
+    "pipeline.to_review": "{review:regel is|regels zijn} een blik waard (zet Bewerken aan, dan Menu > Nakijken...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Geen pagina gevonden in de viewer. Controleer of het boek open is, of gebruik Gebied instellen... (menu Pagina)",
-    "ollama.unreachable": "TASlation kon het vertaalprogramma niet bereiken. Druk zo meteen op F5; het start vanzelf.",
+    "pipeline.no_content": "Geen pagina gevonden in de viewer. Controleer of het boek open is, of gebruik Gebied instellen... in het linkerpaneel.",
+    "ollama.unreachable": "TASlation kon het vertaalprogramma niet bereiken. Druk zo meteen op Vertalen; het start vanzelf.",
     "ollama.model_missing": ("Het vertaalmodel {model} is niet geïnstalleerd. Voer install.cmd opnieuw uit om het te "
                              "installeren."),
-    "ollama.http_error": "Het vertaalprogramma weigerde ({status}). Druk op F5 om het opnieuw te proberen; gebeurt het weer, start uw pc dan opnieuw op.",
-    "ollama.timeout": "De vertaling duurde te lang. Druk op F5 om het opnieuw te proberen.",
-    "ollama.connection_failed": ("Het vertaalprogramma reageert niet meer. Druk op F5 om het opnieuw te proberen."),
-    "ollama.bad_json": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op F5 om het opnieuw te proberen.",
-    "ollama.reported_error": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op F5 om het opnieuw te proberen.",
-    "ollama.broke_off": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op F5 om het opnieuw te proberen.",
-    "ollama.bad_answer": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op F5 om het opnieuw te proberen.",
+    "ollama.http_error": "Het vertaalprogramma weigerde ({status}). Druk op Vertalen om het opnieuw te proberen; gebeurt het weer, start uw pc dan opnieuw op.",
+    "ollama.timeout": "De vertaling duurde te lang. Druk op Vertalen om het opnieuw te proberen.",
+    "ollama.connection_failed": ("Het vertaalprogramma reageert niet meer. Druk op Vertalen om het opnieuw te proberen."),
+    "ollama.bad_json": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op Vertalen om het opnieuw te proberen.",
+    "ollama.reported_error": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op Vertalen om het opnieuw te proberen.",
+    "ollama.broke_off": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op Vertalen om het opnieuw te proberen.",
+    "ollama.bad_answer": "Het vertaalprogramma gaf een antwoord waar TASlation niets mee kon. Druk op Vertalen om het opnieuw te proberen.",
     "ollama.not_loopback": ("de URL van Ollama moet een loopback-adres (deze computer) met http(s) zijn, gekregen: "
                             "'{url}'"),
     "ollama.slow": "Het vertaalprogramma reageert traag (het is misschien nog aan het laden). Stop annuleert deze pagina.",
     "ollama.no_answer": "Het vertaalprogramma heeft {seconds:.0f} s niet gereageerd, dus TASlation vraagt het opnieuw.",
     "ollama.restarting": "Het vertaalprogramma reageert nog steeds niet, dus TASlation start het opnieuw...",
-    "ollama.not_answering": ("Het vertaalprogramma op deze computer reageert niet. Start het opnieuw (of start TASlation "
-                             "opnieuw) en druk daarna op F5."),
+    "ollama.not_answering": ("Het vertaalprogramma op deze computer reageert niet. Start het opnieuw (of start "
+                             "TASlation opnieuw) en druk daarna op Vertalen."),
     "ollama.loaded": "Vertaler klaar.",
     "ollama.loading": "Vertaler wordt klaargezet...",
     "ollama.partly_on_gpu": "Slechts {percent}% van de vertaler past op de videokaart, dus vertalen wordt traag. Sluit andere programma's die de videokaart gebruiken.",

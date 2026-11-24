@@ -1,6 +1,8 @@
 """Simplified Chinese (简体中文) templates for `taslation.messages` (see `taslation.message_texts`): 您, as the window;
 its buttons as the window names them (“停止”). Counts take a measure word with spaces around
-the number (“{bubbles} 个气泡”), as in the window."""
+the number (“{bubbles} 个气泡”), as in the window.
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "无法使用模型的回复",
@@ -25,23 +27,23 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "已取消",
     "pipeline.from_cache": "已显示以前翻译的 {bubbles} 行。",
     "pipeline.translated": "已翻译 {bubbles} 行，用时 {seconds:.0f} 秒。",
-    "pipeline.to_review": "有 {review} 处值得看一下（译者角色，检查...）。",
+    "pipeline.to_review": "有 {review} 处值得看一下（打开“编辑”，再用“菜单 > 检查...”）。",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "在查看器中找不到页面。请确认书已打开，或使用“设置区域...”（页面菜单）。",
-    "ollama.unreachable": "TASlation 无法连接翻译程序。请稍后按 F5；它会自动启动。",
+    "pipeline.no_content": "在查看器中找不到页面。请确认书已打开，或使用左侧窗格中的“设置区域...”。",
+    "ollama.unreachable": "TASlation 无法连接翻译程序。请稍后按“翻译”；它会自动启动。",
     "ollama.model_missing": "未安装翻译模型 {model}。请再次运行 install.cmd 进行安装。",
-    "ollama.http_error": "翻译程序拒绝了请求（{status}）。请按 F5 重试；如果反复出现，请重启电脑。",
-    "ollama.timeout": "翻译用时过长。请按 F5 重试。",
-    "ollama.connection_failed": "翻译程序不再响应。请按 F5 重试。",
-    "ollama.bad_json": "翻译程序给出的回答 TASlation 无法使用。请按 F5 重试。",
-    "ollama.reported_error": "翻译程序给出的回答 TASlation 无法使用。请按 F5 重试。",
-    "ollama.broke_off": "翻译程序给出的回答 TASlation 无法使用。请按 F5 重试。",
-    "ollama.bad_answer": "翻译程序给出的回答 TASlation 无法使用。请按 F5 重试。",
+    "ollama.http_error": "翻译程序拒绝了请求（{status}）。请按“翻译”重试；如果反复出现，请重启电脑。",
+    "ollama.timeout": "翻译用时过长。请按“翻译”重试。",
+    "ollama.connection_failed": "翻译程序不再响应。请按“翻译”重试。",
+    "ollama.bad_json": "翻译程序给出的回答 TASlation 无法使用。请按“翻译”重试。",
+    "ollama.reported_error": "翻译程序给出的回答 TASlation 无法使用。请按“翻译”重试。",
+    "ollama.broke_off": "翻译程序给出的回答 TASlation 无法使用。请按“翻译”重试。",
+    "ollama.bad_answer": "翻译程序给出的回答 TASlation 无法使用。请按“翻译”重试。",
     "ollama.not_loopback": "Ollama 的 URL 必须是本机回环（loopback）的 http(s) 地址，收到的是：“{url}”",
     "ollama.slow": "翻译程序响应较慢（可能仍在加载）。“停止”可取消此页。",
     "ollama.no_answer": "翻译程序 {seconds:.0f} 秒没有响应，TASlation 正在重新询问。",
     "ollama.restarting": "翻译程序仍无响应，TASlation 正在重新启动它...",
-    "ollama.not_answering": "这台电脑上的翻译程序没有响应。请重新启动它（或重新启动 TASlation），然后按 F5。",
+    "ollama.not_answering": "这台电脑上的翻译程序没有响应。请重新启动它（或重新启动 TASlation），然后按“翻译”。",
     "ollama.loaded": "翻译已就绪。",
     "ollama.loading": "正在准备翻译...",
     "ollama.partly_on_gpu": "翻译所用的部分只有 {percent}% 能放入显卡，因此翻译会很慢。请关闭其他使用显卡的程序。",

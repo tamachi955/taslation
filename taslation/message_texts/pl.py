@@ -3,6 +3,8 @@ window; its buttons as the window names them (Stop).
 
 Polish has several plural forms: a count is written as a label ("dymków: 5", "stron: 21") or with a word that does
 not change ("{minutes} min"), so that it reads right for every number.
+
+Machine-translated; no native review.
 """
 
 TEMPLATES: dict[str, str] = {
@@ -29,26 +31,26 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "anulowano",
     "pipeline.from_cache": "Wiersze pokazane z wcześniejszych tłumaczeń: {bubbles}.",
     "pipeline.translated": "Przetłumaczone wiersze: {bubbles} ({seconds:.0f} s).",
-    "pipeline.to_review": "Warto spojrzeć: {review} (rola Tłumacz, Przegląd...).",
+    "pipeline.to_review": "Warto spojrzeć: {review} (włącz Edycja, potem Menu > Przegląd...).",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "Nie znaleziono strony w czytniku. Sprawdź, czy książka jest otwarta, albo użyj Ustaw obszar... (menu Strona)",
-    "ollama.unreachable": "TASlation nie może połączyć się z programem tłumaczącym. Naciśnij F5 za chwilę; uruchamia się sam.",
+    "pipeline.no_content": "Nie znaleziono strony w czytniku. Sprawdź, czy książka jest otwarta, albo użyj Ustaw obszar... w lewym panelu.",
+    "ollama.unreachable": "TASlation nie może połączyć się z programem tłumaczącym. Naciśnij Przetłumacz za chwilę; uruchamia się sam.",
     "ollama.model_missing": "Model tłumaczenia {model} nie jest zainstalowany. Uruchom ponownie install.cmd, aby go "
                              "zainstalować.",
-    "ollama.http_error": "Program tłumaczący odmówił ({status}). Naciśnij F5, aby spróbować ponownie; jeśli to się powtórzy, uruchom komputer ponownie.",
-    "ollama.timeout": "Tłumaczenie trwało zbyt długo. Naciśnij F5, aby spróbować ponownie.",
-    "ollama.connection_failed": ("Program tłumaczący przestał odpowiadać. Naciśnij F5, aby spróbować ponownie."),
-    "ollama.bad_json": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij F5, aby spróbować ponownie.",
-    "ollama.reported_error": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij F5, aby spróbować ponownie.",
-    "ollama.broke_off": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij F5, aby spróbować ponownie.",
-    "ollama.bad_answer": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij F5, aby spróbować ponownie.",
+    "ollama.http_error": "Program tłumaczący odmówił ({status}). Naciśnij Przetłumacz, aby spróbować ponownie; jeśli to się powtórzy, uruchom komputer ponownie.",
+    "ollama.timeout": "Tłumaczenie trwało zbyt długo. Naciśnij Przetłumacz, aby spróbować ponownie.",
+    "ollama.connection_failed": ("Program tłumaczący przestał odpowiadać. Naciśnij Przetłumacz, aby spróbować ponownie."),
+    "ollama.bad_json": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij Przetłumacz, aby spróbować ponownie.",
+    "ollama.reported_error": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij Przetłumacz, aby spróbować ponownie.",
+    "ollama.broke_off": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij Przetłumacz, aby spróbować ponownie.",
+    "ollama.bad_answer": "Program tłumaczący dał odpowiedź, której TASlation nie mógł użyć. Naciśnij Przetłumacz, aby spróbować ponownie.",
     "ollama.not_loopback": ("adres URL serwera Ollama musi być adresem http(s) pętli zwrotnej (ten komputer); podano: "
                             "„{url}”"),
     "ollama.slow": "Program tłumaczący wolno odpowiada (może jeszcze się wczytuje). Stop anuluje tę stronę.",
     "ollama.no_answer": "Program tłumaczący nie odpowiadał przez {seconds:.0f} s, więc TASlation pyta go ponownie.",
     "ollama.restarting": "Program tłumaczący nadal nie odpowiada, więc TASlation uruchamia go ponownie...",
-    "ollama.not_answering": ("Program tłumaczący na tym komputerze nie odpowiada. Uruchom go ponownie (lub uruchom ponownie "
-                             "TASlation), a potem naciśnij F5."),
+    "ollama.not_answering": ("Program tłumaczący na tym komputerze nie odpowiada. Uruchom go ponownie (lub uruchom "
+                             "ponownie TASlation), a potem naciśnij Przetłumacz."),
     "ollama.loaded": "Tłumacz gotowy.",
     "ollama.loading": "Przygotowywanie tłumacza...",
     "ollama.partly_on_gpu": "Tylko {percent}% tłumacza mieści się na karcie graficznej, więc tłumaczenie będzie wolne. Zamknij inne programy korzystające z karty graficznej.",

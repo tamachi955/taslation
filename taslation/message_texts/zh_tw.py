@@ -1,6 +1,8 @@
 """Traditional Chinese (繁體中文, "zh-tw") templates for `taslation.messages` (see `taslation.message_texts`): 您, as
 the window; its buttons as the window names them (「停止」). Counts take a measure word with
-spaces around the number (「{bubbles} 個氣泡」), as in the window."""
+spaces around the number (「{bubbles} 個氣泡」), as in the window.
+
+Machine-translated; no native review."""
 
 TEMPLATES: dict[str, str] = {
     "batch.reply_unusable": "無法使用模型的回覆",
@@ -25,23 +27,23 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "已取消",
     "pipeline.from_cache": "已顯示先前翻譯的 {bubbles} 行。",
     "pipeline.translated": "已翻譯 {bubbles} 行，用時 {seconds:.0f} 秒。",
-    "pipeline.to_review": "有 {review} 處值得看一下（譯者角色，檢查...）。",
+    "pipeline.to_review": "有 {review} 處值得看一下（開啟「編輯」，再用「選單 > 檢查...」）。",
     "pipeline.page_error": "{error}",
-    "pipeline.no_content": "在檢視器中找不到頁面。請確認書已開啟，或使用「設定區域...」（頁面選單）。",
-    "ollama.unreachable": "TASlation 無法連線翻譯程式。請稍後按 F5；它會自動啟動。",
+    "pipeline.no_content": "在檢視器中找不到頁面。請確認書已開啟，或使用左側窗格中的「設定區域...」。",
+    "ollama.unreachable": "TASlation 無法連線翻譯程式。請稍後按「翻譯」；它會自動啟動。",
     "ollama.model_missing": "尚未安裝翻譯模型 {model}。請再次執行 install.cmd 進行安裝。",
-    "ollama.http_error": "翻譯程式拒絕了要求（{status}）。請按 F5 重試；如果反覆出現，請重新啟動電腦。",
-    "ollama.timeout": "翻譯用時過長。請按 F5 重試。",
-    "ollama.connection_failed": "翻譯程式不再回應。請按 F5 重試。",
-    "ollama.bad_json": "翻譯程式給出的回答 TASlation 無法使用。請按 F5 重試。",
-    "ollama.reported_error": "翻譯程式給出的回答 TASlation 無法使用。請按 F5 重試。",
-    "ollama.broke_off": "翻譯程式給出的回答 TASlation 無法使用。請按 F5 重試。",
-    "ollama.bad_answer": "翻譯程式給出的回答 TASlation 無法使用。請按 F5 重試。",
+    "ollama.http_error": "翻譯程式拒絕了要求（{status}）。請按「翻譯」重試；如果反覆出現，請重新啟動電腦。",
+    "ollama.timeout": "翻譯用時過長。請按「翻譯」重試。",
+    "ollama.connection_failed": "翻譯程式不再回應。請按「翻譯」重試。",
+    "ollama.bad_json": "翻譯程式給出的回答 TASlation 無法使用。請按「翻譯」重試。",
+    "ollama.reported_error": "翻譯程式給出的回答 TASlation 無法使用。請按「翻譯」重試。",
+    "ollama.broke_off": "翻譯程式給出的回答 TASlation 無法使用。請按「翻譯」重試。",
+    "ollama.bad_answer": "翻譯程式給出的回答 TASlation 無法使用。請按「翻譯」重試。",
     "ollama.not_loopback": "Ollama 的 URL 必須是本機回送（loopback）的 http(s) 位址，收到的是：「{url}」",
     "ollama.slow": "翻譯程式回應較慢（可能仍在載入）。「停止」可取消此頁。",
     "ollama.no_answer": "翻譯程式 {seconds:.0f} 秒沒有回應，TASlation 正在重新詢問。",
     "ollama.restarting": "翻譯程式仍無回應，TASlation 正在重新啟動它...",
-    "ollama.not_answering": "這台電腦上的翻譯程式沒有回應。請重新啟動它（或重新啟動 TASlation），然後按 F5。",
+    "ollama.not_answering": "這台電腦上的翻譯程式沒有回應。請重新啟動它（或重新啟動 TASlation），然後按「翻譯」。",
     "ollama.loaded": "翻譯已就緒。",
     "ollama.loading": "正在準備翻譯...",
     "ollama.partly_on_gpu": "翻譯所用的部分只有 {percent}% 能放入顯示卡，因此翻譯會很慢。請關閉其他使用顯示卡的程式。",

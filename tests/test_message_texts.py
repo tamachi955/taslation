@@ -19,11 +19,15 @@ NO_AGREEMENT = {"ja", "zh", "zh-tw", "ko", "th", "vi", "id", "tr", "ru", "pl"}
 # never translated: the product, Ollama, commands, file and protocol names, key names
 KEEP = ("TASlation", "Ollama", "> Ollama", "install.cmd", "ollama pull {model}", "`{command}`", "manga-ocr", "OCR", "HTTP", "JSON",
         "http(s)", "Windows", "hwnd", "Left", "Right", "PageDown", "Space")
-# code -> the window's buttons it names, by their English keys in the window catalogs (taslation.i18n)
+# code -> the left pane's controls it names, by their English keys in the window catalogs (taslation.i18n)
 BUTTONS = {
-    "ollama.slow": ("Stop (Esc)",),
+    "ollama.slow": ("Stop",),
+    **{code: ("Translate",) for code in ("ollama.unreachable", "ollama.http_error", "ollama.timeout",
+                                         "ollama.connection_failed", "ollama.bad_json", "ollama.reported_error",
+                                         "ollama.broke_off", "ollama.bad_answer", "ollama.not_answering")},
+    "pipeline.no_content": ("Set area...",),
+    "pipeline.to_review": ("Edit", "Menu", "Review..."),
 }
-KEY_HINT = re.compile(r"\s*[(（](?:Esc|Échap|F\d+)[)）]\s*$")  # "Stop (Esc)" is the Stop button
 
 MESSAGE_PARAMS = {"error"}
 TEXT_PARAMS = {"title", "key", "call", "detail", "translator", "url", "model", "path", "missing", "command", "wanted",
@@ -182,8 +186,8 @@ def test_messages_name_the_buttons_as_the_window_does():
         cat = catalog(lang)
         for code, keys in BUTTONS.items():
             for key in keys:
-                label = KEY_HINT.sub("", window.get(key) or key)
-                assert label in cat[code], f"{lang} {code}: the window calls the button {label!r}: {cat[code]!r}"
+                label = window.get(key) or key
+                assert label in cat[code], f"{lang} {code}: the window calls the control {label!r}: {cat[code]!r}"
 
 
 def test_every_window_language_has_a_catalog():
@@ -221,7 +225,7 @@ def test_japanese_reads_as_the_review_asked():
     page = dict(cached=1, new=0, review=0, error="")
     assert render(Message("pipeline.from_cache", bubbles=6, seconds=0.1, **page), ja) == "6 行を以前の翻訳から表示しました。"
     assert render(Message("pipeline.translated", bubbles=6, seconds=2.1, **{**page, "review": 2}), ja) == (
-        "6 行を翻訳しました（2 秒）。" + JOINER + "確認するとよいものが 2 件あります（翻訳者の役割、「レビュー...」）。")
+        "6 行を翻訳しました（2 秒）。" + JOINER + "確認するとよいものが 2 件あります（「編集」をオンにして「メニュー」>「レビュー...」）。")
     assert ja["translator.model_missing"].startswith("この言語の翻訳モデル")
 
 
