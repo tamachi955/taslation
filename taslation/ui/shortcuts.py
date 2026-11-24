@@ -1,53 +1,32 @@
-"""The window's keys in one table (`ACTIONS`), which the bindings (`bind_keys`), the menus' and the toolbar's key
-names (`Keymap.shown`) and Help > How to use's Keys (`help_lines`) all read, with the reader's own keys over it
-(`Keymap`: Tools > Settings... > Shortcuts, kept in ``<state dir>/shortcuts.json``: only the keys that differ from the
-table's). `current` is the keymap in force, for the parts that have no window at hand (`set_current` makes it so).
+"""The keys of TASlation's own dialogs in one table (`ACTIONS`): the region editor's Previous and Next and its Copy
+format and Paste format (`dialogs.review.EditBubbleDialog` binds them, `bind_on`; its buttons name them, `with_keys`).
+Every other key goes to the viewer: TASlation binds none over it. A reader's own keys for these, kept in
+``<state dir>/shortcuts.json`` by an earlier version (only the keys that differ from the table's), still apply
+(`Keymap.load`); the keys of actions this version no longer has are left out of it. `current` is the keymap in force,
+for the parts that have no window at hand (`set_current` makes it so).
 
 A key is written as Tk names it, the modifiers first in the order Control, Alt, Shift: ``F5``, ``Control-z``,
-``Alt-Shift-F2``, ``t``. A letter is lowercase; Shift belongs to a letter only with Ctrl or Alt (a plain letter is
-bound in both cases, as T always was), and Enter (``Return``) is bound with the keypad's Enter too (`normal`,
-`sequences`). `key_of_event` makes one from a key press, `key_text` names it as the keyboard does, in the window's
+``Alt-Shift-F2``. A letter is lowercase; Shift belongs to a letter only with Ctrl or Alt, and Enter (``Return``) is
+bound with the keypad's Enter too (`normal`, `sequences`). `key_text` names a key as the keyboard does, in the window's
 language ("Ctrl+Z", "Strg+Z").
 
-Where a key works (`Action.scope`): a "window" key anywhere in the window (bound on it), so it has Ctrl or Alt or is
-an F key, else it would be taken from the boxes one types in; a "page" key while the page has the keys (bound on it;
-plain keys too); an "editor" key in the region editor (`dialogs.review.EditBubbleDialog` binds it, `bind_on`), with
-Ctrl or Alt or an F key as in the window. Copy format and Paste format work on the page and in the editor alike
-(`Action.editor`). Translator mode's tools (`Action.translator`) do nothing in the Reader role, where their buttons are
-not there. Never a key of another action that works in the same place (`meet`), a key passed on to the viewer
-(`constants.FORWARDED_KEYS`, with any modifier) for the window or the page, Esc (`FIXED`: it lets go of the chosen
-box, leaves the full screen and closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), nor in the window or the
-editor Ctrl+A, C, V or X (the boxes' editing): `Keymap.problem`. The table's own keys of an action pass those
-rules for it: Tab and Shift+Tab going through the regions and Alt with an arrow nudging them hold the keys on the page
-themselves ("break"), and Ctrl+C and Ctrl+V copy and paste a region on the page, which has no text to edit.
-
-The viewer's page keys are Page > Page keys...'s (`dialogs.pagekeys`): shown read-only (`FIXED`), as are translator
-mode's mouse gestures (`FIXED_GESTURES`: a click and a drag, Shift while rotating, a drag on empty space, Shift+click,
-a Shift+drag band, and what acts on several selected). Over the full-screen viewer, F5, F11 and Esc are hot keys of
-their own (`overbook.OVER_HOTKEYS`) and keep those keys; the keys of a bubble's Japanese and translation and the
-keys that go from bubble to bubble (`bubble_text.TEXT_ACTIONS`) are hot keys there too, as this keymap has them,
-while the pointer is on the page or a bubble's panel is pinned."""
+A key of the editor has Ctrl or Alt or is an F key (a plain key would be taken from its text box), and is never Esc
+(it closes the dialogs), Tab, F10 or Alt+F4 (Windows' own), Ctrl+A, C, V or X (the boxes' editing), nor the key of
+another action: `Keymap.problem`."""
 
 from __future__ import annotations
 
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from ..atomic import write_atomic
 from ..i18n import _
-from .constants import FORWARDED_KEYS, KEY_ARROWS
+from .constants import KEY_ARROWS
 
 SHORTCUTS_FILE = "shortcuts.json"  # in the state folder
-SCOPES = ("window", "page", "editor")
 MODIFIERS = ("Control", "Alt", "Shift")  # in this order in a key
-SHIFT_MASK, CONTROL_MASK = 0x1, 0x4
-ALT_MASK = 0x20000 if sys.platform == "win32" else 0x8  # (on Windows, Tk's Mod1 is Num Lock)
-MODIFIER_KEYSYMS = frozenset({"Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R", "Caps_Lock",
-                              "Num_Lock", "Scroll_Lock", "Win_L", "Win_R", "Meta_L", "Meta_R", "Super_L", "Super_R",
-                              "App", "ISO_Level3_Shift"})
 WINDOWS_KEYS = frozenset({"Tab", "ISO_Left_Tab", "F10"})  # Windows' own (with Alt+F4)
 EDITING_LETTERS = frozenset("acvx")  # Ctrl with them edits the text of a box
 ALIASES = {"KP_Enter": "Return"}
@@ -55,82 +34,21 @@ ALIASES = {"KP_Enter": "Return"}
 
 @dataclass(frozen=True)
 class Action:
-    """One thing the window does on a key: its *name* (in the keymap's file), *label* (English, a key of the window's
-    catalogs), its *keys* at first, the *scope* it works in, whether it is translator mode's (*translator*) and whether
-    the region editor does it too, on the same keys (*editor*)."""
+    """One thing a dialog does on a key: its *name* (in the keymap's file), *label* (English, a key of the window's
+    catalogs) and its *keys* at first."""
 
     name: str
     label: str
     keys: tuple[str, ...] = ()
-    scope: str = "window"
-    translator: bool = False
-    editor: bool = False
 
 
 ACTIONS: tuple[Action, ...] = (
-    Action("translate_now", "Translate the page on show", ("F5",)),
-    Action("reading_mode", "Full screen", ("F11",)),  # (its name kept: shortcuts.json)
-    Action("undo", "Undo", ("Control-z",)),
-    Action("redo", "Redo", ("Control-y",)),
-    Action("show_original", "Show original"),
-    Action("hover_shows", "Switch between the translation and the original on the page"),
-    Action("hover_reveal", "Switch between a panel and the bubble itself under the pointer"),
-    Action("show_japanese", "Show the Japanese of the bubble under the pointer, to select and copy", ("F2",)),
-    Action("copy_japanese", "Copy the Japanese of the bubble under the pointer", ("Shift-F2",)),
-    Action("copy_translation", "Copy the translation of the bubble under the pointer", ("Control-F2",)),
-    Action("next_bubble", "Show the Japanese of the next bubble, to select and copy", ("F3",)),
-    Action("previous_bubble", "Show the Japanese of the previous bubble, to select and copy", ("Shift-F3",)),
-    Action("always_on_top", "Always on top"),
-    Action("over_viewer", "Over the full-screen viewer"),
-    Action("order_numbers", "Reading-order numbers"),
-    Action("set_area", "Set area..."),
-    Action("page_keys", "Page keys..."),
-    Action("saved_translations", "Saved translations..."),
-    Action("settings", "Settings..."),
-    Action("how_to_use", "How to use...", ("F1",)),
-    Action("keys_help", "Keys...", ("Shift-F1",)),
-    Action("edit_box", "Edit the chosen box", ("Return",), "page"),
-    Action("remove_box", "Remove the chosen box", ("Delete",), "page"),
-    Action("text_direction", "Text direction", ("t",), "page"),
-    Action("next_region", "Select the next region", ("Tab",), "page", True),
-    Action("previous_region", "Select the previous region", ("Shift-Tab",), "page", True),
-    Action("nudge_left", "Move the selected regions left by 1 pixel (with Shift, by 10)", ("Alt-Left",), "page", True),
-    Action("nudge_right", "Move the selected regions right by 1 pixel (with Shift, by 10)", ("Alt-Right",), "page",
-           True),
-    Action("nudge_up", "Move the selected regions up by 1 pixel (with Shift, by 10)", ("Alt-Up",), "page", True),
-    Action("nudge_down", "Move the selected regions down by 1 pixel (with Shift, by 10)", ("Alt-Down",), "page", True),
-    Action("copy_format", "Copy format", ("Control-Shift-c",), "page", True, editor=True),
-    Action("paste_format", "Paste format", ("Control-Shift-v",), "page", True, editor=True),
-    Action("copy_region", "Copy region", ("Control-c",), "page", True),
-    Action("paste_region", "Paste region", ("Control-v",), "page", True),
-    Action("reading_order", "Reading order", (), "page", True),
-    Action("skip_page", "Skip page", (), "page", True),
-    Action("translate_again", "Translate again", (), "page", True),
-    Action("book_settings", "Book settings...", (), "page", True),
-    Action("series_sheet", "Series sheet...", (), "page", True),
-    Action("review", "Review...", (), "page", True),
-    Action("find_replace", "Find and replace...", (), "page", True),
-    Action("ignore_area", "Ignore this area on all pages of this book", (), "page", True),
-    Action("paste_format_on_kind", "Paste format on every region of this kind...", (), "page", True),
-    Action("set_kind", "Set kind...", (), "page", True),
-    Action("set_text_size", "Set text size...", (), "page", True),
-    Action("place_in_order", "Place in reading order...", (), "page", True),
-    Action("editor_previous", "Region editor: save and go to the previous region", ("Alt-Up",), "editor"),
-    Action("editor_next", "Region editor: save and go to the next region", ("Alt-Down",), "editor"),
+    Action("copy_format", "Copy format", ("Control-Shift-c",)),
+    Action("paste_format", "Paste format", ("Control-Shift-v",)),
+    Action("editor_previous", "Region editor: save and go to the previous region", ("Alt-Up",)),
+    Action("editor_next", "Region editor: save and go to the next region", ("Alt-Down",)),
 )
 BY_NAME = {action.name: action for action in ACTIONS}
-FIXED_ESCAPE = "Let go of the chosen box, or leave full screen"
-FIXED_PAGE_KEYS = "Passed on to the viewer, which turns its pages with the keys of Page > Page keys..."
-# translator mode's mouse gestures, read-only like Esc: (what it does, the gesture), keys of the window's catalogs
-FIXED_GESTURES = (
-    ("Select a region and move it; its handles resize it, its round handle rotates it.", "Click, drag"),
-    ("Rotate in steps of 15°.", "Shift while rotating"),
-    ("Add a region.", "Drag on empty space"),
-    ("Add a region to the selection, or take it out of it.", "Shift+click"),
-    ("Add every region inside the rectangle you draw to the selection.", "Shift+drag"),
-    ("Removing, the text direction, moving (with the keys or a drag) and pasting a format act on all of them, as one "
-     "change.", "Several selected"),
-)
 
 
 def split(key: str) -> tuple[tuple[str, ...], str]:
@@ -175,20 +93,6 @@ def sequences(key: str) -> list[str]:
     return out
 
 
-def key_of_event(event: Any) -> str | None:
-    """The key a key press stands for, None for a modifier pressed alone."""
-    keysym = str(getattr(event, "keysym", "") or "")
-    if not keysym or keysym in MODIFIER_KEYSYMS or keysym == "??":
-        return None
-    try:
-        state = int(getattr(event, "state", 0) or 0)
-    except (TypeError, ValueError):
-        state = 0
-    mods = [name for name, mask in (("Control", CONTROL_MASK), ("Alt", ALT_MASK), ("Shift", SHIFT_MASK))
-            if state & mask]
-    return normal("-".join((*mods, keysym)))
-
-
 def key_names() -> dict[str, str]:
     """The names of the keys that have one, in the window's language."""
     return {"Control": _("Ctrl"), "Alt": _("Alt"), "Shift": _("Shift"), "Return": _("Enter"), "Escape": _("Esc"),
@@ -200,7 +104,7 @@ def key_names() -> dict[str, str]:
 
 
 def key_text(key: str) -> str:
-    """*key* as the keyboard names it, in the window's language: "Ctrl+Shift+Z", "F5", "T", "Enter"."""
+    """*key* as the keyboard names it, in the window's language: "Ctrl+Shift+Z", "F5", "Alt+↑", "Enter"."""
     mods, base = split(normal(key))
     names = key_names()
     shown = names.get(base, base.upper() if len(base) == 1 else base)
@@ -241,40 +145,33 @@ class Keymap:
         return tuple(normal(key) for key in BY_NAME[name].keys)
 
     def shown(self, name: str) -> str:
-        """The keys of the action *name* as the menus and buttons name them ("" for none)."""
+        """The keys of the action *name* as the buttons name them ("" for none)."""
         return keys_text(self.of(name))
 
-    def owner(self, key: str, near: str | None = None) -> str | None:
-        """The action *key* is the key of, if any; with *near* (an action's name) only among the actions that work
-        where that one does (`meet`), itself among them."""
+    def owner(self, key: str) -> str | None:
+        """The action *key* is the key of, if any."""
         key = normal(key)
-        return next((action.name for action in ACTIONS if key in self.of(action.name)
-                     and (near is None or meet(BY_NAME[near], action))), None)
+        return next((action.name for action in ACTIONS if key in self.of(action.name)), None)
 
     def problem(self, name: str, key: str) -> str | None:
-        """Why *key* cannot be the key of the action *name* (in the window's language), None when it can. A key the
-        table gives the action itself is refused only while another action has it."""
+        """Why *key* cannot be the key of the action *name* (in English, for the log: no dialog sets keys any more),
+        None when it can. A key the table gives the action itself is refused only while another action has it."""
         action = BY_NAME[name]
         key = normal(key)
         mods, base = split(key)
-        shown = key_text(key)
         own = key in {normal(k) for k in action.keys}
-        if base in FORWARDED_KEYS and action.scope != "editor" and not own:
-            return _("{key} turns the viewer's pages (Page > Page keys...).").format(key=shown)
         if base == "Escape":
-            return _("Esc is fixed: it lets go of the chosen box, leaves full screen and closes the dialogs.")
+            return "Esc closes the dialogs"
         if (base in WINDOWS_KEYS or (base == "F4" and "Alt" in mods)) and not own:
-            return _("{key} is a key of Windows.").format(key=shown)
-        if (action.scope in ("window", "editor") or action.editor) and not own:  # (the editor has boxes to type in)
+            return "a key of Windows"
+        if not own:  # (the editor has boxes to type in)
             if not ("Control" in mods or "Alt" in mods) and not _is_function_key(base):
-                if action.scope == "window":
-                    return _("A key for the whole window needs Ctrl or Alt, or is an F key: a plain key would be taken from the boxes you type in.")
-                return _("A key that works in the region editor needs Ctrl or Alt, or is an F key: a plain key would be taken from its text box.")
+                return "a plain key would be taken from the editor's text box"
             if mods == ("Control",) and base in EDITING_LETTERS:
-                return _("{key} is for editing the text in a box.").format(key=shown)
-        other = self.owner(key, near=name)
+                return "a key for editing the text in a box"
+        other = self.owner(key)
         if other is not None and other != name:
-            return _("{key} is already the key of {action}.").format(key=shown, action=_(BY_NAME[other].label))
+            return f"already the key of {other}"
         return None
 
     def with_key(self, name: str, key: str | None) -> "Keymap":
@@ -325,19 +222,6 @@ def _is_function_key(base: str) -> bool:
     return base[:1] == "F" and base[1:].isdigit() and 1 <= int(base[1:]) <= 24
 
 
-def places(action: Action) -> set[str]:
-    """Where *action*'s keys work: its scope, the editor too for Copy format and Paste format, and for a window key
-    the page as well (the window's bindings run for the page)."""
-    out = {action.scope, *(("editor",) if action.editor else ())}
-    return out | {"page"} if "window" in out else out
-
-
-def meet(one: Action, other: Action) -> bool:
-    """Whether two actions work in a place in common, so that they cannot share a key (Alt+Down nudges the regions on
-    the page and goes to the next region in the editor)."""
-    return bool(places(one) & places(other))
-
-
 _CURRENT: list[Keymap] = [Keymap()]
 
 
@@ -351,35 +235,10 @@ def set_current(keymap: Keymap) -> None:
 
 
 # ------------------------------------------------------------------ the bindings and the words
-def bind_keys(widgets: Mapping[str, Any], keymap: Keymap, handlers: Mapping[str, Callable[[Any], Any]],
-              bound: Iterable[tuple[str, str]] = ()) -> list[tuple[str, str]]:
-    """The keys of *keymap* bound on *widgets* (scope -> widget) to *handlers* (action name -> what a key press
-    does; an action without one is left unbound). What was bound before goes first: *bound* (as this returned it
-    last time) and the table's own keys (as the parts may have bound them themselves). The (scope, sequence) bound."""
-    unbind = set(bound)
-    for action in ACTIONS:
-        unbind.update((action.scope, seq) for key in action.keys for seq in sequences(key))
-    for scope, seq in sorted(unbind):
-        widget = widgets.get(scope)
-        if widget is not None:
-            widget.unbind(seq)
-    out: list[tuple[str, str]] = []
-    for action in ACTIONS:
-        handler = handlers.get(action.name)
-        widget = widgets.get(action.scope)
-        if handler is None or widget is None:
-            continue
-        for key in keymap.of(action.name):
-            for seq in sequences(key):
-                widget.bind(seq, handler)
-                out.append((action.scope, seq))
-    return out
-
-
 def bind_on(widgets: Iterable[Any], keymap: Keymap, handlers: Mapping[str, Callable[[Any], Any]]) -> None:
-    """The keys of the actions in *handlers* (action name -> what a key press does) bound on each of *widgets*,
-    whatever their scope: a dialog made anew each time binds its own keys so (the region editor's Previous and Next,
-    and Copy format and Paste format on the page's keys)."""
+    """The keys of the actions in *handlers* (action name -> what a key press does) bound on each of *widgets*: a
+    dialog made anew each time binds its own keys so (the region editor's Previous and Next, and Copy format and Paste
+    format)."""
     for name, handler in handlers.items():
         for key in keymap.of(name):
             for seq in sequences(key):
@@ -389,25 +248,6 @@ def bind_on(widgets: Iterable[Any], keymap: Keymap, handlers: Mapping[str, Calla
 
 def with_keys(label: str, name: str, keymap: Keymap | None = None) -> str:
     """*label* (English, a key of the window's catalogs) in the window's language with the keys of the action *name*
-    in brackets, as a button names them ("Undo (Ctrl+Z)"); the label alone for an action with no key."""
+    in brackets, as a button names them ("Previous (Alt+↑)"); the label alone for an action with no key."""
     shown = (keymap or current()).shown(name)
     return _(label) + (f" ({shown})" if shown else "")
-
-
-def fixed_rows() -> list[tuple[str, str]]:
-    """The keys this table does not change, as the Shortcuts page lists them: (what, keys), in the window's language:
-    Esc, the page keys passed on to the viewer, then translator mode's mouse gestures (`FIXED_GESTURES`)."""
-    page_keys = ", ".join(key_text(k) for k in FORWARDED_KEYS)
-    return [(_(FIXED_ESCAPE), key_text("Escape")), (_(FIXED_PAGE_KEYS), page_keys),
-            *((_(what), _(gesture)) for what, gesture in FIXED_GESTURES)]
-
-
-def help_lines(keymap: Keymap | None = None) -> list[str]:
-    """Help's Keys as the keymap has them: "F5: Translate the page on show", one line per action with a key, then
-    Esc and the mouse gestures (the page keys have a topic of their own), in the window's language."""
-    keymap = keymap or current()
-    lines = [_("{keys}: {action}").format(keys=keymap.shown(a.name), action=_(a.label))
-             for a in ACTIONS if keymap.of(a.name)]
-    fixed = fixed_rows()
-    lines += [_("{keys}: {action}").format(keys=keys, action=what) for what, keys in fixed[:1] + fixed[2:]]
-    return lines

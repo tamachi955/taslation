@@ -114,7 +114,8 @@ def watch(follow, monkeypatch):
 
 
 def _shown(w):
-    return w._picture()[0]
+    """What the page shows (`_hidden_picture`: what the see-through window letters the viewer with)."""
+    return w._hidden_picture()
 
 
 def _lettered_page(w):

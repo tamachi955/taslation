@@ -18,7 +18,7 @@ from ..regions import PageResult
 from ..render.shaping import letter_by_letter
 from . import status_slot, trouble
 from .banner import BAND_COLOURS, NOTICE_COLOURS, PROBLEM_COLOURS, SetupBanner, Strip, busy_title, is_notice
-from .constants import NOTE_MS_PER_CHAR, READING_NOTE_MS, READY, TRANSLATOR_NOTE_MAX_MS
+from .constants import READY
 from .constants import APP_TITLE
 from .progress import busy_line, rendered
 
@@ -55,14 +55,11 @@ class StatusMixin:
             return
         self._wrap(self.guard_label, width // 2)
         guard = self.guard_label.winfo_reqwidth() + 12 if self.guard_var.get() else 0
-        move = getattr(self, "move_btn", None)  # the button that moves TASlation to the book's monitor, when shown
-        moving = move.winfo_reqwidth() + 8 if move is not None and move.winfo_manager() else 0
-        self._wrap(self.status_label, width - guard - moving - 106)  # the busy bar's place: 90 px and its padding
+        self._wrap(self.status_label, width - guard - 106)  # the busy bar's place: 90 px and its padding
 
     def status(self, text: str | Message | Callable[[], str]) -> None:
         """The status line: *text*, a Message in the window's language, or what a callable gives in the window's
-        language (each asked again after a language switch); on the full screen the line shows at the bottom of the
-        page for a while (`_note_ms`)."""
+        language (each asked again after a language switch); the right side pane shows it (`seethrough.right_rows`)."""
         if isinstance(text, Message):
             message = text
             text = lambda: rendered(message)  # noqa: E731 - said again after a language switch
@@ -70,16 +67,6 @@ class StatusMixin:
         line = render() if render is not None else str(text)
         self._status_render, self._status_key, self._status_page = render, None, None
         self.status_var.set(line)
-        if self.reading:  # no status bar there: the line shows at the bottom of the page for a while
-            self.canvas.set_note(line, self._note_ms(line))
-
-    def _note_ms(self, line: str) -> int:
-        """How long the status line *line* stays at the bottom of the full screen: `READING_NOTE_MS` in the Reader
-        role, which sees the page turn; in the Translator role, whose lines say what is selected and what failed, as
-        long as it takes to read it (`NOTE_MS_PER_CHAR`), never shorter and at most `TRANSLATOR_NOTE_MAX_MS`."""
-        if self.role_var.get() != "translator":
-            return READING_NOTE_MS
-        return max(READING_NOTE_MS, min(TRANSLATOR_NOTE_MAX_MS, NOTE_MS_PER_CHAR * len(line)))
 
     def say(self, key: str | Message, /, **values: Any) -> None:
         """The status line *key* in the window's language with *values* filled in (said again after a switch; a
@@ -98,9 +85,8 @@ class StatusMixin:
         self._status_page = page
 
     def _job_line(self, render: Callable[[], str]) -> None:
-        """The status line of the page job at work (its progress, a request that is slow; no note on the full
-        screen's page): about the page the job reads (`_job_frame`), so it goes while the viewer shows another page
-        (`_status_follows_page`)."""
+        """The status line of the page job at work (its progress, a request that is slow): about the page the job
+        reads (`_job_frame`), so it goes while the viewer shows another page (`_status_follows_page`)."""
         self.status_var.set(render())
         self._status_render, self._status_key = render, None
         self._status_page = self._job_frame
@@ -143,8 +129,8 @@ class StatusMixin:
 
     # ------------------------------------------------------------------ the strips over the page
     def _build_strips(self) -> None:
-        """Between the toolbar and the page: the setup banner and the band, each away while it has nothing to say; the
-        full screen hides them with the toolbar."""
+        """Between the toolbar and the page of the hidden window: the setup banner and the band, each away while it has
+        nothing to say (the right side pane says the banner's lines: `seethrough.right_rows`)."""
         self.strips = ttk.Frame(self)
         self.strips.pack(fill="x")
         self.setup_banner = SetupBanner(self.strips)
@@ -172,7 +158,7 @@ class StatusMixin:
         """The setup banner: the problems and notices of the last setup check, in the window's language, each with the
         button that fixes it where the window can (`trouble.setup_button`: Start translator again, Download model);
         then what keeps the window from reading the viewer, with its button (`trouble.viewer_trouble`, `_trouble`:
-        Choose viewer, Show viewer, Move TASlation aside); the translator on the processor (`_on_cpu`, with Close);
+        Choose viewer, Show viewer); the translator on the processor (`_on_cpu`, with Close);
         a target language whose script this computer cannot shape (`render.shaping.letter_by_letter`, with Close:
         once a session). In see-through mode, where the window is never on the screen, the same lines come in the
         right side pane (``_see_banner_rows``, `seethrough.right_rows`) with their buttons in the Menu
@@ -181,10 +167,9 @@ class StatusMixin:
             (trouble.setup_line(m), NOTICE_COLOURS if is_notice(m) else PROBLEM_COLOURS, trouble.setup_button(self, m))
             for m in self._health]
         kind = getattr(self, "_trouble", None)
-        # (see-through mode: no line asks to choose a viewer - the chooser comes by itself - nor to move a window that
-        # is not on the screen)
+        # (see-through mode: no line asks to choose a viewer - the chooser comes by itself)
         hidden = getattr(self, "_see_hidden", False)
-        if kind is not None and not (hidden and trouble.TROUBLE_ACTIONS[kind] in (trouble.CHOOSE, trouble.ASIDE)):
+        if kind is not None and not (hidden and trouble.TROUBLE_ACTIONS[kind] == trouble.CHOOSE):
             rows.append((trouble.trouble_line(kind), PROBLEM_COLOURS,
                          trouble.action_button(self, trouble.TROUBLE_ACTIONS[kind])))
         seconds = getattr(self, "_on_cpu", None)

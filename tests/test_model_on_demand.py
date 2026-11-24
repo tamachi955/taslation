@@ -23,7 +23,7 @@ from taslation.translate import ollama as ollama_module
 from taslation.translate.ollama import never_unloads, partly_on_gpu, same_model, unloads_at_once
 from taslation.ui import jobs
 from taslation.ui.dialogs import caches
-from taslation.ui.progress import progress_line, reads_page
+from taslation.ui.progress import progress_line, reads_page, rendered
 
 MODEL = "qwen3.5:4b"
 
@@ -341,7 +341,6 @@ class Window:
     def __init__(self):
         self._progress: object = ""
         self._before_loading = None
-        self._partial_said = False
         self._page_cancel = None
         self.pipeline = None
         self.events: list = []
@@ -417,7 +416,8 @@ def test_what_a_request_of_the_backlog_tells_is_said_in_the_status_line_only(win
     split = Message("ollama.partly_on_gpu", model=MODEL, percent=55)
     window._model_status(split, behind=True)
     window._model_status(split)
-    assert [e[0] for e in window.events].count("popup") == 1  # (said in a popup once a session, whoever loaded)
+    assert window.statuses[-2:] == [split, split]  # (said in the status line, whoever loaded: no popup over the book)
+    assert "popup" not in [e[0] for e in window.events]
 
 
 def test_the_translator_tells_the_window_whether_its_request_is_the_backlogs(monkeypatch):
@@ -433,13 +433,12 @@ def test_the_translator_tells_the_window_whether_its_request_is_the_backlogs(mon
                       ("model_status", {"message": loading, "behind": True})]
 
 
-def test_a_split_model_is_said_in_a_popup_once_a_session(window):
+def test_a_split_model_is_said_in_the_status_line_and_no_popup_comes_up(window):
     message = Message("ollama.partly_on_gpu", model=MODEL, percent=55)
     window._model_status(message)
     window._model_status(message)
-    assert len(window.statuses) == 2
-    (popup,) = [e for e in window.events if e[0] == "popup"]
-    assert "55%" in popup[1] and "graphics card" in popup[1]
+    assert window.statuses == [message, message] and window.events == []
+    assert "55%" in rendered(message) and "graphics card" in rendered(message)
 
 
 def test_the_window_s_close_cancels_the_page_and_releases(ollama, settings, window):

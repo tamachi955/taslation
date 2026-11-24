@@ -1320,7 +1320,7 @@ class LoadAhead:
     when Ollama does not hold the model) is done while the rest of the page is read, and the request finds the model
     loaded (`OllamaTranslator.ensure_loaded`: one load at a time; the page models and the OCR readers stay where they
     are, the judgement at the start counted the model whole beside them). The page's cancel ends it; `join` waits for
-    it, so that the page lets go of the worker with no load of its own under way (Tools > Release the model now waits
+    it, so that the page lets go of the worker with no load of its own under way (Menu > Release the model now waits
     for the page). A load that fails is left to the request, which says what is wrong as ever. A page whose frame is
     not kept yet (*gate*, `PageGate`) loads nothing before the window has seen that frame on show after the load asked
     (`PageGate.on_show`), as its request does; a page done before that (every line reused) loads nothing, and a frame
@@ -1652,7 +1652,7 @@ class Pipeline:
                 model.release()  # the settings changed meanwhile: this one is not used any more
 
     def release_gpu_models(self) -> None:
-        """Every GPU model of `gpu_releases` lets go (Tools > Release the model now; each loads again where the
+        """Every GPU model of `gpu_releases` lets go (Menu > Release the model now; each loads again where the
         session's plan has it when it is next needed). One that fails keeps neither the others nor the page from going
         on. Nothing lets go for a load of the translation model: the judgement at the start counted it whole beside
         them (`taslation.ocr.place`)."""

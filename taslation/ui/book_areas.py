@@ -27,18 +27,18 @@ from .dialogs import caches as boxes
 from .history import OWN_PAGE, BookStep, owner
 from .translator import holds
 
-# the Page menu's entry and what the status line says while the pointer is on it (`app.App._build_menus`)
+# the entry of the Menu's Page (`see_edit.build_menu`), and the tip the window's Page menu had for it
 IGNORE_EVERYWHERE = "Ignore this area on all pages of this book"
 IGNORE_TIP = ("Translator mode: what is found mostly inside the selected region's place is left as drawn on every page "
               "of this book (watermarks, page numbers, banners); Book settings lists these areas.")
 # a region dropped where one was dropped on another page before: the question and its buttons
 AREA_QUESTION = ("You dropped a region at this place on another page of this book too. Ignore this area on all pages "
                  "of this book? What is found mostly inside it is left as drawn on every page. Book settings lists it, "
-                 "and Ctrl+Z takes it back.")
+                 "and Menu > Undo takes it back.")
 AREA_YES = "Ignore on all pages"
 AREA_NO = "Only this page"
 # what the status line says
-AREA_ADDED = "This area is ignored on all pages of this book. Ctrl+Z takes it back; Book settings lists it."
+AREA_ADDED = "This area is ignored on all pages of this book. Menu > Undo takes it back; Book settings lists it."
 AREA_THERE = "This area is ignored on all pages of this book already."
 AREA_BACK = "The area ignored on all pages is taken back: text is looked for there again."
 AREA_AGAIN = "The area is ignored on all pages again."
@@ -52,8 +52,8 @@ USE_FOR_SERIES_TIP = ("Start every new volume of {series} with the areas listed 
                       "own keeps them.")
 AREAS_SHARED = "Saved: a new volume of {series} starts with these {n} area(s)."
 AREAS_SHARED_NONE = "Saved: a new volume of {series} starts with no areas ignored."
-# the Page menu's entry of the same name (`USE_FOR_SERIES`): what the status line says while the pointer is on it, and
-# when the series' file cannot be written (Book settings' line, `dialogs.book_settings.SHARE_FAILED`)
+# the Menu's Page entry of the same name (`USE_FOR_SERIES`): the tip the window's Page menu had for it, and what is
+# said when the series' file cannot be written (Book settings' line, `dialogs.book_settings.SHARE_FAILED`)
 SERIES_AREAS_TIP = ("Start every new volume of this book's series with the areas this book ignores on all pages. A "
                     "volume that has areas of its own keeps them.")
 SERIES_AREAS_FAILED = "Could not save the series' defaults: {error}"
@@ -147,8 +147,9 @@ class AreaMixin:
         return not getattr(self, "busy", False)
 
     def _sync_series_areas_entry(self) -> None:
-        """The Page menu's Use these areas for the series greyed unless it can act (`series_areas_ready`): when the
-        menu opens (its postcommand)."""
+        """The window's Page menu's Use these areas for the series greyed unless it can act (`series_areas_ready`):
+        when the menu opens (its postcommand). Nothing calls it now: the Menu's Page is built afresh each time it opens,
+        its entry's state read then (`see_edit.build_menu`)."""
         entry = getattr(self, "_series_areas_entry", None)
         if entry is None:
             return

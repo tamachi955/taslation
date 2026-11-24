@@ -232,7 +232,7 @@ def test_replace_all_in_one_step_writes_the_file_and_changes_only_the_text(windo
             assert {k: v for k, v in a.items() if k != "text"} == {k: v for k, v in b.items() if k not in ("text", "edited")}
             assert b.get("edited", False) is (a["text"] != b["text"])
     assert not window.busy and window.history.done[-1].state == "done"
-    assert window.lines == ["Replaced in 3 text area(s) on 2 page(s). Ctrl+Z takes it back."]
+    assert window.lines == ["Replaced in 3 text area(s) on 2 page(s). Menu > Undo takes it back."]
 
 
 def test_flags_note_and_the_page_mark_stay(window, cache, store):
@@ -687,7 +687,7 @@ def test_a_finished_replacement_is_said_in_the_window(hidden_root, window, opene
     d.replace_var.set("Bel")
     d.update_list()
     d.replace_all()
-    assert d.said_var.get() == "Replaced in 1 text area(s) on 1 page(s). Ctrl+Z takes it back."
+    assert d.said_var.get() == "Replaced in 1 text area(s) on 1 page(s). Menu > Undo takes it back."
 
 
 # ------------------------------------------------------------------ the strings

@@ -151,7 +151,7 @@ def test_paste_format_on_every_region_of_a_kind_across_the_book_and_take_it_back
     w.paste_format_on_kind()  # declined: nothing changes
     assert asked == [(
         "Put the copied formatting on every region of the kind Shout in this book: 2 region(s) on 2 page(s)? "
-        "Ctrl+Z takes it back.", "Paste on 2 region(s)")]
+        "Menu > Undo takes it back.", "Paste on 2 region(s)")]
     assert here.style is None and _notes(p, second) == before_second and not len(w.history)
     monkeypatch.setattr(formats.boxes, "ask", lambda *a, **kw: True)
     w.paste_format_on_kind()
@@ -271,10 +271,10 @@ def test_the_editor_copies_and_pastes_the_bar(hidden_root):
 
 def test_the_keys_and_every_word_in_every_language():
     keymap = shortcuts.Keymap()  # the keys are the shortcuts table's, named as the keyboard names them
-    assert [keymap.shown(name) for name in ("copy_format", "paste_format", "copy_region", "paste_region")] == [
-        "Ctrl+Shift+C", "Ctrl+Shift+V", "Ctrl+C", "Ctrl+V"]
-    lines = shortcuts.help_lines(keymap)
-    assert "Ctrl+Shift+C: Copy format" in lines and "Ctrl+V: Paste region" in lines
+    assert [keymap.shown(name) for name in ("copy_format", "paste_format")] == ["Ctrl+Shift+C", "Ctrl+Shift+V"]
+    # (Copy region and Paste region: the overlay's Edit menu since 2.0.0, Ctrl+C and Ctrl+V in its words; no keys of
+    # the table's, nor help's list of keys, which went with TASlation's own window)
+    assert [shortcuts.key_text(key) for key in ("Control-c", "Control-v")] == ["Ctrl+C", "Ctrl+V"]
     words = [formats.FORMAT_COPIED, formats.NOTHING_COPIED, formats.FORMAT_PASTED, formats.FORMAT_SAME,
              formats.SELECT_FIRST, formats.NO_BOOK, formats.KIND_QUESTION, formats.KIND_APPLY, formats.KIND_NONE,
              formats.KIND_DONE, formats.KIND_BACK, formats.KIND_AGAIN, formats.SAVE_FAILED,
@@ -286,7 +286,7 @@ def test_the_keys_and_every_word_in_every_language():
         if code != "en":
             assert all(w in catalog for w in words), (code, [w for w in words if w not in catalog])
     set_language("de")
-    assert keymap.shown("copy_format") == "Strg+Umschalt+C" and keymap.shown("paste_region") == "Strg+V"
+    assert keymap.shown("copy_format") == "Strg+Umschalt+C" and shortcuts.key_text("Control-v") == "Strg+V"
     set_language("en")
     for word in words:  # the placeholders kept
         for code, catalog in CATALOGS.items():

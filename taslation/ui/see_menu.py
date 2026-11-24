@@ -1,21 +1,18 @@
-"""See-through mode without TASlation's own window (`seethrough.hidden`): what that window offered and the side panes
-do not, in places of their own.
+"""What TASlation offers beyond the side panes, with no window of its own (the hidden Tk root, `seethrough.hidden`,
+hosts the dialogs), in places of their own.
 
 * The menu (`build`, `popup`): the left pane's Menu row opens it at the pane's right edge, level with the row
   (`popup_at_pane`), and a click on TASlation's taskbar button while the left pane has no room beside the page opens
   it at the pointer (`seethrough.front_tick`, "button"), with the left pane's controls (Translate, Auto, Lettering,
   Set area...) and Settings... and Quit added. While the setup banner has buttons
   (Start translator again, Download model, Show viewer, Close), they come first (`banner_actions`: their lines are
-  in the right pane). Its entries are the window's own commands and dialogs that still mean something here -
-  the viewer chooser and the book's Series and Volume (`ViewerDialog`, `BookDialog`: the toolbar's two controls as
-  small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now, the window's
-  language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). While the left pane's
-  Edit is on, the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the page's tools and
-  what the window's Page menu does to the regions chosen, then Review..., My corrections..., Lines to review..., Find
-  and replace..., Series sheet..., Book settings...). Left out: what only concerns the window's own page and canvas
-  (Show original, what the page and a bubble under the pointer show, Always on top, Over the full-screen viewer,
-  Reading-order numbers - Edit numbers the regions itself -, Full screen, Page keys..., Help > Keys...). Every entry
-  but Quit counts as the reader asking (`seethrough.asked`): a dialog it opens takes the keys.
+  in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
+  `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
+  TASlation's language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). While the
+  left pane's Edit is on, the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the
+  page's tools and what acts on the regions chosen, then Review..., My corrections..., Lines to review..., Find
+  and replace..., Series sheet..., Book settings...). Every entry but Quit counts as the reader asking
+  (`seethrough.asked`): a dialog it opens takes the keys.
 * A menu needs its window in front for a click outside it to close it (Windows' rule for a menu of a window that is
   not in front): the hidden window is made the foreground first - the click that opened the menu was the reader's,
   on a pane or the taskbar button of TASlation's -, and `seethrough.front_tick` gives the foreground back to the

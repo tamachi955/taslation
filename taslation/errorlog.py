@@ -14,7 +14,7 @@ string as ``'…'`` unless the code of the traceback names it (a key such as 'te
 (`program_name`) and show the program's code, never a value. So no page text, OCR text or translation, no book or
 window title, and no path under the reader's profile but the state folder's (by name alone) reaches the file.
 
-`details_text` is what Copy details (Help > About TASlation, an error box: `ui.copy_details`; a failed start:
+`details_text` is what Copy details (Menu > Help > About TASlation, an error box: `ui.copy_details`; a failed start:
 `cli._complain`) gives: the environment, Ollama's version, the offline guard's state (`guard_line`), the settings and
 the last error, through the same `scrub`.
 """

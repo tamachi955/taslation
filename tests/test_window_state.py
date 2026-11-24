@@ -1,12 +1,11 @@
-"""Where the window stands: a viewer changed or closed, the page a tool would act on, the lines that
-say why nothing happened, the "To:" box kept between starts, the keys left with the page. The window's parts are borrowed
-onto stand-ins; a hidden root where a real widget is wanted. No window of the reader's, no key."""
+"""Where the window stands: a viewer changed or closed, the page a tool would act on, the lines that say why nothing
+happened, the "To:" box kept between starts. The window's parts are borrowed onto stand-ins; a hidden root where a
+real widget is wanted. No window of the reader's, no key."""
 from __future__ import annotations
 
 import json
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
 from types import SimpleNamespace
 
 import numpy as np
@@ -15,11 +14,11 @@ from PIL import Image
 
 from taslation.annotations import GlossaryStore
 from taslation.cache import CacheStore
-from taslation.capture import Enlarged, WindowInfo
+from taslation.capture import WindowInfo
 from taslation.i18n import ui_settings_path
 from taslation.regions import PageResult, TextRegion
 from taslation.ui import app as app_mod
-from taslation.ui import constants, live, reading, translator, viewers
+from taslation.ui import constants, live, translator, viewers
 from taslation.ui.dialogs import caches, glossary
 from taslation.ui.dialogs.review import ReviewDialog
 from taslation.ui.status import StatusMixin
@@ -62,17 +61,13 @@ class Chooser:
     _on_window_selected = A._on_window_selected
     _learn_viewer = A._learn_viewer
     _title_book = A._title_book
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
+    _enlarge_first = lambda self: True  # (the window looked at as it is: tests/test_see_hidden.py)
     _learn_covered_soon = lambda self: None  # (whether the viewer draws while covered: tests/test_covered_viewer.py)
     _warm_page_models = A._warm_page_models
     _show_chosen = A._show_chosen
     _viewer_gone = A._viewer_gone
     _current_window = A._current_window
     set_area = A.set_area
-    forward_key = A.forward_key
-    _key_viewer = A._key_viewer
-    _hand_over = A._hand_over
-    _pass_on = A._pass_on
     _book_key = A._book_key
 
     def __init__(self, windows, selected=None, book="", edited=False, given=False):
@@ -86,7 +81,6 @@ class Chooser:
         self._book_before = ""
         self.window_query = ""
         self.busy = False
-        self.reading = self._reading_at_start = False
         self.profiles = SimpleNamespace(margins_for=lambda win, large=False: self.hand)
         self.hand = None
         self.settings = SimpleNamespace(margins=(0, 0, 0, 0))
@@ -131,7 +125,7 @@ class Chooser:
 def gone(monkeypatch):
     """The windows that are still there; the rest were closed."""
     alive = {1, 2}
-    for module in (viewers, live, reading):
+    for module in (viewers, live):
         monkeypatch.setattr(module, "window_exists", lambda hwnd: hwnd in alive)
     return alive
 
@@ -146,7 +140,7 @@ def test_choosing_another_viewer_does_not_keep_the_old_book(gone):
 def test_a_tab_that_shows_another_book_takes_its_name(gone):
     w = Chooser([TAB_B], selected=BOOK_A, book="My name for A", edited=True)
     w.pick(TAB_B)
-    assert w.book_var.get() == "Book B" and not w._book_edited and not w.left  # the same window stays enlarged
+    assert w.book_var.get() == "Book B" and not w._book_edited and not w.left  # the same window: not left
 
 
 def test_the_same_viewer_chosen_again_keeps_the_name_typed(gone):
@@ -203,14 +197,10 @@ def test_a_viewer_closed_is_said_and_watched_for_again(gone):
     assert w.said == [constants.VIEWER_CLOSED]
 
 
-def test_a_key_or_a_request_finds_the_viewer_closed(gone, monkeypatch):
+def test_a_request_finds_the_viewer_closed(gone, monkeypatch):
     shown = []
     monkeypatch.setattr(caches, "tell", lambda *a, **k: shown.append(a))
-    w = Chooser([BOOK_A], selected=BOOK_A)
     gone.discard(1)
-    w._book_in_front = lambda: False
-    w.forward_key("Right")
-    assert w.selected is None and w.said == [constants.VIEWER_CLOSED]
     w = Chooser([BOOK_A], selected=BOOK_A)
     assert w._current_window() is None and w.said == [constants.VIEWER_CLOSED] and len(shown) == 1
 
@@ -292,18 +282,16 @@ class Tools:
     open_review = A.open_review
     _page_to_work_on = A._page_to_work_on
     _end_order = A._end_order
-    _on_release = A._on_release
 
     def __init__(self, result=None, on_show=True, kept=True):
         self.last_result = result
         self.pipeline = SimpleNamespace(is_skipped=lambda r: False, set_page_skip=lambda r, skip: kept,
                                         set_reading_order=lambda r, order: kept, forget_page=lambda r: 1)
         self.on_show = on_show
-        self.busy = self.reading = False
+        self.busy = False
         self._ordering = self._review = None
-        self._drag_start = self._drag_rect = self._grip = self._grip_start = None
         self.role_var = Var("translator")
-        self.said, self.read, self.clicks = [], [], []
+        self.said, self.read = [], []
         self.editing = False
 
     def _result_on_show(self):
@@ -323,9 +311,6 @@ class Tools:
 
     def _start_translate(self, image, complete=None):
         self.read.append(image)
-
-    def _forward_click(self, event):
-        self.clicks.append(event)
 
 
 def test_the_page_tools_with_no_page_say_what_to_do(monkeypatch):
@@ -351,37 +336,6 @@ def test_skip_and_finish_order_under_a_generic_name_say_so():
     w._ordering = ["a region"]
     w.toggle_order()
     assert w.said == ["Give the book a name first (its series in the Series field, and its volume beside it if it has one)."] and w._ordering is None
-
-
-def test_a_click_that_is_not_taslations_own_goes_to_the_viewer_in_either_role():
-    w = Tools(SimpleNamespace(original="page"), on_show=False)
-    w._drag_start = (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 1 and not w.said  # the Translator, a page not translated on show: it goes on
-    w.role_var.set("reader")
-    w._drag_start = (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 2  # the reader's clicks go on as ever
-    w.role_var.set("translator")
-    w.canvas = SimpleNamespace(inside=lambda x, y: True)
-    w.reading, w._drag_start = True, (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    # not the Translator's on the full screen, no translated page on show: TASlation's, and it says what to do
-    assert len(w.clicks) == 2 and w.said == ["Translate a page first: press F5."]
-    w.role_var.set("reader")  # the Reader's there go on as in the window
-    w._drag_start = (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 3
-    w.role_var.set("translator")
-    w.editing, w._drag_start = True, (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 3  # the translated page on show there: the click is TASlation's
-    w.reading, w.editing, w._drag_start = False, True, (10, 10)
-    w._on_release(SimpleNamespace(x=10, y=10))
-    assert len(w.clicks) == 3  # the translated page on show: the click is TASlation's (its text areas)
-    w.editing, w._drag_start = False, (10, 10)
-    w._on_release(SimpleNamespace(x=60, y=80))
-    assert len(w.clicks) == 3  # a drag is no click
 
 
 def test_edit_with_nothing_selected_says_so(hidden_root):
@@ -424,7 +378,6 @@ def test_regions_alike_are_told_apart_by_identity_on_the_overlay():
         _page_regions = A._page_regions
         _noted_regions = A._noted_regions
         role_var = Var("translator")
-        reading = False
 
     first, second, third = _region(), _region(), _region()
     third.reader_note = "a note"
@@ -473,86 +426,7 @@ def test_the_language_chosen_is_kept_for_the_next_start(tmp_path):
     assert app_mod.first_target(tmp_path, "English", "en", False) == "Klingon"
 
 
-# ------------------------------------------------------------------ the keys and the page
-class Focus:
-    _after_control = A._after_control
-    _focus_page = A._focus_page
-    _edit_key = A._edit_key
-
-    def __init__(self, focus):
-        self.focus = focus
-        self.canvas = SimpleNamespace(focus_set=lambda: self.taken.append(1))
-        self.taken, self.idle = [], []
-
-    def focus_get(self):
-        if isinstance(self.focus, Exception):
-            raise self.focus
-        return self.focus
-
-    def after_idle(self, func):
-        self.idle.append(func)
-        func()
-
-
-def test_a_control_of_the_window_gives_the_keys_back_to_the_page():
-    w = Focus(None)
-    own = SimpleNamespace(winfo_toplevel=lambda: w)
-    w.focus = own
-    w._after_control(SimpleNamespace(widget=own))
-    assert w.taken == [1]
-
-
-def test_a_dialog_keeps_the_keys_it_has():
-    w = Focus(SimpleNamespace(winfo_toplevel=lambda: "a dialog"))
-    w._after_control(SimpleNamespace(widget=SimpleNamespace(winfo_toplevel=lambda: w)))
-    assert not w.taken
-    w._after_control(SimpleNamespace(widget=SimpleNamespace(winfo_toplevel=lambda: "a dialog")))  # a dialog's own button
-    assert not w.idle or len(w.idle) == 1
-    w = Focus(KeyError("popdown"))  # a list's popdown has no widget of Tkinter's
-    w._focus_page()
-    assert not w.taken
-
-
-def test_a_control_its_command_took_away_gives_the_keys_back_too():
-    w = Focus(None)
-    w._after_control(SimpleNamespace(widget="a path of a widget gone"))
-    assert w.taken == [1]
-
-
-def test_ctrl_z_in_a_box_leaves_the_pages_edits_alone(hidden_root):
-    w = Focus(None)
-    steps = []
-    entry, box = ttk.Entry(hidden_root), ttk.Combobox(hidden_root)
-    w._edit_key(SimpleNamespace(widget=entry), lambda: steps.append("undo"))
-    w._edit_key(SimpleNamespace(widget=box), lambda: steps.append("undo"))
-    assert not steps
-    w._edit_key(SimpleNamespace(widget=ttk.Frame(hidden_root)), lambda: steps.append("undo"))
-    assert steps == ["undo"]
-
-
 # ------------------------------------------------------------------ what waits, and what is said
-def test_closing_puts_the_enlarged_window_back_with_no_key_and_no_box(monkeypatch):
-    class Closing:
-        _restore_enlarged = A._restore_enlarged
-        _keep_enlarged = A._keep_enlarged  # (kept for the next start: tests/test_enlarge_recovery.py)
-
-        def __init__(self):
-            self.said = []
-            self._enlarged = Enlarged(1, (100, 100, 900, 700), (0, 0, 1920, 1032))
-
-        def say(self, line, /, **values):
-            self.said.append(line)
-
-    boxes, restored = [], []
-    monkeypatch.setattr(viewers, "restore_window", lambda enlarged: restored.append(enlarged.hwnd) or False)
-    monkeypatch.setattr(caches, "tell", lambda _parent, text, **_k: boxes.append(text))
-    w = Closing()
-    w._restore_enlarged()
-    assert restored == [1] and w._enlarged is None and not boxes and not w.said  # (one the reader resized stays)
-    w._restore_enlarged()
-    assert restored == [1]
-
-
 def test_close_saves_the_style_guide_as_it_stands(hidden_root, tmp_path):
     store = GlossaryStore(tmp_path / "glossary")
     changes = []
@@ -584,45 +458,6 @@ def test_a_language_switch_asks_before_it_closes_a_form(monkeypatch):
     w = Switch()
     w._on_ui_language()
     assert w.rebuilt == 0 and w.ui_lang_var.get() == "en"  # the choice is back on the language the window has
-
-
-def _enlarged(changed=True):
-    return SimpleNamespace(hwnd=1, changed=changed, given=None)
-
-
-class Settling:
-    _enlarge_done = A._enlarge_done
-    _keep_enlarged = A._keep_enlarged  # (kept for the next start: tests/test_enlarge_recovery.py)
-    _learn_covered_soon = lambda self: None  # (whether the viewer draws while covered: tests/test_covered_viewer.py)
-    reading = False
-    selected = BOOK_A
-
-    def __init__(self, enlarged):
-        self._enlarged = enlarged
-        self.said, self.notes = [], []
-        self.canvas = SimpleNamespace(set_note=lambda text, ms: self.notes.append(text))
-        self._auto_last = self._auto_candidate = None
-
-    def say(self, key, **values):
-        self.said.append(key)
-
-    _forget_page_area = _sync_area = _apply_found_margins = lambda self: None
-    _look_afresh = lambda self, frame, thumb: None
-
-    def settled(self):
-        self._enlarging = {"enlarged": self._enlarged, "then": None}
-        self._enlarge_done()
-
-
-def test_a_window_that_jumps_is_explained_once(monkeypatch):
-    monkeypatch.setattr(viewers, "window_rect", lambda hwnd: (0, 0, 1, 1))
-    w = Settling(_enlarged())
-    w.settled()
-    w.settled()
-    assert w.said == [viewers.ENLARGED] and w.notes == [viewers.ENLARGED]
-    w = Settling(_enlarged(changed=False))  # one of a fixed size says that, not this
-    w.settled()
-    assert w.said == [viewers.KEPT_ITS_SIZE]
 
 
 def test_a_page_partly_translated_says_what_is_left(hidden_root):

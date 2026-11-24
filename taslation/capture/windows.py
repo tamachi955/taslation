@@ -1,4 +1,4 @@
-"""Window enumeration, capture and page-turn key presses on Windows.
+"""Window enumeration and capture on Windows.
 
 Implemented with ``ctypes`` on top of user32/gdi32 only, and nothing here can
 talk to the network.
@@ -17,10 +17,12 @@ changes - no code was taken from it, it is a C# project):
   requires the window to be visible.
 * A viewer that stops drawing while it is covered is raised for a moment
   without activation (`raise_window`) and put back.
-* A page key the reader presses in TASlation's window goes on to the viewer as one
-  key press, posted or sent with ``SendInput`` after bringing the viewer to the
-  foreground; the viewer does the page turning itself. Afterwards the foreground
-  goes back (`give_foreground`, without a key press of its own).
+* TASlation sends the viewer no key and no click: in see-through mode, the
+  program's one mode since 2.0.0, the reader turns the pages in the viewer
+  itself. The functions here that could post or send one (`post_key`,
+  `post_click`, `press_key`, `press_briefly`) are called by no module of the
+  program; the tools' guards name them. A window of the program is given the
+  foreground without a key press (`give_foreground`).
 * What happens to windows comes from out-of-context WinEvent hooks
   (`WindowEvents`: which window comes to the front, the viewer's window renamed,
   moved or closed), so that the window need not capture the viewer just to
@@ -480,7 +482,7 @@ if IS_WINDOWS:
     KEYEVENTF_EXTENDEDKEY = 0x0001
     KEYEVENTF_KEYUP = 0x0002
 
-    VK_CODES = KEY_CODES  # the key names TASlation knows (`pagekeys.KEY_NAMES`), also where no key can be pressed
+    VK_CODES = KEY_CODES  # the key names TASlation knows (`pagekeys.KEY_CODES`), also where no key can be pressed
     EXTENDED_KEYS = {0x25, 0x26, 0x27, 0x28, 0x21, 0x22, 0x24, 0x23, 0x2D, 0x2E}
 
 
@@ -988,7 +990,7 @@ def _send_key(vk: int, up: bool) -> None:
 
 
 def key_code(name: str) -> int:
-    """The virtual-key code of the key named *name* (`pagekeys.KEY_NAMES`, any case: Left, PageDown, F11, a letter
+    """The virtual-key code of the key named *name* (`pagekeys.KEY_CODES`, any case: Left, PageDown, F11, a letter
     or a digit, ...)."""
     key = name.strip().lower()
     if key in VK_CODES:
@@ -1000,8 +1002,8 @@ def key_code(name: str) -> int:
 
 def press_key(hwnd: int, key: str = "Left") -> bool:
     """Press *key* once in *hwnd*, which must have the foreground (`press_briefly` hands it over; nothing here forces it):
-    only ever a key the person pressed, passed on at the person's own pace. False, and nothing pressed, for a window
-    not in front."""
+    no module of the program calls it since 2.0.0 (see the module's docstring). False, and nothing pressed, for a
+    window not in front."""
     _require_windows()
     vk = key_code(key)
     if user32.GetForegroundWindow() != hwnd:
@@ -1014,8 +1016,8 @@ def press_key(hwnd: int, key: str = "Left") -> bool:
 
 def give_foreground(hwnd: int) -> bool:
     """Give the foreground to *hwnd*, a window of this program that is on the screen, from whichever window has it
-    (the viewer, after a page-turn key). No key is pressed for it (an ALT tap, the usual way to be let through,
-    would reach the viewer: Chrome takes a lone ALT for its menu, and the next page-turn key would go there): for a moment this
+    (the viewer, say). No key is pressed for it (an ALT tap, the usual way to be let through, would reach the
+    viewer: Chrome takes a lone ALT for its menu, and the reader's next key would go there): for a moment this
     thread shares its input with the foreground window's, which is what lets Windows hand the foreground over.
     Returns whether *hwnd* has it now; a minimised or hidden window is left as it is."""
     _require_windows()
@@ -1125,7 +1127,7 @@ FOREGROUND_STEP_S = 0.03  # ... how often that is tried meanwhile
 # A browser reader that gets the foreground may draw itself anew: black for about 0.8 s, and a key in that time is lost
 # and the same page comes back (measured on a real one: 0.1 s to the black, 0.7 s of it; after it a key turns at once).
 # Only a browser that windows hiding it covered (`covered_by_opaque`) is waited for: it may have stopped drawing
-# (2026-11-03 survey), and the black likely came from that; under TASlation's own window at WINDOW_ALPHA it never stops.
+# (2026-11-03 survey), and the black likely came from that; under TASlation's see-through windows it never stops.
 REDRAW_STARTS_S = 1.0  # no black frame this long after the foreground came: nothing is being drawn anew (late at times)
 REDRAW_WAIT_S = 2.5  # the longest a key waits for it (a black page of the book is black all this time)
 REDRAW_STEP_S = 0.05  # how often the latest frame is looked at meanwhile
@@ -1212,8 +1214,8 @@ def fully_opaque(hwnd: int) -> bool:
     """Whether the top-level window *hwnd* hides what lies under it, as Chromium's occlusion tracker counts a window
     that covers a browser (`gfx::IsWindowVisibleAndFullyOpaque`, ui/gfx/win/hwnd_util.cc): shown, not minimised nor
     cloaked, not click-through, not a tool window (the taskbar is), and not layered with an alpha below 255 or a
-    colour key (or with attributes that cannot be read: UpdateLayeredWindow). TASlation's own window at WINDOW_ALPHA
-    is not."""
+    colour key (or with attributes that cannot be read: UpdateLayeredWindow). TASlation's see-through lettering and panes
+    are not."""
     if not IS_WINDOWS or not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
         return False
     if _is_cloaked(hwnd):
@@ -1233,7 +1235,7 @@ def fully_opaque(hwnd: int) -> bool:
 def covered_by_opaque(hwnd: int) -> bool:
     """Whether a window that hides what lies under it (`fully_opaque`) lies over any of the client area of *hwnd*:
     only then may a browser have stopped drawing behind it (fully covered), and draw itself anew - black for a moment
-    - once it gets the foreground. A browser under see-through windows only (TASlation's own at WINDOW_ALPHA) never
+    - once it gets the foreground. A browser under see-through windows only (TASlation's lettering and panes) never
     stopped drawing. False outside Windows or for a window that is gone."""
     if not IS_WINDOWS or not user32.IsWindow(hwnd):
         return False
@@ -1500,7 +1502,7 @@ def keep_viewer_under(viewer: int, own: int, order: _Order | None = None, betwee
     window that could hide some of it lies between the two (`windows_between`): SetWindowPos with SWP_NOACTIVATE and
     neither its place nor its size changed - no activation, no change of the foreground, no key, no click; only the
     viewer's place in the order. A window that lay between is not moved: it lies under the viewer from then on, above
-    what lay under the viewer before. Under a topmost *own* (Always on top, the full screen) the viewer goes to the top
+    what lay under the viewer before. Under a topmost *own* the viewer goes to the top
     of the windows that are not topmost (HWND_TOP), right under the topmost ones: put after a topmost window it would
     become topmost itself. What was done: "placed", "" (nothing between could hide it), or why nothing was:
     "not windows", "gone", "minimised" (either window), "topmost" (the viewer is topmost: nothing can lie over it but
@@ -1571,7 +1573,7 @@ RDW_INVALIDATE, RDW_ALLCHILDREN = 0x0001, 0x0080
 def windows_over(hwnd: int, opaque: bool = False) -> list[Rect]:
     """The rectangles of the windows above the top-level window of *hwnd* that a copy of the screen would show, as
     `behind_others` counts them (shown, not minimised nor cloaked, not click-through), the nearest first; with
-    *opaque* only those that hide what lies under them (`fully_opaque`: not TASlation's own at WINDOW_ALPHA, say). []
+    *opaque* only those that hide what lies under them (`fully_opaque`: not TASlation's see-through windows, say). []
     outside Windows or for a window that is gone."""
     if not IS_WINDOWS or not user32.IsWindow(hwnd):
         return []
@@ -1691,7 +1693,7 @@ def window_at_pointer() -> int:
 
 def front_owner(pid: int, tops: Sequence[int], own_pid: int, viewer: int) -> str:
     """Whose window is in front, from that window's process *pid* and its top-level windows *tops* (itself, its root,
-    its owner's root): "own" (a window of this program: the window, the full screen, a dialog, a message box),
+    its owner's root): "own" (a window of this program: the see-through window, a pane, a dialog, a message box),
     "viewer" (the viewer's window *viewer*, or a popup it owns), "other" (anything else, or nothing)."""
     if pid and pid == own_pid:
         return "own"

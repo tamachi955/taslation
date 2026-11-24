@@ -415,7 +415,7 @@ def test_rename_hands_the_new_name_to_the_windows_rename_and_the_list_follows(hi
     monkeypatch.setattr(CachesDialog, "_ask_name", lambda _self, book, then: then(f"{OTHER} 9"))
     _choose(d, (f"{OTHER} 1", "English"))
     d._rename()
-    assert d.backup_var.get() == f"{OTHER} 1 keeps its name; the window's status line says why."
+    assert d.backup_var.get() == f"{OTHER} 1 keeps its name; the status line in the right pane says why."
     window._start_dialog = object()  # the window waits for an answer of its own
     d._rename()
     assert d.backup_var.get() == "Answer the question in the TASlation window first." and len(window.asked) == 2
@@ -435,7 +435,7 @@ def test_the_rename_waits_while_the_window_is_busy(hidden_root, tmp_path, monkey
     assert [ms for ms, _then in later] == [caches.RENAME_POLL_MS] and d.backup_var.get() == ""
     window.busy = False
     later[0][1]()
-    assert d.backup_var.get() == f"{SERIES} 10 keeps its name; the window's status line says why."
+    assert d.backup_var.get() == f"{SERIES} 10 keeps its name; the status line in the right pane says why."
     d.destroy()
     window.destroy()
 

@@ -1,6 +1,8 @@
-"""The window shows the viewer live: its latest frame, the translated page laid over it while it shows that page, a
-page filling in as it is translated, the last good frame when the viewer hides behind TASlation, and requests that
-wait for the models to load. Parts of the App are borrowed onto a stand-in on the shared hidden root."""
+"""The hidden window follows the viewer live: its latest frame, the translated page while the viewer shows that page,
+a page filling in as it is translated (noted on the hidden canvas, never drawn: the see-through window shows the
+words), the last good frame when the viewer hides behind TASlation, the canvas's quick draw of frames that keep coming,
+and requests that wait for the models to load. Parts of the App are borrowed onto a stand-in on the shared hidden
+root."""
 from __future__ import annotations
 
 import queue
@@ -16,7 +18,7 @@ from taslation.capture import WindowInfo
 from taslation.detect import page_area
 from taslation.regions import PageResult
 from taslation.ui import app as app_mod
-from taslation.ui import live, preview
+from taslation.ui import live, preview, seethrough
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.live import BlackViewerMixin
 
@@ -60,15 +62,13 @@ class Bar:
 
 
 class Window(BlackViewerMixin):
-    _blank_behind = app_mod.App._blank_behind
-    _raise_viewer = app_mod.App._raise_viewer
-    _resizing = app_mod.App._resizing
-    _window_size = app_mod.App._window_size
-    _blank_lasted = app_mod.App._blank_lasted
-
     """The parts of the App that the live view, the page events, the capture and the waiting requests use."""
 
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
+    _blank_behind = app_mod.App._blank_behind
+    _raise_viewer = app_mod.App._raise_viewer
+    _window_size = app_mod.App._window_size
+    _blank_lasted = app_mod.App._blank_lasted
+    _enlarge_first = lambda self: True  # (the window looked at as it is: tests/test_see_hidden.py)
     _handle_event = app_mod.App._handle_event
     _warm_when_idle = app_mod.App._warm_when_idle
     _on_page_event = app_mod.App._on_page_event
@@ -83,7 +83,7 @@ class Window(BlackViewerMixin):
     _page_line = app_mod.App._page_line
     _redisplay = app_mod.App._redisplay
     _status_follows_page = app_mod.App._status_follows_page
-    _picture = app_mod.App._picture
+    _hidden_picture = app_mod.App._hidden_picture
     _overlay_items = app_mod.App._overlay_items
     _page_regions = app_mod.App._page_regions
     _noted_regions = app_mod.App._noted_regions
@@ -154,7 +154,7 @@ class Window(BlackViewerMixin):
                                         black_wait_s=30.0)
         self.selected = VIEWER
         self.own = list(own)  # where this program's windows are on the screen
-        self.busy = self.reading = self._viewer_hidden = self._busy_shown = self._waiting = False
+        self.busy = self._viewer_hidden = self._busy_shown = self._waiting = False
         self.ready, self._bar_shown = True, False
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = self._ordering = None
@@ -211,36 +211,30 @@ def viewer(monkeypatch):
     return state
 
 
-def test_the_window_shows_the_viewer_live_and_lays_the_translation_over_it(hidden_root, viewer):
+def test_the_window_follows_the_viewer_live_and_takes_the_translation_while_it_shows_that_page(hidden_root, viewer):
     w = Window(hidden_root)
-    draws: list[Image.Image | None] = []
-    set_image = w.canvas.set_image
-    w.canvas.set_image = lambda image: (draws.append(image), set_image(image))
+    kept: list[Image.Image | None] = []
+    keep = w.canvas.keep
+    w.canvas.keep = lambda image: (kept.append(image), keep(image))
+    w.canvas.set_image = lambda image: pytest.fail("the hidden canvas drew a picture")
     page = viewer.frame
-    w._tick()  # Auto is off: the viewer is shown all the same
-    assert w.shown() is page and w._live is page and draws == [page]
-    w._tick()  # the same frame again: nothing is drawn
-    assert len(draws) == 1
+    w._tick()  # Auto is off: the viewer is followed all the same
+    assert w.shown() is page and w._live is page and kept == [page]  # noted on the hidden canvas, nothing drawn
+    w._tick()  # the same frame again: nothing new
+    assert len(kept) == 1
     viewer.frame = page.copy()  # another capture, the same picture: still nothing
     w._tick()
-    assert len(draws) == 1 and w._live is page
+    assert len(kept) == 1 and w._live is page
 
     result = _translated(page)
-    w._handle_event("result", {"result": result})  # the translated page replaces the frame at once
+    w._handle_event("result", {"result": result})  # the translated page is the page on show at once
     assert w.shown() is result.image and w._live is result.original and w._result_on_show()
 
     viewer.frame = _frame(toolbar=True)  # the viewer's toolbar comes up above the page: the translation stays
     w._tick()
-    shown = np.asarray(w.shown())
-    assert shown[5, 100].tolist() == [60, 60, 160]  # the toolbar as it is now ...
-    assert shown[40, 50].tolist() == [200, 0, 0] and shown[60, 70].tolist() == [250, 250, 250]  # ... the lettering
-    assert w._result_on_show()
-    w.original_var.set(True)  # Show original: the live frame as it is
-    w._redisplay()
-    assert w.shown() is viewer.frame
-    w.original_var.set(False)
+    assert w._result_on_show() and w.shown() is result.image
 
-    viewer.frame = _frame(ink=(120, 80, 170, 130))  # a page turned in the viewer: shown as it is, no translation
+    viewer.frame = _frame(ink=(120, 80, 170, 130))  # a page turned in the viewer: its frame, no translation
     w._tick()
     assert w.shown() is viewer.frame and not w._result_on_show()
     w.role_var.set("translator")
@@ -260,25 +254,24 @@ def test_a_page_fills_in_on_the_frame_as_its_events_come(hidden_root, viewer):
     boxes = [(40, 30, 80, 70), (120, 80, 170, 130)]
     w._handle_event("regions", {"boxes": boxes, "size": frame.size})
     w._flush_fill()
-    assert w.shown() is frame and len(w.canvas.find_withtag("outline-dashed")) == 2  # found: dashed outlines
+    assert w.shown() is frame and w._fill.states == ["found", "found"]  # found: the frame as it is
     assert w.canvas.badge and w.canvas.band is not None  # the busy line is a badge in the corner ...
     bx0, by0, bx1, by1 = w.canvas.bbox("busy")
-    px0, py0, px1, py1 = w.canvas._shown
-    assert bx1 > px1 and 380 <= bx1 <= 400 and by0 <= 12 and by1 < 60  # ... the canvas's top right, beside the page
+    assert 380 <= bx1 <= 400 and by0 <= 12 and by1 < 60  # ... the canvas's top right
     w._handle_event("read", {"index": 0, "status": "untranslated", "box": (40, 30, 80, 66)})  # read: where it is now
-    w._handle_event("read", {"index": 1, "status": "ocr-noise"})  # no text: its outline goes
+    w._handle_event("read", {"index": 1, "status": "ocr-noise"})  # no text: it is left out
     w._handle_event("progress", {"text": "Translating 1 bubble(s) with qwen3.5:4b..."})
     w._flush_fill()
-    assert len(w.canvas.find_withtag("outline-solid")) == 1 and not w.canvas.find_withtag("outline-dashed")
-    assert w._fill.boxes[0] == (40, 30, 80, 66)
-    assert w.canvas.itemcget("busy-text", "text").startswith("Translating... asking the model (")
+    assert w._fill.states == ["read", "skipped"] and w._fill.boxes[0] == (40, 30, 80, 66)
+    assert w.canvas.band().startswith("Translating... asking the model (")  # (as the spinner asks it at every turn)
     assert w.status_var.get() == "Translating... asking the model"
     patch = Image.new("RGB", (40, 40), (200, 0, 0))
     w._handle_event("translated", {"index": 0, "text": "Hi!", "box": boxes[0], "patch": patch})
     w._flush_fill()
-    assert not w.canvas.find_withtag("outline")  # lettered: no outline left
+    assert w._fill.states[0] == "lettered" and w._fill.filled == 1  # lettered
     assert np.asarray(w.shown())[50, 60].tolist() == [200, 0, 0] and np.asarray(frame)[50, 60].tolist() == [20, 20, 20]
-    assert w.canvas.itemcget("busy-text", "text").startswith("Translating... 1 of 1 line(s) done (")
+    assert w.canvas.band().startswith("Translating... 1 of 1 line(s) done (")
+    assert "This page: 1 of 1 lines" in [row.text for row in seethrough.right_rows(w)]  # what the right pane says
     final = _translated(frame)
     w._handle_event("page", {"image": final.image})
     w._handle_event("result", {"result": final})
@@ -290,7 +283,7 @@ def test_a_page_fills_in_on_the_frame_as_its_events_come(hidden_root, viewer):
     w._start_translate(final.original)  # the page on show translated again: it fills in over its translation
     w._handle_event("regions", {"boxes": boxes[:1], "size": frame.size})
     w._flush_fill()
-    assert w.shown() is final.image and len(w.canvas.find_withtag("outline-dashed")) == 1
+    assert w.shown() is final.image and w._fill.states == ["found"]
     w._handle_event("translate_done", {})  # the job failed: the page as it was again, no band, no bar
     assert w._fill is None and w.shown() is final.image and not w.canvas.find_withtag("busy")
     assert not w.progress_bar.shown
@@ -310,42 +303,6 @@ def _drawn_whole(image, like):
         return _drawn(c)
     finally:
         c.destroy()
-
-
-def test_a_page_filling_in_resamples_each_bubble_alone_and_the_finished_page_is_drawn_whole(hidden_root, viewer,
-                                                                                                sample_page):
-    """Each bubble lettered in place resamples its own canvas pixels alone (with those round it the filter reaches)
-    into the picture on show, which stays: within a grey level of a full draw. The finished page is a new picture,
-    drawn whole: the very pixels of a full draw."""
-    viewer.frame = sample_page.copy()
-    w = Window(hidden_root)
-    w.canvas.winfo_width, w.canvas.winfo_height = (lambda: 600), (lambda: 500)  # the page drawn at 0.29 of its size
-    w._tick()
-    frame = w._live
-    w._start_translate(frame, thumb=w._live_thumb)
-    boxes = [(100, 120, 400, 420), (700, 900, 1100, 1300), (180, 1400, 520, 1700)]
-    w._handle_event("regions", {"boxes": boxes, "size": frame.size})
-    w._flush_fill()
-    whole = []
-    draw = w.canvas._draw_picture
-    w.canvas._draw_picture = lambda *a: (whole.append(w.shown()), draw(*a))[1]
-    for i, box in enumerate(boxes):
-        before, picture = _drawn(w.canvas), w.canvas.find_withtag("picture")
-        patch = Image.new("RGB", (box[2] - box[0], box[3] - box[1]), (250, 250, 250))
-        patch.paste((200, 0, 0), (40, 40, 200, 120))
-        w._handle_event("translated", {"index": i, "text": "Hi!", "box": box, "patch": patch})
-        w._flush_fill()
-        assert w.shown() is w._fill.page and len(w.canvas.find_withtag("outline")) == len(boxes) - 1 - i
-        assert np.abs(_drawn(w.canvas) - before).max() > 100  # lettered on the canvas ...
-        assert np.abs(_drawn(w.canvas) - _drawn_whole(w._fill.page, w.canvas)).max() <= 1  # ... as a full draw has it
-        if i:  # (the first one makes the page lettered so far: a new picture, drawn whole)
-            assert w.canvas.find_withtag("picture") == picture  # the picture stays
-    assert len(whole) == 1 and whole[0] is w._fill.page
-    final = _translated(frame, box=boxes[0])
-    w._handle_event("page", {"image": final.image})
-    w._flush_fill()
-    assert len(whole) == 2 and whole[1] is final.image
-    assert (_drawn(w.canvas) == _drawn_whole(final.image, w.canvas)).all()  # the finished page: today's very pixels
 
 
 def test_frames_that_keep_coming_are_drawn_quickly_and_as_ever_once_they_stop(hidden_root, monkeypatch):
@@ -411,10 +368,9 @@ def test_the_status_bar_names_the_stage_in_the_windows_language(hidden_root, vie
 
 
 class Said(Window):
-    """The window with its own status line (`status`), the full screen's note on the page included."""
+    """The window with its own status line (`status`)."""
 
     status = app_mod.App.status
-    _note_ms = app_mod.App._note_ms
 
 
 def test_a_line_about_a_page_goes_as_soon_as_the_viewer_shows_another(hidden_root, viewer):
@@ -459,17 +415,6 @@ def test_a_line_about_a_page_goes_as_soon_as_the_viewer_shows_another(hidden_roo
     viewer.frame = _frame(ink=(60, 60, 90, 90), size=(260, 150))
     w._tick()
     assert w.status_var.get() == "Viewer: Yomizuq - Google Chrome"
-
-
-def test_in_the_reading_window_the_note_of_a_page_goes_with_its_page(hidden_root, viewer):
-    w = Said(hidden_root)
-    w._tick()
-    w.reading = True
-    w._handle_event("result", {"result": _translated(w._live)})
-    assert w.canvas.note == w.status_var.get() != ""  # the line on the page for a while
-    viewer.frame = _frame(ink=(120, 80, 170, 130))
-    w._tick()
-    assert w.canvas.note == "" and w.status_var.get() == "Viewer: Yomizuq - Google Chrome"  # no note of its own
 
 
 def test_a_frame_of_a_new_size_is_read_by_its_own_area_while_the_job_keeps_the_old_one(hidden_root, viewer):
@@ -534,10 +479,6 @@ def test_a_viewer_hidden_behind_taslation_keeps_the_last_good_frame(hidden_root,
     viewer.frame = Image.new("RGB", (200, 150), (0, 0, 0))
     w._tick()
     assert viewer.asked[-1] is True and w._live is not viewer.frame  # a blank frame is neither shown nor kept
-    w._black_watch = None  # (black: the heartbeat follows that now, `test_black_viewer`)
-    w.reading = True  # behind the full screen: as before, a message instead of the picture
-    w._tick()
-    assert viewer.asked[-1] is False and w._viewer_hidden
 
 
 def test_requests_wait_for_the_models_and_run_once_they_are_loaded(hidden_root, viewer):

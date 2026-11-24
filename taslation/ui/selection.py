@@ -1,23 +1,23 @@
-"""Several regions selected at once in translator mode, as shapes in an office program, and the page's reading order
-shown and fixed on the boxes (`SelectionMixin`, a part of `app.App`).
+"""Several regions selected at once in translator mode (Edit), as shapes in an office program, and the page's reading
+order shown and fixed on the boxes (`SelectionMixin`, a part of `app.App`).
 
-Shift+click adds a region to the selection or takes it out of it, and Shift+drag draws a rubber band that adds every
-region lying wholly inside it (`translator.TranslatorMixin._on_press`: Shift on a handle still resizes, on the rotate
-handle it still turns in 15° steps; a plain drag on empty space still adds a region). The selected region the window
-had (`_chosen_region`) stays the first of them and the others are `_also_chosen`; `translator.chosen_regions` names
-them all. With several selected they are framed without handles, and these act on all of them, each one change that
-Ctrl+Z takes back and that selects them all again: Delete (`_drop_regions`), T (`_restyle_regions`), Paste format
-(`formats.FormatMixin._format_targets`), a drag of any of them and Alt+arrows (`_move_regions`: the same move for
-each, stopping where the first meets the page's edge), and Page > Set kind... (`set_kind_of_selection`) and Set text
-size... (`set_size_of_selection`). A click on one of them without a drag selects it alone, as a click elsewhere, Esc
-and Tab do.
+Shift+click adds a region to the selection or takes it out of it (`_toggle_chosen`: the overlay's, `see_edit.act`);
+`_band_select` adds every region lying wholly inside a rubber band (the canvas's pointer handlers',
+`translator.TranslatorMixin._on_press`, which nothing binds while the window is hidden). The selected region (`_chosen_region`) stays the first of
+them and the others are `_also_chosen`; `translator.chosen_regions` names them all. With several selected they are
+framed without handles, and these act on all of them, each one change that Undo takes back and that selects them all
+again: Drop the chosen regions (`_drop_regions`), Text direction (`_restyle_regions`), Paste format
+(`formats.FormatMixin._format_targets`), a drag of any of them (`_move_regions`: the same move for each, stopping where
+the first meets the page's edge), and the Menu's Page > Set kind... (`set_kind_of_selection`) and Set text size...
+(`set_size_of_selection`). A click on one of them without a drag selects it alone, as a click elsewhere and Esc do.
 
 Each region's place in the page's reading order (`_page_regions`) shows in a small badge beside its box
-(`_draw_order_badges`, `preview.ImageCanvas.draw_badges`: placed as a label is, clear of the neighbouring regions);
-View > Reading-order numbers turns them off and on (ui.json `ORDER_HIDDEN`). While the reading order is set by clicks
-the labels carry the numbers instead. Page > Place in reading order... puts the selected regions at one place of the
-page's order without clicking the whole page again (`place_in_order`), one "order" change, as the reading order tool's
-is. Nothing here is kept but what the stores keep; no page image leaves memory."""
+(`_draw_order_badges`, `preview.ImageCanvas.draw_badges`: placed as a label is, clear of the neighbouring regions),
+unless an earlier version's View > Reading-order numbers turned them off (ui.json `ORDER_HIDDEN`, still read). While
+the reading order is set by clicks the labels carry the numbers instead. Page > Place in reading order... puts the
+selected regions at one place of the page's order without clicking the whole page again (`place_in_order`), one
+"order" change, as the reading order tool's is. Nothing here is kept but what the stores keep; no page image leaves
+memory."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from ..annotations import RegionStyle
-from ..i18n import load_ui_flag, save_ui_flag
+from ..i18n import load_ui_flag
 from . import area
 from .dialogs import selection as asks
 from .formats import NO_BOOK, SELECT_FIRST
@@ -37,28 +37,20 @@ from .translator import MADE_AGAIN, TAKEN_BACK, chosen_regions, holds
 
 ORDER_HIDDEN = "order_numbers_hidden"  # ui.json: the reader turned the reading-order badges off
 # what the status line says
-SEVERAL = ("{n} regions selected: Delete, T, Alt+arrows, a drag, Ctrl+Shift+V and Page > Set kind... or Set text "
-           "size... act on all of them.")
+SEVERAL = "{n} regions selected: a drag and the entries of Menu > Page act on all of them."
 NOTHING_TO_CHANGE = "Nothing to change: the selected region(s) have it already."
-DROPPED = "{n} regions dropped; Ctrl+Z brings them back."
-KIND_SET = "Kind set on {n} region(s). Ctrl+Z takes it back."
-SIZE_SET = "Text size set on {n} region(s). Ctrl+Z takes it back."
-PLACED = "Put at place {place} of {total} in the reading order. Ctrl+Z takes it back."
+DROPPED = "{n} regions dropped; Menu > Undo brings them back."
+KIND_SET = "Kind set on {n} region(s). Menu > Undo takes it back."
+SIZE_SET = "Text size set on {n} region(s). Menu > Undo takes it back."
+PLACED = "Put at place {place} of {total} in the reading order. Menu > Undo takes it back."
 PLACED_ALREADY = "The selected region(s) are at that place in the reading order already."
-ORDERING = "Reading order: click the regions in the order they are read, then press Finish order (Esc cancels)."
+ORDERING = "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu."
 NAME_FIRST = "Give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 # the changes on several regions, taken back and made again (`TranslatorMixin._step_through` says them)
 UNDONE = {"drops": "The dropped regions are back.", "kind": "Kind taken back.", "size": "Text size taken back."}
 REDONE = {"drops": "Regions dropped again.", "kind": "Kind set again.", "size": "Text size set again."}
 TAKEN_BACK.update(UNDONE)
 MADE_AGAIN.update(REDONE)
-# the Page menu's entries and View's checkbutton, said in the status line while the pointer is on them
-PAGE_SELECTION_TIPS = (
-    "Translator mode: set the kind of text of the selected region(s), as the region editor's Kind does.",
-    "Translator mode: give the selected region(s) a fixed text size, or the size that fits again.",
-    "Translator mode: put the selected region(s) at another place in this page's reading order.",
-)
-ORDER_NUMBERS_TIP = "Translator mode: show each region's place in the reading order in a small badge beside it."
 
 
 def ask_dialog(make: Callable[[], asks.ValueDialog]) -> Any:
@@ -116,7 +108,7 @@ class SelectionMixin:
         self._say_selection()
 
     def _set_chosen(self, regions: Sequence[Any]) -> None:
-        """*regions* selected, the first of them the one Tab goes on from and the editor opens on."""
+        """*regions* selected, the first of them the one the editor opens on."""
         regions = list(regions)
         self._grip_box = None
         self._chosen_region = regions[0] if regions else None
@@ -283,7 +275,6 @@ class SelectionMixin:
         if not group:
             return
         kind = ask_dialog(lambda: asks.KindDialog(self, len(group), group[0].tag))
-        self._focus_back()
         if kind is not None and not self.busy and all(holds(self.last_result, r) for r in group):
             self._set_kinds(group, kind)
 
@@ -294,7 +285,6 @@ class SelectionMixin:
         if not group:
             return
         size = ask_dialog(lambda: asks.SizeDialog(self, len(group), (group[0].style or RegionStyle()).size))
-        self._focus_back()
         if size is not None and not self.busy and all(holds(self.last_result, r) for r in group):
             self._restyle_regions([(r, replace(r.style or RegionStyle(), size=int(size))) for r in group], "size",
                                   SIZE_SET)
@@ -314,7 +304,6 @@ class SelectionMixin:
             return
         now = next(i for i, r in enumerate(regions) if r is chosen[0]) + 1
         place = ask_dialog(lambda: asks.PlaceDialog(self, len(chosen), len(regions), now))
-        self._focus_back()
         if place is None or self.busy or self.last_result is not result or self._ordering is not None:
             return
         self._place_regions(chosen, int(place))
@@ -341,12 +330,6 @@ class SelectionMixin:
         self.say(PLACED, place=at, total=len(ordered))
         self._redisplay()
 
-    def _focus_back(self) -> None:
-        """The page takes the keys again once a question is closed."""
-        focus = getattr(self, "_focus_page", None)
-        if focus is not None:
-            focus()
-
     # ------------------------------------------------------------------ the reading order on the boxes
     def _page_drawn(self) -> None:
         """The canvas's hook after every redraw: the reading-order badges, then the selection over them."""
@@ -355,8 +338,8 @@ class SelectionMixin:
 
     def _draw_order_badges(self) -> None:
         """Each region's place in the page's reading order (`_page_regions`) in a small badge beside its box, in
-        translator mode on the page it belongs to, unless View > Reading-order numbers is off; not while the reading
-        order is being set (the labels carry the numbers then)."""
+        translator mode on the page it belongs to, unless the badges were turned off (`ORDER_HIDDEN`); not while the
+        reading order is being set (the labels carry the numbers then)."""
         canvas = self.canvas
         canvas.delete(BADGE_TAG)
         var = getattr(self, "order_numbers_var", None)
@@ -366,13 +349,5 @@ class SelectionMixin:
         if regions:
             canvas.draw_badges([(r.bbox, str(i + 1)) for i, r in enumerate(regions)])
 
-    def toggle_order_numbers(self) -> None:
-        """View > Reading-order numbers: the badges off or on, remembered in ui.json for the next start."""
-        try:
-            save_ui_flag(Path(self.settings.state_dir), ORDER_HIDDEN, not self.order_numbers_var.get())
-        except OSError:
-            pass  # the choice holds for this session
-        self._redisplay()
 
-
-__all__ = ["ORDER_HIDDEN", "PAGE_SELECTION_TIPS", "SelectionMixin", "front_first", "placed_order"]
+__all__ = ["ORDER_HIDDEN", "SelectionMixin", "front_first", "placed_order"]

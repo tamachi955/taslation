@@ -112,7 +112,7 @@ class Readers:
     Where they run (`taslation.ocr.place`): given the *settings* in force (here, or later by `use` / `place_with`: the
     window's own object), charspot and nar go where the session's plan has them (`place.readers_placement`: the
     judgement at the start; ``ocr_runs_on`` "cpu" or "gpu" from the next read), and stay there - placed again only
-    after Tools > Release the model now let their GPU copies go (`release_gpu`) or that setting changed. A failure on
+    after Menu > Release the model now let their GPU copies go (`release_gpu`) or that setting changed. A failure on
     the GPU puts them on the CPU for the rest of the session (`_gpu_failed`). `placement` says where they are and
     why. Without *settings* they stay on the CPU, as before. CPT stays on the CPU (`place`'s docstring says why)."""
 
@@ -183,7 +183,7 @@ class Readers:
             return decided
 
     def release_gpu(self) -> None:
-        """The readers' GPU memory given back now (Tools > Release the model now: `Pipeline.gpu_releases`); they read
+        """The readers' GPU memory given back now (Menu > Release the model now: `Pipeline.gpu_releases`); they read
         on the CPU until the next read puts them where the plan has them again (`_check`). Never raises."""
         with self._lock:
             self._placed_for = None

@@ -38,11 +38,10 @@ the text and geometry of what is still to translate (`Pipeline.scanned_of`, a `S
 itself, packed without loss (`pageimages.pack`, on a thread of its own) until the backlog's read has read it
 (`Pipeline.scan`), then dropped - the regions that read gave kept in its place. Caps: FRAME_CAP_MB of frames (counted
 as they are until packed) and of the regions' masks together, and UNIT_CAP page units; a page that would pass either
-is not caught (regions that would pass it are not kept: the page is then read again when shown). A thumbnail at most
-`frames.THUMB_HEIGHT` px high of every screen told to the window (in memory, too small to read; never shown as a page).
+is not caught (regions that would pass it are not kept: the page is then read again when shown).
 The backlog is dropped (`drop`) when the window closes, for another book and for another viewer window; pages already
 stored stay stored, and nothing more is told of a screen dropped. Auto off, Stop
-and Tools > Release the model now pause it (`paused`); the next page job, or Auto on, goes on with it. A translator
+and Menu > Release the model now pause it (`paused`); the next page job, or Auto on, goes on with it. A translator
 that does not answer pauses it too ("no_answer", `follow_silence`: a request of any job's ended without an answer by
 the rule of `translate.ollama`, asked again and, for the server TASlation started, the server started again): it goes
 on by itself at the next answer of any request, and with F5 or Auto on (`go_on_after_silence`: asked once more, paused
@@ -101,14 +100,13 @@ OpenMantra and taken out: no better translation, more of the server's time - doc
 
 Events to the window (through *post*, the window's ``_post``), each with ``reading=True``:
 
-* ``page_stage`` {seq, fingerprint, stage, state[, thumb], reading}: a screen of normal reading, at every change:
+* ``page_stage`` {seq, fingerprint, stage, state, reading}: a screen of normal reading, at every change:
   *seq* the screen's place in the order of first sight in this book and
   session (1, 2, ...), *fingerprint* that of its first page unit, *stage* "read" or "translate", *state* "waiting",
   "working", "done", "failed", "skipped" or "missed" (a page that went by before it could be caught: on show
   SHOWN_AT_LEAST_MS or more, not soft, its frame changed before it was confirmed - or confirmed and not caught), and
-  read "merged" {into} for a page that went by and was then seen to be the screen *into*. The first event of a screen
-  has *thumb* (not a page that went by: it has none). Nothing is told of a frame before it is confirmed, but that it
-  went by.
+  read "merged" {into} for a page that went by and was then seen to be the screen *into*. Nothing is told of a frame
+  before it is confirmed, but that it went by.
 * ``page_on_show`` {seq, reading}: the screen on show changed (None: none of the book's).
 * ``backlog`` {pages, lines, paused, dropped, reading}: the backlog's totals changed - the pages caught and not done
   yet, the lines still to translate of those read, whether it is paused, and the screens that went by too fast to be
@@ -227,7 +225,6 @@ class Screen:
     fingerprints: tuple[str, ...] = ()
     seq: int = 0
     stages: dict[str, str] = field(default_factory=dict)
-    thumbed: bool = False
     missed: bool = False  # (told as gone by, not caught or done since)
 
 
@@ -483,11 +480,9 @@ class Backlog:
             self.screens.append(screen)
             return screen
 
-    def tell(self, screen: Screen, stage: str, state: str, image: Any = None, **extra: Any) -> None:
-        """``page_stage`` for *screen* (numbered now when it was never told), when its *stage* changes to *state*;
-        the screen's first event gets its thumbnail, made from *image* (none: a page that went by)."""
-        from .frames import thumb_of
-
+    def tell(self, screen: Screen, stage: str, state: str, **extra: Any) -> None:
+        """``page_stage`` for *screen* (numbered now when it was never told), when its *stage* changes to *state*
+        (no picture of it: the counts alone are shown)."""
         with self._lock:
             if not any(s is screen for s in self.screens):
                 return  # (a screen dropped - or merged into another - is never told of again: its seq is another's)
@@ -499,12 +494,6 @@ class Backlog:
                 screen.seq = self._seq
             data: dict[str, Any] = {"seq": screen.seq, "fingerprint": screen.fingerprint, "stage": stage,
                                     "state": state, "reading": True, **extra}
-            if not screen.thumbed and image is not None:
-                try:
-                    data["thumb"] = thumb_of(image)
-                    screen.thumbed = True
-                except Exception:  # noqa: BLE001 - told without it
-                    pass
             self._post("page_stage", **data)
 
     def show(self, screen: Screen | None) -> None:
@@ -1198,7 +1187,7 @@ class Tracking:
             return
         if state == "working" and screen.stages.get(stage) in ("done", "skipped"):
             return
-        self.backlog.tell(screen, stage, state, self.image)
+        self.backlog.tell(screen, stage, state)
 
     def _report(self) -> None:
         """(the frame confirmed) The screen on show, and how far its job is: its read done once every unit is read,
@@ -1227,7 +1216,7 @@ class Tracking:
             return
         for stage in ("read", "translate"):
             if screen.stages.get(stage) == "working":
-                self.backlog.tell(screen, stage, state, self.image)
+                self.backlog.tell(screen, stage, state)
         self.backlog.totals()
 
     def finished(self, result: Any) -> None:
@@ -1250,11 +1239,11 @@ class Tracking:
         untranslated = any(getattr(r, "status", "") == "untranslated" for r in regions)
         translated = any(getattr(r, "translated_text", "") for r in regions)
         error = getattr(result, "error", "")
-        b.tell(screen, "read", "done", self.image)
+        b.tell(screen, "read", "done")
         if error or untranslated:
-            b.tell(screen, "translate", "failed", self.image)
+            b.tell(screen, "translate", "failed")
         else:
-            b.tell(screen, "translate", "done" if translated else "skipped", self.image)
+            b.tell(screen, "translate", "done" if translated else "skipped")
         screen.missed = False
         b.release(screen, done=not (error or untranslated))
         self._keep_read(screen)
@@ -1313,7 +1302,7 @@ class Tracking:
             # once sealed, `Backlog.settle_pending`)
             with b._lock:
                 b.pending.append((self, work))
-            b.tell(screen, "translate", "waiting", self.image)
+            b.tell(screen, "translate", "waiting")
             return
         self.catch(work)
 
@@ -1331,8 +1320,8 @@ class Tracking:
         if not caught:
             self.tell_not_caught(went_by=gate is not None)
             return
-        b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting", self.image)
-        b.tell(screen, "translate", "waiting", self.image)
+        b.tell(screen, "read", "done" if work is not None and work.read_all and work.read else "waiting")
+        b.tell(screen, "translate", "waiting")
         b.totals()
 
     def tell_not_caught(self, went_by: bool = True) -> None:
@@ -1354,7 +1343,7 @@ class Tracking:
         state = "missed" if went_by and not queued else "waiting"
         for stage in ("read", "translate"):
             if screen.stages.get(stage) not in ("done", "failed", "skipped"):
-                b.tell(screen, stage, state, self.image)
+                b.tell(screen, stage, state)
         screen.missed = state == "missed" and screen.stages.get("translate") == "missed"
         b.totals()
 
@@ -1456,7 +1445,7 @@ def go_on_after_silence(window: Any) -> None:
 
 
 def tick(window: Any) -> None:
-    """(the window's event pump) `Backlog.tick`; Tools > Release the model now (`Pipeline.stop_warm` with *wait*)
+    """(the window's event pump) `Backlog.tick`; Menu > Release the model now (`Pipeline.stop_warm` with *wait*)
     pauses it until the next page job."""
     backlog = backlog_of(window, make=False)
     if backlog is None:

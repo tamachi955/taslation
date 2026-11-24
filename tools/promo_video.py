@@ -32,6 +32,9 @@ and outside ``~/.taslation``: the scratch folder), so that a video can be made a
   loaded it lets go of at its close, and what is still loaded of it at the end that was not before is unloaded).
   *--package* runs another checkout's ``taslation`` package (the one under that folder) in the same way, so that two
   versions can be recorded alike; *--label* names the recording (default: TASlation and the package's version).
+  The pictures are of TASlation's own window, so the package is one that shows it: one before 2.0.0. From 2.0.0 on
+  the window is hidden and the lettering lies over the viewer's own window (see-through mode, the program's one
+  mode): such a package is refused (`own_window_shown`) - this checkout's too -, before anything is started.
   With *--start-ollama PORT* the window's own starter starts Ollama instead, as `tools/standin_e2e.py --start-ollama`
   has it: on that loopback port, where nothing may answer (never the default port, whose server is the person's), with
   the environment the starter chooses for the window's settings (*--ollama-window-cache*, *--ocr-runs-on*: the
@@ -43,7 +46,8 @@ and outside ``~/.taslation``: the scratch folder), so that a video can be made a
 * the guard of `tools/demo_video.py`, as `tools/standin_e2e.py` has it: the window list the app sees holds the
   stand-in alone (found by the process tree this tool started AND the token in its title; no other window's title
   is read), every function that captures, moves, raises or enlarges a window acts on the stand-in or this process's
-  own windows, keys and clicks are refused outright, the global hot keys are never registered with Windows, the
+  own windows, keys and clicks are refused outright, the global hot keys of a package that has them are never
+  registered with Windows (`HotKeys`), the
   window chosen is checked at every step and anything but the stand-in ends the run at once; the window is told the
   viewer is in front (the reader's case), and the foreground is never changed by this tool;
 * the run: the stand-in starts on the page before *--first*; once the window has loaded the translation model and
@@ -1575,6 +1579,45 @@ def settings_for(settings_cls: Any, asked: Sequence[str] = (), **values: Any) ->
     return settings_cls(**{k: v for k, v in values.items() if k in names})
 
 
+def own_window_shown(settings_cls: Any, has_see_through: bool) -> bool:
+    """Whether the package running shows TASlation's own window, which `record` pictures: every package before 2.0.0,
+    with no see-through mode (*has_see_through*: it has ``taslation.ui.seethrough``) or with one as a setting of its
+    window (`Settings.see_through`, off by default). From 2.0.0 on see-through mode is the program's one mode, the
+    window hidden: nothing of it to picture."""
+    import dataclasses
+
+    return not has_see_through or "see_through" in {f.name for f in dataclasses.fields(settings_cls)}
+
+
+class HotKeys:
+    """The global hot keys of a package that has them (`capture.overlay.HotKeys`, before 2.0.0) as this tool lets the
+    window have them: none is registered with Windows - the keys stay the system's and their owner's -, the names the
+    window holds are kept, and no press ever comes (this tool presses nothing)."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    @property
+    def registered(self) -> frozenset[str]:
+        return frozenset(self.names)
+
+    def register(self, name: str, vk: int, mods: int = 0) -> bool:
+        self.names.add(name)
+        return True
+
+    def unregister(self, name: str) -> None:
+        self.names.discard(name)
+
+    def clear(self) -> None:
+        self.names.clear()
+
+    def close(self) -> None:
+        self.clear()
+
+    def take(self) -> list[str]:
+        return []
+
+
 def readers_during(records: Sequence[dict[str, Any]], start: float | None, end: float | None) -> dict[str, Any]:
     """Where the OCR readers read while the pictures were taken, from the placements noted as they changed
     (`standin_e2e.Notes.placement`: each with its time, the rule's device and why, and each reader's device): the one
@@ -1672,15 +1715,25 @@ def older_guarded(windows: Any, table: dict[str, Any], target: Callable[..., Any
 
 def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Probe) -> dict[str, Any]:
     """The guard of `tools/demo_video.py` as `tools/standin_e2e.py` has it (keys and clicks refused outright; the
-    global hot keys this tool's, never Windows'), the window told the viewer is in front, and the probe on the
-    window's page (`App._redisplay`) and on its results (`App._handle_event`); what was replaced."""
+    global hot keys of a package that has them this tool's, never Windows'), the window told the viewer is in front
+    (over the book too, in a package that has it), and the probe on the window's page (`App._redisplay`) and on its
+    results (`App._handle_event`); what was replaced."""
+    import importlib
+
     import demo_video
 
-    import taslation.capture.overlay as overlay
     import taslation.capture.wgc as wgc
     import taslation.capture.windows as windows
     from taslation.ui import app as app_mod
-    from taslation.ui import live, overbook
+    from taslation.ui import live
+
+    def optional(name: str) -> Any:  # (a module of a package before 2.0.0, None in one without it)
+        try:
+            return importlib.import_module(name)
+        except ImportError:
+            return None
+
+    overlay, overbook = optional("taslation.capture.overlay"), optional("taslation.ui.overbook")
 
     table = {name: (("never" if allow == "viewer" else allow), target)
              for name, (allow, target) in demo_video.GUARDED.items()}  # (TASlation sends no key, no click here)
@@ -1700,7 +1753,8 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Pro
         guard.refuse("a capture session")
 
     wgc.latest = compositor
-    overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
+    if overlay is not None and hasattr(overlay, "HotKeys"):
+        overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
     App = app_mod.App
     redisplay, handle_event, chosen = App._redisplay, App._handle_event, App._on_window_selected
 
@@ -1728,13 +1782,14 @@ def install(guard: Any, viewer_info: Callable[[], Any], hotkeys: Any, probe: Pro
     App._redisplay, App._handle_event, App._on_window_selected = drawn, handled, selected
     real_owner = live.foreground_owner
     live.foreground_owner = lambda hwnd, viewer, *a, **k: (real_owner(hwnd, viewer, *a, **k), "viewer")[1]
-    over_owner = overbook.foreground_owner
+    if overbook is not None and hasattr(overbook, "foreground_owner"):
+        over_owner = overbook.foreground_owner
 
-    def over(hwnd: int, viewer: int, *a: Any, **k: Any) -> str:
-        got = over_owner(hwnd, viewer, *a, **k)
-        return "viewer" if got != "own" else got
+        def over(hwnd: int, viewer: int, *a: Any, **k: Any) -> str:
+            got = over_owner(hwnd, viewer, *a, **k)
+            return "viewer" if got != "own" else got
 
-    overbook.foreground_owner = over
+        overbook.foreground_owner = over
     return done
 
 
@@ -2120,6 +2175,14 @@ def record(args: argparse.Namespace) -> int:
 
     if not Path(taslation.__file__).resolve().is_relative_to(package):
         raise SystemExit(f"taslation comes from {taslation.__file__}, not from {package}")
+    import importlib.util
+
+    from taslation.config import Settings
+
+    if not own_window_shown(Settings, importlib.util.find_spec("taslation.ui.seethrough") is not None):
+        shutil.rmtree(scratch, ignore_errors=True)
+        raise SystemExit("this package shows no window of its own to picture (2.0.0 on: the lettering lies over the "
+                         "viewer's window, TASlation's hidden): give --package a checkout before 2.0.0")
     if args.start_ollama:
         try:
             from taslation import ollama_start
@@ -2211,9 +2274,15 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     from taslation.ui.translator import remember_role
 
     # every module in place before the guard replaces what they import
+    import importlib
+
     from taslation import frames, pipeline  # noqa: F401
-    from taslation.ui import jobs, live, overbook, reading, trouble, viewers  # noqa: F401
+    from taslation.ui import jobs, live, trouble, viewers  # noqa: F401
     from taslation.ui.dialogs import caches, start  # noqa: F401
+
+    for name in ("taslation.ui.overbook", "taslation.ui.reading"):  # (a package before 2.0.0 has them too)
+        with contextlib.suppress(ImportError):
+            importlib.import_module(name)
 
     guard = demo_video.Guard(hwnd)
     if guard.is_own(hwnd) or sv.find_window(browser.tree, browser.token) != hwnd:
@@ -2232,7 +2301,7 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
         return WindowInfo(hwnd, sv.window_text(hwnd), window_class(hwnd), pid, window_rect(hwnd), program_name(pid))
 
     notes = e2e.Notes(top, dpr)
-    hotkeys = e2e.HotKeys(notes)
+    hotkeys = HotKeys()
     probe = Probe(notes)
     patched = install(guard, viewer_info, hotkeys, probe)
     state = demo_video.scratch_state()
@@ -2240,7 +2309,8 @@ def run_window(args: argparse.Namespace, browser: Any, hwnd: int, ready: dict[st
     remember_role(state, BOOK, "reader")
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
-    profiles.set_margins(info, area, large=True)
+    with contextlib.suppress(TypeError):  # (a package before 2.0.0: the area of the viewer's window it enlarged too)
+        profiles.set_margins(info, area, large=True)
     chosen = {k: v for k, v in (("ollama_window_cache", args.ollama_window_cache), ("ocr_runs_on", args.ocr_runs_on))
               if v is not None}
     settings = settings_for(Settings, asked=list(chosen), state_dir=state, ui_language="en", target_language="English",

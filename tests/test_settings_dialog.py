@@ -1,4 +1,4 @@
-"""The Settings dialog (Tools > Settings...) and the settings file it writes: the writer keeps the file's notes and
+"""The Settings dialog (Settings... in the left pane) and the settings file it writes: the writer keeps the file's notes and
 other lines, a new file is the example with every setting a note, the keys this version does not know are named once
 (by name only), what Save and Open settings file do, and how the window applies what was saved. Dialogs on the shared
 hidden root, never mapped where it can be helped."""
@@ -66,7 +66,7 @@ def test_write_settings_changes_the_lines_of_its_settings_alone(tmp_path):
     path = tmp_path / "taslation.toml"
     before = EXAMPLE.read_text(encoding="utf-8")
     path.write_text(before, encoding="utf-8")
-    values = {"min_font_size": 10, "uppercase": True, "ui_scale": 1.25, "always_on_top": True,
+    values = {"min_font_size": 10, "uppercase": True, "ui_scale": 1.25, "see_through_indicators": False,
               "detect_model": "on", "art_erase": "lama"}
     assert write_settings(path, values) == path
     old, new = before.splitlines(), path.read_text(encoding="utf-8").splitlines()
@@ -144,14 +144,15 @@ def test_unknown_keys_are_named_once_by_name_alone(tmp_path, hidden_root):
 
     assert dlg.warn_ignored(hidden_root, settings, tell) is True
     assert told == [("TASlation does not know these settings in taslation.toml and leaves them out: a_key, b_key. "
-                     "Tools > Settings... opens the file.", {"icon": "info", "wait": False})]
+                     "Settings... opens the file.", {"icon": "info", "wait": False})]
     assert "a title of mine" not in told[0][0]
     assert dlg.warn_ignored(hidden_root, settings, tell) is False and len(told) == 1  # (the next start too)
     other = settings.with_overrides(ignored_keys=("c_key",))
     assert dlg.warn_ignored(hidden_root, other, tell) is True and "c_key" in told[-1][0]
     assert dlg.warn_ignored(hidden_root, Settings(state_dir=tmp_path), tell) is False
     set_language("ja")
-    assert "ツール > 設定..." in dlg.ignored_note(settings) and "a_key, b_key" in dlg.ignored_note(settings)
+    note = dlg.ignored_note(settings)
+    assert "設定..." in note and "ツール" not in note and "a_key, b_key" in note
 
 
 def test_the_command_line_names_unknown_keys_and_not_their_values(tmp_path, monkeypatch, capsys):
@@ -164,16 +165,14 @@ def test_the_command_line_names_unknown_keys_and_not_their_values(tmp_path, monk
     assert "no_such" in err and "a title of mine" not in err
 
 
-def test_always_on_top_in_the_file_starts_the_window_on_top(tmp_path, monkeypatch):
-    import taslation.capture as capture_mod
-
-    started = []
-    monkeypatch.setattr(capture_mod, "enable_dpi_awareness", lambda: None)
-    monkeypatch.setattr(app_mod, "run_app", lambda settings, **kw: started.append(kw["on_top"]) or 0)
-    args = cli.build_parser().parse_args(["gui"])
-    cli.cmd_gui(args, Settings(state_dir=tmp_path, always_on_top=True))
-    cli.cmd_gui(args, Settings(state_dir=tmp_path))
-    assert started == [True, False]
+def test_the_old_window_s_settings_in_a_file_load_and_are_left_out(tmp_path, caplog):
+    path = tmp_path / "taslation.toml"
+    path.write_text("always_on_top = true\nsee_through = false\nmin_font_size = 10\n", encoding="utf-8")
+    with caplog.at_level("INFO", logger="taslation.config"):
+        loaded = Settings.from_toml(path)
+    assert loaded.min_font_size == 10 and loaded.ignored_keys == () and not hasattr(loaded, "always_on_top")
+    said = [r.getMessage() for r in caplog.records if "former window" in r.getMessage()]
+    assert said == ["settings of TASlation's former window left out (they do nothing now): always_on_top, see_through"]
 
 
 # ------------------------------------------------------------------ the dialog
@@ -204,10 +203,10 @@ def test_save_writes_what_changed_and_hands_it_on(hidden_root, in_force):
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=saved)
     d.sizes["min_font_size"].set("10")
     d.uppercase.set(True)
-    d.on_top.set(True)
+    d.extra["see_through_indicators"].set(False)
     d.detect.set(_("Always used"))
     assert d.save() is True
-    changed = {"min_font_size": 10, "uppercase": True, "always_on_top": True, "detect_model": "on"}
+    changed = {"min_font_size": 10, "uppercase": True, "see_through_indicators": False, "detect_model": "on"}
     assert got == [changed] and d.message_var.get() == "Saved. The changes apply now."
     text = in_force.config_path.read_text(encoding="utf-8")
     assert text.startswith(NEW_FILE_HEADER) and '# ollama_url = "http://127.0.0.1:11434"' in text
@@ -417,9 +416,6 @@ def test_the_wheel_scrolls_the_page_in_front_but_not_over_a_box_that_takes_it(hi
     assert down > 0.0
     d._wheel(SimpleNamespace(widget=label, delta=120))
     assert canvas.yview()[0] == 0.0
-    d.pages.select(d.keys_tab)  # the Shortcuts page does not scroll: the wheel leaves it alone
-    d._wheel(SimpleNamespace(widget=d.keys, delta=-120))
-    assert d.keys_tab.canvas.yview()[0] == 0.0 and not d.keys_tab.scrolls()
 
 
 def _all(widget):
@@ -435,8 +431,7 @@ def _all(widget):
 def _window(hidden_root, tmp_path):
     done = []
     w = SimpleNamespace(
-        settings=Settings(state_dir=tmp_path), top_var=tk.BooleanVar(hidden_root, value=False),
-        _apply_on_top=lambda: done.append("on top"), _dpi_watch=SimpleNamespace(rescale=lambda: done.append("scale")),
+        settings=Settings(state_dir=tmp_path), _dpi_watch=SimpleNamespace(rescale=lambda: done.append("scale")),
         _jobs=SimpleNamespace(put=lambda job: done.append(("job", job))), _job_settings_changed="rebuild",
         last_result=SimpleNamespace(original="the page"), busy=False,
         _start_translate=lambda original, complete=False: done.append(("again", original, complete)))
@@ -445,9 +440,9 @@ def _window(hidden_root, tmp_path):
 
 def test_saved_settings_are_set_on_the_window_and_applied_at_once(hidden_root, tmp_path):
     w, done = _window(hidden_root, tmp_path)
-    app_mod.App._settings_saved(w, {"always_on_top": True, "ui_scale": 1.25, "uppercase": True})
-    assert w.settings.always_on_top and w.settings.ui_scale == 1.25 and w.settings.uppercase and w.top_var.get()
-    assert done == ["on top", "scale", ("job", "rebuild"), ("again", "the page", True)]
+    app_mod.App._settings_saved(w, {"ui_scale": 1.25, "uppercase": True})
+    assert w.settings.ui_scale == 1.25 and w.settings.uppercase
+    assert done == ["scale", ("job", "rebuild"), ("again", "the page", True)]
     done.clear()
     app_mod.App._settings_saved(w, {"hover_delay_ms": 900})  # nothing on the page changes
     assert w.settings.hover_delay_ms == 900 and done == []
@@ -469,19 +464,19 @@ def test_the_worker_makes_the_page_models_for_the_new_settings(tmp_path, monkeyp
     app_mod.App._job_settings_changed(SimpleNamespace(pipeline=None))  # no pipeline yet: nothing to do
 
 
-def test_tools_settings_opens_one_dialog(tmp_path, monkeypatch):
+def test_settings_opens_one_dialog(tmp_path, monkeypatch):
     made = []
 
-    def dialog(master, settings, on_saved=None, keymap=None, on_keys=None, pipeline=None):
-        made.append((on_saved, keymap, on_keys, pipeline().stage_times))
+    def dialog(master, settings, on_saved=None, pipeline=None):
+        made.append((on_saved, pipeline().stage_times))
         return SimpleNamespace(winfo_exists=lambda: True, lift=lambda: made.append("lift"))
 
     monkeypatch.setattr(app_mod, "SettingsDialog", dialog)
-    w = SimpleNamespace(settings=Settings(state_dir=tmp_path), _settings_saved="saved", keymap="keys",
-                        _shortcuts_saved="keys saved", pipeline=SimpleNamespace(stage_times="times"))
+    w = SimpleNamespace(settings=Settings(state_dir=tmp_path), _settings_saved="saved",
+                        pipeline=SimpleNamespace(stage_times="times"))
     app_mod.App.open_settings(w)
     app_mod.App.open_settings(w)
-    assert made == [("saved", "keys", "keys saved", "times"), "lift"]  # the System page reads the window's pipeline
+    assert made == [("saved", "times"), "lift"]  # the System page reads the window's pipeline
 
 
 def test_the_window_names_unknown_keys_once_no_dialog_holds_it(tmp_path, monkeypatch):
@@ -492,7 +487,7 @@ def test_the_window_names_unknown_keys_once_no_dialog_holds_it(tmp_path, monkeyp
     w = SimpleNamespace(settings=Settings(state_dir=tmp_path), reading=False, after=lambda ms, fn: later.append(ms))
     w._warn_ignored = lambda: app_mod.App._warn_ignored(w)
     app_mod.App._warn_ignored(w)
-    assert later == [app_mod.FIRST_STEPS_RETRY_MS] and said == []
+    assert later == [app_mod.LATER_RETRY_MS] and said == []
     held[0] = False
     app_mod.App._warn_ignored(w)
     assert said == [app_mod.boxes.tell]

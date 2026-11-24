@@ -1,14 +1,14 @@
-"""The window's layout and its place on the screen: the toolbar that flows into rows in every language, one place for
-every command, comboboxes as wide as their entries, the target languages in the window's language, the status line said again after a language switch, the full screen giving the window back
-its size and place, the page panel found in the viewer's frames, the hint on an empty canvas, readable labels and
-handles, the Caches, notice, passphrase and region dialogs, the icon. Parts of the App are borrowed onto stand-ins
-on the shared hidden root (never mapped)."""
+"""The hidden window's layout and its dialogs' place on the screen: the toolbar (never seen, the state the panes and
+dialogs share) that flows into rows in every language, comboboxes as wide as their entries, the target languages in
+the window's language, the status line said again after a language switch, the window's first size, the page panel
+found in the viewer's frames, the hidden canvas keeping the page on show without drawing it, readable labels and
+handles, the Menu's Use these areas for the series greyed until it can act, the Caches, notice, passphrase and region
+dialogs, the icon. Parts of the App are borrowed onto stand-ins on the shared hidden root (never mapped)."""
 from __future__ import annotations
 
 import importlib.util
 import json
 import random
-import re
 import tkinter as tk
 import tkinter.font as tkfont
 import tomllib
@@ -39,17 +39,15 @@ def _sized(canvas, width=400, height=300):
     return canvas
 
 
-# ------------------------------------------------------------------ the toolbar and the menus
+# ------------------------------------------------------------------ the toolbar
 class Bars(tk.Toplevel):
-    """The App's toolbar and menus, built on a withdrawn window of the hidden root."""
+    """The App's toolbar, built on a withdrawn window of the hidden root."""
 
     _build_toolbar = app_mod.App._build_toolbar
     _build_translator_tools = app_mod.App._build_translator_tools
-    _build_menus = app_mod.App._build_menus
     _sync_tools = app_mod.App._sync_tools
     _target_typed = app_mod.App._target_typed
     _target_set = app_mod.App._target_set
-    _sync_series_areas_entry = app_mod.App._sync_series_areas_entry
     series_areas_ready = app_mod.App.series_areas_ready
 
     def __init__(self, root):
@@ -58,7 +56,7 @@ class Bars(tk.Toplevel):
         self.settings = SimpleNamespace(target_language="English", ollama_model="qwen3.5:4b", role="reader")
         for name in ("window_var", "book_var", "model_var", "lang_var", "role_var", "ui_lang_var"):
             setattr(self, name, tk.StringVar(self))
-        for name in ("auto_var", "original_var", "top_var", "over_var", "order_numbers_var"):
+        for name in ("auto_var", "original_var"):
             setattr(self, name, tk.BooleanVar(self))
         self.model_var.set("qwen3.5:4b")
         self.role_var.set("reader")
@@ -66,20 +64,18 @@ class Bars(tk.Toplevel):
     def _noop(self, *_args, **_kwargs):
         pass
 
-    open_page_keys = _noop
-    set_area = clear_area = translate_now = enter_reading = _on_role_changed = toggle_order = toggle_skip = _noop
+    set_area = clear_area = translate_now = _on_role_changed = toggle_order = toggle_skip = _noop
     retranslate_page = open_book_settings = open_review = open_corrections = open_find_replace = undo_edit = redo_edit = _turn_direction = stop_page = _noop
     open_lines_to_review = _noop
-    _redisplay = _apply_on_top = open_glossary = open_caches = review_names = _rescan_windows = _noop
-    _on_window_selected = open_notice = _on_ui_language = toggle_over = _noop
-    open_about = open_help = open_keys = open_updates = _noop
+    _redisplay = open_glossary = open_caches = review_names = _rescan_windows = _noop
+    _on_window_selected = open_notice = _on_ui_language = _noop
+    open_about = open_help = open_updates = _noop
     open_settings = _noop
 
     def build(self, code: str) -> app_mod.FlowBar:
         set_language(code)
         for child in self.winfo_children():
             child.destroy()
-        self._build_menus()
         self._build_toolbar()
         self.update_idletasks()
         return self.toolbar
@@ -95,19 +91,6 @@ def _texts(widget) -> list[tuple[str, str]]:
     return found
 
 
-def _menu_labels(menu: tk.Menu) -> list[str]:
-    """Every entry's label, the menus' own names among them."""
-    labels = []
-    for i in range(int(menu.index("end")) + 1):
-        kind = menu.type(i)
-        if kind == "cascade":
-            labels.append(str(menu.entrycget(i, "label")))
-            labels += _menu_labels(menu.nametowidget(menu.entrycget(i, "menu")))
-        elif kind in ("command", "checkbutton", "radiobutton"):
-            labels.append(str(menu.entrycget(i, "label")))
-    return labels
-
-
 def test_the_toolbar_flows_into_rows_and_shows_every_control_whole_in_every_language(hidden_root):
     w = Bars(hidden_root)
     rows = {}
@@ -121,12 +104,8 @@ def test_the_toolbar_flows_into_rows_and_shows_every_control_whole_in_every_lang
                     assert x + group.winfo_reqwidth() <= room, (code, width, [t for _k, t in _texts(group)])
                 assert int(flowing.cget("height")) >= 24 * flowing.rows  # the bar is as tall as its rows
             rows[(code, width)] = bar.rows
-        # one place each: no control of the toolbar or of the strip is in a menu too, and none shows twice
-        labels = _menu_labels(w.menubar)
         shown = [text for _kind, text in _texts(bar) + _texts(w.tools_bar)]
-        assert len(shown) == len(set(shown)) and len(labels) == len(set(labels)), code
-        assert not {text.replace(" (F5)", "").replace(" (F11)", "") for text in shown} & set(labels), code
-        assert not set(shown) & set(labels), code
+        assert len(shown) == len(set(shown)), code  # none twice
     assert all(rows[(c, 1366)] <= rows[(c, 1180)] <= rows[(c, 820)] <= 3 for c in UI_LANGUAGES)
     assert sum(rows[(c, 1180)] == 1 for c in UI_LANGUAGES) > len(UI_LANGUAGES) / 2  # one row for most languages
     set_language("en")
@@ -148,53 +127,51 @@ def test_the_comboboxes_are_as_wide_as_their_longest_entry(hidden_root):
     set_language("en")
 
 
-def test_the_window_has_no_mode_box_and_each_choice_one_place(hidden_root):
+def test_the_window_has_no_mode_box_and_the_toolbar_holds_only_the_shared_state(hidden_root):
     w = Bars(hidden_root)
     w.build("en")
     assert not hasattr(w, "mode_box") and not hasattr(w, "mode_var") and not hasattr(w, "_stop_entry")
     assert not hasattr(w, "model_box") and not hasattr(w, "_tool_entries") and w.model_var.get() == "qwen3.5:4b"
+    assert not hasattr(w, "menubar") and not hasattr(w, "hint_label")  # (no menu bar, no strip's hint: the panes)
     assert all("Mode" not in text for _kind, text in _texts(w.toolbar))
-    menus = {str(w.menubar.entrycget(i, "label")): w.menubar.nametowidget(w.menubar.entrycget(i, "menu"))
-             for i in range(int(w.menubar.index("end")) + 1) if w.menubar.type(i) == "cascade"}
-    assert list(menus) == ["Page", "Tools", "View", "Language", "Help"]
-    assert _menu_labels(menus["Page"]) == ["Set area...", "Page keys...", "Ignore this area on all pages of this book",
-                                         "Use these areas for the series",
-                                         "Copy format", "Paste format", "Paste format on every region of this kind...",
-                                         "Copy region", "Paste region", "Set kind...", "Set text size...",
-                                         "Place in reading order..."]
-    assert _menu_labels(menus["Tools"]) == ["Saved translations...", "Names rendered in more than one way...",
-                                              "Settings...", "Release the model now"]
-    assert _menu_labels(menus["View"]) == ["Show original", "Translation on the page, original under the pointer",
-                                         "Original on the page, translation under the pointer",
-                                         "Under the pointer: a panel beside the bubble",
-                                         "Under the pointer: the bubble itself", "Always on top",
-                                         "Over the full-screen viewer", "Reading-order numbers"]
-    assert _menu_labels(menus["Help"]) == ["How to use...", "Keys...", "Legal notice...", "Check for updates...",
-                                           "About TASlation"]
     shown = [text for _kind, text in _texts(w.toolbar)]
-    assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Full screen (F11)", "Reader", "Translator",
-                                    "Stop (Esc)"])
+    assert sorted(shown) == sorted(["Translate (F5)", "Auto", "Reader", "Translator", "Stop (Esc)"])
     set_language("en")
+
+
+def _edit_menu(root, app):
+    from taslation.ui import see_edit
+
+    menu, page = tk.Menu(root, tearoff=0), tk.Menu(root, tearoff=0)
+    see_edit.build_menu(app, menu, page)
+    entry = next(i for i in range(int(page.index("end")) + 1)
+                 if page.type(i) == "command" and page.entrycget(i, "label") == "Use these areas for the series")
+    state = str(page.entrycget(entry, "state"))
+    menu.destroy()
+    page.destroy()
+    return state
 
 
 def test_use_these_areas_for_the_series_is_greyed_until_the_book_has_a_series(hidden_root):
     w = Bars(hidden_root)
     w.build("en")
-    page = next(w.menubar.nametowidget(w.menubar.entrycget(i, "menu")) for i in range(int(w.menubar.index("end")) + 1)
-                if w.menubar.type(i) == "cascade" and w.menubar.entrycget(i, "label") == "Page")
-    entry = next(i for i in range(int(page.index("end")) + 1)
-                 if page.type(i) == "command" and page.entrycget(i, "label") == "Use these areas for the series")
-    assert w._series_areas_entry == (page, entry)
-    assert str(page.entrycget(entry, "state")) == "disabled"  # no book read yet
-    w.tk.call(page.cget("postcommand"))  # the menu opens
-    assert str(page.entrycget(entry, "state")) == "disabled"
+    w._ordering = None
+    for name in ("set_kind_of_selection", "set_size_of_selection", "place_in_order", "copy_format", "paste_format",
+                 "paste_format_on_kind", "copy_region", "paste_region", "_drop_chosen", "ignore_area_everywhere",
+                 "use_areas_for_series_now"):
+        setattr(w, name, w._noop)
+    assert _edit_menu(hidden_root, w) == "disabled"  # no book read yet (the Menu is built as it opens)
     w.pipeline, w.busy = SimpleNamespace(annotations=SimpleNamespace(can_share=True, book="Lantern Quay 2")), False
     w.book_var.set("Lantern Quay 2")
-    w.tk.call(page.cget("postcommand"))
-    assert str(page.entrycget(entry, "state")) == "normal"
+    assert _edit_menu(hidden_root, w) == "normal"
+    w.busy = True  # a job on: not now
+    assert _edit_menu(hidden_root, w) == "disabled"
+    w.busy = False
+    w.book_var.set("Another Book 3")  # the book in the fields is not the one read
+    assert _edit_menu(hidden_root, w) == "disabled"
+    w.book_var.set("Lantern Quay 2")
     w.pipeline.annotations.can_share = False  # a book of one volume: no series
-    w.tk.call(page.cget("postcommand"))
-    assert str(page.entrycget(entry, "state")) == "disabled"
+    assert _edit_menu(hidden_root, w) == "disabled"
     w.destroy()
 
 
@@ -204,27 +181,21 @@ def test_translator_tools_follow_the_role_on_the_strip(hidden_root):
     assert not w._tool_strip.winfo_manager()  # the reader role: translator mode's strip is not there
     assert [str(b.cget("text")) for b in w.tool_btns] == [
         "Reading order", "Skip page", "Translate again", "Book settings...", "Series sheet...", "Review...",
-        "My corrections...", "Lines to review...", "Find and replace...", "Text direction (T)", "Undo (Ctrl+Z)",
-        "Redo (Ctrl+Y)"]
+        "My corrections...", "Lines to review...", "Find and replace...", "Text direction", "Undo", "Redo"]
     assert all(str(b.cget("state")) == "disabled" for b in w.tool_btns)
     w.role_var.set("translator")
     w._sync_tools()
     assert all(str(b.cget("state")) == "normal" for b in w.tool_btns)
-    assert w._tool_strip.winfo_manager() == "pack" and w.hint_label.winfo_manager() == "pack"
-    assert str(w.hint_label.cget("text")).startswith("Click: select · drag: move")
+    assert w._tool_strip.winfo_manager() == "pack"
     w.role_var.set("reader")
     w._sync_tools()
-    assert not w._tool_strip.winfo_manager()  # gone again with its hint
+    assert not w._tool_strip.winfo_manager()  # gone again
     assert w.translate_btn.cget("text") == "Translate (F5)"
     set_language("ja")
     assert _("Translate (F5)") == "翻訳 (F5)" and _("Translate again") == "訳し直す"
     w.role_var.set("translator")
     w.build("ja")  # built anew (a language switch) in the translator role: the strip is there at once
     assert w._tool_strip.winfo_manager() == "pack"
-    assert str(w.hint_label.cget("text")) == ("クリックで選択・ドラッグで移動・ハンドルで大きさ変更・丸いハンドルで回転（Shift で 15° ずつ）・"
-                                              "ダブルクリックか Enter で編集・Esc で選択解除・"
-                                              "空いた所をドラッグで追加・Delete で削除・T で文字列の方向・Ctrl+Z で元に戻す・"
-                                              "Ctrl+Y でやり直す・Tab で次の領域・Alt+矢印キーで 1px ずつ移動")
     w.role_var.set("reader")
     set_language("en")
 
@@ -266,12 +237,10 @@ def test_the_target_languages_show_in_the_windows_language_and_stay_english(hidd
 # ------------------------------------------------------------------ the status line
 class Line:
     status = app_mod.App.status
-    _note_ms = app_mod.App._note_ms
     say = app_mod.App.say
 
     def __init__(self, root):
         self.status_var = tk.StringVar(master=root)
-        self.reading = False
 
 
 def test_a_status_line_is_said_again_in_the_new_language(hidden_root):
@@ -286,190 +255,6 @@ def test_a_status_line_is_said_again_in_the_new_language(hidden_root):
 
 
 # ------------------------------------------------------------------ the window's size and place
-class FakeTk:
-    """What the geometry helpers ask of Tk, with idle callbacks run on demand."""
-
-    _restore_geometry = app_mod.App._restore_geometry
-    _current_geometry = app_mod.App._current_geometry
-    _track_geometry = app_mod.App._track_geometry
-
-    def __init__(self, geometry: str, state: str = "normal"):
-        self._geometry, self._state = geometry, state
-        self.reading, self._restoring, self._normal_geometry = False, False, geometry
-        self.idle: list = []
-        self.calls: list[tuple[str, str]] = []
-
-    def geometry(self, new=None):
-        if new is None:
-            return self._geometry
-        self.calls.append(("geometry", new))
-        self._geometry = new
-
-    def state(self, new=None):
-        if new is None:
-            return self._state
-        self.calls.append(("state", new))
-        self._state = new
-
-    def after_idle(self, func):
-        self.idle.append(func)
-
-    def run_idle(self):
-        while self.idle:
-            self.idle.pop(0)()
-
-
-def test_reading_mode_gives_the_window_back_its_size_and_place_after_tks_own_resizing():
-    w = FakeTk("1180x920+1940+20")
-    for _cycle in range(3):
-        saved = w._current_geometry()
-        assert saved == ("1180x920+1940+20", False)
-        w._geometry = "1180x900+1940+20"  # the menu bar put back takes its 20 px from the inside, as Tk does
-        w._restore_geometry(saved)
-        assert w._restoring and w.geometry() == "1180x900+1940+20"  # not before Tk is done
-        w.run_idle()
-        assert w.geometry() == "1180x920+1940+20" and not w._restoring
-    # maximised on the second monitor: full screen leaves it maximised on the first one; its place comes back
-    # first, then it is maximised again there (on Windows that order puts it on the monitor of its place)
-    w = FakeTk("1180x920+1940+20")
-    w._track_geometry(SimpleNamespace(widget=w))
-    w._state, w._geometry = "zoomed", "1920x989+1940+20"
-    saved = w._current_geometry()
-    assert saved == ("1180x920+1940+20", True)
-    w._state, w._geometry = "zoomed", "1920x1009+0+0"
-    w.calls.clear()
-    w._restore_geometry(saved)
-    w.run_idle()
-    assert w.calls == [("state", "normal"), ("geometry", "1180x920+1940+20"), ("state", "zoomed")]
-    assert not w._restoring
-    w._track_geometry(SimpleNamespace(widget=w))  # maximised: its size and place before it are kept
-    assert w._normal_geometry == "1180x920+1940+20"
-    w.calls.clear()  # a language switch while maximised and nothing else: left as it is
-    w._restore_geometry(saved, rezoom=False)
-    w.run_idle()
-    assert w.calls == []
-
-
-class Reading(tk.Toplevel):
-    """The full screen in and out on a withdrawn window of the hidden root (full screen is only recorded)."""
-
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
-    enter_reading = app_mod.App.enter_reading
-    _reading_role = app_mod.App._reading_role
-    leave_reading = app_mod.App.leave_reading
-    status = app_mod.App.status
-    _note_ms = app_mod.App._note_ms
-    say = app_mod.App.say
-    _normal_status = app_mod.App._normal_status
-    _page_status = app_mod.App._page_status
-    _restore_geometry = app_mod.App._restore_geometry
-    _current_geometry = app_mod.App._current_geometry
-    _window_monitor = app_mod.App._window_monitor
-    _onto_monitor = app_mod.App._onto_monitor
-    _area_offer_due = app_mod.App._area_offer_due
-    _set_covered = app_mod.App._set_covered
-    _watch_top_edge = app_mod.App._watch_top_edge
-    _top_edge_moved = app_mod.App._top_edge_moved
-    _top_edge_left = app_mod.App._top_edge_left
-    _show_close = app_mod.App._show_close
-    _hide_close = app_mod.App._hide_close
-    _close_clicked = app_mod.App._close_clicked
-    _ask_name_after_reading = app_mod.App._ask_name_after_reading
-
-    def __init__(self, root):
-        super().__init__(root)
-        self.withdraw()
-        self.attrs = {"-alpha": 0.99, "-fullscreen": 0}
-        self.menubar = tk.Menu(self)
-        self.config(menu=self.menubar)
-        self.bar = ttk.Frame(self)
-        self.bar.pack(fill="x")
-        self._bars = (self.bar,)
-        self.canvas = ImageCanvas(self)
-        self.canvas.pack(fill="both", expand=True)
-        self.status_bar = ttk.Frame(self)
-        self.status_bar.pack(fill="x")
-        self.notes_label = ttk.Label(self)
-        self.status_var = tk.StringVar(self)
-        self.original_var, self.auto_var, self.top_var = tk.BooleanVar(self), tk.BooleanVar(self), tk.BooleanVar(self)
-        self.role_var = tk.StringVar(self, value="reader")
-        self.selected, self.last_result = VIEWER, None
-        self.reading = self._viewer_hidden = self._restoring = False
-        self._ordering = self._chosen_region = self._status_render = self._status_key = None
-        self._normal_geometry = ""
-        self._manual_area = True  # an area of the reader's: Set area... is not offered first
-        self._covered = False
-        self.alphas: list[float] = []  # every alpha the window was given, in turn
-
-    def attributes(self, *args):
-        if len(args) == 1:
-            return self.attrs.get(args[0], 0)
-        self.attrs[args[0]] = args[1]
-        if args[0] == "-alpha":
-            self.alphas.append(args[1])
-
-    def _own_hwnd(self):  # not on a screen: no monitor to go to
-        return None
-
-    def _apply_on_top(self):
-        pass
-
-    def _redisplay(self):
-        pass
-
-    def _show_notes(self):
-        pass
-
-    def _result_on_show(self):
-        return False
-
-    def _on_escape(self):
-        pass
-
-
-def test_leaving_reading_mode_puts_back_the_place_and_the_normal_status(hidden_root):
-    w = Reading(hidden_root)
-    w.geometry("640x480+2000+40")
-    w.update_idletasks()
-    w.say("Viewer: {title}", title=VIEWER.title)
-    w.auto_var.set(True)  # (Auto on already: the plain first line, tests/test_reading_flow.py has the other)
-    for _cycle in range(3):
-        w.enter_reading()
-        assert w.reading and w.attrs["-fullscreen"] is True and str(w.cget("menu")) == ""
-        assert w.status_var.get() == "Full screen: page keys turn the viewer's pages; F11 or Esc leaves it."
-        w.leave_reading()
-        assert not w.reading and w.attrs["-fullscreen"] is False and str(w.cget("menu")) == str(w.menubar)
-        assert w.status_var.get() == "Viewer: " + VIEWER.title  # not the full screen's line any more
-        w.geometry("640x460+0+0")  # what Tk might leave meanwhile
-        w.update_idletasks()  # the idle callbacks: the size and place come back after Tk's own resizing
-        assert w.geometry() == "640x480+2000+40" and not w._restoring
-    w.role_var.set("translator")  # the full screen in the Translator role leaves the same way
-    w.say("Viewer: {title}", title=VIEWER.title)
-    w.enter_reading()
-    assert w.reading and w.attrs["-fullscreen"] is True and w.status_var.get().startswith("Full screen, Translator role")
-    w.leave_reading()
-    assert not w.reading and w.attrs["-fullscreen"] is False and str(w.cget("menu")) == str(w.menubar)
-    assert w.status_var.get() == "Viewer: " + VIEWER.title
-    w.update_idletasks()
-    assert w.geometry() == "640x480+2000+40" and not w._restoring
-
-
-@pytest.mark.parametrize("role", ["reader", "translator"])
-def test_the_full_screen_rests_show_original_and_gives_it_back(hidden_root, role):
-    """Show original is in a menu, and the full screen has none: left on, it would show originals with no way back."""
-    w = Reading(hidden_root)
-    w.role_var.set(role)
-    w.original_var.set(True)
-    w.enter_reading()
-    assert w.reading and not w.original_var.get()  # the translation, in either role
-    w.leave_reading()
-    assert not w.reading and w.original_var.get()  # as the reader had it
-    w.original_var.set(False)
-    w.enter_reading()
-    w.leave_reading()
-    assert not w.original_var.get()
-
-
 def test_the_first_size_fits_the_work_area_and_sits_in_its_middle(monkeypatch):
     for screen, work, expected in (((1366, 768), (0, 0, 1366, 728), "1180x669+85+0"),
                                    ((1920, 1080), (0, 0, 1920, 1032), "1180x920+362+26"),
@@ -640,10 +425,9 @@ def _browser(size=(960, 600), page=(200, 130, 760, 560), bars=85):
 
 
 class Viewer(BlackViewerMixin):
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
+    _enlarge_first = lambda self: True  # (the viewer's window looked at once: tests/test_see_hidden.py)
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
-    _resizing = app_mod.App._resizing
     _find_page = app_mod.App._find_page
     _found_margins = app_mod.App._found_margins
     _margins_of = app_mod.App._margins_of
@@ -661,7 +445,7 @@ class Viewer(BlackViewerMixin):
     def __init__(self, manual=None):
         self.settings = Settings()
         self.settings.margins = manual or (0, 0, 0, 0)
-        self.selected, self.reading, self.busy, self.ready = VIEWER, False, False, False
+        self.selected, self.busy, self.ready = VIEWER, False, False
         self._manual_area, self._page_areas, self._area_hinted = manual is not None, {}, False
         self._hand_area, self._inner_areas = manual, {}
         self.profiles = SimpleNamespace(set_margins=lambda title, margins, large=False: None)
@@ -692,7 +476,7 @@ def test_the_page_panel_found_in_a_capture_becomes_the_capture_area(viewer):
     image = viewer._capture(VIEWER.hwnd)
     assert image is viewer.frame
     assert tuple(viewer.settings.margins) == (150, 44, 150, 20)  # the whole window less the frame
-    assert viewer.settings.with_overrides(next_page_key="Left").margins == (150, 44, 150, 20)  # the batch's too
+    assert viewer.settings.with_overrides(page_turn_wait_ms=900).margins == (150, 44, 150, 20)  # the batch's too
     assert not viewer._area_hint_due()  # found: no hint
 
 
@@ -705,7 +489,7 @@ def test_a_hand_set_area_is_the_outer_bound_and_the_page_panel_inside_it_is_read
     monkeypatch.setattr(live, "capture_window", lambda hwnd, **_k: w.frame)
     w._capture(VIEWER.hwnd)
     assert tuple(w.settings.margins) == (200, 130, 200, 40) and w._hand_area == (0, 85, 0, 0)
-    assert tuple(w.settings.with_overrides(next_page_key="Left").margins) == (200, 130, 200, 40)  # the batch's too
+    assert tuple(w.settings.with_overrides(page_turn_wait_ms=900).margins) == (200, 130, 200, 40)  # the batch's too
     assert not w._page_areas and not w._area_hint_due()  # nothing looked for on the whole capture meanwhile
     w.frame = Image.new("RGB", (960, 600), "white")  # nothing found on this one (a panel over the page)
     w._capture(VIEWER.hwnd)
@@ -818,7 +602,7 @@ def test_clear_area_is_a_button_of_the_set_area_dialog(hidden_root, viewer, monk
     left = []
     viewer.after = lambda ms, then: left.append(then)
     viewer.set_area(then=lambda: left.append("reading"))
-    opened[1]()  # the full screen offered the area first: it opens after this too
+    opened[1]()  # (a caller that goes on once the area is set: it goes on after Clear area too)
     assert len(left) == 1 and left[0]() is None and left[-1] == "reading"
 
     cleared = []
@@ -863,38 +647,28 @@ def test_the_area_dialog_shows_the_page_panel_found_inside_the_area_dashed(hidde
 
 
 # ------------------------------------------------------------------ the canvas
-class Empty:
+class Shown:
+    """The page on show as `_redisplay` keeps it on the hidden canvas."""
+
     _redisplay = app_mod.App._redisplay
-    _margins_of = app_mod.App._margins_of
+    _hidden_picture = app_mod.App._hidden_picture
     _status_follows_page = app_mod.App._status_follows_page
 
     def __init__(self, root):
         self.canvas = _sized(ImageCanvas(root))
-        self.reading = self._viewer_hidden = False
         self.selected = None
-        self.settings = SimpleNamespace(margins=(0, 0, 0, 0))
-
-    def _picture(self):
-        return None, [], []
+        self._fill = self.last_result = self._live = self._status_page = None
+        self._see_through = None  # (no see-through window: no patches handed over)
 
 
-def test_with_no_viewer_the_canvas_says_what_to_do(hidden_root):
-    w = Empty(hidden_root)
-    set_language("ja")
-    try:
-        w._redisplay()
-        items = w.canvas.find_withtag("hint")
-        shown = w.canvas.itemcget(items[0], "text")
-        assert items and re.sub(r"\s", "", shown) == re.sub(r"\s", "", i18n.JA[app_mod.NO_VIEWER])
-        font = tkfont.Font(font=w.canvas.itemcget(items[0], "font"))
-        assert w.canvas.itemcget(items[0], "fill") == "#ffffff" and shown.count("\n") >= 1  # broken into lines ...
-        assert all(font.measure(line) <= 400 - 80 for line in shown.split("\n"))  # ... that fit the canvas
-        assert "TASlation" in shown  # never broken inside
-    finally:
-        set_language("en")
-    w.selected = VIEWER  # a viewer is chosen: its picture comes instead
+def test_the_hidden_canvas_keeps_the_page_on_show_and_draws_nothing(hidden_root):
+    w = Shown(hidden_root)
+    w._redisplay()  # no viewer yet: nothing on show, no hint drawn either (the panes and the chooser say it)
+    assert w.canvas._image is None and w.canvas.find_all() == () and w.canvas.hint == ""
+    frame = Image.new("RGB", (400, 300), "white")
+    w.selected, w._live = VIEWER, frame
     w._redisplay()
-    assert not w.canvas.find_withtag("hint") and w.canvas.hint == ""
+    assert w.canvas._image is frame and w.canvas.find_all() == ()  # held, never drawn
 
 
 def test_translator_labels_and_handles_read_on_white_and_on_black(hidden_root):

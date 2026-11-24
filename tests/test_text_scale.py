@@ -1,4 +1,4 @@
-"""The lettering size (`Settings.text_scale`, Tools > Settings... and a book's own in Book settings...): at 100 % the
+"""The lettering size (`Settings.text_scale`, Settings... and a book's own in Book settings...): at 100 % the
 page is lettered as it was before there was one (no extra pass, the same pixels); under it every translation smaller
 by so much, never under the smallest size; over it larger only where the page's sizes held it back, never past its
 bubble or the largest size; the page's sizes measured at 100 % (no double scaling); a book's own size and largest

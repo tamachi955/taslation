@@ -1,5 +1,5 @@
-"""The see-through window (a prototype behind ``Settings.see_through``, off by default; Windows only): TASlation's
-lettering laid over the viewer's own window, which goes on taking every click and key itself.
+"""The see-through window (Windows only): TASlation's lettering laid over the viewer's own window, which goes on
+taking every click and key itself.
 
 * A window of its own, not Tk's: per-pixel alpha needs a layered window drawn with ``UpdateLayeredWindow`` from a
   premultiplied BGRA picture, which Tk cannot give. Its extended styles are WS_EX_LAYERED | WS_EX_TRANSPARENT (no

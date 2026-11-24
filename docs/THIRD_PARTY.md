@@ -80,7 +80,7 @@ TASlation translates with one model at a time, run by Ollama on this computer, a
 needs is installed (TASlation offers the other when the language changes, and removes only a model it installed
 itself; `taslation/translator_install.py` keeps the record, `translator_models.json` in the data folder). Neither is in
 this repository or bundled: `setup_models.py --translator-for LANGUAGE` installs it, after a person said yes (install.ps1
-asks, the window and the command line ask when the language changes).
+asks, TASlation and the command line ask when the language changes).
 
 | Model | Licence | Lineage | Training data |
 |---|---|---|---|
@@ -111,7 +111,7 @@ What the PLaMo Community License, as revised on November 9, 2026, means here, in
 * the user is responsible for having the rights, permissions and consents needed for what they put into it and for
   what comes out, and the licence gives no licence to anyone else's rights in them (article 9): the agreement step
   says so; for a book, that is what the legal notice is about;
-* "Built with PLaMo" is shown where TASlation is described: Help > About TASlation and the README. Article 4 asks it,
+* "Built with PLaMo" is shown where TASlation is described: Menu > Help > About TASlation and the README. Article 4 asks it,
   with a copy of the licence and "PLaMo" in a model's name, of whoever provides the model or a model made from it to
   others (since the revision, no longer of whoever provides outputs). TASlation provides neither, as each computer
   downloads the file from Hugging Face itself, and keeps the credit all the same;
@@ -122,7 +122,7 @@ What the PLaMo Community License, as revised on November 9, 2026, means here, in
   (4)). The legal notice says so in every language, besides asking never to publish or share translations at all;
 * the model and its output come as is, without any warranty, and the user is responsible for how they use them
   (article 7);
-* the agreement is asked for before anything is downloaded, in install.ps1, in the window (a tick and a button of its
+* the agreement is asked for before anything is downloaded, in install.ps1, in TASlation (a tick and a button of its
   own) and at the console, and written down with its time, the revision and the licence texts' SHA256 in
   `translator_models.json`; a changed licence is asked about again before PLaMo is next installed.
 

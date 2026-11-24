@@ -236,9 +236,9 @@ def offer_standard_name(window: Any) -> None:
     make (a cache from before the two fields: "Title 3巻"), offered once per session to be renamed to it
     (`StandardNameOffer`): Rename plans the rename as the colophon's does (`JobsMixin._plan_rename`, the review first
     where the sheets say otherwise), Not now leaves it under the old name, where it is read and written as before.
-    It waits while the full screen or a dialog of the start is on, or a page is being translated (the end of each
-    page offers it again: "translate_done")."""
-    if (getattr(window, "reading", False) or getattr(window, "_start_dialog", None) is not None
+    It waits while a dialog of the start is on, or a page is being translated (the end of each page offers it again:
+    "translate_done")."""
+    if (getattr(window, "_start_dialog", None) is not None
             or getattr(window, "busy", False) or getattr(window, "book_var", None) is None):
         return  # (a window part with no Book group, too)
     current = window.book_var.get().strip()

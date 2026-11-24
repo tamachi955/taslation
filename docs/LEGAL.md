@@ -13,8 +13,8 @@ and it is not legal advice. Laws differ from country to country, and they change
 Each time you turn a page, TASlation makes a temporary copy of what the viewer drew on the screen (a capture in memory),
 translates the text with a model on your own computer (an adaptation of the work), and shows the result over the same page, to you alone. So that it does not translate a page twice,
 it saves the translations, the positions of the bubbles and the page fingerprint in the cache. It saves no page image. With the translations it keeps the book's name, what the book's colophon says of it, and your corrections and notes, in files on your computer
-(docs/MANUAL.md, "The translation cache and backups", and Help > How to use... > Your data list all of it). While you read, it sends nothing anywhere but to the translation program on your computer;
-the network is used only when you install or update TASlation, when you agree to download a translation model, and, only if you turn it on or ask for it in the Help menu, to look for a new version
+(docs/MANUAL.md, "The translation cache and backups", and Menu > Help > How to use... > Your data list all of it). While you read, it sends nothing anywhere but to the translation program on your computer;
+the network is used only when you install or update TASlation, when you agree to download a translation model, and, only if you turn it on or ask for it in Menu > Help, to look for a new version
 (then a program of its own, `check_update.py`, asks GitHub for one small file and sends nothing about you or your books).
 
 The capture is temporary. In Japan, since Article 2 requires a tangible reproduction, it may be considered not to be a reproduction at all,
@@ -111,7 +111,7 @@ that it is an infringement in law, but there is no criminal penalty for private 
 
 ## The notice at start
 
-For these reasons, the window shows a notice when it starts. First it asks which country you are in (it suggests one from Windows' region setting)
+For these reasons, TASlation shows a notice when it starts. First it asks which country you are in (it suggests one from Windows' region setting)
 and the window's language (it suggests one from the country), and shows a general notice in that language. The notice covers what TASlation does;
 that private use is allowed in Japan but not everywhere; that translations must never be shared; that the book is shown as it was published,
 and that possessing it may be illegal depending on where you read; and that translations can be wrong. It also explains what "a civil matter" means, that the law that applies is the law of the place where you read,
@@ -126,7 +126,7 @@ The notice is shown at every start until you tick "Do not show this again".
 
 TASlation's code is free software under the MIT licence, provided as is, without any warranty. However, the weights of the three OCR models needed to read pages (manga-ocr-charspot-small, manga-ocr-nar-small, manga-ocr-base-CPT-flex) are CC BY-NC-SA 4.0, so **use of TASlation is limited to non-commercial use**. To the extent the law allows, the author
 is not liable for any damage or legal consequence arising from the use of this software, from the books read with it, or from the information on this page and in the notice (a summary of laws that can change, not legal advice). Whether to use it is for you to decide, where you are.
-The notice at start says so too, and asks for your agreement before the window opens.
+The notice at start says so too, and asks for your agreement before TASlation goes on.
 
 TASlation is not affiliated with, not endorsed by, and not connected with any e-book store, viewer or publisher.
 
@@ -137,9 +137,9 @@ The sources for each country's laws and cases are in [docs/LEGAL_SOURCES.md](LEG
 ## What is left out on purpose
 
 * **Sending anything over the network**: It never sends information outside to translate. Everything is done locally.
-* **Saving page images**: Captured pages, cut-out images and translated pages exist only in memory. There is no "Save image" button and no export command. The capture of a page you turned past stays in memory only until its lettering is read (at most 256 MB), and is never shown or saved. What shows how far it is is a thumbnail at most 96 pixels high, too small to read, which also exists only in memory.
-* **Saving the Japanese original**: The cache holds the *translations*, the positions of the bubbles and a 320-bit page fingerprint. The Japanese text is never written to disk. The cache, series-sheet and notes files are saved protected with Windows' own data protection (DPAPI), and only your Windows user on this computer can open them. The window's settings files (ui.json and the like) keep the names of the books you read last, unprotected.
-* **Making the book readable without the viewer**: What the cache holds can be shown only over the real page shown in the viewer, and only when the fingerprints match. The same goes for the pages you turned past, which are translated in the background: their captures in memory cannot be paged through and read inside TASlation. Clicking a thumbnail beside the page only tells you to open that page in the viewer. It does not let you read without the viewer, because that causes problems, for example where payment depends on what is viewed.
+* **Saving page images**: Captured pages, cut-out images and translated pages exist only in memory. There is no "Save image" button and no export command. The capture of a page you turned past stays in memory only until its lettering is read (at most 256 MB), and is never shown or saved. How far it is shows only as the number of pages and lines still to go.
+* **Saving the Japanese original**: The cache holds the *translations*, the positions of the bubbles and a 320-bit page fingerprint. The Japanese text is never written to disk. The cache, series-sheet and notes files are saved protected with Windows' own data protection (DPAPI), and only your Windows user on this computer can open them. TASlation's settings files (ui.json and the like) keep the names of the books you read last, unprotected.
+* **Making the book readable without the viewer**: What the cache holds can be shown only over the real page shown in the viewer, and only when the fingerprints match. The same goes for the pages you turned past, which are translated in the background: their captures in memory cannot be paged through and read inside TASlation. TASlation shows only how many pages and lines are still to go. It does not let you read without the viewer, because that causes problems, for example where payment depends on what is viewed.
 * **Breaking the viewer's capture protection**: It uses only Windows' ordinary window capture. A window the viewer has made uncapturable shows up black, and TASlation leaves it so. It decrypts nothing, and never touches DRM, file formats or network protocols.
 * **Sharing**: There is no account, no sync and no upload, and nothing is exported in a readable form. The saved files cannot be read when copied to another computer or opened by another Windows user. But a program running as your Windows user can open them, as TASlation does. You can turn your own translation cache into a file encrypted with your own passphrase, as a backup for yourself or for another computer of your own (or for a smartphone version of the reader that may be made in the future), but it cannot be read without the passphrase. Never share it. This file is the only way to keep a spare or to move the translations. After Windows is reinstalled, or an administrator resets your Windows password, the saved files can no longer be opened.
 

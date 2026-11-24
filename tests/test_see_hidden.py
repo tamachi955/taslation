@@ -1,14 +1,15 @@
-"""See-through mode without TASlation's own window on the screen (`ui.seethrough.hidden`): its size and place always
-off every monitor, never minimised nor maximised, alpha 0 and an application's window with its taskbar button titled
-TASlation, each put back when changed; the foreground handed back to the viewer when Windows gave it to the window,
-and a click on its taskbar button giving a dialog on show, the chooser, the Menu with the left pane's controls or the
-viewer; its Close quitting as Quit does; its dialogs over the viewer and on the viewer's monitor, the ones the reader
-asked for taking the keys; the Menu (`ui.see_menu`) with the window's entries that still mean something, the viewer
-chooser and Series and Volume as small dialogs, the chooser coming by itself with no viewer, the setup banner's lines
-in the right pane with their buttons in the Menu (a dialog with that pane off); what needs the window left out (over the book and its hot keys, the full screen, the Translator role, the viewer's window
-enlarged, the line that TASlation covers the viewer, the pages seen), the panes' words naming no menu and no key, and
-the Settings dialog without the window's rows; and with the mode off, nothing of it. Fake windows and a withdrawn Tk
-root only: nothing is shown, no key, no click, the foreground only read."""
+"""TASlation's own window never on the screen (`ui.seethrough.hidden`): its size and place always off every monitor,
+never minimised nor maximised, alpha 0 and an application's window with its taskbar button titled TASlation, each put
+back when changed; the foreground handed back to the viewer when Windows gave it to the window, and a click on its
+taskbar button giving a dialog on show, the chooser, the Menu with the left pane's controls or the viewer; its Close
+quitting as Quit does; its dialogs over the viewer and on the viewer's monitor, the ones the reader asked for taking
+the keys; the Menu (`ui.see_menu`) with the window's entries that still mean something, the viewer chooser and Series
+and Volume as small dialogs, the chooser coming by itself with no viewer, the setup banner's lines in the right pane
+with their buttons in the Menu (a dialog with that pane off); a start whose see-through window could not be made said
+in a box and ended; the Translator role as the left pane's Edit, the viewer's window looked at as it is (never
+enlarged), no line that TASlation covers the viewer, the panes' words naming no menu and no key, and the Settings
+dialog with the mode's rows only; and without the hidden flag (`quiet_start` off Windows), nothing of it. Fake windows
+and a withdrawn Tk root only: nothing is shown, no key, no click, the foreground only read."""
 
 import time
 import tkinter as tk
@@ -83,47 +84,45 @@ def test_every_size_and_place_given_the_hidden_window_goes_off_the_screen_and_it
         assert getattr(app_mod.App, name) is getattr(ui.HiddenWindowMixin, name), name
 
 
-def test_with_see_through_off_the_window_is_tks_own(monkeypatch):
-    root = Root()  # (no _see_hidden: as every start without the mode)
+def test_without_the_hidden_flag_the_window_is_tks_own(monkeypatch):
+    root = Root()  # (no _see_hidden: as a window `quiet_start` did not hide)
     root.geometry("1180x920+300+40")
     root.state("zoomed")
     root.iconify()
     assert root.calls == [("geometry", "1180x920+300+40"), ("state", "zoomed"), ("iconify",)]
     assert root.dialog_centre() is None
+    monkeypatch.setattr(ui.window, "IS_WINDOWS", False)  # (off Windows: nothing hides it)
     later, attributes = [], []
     app = SimpleNamespace(after=lambda ms, f: later.append(ms), wm_attributes=lambda *a: attributes.append(a))
     ui.quiet_start(app, Settings())
-    assert not ui.hidden(app) and attributes == []
-    ui.unhide(app)  # (nothing to undo)
-    assert attributes == []
+    assert not ui.hidden(app) and attributes == [] and app._quiet_decoy is None and not ui.quiet(app)
     assert ui.keep_hidden(app) is None and ui.hand_back(app) is False
 
 
-def test_the_hidden_window_is_never_seen_and_never_on_top(monkeypatch):
-    from taslation.ui import reading
-
-    monkeypatch.setattr(reading, "IS_WINDOWS", True)
+def test_the_hidden_window_is_never_seen(monkeypatch):
+    monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
     set_ = []
-    window = SimpleNamespace(attributes=lambda *a: set_.append(a), top_var=SimpleNamespace(get=lambda: True),
-                             reading=False, _see_hidden=True)
-    reading.ReadingMixin._apply_alpha(window)
-    reading.ReadingMixin._apply_on_top(window)
-    assert set_ == [("-alpha", 0.0), ("-topmost", False)]
-    window._see_hidden, set_[:] = False, []
-    reading.ReadingMixin._apply_alpha(window)
-    reading.ReadingMixin._apply_on_top(window)
-    assert set_ == [("-alpha", reading.WINDOW_ALPHA), ("-topmost", True)]
+    window = SimpleNamespace(attributes=lambda *a: set_.append(a), _see_hidden=True)
+    ui.HiddenWindowMixin._apply_alpha(window)
+    assert set_ == [("-alpha", 0.0)]
+    window._see_hidden = False
+    ui.HiddenWindowMixin._apply_alpha(window)
+    assert set_ == [("-alpha", 0.0)]  # (not hidden: left as Tk has it)
+    from taslation.ui import app as app_mod
+
+    assert app_mod.App._apply_alpha is ui.HiddenWindowMixin._apply_alpha
 
 
-def test_unhide_gives_the_window_back_when_the_see_through_window_could_not_start(monkeypatch):
+def test_a_start_whose_see_through_window_could_not_be_made_says_so_and_ends(monkeypatch):
+    from taslation.ui.dialogs import caches
+
     monkeypatch.setattr(ui.window.SeeThrough, "start", classmethod(lambda cls: None))
-    attributes, geometry, alpha = [], [], []
-    app = SimpleNamespace(settings=Settings(see_through=True), _see_hidden=True, _normal_geometry="1180x920+40+40",
-                          wm_attributes=lambda *a: attributes.append(a), wm_geometry=geometry.append,
-                          _apply_alpha=lambda: alpha.append(app._see_hidden))
+    told = []
+    monkeypatch.setattr(caches, "tell", lambda parent, text, **k: told.append((parent, text)))
+    app = SimpleNamespace(settings=Settings(), _see_hidden=True, quit_before_start=False)
     assert ui.start(app) is False
-    assert not ui.hidden(app) and attributes == [("-toolwindow", False)] and alpha == [False]
-    assert geometry == ["1180x920+40+40"]
+    assert app.quit_before_start is True and not ui.on(app)
+    assert told == [(app, ui.COULD_NOT_START)]  # (in the window's language: English here)
 
 
 # ------------------------------------------------------------------ kept as it is to be
@@ -268,32 +267,6 @@ def test_a_dialog_the_reader_asked_for_takes_the_keys_as_it_shows_and_the_others
     app._see_asked -= ui.ASKED_S + 0.1
     ui._mapped(app, SimpleNamespace(widget=dialog))
     assert done == ["lift", "focus"]
-
-
-def test_the_first_starts_popup_waits_for_a_start_with_the_window(monkeypatch):
-    from taslation.ui import app as app_mod
-
-    made = []
-    monkeypatch.setattr(app_mod, "first_steps_due", lambda state_dir: True)
-    monkeypatch.setattr(app_mod, "FirstSteps", lambda *a, **k: made.append(a) or "popup")
-    monkeypatch.setattr(app_mod, "modal_up", lambda window: False)
-    window = SimpleNamespace(_first_steps=None, settings=Settings(), _see_hidden=True, reading=False,
-                             _first_steps_closed=None, open_help=None)
-    app_mod.App._offer_first_steps(window)
-    assert made == [] and window._first_steps is None
-    window._see_hidden = False
-    app_mod.App._offer_first_steps(window)
-    assert len(made) == 1 and window._first_steps == "popup"
-
-
-def test_neither_over_the_book_nor_the_full_screen_while_the_window_is_hidden(monkeypatch):
-    from taslation.ui import overbook, reading
-
-    monkeypatch.setattr(overbook, "IS_WINDOWS", True)
-    window = SimpleNamespace(_see_hidden=True, reading=False)  # (nothing else: a path past the guard fails here)
-    overbook.OverBookMixin._over_sync(window)
-    overbook.OverBookMixin._remember_place(window)
-    reading.ReadingMixin.enter_reading(window)
 
 
 # ------------------------------------------------------------------ the Menu
@@ -705,9 +678,8 @@ def banner_window(**more):
     return window, shown
 
 
-@pytest.mark.parametrize("kind, kept", [("closed", False), ("tied", False), ("covered", False), ("minimised", True)])
-def test_the_banners_dialog_leaves_choosing_a_viewer_to_the_chooser_and_has_no_window_to_move(monkeypatch, kind,
-                                                                                               kept):
+@pytest.mark.parametrize("kind, kept", [("closed", False), ("tied", False), ("minimised", True), ("black", True)])
+def test_the_banners_dialog_leaves_choosing_a_viewer_to_the_chooser(monkeypatch, kind, kept):
     from taslation.ui import status
 
     said = []
@@ -753,7 +725,7 @@ def test_the_start_listens_for_dialogs_and_the_window_minimised_and_makes_no_ico
     over, binds = FakeOver(), []
     monkeypatch.setattr(ui.window.SeeThrough, "start", classmethod(lambda cls: over))
     monkeypatch.setattr(wgc, "set_update_ms", lambda ms: None)
-    app = SimpleNamespace(settings=Settings(see_through=True), _see_hidden=True, after=lambda ms, f: "job",
+    app = SimpleNamespace(settings=Settings(), _see_hidden=True, after=lambda ms, f: "job",
                           bind_class=lambda *a, **k: binds.append(a[:2]))
     assert ui.start(app) is True
     assert binds == [("Toplevel", "<Map>"), ("Toplevel", "<Unmap>"), ("Toplevel", "<Destroy>"), ("Tk", "<Unmap>")]
@@ -793,34 +765,6 @@ def test_no_icon_in_the_notification_area_and_the_menu_presses_nothing_and_moves
 
 
 # ------------------------------------------------------------------ what needs TASlation's own window is not used
-def test_over_the_book_holds_no_hot_key_and_offers_nothing_while_the_window_is_hidden(monkeypatch):
-    from taslation.capture import overlay
-    from taslation.ui import overbook
-
-    monkeypatch.setattr(overbook, "IS_WINDOWS", True)
-    monkeypatch.setattr(overlay.HotKeys, "start", classmethod(lambda cls: (_ for _ in ()).throw(AssertionError)))
-    said = []
-    window = SimpleNamespace(_see_hidden=True, reading=False, say=said.append, _over_on=False)
-    window._over_enter = lambda: said.append("enter")
-    window._over_offer = lambda offered: said.append("offer")
-    window._over_keys = lambda: said.append("keys")
-    overbook.OverBookMixin._over_sync(window)  # (a viewer full screen or not: no enter, no offer, no hot key)
-    assert said == []
-
-
-def test_the_start_leaves_out_the_full_screen_and_says_so_once(caplog):
-    import logging
-
-    app = SimpleNamespace(_reading_at_start=True, settings=Settings(role="translator"))
-    with caplog.at_level(logging.INFO, logger=ui.__name__):
-        ui.without_the_window(app)
-        ui.without_the_window(app)
-    assert app._reading_at_start is False
-    lines = [r.getMessage() for r in caplog.records]
-    assert sum("full screen" in line for line in lines) == 1
-    assert not any("role" in line for line in lines)  # (the Translator role is the left pane's Edit now)
-
-
 def test_edit_follows_only_the_role_kept_for_the_book_while_the_window_is_hidden():
     from taslation.ui import translator
 
@@ -864,30 +808,39 @@ def test_the_role_is_the_edit_switch_s_state():
     assert see_edit.on(app) is False  # (the window on the screen: its own Translator role, no Edit)
 
 
-def test_the_viewers_window_is_never_enlarged_while_the_window_is_hidden(monkeypatch):
+def test_the_viewers_window_is_never_enlarged_only_looked_at(monkeypatch):
+    import inspect
+
     from taslation.ui import viewers
 
-    monkeypatch.setattr(viewers, "enlarge_window", lambda hwnd: (_ for _ in ()).throw(AssertionError("moved")))
-    monkeypatch.setattr(viewers, "window_shown", lambda hwnd: True)
-    window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarging=None, _enlarge_asked=None)
+    assert not hasattr(viewers, "enlarge_window")  # (nothing that moves or resizes it is at hand)
+    assert "SetWindowPos" not in inspect.getsource(viewers) and "MoveWindow" not in inspect.getsource(viewers)
+    shown = [False]
+    monkeypatch.setattr(viewers, "window_shown", lambda hwnd: shown[0])
+    window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarge_asked=None)
+    assert viewers.ViewerMixin._enlarge_first(window) is True and window._enlarge_asked is None  # (minimised: later)
+    shown[0] = True
     assert viewers.ViewerMixin._enlarge_first(window) is True
-    # looked at for it all the same (read as it is): what early start waits for before it starts a page at once
+    # looked at once (read as it is): what early start waits for before it starts a page at once
     assert window._enlarge_asked == 5 and viewers.ViewerMixin._enlarge_first(window) is True
+    window.selected = None
+    assert viewers.ViewerMixin._enlarge_first(window) is True and window._enlarge_asked == 5
 
 
-def test_early_start_goes_on_while_the_window_is_hidden_once_the_viewer_was_looked_at(monkeypatch):
+def test_early_start_goes_on_once_the_viewer_was_looked_at(monkeypatch):
     from taslation.ui import live, viewers
 
-    monkeypatch.setattr(viewers, "enlarge_window", lambda hwnd: (_ for _ in ()).throw(AssertionError("moved")))
     monkeypatch.setattr(viewers, "window_shown", lambda hwnd: True)
-    window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarging=None, _enlarge_asked=None,
+    window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarge_asked=None,
                              _early=None, ready=True, busy=False, _early_on=lambda: True, _black_open=lambda: False,
                              auto_var=SimpleNamespace(get=lambda: True), _auto_last=None, _start_pending=None,
                              _starts_book=lambda image: False, _all_cached=lambda image: False)
-    op = SimpleNamespace(turned_at=None, operation=None)
+    op = SimpleNamespace(operation=None)
     assert not live.LiveViewMixin._early_allowed(window, op, None, None)  # (the viewer's first page: not looked at)
     viewers.ViewerMixin._enlarge_first(window)
     assert live.LiveViewMixin._early_allowed(window, op, None, None)
+    window.auto_var = SimpleNamespace(get=lambda: False)  # (Auto off: nothing starts by itself)
+    assert not live.LiveViewMixin._early_allowed(window, op, None, None)
 
 
 def test_no_line_says_taslation_covers_the_viewer_while_its_window_is_hidden():
@@ -897,15 +850,6 @@ def test_no_line_says_taslation_covers_the_viewer_while_its_window_is_hidden():
     window = SimpleNamespace(_covered=False, _see_hidden=True, say=said.append)
     live.LiveViewMixin._set_covered(window, True)
     assert said == [] and window._covered is False
-
-
-def test_the_pages_seen_are_not_counted_while_the_window_is_hidden(monkeypatch):
-    from taslation.ui import side
-
-    looked = []
-    seen = SimpleNamespace(look=lambda *a, **k: looked.append(a) or (True, True), watch=None)
-    monkeypatch.setattr(side, "state", lambda window: SimpleNamespace(seen=seen, model=SimpleNamespace(on_show=3)))
-    assert side.on_picture(SimpleNamespace(_see_hidden=True), object()) == [] and looked == []
 
 
 # ------------------------------------------------------------------ the banner's lines in the right pane
@@ -975,38 +919,30 @@ def test_every_language_s_page_menu_aside_is_left_out_of_the_panes_words():
         assert not any(mark in left for mark in "()（）"), code
 
 
-# ------------------------------------------------------------------ the Settings dialog in see-through mode
-def test_the_settings_dialog_leaves_out_what_acts_on_the_windows_page_and_shows_the_modes_own_rows(hidden_root,
-                                                                                                    tmp_path,
-                                                                                                    monkeypatch):
+# ------------------------------------------------------------------ the Settings dialog
+def test_the_settings_dialog_has_the_modes_own_rows_and_none_of_the_old_windows(hidden_root, tmp_path, monkeypatch):
     from taslation.ui.dialogs import settings as dlg
 
     monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
     settings = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
-                        config_path=tmp_path / "taslation.toml", see_through=True)
-    window_only = {"hover_shows", "hover_reveal", "bubble_zoom", "side_indicator", "panel_font_size",
-                   "hover_delay_ms"}
-    plain = dlg.SettingsDialog(hidden_root, settings)
-    tabs = [plain.pages.tab(t, "text") for t in plain.pages.tabs()]
-    assert tabs == ["General", "Shortcuts", "System"]
-    assert window_only <= set(plain.extra) | set(plain.numbers)
-    assert not {"see_through", "see_through_indicators"} & set(plain.extra)  # (1.0.1's window: as it was)
-    plain.destroy()
+                        config_path=tmp_path / "taslation.toml")
+    gone = {"see_through", "hover_shows", "hover_reveal", "bubble_zoom", "side_indicator", "panel_font_size",
+            "always_on_top", "over_book", "next_page_key", "prev_page_key"}
     owner = tk.Toplevel(hidden_root)
     owner.withdraw()
     owner._see_hidden = True
     got = []
     see = dlg.SettingsDialog(owner, settings, on_saved=got.append)
     assert [see.pages.tab(t, "text") for t in see.pages.tabs()] == ["General", "System"]
-    assert not (window_only - {"hover_delay_ms"}) & (set(see.extra) | set(see.numbers))
-    assert {"see_through", "see_through_indicators"} <= set(see.extra)
+    assert not gone & (set(see.extra) | set(see.numbers) | set(see.values()))
+    assert "see_through_indicators" in see.extra
     assert set(see.numbers) == {"hover_delay_ms"}  # (the mode's own row of the delay: the patch under the pointer)
-    values = see.values()
-    assert all(values[key] == getattr(settings, key) for key in window_only)  # (left out: kept as they are)
     assert see.changed() == {}
-    see.extra["see_through"].set(False)
     see.extra["see_through_indicators"].set(False)
-    assert see.save() is True and got == [{"see_through": False, "see_through_indicators": False}]
+    see.numbers["hover_delay_ms"].set(str(settings.hover_delay_ms + 50))
+    assert see.save() is True
+    assert got == [{"see_through_indicators": False, "hover_delay_ms": settings.hover_delay_ms + 50}]
     again = Settings.from_toml(tmp_path / "taslation.toml")
-    assert again.see_through is False and again.see_through_indicators is False
+    assert again.see_through_indicators is False and again.hover_delay_ms == settings.hover_delay_ms + 50
     see.destroy()
+    owner.destroy()

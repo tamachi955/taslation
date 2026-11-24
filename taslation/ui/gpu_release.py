@@ -1,4 +1,4 @@
-"""Tools > Release the model now (`release_now`): the GPU memory TASlation's own models hold given back at once, for a
+"""Menu > Release the model now (`release_now`): the GPU memory TASlation's own models hold given back at once, for a
 game or another program, without closing the window; and the layers on the GPU (``ollama_num_gpu``) set on the
 window's translators when the Settings dialog saved them (`apply_num_gpu`).
 
@@ -130,7 +130,7 @@ def released_line(names: list[str], pages: bool, ocr: bool = False) -> tuple[str
 
 
 def release_now(window: Any) -> bool:
-    """Tools > Release the model now: refused in the status line while the model is in use (`in_use`), else a job of
+    """Menu > Release the model now: refused in the status line while the model is in use (`in_use`), else a job of
     the window's worker (`release_models`) whose result the status line says. Whether it was queued."""
     if in_use(window):
         window.say(RELEASE_REFUSED)

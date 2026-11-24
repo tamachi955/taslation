@@ -2,14 +2,14 @@
 stand-in viewer (`tools/standin_viewer`), with no real book and no real viewer - a developer's debugging aid, never
 part of a release.
 
-    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,r,t,o,z,x,f,f2] [--canned] [--scale 1.0]
+    python tools/standin_e2e.py --out SCRATCH [--scenario all | c,a,b,d,e,x,f2] [--canned] [--scale 1.0]
                                 [--browser auto|chrome|edge] [--seed 1] [--series 1] [--first 1] [--synthetic]
                                 [--front viewer|as-is] [--cancel-soft-ms 700] [--ollama-url http://127.0.0.1:11434]
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
                                 [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
-                                [--see-through] [--see-truth] [--standin-size WxH] [--standin-full-screen]
-                                [--capture-ms MS] [--no-viewer-s S] [--book-asked]
+                                [--see-truth] [--see-indicators on|off] [--see-edit] [--standin-size WxH]
+                                [--standin-full-screen] [--no-viewer-s S] [--book-asked]
 
 What runs, all on this computer:
 
@@ -20,11 +20,10 @@ What runs, all on this computer:
   the series chosen by its place in the sorted list, *--series*, never by name; no picture is copied), or with
   *--synthetic* (or no dataset) the repository's two test pages, turned and flipped. The page TURNS BY ITSELF from a
   script in its URL, released part by part through a control file in the scratch folder: no key, no click, nothing
-  is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here; in
-  scenario t the key the window hands to the viewer for a page key pressed on its page is noted, never sent, and
-  releases the stand-in's turn);
-* TASlation's window in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: page by page, Auto
-  on, the Reader role, early start and the load of the model at the start as the defaults have them), on a scratch
+  is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here);
+* TASlation in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: its one mode, see-through -
+  the lettering laid over the stand-in's own window by a click-through window of TASlation's, its own window hidden -,
+  Auto on, Edit off, early start and the load of the model at the start as the defaults have them), on a scratch
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
   English; the reader's capture area 0,85,0,0 as on the owner's browser reader, its top scaled with *--scale*),
   with the real OCR models
@@ -43,41 +42,26 @@ What runs, all on this computer:
   stand-in or this process's own windows, else the run stops; the window chosen is checked at every step
   (`standin_viewer.SelectionGuard`) and anything but the stand-in stops the run at once, nothing pressed.
   This tool never changes the foreground: the window follows a viewer in front, which is the reader's case, and with
-  *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was) -
-  over the book (scenario o) it is told so whenever its own window is not in front, and it gives the stand-in the
-  foreground from its own window as that mode does. Its global hot keys are never registered with Windows: the
-  window holds them in this tool's `HotKeys`, which notes their names, and a hot key "pressed" is this tool's call
-  handed to the window as Windows hands one over (only for a key the window holds); no key reaches the system;
+  *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was);
 * *--scale* other than 1: the stand-in's browser draws as on a display of that scale (``--force-device-scale-factor``,
   its own window and the page's devicePixelRatio), TASlation's text size (`Settings.ui_scale`) is set to it and the
   reader's capture area scaled with it; no setting of the system's is changed.
 
-The scenarios, in this order (each released once the window has come to rest after the one before):
+The scenarios, in this order (each released once the window has come to rest after the one before), every turn the
+stand-in's own:
   c  turns while the model still loads at the start         a  slow reading: 9 turns 6-8 s apart
   b  fast flipping: 10 turns 0.3-0.5 s apart, then a rest   d  black flashes and spinners between turns
   e  turning back to pages translated (cache hits)
-  r  the full screen in the Reader role, entered and left by F11's own handler (`toggle_reading`): slow turns, a
-     quick one, back
-  t  the full screen in the Translator role: the toolbar's Translator, F11's own handler; at rest a region selected
-     by a click on the page and the region editor opened by a double click (Tk's own pointer events on the page,
-     no input of the system's) and closed by its Esc, the selection let go by Esc; then the window's next page key
-     (Tk's key event on the page) turns the page - the key the window hands to the viewer releases the stand-in's
-     turn (`page_key`) -, and t2 its previous page key back; the full screen left by Esc, the Reader role again
-     (t brings t2, t2 brings t)
-  o  over the book: the stand-in made to fill its monitor, View > Over the full-screen viewer on, the status bar's
-     Move TASlation there, the Full screen button; turns as in r; the full screen left by the F11 hot key, the mode
-     turned off, both windows put back
-  z  TASlation's text size at 150 % of the run's (Settings), turns, back
   x  a request cancelled in flight at the translator: screens of little text (the dataset's pages with one or two
      lines, by its annotation's counts) drawn soft for --cancel-soft-ms at half resolution, so that the window reads
      the soft frame and asks on it before the sharp one comes; then back (needs the dataset)
-  f  the dark theme, then a narrow window (single pages)
-  f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page, the
-     stand-in made narrow once the window has had its viewer's window as large as it makes it
+  f2 the stand-in's window made narrow (single pages)
+  f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page
+  k  (by its name only: k5, k1, k2; k3 by its own name) pages flipped past at a pace, then read back
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
-the OCR on four logical processors, the model on them too): each rest of a, d, e, r, o, z, x, f, f2 and f3, the one at
-its end too (the driver changes the window for the next scenario as soon as the stand-in waits for it), is held until
+the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2 and f3, the one at its end
+too (the driver changes the stand-in for the next scenario as soon as it waits for it), is held until
 the page on show is finished - the window shows it translated -, or the window has been at rest without it, or CAP_S
 has gone by (``hN`` in the stand-in's script, let go through its control file); x's screens of little text are kept
 soft until the window asked on the soft frame (``kN``, KEEP_SOFT_S at most) instead of --cancel-soft-ms. Each hold and
@@ -89,10 +73,10 @@ control file are what they always were.
 process of its own on a scratch state with a browser window it has never seen, and what it learns of a viewer that
 draws soft first (`App._drew_soft`) is held for that window in memory only, so it starts not knowing; the report says
 what the stand-in drew (no soft draw) and how often the window learnt it all the same (``run.timing``: must be never).
-Scenario x (a request cancelled on a soft frame) is left out of all and refused by name; c, a, b, f, f2, t and k are
-timed from the sharp draw, which is the turn; d's flashes and spinners, e's turns back to cached pages, r, o and z
-change only in that their turns have no soft time; --k-soft changes nothing. The default, on, keeps the scenarios and
-the runners' checks exactly as they are.
+Scenario x (a request cancelled on a soft frame) is left out of all and refused by name; c, a, b, f2, f3 and k are
+timed from the sharp draw, which is the turn; d's flashes and spinners and e's turns back to cached pages change only
+in that their turns have no soft time; --k-soft changes nothing. The default, on, keeps the scenarios and the
+runners' checks exactly as they are.
 
 *--standin-profile dark|light* has the stand-in behave as one of two kinds of web viewer (standin.html says how: the
 page fitted to the height of the viewer's area, the cover alone, bars over the page, side arrows, a slider in the
@@ -104,16 +88,15 @@ with the bars held over the page for 15 s. The report keeps what the stand-in sa
 washed-out pictures, turns, jumps, sizes and draws, with their times (``run.stand_in_profile_events``). Without it
 the stand-in is what it always was.
 
-*--see-through* runs the window in see-through mode (``Settings.see_through``: the lettering laid over the stand-in's
-own window by a click-through window of TASlation's), watched by `standin_seethrough.SeeWatch` (``run.see_through``:
-the time from the stand-in's change of screen to the old page's patches gone, the hits, the foreground, the frames a
-second, the CPU; with *--see-truth* copies of the stand-in's place on the screen in memory, checked for old patches
-over a new page, two of them into shots/; *--see-indicators off* with the indicators' pane switched off,
-``Settings.see_through_indicators``). With a profile and without it the frames a second and the CPU are noted all
-the same, for the comparison (*--capture-ms 16* asks for the frames as often as see-through mode does). *--standin-size
+The see-through window is watched by `standin_seethrough.SeeWatch` (``run.see_through``: the time from the
+stand-in's change of screen to the old page's patches gone, the hits, the foreground, the frames a second, the CPU;
+with *--see-truth* copies of the stand-in's place on the screen in memory, checked for old patches over a new page,
+two of them into shots/; *--see-indicators off* with the indicators' pane switched off,
+``Settings.see_through_indicators``; *--see-edit* with Edit on, the region under the pointer measured,
+``run.see_through.edit``). *--standin-size
 WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
-reader's area the whole frame). In see-through mode TASlation's own window is never on the screen: the watch reads its
-handle once a second (on no monitor, alpha 0, an application's window with its taskbar button titled TASlation:
+reader's area the whole frame). TASlation's own window is never on the screen: the watch reads its handle once a
+second (on no monitor, alpha 0, an application's window with its taskbar button titled TASlation:
 ``run.see_through.hidden_window``). *--no-viewer-s S*
 gives the window no viewer to find for its first S seconds (the viewer chooser comes by itself meanwhile), and
 *--book-asked* starts it with a name that names no book, so that the start dialog asks it at Auto's first page; the
@@ -144,14 +127,15 @@ cancelled with its page on show, ``resized_away``); overlays left on a page the 
 the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
-stand-in rested on; the window's modes as they changed (reading, over the book, the text size, the role) and the
-hot keys it held; the requests of scenario x sent for nothing and what their cancel cost. Into *--out*: report.json
+stand-in rested on; the window's role (Edit) as it changed; the requests of scenario x sent for nothing and what
+their cancel cost. Into *--out*: report.json
 (with the lines of the rule for a request without an answer and of the backlog's pause for it, ``no_answer``, each silence with what the server answered just then: `LogTap`); stacks.txt
 when a request to the translator stays under way too long (`watch_stuck`: the threads' stacks, files, lines and
 functions only); with --start-ollama the server's own log, ollama_server.log (no prompt or answer in it); and shots/ -
 pictures of
-TASlation's OWN window only (PrintWindow of its handle, the client area; never a copy of the screen) at chosen
-moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete them after.
+TASlation's OWN window only (PrintWindow of its handle, the client area, hidden as it is; never a copy of the screen)
+at chosen moments: they show the sample pages (CC BY-NC) and the model's lettering, for the developer's eyes; delete
+them after.
 With each picture: the capture area, the part of the frame the page view draws against the page the stand-in drew
 there (`page_facts`: rows of the browser's title bar and of the band drawn, the ground drawn round the page) and what
 the reading makes of the frame (`reading_facts`: the page units in the area and on the whole frame, their fingerprints'
@@ -188,7 +172,6 @@ from ctypes import wintypes
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -212,7 +195,6 @@ REST_MS = 2000  # a screen on show sharp so long is one the reader rested on
 STALE_MS = 1000  # a page lettered on show this long after the stand-in left it is an overlay left behind
 LAG_MS = 1000  # ... any page of the window's this long: the window did not follow
 LONG_CAPTURE_MS = 100  # a capture that took longer is noted with when it was
-MODE_WAIT_S = 20.0  # a mode of a scenario not on so long after it was entered: the scenario is released all the same
 STANDIN_SIZE = (1300, 900)
 NARROW_SIZE = (860, 1000)
 APP_SIZE = (1180, 940)
@@ -231,13 +213,7 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "d": ("black flashes, spinners", ["n", "w6000", "f800", "w5000", "s1500", "w5000", "n", "w300", "f700",
                                       "w6000", "s2500", "n", "w6000"]),
     "e": ("turning back", ["p", "w3000", "p", "w3000", "p", "w3000", "n", "w3000", "n", "w4000"]),
-    "r": ("full screen, Reader role", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000", "p", "w3000"]),
-    "t": ("full screen, Translator role", ["n", "w6000"]),  # (each turn released by a page key: `Director.page_key`)
-    "t2": ("its page key back", ["p", "w4000"]),
-    "o": ("over the book", ["n", "w6000", "n", "w6000", "n", "w300-500", "n", "w6000"]),
-    "z": ("text size", ["n", "w6000", "p", "w3000", "n", "w4000"]),
     "x": ("cancelled in flight", []),  # (its steps: `cancel_steps`, on the screens of little text added for it)
-    "f": ("dark theme", ["n", "w6000", "n", "w6000"]),
     "f2": ("narrow window", ["n", "w6000", "n", "w6000"]),
     # (by its name only: a's slow reading on single pages - the stand-in made narrow first, as for f2, after the
     # window has had its viewer's window as large as it makes it; the timing figures' screens of one page)
@@ -254,7 +230,7 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
                                              "w9000", "a", "w500", "n", "w7000", "v2000", "w600", "n", "w7000", "j44",
                                              "w9000", "p", "w6000", "j56", "v15000", "w17000"]),
 }
-ORDER = ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
+ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
 NAMED_ONLY = ("q", "f3")  # scenarios never in "all", only by their names
@@ -266,33 +242,23 @@ PROFILE_EVENTS = ("bars", "bars_done", "arrows", "spinner", "preview", "turn", "
 PROFILE_EVENT_WORDS = ("on", "why", "by", "dir", "side", "state", "kind", "page", "pages", "ms", "full", "band", "box",
                        "from", "to", "frames", "median", "p90", "max")
 K_READ_MS = 8000  # ... the pages read back at this pace
-K_KEY_GIVE_UP_S = 3.0  # --k-keys: a key the window has not handed on so long after it was pressed releases its turn
 K_STAYED_MS = 800  # ... a flipped page whose sharp frame stayed this long is caught (the gate's confirmation)
-PAIRS = (("f", "f2"), ("t", "t2"), ("t2", "t"))  # a scenario that brings another with it
-KEYED = {"t": "next", "t2": "prev"}  # the scenarios whose turn a page key pressed on the window's page releases
-ACTS_WAIT_S = 90.0  # scenario t: the Translator's acts begin at rest on a translated page, or after this long at most
-FULL_SCREEN_SETTLE_S = 2.0  # ... and once the full screen has had this long to lay the page out at its size
 # the turns whose soft frame and sharp frame drawn quickly are pictured (turns that come to a window at rest), and
 # (scenario, turn) -> (seconds after the turn began, name): the other pictures of a turn
-SOFT_SHOTS = {"a": (1,), "e": (3,), "r": (1,), "t": (1,), "o": (1,), "x": (1,), "f2": (1,)}
+SOFT_SHOTS = {"a": (1,), "e": (3,), "x": (1,), "f2": (1,)}
 SHOTS = {("c", 2): (1.0, "c_loading"), ("a", 1): (5.2, "a_turn1_rest"), ("a", 5): (5.2, "a_turn5_rest"),
          ("b", 10): (6.0, "b_after_flipping"), ("d", 3): (5.0, "d_rest"), ("e", 1): (1.5, "e_back_cached"),
-         ("r", 1): (5.2, "r_rest"), ("r", 4): (5.0, "r_after_flipping"), ("r", 5): (1.5, "r_back_cached"),
-         ("t", 1): (5.2, "t_rest_after_the_key"), ("t2", 1): (1.5, "t2_back_cached"),
-         ("o", 1): (5.2, "o_rest"), ("o", 4): (5.0, "o_after_flipping"), ("z", 1): (5.2, "z_rest"),
-         ("x", 1): (4.0, "x_rest"), ("f", 2): (5.0, "f_dark_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
+         ("x", 1): (4.0, "x_rest"), ("f2", 1): (1.5, "f_narrow_turn1"),
          ("f2", 2): (5.0, "f_narrow_rest"), ("q", 1): (8.0, "q_bars_at_rest"), ("q", 2): (1.0, "q_bars_after_a_turn"),
          ("q", 4): (0.3, "q_arrows"), ("q", 8): (9.0, "q_bars_held")}
 RESIZE_SHOT_S = 3.0  # the picture of the window this long after the stand-in drew its page at a new size
-TEXT_SIZE = 1.5  # scenario z: TASlation's text size, times the run's
 CANCEL_SCREENS = 3  # scenario x: the screens of little text (spreads of pages with 1 to CANCEL_LINES lines of text)
 CANCEL_LINES = 2
 CANCEL_FACTOR = 2  # ... drawn soft this many times smaller (a soft frame the window can read)
 # --wait-done (a slower computer than the one the rests were written for): the rests of these scenarios held until
 # their page is finished (`held`, `hold_over`), and scenario x's soft frames kept until the window asked on them,
-# KEEP_SOFT_S at most. Not c (turns while the model loads), b (quick turns), t and t2 (a turn each, released by the
-# window's page key).
-HOLD_SCENARIOS = ("a", "d", "e", "r", "o", "z", "x", "f", "f2", "f3")
+# KEEP_SOFT_S at most. Not c (turns while the model loads) nor b (quick turns).
+HOLD_SCENARIOS = ("a", "d", "e", "x", "f2", "f3")
 KEEP_SOFT_S = 15.0
 
 
@@ -305,8 +271,8 @@ class Segment:
 
 
 def wanted(text: str) -> list[str]:
-    """The scenarios asked for, in `ORDER` ("f" brings the narrow window with it, "f2" alone is the narrow window
-    without the dark theme; "t" and "t2" come together: `PAIRS`)."""
+    """The scenarios asked for, in `ORDER` ("k" asks for `K_ASKED`). The scenarios of TASlation's own window that
+    went with it in 2.0.0 (r, t, t2, o, z, f) are unknown ones."""
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
@@ -315,7 +281,6 @@ def wanted(text: str) -> list[str]:
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
-    asked |= {other for one, other in PAIRS if one in asked}
     return [n for n in [*ORDER, *K_PACES, *NAMED_ONLY] if n in asked]
 
 
@@ -331,41 +296,19 @@ def soft_first_scenarios(names: list[str], text: str, soft_first: bool) -> tuple
 
 
 def k_steps(name: str, fresh: int, width: int, turns: int, read: int, soft: bool,
-            read_ms: int = K_READ_MS, keyed: bool = False, stay_ms: int = 0) -> list[str]:
+            read_ms: int = K_READ_MS, stay_ms: int = 0) -> list[str]:
     """Scenario k's steps at the pace of *name* (`K_PACES`): to page *fresh* (one no scenario before turned to) and a
     rest there, *turns* pages flipped past, the last of them kept *stay_ms* (0: the pace), back to the first of them,
     and *read* of them read at *read_ms* a page (K_READ_MS); without *soft*, every page drawn sharp at once (the
-    stand-in's soft time and blur off, and back after). *keyed* (--k-keys): no wait of the stand-in's own - each turn
-    waits for its release (``u``), at the times of `k_key_times`."""
+    stand-in's soft time and blur off, and back after). Every turn is the stand-in's own."""
     pace = K_PACES[name]
     pre, post = ([], []) if soft else (["t0", "b1"], ["t", "b"])
-    if keyed:
-        steps = [*pre, f"j{fresh}", *(["u", "n"] * turns), "u", f"j{fresh + width}", *(["u", "n"] * max(0, read - 1))]
-        return [*steps, "u", *post]
     flips = ["n", f"w{pace}"] * turns
     if stay_ms and flips:
         flips[-1] = f"w{stay_ms}"
     steps = [*pre, f"j{fresh}", f"w{read_ms}", *flips, f"j{fresh + width}", f"w{read_ms}"]
     steps += ["n", f"w{read_ms}"] * max(0, read - 1)
     return [*steps, *post]
-
-
-def k_key_times(pace_ms: int, turns: int, read: int, read_ms: int = K_READ_MS,
-                stay_ms: int = 0) -> list[tuple[float, str]]:
-    """--k-keys: when each turn of scenario k (`k_steps`, *keyed*) is released, in seconds after the pace began, and
-    how: "key" by the window's page key handed on, "driver" by the driver alone (the turn back to the first page
-    flipped past, and the end of the last page read back) - the times of the waits of the steps without keys."""
-    out: list[tuple[float, str]] = []
-    t = read_ms / 1000
-    for i in range(turns):
-        out.append((round(t, 3), "key"))
-        t += (stay_ms if stay_ms and i == turns - 1 else pace_ms) / 1000
-    out.append((round(t, 3), "driver"))
-    for _ in range(max(0, read - 1)):
-        t += read_ms / 1000
-        out.append((round(t, 3), "key"))
-    out.append((round(t + read_ms / 1000, 3), "driver"))
-    return out
 
 
 def cancel_steps(first: int, back: int, soft_ms: int, keep_ms: int | None = None) -> list[str]:
@@ -382,10 +325,9 @@ def cancel_steps(first: int, back: int, soft_ms: int, keep_ms: int | None = None
 def held(steps: list[str], first: int) -> list[str]:
     """--wait-done: *steps* with a hold (``hN``, numbered on from *first*) after each rest a reader takes - a wait of
     REST_MS or more -, the rest at their end too; the driver lets it go once the page on show is finished
-    (`hold_over`). (The rest at the end is held as well because the driver changes the window as soon as the stand-in
-    waits for the next scenario - a mode left, the theme, the text size or the stand-in's size changed -, before the
-    window is at rest: a page still being translated then was cut short, as scenario f's last on
-    a runner, by f2's narrow window.)"""
+    (`hold_over`). (The rest at the end is held as well because the driver changes the stand-in as soon as it waits
+    for the next scenario - its size changed for f2 -, before the window is at rest: a page still being translated
+    then was cut short, as the last of the dark theme's scenario of 1.0.1 was on a runner, by f2's narrow window.)"""
     out, n = [], first
     for step in steps:
         out.append(step)
@@ -428,8 +370,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
             fresh = farthest + width
             fresh = fresh - fresh % 2 if spread else fresh
             steps = k_steps(name, fresh, width, int(k.get("turns", 20)), int(k.get("read", 20)),
-                            bool(k.get("soft", True)), int(k.get("read_ms") or K_READ_MS), bool(k.get("keys")),
-                            int(k.get("stay_ms") or 0))
+                            bool(k.get("soft", True)), int(k.get("read_ms") or K_READ_MS), int(k.get("stay_ms") or 0))
         else:
             steps = SCENARIOS[name][1]
         if wait_done is not None and name in HOLD_SCENARIOS:
@@ -792,16 +733,14 @@ class Notes:
         # stand-in drew on the two frames it took for the soft and the sharp picture
         self.drew_soft: list[dict[str, Any]] = []
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
-        self.modes: list[dict[str, Any]] = []  # reading, over the book, text size, the role, as changed
-        self.hotkeys: list[dict[str, Any]] = []  # the hot keys the window held, as they changed, and the presses
-        # what the driver changed in the window between scenarios (a mode entered or left, the theme, the text size,
-        # the stand-in's size), and when: a rest on the page before ends there (`turn_rows`)
+        self.modes: list[dict[str, Any]] = []  # the role (Edit off: reader, on: translator), as changed
+        # what the driver changed between scenarios (the stand-in's size), and when: a rest on the page before ends
+        # there (`turn_rows`)
         self.acts: list[dict[str, Any]] = []
         self.lookups: list[dict[str, Any]] = []  # each page unit a page job looked for in the cache, and what it found
         self.resolves: list[dict[str, Any]] = []  # ... and each look for the page as read at other sizes
         self.decides: list[dict[str, Any]] = []  # each page job kept for now, decided (`Pipeline.decide_kept`): how
         self.on_display: Callable[[dict[str, Any]], None] | None = None
-        self.leaves: list[dict[str, Any]] = []  # each leave of the full screen: when, and the calls that led to it
         # where a page job's time went (`span`: its stages, by thread), the cuts of the pairs that only grow
         # (`GrowingContext.take`), and the loads and unloads of the model that leave the server holding nothing
         self.spans_off: list[tuple[str, float, float, str, Any]] = []  # (spans while no page job ran)
@@ -814,7 +753,6 @@ class Notes:
         self.priority: list[dict[str, Any]] = []  # the server lowered for the backlog and set back (`watch_priority`)
         # (memory only, never written or printed: a request's line as a number, to find a line asked for again)
         self.sources: dict[int, int] = {}
-        self.side: SideCheck | None = None  # the indicator looked at from the window (`--side-indicator` not off)
 
     def span(self, label: str, t0: float, t1: float, extra: Any = None) -> None:
         """A stage of the page job running (*label*, from *t0* to *t1*, on this thread; *extra*: a code or a number),
@@ -937,11 +875,9 @@ class Notes:
                 self.tags[id(item[1])] = (self.current, now_ms())
 
     def reading(self, kind: str, data: dict[str, Any]) -> None:
-        """A normal reading event (`backlog`), numbers only: the thumbnail's size, never the thumbnail."""
-        thumb = data.get("thumb")
+        """A normal reading event (`backlog`), numbers only."""
         rec = {"t": now_ms(), "kind": kind, **{k: data.get(k) for k in ("seq", "stage", "state", "into", "pages",
-                                                                       "lines", "paused", "dropped")},
-               "thumb": list(getattr(thumb, "size", ())) if thumb is not None else None}
+                                                                       "lines", "paused", "dropped")}}
         with self.lock:
             self.readings.append(rec)
 
@@ -1114,23 +1050,12 @@ class Notes:
                 self.margins.append(rec)
 
     def mode(self, app: Any) -> None:
-        """The window's modes, noted as they change: the full screen, over the book, TASlation's text size, the
-        role."""
-        rec = {"t": now_ms(), "reading": bool(getattr(app, "reading", False)),
-               "over": bool(getattr(app, "_over_on", False)), "text_size": float(app.settings.ui_scale),
-               "role": str(app.role_var.get())}
+        """The window's role (Edit), noted as it changes."""
+        rec = {"t": now_ms(), "role": str(app.role_var.get())}
         with self.lock:
             last = self.modes[-1] if self.modes else None
             if last is None or any(last[k] != rec[k] for k in rec if k != "t"):
                 self.modes.append(rec)
-
-    def held(self, names: frozenset[str]) -> None:
-        with self.lock:
-            self.hotkeys.append({"t": now_ms(), "held": sorted(names)})
-
-    def pressed(self, name: str, taken: bool) -> None:
-        with self.lock:
-            self.hotkeys.append({"t": now_ms(), "pressed": name, "taken": taken})
 
     def lookup(self, pipeline: Any, unit: Any, hit: Any, read: tuple[Any, Any] | None) -> None:
         """A page unit a page job looked for in the cache (`Pipeline._lookup`), in numbers: the frame's size and the
@@ -1198,50 +1123,6 @@ class Notes:
                 self.ocr.append(rec)
 
 
-class HotKeys:
-    """TASlation's global hot keys as this tool lets the window have them (in `capture.overlay.HotKeys`' place): none
-    is registered with Windows - the keys stay the system's and their owner's -, the names the window holds are noted
-    as they change, and a press is this tool's (`press`), handed to the window by `take` as Windows hands over a
-    WM_HOTKEY: only for a key the window holds then (another is the viewer's, and noted as not taken)."""
-
-    def __init__(self, notes: Notes):
-        self.notes = notes
-        self.names: set[str] = set()
-        self.presses: list[str] = []
-
-    @property
-    def registered(self) -> frozenset[str]:
-        return frozenset(self.names)
-
-    def register(self, name: str, vk: int, mods: int = 0) -> bool:
-        if name not in self.names:
-            self.names.add(name)
-            self.notes.held(self.registered)
-        return True
-
-    def unregister(self, name: str) -> None:
-        if name in self.names:
-            self.names.discard(name)
-            self.notes.held(self.registered)
-
-    def clear(self) -> None:
-        for name in list(self.names):
-            self.unregister(name)
-
-    def close(self) -> None:
-        self.clear()
-
-    def press(self, name: str) -> None:
-        self.presses.append(name)
-
-    def take(self) -> list[str]:
-        taken = [name for name in self.presses if name in self.names]
-        for name in self.presses:
-            self.notes.pressed(name, name in self.names)
-        self.presses.clear()
-        return taken
-
-
 # status lines said with `say` that speak of a page: of the page the job read, of the viewer's page on show
 JOB_KEYS = ("Stopped: this page was not translated",)
 
@@ -1278,15 +1159,6 @@ def tk_error() -> type[Exception]:
     return tk.TclError
 
 
-def page_point(app: Any, region: Any) -> tuple[int, int]:
-    """The middle of *region* (image pixels) on the window's page canvas, in the canvas's pixels."""
-    from taslation.ui import area
-
-    x0, y0, x1, y1 = region.bbox
-    x, y = area.to_canvas((x0 + x1) / 2, (y0 + y1) / 2, app.canvas.scale, app.canvas.offset)
-    return int(round(x)), int(round(y))
-
-
 def _user32() -> Any:
     """user32 of this tool's own (its functions' argument types set here touch no other module's)."""
     import ctypes
@@ -1295,43 +1167,12 @@ def _user32() -> Any:
     user32 = ctypes.WinDLL("user32")
     user32.GetAncestor.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
-    user32.WindowFromPoint.restype = wintypes.HWND
-    user32.WindowFromPoint.argtypes = [wintypes.POINT]
-    user32.GetWindow.restype = wintypes.HWND
-    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
     return user32
 
 
 def root_of(widget: Any) -> int:
     """The top-level window (Windows' handle) of the Tk widget *widget*."""
     return int(_user32().GetAncestor(widget.winfo_id(), 2) or 0)  # GA_ROOT
-
-
-def over_facts(window: Any, app: Any) -> dict[str, Any]:
-    """Where TASlation's own window *window* (a dialog) lies against the window *app* on the full screen, as Windows
-    has them, by asking it only (nothing moves): whether the window at the dialog's middle is the dialog (it is above
-    the full screen there), whether the dialog lies within the full screen's rectangle, whether the window owns it,
-    and both sizes."""
-    from ctypes import wintypes
-
-    from taslation.capture import window_rect
-
-    user32 = _user32()
-    out: dict[str, Any] = {}
-    try:
-        own, full = root_of(window), root_of(app)
-        left, top, right, bottom = window_rect(own)
-        f_left, f_top, f_right, f_bottom = window_rect(full)
-        at = int(user32.WindowFromPoint(wintypes.POINT((left + right) // 2, (top + bottom) // 2)) or 0)
-        at_root = int(user32.GetAncestor(at, 2) or 0) if at else 0
-        owner = int(user32.GetWindow(own, 4) or 0)  # GW_OWNER
-        out.update(dialog_on_top_at_its_middle=at_root == own, within_the_full_screen=(
-            left >= f_left and top >= f_top and right <= f_right and bottom <= f_bottom),
-                   owned_by_the_window=owner == full, dialog_size=[right - left, bottom - top],
-                   full_screen_size=[f_right - f_left, f_bottom - f_top])
-    except Exception as e:  # noqa: BLE001 - said by its type
-        out["error"] = type(e).__name__
-    return out
 
 
 class LogTap(logging.Handler):
@@ -1346,9 +1187,8 @@ class LogTap(logging.Handler):
     # the lines of the rule for a request without an answer (`translate.ollama`, `ollama_start.OllamaStarter.restart`,
     # `pipeline.LoadAhead`) and of the backlog's pause for it: fixed words, numbers and a thread's name, never a line
     NO_ANSWER_PREFIXES = ("no answer:", "backlog paused: the translation program", "backlog goes on:")
-    # the window's lines of the viewer kept under it and of the viewer hidden wholly (`ui.order`): fixed words and
-    # numbers only
-    WINDOW_ORDER_PREFIXES = ("window order:", "the viewer is hidden wholly")
+    # the window's lines of the viewer kept under it (`ui.order`): fixed words and numbers only
+    WINDOW_ORDER_PREFIXES = ("window order:",)
 
     def __init__(self, notes: Notes, url: str | None = None):
         super().__init__(logging.INFO)
@@ -1389,275 +1229,6 @@ class LogTap(logging.Handler):
             pass
 
 
-# ---------------------------------------------------------------------------------------------------- the indicator
-SIDE_CHECK_MS = 200  # the indicator beside the page looked at this long after an event of normal reading (at most)
-
-
-class SideCheck:
-    """The indicator beside the page (`ui.side`) looked at from the window itself (scenario k with it on): what normal
-    reading told it (``page_stage`` with ``reading``, ``page_on_show``, ``backlog``), kept here as the indicator's
-    rules take it (a stage the latest told, "merged" takes a screen away, a drop or another book's screen 1 clears),
-    against what its model holds and what its canvas has drawn - each screen's cell or rail mark in the state last
-    told, the screen on show outlined, a screen that went by drawn as missed, nothing left after a drop. Numbers and
-    screen numbers only. Runs on the Tk thread (the event handler, and a check `SIDE_CHECK_MS` after an event, never
-    inside the event pump)."""
-
-    def __init__(self, notes: Notes):
-        self.notes = notes
-        self.told: dict[int, dict[str, str]] = {}
-        self.prints: dict[int, str] = {}
-        self.on_show: int | None = None
-        self.totals: tuple[int, int, bool, int] | None = None
-        self.pending: str | None = None
-        self.checks = 0
-        self.check_ms: list[float] = []
-        self.wrong: Counter[str] = Counter()
-        self.examples: dict[str, list[Any]] = {}
-        self.kinds: Counter[str] = Counter()
-        self.layouts: Counter[str] = Counter()
-        self.ever: set[tuple[int, str]] = set()  # (seq, fingerprint) of every screen told
-        self.missed_told: set[tuple[int, str]] = set()
-        self.missed_drawn: set[tuple[int, str]] = set()
-        self.on_show_drawn = 0
-        self.on_show_checked = 0
-        self.drops: list[dict[str, Any]] = []
-
-    # what was told
-    def told_event(self, app: Any, kind: str, data: dict[str, Any]) -> None:
-        from taslation import fingerprint as fp
-        from taslation.ui.side_model import MERGED, SIDE_STAGES, STATES
-
-        self.kinds[kind] += 1
-        if kind == "backlog":
-            if data.get("dropped") is True:
-                self.told.clear()
-                self.prints.clear()
-                self.on_show = None
-            self.totals = (_count_of(data.get("pages")), _count_of(data.get("lines")), bool(data.get("paused")),
-                           0 if data.get("dropped") is True else _count_of(data.get("dropped")))
-            return
-        if kind == "page_on_show":
-            try:
-                self.on_show = None if data.get("seq") is None else int(data["seq"])
-            except (TypeError, ValueError):
-                self.on_show = None
-            return
-        try:
-            seq = int(data.get("seq"))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return
-        print_ = str(data.get("fingerprint") or "")
-        old = self.prints.get(seq)
-        within = int(getattr(app.settings, "fingerprint_max_distance", 0) or 0)
-        if old and print_:
-            try:
-                other = fp.hamming(old, print_) > within
-            except (TypeError, ValueError):
-                other = old != print_
-            if other:  # (the engine numbers another book's screens from 1 again)
-                self.told.clear()
-                self.prints.clear()
-                self.on_show = None
-        stage, state = data.get("stage"), data.get("state")
-        if stage == "read" and state == MERGED:
-            if self.told.pop(seq, None) is not None:
-                self.prints.pop(seq, None)
-                if self.on_show == seq:
-                    self.on_show = None
-            return
-        stages = self.told.setdefault(seq, {s: "waiting" for s in SIDE_STAGES})
-        if print_ and not self.prints.get(seq):
-            self.prints[seq] = print_
-        if stage in SIDE_STAGES and state in STATES:
-            stages[stage] = state
-        key = (seq, self.prints.get(seq, ""))
-        self.ever.add(key)
-        if stages["read"] == "missed" or stages["translate"] == "missed":
-            self.missed_told.add(key)
-
-    def handled(self, app: Any, kind: str, data: dict[str, Any]) -> None:
-        """(the event handled) A drop looked at at once; the rest a little later."""
-        if kind == "backlog" and data.get("dropped") is True:
-            self.drop_looked(app)
-        if self.pending is None:
-            try:
-                self.pending = app.after(SIDE_CHECK_MS, lambda: self.check(app))
-            except Exception:  # noqa: BLE001 - the window closing
-                self.pending = None
-
-    def _wrong(self, what: str, example: Any) -> None:
-        self.wrong[what] += 1
-        items = self.examples.setdefault(what, [])
-        if len(items) < 5:
-            items.append(example)
-
-    # what the window holds
-    def drop_looked(self, app: Any) -> None:
-        st = getattr(app, "_side", None)
-        if st is None:
-            return
-        model, view = st.model, st.view
-        left = sorted(model.screens)
-        drawn = self._drawn_screens(view) if view is not None else []
-        rec = {"t": now_ms(), "screens_left": len(left), "on_show": model.on_show, "drawn_left": len(drawn)}
-        self.drops.append(rec)
-        if left or model.on_show is not None or drawn:
-            self._wrong("drop_not_cleared", rec)
-
-    @staticmethod
-    def _drawn_screens(view: Any) -> list[str]:
-        """The canvas items of a screen's cell (``s<seq>``) or a rail mark (``mark-<mark>``)."""
-        out = []
-        try:
-            for item in view.find_all():
-                tags = view.gettags(item)
-                if any((t.startswith("s") and t[1:].isdigit()) or t.startswith("mark-") for t in tags):
-                    out.append(item)
-        except Exception:  # noqa: BLE001 - the widget gone
-            return []
-        return out
-
-    def check(self, app: Any) -> None:
-        self.pending = None
-        began = time.perf_counter()
-        try:
-            self._check(app)
-        except Exception as e:  # noqa: BLE001 - noted, never in the app's way
-            self.notes.error("side check", type(e).__name__)
-        self.check_ms.append((time.perf_counter() - began) * 1000)
-
-    def _check(self, app: Any) -> None:
-        from taslation.ui.side_model import Screen
-
-        st = getattr(app, "_side", None)
-        if st is None:
-            self._wrong("no_indicator", None)
-            return
-        self.checks += 1
-        model, view = st.model, st.view
-        if set(model.screens) != set(self.told):
-            self._wrong("screens", {"told": sorted(self.told), "model": sorted(model.screens)})
-        for seq, stages in self.told.items():
-            screen = model.screens.get(seq)
-            if screen is not None and dict(screen.stages) != stages:
-                self._wrong("stages", {"seq": seq, "told": dict(stages), "model": dict(screen.stages)})
-        if model.on_show != self.on_show:
-            self._wrong("on_show", {"told": self.on_show, "model": model.on_show})
-        if self.totals is not None:
-            b = model.backlog
-            if (b.pages, b.lines, b.paused, b.dropped) != self.totals:
-                self._wrong("totals", {"told": list(self.totals), "model": [b.pages, b.lines, b.paused, b.dropped]})
-        kind = view.layout.kind if view is not None and view.shown else ""
-        self.layouts[kind or "none"] += 1
-        if not kind:
-            return
-        if kind == "column":
-            self._check_column(view, model)
-        else:
-            self._check_rail(view, model)
-        for seq, stages in self.told.items():  # (the screens that went by, drawn as such)
-            told = Screen(seq, stages=dict(stages))
-            if told.mark == "missed" and self._drawn_missed(view, model, seq, kind):
-                self.missed_drawn.add((seq, self.prints.get(seq, "")))
-
-    def _bar_state(self, view: Any, box: tuple[int, int, int, int], seq: int) -> str:
-        from taslation.ui.side_view import DONE, EDGE, FAILED, MISSED, SKIPPED
-
-        x0, y0, x1, y1 = box
-        items = [i for i in view.find_overlapping(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
-                 if f"s{seq}" in view.gettags(i) and "marks" not in view.gettags(i)
-                 and view.type(i) in ("rectangle", "line")]
-        if any("stripe" in view.gettags(i) for i in items):
-            return "working"
-        rects = [i for i in items if view.type(i) == "rectangle"]
-        fills = {str(view.itemcget(i, "fill")).lower() for i in rects}
-        if DONE.lower() in fills:
-            return "done"
-        if FAILED.lower() in fills:
-            return "failed"
-        if any(str(view.itemcget(i, "dash")) and str(view.itemcget(i, "outline")).lower() == MISSED.lower()
-               for i in rects):
-            return "missed"
-        outlines = {str(view.itemcget(i, "outline")).lower() for i in rects}
-        if SKIPPED.lower() in outlines:
-            return "skipped"
-        if EDGE.lower() in outlines:
-            return "waiting"
-        return "?"
-
-    def _check_column(self, view: Any, model: Any) -> None:
-        from taslation.ui.side_model import SIDE_STAGES
-        from taslation.ui.side_view import CHOSEN
-
-        for index, seq in enumerate(model.order):
-            screen = model.screens[seq]
-            parts = view._cell_parts(index)
-            for stage in SIDE_STAGES:
-                drawn = self._bar_state(view, parts[stage], seq)
-                if drawn != screen.state(stage):
-                    self._wrong("bar", {"seq": seq, "stage": stage, "state": screen.state(stage), "drawn": drawn})
-            outlined = any(view.type(i) == "rectangle" and str(view.itemcget(i, "outline")).lower() == CHOSEN.lower()
-                           for i in view.find_withtag(f"s{seq}") if "marks" in view.gettags(i))
-            if seq == model.on_show:
-                self.on_show_checked += 1
-                self.on_show_drawn += outlined
-                if not outlined:
-                    self._wrong("on_show_not_outlined", {"seq": seq})
-            elif outlined:
-                self._wrong("outlined_not_on_show", {"seq": seq, "on_show": model.on_show})
-
-    def _check_rail(self, view: Any, model: Any) -> None:
-        marks = list(getattr(view, "_marks", []) or [])
-        seen = [s for m in marks for s in m.seqs]
-        if sorted(seen) != list(model.order):
-            self._wrong("rail_screens", {"marks": len(seen), "model": len(model.order)})
-        rx, rw = view.layout.rail_x, view.layout.rail_w
-        for m in marks:
-            want = {model.screens[s].mark for s in m.seqs if s in model.screens}
-            if len(m.seqs) == 1 and want and m.mark not in want:
-                self._wrong("rail_mark", {"seqs": list(m.seqs), "mark": m.mark, "model": sorted(want)})
-            drawn = {t for i in view.find_overlapping(rx, m.y0, rx + rw - 1, max(m.y0 + 1, m.y1) - 1)
-                     for t in view.gettags(i) if t.startswith("mark-")}
-            if f"mark-{m.mark}" not in drawn:
-                self._wrong("rail_mark_not_drawn", {"seqs": [m.seqs[0], m.seqs[-1]], "mark": m.mark})
-        on = [m for m in marks if m.on_show]
-        outlined = bool(view.find_withtag("on-show"))
-        if model.on_show is not None and model.on_show in model.screens:
-            self.on_show_checked += 1
-            ok = len(on) == 1 and model.on_show in on[0].seqs and outlined
-            self.on_show_drawn += ok
-            if not ok:
-                self._wrong("on_show_not_outlined", {"seq": model.on_show, "marks_on_show": len(on)})
-        elif on or outlined:
-            self._wrong("outlined_not_on_show", {"on_show": model.on_show})
-
-    def _drawn_missed(self, view: Any, model: Any, seq: int, kind: str) -> bool:
-        if seq not in model.screens:
-            return False
-        if kind == "column":
-            index = model.order.index(seq)
-            parts = view._cell_parts(index)
-            return "missed" in (self._bar_state(view, parts["read"], seq), self._bar_state(view, parts["translate"], seq))
-        return any(seq in m.seqs and m.mark == "missed" for m in getattr(view, "_marks", []) or [])
-
-    def report(self) -> dict[str, Any]:
-        ms = sorted(self.check_ms)
-        return {"checks": self.checks, "events": dict(self.kinds), "layouts": dict(self.layouts),
-                "wrong": dict(self.wrong), "examples": self.examples,
-                "screens_told": len(self.ever), "missed_told": len(self.missed_told),
-                "missed_drawn_as_missed": len(self.missed_drawn & self.missed_told),
-                "on_show_outlined": [self.on_show_drawn, self.on_show_checked],
-                "drops": self.drops,
-                "check_ms": {"median": round(statistics.median(ms), 2), "max": round(ms[-1], 1)} if ms else None}
-
-
-def _count_of(value: Any) -> int:
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
-
-
 # ---------------------------------------------------------------------------------------------------- the hooks
 # the live view's calls on the Tk thread whose time is noted (those the window has: older code lacks some)
 TIMED = ("_beat", "_poll", "_look", "_look_over_job", "_watch_page", "_follow_step", "_poll_events")
@@ -1685,7 +1256,7 @@ STEP_CALLS = ("_poll", "_look", "_follow_step")
 STEP_PARTS = ("_viewer_shows_book", "_frame_count", "_capture", "_drew_nothing", "_turn_seen", "_show_live",
               "_redisplay", "_check_sharper", "_take_at_once", "_all_cached", "_looks_soft", "_take", "_begin_follow",
               "_early_start", "_look_over_job")
-STEP_FUNCS = (("ui.live", "window_exists"), ("ui.live", "_thumb"), ("ui.live", "_detail"), ("ui.side", "on_picture"),
+STEP_FUNCS = (("ui.live", "window_exists"), ("ui.live", "_thumb"), ("ui.live", "_detail"),
               ("ui.preview", "ImageCanvas.set_image"))
 LONG_STEP_MS = 300
 LONG_STEPS_KEPT = 12
@@ -2506,13 +2077,10 @@ def priority_report(notes: Notes, rel: Callable[[Any], Any]) -> dict[str, Any]:
                                    for r in low_others][:20]}
 
 
-def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any],
-            hotkeys: HotKeys) -> dict[str, Any]:
-    """The guard (`demo_video`'s, keys and clicks refused; the global hot keys this tool's *hotkeys*), and the hooks
-    that take the notes; what was replaced."""
+def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any]) -> dict[str, Any]:
+    """The guard (`demo_video`'s, keys and clicks refused), and the hooks that take the notes; what was replaced."""
     import demo_video
 
-    import taslation.capture.overlay as overlay
     import taslation.capture.wgc as wgc
     import taslation.capture.windows as windows
     from taslation import fingerprint, frames
@@ -2522,7 +2090,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     from taslation.translate import ollama as ollama_mod
     from taslation.translate import plamo as plamo_mod
     from taslation.ui import app as app_mod
-    from taslation.ui import live, overbook
+    from taslation.ui import live
 
     table = {name: (("never" if allow == "viewer" else allow), target)
              for name, (allow, target) in demo_video.GUARDED.items()}  # (TASlation sends no key, no click here)
@@ -2554,7 +2122,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
 
     wgc.latest = compositor
     watch_priority(notes)
-    overlay.HotKeys.start = classmethod(lambda cls, *a, **k: hotkeys)  # type: ignore[assignment]
 
     App = app_mod.App
     start_translate, job_translate = App._start_translate, App._job_translate
@@ -2575,24 +2142,11 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             notes.job_over(job)
 
     def handled(self: Any, kind: str, data: dict[str, Any]) -> Any:
-        side = None
         if kind in KINDS:
             notes.app_event(self, kind, data)
         elif kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading")):
             notes.reading(kind, data)
-            side = notes.side
-            if side is not None:
-                try:
-                    side.told_event(self, kind, data)
-                except Exception as e:  # noqa: BLE001 - noted, never in the app's way
-                    notes.error("side told", type(e).__name__)
-        out = handle_event(self, kind, data)
-        if side is not None:
-            try:
-                side.handled(self, kind, data)
-            except Exception as e:  # noqa: BLE001 - noted, never in the app's way
-                notes.error("side handled", type(e).__name__)
-        return out
+        return handle_event(self, kind, data)
 
     def drawn(self: Any) -> Any:
         out = redisplay(self)
@@ -2775,16 +2329,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
     for name in STEP_CALLS:
         if hasattr(App, name):
             setattr(App, name, step_call(notes, name, getattr(App, name)))
-    leave_reading = App.leave_reading
-
-    def left(self: Any, *a: Any, **k: Any) -> Any:
-        if getattr(self, "reading", False):  # who left the full screen: the functions' names on the way, no more
-            calls = [f.name for f in traceback.extract_stack(limit=8)[:-1]]
-            with notes.lock:
-                notes.leaves.append({"t": now_ms(), "role": str(self.role_var.get()), "calls": calls[-6:]})
-        return leave_reading(self, *a, **k)
-
-    App.leave_reading = left
 
     def counted(cls: Any, name: str, note: Callable[[str], None]) -> None:
         original = cls.__dict__[name]
@@ -2949,12 +2493,6 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
         return "viewer" if args.front == "viewer" else got
 
     live.foreground_owner = owner
-
-    def over_owner(hwnd: int, viewer: int, *a: Any, **k: Any) -> str:  # over the book: its own window as it is
-        got = real_owner(hwnd, viewer, *a, **k)
-        return "viewer" if args.front == "viewer" and got != "own" else got
-
-    overbook.foreground_owner = over_owner
     from taslation.ui import order as order_mod
 
     if getattr(args, "order_partly", "as-built") != "as-built":  # (`ui.order`'s switch, for this run alone)
@@ -3004,12 +2542,10 @@ class Director:
 
     def __init__(self, app: Any, browser: sv.StandinBrowser, guard: Any, selection: sv.SelectionGuard,
                  notes: Notes, segments: list[Segment], args: argparse.Namespace, out: Path, standin_dir: Path,
-                 narrow_rect: tuple[int, int, int, int], app_rect: tuple[int, int, int, int], hotkeys: HotKeys):
+                 narrow_rect: tuple[int, int, int, int], app_rect: tuple[int, int, int, int]):
         self.app, self.browser, self.guard, self.selection = app, browser, guard, selection
         self.notes, self.segments, self.args, self.out, self.standin_dir = notes, segments, args, out, standin_dir
-        self.narrow_rect, self.app_rect, self.hotkeys = narrow_rect, app_rect, hotkeys
-        self.entered: dict[str, dict[str, Any]] = {}  # per scenario of a mode: what was done to enter it, and when
-        self.standin_before: tuple[int, int, int, int] | None = None  # the stand-in's rect before scenario o
+        self.narrow_rect, self.app_rect = narrow_rect, app_rect
         self.resized_at, self.resizes_seen = float("-inf"), 0  # the stand-in's last draw at a new size, pictured after
         self.mono0, self.epoch0 = time.monotonic(), now_ms()
         self.cover: CoverWindow | None = None  # (`cover_step`)
@@ -3027,7 +2563,6 @@ class Director:
         self.failed = ""
         self.released: dict[str, dict[str, Any]] = {}
         self.facts: dict[str, Any] = {}
-        self.theme: dict[str, str] = {}
         self.shots: list[dict[str, Any]] = []
         self.taken: set[str] = set()
         self.due: list[tuple[float, str]] = []
@@ -3035,11 +2570,6 @@ class Director:
         self.turns_in: Counter[str] = Counter()
         self.segment_of_go = {s.go: s.name for s in segments}
         self.current = ""
-        self.keyed: dict[str, dict[str, Any]] = {}  # scenario t's and t2's page key: how it was pressed, what it handed
-        self.key_for: Segment | None = None  # the scenario whose turn the next key handed to the stand-in releases
-        self.turns_released = 0  # --k-keys: the turns the control file has released (the stand-in's ``u`` steps)
-        self.k_keys: dict[str, dict[str, Any]] = {}  # --k-keys: per pace, the keys pressed and what became of them
-        self._hook_page_keys()
         self.page_rect: tuple[int, int, int, int] | None = None  # the page the stand-in drew last (its canvas's pixels)
         self.band_px = 0  # the height of its band then
         # --wait-done (its cap, seconds; None: the script has no holds and keeps no soft frame): the control file's
@@ -3051,7 +2581,6 @@ class Director:
         self.screen_now: tuple[int, bool] | None = None
         self.screen_state, self.screen_since = "none", time.monotonic()
         self.last_ocr = 0.0
-        self.side_drop_at: float | None = None  # (`side_drop_due`)
         self.saver: queue.Queue[Any] = queue.Queue()
         self.saver_thread = threading.Thread(target=self._save, name="standin-shots", daemon=True)
         self.saver_thread.start()
@@ -3306,22 +2835,13 @@ class Director:
         if (seg, k) in SHOTS:
             delay, label = SHOTS[(seg, k)]
             self.due.append((time.monotonic() + delay, label))
-        if seg in K_PACES and self.notes.side is not None:  # the indicator after the flips, and after the reads back
-            turns = self.args.k_turns
-            read = self.args.k_read or turns
-            if k == turns + 2:  # (the turn back to the first page flipped past)
-                self.due.append((time.monotonic() + 0.4, f"{seg}_side_after_the_flips"))
-            elif k == turns + 1 + read:  # (the last page read back, near the end of its stay)
-                self.due.append((time.monotonic() + max(0.5, self.args.k_read_ms / 1000 - 1.0),
-                                 f"{seg}_side_read_back"))
 
     # the scenarios
     def idle(self) -> bool:
         app = self.app
         f = getattr(app, "_following", None)
         return bool(app.ready and not app.busy and app._queued is None
-                    and (f is None or f.op is None) and getattr(app, "_early", None) is None
-                    and getattr(app, "_enlarging", None) is None)
+                    and (f is None or f.op is None) and getattr(app, "_early", None) is None)
 
     def step(self) -> None:
         now = time.monotonic()
@@ -3332,21 +2852,15 @@ class Director:
             self.waits(now)
         if self.index >= len(self.segments):
             if self.phase != "end":
-                if self.index:
-                    self.after(self.segments[-1])
                 self.phase, self.phase_at = "end", now
                 return
             if (self.ended and rested and self.backlog_done()) or waited > self.args.timeout:
-                if self.side_drop_due():
-                    return
                 if waited > self.args.timeout:
                     self.released["end"] = {"timed_out": True}
                 self.finish()
             return
         seg = self.segments[self.index]
         if self.phase == "prepare":
-            if self.index:
-                self.after(self.segments[self.index - 1])
             self.before(seg)
             self.phase, self.phase_at = "settle", now
             return
@@ -3354,11 +2868,7 @@ class Director:
             if getattr(self.args, "no_viewer_s", 0) and getattr(self.app, "selected", None) is None:
                 return  # (--no-viewer-s: nothing is released before the window has found the stand-in)
             ready_go = self.waiting_go >= seg.go
-            if seg.name in ("r", "t", "o", "z") and seg.name not in self.entered and ready_go and rested:
-                self.enter(seg.name)  # (a mode entered at rest, as a reader does; released once it is on)
-                return
             app = self.app
-            mode = self.entered.get(seg.name)
             if seg.name == "c":
                 go = ready_go and getattr(app, "selected", None) is not None
             elif seg.name in NARROW:
@@ -3367,46 +2877,34 @@ class Director:
                 first = seg is next(x for x in self.segments if x.name in K_PACES)
                 go = (ready_go and rested and self.backlog_done() and (self.index > 0 or self.first_page_done())
                       and not (first and self.args.k_narrow and not self.resized()))
-            elif seg.name in ("r", "o", "z"):
-                go = ready_go and rested and mode is not None and now - mode["at"] >= 1.0 and (
-                    seg.name == "z" or bool(app.reading) and (seg.name == "r" or bool(app._over_on)))
-            elif seg.name in KEYED:  # the turn released by the page key the window hands on (`page_key`)
-                go = self.keyed_turn(seg, ready_go, rested, now)
             else:
                 go = ready_go and rested and (self.index > 0 or self.first_page_done())
-            timed_out = ready_go and (waited > self.args.timeout or (
-                seg.name in ("r", "o", "z") and mode is not None and now - mode["at"] > MODE_WAIT_S))
+            timed_out = ready_go and waited > self.args.timeout
             if timed_out and not app.ready:
                 self.stop("the window was not ready within --timeout")
                 return
             if go or timed_out:
                 self.released[seg.name] = {"waited_s": round(waited, 1), "timed_out": bool(timed_out and not go),
                                            "t": now_ms()}
-                self.key_for = None
                 self.release(go=seg.go)
                 self.phase, self.phase_at = "running", now
             return
-        if self.phase == "running" and seg.name in K_PACES and self.args.k_keys:
-            self.k_keys_step(seg, now)
         if self.phase == "running" and (self.waiting_go > seg.go or self.ended):
             self.index += 1
             self.phase, self.phase_at = "prepare", now
 
-    def release(self, go: int | None = None, hold: int | None = None, sharp: int | None = None,
-                turns: int | None = None) -> None:
+    def release(self, go: int | None = None, hold: int | None = None, sharp: int | None = None) -> None:
         """The control file written: the stand-in's script released to *go* (``gN``); with --wait-done, its holds to
-        *hold* (``hN``) and its turns kept soft to *sharp* (``kN``) as well; with --k-keys, once a turn was released,
-        the turns released (*turns*, ``u``); a value not given as it was. Without the options the file is what it
-        always was (the go alone)."""
-        for key, value in (("go", go), ("hold", hold), ("sharp", sharp), ("turns", turns)):
+        *hold* (``hN``) and its turns kept soft to *sharp* (``kN``) as well; a value not given as it was. Without the
+        option the file is what it always was (the go alone)."""
+        for key, value in (("go", go), ("hold", hold), ("sharp", sharp)):
             if value is not None:
                 self.control[key] = int(value)
-        turned = {"turns": self.control["turns"]} if self.control.get("turns") else {}
         if self.wait_done is None:
-            sv.write_control(self.standin_dir, self.control["go"], **turned)
+            sv.write_control(self.standin_dir, self.control["go"])
         else:
             sv.write_control(self.standin_dir, self.control["go"], hold=self.control["hold"],
-                             sharp=self.control["sharp"], **turned)
+                             sharp=self.control["sharp"])
 
     def waits(self, now: float) -> None:
         """--wait-done, at every look: the hold the stand-in is at let go once `hold_over` says why (its page finished,
@@ -3448,35 +2946,10 @@ class Director:
         return any(d["kind"] == "translated" for d in self.notes.displays) or (
             self.app.ready and time.monotonic() - self.phase_at > 30)
 
-    def side_drop_due(self) -> bool:
-        """(scenario k with the indicator on, at the end) The backlog dropped once as another book drops it
-        (`backlog.drop_backlog`), pictured before and after: the indicator is looked at as the drop is handled
-        (`SideCheck.drop_looked`); True while the window is given its 2 s for it."""
-        if self.notes.side is None or not any(s.name in K_PACES for s in self.segments):
-            return False
-        from taslation import backlog as backlog_mod
-
-        now = time.monotonic()
-        if self.side_drop_at is None:
-            self.shot("k_side_before_the_drop")
-            held = backlog_mod.backlog_of(self.app, make=False)
-            if held is not None:  # (what it held at the end, before the drop: `bytes_at_end`)
-                self.notes.backlog_note("before the drop", held)
-            backlog_mod.drop_backlog(self.app, "the tool's look at the indicator")
-            self.side_drop_at = now
-            self.due.append((now + 1.0, "k_side_after_the_drop"))
-            return True
-        return now - self.side_drop_at < 2.0
-
     def before(self, seg: Segment) -> None:
-        from taslation.ui import theme
-
-        if seg.name == "f":
-            self.notes.act(seg.name, "dark theme")
-            self.theme["before"] = theme.mode()
-            self.app._settings_saved({"theme": "dark"})
-            self.theme["after"] = theme.mode()
-        elif seg.name in NARROW and seg is next(x for x in self.segments if x.name in NARROW):
+        """The stand-in made narrow for the first of f2 and f3 asked, and for scenario k with --k-narrow (its own
+        window's place: TASlation never moves nor resizes it)."""
+        if seg.name in NARROW and seg is next(x for x in self.segments if x.name in NARROW):
             self.resize_from = len(self.events)  # (f3 after f2: the stand-in is narrow already, resized since)
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
@@ -3487,408 +2960,6 @@ class Director:
             hwnd = self.browser.hwnd
             if hwnd and self.guard.is_viewer(hwnd):
                 place_own(hwnd, self.narrow_rect)
-
-    def enter(self, name: str) -> None:
-        """The mode of scenario *name* entered, as a reader does: r - F11 (`toggle_reading`, the key's own handler);
-        t - the toolbar's Translator, then F11's handler; o - over the book (`over_begin`); z - TASlation's text size
-        TEXT_SIZE times the run's (Settings)."""
-        app = self.app
-        self.entered[name] = {"at": time.monotonic()}
-        self.notes.act(name, "entered")
-        if name == "r":
-            self.shot("r_toolbar_reader_role")  # (the window as it was: the toolbar's Full screen and the role)
-            app.toggle_reading()
-            self.entered["r"].update(full_screen=bool(app.reading), auto_on_it=bool(app.auto_var.get()),
-                                     first_line=self.status_facts())
-            app.after(1500, lambda: self.shot("r_full_screen_reader_role"))
-        elif name == "t":
-            facts = self.entered["t"]
-            facts.update(auto_before=bool(app.auto_var.get()), role_before=str(app.role_var.get()))
-            facts["role_by_its_button"] = self.choose_role("translator")
-
-            def full() -> None:
-                self.shot("t_toolbar_translator_role")
-                app.toggle_reading()  # F11's own handler
-                facts["full_at"] = time.monotonic()  # (the acts wait for the page laid out on it: `keyed_turn`)
-                facts.update(full_screen=bool(app.reading), role_on_it=str(app.role_var.get()),
-                             auto_on_it=bool(app.auto_var.get()), first_line=self.status_facts())
-                app.after(1500, lambda: self.shot("t_full_screen_translator_role"))
-
-            app.after(900, full)
-        elif name == "o":
-            self.over_begin()
-        elif name == "z":
-            app._settings_saved({"ui_scale": round(self.args.scale * TEXT_SIZE, 2)})
-
-    def after(self, seg: Segment) -> None:
-        """The stand-in has gone through scenario *seg*: its mode left (r: F11's handler; o: `over_end`; z: the run's
-        text size again)."""
-        app = self.app
-        if seg.name == "r" and app.reading:
-            self.notes.act(seg.name, "left")
-            app.toggle_reading()
-            if "r" in self.entered:
-                self.entered["r"].update(left=not app.reading, auto_after=bool(app.auto_var.get()),
-                                         status_after=self.status_facts())
-        elif seg.name == "t2":
-            self.notes.act(seg.name, "left")
-            self.leave_translator()
-        elif seg.name == "o":
-            self.notes.act(seg.name, "left")
-            self.over_end()
-        elif seg.name == "z":
-            self.notes.act(seg.name, "left")
-            app._settings_saved({"ui_scale": self.args.scale})
-        elif seg.name in K_PACES and seg.name in self.k_keys:
-            self.key_for = None
-            app.__dict__.pop("_raise_for_key", None)
-
-    # scenario k by the window's page key (--k-keys)
-    def k_keys_step(self, seg: Segment, now: float) -> None:
-        """--k-keys: scenario k's turns, each released by the window's next page key (pressed on the window's page:
-        its binding's own call, `forward_key`) once the window hands it on (`_hook_page_keys`), at the times of
-        `k_key_times` from the pace's release; the turn back and the end of the last page read back released by the
-        driver alone. A key not handed on within K_KEY_GIVE_UP_S releases its turn all the same, noted so. The
-        window's raise of the viewer before a key is left out (the stand-in drawing while covered,
-        --standin-draws-covered: the windows of a person at the machine stay as they lie)."""
-        plan = self.k_keys.get(seg.name)
-        if plan is None:
-            a = self.args
-            plan = self.k_keys[seg.name] = {
-                "due": k_key_times(K_PACES[seg.name], a.k_turns, a.k_read or a.k_turns, a.k_read_ms, a.k_stay_ms),
-                "next": 0, "keys": [], "extra": 0, "began": self.phase_at}
-            self.app._raise_for_key = lambda _hwnd: None
-        t = now - plan["began"]
-        while plan["next"] < len(plan["due"]) and t >= plan["due"][plan["next"]][0]:
-            at, how = plan["due"][plan["next"]]
-            plan["next"] += 1
-            if how == "key":
-                self.k_press(seg, plan, at)
-            else:
-                self.k_release(seg)
-        for row in plan["keys"]:
-            if row.get("handed_after_ms") is None and not row.get("gave_up") and now - row["mono"] > K_KEY_GIVE_UP_S:
-                row["gave_up"] = True
-                self.k_release(seg)
-
-    def k_press(self, seg: Segment, plan: dict[str, Any], at: float) -> None:
-        """The window's next page key, as Page > Page keys... has it, pressed on its page (the binding's own call:
-        Tk delivers keys to the window with the system's keyboard focus, which this tool never moves)."""
-        app = self.app
-        pair = app._page_key_pair()
-        key = (getattr(pair[1], "next", "") if pair is not None else "") or "Left"
-        now = time.monotonic()
-        plan["keys"].append({"due_s": at, "late_ms": round((now - plan["began"] - at) * 1000), "mono": now,
-                             "t": now_ms(), "busy": bool(getattr(app, "busy", False))})
-        self.key_for = seg
-        app.forward_key(key)
-
-    def k_release(self, seg: Segment) -> None:
-        self.turns_released += 1
-        self.release(turns=self.turns_released)
-
-    def k_handed(self, seg: Segment, key: Any) -> None:
-        """--k-keys: the keys the window handed on (one or several in one handover), each releasing the turn of the
-        oldest key pressed that was not handed on yet; one with no such key is counted (`extra`) and releases
-        nothing."""
-        plan = self.k_keys.get(seg.name)
-        keys = [key] if isinstance(key, str) else list(key)
-        for _ in keys:
-            row = next((r for r in (plan or {}).get("keys", [])
-                        if r.get("handed_after_ms") is None and not r.get("gave_up")), None)
-            if row is None:
-                if plan is not None:
-                    plan["extra"] += 1
-                continue
-            row["handed_after_ms"] = round((time.monotonic() - row["mono"]) * 1000)
-            row["handed_t"] = now_ms()
-            row["together"] = len(keys)
-            self.k_release(seg)
-
-    def k_keys_facts(self, rel: Callable[[float | None], float | None]) -> dict[str, Any]:
-        """--k-keys, per pace: the keys pressed, handed on, given up on; each with its time on the run's clock (*rel*:
-        ``t_s`` pressed, ``handed_s`` handed on)."""
-        out: dict[str, Any] = {}
-        for name, plan in self.k_keys.items():
-            rows = [{**{k: v for k, v in r.items() if k not in ("mono", "t", "handed_t")}, "t_s": rel(r.get("t")),
-                     "handed_s": rel(r.get("handed_t"))} for r in plan["keys"]]
-            out[name] = {"pressed": len(rows), "handed_on": sum(1 for r in rows if r.get("handed_after_ms") is not None),
-                         "gave_up": sum(1 for r in rows if r.get("gave_up")), "extra": plan["extra"],
-                         "handed_after_ms": tail([r.get("handed_after_ms") for r in rows]),
-                         "pressed_busy": sum(1 for r in rows if r["busy"]), "keys": rows}
-        return out
-
-    # scenario t: the full screen in the Translator role
-    def _hook_page_keys(self) -> None:
-        """The page keys of scenarios t and t2: the key the window hands to the stand-in for a page key pressed on
-        its page (`reading.ReadingMixin._pass_on`; a browser's keys go pressed for real, `press_briefly`) is noted
-        and never sent - it releases the stand-in's turn of the scenario it was pressed for (`key_for`), as a viewer
-        turns its page on the key. Any other key goes to the guard, which refuses it and stops the run."""
-        from taslation.ui import reading as reading_mod
-
-        guarded = reading_mod.press_briefly
-
-        def page_key(hwnd: int, key: Any, *a: Any, **k: Any) -> Any:
-            seg = self.key_for
-            if seg is None or not self.guard.is_viewer(hwnd):
-                return guarded(hwnd, key, *a, **k)
-            if seg.name in K_PACES:  # (--k-keys: every key handed on releases a turn, `k_handed`)
-                self.k_handed(seg, key)
-                return True
-            self.key_for = None
-            facts = self.keyed.setdefault(seg.name, {})
-            facts["handed_on"] = key if isinstance(key, str) else list(key)
-            facts["handed_on_after_ms"] = round((time.monotonic() - facts.get("at", time.monotonic())) * 1000)
-            self.release(go=seg.go)
-            return True
-
-        reading_mod.press_briefly = page_key
-
-    def keyed_turn(self, seg: Segment, ready_go: bool, rested: bool, now: float) -> bool:
-        """Scenarios t and t2: whether the page key has released the stand-in's turn (`page_key`); before that, at rest
-        on the full screen in the Translator role, t's acts there (`translator_acts`, which end with its key), and
-        t2's key at rest."""
-        facts = self.keyed.get(seg.name)
-        if facts is not None:
-            return "handed_on" in facts  # (the key pressed: released once the window hands it on)
-        if not ready_go:
-            return False
-        app = self.app
-        if seg.name == "t2":
-            if rested:
-                self.press_page_key(seg)
-            return False
-        mode = self.entered.get("t")
-        if mode is None or "acts" in mode:
-            return False
-        on = (bool(app.reading) and app.role_var.get() == "translator" and rested and app._editing()
-              and now - mode.get("full_at", now) >= FULL_SCREEN_SETTLE_S)
-        if on or now - mode["at"] > ACTS_WAIT_S:
-            mode["acts"] = {"waited_s": round(now - mode["at"], 1)}
-            self.translator_acts(seg)
-        return False
-
-    def translator_acts(self, seg: Segment) -> None:
-        """Scenario t at rest on the full screen in the Translator role, as a person works there: the largest region
-        lettered selected by a click on it (Tk's own press and release on the page canvas) and pictured; the region
-        editor opened by a double click on it, its place over the full screen noted (`over_facts`) and its own window
-        pictured, then closed by its Esc (`close_asked`); the selection let go by Esc (the window's handler); then
-        the next page key (`press_page_key`). Each step notes what came of it, as numbers and names."""
-        app, acts = self.app, self.entered["t"]["acts"]
-        region = self.largest_region()
-        acts["region_found"] = region is not None
-        if region is None or not app._editing():
-            acts["skipped"] = "no region" if region is None else "the translated page not on show"
-            self.press_page_key(seg)
-            return
-        clock = [int(time.monotonic() * 1000) & 0x3FFFFFFF]  # the events' times: clicks far apart, a double close
-
-        def click(gap: int) -> None:  # (at the region's middle where the page is drawn now)
-            x, y = page_point(app, region)
-            clock[0] += gap
-            app.canvas.event_generate("<ButtonPress-1>", x=x, y=y, time=clock[0])
-            app.canvas.event_generate("<ButtonRelease-1>", x=x, y=y, time=clock[0] + 60)
-
-        def select() -> None:
-            click(0)
-            acts["selected_by_a_click"] = app._chosen_region is region
-            acts["clicks_handed_to_the_stand_in"] = self.guard.used.get("post_click", 0)
-            acts["status_after_the_click"] = self.status_facts()
-            app.after(700, pictured)
-
-        def pictured() -> None:
-            self.shot("t_region_selected")
-            app.after(300, edit)
-
-        def edit(tries: int = 0) -> None:
-            if self.over or not app._editing():
-                acts["editor"] = "the translated page not on show"
-                app.after(300, key)
-                return
-            if app.busy and tries < 40:  # a job at work (the editor opens at rest, as a person's double click does)
-                app.after(500, lambda: edit(tries + 1))
-                return
-            acts["busy_at_the_double_click"] = bool(app.busy)
-            x, y = page_point(app, region)
-            acts["region_under_the_double_click"] = app._region_at(*app.canvas.to_image_coords(x, y)) is region
-            click(5000)  # (a click of its own, long after the one that selected) ...
-            click(250)  # ... and the second of a double click
-            editor = getattr(app, "_editor", None)
-            acts["editor_by"] = "a double click" if editor is not None and editor.winfo_exists() else None
-            if acts["editor_by"] is None and acts["region_under_the_double_click"]:
-                app._on_double(SimpleNamespace(x=x, y=y))  # (Tk took the two clicks for two: the double's handler)
-                acts["editor_by"] = "the double click's handler"
-            app.after(1200, opened)
-
-        def opened() -> None:
-            editor = getattr(app, "_editor", None)
-            acts["editor_open"] = bool(editor is not None and editor.winfo_exists())
-            if acts["editor_open"]:
-                acts["editor_window"] = over_facts(editor, app)
-                self.shot("t_region_editor", window=editor)
-                editor.close_asked()  # its Esc: nothing changed, it closes
-            app.after(700, closed)
-
-        def closed() -> None:
-            editor = getattr(app, "_editor", None)
-            acts["editor_closed"] = editor is None or not editor.winfo_exists()
-            acts["full_screen_after_the_editor"] = bool(app.reading)
-            acts["selected_after_the_editor"] = app._chosen_region is region
-            with contextlib.suppress(KeyError, tk_error()):
-                acts["keys_back_on_the_page"] = app.focus_get() is app.canvas
-            app._on_escape()  # Esc's own handler, a region selected: it lets go of it, the full screen stays
-            acts["esc_let_go"] = app._chosen_region is None
-            acts["full_screen_after_esc"] = bool(app.reading)
-            app.after(700, key)
-
-        def key() -> None:
-            if not self.over:
-                self.press_page_key(seg)
-
-        select()
-
-    def largest_region(self) -> Any:
-        """The largest region on the page on show whose middle lies on the page the full screen draws, a lettered one
-        first; None without one."""
-        app = self.app
-        try:
-            regions = list(app._page_regions())
-        except Exception:  # noqa: BLE001 - no regions to be had
-            return None
-        regions = [r for r in regions if app.canvas.inside(*page_point(app, r))]
-        lettered = [r for r in regions if getattr(r, "status", "") == "translated"] or regions
-        return max(lettered, key=lambda r: (r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]), default=None)
-
-    def press_page_key(self, seg: Segment) -> None:
-        """The window's next or previous page key (`KEYED`, as Page > Page keys... has them) pressed on its page: Tk's
-        key event on the page canvas, whose binding hands it to `forward_key`; where Tk does not deliver it (it
-        delivers keys to the window with the system's keyboard focus, which this tool never moves) the binding's own
-        call. The key the window then hands to the stand-in releases its turn (`page_key`)."""
-        from taslation.ui.constants import FORWARDED_KEYS
-
-        app = self.app
-        pair = app._page_key_pair()
-        meaning = KEYED[seg.name]
-        key = getattr(pair[1], meaning, "") if pair is not None else ""
-        key = key or ("Left" if meaning == "next" else "Right")
-        keysym = next((k for k, v in FORWARDED_KEYS.items() if v == key), key)
-        facts = self.keyed.setdefault(seg.name, {})
-        facts.update(at=time.monotonic(), pressed=key, on_the_full_screen=bool(app.reading),
-                     role=str(app.role_var.get()), auto=bool(app.auto_var.get()))
-        calls: list[str] = []
-
-        def counted(k: str) -> None:
-            calls.append(k)
-            type(app).forward_key(app, k)
-
-        self.key_for = seg
-        app.forward_key = counted  # (only counted: the window's own `forward_key` does the rest)
-        try:
-            app.canvas.event_generate(f"<KeyPress-{keysym}>")
-        finally:
-            del app.forward_key
-        facts["by"] = "a key event on the page" if calls else "the binding's call"
-        if not calls:
-            app.forward_key(key)
-        facts["status_after_the_key"] = self.status_facts()
-
-    def leave_translator(self) -> None:
-        """Scenario t over (after t2): the full screen left by Esc's own handler (pressed again while it only let go
-        of a region), F11's handler where it did not; then the toolbar's Reader again, for the scenarios after it."""
-        app, facts = self.app, self.entered.get("t")
-        if facts is None:
-            return
-        presses = 0
-        while app.reading and presses < 2:
-            app._on_escape()
-            presses += 1
-        facts["esc_presses_to_leave"] = presses if not app.reading else None
-        if app.reading:
-            app.toggle_reading()
-        facts.update(auto_after=bool(app.auto_var.get()), status_after=self.status_facts())
-        facts["reader_by_its_button"] = self.choose_role("reader")
-        facts["role_after"] = str(app.role_var.get())
-
-    def choose_role(self, value: str) -> bool:
-        """The toolbar's role button for *value* invoked, as a click on it does (its command: `_on_role_changed`);
-        False where none was found and the role was set as that command sets it."""
-        app = self.app
-        stack: list[Any] = [app]
-        while stack:
-            widget = stack.pop()
-            with contextlib.suppress(Exception):
-                if (widget.winfo_class() == "TRadiobutton" and str(widget.cget("value")) == value
-                        and str(widget.cget("variable")) == str(app.role_var)):
-                    widget.invoke()
-                    return True
-            stack.extend(widget.winfo_children())
-        app.role_var.set(value)
-        app._on_role_changed()
-        return False
-
-    def status_facts(self) -> dict[str, Any]:
-        """The status line as its kind (`status_kind`, never its text) and its note on the full screen's page: shown
-        or not, for how long (`StatusMixin._note_ms`)."""
-        app = self.app
-        kind = status_kind(getattr(app, "_status_render", None), getattr(app, "_status_key", None))[0]
-        note = str(getattr(app.canvas, "note", "") or "")
-        return {"kind": kind, "note_on_the_page": bool(note), "note_ms": app._note_ms(note) if note else None}
-
-    def over_begin(self) -> None:
-        """Scenario o: the stand-in's window made to fill its monitor (a viewer's full screen, as `is_fullscreen` tells
-        it), View > Over the full-screen viewer turned on; then, as a reader would, the status bar's Move TASlation
-        there (offered while TASlation is on another monitor) and the Full screen button (F11 over the book is the
-        viewer's own key). What was offered and done is noted."""
-        from taslation.capture import monitor_rect, window_rect
-
-        app, hwnd, facts = self.app, self.browser.hwnd, self.entered["o"]
-        if not hwnd or not self.guard.is_viewer(hwnd):
-            return
-        self.standin_before = window_rect(hwnd)
-        monitor = monitor_rect(hwnd)
-        if monitor is None:
-            facts["failed"] = "no monitor"
-            return
-        left, top, right, bottom = monitor
-        place_own(hwnd, (left, top, right - left, bottom - top))
-        app.over_var.set(True)
-        app.toggle_over()
-
-        def move() -> None:
-            button = getattr(app, "move_btn", None)
-            facts["move_offered"] = bool(button is not None and button.winfo_manager())
-            app.move_to_book()  # the status bar's button
-            app.after(1000, read)
-
-        def read() -> None:
-            facts["over_before_reading"] = bool(app._over_on)
-            app.enter_reading()  # the Full screen button
-
-        app.after(800, move)
-
-    def over_end(self) -> None:
-        """Scenario o over: the full screen left by the F11 hot key (this tool's press, `HotKeys`), then the mode turned
-        off, TASlation's window back in its place and the stand-in's back to its size (F11's handler where the press
-        was not taken: noted)."""
-        app, facts = self.app, self.entered.get("o")
-        if facts is None:
-            return
-        self.hotkeys.press("F11")
-
-        def off() -> None:
-            facts["left_by_hot_key"] = not app.reading
-            if app.reading:
-                app.toggle_reading()
-            app.over_var.set(False)
-            app.toggle_over()
-            x, y, w, h = self.app_rect
-            app.geometry(f"{w}x{h}+{x}+{y}")
-            hwnd = self.browser.hwnd
-            if self.standin_before is not None and hwnd and self.guard.is_viewer(hwnd):
-                left, top, right, bottom = self.standin_before
-                place_own(hwnd, (left, top, right - left, bottom - top))
-
-        app.after(800, off)
 
     def backlog_done(self) -> bool:
         """Whether the window's backlog has nothing left to do (or waits, paused: the end of a scenario all the
@@ -3976,14 +3047,13 @@ class Director:
 
 def area_facts(app: Any) -> dict[str, Any]:
     """The capture area the window reads by, as numbers: the margins in use, the reader's area for the frame there
-    is now (and whether it is the enlarged window's), the page panel found within it, the part of the picture the
-    page view draws (its crop, None off the full screen) and the picture's size, the viewer's window size."""
+    is now, the page panel found within it, the part of the picture the page view draws (its crop) and the picture's
+    size, the viewer's window size."""
     from taslation.capture import window_rect
 
     out: dict[str, Any] = {}
     for name, get in (("margins", lambda: app.settings.margins), ("hand", lambda: app._hand_area),
-                      ("inner", lambda: app._inner_margins()), ("large", lambda: app._area_large),
-                      ("manual", lambda: app._manual_area), ("enlarged", lambda: app._window_enlarged()),
+                      ("inner", lambda: app._inner_margins()), ("manual", lambda: app._manual_area),
                       ("drawn_box", lambda: app.canvas.shown_box()), ("crop", lambda: app.canvas.crop),
                       ("picture_size", lambda: app.canvas._image.size)):
         try:
@@ -4614,9 +3684,9 @@ def turn_rows(turns: list[dict[str, Any]], notes: Notes, end: float) -> list[dic
     """Per turn of the stand-in, numbers: the times are from the stand-in's draw of the turn's sharp frame (its own
     clock, put on the window's by the least latency of its console lines: `summarise`) to the window's first
     request for the job that finished the page (`finishing_job`), its first picture of the page with lettering on
-    it, and its finished page. Its rest ends at the next turn or where the driver changed the window before it (a mode
-    left or entered, the theme, the text size, the stand-in's size: `Notes.acts`), whichever comes first: what the
-    window showed then is the page at rest (`at_rest`), not what the next scenario made of it."""
+    it, and its finished page. Its rest ends at the next turn or where the driver changed the stand-in before it (its
+    size: `Notes.acts`), whichever comes first: what the window showed then is the page at rest (`at_rest`), not what
+    the next scenario made of it."""
     rows = []
     started = [j for j in notes.jobs if j["started"]]
     acts = sorted(getattr(notes, "acts", ()), key=lambda a: a["t"])
@@ -5152,7 +4222,7 @@ def run(args: argparse.Namespace) -> int:
     k_plan = {"turns": args.k_turns, "read": args.k_read if args.k_read else args.k_turns,
               "soft": args.k_soft == "on" and soft_first, "narrow": bool(args.k_narrow),
               "backlog": args.k_backlog == "on",
-              "read_ms": args.k_read_ms, "keys": bool(args.k_keys), "stay_ms": args.k_stay_ms}
+              "read_ms": args.k_read_ms, "stay_ms": args.k_stay_ms}
     profile_options = sv.parse_options(args.standin_option)
     if profile_options and not args.standin_profile:
         raise SystemExit("--standin-option is for a stand-in with a profile (--standin-profile)")
@@ -5214,8 +4284,7 @@ def run(args: argparse.Namespace) -> int:
         (l_, t_, r_, b_), _p = monitors.areas[0] if monitors.areas else ((0, 0, 1920, 1040), True)
         standin_rect = (l_, t_, min(w_, r_ - l_), min(h_, b_ - t_))
     report["standin_rect"] = list(standin_rect)
-    report["see_through"] = bool(args.see_through)
-    report["capture_ms"] = args.capture_ms or None
+    report["see_through"] = True  # (the program's one mode since 2.0.0; the key is kept for the reports' readers)
     report["standin_full_screen"] = bool(args.standin_full_screen)
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
@@ -5291,7 +4360,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
 
     # every module in place before the guard replaces what they import
     from taslation import frames, pipeline  # noqa: F401
-    from taslation.ui import jobs, live, overbook, reading, trouble, viewers  # noqa: F401
+    from taslation.ui import jobs, live, trouble, viewers  # noqa: F401
     from taslation.ui.dialogs import caches, start  # noqa: F401
 
     guard = demo_video.Guard(hwnd)
@@ -5314,57 +4383,41 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         return WindowInfo(hwnd, sv.window_text(hwnd), window_class(hwnd), pid, window_rect(hwnd), program_name(pid))
 
     notes = Notes(top, dpr)
-    hotkeys = HotKeys(notes)
-    patched = install(notes, args, guard, viewer_info, hotkeys)
+    patched = install(notes, args, guard, viewer_info)
     watch_stuck(notes, out / "stacks.txt", url)
     watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt", standin_pids=lambda: {pid, *browser.tree})
     watch_input(notes)
     state = demo_video.scratch_state()
     info = viewer_info()
-    edit = bool(getattr(args, "see_through", False) and getattr(args, "see_edit", False))
+    edit = bool(getattr(args, "see_edit", False))
     remember_role(state, BOOK, "translator" if edit else "reader")  # (the Translator's: the left pane's Edit on)
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
-    profiles.set_margins(info, area, large=True)
-    settings = Settings(state_dir=state, ui_language="en", target_language="English", over_book=False,
-                        always_on_top=False, ui_scale=args.scale,
+    settings = Settings(state_dir=state, ui_language="en", target_language="English", ui_scale=args.scale,
                         models_dir=Path(os.environ["TASLATION_MODELS_DIR"]), ollama_url=url,
                         ocr_runs_on=args.ocr_runs_on, ollama_window_cache=args.ollama_window_cache,
-                        ollama_num_gpu=args.ollama_num_gpu, see_through=bool(getattr(args, "see_through", False)),
-                        see_through_indicators=getattr(args, "see_indicators", "on") == "on",
-                        **({"side_indicator": args.side_indicator} if args.side_indicator else {}))
+                        ollama_num_gpu=args.ollama_num_gpu,
+                        see_through_indicators=getattr(args, "see_indicators", "on") == "on")
     settings.validate()
-    if getattr(settings, "side_indicator", "off") != "off":
-        notes.side = SideCheck(notes)
     errorlog.setup(settings)
     tap = LogTap(notes, url if mode.startswith("real") else None)
     logging.getLogger().addHandler(tap)
     netguard.install(settings.ollama_port)  # nothing but the translator's port on this computer, as the window has it
     front_before = int(ctypes.windll.user32.GetForegroundWindow() or 0)  # (read only: who is in front before the start)
-    activations = None
-    if args.see_through:  # (TASlation's own windows' activations counted from before the window is made; none refused)
-        import standin_seethrough
+    import standin_seethrough
 
-        activations = standin_seethrough.Activations()
+    activations = standin_seethrough.Activations()  # (TASlation's own windows' activations, from before it is made)
     made_t = now_ms()  # (the window's start: what follows is timed from here, `start_clock`)
     app = app_mod.App(settings, window_query=browser.token, book=BOOK_UNNAMED if args.book_asked else BOOK, auto=True)
     built_t = now_ms()
-    if args.capture_ms:  # (the window's frames asked for this often, as see-through mode asks for them: the comparison)
-        from taslation.capture import wgc
-
-        wgc.set_update_ms(args.capture_ms)
-    see = None
-    if args.see_through or args.standin_profile:  # (the frames a second and the CPU with it off too)
-        import standin_seethrough
-
-        see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
-                                          truth=bool(args.see_through and args.see_truth),
-                                          shots=out / "shots" if args.see_truth else None, front_before=front_before,
-                                          activations=activations,
-                                          pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
-                                          viewer_pids=lambda: {pid, *browser.tree}, edit=edit)
-        see.install()
-        see.start()
+    see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
+                                      truth=bool(args.see_truth),
+                                      shots=out / "shots" if args.see_truth else None, front_before=front_before,
+                                      activations=activations,
+                                      pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
+                                      viewer_pids=lambda: {pid, *browser.tree}, edit=edit)
+    see.install()
+    see.start()
     queue_put = app._events.put
 
     def tagged(item: Any, *a: Any, **k: Any) -> Any:
@@ -5392,7 +4445,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     app.geometry(f"{w}x{h}+{x}+{y}")
     app.after(600, lambda: app.geometry(f"{w}x{h}+{x}+{y}"))
     director = Director(app, browser, guard, selection, notes, segments, args, out, standin_dir, narrow_rect,
-                        app_rect, hotkeys)
+                        app_rect)
     director.start()
     began = now_ms()
     try:
@@ -5408,17 +4461,15 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
             demo_video.finish_app(app)
         director.close_saver()
         logging.getLogger().removeHandler(tap)
-        if see is not None:
-            see.close()
+        see.close()
     run_ = summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode,
                      cache_at_end(settings))
-    if see is not None:
-        lat = [e["recv"] - e["t"] for e in director.events]
-        run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
-        run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
-        pipeline = run_["see_through"].get("pipeline") or {}
-        pipeline["present_to_display_ms"] = see_lags(notes, pipeline.get("presents_t", []))
-        pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
+    lat = [e["recv"] - e["t"] for e in director.events]
+    run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
+    run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
+    see_pipeline = run_["see_through"].get("pipeline") or {}
+    see_pipeline["present_to_display_ms"] = see_lags(notes, see_pipeline.get("presents_t", []))
+    see_pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
     run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
     return run_
 
@@ -5620,15 +4671,9 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
     resizes = resize_rows(events, offset, notes, turns, rows)
     for item in resizes:
         item["from_s"] = rel(item.pop("from_t"))
-    leaves = [{**{k: v for k, v in item.items() if k != "t"}, "t_s": rel(item["t"])} for item in notes.leaves]
-    modes = {"leaves_of_the_full_screen": leaves,
-             "columns": ["t_s", "reading", "over", "text_size", "role"],
-             "rows": [[rel(m["t"]), int(m["reading"]), int(m["over"]), m["text_size"], m["role"]]
-                      for m in notes.modes],
-             "entered": {name: {k: v for k, v in facts.items() if k != "at"}
-                         for name, facts in director.entered.items()},
-             "driver_acts": [{**{k: v for k, v in a.items() if k != "t"}, "t_s": rel(a["t"])} for a in notes.acts],
-             "hot_keys": [{**{k: v for k, v in h.items() if k != "t"}, "t_s": rel(h["t"])} for h in notes.hotkeys]}
+    modes = {"columns": ["t_s", "role"],
+             "rows": [[rel(m["t"]), m["role"]] for m in notes.modes],
+             "driver_acts": [{**{k: v for k, v in a.items() if k != "t"}, "t_s": rel(a["t"])} for a in notes.acts]}
     cancel_rows = [r for r in rows if r["segment"] == "x"]
     in_flight = [w for w in wasted if segment_at_t(w["t"]) == "x"]
     cancel = {"soft_ms": director.args.cancel_soft_ms, "factor": CANCEL_FACTOR,
@@ -5654,15 +4699,12 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
                              for r in requests]}
     k_facts = k_block(notes, turns, rows, requests, spells, rel)
     pump = sorted(ms_ for ms_, _busy in notes.timings.get("_poll_events", []))
-    side_facts = {"setting": getattr(director.app.settings, "side_indicator", None),
-                  "poll_events_ms": {"n": len(pump), "median": round(statistics.median(pump), 3),
-                                     "p90": round(pump[int(0.9 * (len(pump) - 1))], 2),
-                                     "p99": round(pump[int(0.99 * (len(pump) - 1))], 2),
-                                     "max": round(pump[-1], 1)} if pump else None,
-                  **({"looked": notes.side.report()} if notes.side is not None else {})}
+    poll_events = {"n": len(pump), "median": round(statistics.median(pump), 3),
+                   "p90": round(pump[int(0.9 * (len(pump) - 1))], 2),
+                   "p99": round(pump[int(0.99 * (len(pump) - 1))], 2), "max": round(pump[-1], 1)} if pump else None
     return {
         **({"scenario_k": k_facts} if k_facts else {}),
-        "side_indicator": side_facts,
+        "poll_events_ms": poll_events,
         "timing": timing_summary(rows, getattr(director.args, "soft_first", "on") == "on", notes.drew_soft,
                                  [s for _t, s in browser.said()], rel),
         "latency_rested": latency,
@@ -5705,10 +4747,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
         "clock": {"standin_to_window_ms": round(offset, 1),
                   "log_latency_ms_median": round(statistics.median(lat) - offset, 1) if lat else None},
         "band_top_px": top, "dpr": dpr,
-        "released": director.released, "theme": director.theme,
+        "released": director.released,
         **({"waits": director.waits_report()} if director.wait_done is not None else {}),
-        "page_keys": {name: {k: v for k, v in facts.items() if k != "at"} for name, facts in director.keyed.items()},
-        "k_keys": director.k_keys_facts(rel),
         "segments": table, "turns": rows, "incidents": spells,
         "jobs": {"started": len(started), "on": dict(Counter(j["state"] for j in started)),
                  "not_started": len(jobs) - len(started),
@@ -5859,7 +4899,6 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             if nxt is not None:
                 slot.append(server_wait(nxt))
         jobs = [j for j in notes.jobs if j["started"] and lo <= j["t"] < upto]
-        thumbs = [r["thumb"] for r in told if r["thumb"]]
         by_id = {j["id"]: j for j in notes.jobs}
         flipped = {row["page"]: (f, row) for f, (_t, row) in zip(flip_rows, flips)}
 
@@ -5966,7 +5005,6 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
             "regions_mb_most": round(max((b.get("regions", 0) or 0 for b in held), default=0) / mb, 2),
             "frames_held_after_read_most": max((b.get("framed_after_read", 0) for b in held), default=0),
             "bytes_at_end": held[-1].get("bytes") if held else 0,
-            "thumb_height_most": max((t[1] for t in thumbs), default=None),
             "flip_list": flip_rows,
             "back_s": rel(back_t), "empty_s": rel(empty)}
     if not paces:
@@ -5980,15 +5018,13 @@ def k_block(notes: Notes, turns: list[dict[str, Any]], rows: list[dict[str, Any]
                                         next((j for j in notes.jobs if j["started"] and j["t"] >= b["began"]), None)
                                         if b["did"] == "stopped" else None))]
                                    for b in steps]},
-            "event_list": {"columns": ["t_s", "kind", "seq", "stage", "state", "pages", "thumb"],
-                           "rows": [[rel(r["t"]), r["kind"], r["seq"], r["stage"], r["state"], r["pages"],
-                                     r["thumb"]] for r in readings]},
+            "event_list": {"columns": ["t_s", "kind", "seq", "stage", "state", "pages"],
+                           "rows": [[rel(r["t"]), r["kind"], r["seq"], r["stage"], r["state"], r["pages"]]
+                                    for r in readings]},
             "told": told_states(readings),
             "catches": {"caught": sum(1 for c in catches if c["caught"]),
                         "not_caught": sum(1 for c in catches if not c["caught"]),
-                        "from_regions": sum(1 for c in catches if c["caught"] and c["read"])},
-            "thumbs_with_first_event_only": len({r["seq"] for r in readings if r["thumb"]})
-            == sum(1 for r in readings if r["thumb"])}
+                        "from_regions": sum(1 for c in catches if c["caught"] and c["read"])}}
 
 
 def first_steps(jobs: list[dict[str, Any]], steps: list[dict[str, Any]], every: list[dict[str, Any]]
@@ -6140,8 +5176,7 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     if kept:
         print(f"window order: the stand-in put under the window {sum(1 for n in kept if 'put directly under' in n['line'])}"
               f" time(s), left as it was {sum(1 for n in kept if 'left as it is' in n['line'])} time(s), "
-              f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s); hidden wholly, no frame after "
-              f"a page key {sum(1 for n in kept if n['line'].startswith('the viewer is hidden wholly'))} time(s)")
+              f"refused {sum(1 for n in kept if 'did not put' in n['line'])} time(s)")
     cover = run_.get("tool_cover") or {}
     if cover:
         part = cover.get("part", 1.0)
@@ -6192,13 +5227,7 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"{k['same_page_turn_waits_ms']}, first bubble {k['same_page_turn_first_lettered_ms']}; "
               f"frames held {k['frame_wait_ms']} ms; steps {k['steps_on']}, busy {k['steps_busy_s']} s, reads after "
               f"a stop {k['reads_after_a_stop']}")
-    side = run_.get("side_indicator") or {}
-    looked = side.get("looked")
-    print(f"indicator {side.get('setting')}: event pump {side.get('poll_events_ms')}" + (
-        f"; looked at {looked['checks']} times {looked['layouts']}, wrong {looked['wrong']}, screens told "
-        f"{looked['screens_told']}, gone by {looked['missed_told']} (drawn so {looked['missed_drawn_as_missed']}), "
-        f"on show outlined {looked['on_show_outlined']}, drops {looked['drops']}, a look {looked['check_ms']} ms"
-        if looked else ""))
+    print(f"event pump {run_.get('poll_events_ms')}")
     split = run_.get("stage_split") or {}
     if split.get("all"):
         print("where a rested page's time went (ms, median/p90/max over the finishing jobs): " + "; ".join(
@@ -6276,12 +5305,6 @@ def print_table(report: dict[str, Any], path: Path) -> None:
     print(f"readings of a page the cache did not hold as found: {looks['with_readings']} of {looks['looks']} looks, "
           f"found {looks['found']}; ms {looks['ms']} (when found {looks['ms_when_found']}); readings "
           f"{looks['readings']}")
-    modes = run_["modes"]
-    print(f"modes entered {modes['entered']}; hot keys pressed "
-          f"{[(h['pressed'], h['taken']) for h in modes['hot_keys'] if 'pressed' in h]}")
-    if run_.get("page_keys"):
-        print(f"page keys pressed on the window's page: {run_['page_keys']}")
-    print(f"the full screen left: {modes.get('leaves_of_the_full_screen')}")
     cancel = run_["cancel_in_flight"]
     if cancel["turns"]:
         print(f"cancelled in flight (soft {cancel['soft_ms']} ms): jobs on soft {cancel['jobs_on_soft']}, requests "
@@ -6300,8 +5323,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--out", type=Path, default=Path(tempfile.gettempdir()) / f"taslation-standin-{os.getpid()}",
                     help="the scratch folder (the state, the stand-in's files, report.json, shots/)")
     ap.add_argument("--scenario", default="all",
-                    help="all, or some of c,a,b,d,e,r,t,o,z,x,f,f2,k,q (f brings f2 with it, t brings t2; k is "
-                         "k5,k1,k2 and never in all, nor is q: for --standin-profile)")
+                    help="all, or some of c,a,b,d,e,x,f2,k,q (k is k5,k1,k2 and never in all, nor is q: for "
+                         "--standin-profile)")
     ap.add_argument("--scale", type=float, default=1.0,
                     help="the display scale the stand-in's browser draws at, and TASlation's text size (1 to 3)")
     ap.add_argument("--cancel-soft-ms", type=int, default=700,
@@ -6346,8 +5369,8 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--models", default="", help="the models folder (default: TASLATION_MODELS_DIR)")
     ap.add_argument("--timeout", type=float, default=180.0, help="seconds a scenario may wait for the window's rest")
     ap.add_argument("--wait-done", type=float, metavar="CAP_S",
-                    help="a computer slower than the scenarios' rests were written for: the rests of a, d, e, r, o, z, "
-                         "x, f and f2, the one at each one's end too, held until the page on show is finished (or "
+                    help="a computer slower than the scenarios' rests were written for: the rests of a, d, e, x and "
+                         "f2, the one at each one's end too, held until the page on show is finished (or "
                          "the window at rest without it), CAP_S at most, and x's soft frames kept until the window "
                          f"asked on them ({KEEP_SOFT_S:g} s at most); the holds in the report (run.waits). Without it "
                          "the scenarios are as written")
@@ -6356,10 +5379,6 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--k-read-ms", type=int, default=K_READ_MS,
                     help=f"scenario k: ms a page read back stays (default {K_READ_MS}; longer for a computer without "
                          "a GPU, whose page on show takes longer)")
-    ap.add_argument("--k-keys", action="store_true",
-                    help="scenario k: each turn released by the window's next page key once the window hands it on "
-                         "(pressed on its page, as a reader turns by TASlation's keys), not by the stand-in's own "
-                         "clock; the window's raise of the viewer before a key left out (with --standin-draws-covered)")
     ap.add_argument("--k-stay-ms", type=int, default=0,
                     help="scenario k: ms the last page flipped to stays before the turn back (default: the pace) - a "
                          "page read afresh on show while the pages turned past wait")
@@ -6388,11 +5407,6 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help="off: no page is caught behind the reader (the baseline of the same turns)")
     ap.add_argument("--k-narrow", action="store_true",
                     help="scenario k: in the narrow window (single pages), the stand-in placed at NARROW_SIZE first")
-    ap.add_argument("--side-indicator", default=None, choices=("column", "rail", "off"),
-                    help="the setting side_indicator of the window (default: the app's, column); not off: the "
-                         "indicator beside the page is looked at from the window as the events come (`SideCheck`), "
-                         "pictured after the flips and the reads back of scenario k, and dropped at the end to see "
-                         "it cleared")
     ap.add_argument("--standin-slider", type=int, default=0, choices=(0, 1, 2),
                     help="the stand-in's page slider under the page: 0 none (default), 1 a bar with a knob, 2 the "
                          "pages drawn as the knob is dragged")
@@ -6402,22 +5416,18 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--standin-option", action="append", default=[], metavar="NAME=VALUE",
                     help="with --standin-profile: one of its parts given another value (again for more; the names: "
                          + ", ".join(sv.PROFILE_OPTIONS) + ")")
-    ap.add_argument("--see-through", action="store_true",
-                    help="the window's see-through mode (Settings.see_through): the lettering over the stand-in's own "
-                         "window; the see-through window is watched (`standin_seethrough`, run.see_through)")
     ap.add_argument("--see-indicators", default="on", choices=("on", "off"),
-                    help="with --see-through: the setting see_through_indicators (off: no indicators pane at the "
-                         "right)")
+                    help="the setting see_through_indicators (off: no indicators pane at the right)")
     ap.add_argument("--see-truth", action="store_true",
-                    help="with --see-through: copies of the stand-in's place on the screen, every "
+                    help="copies of the stand-in's place on the screen, every "
                          f"{1000 * 0.033:.0f} ms in memory, checked for old patches over a new page; two of them into "
                          "shots/ (they show the sample pages: delete them after)")
     ap.add_argument("--see-pane-shot", action="store_true",
-                    help="with --see-through: one copy of the stand-in's place on the screen, taken the first time "
+                    help="one copy of the stand-in's place on the screen, taken the first time "
                          "both side panes show beside a spread whose page is done and the copy shows nothing of another "
                          "program's, into shots/ (it shows a sample page: delete it after)")
     ap.add_argument("--see-edit", action="store_true",
-                    help="with --see-through: the book's role kept as the Translator's, so that the left pane's Edit "
+                    help="the book's role kept as the Translator's, so that the left pane's Edit "
                          "is on from the start; a click and a drag on a region, posted to the lettering's own window, "
                          "are measured in place of the patch under the pointer (run.see_through.edit)")
     ap.add_argument("--standin-size", default="", metavar="WxH",
@@ -6426,13 +5436,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--standin-full-screen", action="store_true",
                     help="the stand-in in the browser's own full screen from its start; the reader's area is then the "
                          "whole frame")
-    ap.add_argument("--capture-ms", type=int, default=0, metavar="MS",
-                    help="the window's frames asked for at most this often (wgc.set_update_ms; see-through mode asks "
-                         "for 16): a run without see-through to compare the frames a second with")
     ap.add_argument("--no-viewer-s", type=float, default=0.0, metavar="S",
                     help="the window finds no viewer for its first S seconds (its look for windows given none), then "
-                         "the stand-in; nothing is released before it has chosen it (run.no_viewer; in see-through "
-                         "mode the viewer chooser comes by itself meanwhile: run.see_through.hidden_window.dialogs)")
+                         "the stand-in; nothing is released before it has chosen it (run.no_viewer; the viewer "
+                         "chooser comes by itself meanwhile: run.see_through.hidden_window.dialogs)")
     ap.add_argument("--book-asked", action="store_true",
                     help=f"the window begins with the name {BOOK_UNNAMED!r}, which names no book, so that Auto's first "
                          f"page asks it (the start dialog); answered {BOOK_ANSWER_S:g} s after it is on the screen, "

@@ -217,10 +217,9 @@ class WarningBox(tk.Toplevel):
 
 
 def _box(parent: tk.Misc, text: str, wait: bool, **kwargs: Any) -> WarningBox:
-    """TASlation's own box over *parent* (`WarningBox`), in front and above everything - a full-screen viewer too: a
-    box of the window's own over the full-screen viewer is raised there by `overbook` as well - with the keys. When
-    the viewer chosen in the window had the foreground (a box nobody asked for, the reader in the book), the viewer
-    gets it back once the box is closed. *wait*: until then (else at once, the box left to the reader)."""
+    """TASlation's own box over *parent* (`WarningBox`), in front and above everything - a full-screen viewer too -
+    with the keys. When the viewer chosen had the foreground (a box nobody asked for, the reader in the book), the
+    viewer gets it back once the box is closed. *wait*: until then (else at once, the box left to the reader)."""
     app = parent._root()
     win = getattr(app, "selected", None)
     viewer = getattr(win, "hwnd", 0) or 0
@@ -702,7 +701,7 @@ class CachesDialog(tk.Toplevel):
         try:
             self.rename_flow(old, new, str(entry.get("model", "")), str(entry.get("language", "") or "English"), None)
         except Exception:  # noqa: BLE001 - the window says nothing then: the dialog does
-            self._say(_("{book} keeps its name; the window's status line says why.").format(book=old), error=True)
+            self._say(_("{book} keeps its name; the status line in the right pane says why.").format(book=old), error=True)
             return
         self._watch_rename(old, new)
 
@@ -724,7 +723,7 @@ class CachesDialog(tk.Toplevel):
             self._say(_("Renamed {book} to {name}.").format(book=old, name=new))
         else:
             self._fill(book=old)
-            self._say(_("{book} keeps its name; the window's status line says why.").format(book=old))
+            self._say(_("{book} keeps its name; the status line in the right pane says why.").format(book=old))
 
     # ------------------------------------------------------------------ export, import
     def _before(self, title: str, text: str) -> bool:

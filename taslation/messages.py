@@ -213,11 +213,11 @@ TEMPLATES: dict[str, str] = {
     "store.not_here": ("{files:saved file|saved files} cannot be opened by this Windows user on this computer: saved by "
                        "another Windows user or on another computer, or damaged. TASlation never writes over them: such "
                        "a book starts afresh, and its file is kept beside it under a new name. To bring a book's "
-                       "translations here, export them where they were saved (Tools > Saved translations... > Export "
+                       "translations here, export them where they were saved (Menu > Saved translations... > Export "
                        "(encrypted)...) and import that file here (Import...)."),
     "store.set_aside": ("A saved file of this book cannot be opened by this Windows user on this computer: saved by "
                         "another Windows user or on another computer, or damaged. It is kept as {path}, and the book "
-                        "starts afresh here. To bring its translations here, export them where they were saved (Tools > "
+                        "starts afresh here. To bring its translations here, export them where they were saved (Menu > "
                         "Saved translations... > Export (encrypted)...) and import that file here (Import...)."),
 }
 

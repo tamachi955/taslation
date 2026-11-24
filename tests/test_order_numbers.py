@@ -1,8 +1,8 @@
 """The page's reading order on the boxes in translator mode: each region's place in a small badge beside it, clear of
-the neighbouring regions and labels, hidden while the order is set by clicks and in reader mode, View > Reading-order
-numbers turning them off and on (remembered in ui.json); Page > Place in reading order... putting the selected
-regions at one place of the order, one change that Ctrl+Z takes back, on the real pipeline and stores; its question;
-every line in every language."""
+the neighbouring regions and labels, hidden while the order is set by clicks, in reader mode and while ui.json says
+they were turned off; the Menu's Page > Place in reading order... putting the selected regions at one place of the
+order, one change that Undo takes back, on the real pipeline and stores; its question; every line in every
+language."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 from test_reading_window import Shapes, _region
 from test_translator_mode import Window, _skipped_and_order, window  # noqa: F401 - the fixture, on the real pipeline
 
-from taslation.i18n import CATALOGS, load_ui_flag, save_ui_flag
+from taslation.i18n import CATALOGS, save_ui_flag
 from taslation.ui import app as app_mod
 from taslation.ui import area, selection
 from taslation.ui.dialogs import selection as asks
@@ -30,7 +30,6 @@ class Numbered(Shapes):
 
     _page_drawn = app_mod.App._page_drawn
     _draw_order_badges = app_mod.App._draw_order_badges
-    toggle_order_numbers = app_mod.App.toggle_order_numbers
 
     def __init__(self, root, regions, state_dir):
         super().__init__(root, regions)
@@ -86,7 +85,7 @@ def test_a_badge_leaves_the_labels_free(numbered):
         assert not any(_overlap(badge, label) for label in labels)
 
 
-def test_the_badges_hide_while_the_order_is_set_in_reader_mode_and_when_turned_off(numbered, tmp_path):
+def test_the_badges_hide_while_the_order_is_set_in_reader_mode_and_when_turned_off(numbered):
     w, _regions = numbered
     w._ordering = []  # the reading order set by clicks: the labels carry the numbers
     w._redisplay()
@@ -98,15 +97,15 @@ def test_the_badges_hide_while_the_order_is_set_in_reader_mode_and_when_turned_o
     w.role_var.set("translator")
     w._redisplay()
     assert len(w.badge_boxes()) == 4
-    w.order_numbers_var.set(False)  # View > Reading-order numbers, as the checkbutton sets it
-    w.toggle_order_numbers()
-    assert not w.canvas.find_withtag(BADGE_TAG) and load_ui_flag(tmp_path, selection.ORDER_HIDDEN)
+    w.order_numbers_var.set(False)  # turned off (ui.json's `ORDER_HIDDEN` at the start)
+    w._redisplay()
+    assert not w.canvas.find_withtag(BADGE_TAG)
     w.order_numbers_var.set(True)
-    w.toggle_order_numbers()
-    assert len(w.badge_boxes()) == 4 and not load_ui_flag(tmp_path, selection.ORDER_HIDDEN)
+    w._redisplay()
+    assert len(w.badge_boxes()) == 4
 
 
-def test_the_choice_is_remembered_for_the_next_start(hidden_root, tmp_path):
+def test_the_choice_made_earlier_is_read_at_the_start(hidden_root, tmp_path):
     class Host(tk.Frame):
         _init_selection = app_mod.App._init_selection
 
@@ -137,7 +136,6 @@ class Ordered(Window):
     _editing = app_mod.App._editing
     place_in_order = app_mod.App.place_in_order
     _place_regions = app_mod.App._place_regions
-    _focus_back = app_mod.App._focus_back
 
     def texts(self):
         return [r.translated_text for r in self._page_regions()]
@@ -207,8 +205,8 @@ def test_the_place_question_gives_a_place_from_one_to_the_total(hidden_root):
 
 
 def test_every_line_of_the_reading_order_numbers_is_in_every_language():
-    keys = [selection.PLACED, selection.PLACED_ALREADY, selection.PAGE_SELECTION_TIPS[2], selection.ORDER_NUMBERS_TIP,
-            asks.PLACE_LINE, asks.PLACE_OF, "Place in reading order...", "Reading-order numbers", selection.ORDERING]
+    keys = [selection.PLACED, selection.PLACED_ALREADY, asks.PLACE_LINE, asks.PLACE_OF, "Place in reading order...",
+            selection.ORDERING]
     for code, catalog in CATALOGS.items():
         if code != "en":
             assert all(k in catalog for k in keys), (code, [k for k in keys if k not in catalog])

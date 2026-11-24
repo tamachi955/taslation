@@ -286,7 +286,7 @@ class ReplaceMixin:
                 lines = self._stored(pipeline, result, step.edits)
                 elsewhere = also() if also is not None else []  # (the other volumes: saved at once)
                 if step.edits and not lines:
-                    lines.append(("Replaced in {n} text area(s) on {pages} page(s). Ctrl+Z takes it back.",
+                    lines.append(("Replaced in {n} text area(s) on {pages} page(s). Menu > Undo takes it back.",
                                   {"n": len(step.edits), "pages": len({e.fingerprint for e in step.edits})}))
                     rendering = sheet_rendering(pipeline.check_sheet(), query) if len(chosen) == len(hits) else None
                     if rendering is not None and text.strip():

@@ -1,5 +1,6 @@
-"""Frames from Windows.Graphics.Capture (`capture.wgc`), the viewer raised for a look, the viewer's window
-enlarged and put back with no key.
+"""Frames from Windows.Graphics.Capture (`capture.wgc`), the viewer raised for a look, a viewer's window enlarged
+and put back with no key (`capture.enlarge_window` / `restore_window`: what a 1.0.1 session left enlarged is put back,
+`tests/test_enlarge_recovery.py`), the foreground handed over for a key and back.
 
 The package is a stand-in everywhere but in the gated test at the end, which opens nothing: it reads a window of the
 Windows image viewer if one is open, and writes nothing."""
@@ -16,16 +17,11 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PIL import Image
 
-from taslation import capture as capture_mod
 from taslation import cli
-from taslation.cli import enlarge_viewer
 from taslation.capture import wgc, windows
 from taslation.capture.windows import Raised
 from taslation.config import Settings
-from taslation.pagekeys import PageKeys
-from taslation.ui import viewers
 from taslation.ui.app import App
 from taslation.ui.live import BlackViewerMixin
 
@@ -462,12 +458,9 @@ def test_a_window_topmost_of_its_own_is_left_alone(desk):
 class Live(BlackViewerMixin):
     _raise_viewer = App._raise_viewer
     _lower_viewer = App._lower_viewer
-    _raise_helped = App._raise_helped
-    _raise_for_key = App._raise_for_key
     _draws_covered = App._draws_covered
     _note_covered = App._note_covered
     _blank_behind = App._blank_behind
-    _resizing = App._resizing
     _window_size = App._window_size
     _blank_lasted = App._blank_lasted
 
@@ -514,33 +507,34 @@ def test_a_viewer_in_front_is_not_raised(live_desk):
     assert not Live()._raise_viewer(5) and live_desk.raised == []
 
 
-def test_once_it_helped_every_key_raises_first_and_it_is_said_once(live_desk):
-    w = Live()
-    w._raise_for_key(5)
-    assert live_desk.raised == []
-    w._raise_helped(5)
-    w._raise_helped(5)
-    assert len(w.said) == 1
-    w._raise_for_key(5)
-    assert live_desk.raised == [5]
-
-
-def test_a_browser_is_raised_before_a_key_only_while_an_opaque_window_covers_it(live_desk, monkeypatch):
-    """Under TASlation's own window at WINDOW_ALPHA a browser goes on drawing: raised at every key it came over the
-    page for page_turn_wait_ms + settle_ms for nothing. Behind an opaque window it may have stopped drawing."""
+def test_a_browser_draws_covered_only_while_no_opaque_window_covers_it(live_desk, monkeypatch):
+    """A browser follows the published rule: it goes on drawing under windows that let what lies under them show, and
+    may stop under an opaque one. Nothing is kept for it; asking raises nothing."""
     covered = [False]
     from taslation.ui import live
 
     monkeypatch.setattr(live, "window_class", lambda _h: windows.BROWSER_CLASSES[0])
     monkeypatch.setattr(live, "covered_by_opaque", lambda _h: covered[0])
     w = Live()
-    w._raise_for_key(5)
-    assert live_desk.raised == [] and w._draws_covered(5) is True
+    assert w._draws_covered(5) is True
     w._note_covered(5, False)  # (nothing is kept for a browser: the published rule decides)
     assert getattr(w, "_covered_seen", {}) == {} and w._draws_covered(5) is True
     covered[0] = True
-    w._raise_for_key(5)
-    assert live_desk.raised == [5]
+    assert w._draws_covered(5) is False and live_desk.raised == []
+    assert w.said == []
+
+
+def test_another_viewer_that_draws_nothing_covered_is_kept_so_and_the_reader_is_told_once(live_desk, monkeypatch):
+    from taslation.ui import live
+
+    monkeypatch.setattr(live, "window_class", lambda _h: "ViewerClass")
+    w = Live()
+    assert w._draws_covered(5) is None  # (not known yet)
+    w._note_covered(5, False)
+    w._note_covered(5, False)
+    assert w._draws_covered(5) is False and len(w.said) == 1
+    w._note_covered(5, True)
+    assert w._draws_covered(5) is True and live_desk.raised == []
 
 
 def test_a_blank_frame_of_the_window_is_looked_at_raised_once_a_spell(live_desk):
@@ -605,99 +599,6 @@ def test_a_window_the_reader_resized_or_maximised_is_left_as_it_is(screen):
     screen.rect, screen.zoomed = SMALL, True
     assert windows.enlarge_window(5) is None and screen.moved == [WORK]
     assert screen.pressed == []
-
-
-class Choosing:
-    """The parts of the App that enlarge the viewer's window before the first read and put it back."""
-
-    _enlarge_first = App._enlarge_first
-    _enlarge_wait = App._enlarge_wait
-    _enlarge_done = App._enlarge_done
-    _learn_covered_soon = lambda self: None  # (whether the viewer draws while covered: tests/test_covered_viewer.py)
-    _restore_enlarged = App._restore_enlarged
-    _keep_enlarged = App._keep_enlarged  # (kept for the next start: tests/test_enlarge_recovery.py)
-    _viewer_left = App._viewer_left
-
-    def __init__(self):
-        self.settings = Settings(settle_ms=1)
-        self.selected = SimpleNamespace(hwnd=5)
-        self.jobs, self.said, self.then = [], [], []
-        self.reading = True
-        self.canvas = SimpleNamespace(set_note=lambda *a: None)
-        self._enlarging = self._enlarge_asked = self._enlarged = None
-
-    _capture = lambda self, hwnd: Image.new("RGB", (9, 9))
-    _page_keys = lambda self, win=None: PageKeys()
-    _sync_area = lambda self: None
-    _resize_begins = lambda self: None
-    _forget_page_area = lambda self: None
-    _apply_found_margins = lambda self: None
-    _look_afresh = lambda self, frame=None, thumb=None: None
-    _lower_viewer = lambda self: None
-    focus_get = lambda self: None
-
-    def after(self, ms, job):
-        self.jobs.append(job)
-
-    def say(self, text, **params):
-        self.said.append(text.format(**params))
-
-    def run(self, steps=40):
-        while self.jobs and steps:
-            self.jobs.pop(0)()
-            steps -= 1
-
-
-@pytest.fixture
-def choosing(screen, monkeypatch):
-    monkeypatch.setattr(viewers, "window_shown", lambda hwnd: True)
-    monkeypatch.setattr(viewers, "window_rect", lambda hwnd: screen.rect)
-    monkeypatch.setattr(viewers, "enlarge_window", windows.enlarge_window)
-    monkeypatch.setattr(viewers, "restore_window", windows.restore_window)
-    monkeypatch.setattr(viewers, "stop_capture", lambda: None)
-    return screen
-
-
-def test_once_per_selection_before_the_first_read_and_no_key(choosing):
-    w = Choosing()
-    assert w._enlarge_first(lambda: w.then.append(1)) is False
-    w.run()
-    assert w.then == [1] and w._enlarged.given == WORK and w.said == [viewers.ENLARGED]
-    assert w._enlarge_first() is True and choosing.moved == [WORK]
-    assert choosing.pressed == []
-
-
-def test_at_a_change_of_viewer_the_window_goes_back_with_no_key(choosing):
-    w = Choosing()
-    w._enlarge_first()
-    w.run()
-    w._viewer_left()
-    assert choosing.rect == SMALL and w._enlarged is None and choosing.pressed == []
-
-
-def test_a_window_the_reader_made_smaller_stays_so_at_the_end(choosing):
-    w = Choosing()
-    w._enlarge_first()
-    w.run()
-    choosing.rect = (0, 0, 700, 600)
-    w._restore_enlarged()
-    assert choosing.rect == (0, 0, 700, 600) and choosing.pressed == []
-
-
-def test_a_maximised_viewer_is_read_as_it_is(choosing):
-    choosing.zoomed = True
-    w = Choosing()
-    assert w._enlarge_first() is True and w._enlarged is None and w.said == [] and choosing.pressed == []
-
-
-def test_the_command_line_enlarges_and_presses_nothing(screen, monkeypatch):
-    monkeypatch.setattr(capture_mod, "enlarge_window", windows.enlarge_window)
-    monkeypatch.setattr(capture_mod, "capture_window", lambda hwnd, **_: Image.new("RGB", (9, 9)))
-    monkeypatch.setattr(capture_mod, "window_rect", lambda hwnd: screen.rect)
-    enlarged = enlarge_viewer(5, SimpleNamespace(settle_ms=0))
-    assert enlarged.given == WORK and screen.pressed == []
-    screen.zoomed, screen.rect = True, SMALL
-    assert enlarge_viewer(5, SimpleNamespace(settle_ms=0)) is None and screen.pressed == []
 
 
 class Foreground:

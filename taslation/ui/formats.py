@@ -30,25 +30,25 @@ NBox = tuple[float, float, float, float]
 Box = tuple[int, int, int, int]
 
 # what the status line says
-FORMAT_COPIED = "Formatting copied: Ctrl+Shift+V puts it on the selected region."
-NOTHING_COPIED = "Nothing copied yet: select a region and press Ctrl+Shift+C to copy its formatting."
-FORMAT_PASTED = "Formatting pasted on {n} region(s). Ctrl+Z takes it back."
+FORMAT_COPIED = "Formatting copied: Paste format puts it on the selected region."
+NOTHING_COPIED = "Nothing copied yet: select a region and choose Copy format to copy its formatting."
+FORMAT_PASTED = "Formatting pasted on {n} region(s). Menu > Undo takes it back."
 FORMAT_SAME = "The region already has this formatting."
 SELECT_FIRST = "Select a region first (click it)."
 NO_BOOK = "Could not store the formatting: give the book a name first (its series in the Series field, and its volume beside it if it has one)."
 # Page > Paste format on every region of this kind...: the question, its button, and what is said
 KIND_QUESTION = ("Put the copied formatting on every region of the kind {kinds} in this book: {n} region(s) on {pages} "
-                 "page(s)? Ctrl+Z takes it back.")
+                 "page(s)? Menu > Undo takes it back.")
 KIND_APPLY = "Paste on {n} region(s)"
 KIND_NONE = "Every region of this kind in the book already has this formatting."
-KIND_DONE = "Formatting pasted on {n} region(s) on {pages} page(s). Ctrl+Z takes it back."
+KIND_DONE = "Formatting pasted on {n} region(s) on {pages} page(s). Menu > Undo takes it back."
 KIND_BACK = "Formatting across the book taken back on {pages} page(s)."
 KIND_AGAIN = "Formatting across the book made again on {pages} page(s)."
 SAVE_FAILED = "Could not save the change: {error}"
-# Ctrl+C and Ctrl+V: a region itself, its box and formatting, onto another page laid out alike
-REGION_COPIED = "Region copied: Ctrl+V adds it, box and formatting, at the same place on another page laid out alike."
-NO_REGION_COPIED = "Nothing copied yet: select a region and press Ctrl+C to copy it."
-REGION_THERE = "A region is already there: Ctrl+Shift+V puts the copied formatting on it."
+# Copy region and Paste region (Menu > Page): a region itself, its box and formatting, onto another page laid out alike
+REGION_COPIED = "Region copied: Paste region adds it, box and formatting, at the same place on another page laid out alike."
+NO_REGION_COPIED = "Nothing copied yet: select a region and choose Copy region to copy it."
+REGION_THERE = "A region is already there: Paste format puts the copied formatting on it."
 REGION_ELSEWHERE = "The copied region is from a page of another size: paste it on a page laid out alike."
 THERE = 0.5  # a region on the page overlapping the pasted one this much is there already
 # the Page menu's entries said in the status line while the pointer is on them (`app.App._build_menus`)

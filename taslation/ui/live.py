@@ -1,25 +1,17 @@
-"""The viewer live on the page: each frame captured (`_capture`, where the page panel is found), the picture shown
-(the latest frame, the translated page laid over it while the viewer shows that page, a page filling in), the
-viewer hidden behind TASlation, and Auto following the page turns.
+"""The viewer live: each frame captured (`_capture`, where the page panel is found), the picture kept (the latest
+frame, the translated page laid over it while the viewer shows that page, a page filling in) for the lettering laid
+over the viewer (`seethrough`), and Auto following the page turns. TASlation sends the viewer nothing - no key, no
+click -: every change followed here is one the viewer made by itself, at the reader's key or click.
 
 How the viewer is followed is `Settings.follow`. With "poll" its frame is captured every auto_interval_ms (`_tick`).
 With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured only when there is a reason to:
 
-* after TASlation's own operations on it - a key passed on (`reading.forward_key`), a click passed on - the frame is
-  followed at FOLLOW_STEP_MS until it changes, then until it settles (two frames settle_ms apart alike, and none
-  sharper), the page is shown and with Auto on started at once, and RECHECK_MS later it is looked at once more: a
-  viewer such as a browser-based one may draw a soft picture first, and a sharper frame of the page is read
-  again (`_retake`; `_follow_change`, `_step`). A key is pressed for real (the posted one may have been ignored)
-  only once page_turn_wait_ms passed without the frame changing at all - a loading indicator or a partial repaint
-  says the viewer took it, and a slow viewer is waited for -; when the page then turns twice within TWO_TURNS_S,
-  the reader is told how to go back one (`_say_two_turns`). With the viewer's frames counted (`capture.frame_count`)
-  the change is captured at each new frame as it comes (`_counted_change`). A viewer that draws nothing while other
-  windows hide it is raised for a moment before each key (`_raise_for_key`); whether it does is found out with no
-  key as it is chosen (`_learn_covered`), and kept in its profile with how it took the keys (`_note_covered`,
-  `_learned`), so that a later session neither raises it nor waits for a posted key for nothing;
-* while the viewer itself is in front, so that pages turned there are followed (`_poll`): at each new frame it draws
-  (the capture's frame events: `capture.frame_count`, looked at every FRAME_STEP_MS), and every auto_interval_ms; a
-  frame that changed is followed at once as an operation's is, until it settles;
+* at each new frame it draws (the capture's frame events: `capture.frame_count`, looked at every FRAME_STEP_MS), and
+  every auto_interval_ms (`_poll`): a frame that changed is followed at once until it settles (two frames settle_ms
+  apart alike, and none sharper; `_step`), the page is started, and RECHECK_MS later it is looked at once more: a
+  viewer such as a browser-based one may draw a soft picture first, and a sharper frame of the page is read again
+  (`_retake`). Whether a viewer draws while other windows hide it is found out as it is chosen (`_learn_covered`)
+  and kept in its profile (`_note_covered`);
 * with ``early_start`` (the default) a page the cache does not hold is started on its first changed frame too
   (`_early_start`), with a gate (`pipeline.PageGate`, `Pipeline.page_on_show`). The job reads the page at once, and no
   wait comes before its requests: just before the first one (and before the translator's model is loaded for it) it
@@ -64,9 +56,8 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   (`_margins_of`): the job's area stays in force for the job alone until it is gone;
 * never while neither is in front - except for a viewer just chosen (at the start, from the list, by the watch): it
   is looked at at once whoever is in front, and every auto_interval_ms until a frame of it is on the page
-  (`Following.unseen`, `_follow_viewer`), and for a viewer whose window TASlation just gave a new size: the fresh frame
-  goes on the page, the capture area is the new size's own, and Auto goes on from there (`_resize_begins`,
-  `_look_afresh`).
+  (`Following.unseen`, `_follow_viewer`), and after a viewer's window took another size: the fresh frame goes on the
+  page, the capture area is the new size's own, and Auto goes on from there (`_look_afresh`).
 
 Windows tells who is in front and what happens to the viewer's window (`capture.WindowEvents`, whose notes the
 heartbeat takes in: `_beat`), and `follow_decision` decides what each heartbeat does."""
@@ -109,7 +100,6 @@ from ..capture import (
     is_browser_class,
     last_input,
     lower_window,
-    press_briefly,
     raise_window,
     screen_shows_own,
     window_at_pointer,
@@ -127,24 +117,20 @@ from ..detect.page_area import (  # noqa: F401 - panel_inside, TIGHT_PX: as the 
 )
 from ..i18n import _
 from ..messages import Message
-from ..pagekeys import key_ways, opposite_key, pressed_for, same_key, viewer_key
+from ..pagekeys import viewer_key
 from ..pipeline import PageGate, turn_away
 from ..regions import PageResult
-from . import area, hover, in_place, order, seethrough, side
+from . import area, order, seethrough
 from .constants import (
     BLANK_SPREAD,
     BROWSER_MINIMISED,
     FOLLOW_STEP_MS,
-    FOLLOW_WAITS,
     FRAME_GAP_MS,
     FRAME_STEP_MS,
     LIVE_CHANGE,
-    NO_VIEWER,
-    READING_NOTE_MS,
     RECHECK_MS,
     RETAKE_WITHIN_MS,
     SETTLE_TRIES,
-    TWO_TURNS_S,
     VIEWER_BLACK,
     VIEWER_LOADING,
 )
@@ -383,38 +369,27 @@ class Taken:
 
 @dataclass
 class Operation:
-    """An operation of TASlation's on the viewer being followed: its frame awaited to change from *reference* (None:
-    it has changed already), then to settle, and looked at once more after the page is taken."""
+    """A change of the viewer's frame being followed: until it settles, and looked at once more after the page is
+    taken."""
 
     hwnd: int
     reference: np.ndarray | None
-    key: str = ""  # the key passed on ("" for a click)
-    retried: bool = False  # the key was pressed for real already (a click has none to press)
     started: float = 0.0
-    phase: str = "change"  # "change", "settle", "recheck"
+    phase: str = "settle"  # "settle", "recheck"
     last: np.ndarray | None = None  # "settle": the frame before ...
     last_detail: np.ndarray | None = None  # ... its fine detail ...
     last_image: Image.Image | None = None  # ... and its capture
     settles: int = 0
     job: str | None = None  # the after() of its next step
-    operation: bool = True  # after TASlation's own operation (False: a look found the page changing)
-    prev: np.ndarray | None = None  # "change": the frame of the step before
-    stirred_at: float | None = None  # "change": when the frame last changed at all (the viewer took the key)
-    pressed: bool = False  # the key was pressed for real after the posted one changed nothing
-    turned_at: float | None = None  # after that press: when the page turned ...
-    calm: np.ndarray | None = None  # ... the frame it settled on ...
-    twice: bool = False  # ... and whether it turned once more soon after (the posted key had arrived after all)
-    raised: bool = False  # "change": the viewer was raised for a look (`_raise_viewer`) since the frame last changed
+
     fast_until: float | None = None  # "recheck" after a page taken at once (`_take_at_once`): looked at until then
     seq: int | None = None  # the frame count at the last capture (`capture.frame_count`; None: frames not counted)
     last_at: float = 0.0  # "settle" and "recheck" with frames counted: when the frame last changed ...
     settle_from: float = 0.0  # ... and since when it is followed to settle
-    looked_at: float = 0.0  # "change" with frames counted: when the frame was last captured
     redo: bool = False  # "settle": the page started early was dropped; started again once the worker is free
     over_job: bool = False  # "settle": begun while a page job runs, on a frame of another page (`_look_over_job`)
     gave_way: bool = False  # ... a job past its page, cancelled at once (`_tail_gives_way`): no LEFT_PAGE_MS wait
     held_soft: bool = False  # "settle": its frame looks soft (a viewer that draws soft first): not started early on it
-    keys: tuple[str, ...] = ()  # "change": the posted keys awaited, the first one's own wait for all (`_held_keys`)
 
 
 @dataclass
@@ -476,14 +451,9 @@ class BlackViewerMixin:
 
     def _see_black(self, hwnd: int, image: Image.Image) -> bool:
         """A frame of the viewer judged (`capture.is_black`), and whether it is black: the first one opens a spell
-        (`recovery.BlackWatch`), a later one takes the spell a step on. Never while TASlation enlarges the window
-        (`_resizing`): the frames then are of that change. No key goes for it."""
+        (`recovery.BlackWatch`), a later one takes the spell a step on. No key goes for it."""
         black = _black(self, image, self._margins_of(image))
         watch = getattr(self, "_black_watch", None)
-        waiting = getattr(self, "_enlarging", None)
-        if waiting is not None and waiting.get("enlarged") is not None:
-            self._black_watch = None
-            return black
         if watch is None:
             if not black:
                 return False
@@ -509,7 +479,6 @@ class BlackViewerMixin:
         if getattr(self, "_status_key", None) in (VIEWER_LOADING, VIEWER_BLACK):
             self._normal_status()
         if watch.told:
-            self._sync_area()
             self._apply_found_margins()
             self._look_afresh()
         else:
@@ -573,8 +542,6 @@ class LiveViewMixin(BlackViewerMixin):
         win = self.selected
         if win is None:
             return
-        if getattr(self, "_enlarged", None) is not None or getattr(self, "_area_large", False):
-            self._sync_area()  # enlarged, or made smaller again by the reader: the area of this frame
         key, size = viewer_key(win), image.size
         see = seethrough.on(self)
         if self._manual_area:
@@ -640,73 +607,16 @@ class LiveViewMixin(BlackViewerMixin):
 
     # ------------------------------------------------------------------ the picture on the page
     def _redisplay(self) -> None:
-        reading = self.reading
+        """The page on show changed (a frame, a page lettered further, a result): its status line follows it, the
+        patches are handed to the see-through window (`seethrough.present`), and the hidden canvas notes the picture
+        on show (`ImageCanvas.keep`: nothing is drawn - TASlation's own page is never on the screen)."""
         self._status_follows_page()  # (a line about the page before goes with it)
-        if seethrough.hidden(self):  # (see-through mode: the window's page is never on the screen, so it is not drawn
-            # - the lettering over the viewer is the see-through window's; the picture on show is only noted)
-            seethrough.present(self)
-            self.canvas.keep(self._hidden_picture())
-            return
-        self.canvas.enlarge = reading
-        self.canvas.message = _("This viewer cannot be read behind the full screen; press F11") if (
-            reading and self._viewer_hidden) else ""
-        # no viewer chosen yet: what to do, in the window's language (the live picture takes its place once one is)
-        self.canvas.hint = _(NO_VIEWER) if self.selected is None else ""
-        in_place.refresh(self)  # (a bubble showing its other side in its place: drawn with the page, or gone)
-        image, overlay, outlines = self._picture()
-        seethrough.present(self)  # (the lettering over the viewer's own window, in see-through mode)
-        self.canvas.overlay, self.canvas.outlines = overlay, outlines
-        self.canvas.brackets = side.on_picture(self, image)  # (the updated mark: the bubbles changed since last seen)
-        # what the canvas may draw cheaply, leaving the very picture of a full draw (`ImageCanvas.set_image`): a new
-        # frame of the viewer's, and the page filling in, lettered in place in the boxes noted since it was drawn
-        moved, self._live_moved = getattr(self, "_live_moved", False), False
-        lettered, self._fill_changed = getattr(self, "_fill_changed", None), None
-        fill = getattr(self, "_fill", None)
-        self.canvas.moving = bool(moved and image is not None)
-        self.canvas.pixels_of = lambda picture: known_pixels(self, picture)
-        self.canvas.changed = (lettered[1] if lettered is not None and image is not None and lettered[0] is image
-                               and fill is not None and fill.page is image else None)
-        if image is None:
-            self.canvas.crop = None
-            self.canvas.set_image(None)
-            return
-        self.canvas.crop = area.margins_to_box(self._margins_of(image), image.size) if reading else None  # the page alone
-        self.canvas.set_image(image)
-
-    def _picture(self) -> tuple[Image.Image | None, list[Any], list[Any]]:
-        """What the page shows, with translator mode's region overlay and the outlines of a page filling in:
-
-        * a page being translated, while the viewer still shows it (`_fill_on_show`): the frame it is read from with
-          the regions lettered so far, the others outlined;
-        * else the last translated page while the viewer still shows that page - its lettering laid over the
-          viewer's latest frame, so a toolbar or the pointer shows as it is now;
-        * else the viewer's latest frame as it is (a page not translated yet, a page turned, the viewer's panels).
-        Show original leaves the lettering out. With the original on the page and the translation under the
-        pointer (`hover.reverse_on`: `Settings.hover_shows` "translation", in the Reader role), the
-        page being translated and the last translated page show as the viewer does too, without the outlines - but
-        for the box under the pointer whose translation has not come, where its bubble shows in its place
-        (`in_place.hovered_outline`; the panel beside it says so itself: `zoom`). A bubble that shows its other side in
-        its place is laid over this picture (`in_place.refresh`). Reading is on the viewer only: every picture is the
-        viewer's page, so that TASlation never lets a book be read without the viewer."""
-        original = self.original_var.get()
-        reverse = hover.reverse_on(self)
-        fill = self._fill
-        if fill is not None and self._fill_on_show():
-            if reverse:
-                return fill.frame, [], in_place.hovered_outline(self, fill)
-            image = fill.final if fill.final is not None else fill.page if fill.page is not None else fill.base
-            return (fill.frame if original else image), [], ([] if fill.final is not None else fill.outlines())
-        result, live = self.last_result, self._live
-        if result is not None and (live is None or self._same_page(result, live)):
-            if original or reverse:
-                return (live if live is not None else result.original), self._overlay_items(), []
-            return self._lettered(result, live), self._overlay_items(), []
-        return live, [], []
+        seethrough.present(self)
+        self.canvas.keep(self._hidden_picture())
 
     def _hidden_picture(self) -> Image.Image | None:
-        """What the page would show (`_picture`) with TASlation's own window off the screen (see-through mode), made
-        with no picture work: the page filling in as it is lettered so far, else the last translated page as it was
-        lettered (not laid over the viewer's latest frame), else the viewer's latest frame."""
+        """What the page shows, made with no picture work: the page filling in as it is lettered so far, else the last
+        translated page as it was lettered, else the viewer's latest frame."""
         fill = self._fill
         if fill is not None and self._fill_on_show():
             return fill.final if fill.final is not None else fill.page if fill.page is not None else fill.base
@@ -719,15 +629,13 @@ class LiveViewMixin(BlackViewerMixin):
         """The status line speaks of the page on show: a line about one page (`_page_status`, a page job's line,
         `_job_line`) goes as soon as the viewer's latest frame (`_live`) is of another page (`_shows_page`: a soft
         picture and its sharp one, the pointer over it, are the same page) - a turn, the viewer's window given another
-        size -, and the line of what is on show takes its place (`_normal_status`), with no note of its own on the
-        full screen's page, where the old line's note goes too. Asked whenever the page is drawn (`_redisplay`)."""
+        size -, and the line of what is on show takes its place (`_normal_status`). Asked whenever the page is drawn
+        (`_redisplay`)."""
         page = getattr(self, "_status_page", None)
         if page is None or self._live is None or self._shows_page(self._live, page):
             return
-        old, self._status_page = self.status_var.get(), None
+        self._status_page = None
         self._normal_status()
-        if self.reading and self.canvas.note in (old, self.status_var.get()):
-            self.canvas.set_note("")
 
     def _result_on_show(self) -> bool:
         """Whether the page shows the last result (not a page filling in, nor the viewer showing another page)."""
@@ -881,7 +789,7 @@ class LiveViewMixin(BlackViewerMixin):
     def _show_notes(self) -> None:
         """Under the page: the notes for the reader on it, or nothing."""
         noted = self._noted_regions()
-        if not noted or self.reading:  # the full screen shows the page alone
+        if not noted:
             self.notes_label.pack_forget()
             return
         self.notes_var.set(_("Notes for the reader: ") + "   ".join(f"\u2020{i + 1} {r.reader_note}" for i, r in enumerate(noted)))
@@ -902,9 +810,9 @@ class LiveViewMixin(BlackViewerMixin):
         return [r for r in result.regions if r.status != "dropped" and not unsure_art(r, usual)]
 
     def _overlay_items(self) -> list[tuple[tuple[int, int, int, int], str, str]]:
-        """Translator mode, in the window and on the full screen: outline every region (green = translated, orange =
-        not, blue = reader-made), with the speaker, a dagger where a note for the reader is, and the reading-order
-        number while an order is being set; not the pieces of the drawing the OCR read unsure (`_page_regions`)."""
+        """Translator mode: outline every region (green = translated, orange = not, blue = reader-made), with the
+        speaker, a dagger where a note for the reader is, and the reading-order number while an order is being set;
+        not the pieces of the drawing the OCR read unsure (`_page_regions`)."""
         if self.role_var.get() != "translator" or self.last_result is None:
             return []
         items = []
@@ -933,20 +841,14 @@ class LiveViewMixin(BlackViewerMixin):
     def _on_new_page(self, image: Image.Image, thumb: np.ndarray | None = None, complete: bool | None = None) -> None:
         """Auto mode found a new page: translate it. The first page of a book whose Book box names no book starts the
         book first (`_begin_book`): its name is asked for. While that is under way the latest page waits for it. A
-        viewer not read yet has its window enlarged first (`_enlarge_first`), and this frame goes: Auto takes the
-        next. *complete*: the page job's own (None: as the role has it; False: a page the cache holds whole, drawn
-        from it alone, `_take_at_once`)."""
+        viewer not looked at yet is looked at first (`_enlarge_first`: its size, as it is chosen). *complete*: the
+        page job's own (None: as the role has it; False: a page the cache holds whole, drawn from it alone,
+        `_take_at_once`)."""
         if self._start_pending is not None:
             self._start_pending = (image, thumb)
             return
-        if not self._enlarge_first():
-            return
+        self._enlarge_first()
         if self._starts_book(image):
-            if self.reading:  # no dialog over the full screen
-                self._start_translate(image, thumb=thumb, complete=complete)
-                # kept nowhere: its name is asked for on leaving (`_ask_name_after_reading`)
-                self._unkept_reading = getattr(self, "_unkept_reading", 0) + 1
-                return
             if self.selected is None:
                 return
             self._begin_book(image, thumb)
@@ -1003,7 +905,7 @@ class LiveViewMixin(BlackViewerMixin):
         return self.role_var.get() == "translator"
 
     def _take_at_once(self, hwnd: int, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray,
-                      operation: bool = False, shown: bool = True) -> bool:
+                      shown: bool = True) -> bool:
         """A changed frame whose page the cache holds whole (`_all_cached`) taken at once, without the wait for it to
         settle (follow = "events"), drawn from the cache alone, then looked at every FOLLOW_STEP_MS until RECHECK_MS
         after ("recheck" with `Operation.fast_until`): a sharper frame of it - a viewer that draws a soft picture first
@@ -1022,14 +924,14 @@ class LiveViewMixin(BlackViewerMixin):
         if not shown:
             self._quiet_live(image, thumb)
         complete = self._completes()
-        took = self._take(image, thumb, frame_detail, operation=operation, complete=False if complete else None)
+        took = self._take(image, thumb, frame_detail, complete=False if complete else None)
         if took != "started" and not shown:
             self._redisplay()  # nothing started: the turned page shows as it is
         if took == "started":
             f = self._following
             if complete and f.taken is not None:
                 f.taken.complete = True
-            self._begin_follow(hwnd, None, phase="recheck", operation=operation, fast=True)
+            self._begin_follow(hwnd, None, phase="recheck", fast=True)
         return True
 
     def _auto_tick(self) -> None:
@@ -1042,9 +944,9 @@ class LiveViewMixin(BlackViewerMixin):
             self.after(delay, self._auto_tick)
 
     def _beat(self) -> int:
-        """One heartbeat: Windows' notes taken in (`_take_notes`) and what `follow_decision` says done; while TASlation
-        is in front the viewer kept directly under its window, and a viewer hidden wholly that drew no frame of a page
-        key handed on to it said in the status line (`order.beat`). Returns the ms to the next heartbeat."""
+        """One heartbeat: Windows' notes taken in (`_take_notes`) and what `follow_decision` says done; while a window
+        of TASlation's is in front the viewer kept directly under it (`order.beat`). Returns the ms to the next
+        heartbeat."""
         f = self._follower()
         order.beat(self)
         if f.mode != "events":
@@ -1191,14 +1093,11 @@ class LiveViewMixin(BlackViewerMixin):
 
     # ------------------------------------------------------------------ the capture
     def _capture(self, hwnd: int) -> Image.Image:
-        """The viewer's frame. Behind the full screen the screen shows this window, so there only a frame the
-        viewer draws itself is taken; a blank one, or none, puts a message on the page instead (CaptureError). In
-        the normal window a viewer that draws nothing is copied from the screen instead, unless the screen there
-        shows part of TASlation - a picture of itself: then ViewerCovered, and the last good frame stays. A blank
+        """The viewer's frame. A viewer that draws nothing is copied from the screen instead, unless the screen there
+        shows part of TASlation - a dialog of its own: then ViewerCovered, and the last good frame stays. A blank
         frame behind other windows is looked at raised, once (`_blank_behind`): a viewer whose frames are coming
-        shows a blank page then, and that is no failure. A blank frame while TASlation is giving the window a new size
-        is that change on its way (`_resizing`): it says nothing of the viewer, and nothing of the page. The frame
-        taken is remembered with the viewer's frame count before it (`_last_frame`), and the look with when it began
+        shows a blank page then, and that is no failure. The frame taken is remembered with the viewer's frame count
+        before it (``_captured``), and the look with when it began
         (`Look`: the wait for a page started early is counted from it, and its job told of its frame, `_frame_seen`)."""
         self._captured = None
         looked = time.monotonic()
@@ -1212,28 +1111,14 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _capture_frame(self, hwnd: int, seq: int | None) -> Image.Image:
         """`_capture`'s capture itself (*seq*: the viewer's frame count before it)."""
-        if self.reading:
-            try:
-                image = capture_window(hwnd, allow_screen_fallback=False)
-                _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
-                if _blank(self, image) and self._blank_behind(hwnd):
-                    raise CaptureError("the viewer gives no picture behind the full screen")
-            except CaptureError:
-                self._set_viewer_hidden(True)
-                raise
-            self._set_viewer_hidden(False)
-        else:
-            covered = self._covers_viewer(hwnd)
-            image = capture_window(hwnd, allow_screen_fallback=not covered)
-            _captured_facts(self, hwnd, seq, image)
-            if covered and _blank(self, image) and self._blank_behind(hwnd):
-                raise ViewerCovered("the viewer draws nothing behind TASlation")
-            self._set_covered(False)
+        covered = self._covers_viewer(hwnd)
+        image = capture_window(hwnd, allow_screen_fallback=not covered)
+        _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
+        if covered and _blank(self, image) and self._blank_behind(hwnd):
+            raise ViewerCovered("the viewer draws nothing behind TASlation")
+        self._set_covered(False)
         black = self._see_black(hwnd, image)
-        if _blank(self, image):
-            if self._resizing():
-                return image
-        else:
+        if not _blank(self, image):
             if getattr(self, "_blank_looked", False) and getattr(self, "_raised", None) is not None:
                 self._raise_helped(hwnd)
             self._blank_looked = False
@@ -1251,21 +1136,10 @@ class LiveViewMixin(BlackViewerMixin):
             self._captured = (hwnd, seq, image)
         return image
 
-    def _last_frame(self, hwnd: int, seq: int | None) -> Image.Image | None:
-        """The frame `_capture` took last of the window *hwnd*, when the viewer has drawn none since (*seq*: its frame
-        count now, the same as before that capture): capturing it again would give the same picture. None else."""
-        captured = getattr(self, "_captured", None)
-        if captured is None or seq is None or captured[0] != hwnd or captured[1] != seq:
-            return None
-        return captured[2]
-
     def _blank_behind(self, hwnd: int) -> bool:
-        """A blank frame of the viewer: whether it stands for a viewer that draws nothing. Never while its window is
-        being given a new size (`_resizing`). The viewer is raised for a look once a spell of blank frames that has
-        lasted (`_blank_lasted`), and the frames that come then tell; before and after that a viewer whose frames are
-        coming is taken at its word (a blank page)."""
-        if self._resizing():
-            return False
+        """A blank frame of the viewer: whether it stands for a viewer that draws nothing. The viewer is raised for a
+        look once a spell of blank frames that has lasted (`_blank_lasted`), and the frames that come then tell;
+        before and after that a viewer whose frames are coming is taken at its word (a blank page)."""
         if not getattr(self, "_blank_looked", False) and self._blank_lasted(hwnd) and self._raise_viewer(hwnd):
             self._blank_looked = True
             return True
@@ -1288,20 +1162,6 @@ class LiveViewMixin(BlackViewerMixin):
         except CaptureError:
             return None
         return right - left, bottom - top
-
-    def _resizing(self) -> bool:
-        """Whether TASlation is waiting for the viewer's window to take a new size and settle (`_enlarge_first`): its
-        frames meanwhile are of the change, and nothing is concluded from them."""
-        waiting = getattr(self, "_enlarging", None)
-        return waiting is not None and waiting.get("enlarged") is not None
-
-    def _resize_begins(self) -> None:
-        """TASlation is about to wait for the viewer's window to take a new size: what was seen of the frames before it
-        says nothing of those to come (the page taken, a sharper frame of it awaited, a spell of blank frames)."""
-        self._blank_since, self._blank_looked = None, False
-        f = getattr(self, "_following", None)
-        if f is not None:
-            f.taken = f.retake = None
 
     def _look_afresh(self, frame: Image.Image | None = None, thumb: np.ndarray | None = None) -> None:
         """The viewer's window has taken its new size: *frame*, the first settled one of that size (None: none could be
@@ -1327,8 +1187,8 @@ class LiveViewMixin(BlackViewerMixin):
     def _raise_viewer(self, hwnd: int) -> bool:
         """The viewer, behind other windows, raised for a look (`capture.raise_window`: no key, no change of the
         foreground) for page_turn_wait_ms and settle_ms; the frames meanwhile go on as ever, this does not wait.
-        Whether it was raised. Never while its window is being given a new size (`_resizing`)."""
-        if getattr(self, "_raised", None) is not None or self._resizing() or not behind_others(hwnd):
+        Whether it was raised."""
+        if getattr(self, "_raised", None) is not None or not behind_others(hwnd):
             return False
         self._raised = raise_window(hwnd)
         if self._raised is None:
@@ -1353,14 +1213,14 @@ class LiveViewMixin(BlackViewerMixin):
         (`_note_covered`). A new size of its window since it was raised explains the new frame as well, and nothing is
         concluded."""
         size = getattr(self, "_raised_size", None)
-        if self._resizing() or (size is not None and size != self._window_size(hwnd)):
+        if size is not None and size != self._window_size(hwnd):
             return
         self._note_covered(hwnd, False)
 
     def _draws_covered(self, hwnd: int) -> bool | None:
         """Whether the viewer *hwnd* goes on drawing while other windows hide it. A browser follows the published rule
         of Chromium and Firefox, asked as the windows lie now: it stops only under windows that hide what lies under
-        them (`capture.covered_by_opaque`; TASlation's own window at WINDOW_ALPHA hides nothing so). Any other viewer:
+        them (`capture.covered_by_opaque`; TASlation's see-through windows hide nothing so). Any other viewer:
         as this session saw it (`_note_covered`), else as a session before saw it (its profile's "while_covered":
         `pagekeys.Profiles.covered_for`). None: not known yet."""
         if window_class(hwnd) in BROWSER_CLASSES:
@@ -1379,9 +1239,8 @@ class LiveViewMixin(BlackViewerMixin):
     def _note_covered(self, hwnd: int, draws: bool) -> None:
         """What was seen of the viewer *hwnd* while other windows hid it: frames came (*draws*), or came only once it
         was raised (`_raise_helped`). Kept for the session and in the viewer's profile ("while_covered"), so that a
-        later session does not find it out again at its first key; a viewer that draws nothing so is raised before
-        each key from then on (`_raise_for_key`), and the reader is told, once. A browser follows the published rule
-        instead (`_draws_covered`), and nothing is kept for it."""
+        later session does not find it out again; of a viewer that draws nothing so the reader is told, once. A
+        browser follows the published rule instead (`_draws_covered`), and nothing is kept for it."""
         if window_class(hwnd) in BROWSER_CLASSES:
             return
         seen = self.__dict__.setdefault("_covered_seen", {})
@@ -1394,51 +1253,7 @@ class LiveViewMixin(BlackViewerMixin):
             except Exception:  # noqa: BLE001 - kept for the session alone
                 pass
         if not draws and known is not False:
-            self.say("This viewer draws nothing while it is covered: from now on it comes to the front for a moment at each page.")
-
-    def _learned(self, hwnd: int, real: bool, posted: bool) -> None:
-        """A key turned the page of the viewer *hwnd* (`pagekeys.KeyWays.learned`: *real*, pressed for real after a
-        posted one did nothing, else *posted*). Kept in the viewer's profile too ("key_way"), so that a later session
-        presses its first key the way that works at once: a viewer that ignores posted keys made the first key wait
-        page_turn_wait_ms. A browser always gets real presses, and nothing is kept for it."""
-        key_ways(self).learned(hwnd, real, posted)
-        if not (real or posted) or window_class(hwnd) in BROWSER_CLASSES:
-            return
-        win, profiles = getattr(self, "selected", None), getattr(self, "profiles", None)
-        if win is not None and getattr(win, "hwnd", None) == hwnd and profiles is not None:
-            try:
-                profiles.set_key_way(win, "real" if real else "posted")
-            except Exception:  # noqa: BLE001 - kept for the session alone
-                pass
-
-    def _raise_for_key(self, hwnd: int) -> None:
-        """Before a key passed on: a viewer that draws nothing while covered is raised first (`_draws_covered`: one
-        seen so, in this session or a session before, or a browser that windows hiding what lies under them cover).
-        A viewer that draws on, or one not known yet, is not raised: a browser under TASlation's own window at
-        WINDOW_ALPHA goes on drawing, and raised for page_turn_wait_ms + settle_ms at every key it came over
-        TASlation's page each time for nothing; one not known is raised for a look only when its frame does not
-        change (`_await_change`)."""
-        if self._draws_covered(hwnd) is False:
-            self._raise_viewer(hwnd)
-
-    def _look_raised(self, hwnd: int) -> bool:
-        """Whether a frame that did not change after a key is worth a look with the viewer raised before anything is
-        concluded from it: when other windows hide the viewer wholly (`capture.fully_covered`; one partly in sight
-        draws as one in front does) and it is not known to draw so (`_draws_covered`)."""
-        return self._draws_covered(hwnd) is not True and fully_covered(hwnd)
-
-    def _seen_turn(self, hwnd: int, raised: bool, pressed: bool) -> None:
-        """The page of the viewer *hwnd* turned after a key: what that shows of how it draws while covered. Raised for
-        a look (*raised*) with the posted key, it showed what it had not drawn behind the others (`_raise_helped`);
-        raised and then *pressed* for real, the press is what turned it, and nothing is concluded. Not raised at all
-        while other windows hid it wholly, it draws so (`_note_covered`), when that was not known yet."""
-        if raised:
-            if not pressed:
-                self._raise_helped(hwnd)
-            return
-        if (getattr(self, "_raised", None) is None and self._draws_covered(hwnd) is None
-                and fully_covered(hwnd)):
-            self._note_covered(hwnd, True)
+            self.say("This viewer draws nothing while other windows cover it wholly: keep some of it in sight.")
 
     def _learn_covered(self, hwnd: int, done: Any = None) -> None:
         """Whether a viewer just chosen draws while other windows hide it wholly, found out with no key: it is asked to
@@ -1446,7 +1261,7 @@ class LiveViewMixin(BlackViewerMixin):
         frame of it within COVERED_PROBE_MS says it draws so. When none comes it is raised for a look
         (`_raise_viewer`) and asked again; a frame then says it draws only so. Either is kept (`_note_covered`); no
         frame either way says nothing. Nothing is asked of a viewer not hidden wholly (it draws for the eye then),
-        of a browser (the published rule), of one known already, or during a resize. *done* is called
+        of a browser (the published rule), of one known already, or of one raised for a look. *done* is called
         after, either way."""
         def finish() -> None:
             if done is not None:
@@ -1454,7 +1269,7 @@ class LiveViewMixin(BlackViewerMixin):
 
         selected = getattr(self, "selected", None)
         if (not IS_WINDOWS or selected is None or getattr(selected, "hwnd", None) != hwnd
-                or self._draws_covered(hwnd) is not None or self._resizing()
+                or self._draws_covered(hwnd) is not None
                 or getattr(self, "_raised", None) is not None or not fully_covered(hwnd)):
             finish()
             return
@@ -1477,7 +1292,7 @@ class LiveViewMixin(BlackViewerMixin):
         it was raised for a look."""
         selected = getattr(self, "selected", None)
         gone = selected is None or getattr(selected, "hwnd", None) != hwnd or not window_exists(hwnd)
-        if gone or self._resizing():
+        if gone:
             if raised:
                 self._lower_viewer()
             finish()
@@ -1555,101 +1370,17 @@ class LiveViewMixin(BlackViewerMixin):
     def _capture_failed(self, error: CaptureError) -> None:
         if isinstance(error, ViewerCovered):
             self._set_covered(True)
-        elif not self.reading:  # the full screen says so on the page
+        else:
             self.say(error.message if error.message.code != "viewer.error" else Message("viewer.gone"))
 
     # ------------------------------------------------------------------ after a page turn
-    def _follow_change(self, hwnd: int, reference: Any, key: str, started: float, retried: bool = False,
-                       stirred: bool = False, prev: Any = None, pressed: bool = False, raised: bool = False,
-                       seq: int | None = None) -> None:
-        """After TASlation passed a key (*key*; "" for a click) on to the viewer: its frame is followed until it
-        changes from *reference*. Follow = "events": at FOLLOW_STEP_MS, then until it settles, the page taken at once
-        and looked at again RECHECK_MS later (`_begin_follow`). Follow = "poll": every 120 ms until it changes, shown
-        at once; with Auto off the page is translated once it settled (with Auto on the ticks take it). As with
-        "events" (`_await_change`): a key that changed nothing at all for page_turn_wait_ms is pressed for real, once
-        - any change of the frame (*stirred*; *prev*: the frame before) says the viewer took it, and the page is
-        waited for up to FOLLOW_WAITS times as long -, and a page that turns twice soon after that press is said
-        (`_second_turn`). Before that, a viewer behind other windows is raised for a look, as long again (*raised*:
-        `_raise_viewer`), when other windows hide it wholly and it is not known to draw so (`_look_raised`): it may
-        have turned without drawing. *retried*: a key pressed for real from the start (`pagekeys.KeyWays`): none follows it. Which way the
-        page turned is noted for the next keys, and whether the viewer drew while covered (`_seen_turn`). *seq*: the
-        viewer's frame count before the operation (follow = "events": `_begin_follow`)."""
-        if self._follows_events():
-            self._begin_follow(hwnd, reference, key, retried, seq=seq)
-            return
-        try:
-            image = self._capture(hwnd)
-        except CaptureError:
-            return
-        thumb = _thumb(self, image)
-        now = time.monotonic()
-        if frames_differ(reference, thumb):
-            self._seen_turn(hwnd, raised, pressed)
-            self._learned(hwnd, pressed, bool(key) and not retried)
-            self._auto_candidate = None
-            self._show_live(image, thumb)  # the turned page shows at once
-            if not self.auto_var.get():
-                self._auto_last = thumb
-                self.after(self.settings.settle_ms, lambda: self._translate_after_turn(hwnd))
-            if pressed:  # pressed for real: does the page turn once more, soon?
-                self.after(120, lambda: self._second_turn(hwnd, key, now + TWO_TURNS_S, thumb))
-            return
-        stirred = stirred or frames_differ(prev if prev is not None else reference, thumb, LIVE_CHANGE)
-        wait = self.settings.page_turn_wait_ms / 1000
-        if (not raised and not stirred and now - started >= wait and self._look_raised(hwnd)
-                and self._raise_viewer(hwnd)):
-            self.after(120, lambda: self._follow_change(hwnd, reference, key, now, retried, stirred, thumb, pressed,
-                                                        True))
-            return
-        if not retried and not stirred and now - started >= wait:
-            # The posted key changed nothing at all (a window that ignores posted keys): the person's key pressed for
-            # real, once (`press_briefly`: the foreground handed over and back, no ALT tap).
-            press_briefly(hwnd, key)
-            self._follow_change(hwnd, reference, key, time.monotonic(), retried=True, prev=thumb, pressed=True)
-            return
-        if now - started > (FOLLOW_WAITS * wait if stirred else wait):
-            if not stirred:
-                self.say("The viewer did not change (end of book, or the key means nothing there).")
-            return
-        self.after(120, lambda: self._follow_change(hwnd, reference, key, started, retried, stirred, thumb, pressed,
-                                                    raised))
-
-    def _second_turn(self, hwnd: int, key: str, until: float, last: Any, calm: Any = None) -> None:
-        """Follow = "poll", after a key pressed for real turned the page: until *until* (TWO_TURNS_S later) its frame,
-        once it has settled (*calm*: two frames 120 ms apart alike), is watched for turning once more - the posted
-        key had arrived after all, and the viewer turned two pages (`_say_two_turns`)."""
-        try:
-            thumb = _thumb(self, self._capture(hwnd))
-        except CaptureError:
-            return
-        if calm is not None and frames_differ(calm, thumb):
-            self._say_two_turns(key)
-            return
-        if calm is None and not frames_differ(last, thumb, 0.5):
-            calm = thumb  # the first turn has settled
-        if time.monotonic() < until:
-            self.after(120, lambda: self._second_turn(hwnd, key, until, thumb, calm))
-
-    def _translate_after_turn(self, hwnd: int) -> None:
-        if self.busy or not self.ready or not self._enlarge_first(self.translate_now):
-            return
-        try:
-            image = self._capture(hwnd)
-        except CaptureError as e:
-            self._capture_failed(e)
-            return
-        thumb = _thumb(self, image)
-        self._auto_last = thumb
-        self._show_live(image, thumb)
-        self._start_translate(image, thumb=thumb)
 
     # ------------------------------------------------------------------ following the viewer by events
     def _follower(self) -> Following:
         """How the window follows the viewer, made at the first heartbeat. With follow = "events" Windows' window
         events are hooked (`capture.WindowEvents`: the window in front; the viewer's window renamed, moved or
-        closed) and the window's own moves watched (`_watch_own_window`); a click passed on to the viewer is
-        followed as a key is (translator mode's `_forward_click`). Without the hooks (not Windows, a hook that cannot
-        be set) and with follow = "poll", the viewer is polled as before."""
+        closed) and the window's own moves watched (`_watch_own_window`). Without the hooks (not Windows, a hook that
+        cannot be set) and with follow = "poll", the viewer is polled as before."""
         f = getattr(self, "_following", None)
         if f is not None:
             return f
@@ -1744,13 +1475,13 @@ class LiveViewMixin(BlackViewerMixin):
         if f.moved is not None and now >= f.moved + settle:
             f.moved = None
             f.look_at = now if f.look_at is None else min(f.look_at, now)
-        if getattr(self, "_over_on", False):
+        if getattr(self, "_see_hidden", False):
             self._front_as_it_is(f, now)
 
     def _front_as_it_is(self, f: Following, now: float) -> None:
-        """Over the book (`overbook`, the full screen too): who is in front as Windows has it now, whatever the notes
-        said. A click on the window there (WS_EX_NOACTIVATE: a button on it, the side indicator) gives a
-        note that TASlation came to the front while the viewer keeps the foreground, and no note follows, for nothing
+        """Over the viewer (`seethrough`): who is in front as Windows has it now, whatever the notes said. A click on
+        a window that never takes the foreground (WS_EX_NOACTIVATE: the side panes, a box in Edit) may give a note
+        that TASlation came to the front while the viewer keeps the foreground, and no note follows, for nothing
         changed: from the notes alone TASlation would stay "in front" and no page turned in the viewer would be
         followed. As with a note, a window back in front is looked at once."""
         owner = foreground_owner(foreground_window(), f.events.viewer)
@@ -1812,7 +1543,7 @@ class LiveViewMixin(BlackViewerMixin):
             return
         if f.op is not None and f.op.over_job:
             return  # (a page seen while a job ran, followed until it settles: its follow takes it, not two looks)
-        if f.op is not None and f.op.phase == "settle" and f.op.turned_at is None and self._early_on():
+        if f.op is not None and f.op.phase == "settle" and self._early_on():
             self._settle_now(f.op)  # (its frame is its follow's to take: started early on it now, a gate of its own)
             return
         try:
@@ -1942,31 +1673,24 @@ class LiveViewMixin(BlackViewerMixin):
         return image.size == frame.size and not frames_differ(self._area_thumb(frame), self._area_thumb(image))
 
     def _take(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None,
-              operation: bool = False, complete: bool | None = None) -> str:
+              complete: bool | None = None) -> str:
         """A settled frame of the viewer taken as the page (follow = "events"). With Auto on a new page is started at
         once (`_on_new_page`), or - while the models load or a job runs - as soon as it can be (`_queue`: the viewer is
-        looked at again then). With Auto off a page turned by TASlation's own *operation* is translated, as before.
+        looked at again then); with Auto off nothing is taken (F5 translates the page on show).
         *complete*: the page job's (`_on_new_page`). Returns "started", "queued" or "same" (nothing to take)."""
         f = self._following
-        if self.auto_var.get():
-            if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
-                return "same"
-            if not self.ready or self.busy:
-                f.taken = None
-                self._cancel_page(turned=True)  # the page being read is not on show any more
-                self._queue("auto")
-                return "queued"
-            self._auto_last, self._auto_candidate = thumb, None
-            self._mark_taken(image, thumb, frame_detail)
-            self._on_new_page(image, thumb, complete=complete)
-            return "started"
-        if not operation or not self.ready or self.busy:
+        if not self.auto_var.get():
             return "same"
-        if not self._enlarge_first(self.translate_now):
+        if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
             return "same"
-        self._auto_last = thumb
+        if not self.ready or self.busy:
+            f.taken = None
+            self._cancel_page(turned=True)  # the page being read is not on show any more
+            self._queue("auto")
+            return "queued"
+        self._auto_last, self._auto_candidate = thumb, None
         self._mark_taken(image, thumb, frame_detail)
-        self._start_translate(image, thumb=thumb, complete=complete)
+        self._on_new_page(image, thumb, complete=complete)
         return "started"
 
     def _mark_taken(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None) -> None:
@@ -2131,7 +1855,7 @@ class LiveViewMixin(BlackViewerMixin):
         its own, as soon as the worker is free -; else - early_start off, a key pressed for real (its two turns are
         watched for), a page the cache holds, a page that could not be started early - settle_ms, as ever."""
         settle_ms = self.settings.settle_ms
-        if not self._early_on() or op.turned_at is not None:
+        if not self._early_on():
             return settle_ms / 1000
         if self._early_of(op) is not None:
             return KEEP_SETTLES * settle_ms / 1000
@@ -2149,7 +1873,7 @@ class LiveViewMixin(BlackViewerMixin):
         started early on its frame (or to be started again once the worker is free, `Operation.redo`), whose job waits
         before its first request for a look that finds its frame on show (`_frame_seen`), and is dropped by the first
         that finds another."""
-        return self._early_on() and op.turned_at is None and (op.redo or op.held_soft or self._early_of(op) is not None)
+        return self._early_on() and (op.redo or op.held_soft or self._early_of(op) is not None)
 
     def _waits_for_worker(self, op: Operation, now: float) -> bool:
         """Whether *op*'s frame, to be started early once the worker is free (`Operation.redo`; a frame of another
@@ -2158,7 +1882,7 @@ class LiveViewMixin(BlackViewerMixin):
         taken by the look once the job is gone, with no gate): so a frame that has not stayed as it is for KEEP_SETTLES
         times settle_ms is never kept from a job without a gate. Not with early_start off, after a key pressed for
         real, nor once the frame has stayed RETAKE_WITHIN_MS (a job that does not end)."""
-        if not self._early_on() or op.turned_at is not None or not self.busy:
+        if not self._early_on() or not self.busy:
             return False
         return now - op.last_at < RETAKE_WITHIN_MS / 1000
 
@@ -2206,31 +1930,26 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _starts_book(self, image: Image.Image) -> bool:
         """Whether Auto's `_on_new_page` would do more with *image* than translate it: start the book (the start
-        dialog, the name asked for: `_begin_book`), or on the full screen count it among the pages kept nowhere - asked
-        without changing anything."""
+        dialog, the name asked for: `_begin_book`) - asked without changing anything."""
         return self._name_needed() and self._page_uncached(image)
 
     def _early_allowed(self, op: Operation, image: Image.Image, thumb: np.ndarray) -> bool:
         """Whether *op*'s frame *image* may be started at once, before it settles (`_early_start`): early_start on,
-        no key pressed for real (its two turns are watched for), none started early yet, the models ready, the worker
-        free; Auto on and the frame a new page whose start asks nothing (no book start, no window
-        being enlarged), or Auto off and a page turned by TASlation's own operation; the viewer enlarged already; and
-        a page the cache does not hold whole (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
-        if not self._early_on() or op.turned_at is not None or getattr(self, "_early", None) is not None:
+        none started early yet, the models ready, the worker free; Auto on and the frame a new page whose start asks
+        nothing (no book start); the viewer's window looked at once as it was chosen (`_enlarge_first`); and a page
+        the cache does not hold whole (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
+        if not self._early_on() or getattr(self, "_early", None) is not None:
             return False
-        if not self.ready or self.busy:
+        if not self.ready or self.busy or not self.auto_var.get():
             return False
-        if self._black_open() or getattr(self, "_enlarging", None) is not None:
+        if self._black_open():
             return False
         win = self.selected
         if win is None or getattr(self, "_enlarge_asked", None) != win.hwnd:
-            return False  # (the first page of a viewer: its window may be enlarged first, `_enlarge_first`)
-        if self.auto_var.get():
-            if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
-                return False
-            if getattr(self, "_start_pending", None) is not None or self._starts_book(image):
-                return False
-        elif not op.operation:
+            return False  # (the first page of a viewer: its window is looked at first, `_enlarge_first`)
+        if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
+            return False
+        if getattr(self, "_start_pending", None) is not None or self._starts_book(image):
             return False
         return not self._all_cached(image)
 
@@ -2261,7 +1980,7 @@ class LiveViewMixin(BlackViewerMixin):
                       look if look is not None and look.image is image else None)
         self._early_gate = gate
         try:
-            took = self._take(image, thumb, frame_detail, operation=op.operation)
+            took = self._take(image, thumb, frame_detail)
         finally:
             self._early_gate = None
         if took != "started" or getattr(self, "_page_gate", None) is not gate:
@@ -2358,35 +2077,21 @@ class LiveViewMixin(BlackViewerMixin):
         self._stored_by = (frame, stored, replaced) if frame is not None else None
 
     # ------------------------------------------------------------------ an operation followed (events)
-    def _begin_follow(self, hwnd: int, reference: Any, key: str = "", retried: bool = False, *,
-                      phase: str = "change", last: np.ndarray | None = None,
-                      last_detail: np.ndarray | None = None, operation: bool = False, fast: bool = False,
-                      seq: int | None = None, image: Image.Image | None = None, over_job: bool = False,
-                      gave_way: bool = False) -> None:
-        """Follow the viewer's frame (follow = "events"), in place of a follow before: from *phase* "change" (an
-        operation of TASlation's: awaited to change from *reference*, at FOLLOW_STEP_MS; with *seq*, the viewer's
-        frame count when *reference* was captured, at each new frame as it comes, `_counted_change`), "settle" (it has
-        changed: *last* is the frame seen, *image* its capture; *operation*: after TASlation's own operation;
-        *over_job*: a frame of another page than the running job's, `_look_over_job`; *gave_way*: that job, past its
-        page, cancelled at once, `_tail_gives_way`) or, *fast*, "recheck" (a page
-        just taken at once: `_take_at_once`). A posted key that comes while the one before is still awaited with
-        nothing changed goes with it (`_held_keys`). The backlog's step under way stops (`_stop_behind`), and none
-        begins while the viewer is followed (`backlog.Backlog.tick`): the page it goes to comes first."""
+    def _begin_follow(self, hwnd: int, reference: Any, *, phase: str = "settle", last: np.ndarray | None = None,
+                      last_detail: np.ndarray | None = None, fast: bool = False, image: Image.Image | None = None,
+                      over_job: bool = False, gave_way: bool = False) -> None:
+        """Follow the viewer's frame (follow = "events"), in place of a follow before: from *phase* "settle" (it has
+        changed: *last* is the frame seen, *image* its capture; *over_job*: a frame of another page than the running
+        job's, `_look_over_job`; *gave_way*: that job, past its page, cancelled at once, `_tail_gives_way`) or,
+        *fast*, "recheck" (a page just taken at once:
+        `_take_at_once`). The backlog's step under way stops (`_stop_behind`), and none begins while the viewer is
+        followed (`backlog.Backlog.tick`): the page it goes to comes first. (TASlation sends the viewer nothing: every
+        change it follows is one the viewer made by itself, the reader's key or click.)"""
         self._stop_behind()
         f = self._follower()
-        held = self._held_keys(f.op, hwnd) if phase == "change" and key and not retried else None
         self._end_follow()
-        if phase == "change":
-            f.retake = None  # an operation: the page a sharper frame waited for is not the one to come
-        op = Operation(hwnd, reference, key, retried or not key, time.monotonic(), phase, last, last_detail,
-                       operation=phase == "change" or operation, over_job=over_job, gave_way=gave_way and over_job)
-        if key and phase == "change":
-            op.keys = (key,)
-        if held is not None:  # (its wait goes on from the first key, the frames before it the same)
-            op.keys, op.started, op.reference, op.prev = (*held.keys, key), held.started, held.reference, held.prev
-            if held.pressed:  # the keys before it pressed for real already, and the page not turned yet: it too
-                press_briefly(hwnd, key)
-                op.retried = op.pressed = True
+        op = Operation(hwnd, reference, time.monotonic(), phase, last, last_detail, over_job=over_job,
+                       gave_way=gave_way and over_job)
         f.op = op
         if phase == "settle":
             self._settle_on(op, last, last_detail, op.started, image)
@@ -2395,26 +2100,7 @@ class LiveViewMixin(BlackViewerMixin):
             op.fast_until = op.started + RECHECK_MS / 1000
             op.seq = self._frame_count()
             op.last_at = op.started
-        elif phase == "change" and seq is not None:
-            op.seq = seq  # (looked_at 0: the first step captures whatever the count says)
-            op.job = self.after(FRAME_STEP_MS, self._follow_step)
-            return
-        op.job = self.after(FOLLOW_STEP_MS if phase == "change" or fast else self.settings.settle_ms, self._follow_step)
-
-    @staticmethod
-    def _held_keys(op: Operation | None, hwnd: int) -> Operation | None:
-        """The operation *op* followed when a new posted key comes for the viewer *hwnd*, if its own posted keys are
-        still awaited with nothing changed at all (no frame moved, not raised for a look): the new key goes with them.
-        Once the first one's page_turn_wait_ms has passed with nothing changed all of them are pressed for real, in
-        order (`_await_change`); when they were pressed for real already, the new one is pressed for real at once
-        (`_begin_follow`). Else the new key would have ended that wait, and the keys before it, never pressed for
-        real, would have turned nothing - two keys within the wait turned one page -, or, coming after they were, it
-        would have taken their page turn for its own, and the viewer for one that takes posted keys. None when there
-        is no such operation (and for keys pressed for real from the start, which nothing follows up)."""
-        if (op is None or op.phase != "change" or op.hwnd != hwnd or not op.keys or (op.retried and not op.pressed)
-                or op.raised or op.stirred_at is not None):
-            return None
-        return op
+        op.job = self.after(FOLLOW_STEP_MS if fast else self.settings.settle_ms, self._follow_step)
 
     def _settle_on(self, op: Operation, thumb: np.ndarray | None, frame_detail: np.ndarray | None, now: float,
                    image: Image.Image | None = None) -> None:
@@ -2434,9 +2120,8 @@ class LiveViewMixin(BlackViewerMixin):
         op.fast_until = None
         op.redo = False
         op.seq = None
-        if op.turned_at is None:
-            count = self._frame_count()
-            op.seq = look.seq if seen and count is not None and look.seq is not None else count
+        count = self._frame_count()
+        op.seq = look.seq if seen and count is not None and look.seq is not None else count
         if image is not None and thumb is not None and frame_detail is not None:
             self._early_start(op, image, thumb, frame_detail)
         if op.seq is not None:
@@ -2477,16 +2162,13 @@ class LiveViewMixin(BlackViewerMixin):
         op.job = self.after(ms, self._follow_step)
 
     def _step(self, op: Operation) -> None:
-        """The viewer's frame once, for the operation followed: "change" - every FOLLOW_STEP_MS until it differs from
-        the frame before the operation (`_await_change`: a key the viewer ignored is pressed for real; with its frames
-        counted, at each new frame as well, `_counted_change`); "settle" -
+        """The viewer's frame once, for the change followed: "settle" -
         every settle_ms until two frames are alike and the later is not sharper (frames counted: at every new frame,
         until none came for settle_ms; `_settle_on`), then the page is taken (`_take`; a page the cache holds is taken
         on the first frame of it, `_take_at_once`; a page started early on its first frame is confirmed once the frame
         has stayed as it is for KEEP_SETTLES times settle_ms, looked at every FOLLOW_STEP_MS meanwhile when its frames
-        are not counted, and its job told at each look that finds its frame on show still, `_frame_seen`;
-        after a key pressed for real, not before TWO_TURNS_S has passed since the page turned: a page that turns once
-        more by then turned twice, `_say_two_turns`); "recheck" - RECHECK_MS after the page was taken: a frame of
+        are not counted, and its job told at each look that finds its frame on show still, `_frame_seen`); "recheck" -
+        RECHECK_MS after the page was taken: a frame of
         another page is followed until it settles, a sharper frame of the same page is read again, and a page taken at
         once in translator mode is completed from its frame once that has settled (`_completion`, `_complete_taken`)."""
         f = self._following
@@ -2494,8 +2176,6 @@ class LiveViewMixin(BlackViewerMixin):
             return  # (a viewer that stays black: the look when it is back takes it from there)
         now = time.monotonic()
         settle_s = self.settings.settle_ms / 1000
-        if op.seq is not None and op.phase == "change" and not self._counted_change(op, now):
-            return
         if op.seq is not None and op.phase in ("recheck", "settle"):  # the viewer's frames counted
             count = self._frame_count()
             if count is not None and count == op.seq:  # no new frame since the last look: nothing to capture ...
@@ -2521,9 +2201,6 @@ class LiveViewMixin(BlackViewerMixin):
             return
         thumb = _thumb(self, image)
         blank = self._drew_nothing(thumb)  # nothing drawn (yet)
-        if op.phase == "change":
-            self._await_change(op, image, thumb, now, blank)
-            return
         if blank:
             if now - op.started < self.settings.page_turn_wait_ms / 1000 or (
                     op.fast_until is not None and now < op.fast_until):
@@ -2541,26 +2218,18 @@ class LiveViewMixin(BlackViewerMixin):
                 self._drew_soft(op.last_image, image)  # (the page come sharper as it settles: drawn soft first)
             if not moving:
                 self._frame_seen(op, fresh=True)
-            if op.turned_at is not None and not op.twice:  # after a key pressed for real: does it turn once more?
-                if op.calm is not None and frames_differ(op.calm, thumb):
-                    op.twice = True  # it had settled, and turned again: the posted key had arrived after all
-                elif op.calm is None and not moving:
-                    op.calm = thumb
-            waiting = op.turned_at is not None and not op.twice and now - op.turned_at < TWO_TURNS_S
             if moving and self._early_of(op) is not None:
                 self._early_drop()  # the frame changed under the page started on it: nothing of that job lasts ...
                 op.redo = True  # ... and the page starts again on this frame once the worker is free of it
-            if (moving or op.redo or (op.over_job and not self.busy)) and op.turned_at is None and not (
-                    op.redo and self.busy):
+            if (moving or op.redo or (op.over_job and not self.busy)) and not (op.redo and self.busy):
                 op.redo = False
                 # (a page the cache holds: taken now, then rechecked - unless a job runs that this frame, not
                 # confirmed yet, would cancel: `_look_over_job`)
-                if not (op.over_job and self.busy) and self._take_at_once(op.hwnd, image, thumb, frame_detail,
-                                                                          op.operation):
+                if not (op.over_job and self.busy) and self._take_at_once(op.hwnd, image, thumb, frame_detail):
                     return
                 if self._early_start(op, image, thumb, frame_detail):  # (early_start: started on this frame)
                     op.over_job = False  # (the job it was seen over is gone)
-            counted = op.seq is not None and op.turned_at is None
+            counted = op.seq is not None
             if counted or self._watched(op):  # settled once unchanged for `_settle_s` (frames counted: at each new
                 step = FRAME_STEP_MS if counted else FOLLOW_STEP_MS  # frame; else looked at every FOLLOW_STEP_MS)
                 if moving and now - op.settle_from < SETTLE_TRIES * settle_s:
@@ -2570,7 +2239,7 @@ class LiveViewMixin(BlackViewerMixin):
                 if not moving and now - op.last_at < self._settle_s(op):
                     self._next_step(op, step)
                     return
-            elif (moving or waiting) and op.settles < SETTLE_TRIES:
+            elif moving and op.settles < SETTLE_TRIES:
                 op.last, op.last_detail, op.last_image, op.settles = thumb, frame_detail, image, op.settles + 1
                 if moving:
                     op.last_at = now
@@ -2605,10 +2274,7 @@ class LiveViewMixin(BlackViewerMixin):
                 # path's time, with a gate, kept once it has stayed KEEP_SETTLES times settle_ms)
                 self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
                 return
-            took = self._take(image, thumb, frame_detail, operation=op.operation)
-            if op.twice:
-                self._say_two_turns(op.key)
-            op.turned_at, op.twice = None, False  # (said once)
+            took = self._take(image, thumb, frame_detail)
             if took == "started":
                 op.phase = "recheck"
                 self._next_step(op, RECHECK_MS)
@@ -2624,7 +2290,7 @@ class LiveViewMixin(BlackViewerMixin):
             # on show)
             over = self._page_job_runs()
             op.gave_way = over and self._tail_gives_way()  # (a job past its page: cancelled now)
-            if not over and self._take_at_once(op.hwnd, image, thumb, frame_detail, op.operation):
+            if not over and self._take_at_once(op.hwnd, image, thumb, frame_detail):
                 return  # (a page the cache holds: taken now)
             op.over_job = over
             self._settle_on(op, thumb, frame_detail, now, image)
@@ -2645,22 +2311,6 @@ class LiveViewMixin(BlackViewerMixin):
             return
         if op.fast_until is not None and now < op.fast_until:  # taken at once: a sharper frame may come yet
             self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
-
-    def _counted_change(self, op: Operation, now: float) -> bool:
-        """"change" with the viewer's frames counted (`capture.frame_count`; *op*.seq the count at the last capture):
-        whether to capture the frame now - at the first new frame, no sooner than FRAME_GAP_MS after the capture
-        before, and at least every FOLLOW_STEP_MS whatever the count says (the waits of `_await_change` go on at their
-        pace). Else the next step comes in FRAME_STEP_MS: a page the viewer has drawn by the time the key's handover
-        is over is captured within that, not FOLLOW_STEP_MS later."""
-        count = self._frame_count()
-        since = now - op.looked_at
-        if since < FOLLOW_STEP_MS / 1000 - 0.002 and (
-                count is None or count == op.seq or since < FRAME_GAP_MS / 1000 - 0.002):
-            self._next_step(op, FRAME_STEP_MS)
-            return False
-        op.seq = count if count is not None else op.seq
-        op.looked_at = now
-        return True
 
     def _completion(self, op: Operation, now: float) -> bool:
         """"recheck" with the viewer's frames counted, no new frame since the last look, after a page taken at once
@@ -2706,93 +2356,6 @@ class LiveViewMixin(BlackViewerMixin):
         self._start_translate(image, thumb=thumb, complete=True)
         if op.fast_until is not None and now < op.fast_until:  # a sharper frame may come yet
             self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
-
-    def _await_change(self, op: Operation, image: Image.Image, thumb: np.ndarray, now: float, blank: bool) -> None:
-        """"change": the frame after TASlation's operation, every FOLLOW_STEP_MS until it differs from the one before
-        it (the page turned: followed until it settles). Any change of the frame at all meanwhile - full thumbnails
-        compared: a loading indicator, a partial repaint, a blank frame - says that the viewer took the key: it is
-        never pressed again, and the page is waited for up to FOLLOW_WAITS times page_turn_wait_ms (a slow viewer
-        shows it seconds later). A posted key that changed nothing at all for page_turn_wait_ms is pressed for real,
-        once (a window that ignores posted keys); when that changes nothing at all either for as long, the follow
-        ends and the status line says so. Before anything is concluded from a frame that did not change, a viewer
-        hidden wholly by other windows is raised for a look, as long again (`_raise_viewer`) - unless it is known to
-        draw so (`_look_raised`): then, as for a viewer partly in sight, the key is pressed for real after the first
-        wait. What the turn showed of the viewer is kept (`_seen_turn`, `_learned`)."""
-        f = self._following
-        wait = self.settings.page_turn_wait_ms / 1000
-        if not blank and (op.reference is None or frames_differ(op.reference, thumb)):  # the page turned
-            self._seen_turn(op.hwnd, op.raised, op.pressed)
-            if getattr(self, "_raised", None) is not None:
-                self.after(self.settings.settle_ms, self._lower_viewer)  # drawn: back in its place at once
-            self._learned(op.hwnd, op.pressed, bool(op.key) and not op.retried)
-            self._auto_candidate = None
-            f.seen = thumb
-            frame_detail = _detail(self, image, self._area_box(image))
-            if op.pressed:
-                if len(op.keys) <= 1:
-                    op.turned_at = now  # (does it turn once more, soon? "settle" watches; several keys turn several)
-            elif self._take_at_once(op.hwnd, image, thumb, frame_detail, operation=True, shown=False):
-                return  # a page the cache holds: taken on its first frame, then rechecked
-            # (a page job at work meanwhile - the page before still read or asked for -: the page goes as one the
-            # viewer turned while the job ran, `_look_over_job` - the job cancelled once the frame has stayed
-            # LEFT_PAGE_MS, the page started early, a gate of its own, once the worker is free - not taken as settled
-            # and queued, then started with no gate: never caught once turned past, `backlog`)
-            op.over_job = bool(self.auto_var.get()) and (self._page_job_runs() or self._page_job_ends())
-            op.gave_way = op.over_job and self._tail_gives_way()  # (a job past its page: cancelled now)
-            self._show_live(image, thumb)  # the turned page shows at once
-            self._settle_on(op, thumb, frame_detail, now, image)
-            return
-        if blank or frames_differ(op.prev if op.prev is not None else op.reference, thumb, LIVE_CHANGE):
-            op.stirred_at = now  # the viewer is at it: it took the key
-        op.prev = thumb
-        if (not op.raised and op.stirred_at is None and now - op.started >= wait and self._look_raised(op.hwnd)
-                and self._raise_viewer(op.hwnd)):
-            op.raised, op.started = True, now
-            self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
-            return
-        if not op.retried and op.stirred_at is None and now - op.started >= wait:
-            # The posted key changed nothing at all (a window that ignores posted keys): the person's key pressed for
-            # real, once (`press_briefly`: the foreground handed over and back, no ALT tap) - with the keys pressed
-            # since, in order (`_held_keys`), each of them once.
-            press_briefly(op.hwnd, list(op.keys) if len(op.keys) > 1 else op.key)
-            op.retried, op.pressed, op.started = True, True, time.monotonic()
-            self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
-            return
-        if now - op.started > (wait if op.stirred_at is None else FOLLOW_WAITS * wait):
-            if op.stirred_at is None and op.key:
-                self.say("The viewer did not change (end of book, or the key means nothing there).")
-            if blank:  # nothing drawn: looked at again while it lasts
-                f.look_at = now + self.settings.auto_interval_ms / 1000
-            return
-        self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
-
-    def _say_two_turns(self, key: str) -> None:
-        """A key pressed for real (the posted one had changed nothing) turned the page twice within TWO_TURNS_S: the
-        posted key had arrived after all. The reader is told, with the key to press in this window that turns back one
-        page (`key_label`: for the viewer's next key its previous one, else *key*'s opposite, as pressed here:
-        `pagekeys.pressed_for`), in the status line and - as the line moves on while the page is read - on the page
-        for a while."""
-        from .constants import FORWARDED_KEYS
-        from .reading import key_label  # (imported here: `reading` imports `viewers`, which imports this module)
-
-        pair = self._page_key_pair()
-        back = opposite_key(key)
-        if pair is not None:
-            viewer, window = pair
-            if same_key(key, viewer.next):
-                back = viewer.prev
-            elif same_key(key, viewer.prev):
-                back = viewer.next
-            back = pressed_for(back, viewer, window, FORWARDED_KEYS.values())
-        if back:
-            def line() -> str:
-                return _("The viewer turned two pages; press {key} once to go back.").format(key=key_label(back))
-        else:
-            def line() -> str:
-                return _("The viewer turned two pages.")
-        self.status(line)
-        if not self.reading:  # (the full screen shows the status line on the page by itself)
-            self.canvas.set_note(line(), READING_NOTE_MS)
 
     # ------------------------------------------------------------------ the window's own moves, watched (events)
     def _watch_own_window(self) -> None:

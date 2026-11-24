@@ -83,6 +83,75 @@ def test_a_copy_of_the_screen_never_reads_taslation_own_windows():
     assert not capture.screen_shows_own(viewer, [])
 
 
+def test_another_window_over_the_viewer_is_seen_but_no_overlay_or_hidden_one(monkeypatch):
+    """`behind_others`: a window above the viewer in the order of the windows that covers part of it, never one that
+    is hidden, minimised or lets the clicks through (the see-through window's own bars, a tooltip's shadow)."""
+    from types import SimpleNamespace
+
+    from taslation.capture import windows
+
+    above = {1: 2, 2: 3, 3: 4, 4: 0}
+    state = {2: (False, False, 0, (0, 0, 2000, 2000)), 3: (True, True, 0, (0, 0, 2000, 2000)),
+             4: (True, False, 0x20, (0, 0, 2000, 2000))}  # hidden, minimised, click-through
+    fake = SimpleNamespace(IsWindow=lambda h: True, GetAncestor=lambda h, f: h, GetWindow=lambda h, f: above[h],
+                           IsWindowVisible=lambda h: state[h][0], IsIconic=lambda h: state[h][1],
+                           GetWindowLongW=lambda h, i: state[h][2])
+    monkeypatch.setattr(windows, "IS_WINDOWS", True)
+    monkeypatch.setattr(windows, "user32", fake, raising=False)
+    monkeypatch.setattr(windows, "GWL_EXSTYLE", -20, raising=False)
+    monkeypatch.setattr(windows, "client_rect_on_screen", lambda hwnd: (100, 100, 800, 600))
+    monkeypatch.setattr(windows, "_is_cloaked", lambda hwnd: False)
+    monkeypatch.setattr(windows, "_window_rect", lambda hwnd: state[hwnd][3])
+    assert not windows.behind_others(1)
+    state[3] = (True, False, 0, (950, 0, 1000, 50))  # on the screen, beside the viewer
+    assert not windows.behind_others(1)
+    state[3] = (True, False, 0, (850, 0, 1000, 150))  # over a corner of it
+    assert windows.behind_others(1)
+
+
+WORK, SMALL = (0, 0, 1920, 1040), (100, 100, 900, 756)
+
+
+def test_smaller_than_the_work_area():
+    from taslation.capture.windows import smaller_than
+
+    assert smaller_than(SMALL, WORK) and smaller_than((0, 0, 1920, 900), WORK) and smaller_than((0, 0, 1000, 1040), WORK)
+    assert not smaller_than(WORK, WORK) and not smaller_than((-8, -8, 1928, 1048), WORK)
+
+
+def test_a_maximised_large_minimised_or_hidden_window_is_left_alone_and_nothing_else_is_called(monkeypatch):
+    """`enlarge_window` (what a 1.0.1 session did; its windows are put back at the start: `recovery`): only the
+    window's place is changed - the fake has no call that touches the foreground, the order of the windows or a key."""
+    from types import SimpleNamespace
+
+    from taslation.capture import Enlarged, windows
+
+    user32, place, moved = SimpleNamespace(zoomed=False), {"rect": SMALL}, []
+    user32.IsZoomed = lambda hwnd: user32.zoomed
+
+    def move(hwnd, rect):
+        moved.append(rect)
+        place["rect"] = rect
+        return True
+
+    monkeypatch.setattr(windows, "user32", user32, raising=False)
+    monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
+    monkeypatch.setattr(windows, "work_area", lambda hwnd: WORK)
+    monkeypatch.setattr(windows, "window_rect", lambda hwnd: place["rect"])
+    monkeypatch.setattr(windows, "move_window", move)
+    user32.zoomed = True
+    assert windows.enlarge_window(7) is None
+    user32.zoomed = False
+    place["rect"] = WORK
+    assert windows.enlarge_window(7) is None
+    place["rect"] = SMALL
+    monkeypatch.setattr(windows, "window_shown", lambda hwnd: False)
+    assert windows.enlarge_window(7) is None and moved == []
+    monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
+    enlarged = windows.enlarge_window(7)
+    assert enlarged == Enlarged(7, SMALL, WORK) and moved == [WORK] and enlarged.changed
+
+
 @windows_only
 def test_the_rectangle_of_a_tk_window_takes_in_its_client_area(tk_root):
     top = tk.Toplevel(tk_root)

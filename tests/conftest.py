@@ -61,10 +61,8 @@ def no_real_window_restored(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_enlarged_window_kept(monkeypatch):
-    """No test keeps an enlarged window in a state folder, nor puts back one a session before left (some stand-ins'
-    settings have the default, real state folder); tests/test_enlarge_recovery.py patches its own in."""
-    monkeypatch.setattr(viewers, "keep_enlarged", lambda state_dir, enlarged: None)
-    monkeypatch.setattr(viewers, "forget_enlarged", lambda state_dir, hwnd: None)
+    """No test puts back a window an earlier version left enlarged (some stand-ins' settings have the default, real
+    state folder); tests/test_enlarge_recovery.py patches its own in."""
     monkeypatch.setattr(viewers, "put_back_enlarged", lambda state_dir: 0)
 
 

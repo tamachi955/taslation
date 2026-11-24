@@ -4,10 +4,10 @@ TASlation's own process never asks the network: it starts the program files' ``c
 own, beside setup_models.py, outside the offline guard) as a process of its own, without a console window and below
 normal priority, and reads the one line of JSON it prints (`Check`, `parse_answer`). That happens only
 
-* when the reader chooses Help > Check for updates... (`dialogs.updates.UpdateDialog`; chosen again within
+* when the reader chooses Menu > Help > Check for updates... (`dialogs.updates.UpdateDialog`; chosen again within
   `RECENT_S` of an answer that was no failure, that answer is shown again and nothing is asked: `remember`,
   `recent`, in the window's memory only), and
-* at the window's start, for who turned it on (``update_check = "daily"``: the installer asks, Tools > Settings... and
+* at the window's start, for who turned it on (``update_check = "daily"``: the installer asks, Settings... and
   the dialog change it), at most once a day (`start_check_due`), no sooner than `START_DELAY_MS` after the window is
   ready and only while nothing is read or translated (`idle`), never in a git clone. A newer version found then is
   named in the Help menu's item (`menu_label`) and in one quiet status line (`_say_quietly`: the status bar only,
@@ -49,7 +49,7 @@ QUIET_RETRY_MS = 2_000  # the quiet line waits so long while the status line is 
 POLL_MS = 200  # how often the window looks whether the asking program has answered
 CHECK_WAIT_S = 20.0  # the asking program ends itself after 10 s (its CHECK_TOTAL_S); this long, it is ended
 CHANGES_CAP = 6000  # characters of the changes shown (check_update.py's cap)
-RECENT_S = 60.0  # Help > Check for updates... chosen again this soon after an answer shows it again, asking nothing
+RECENT_S = 60.0  # Menu > Help > Check for updates... chosen again this soon after an answer shows it again, asking nothing
 TEST_BASE: str | None = None  # tests only: the loopback address check_update.py asks instead (its --base)
 _clock = time.monotonic  # (`recent`'s clock; the tests set their own)
 
@@ -301,7 +301,7 @@ def setup(window: Any) -> None:
 
 
 def menu_label(window: Any) -> str:
-    """Help > Check for updates..., with the newer version when one is known."""
+    """Menu > Help > Check for updates..., with the newer version when one is known."""
     known = getattr(window, "_update_known", None)
     if known:
         return _("Check for updates... ({version} is available)").format(version=known[0])
@@ -366,7 +366,7 @@ def _start_check_done(window: Any, answer: dict[str, Any]) -> None:
 
 
 def quiet_line(version: str) -> str:
-    return _("TASlation {version} is available: Help > Check for updates...").format(version=version)
+    return _("TASlation {version} is available: Menu > Help > Check for updates...").format(version=version)
 
 
 def _say_quietly(window: Any, version: str) -> None:

@@ -1,4 +1,4 @@
-"""Made-up pages and events for the indicator beside the page (`ui.side`): the engine's ``page_stage``,
+"""Made-up pages and events for the right pane's counts (`ui.side`): the engine's ``page_stage``,
 ``page_on_show`` and ``backlog`` events as normal reading sends them (with ``reading`` True, in the shapes
 `taslation.backlog` gives them), a page or a spread drawn here (grey paper, white
 ovals as bubbles, its number) with made-up English lettering for its "translation" and scribbles for its "original",
@@ -29,13 +29,6 @@ def picture(seq: int) -> Image.Image:
         draw.ellipse((x, y, x + 150, y + 110), fill="white", outline="black", width=3)
     draw.text((PAGE_SIZE[0] // 2 - 20, PAGE_SIZE[1] - 120), str(seq), fill="black", font_size=72)
     return image
-
-
-def thumb(image: Image.Image) -> Image.Image:
-    """As the events carry it: at most 96 pixels tall."""
-    out = image.copy()
-    out.thumbnail((96 * image.width // image.height + 1, 96))
-    return out
 
 
 def fingerprint(seq: int) -> str:
@@ -98,23 +91,19 @@ def result(seq: int, texts: list[str], spread: bool = False, error: str = "") ->
                       fingerprints=[fingerprint(seq)], error=error)
 
 
-def stage(post: Post, seq: int, read: str | None = None, translate: str | None = None, spread: bool = False,
-          with_thumb: bool = False) -> None:
+def stage(post: Post, seq: int, read: str | None = None, translate: str | None = None) -> None:
     """The ``page_stage`` events for screen *seq*: its reading stage *read*, its translation stage *translate*; as
     normal reading tells them (`taslation.backlog`)."""
     first: dict[str, Any] = {"seq": seq, "fingerprint": fingerprint(seq), "reading": True}
-    if with_thumb:
-        first["thumb"] = thumb(scribbled(page(seq, spread), bubble_boxes(seq, spread)))
     if read is not None:
         post("page_stage", {**first, "stage": "read", "state": read})
-        first.pop("thumb", None)
     if translate is not None:
         post("page_stage", {**first, "stage": "translate", "state": translate})
 
 
-def story(post: Post, pages: int = 12, on_show: int | None = None, spread: bool = False,
-          missed: tuple[int, ...] = (), working: tuple[int, ...] = (), waiting_from: int | None = None) -> None:
-    """Normal reading so far: *pages* screens turned, each with its thumbnail; those before *waiting_from* translated,
+def story(post: Post, pages: int = 12, on_show: int | None = None, missed: tuple[int, ...] = (),
+          working: tuple[int, ...] = (), waiting_from: int | None = None) -> None:
+    """Normal reading so far: *pages* screens turned; those before *waiting_from* translated,
     those in *working* being translated, the rest waiting, those in *missed* gone by too fast; *on_show* the one the
     viewer shows (being read, when it is the last), and the backlog's totals."""
     waiting_from = pages - 3 if waiting_from is None else waiting_from
@@ -123,14 +112,14 @@ def story(post: Post, pages: int = 12, on_show: int | None = None, spread: bool 
             stage(post, seq, read="missed")
             continue
         if seq == on_show == pages:
-            stage(post, seq, read="working", with_thumb=True, spread=spread)
+            stage(post, seq, read="working")
             continue
         if seq in working:
-            stage(post, seq, read="done", translate="working", with_thumb=True, spread=spread)
+            stage(post, seq, read="done", translate="working")
         elif seq < waiting_from:
-            stage(post, seq, read="done", translate="done", with_thumb=True, spread=spread)
+            stage(post, seq, read="done", translate="done")
         else:
-            stage(post, seq, read="done", translate="waiting", with_thumb=True, spread=spread)
+            stage(post, seq, read="done", translate="waiting")
     post("page_on_show", {"seq": on_show, "reading": True})
     left = [s for s in range(waiting_from, pages + 1) if s not in missed]
     post("backlog", {"pages": len(left), "lines": 6 * len(left), "paused": False, "dropped": len(missed),

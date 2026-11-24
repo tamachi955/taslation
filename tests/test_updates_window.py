@@ -293,7 +293,7 @@ def test_a_newer_version_found_at_the_start_shows_in_the_help_menu_and_one_quiet
     assert fake_check.made == 1
     w.run_later()  # its answer, as `watch` polls for it
     assert w.label() == "Check for updates... (0.9.0 is available)"
-    assert w.status_var.get() == "TASlation 0.9.0 is available: Help > Check for updates..."
+    assert w.status_var.get() == "TASlation 0.9.0 is available: Menu > Help > Check for updates..."
     assert not [c for c in hidden_root.winfo_children()
                 if isinstance(c, tk.Toplevel) and c not in before]  # no dialog, no popup
     assert updates.recent(w) is None  # (the start's look is not the dialog's answer: Help > Check asks anew)
@@ -386,41 +386,29 @@ def test_a_look_under_way_ends_with_the_window(state):
 
 # ---------------------------------------------------------------- the Help menu
 def test_check_for_updates_is_in_the_help_menu_before_about(tmp_path, hidden_root, state, monkeypatch):
-    from taslation.ui import app as app_mod
+    from taslation.ui import see_menu
 
     called = []
-
-    class Menus(tk.Toplevel):
-        _build_menus = app_mod.App._build_menus
-
-        def __getattr__(self, name):
-            if name.startswith(("open_", "toggle_", "show_", "_on_", "retranslate", "translate", "set_", "undo", "redo",
-                                "_redisplay", "_apply", "review_")):
-                return lambda *a: called.append(name)
-            raise AttributeError(name)
-
-    m = Menus(hidden_root)
-    m.withdraw()
-    m.settings = Settings(state_dir=state)
-    for name in ("auto_var", "original_var", "top_var", "over_var", "order_numbers_var"):
-        setattr(m, name, tk.BooleanVar(m))
-    m.role_var, m.ui_lang_var = tk.StringVar(m), tk.StringVar(m)
-    m._update_known = ("0.9.0", "2026-11-25")
-    m._build_menus()
-    menus = {str(m.menubar.entrycget(i, "label")): m.menubar.nametowidget(m.menubar.entrycget(i, "menu"))
-             for i in range(int(m.menubar.index("end")) + 1) if m.menubar.type(i) == "cascade"}
-    menu = menus["Help"]
-    labels = [str(menu.entrycget(i, "label")) if menu.type(i) != "separator" else "-"
-              for i in range(int(menu.index("end")) + 1)]
-    assert labels == ["How to use...", "Keys...", "Legal notice...", "-", "Check for updates... (0.9.0 is available)",
+    app = SimpleNamespace(settings=Settings(state_dir=state), ui_lang_var=tk.StringVar(hidden_root),
+                          _update_known=("0.9.0", "2026-11-25"))
+    for name in ("open_help", "open_notice", "open_updates", "open_about", "open_caches", "review_names",
+                 "_on_ui_language"):
+        setattr(app, name, lambda name=name: called.append(name))
+    menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _i in range(3))
+    see_menu.build(app, menu, language, help_menu)
+    labels = [str(help_menu.entrycget(i, "label")) if help_menu.type(i) != "separator" else "-"
+              for i in range(int(help_menu.index("end")) + 1)]
+    assert labels == ["How to use...", "Legal notice...", "-", "Check for updates... (0.9.0 is available)",
                       "About TASlation"]
-    assert m._update_entry == (menu, 4)
-    menu.invoke(4)
+    help_menu.invoke(3)
     assert called == ["open_updates"]
-    m._update_known = None
-    updates.relabel(m)
-    assert str(menu.entrycget(4, "label")) == "Check for updates..."
-    m.destroy()
+    cascades = [str(menu.entrycget(i, "label")) for i in range(int(menu.index("end")) + 1) if menu.type(i) == "cascade"]
+    assert cascades == ["Language", "Help"]
+    app._update_known = None
+    see_menu.build(app, menu, language, help_menu)  # (filled anew before each opening)
+    assert str(help_menu.entrycget(3, "label")) == "Check for updates..."
+    for each in (menu, language, help_menu):
+        each.destroy()
 
 
 # ---------------------------------------------------------------- the dialog

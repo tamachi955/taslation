@@ -84,7 +84,7 @@ def test_the_press_waits_only_when_the_foreground_moved_to_a_browser_opaque_wind
 
 
 def test_a_browser_under_see_through_windows_only_gets_the_key_at_once(monkeypatch):
-    """Under TASlation's own window at WINDOW_ALPHA a browser never stops drawing (Chromium counts no layered window
+    """Under TASlation's see-through windows a browser never stops drawing (Chromium counts no layered window
     with an alpha below 255 as covering it): the redraw wait made every key take 1.1-1.5 s, and the keys pressed
     meanwhile went to the browser behind TASlation's back (measured 2026-11-06: half of them at 1 key a second)."""
     assert not _press(monkeypatch, front=9, covered=False)
@@ -136,6 +136,6 @@ def test_only_a_window_that_hides_what_lies_under_it_counts_as_covering_the_brow
     windows.user32.GetWindow = lambda h, _w: above.get(h, 0)
     monkeypatch.setattr(windows, "client_rect_on_screen", lambda _h: (0, 0, 1900, 1000))
     monkeypatch.setattr(windows, "_window_rect", lambda h: rects[h])
-    assert not windows.covered_by_opaque(5)  # TASlation's own at WINDOW_ALPHA over it, an opaque one beside it
+    assert not windows.covered_by_opaque(5)  # TASlation's see-through window over it, an opaque one beside it
     above.update({20: 21, 21: 0})
     assert windows.covered_by_opaque(5)  # an opaque window over part of it

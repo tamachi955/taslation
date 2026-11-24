@@ -44,7 +44,7 @@ UNDO_TIP = "Put back the choices Clear all dropped (while this window is open)."
 AREAS_HEADING = "Areas ignored on all pages of this book (watermarks, page numbers, banners):"
 AREA_ROW = "{pages}: {x0}-{x1} % across, {y0}-{y1} % down"
 SIDE_WORDS = {"": "All pages", "right": "Right-hand pages", "left": "Left-hand pages"}
-NO_AREAS = "None yet: in translator mode, Page > Ignore this area on all pages of this book adds one."
+NO_AREAS = "None yet: with Edit on, Menu > Page > Ignore this area on all pages of this book adds one."
 REMOVE_AREA = "Remove area"
 REMOVE_AREA_TIP = "Look for text in the selected area again on every page of this book (Delete in the list)."
 AREA_REMOVED = "Area removed: text is looked for there again. Undo puts it back."
@@ -64,7 +64,7 @@ FOLLOWS_LINE = "Values marked as the series' default come from the defaults of {
 FROM_SERIES = "(the series' default)"
 AS_SERIES = "As the series' default ({value})"
 SERIES_VALUE = "(series' default: {value})"
-AREAS_FROM_SERIES = ("These are the areas of {series}. Removing one here, or adding one in translator mode, gives "
+AREAS_FROM_SERIES = ("These are the areas of {series}. Removing one here, or adding one with Edit on, gives "
                      "this book a list of its own.")
 CLEAR_QUESTION_SERIES = ("Clear this book's {n} choice(s) of its own? The series' defaults apply to it again, and your "
                          "own settings where the series has none. Undo in this window puts them back.")
@@ -92,7 +92,7 @@ DIRECTION_TIP = ("Which page of a two-page spread is read first, and the order o
 class BookSettingsDialog(tk.Toplevel):
     """Settings that suit this book, kept with its premises (`annotations.BOOK_SETTING_KEYS`): `CHOICES` as checkboxes,
     which start as this book has them or else as the reader's own setting; the lettering size and the largest size
-    (`SIZE_ROWS`: "As in Settings" and an empty box are the reader's own, Tools > Settings...); the book's reading
+    (`SIZE_ROWS`: "As in Settings" and an empty box are the reader's own, Settings...); the book's reading
     direction (`DIRECTIONS`, with annotations that keep one: `Pipeline.set_reading_direction`, which Clear all leaves
     alone); only with `settings.debug` the other keys, as raw values (empty: the reader's own setting). Without it
     those stay as the book has them. Applied, the page on show is lettered again (`App._after_book_settings`), its
@@ -143,7 +143,7 @@ class BookSettingsDialog(tk.Toplevel):
         self.scale_box = ttk.Combobox(grid, textvariable=self.scale_var, values=shown_scales, state="readonly",
                                       width=max(len(s) for s in shown_scales) + 2)
         self.scale_box.grid(row=row, column=1, columnspan=2, sticky="w", padx=(6, 10), pady=(6, 1))
-        tip(_("This book's translations lettered smaller or larger by so much. As in Settings: the size in Tools > Settings..."), name, self.scale_box)
+        tip(_("This book's translations lettered smaller or larger by so much. As in Settings: the size in Settings..."), name, self.scale_box)
         name = ttk.Label(grid, text=_("Largest size (pixels):"))
         name.grid(row=row + 1, column=0, sticky="w", pady=1)
         self.top_var = tk.StringVar(self, value=str(current["max_font_size"]) if "max_font_size" in current else "")
@@ -152,7 +152,7 @@ class BookSettingsDialog(tk.Toplevel):
         self.sides: dict[str, ttk.Label] = {}  # beside a box: the value it gives when left empty
         self.sides["max_font_size"] = ttk.Label(grid, text=self._side_text("max_font_size"))
         self.sides["max_font_size"].grid(row=row + 1, column=2, sticky="w")
-        tip(_("No translation of this book is lettered larger than this. Empty: the largest size in Tools > Settings..."), name, box)
+        tip(_("No translation of this book is lettered larger than this. Empty: the largest size in Settings..."), name, box)
         self.direction_var: tk.StringVar | None = None  # (annotations that keep no direction: no row)
         self.direction_box: ttk.Combobox | None = None
         self.series_direction_word: str | None = None  # the direction row's "As the series' default" (None: none)

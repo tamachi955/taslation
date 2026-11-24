@@ -1,20 +1,24 @@
-"""A viewer's window left enlarged by a session that ended without closing TASlation's window (a crash, the process
-ended): the window and its rectangle before are kept in the state folder's ui.json while it is enlarged, and the next
-start puts it back - only a window that still exists with the same process and class and still has the size it was
-given -, then forgets it. No key is pressed for it, and Windows' side is a fake."""
+"""A viewer's window left enlarged by a session of an older version that ended without closing TASlation's window (a
+crash, the process ended): the window and its rectangle before are kept in the state folder's ui.json while it is
+enlarged, and the next start puts it back - only a window that still exists with the same process and class and still
+has the size it was given -, then forgets it. TASlation itself no longer enlarges a viewer: the entries are made by
+hand here, as 1.0.1 left them. No key is pressed for it, and Windows' side is a fake."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
-from test_enlarge import SMALL, WORK, Win, desk  # noqa: F401 - desk is test_enlarge's fixture
 
 from taslation import recovery
-from taslation.capture import Enlarged
+from taslation.capture import Enlarged, windows
+from taslation.capture.windows import restore_window
 from taslation.i18n import load_ui_table, save_ui_entry
 from taslation.ui import viewers
 
 TABLE = recovery.ENLARGED_TABLE
+WORK = (0, 0, 1920, 1040)
+SMALL = (100, 100, 900, 756)
 
 
 @pytest.fixture
@@ -60,33 +64,53 @@ def test_a_window_the_person_resized_since_stays_as_it_is(tmp_path, screen):
     assert recovery.put_back_enlarged(tmp_path) == 0 and load_ui_table(tmp_path, TABLE) == {}
 
 
-@pytest.fixture
-def kept(monkeypatch, screen):
-    """The window's real keeping, onto the stand-in's state folder (conftest makes it a no-op elsewhere)."""
-    monkeypatch.setattr(viewers, "keep_enlarged", recovery.keep_enlarged)
-    monkeypatch.setattr(viewers, "forget_enlarged", recovery.forget_enlarged)
-    monkeypatch.setattr(viewers, "put_back_enlarged", recovery.put_back_enlarged)
-    return screen
+class User32:
+    """Only what putting a window back may call: a call that would touch the foreground, the order of the windows or
+    a key is not here, and fails."""
+
+    def __init__(self):
+        self.zoomed = False
+
+    def IsZoomed(self, hwnd):
+        return self.zoomed
 
 
-def test_the_window_keeps_the_enlarged_viewer_while_it_is_large_and_forgets_it_once_put_back(hidden_root, tmp_path,
-                                                                                            desk, kept):
-    w = Win(hidden_root, tmp_path)
-    state = w.settings.state_dir
-    w._enlarge_first()
-    assert json.loads(load_ui_table(state, TABLE)["7"])["before"] == list(SMALL)  # kept as it is enlarged
-    w.run_later()
-    assert json.loads(load_ui_table(state, TABLE)["7"])["given"] == list(WORK)  # the size it took
-    w._restore_enlarged()
-    assert load_ui_table(state, TABLE) == {}
+def test_only_a_window_of_the_size_it_was_given_is_put_back(monkeypatch):
+    user32, place = User32(), {"rect": WORK}
+
+    def move(hwnd, rect):
+        place["rect"] = rect
+        return True
+
+    monkeypatch.setattr(windows, "user32", user32, raising=False)
+    monkeypatch.setattr(windows, "window_shown", lambda hwnd: True)
+    monkeypatch.setattr(windows, "window_rect", lambda hwnd: place["rect"])
+    monkeypatch.setattr(windows, "move_window", move)
+    enlarged = Enlarged(7, SMALL, WORK)
+    assert restore_window(enlarged) and place["rect"] == SMALL  # back
+    place["rect"] = (0, 0, 1200, 800)  # the reader made it smaller
+    assert not restore_window(enlarged) and place["rect"] == (0, 0, 1200, 800)
+    place["rect"] = (300, 0, 2220, 1040)  # moved, same size: put back
+    assert restore_window(enlarged) and place["rect"] == SMALL
+    place["rect"] = WORK
+    user32.zoomed = True  # the reader maximised it
+    assert not restore_window(enlarged)
+    user32.zoomed = False
+    monkeypatch.setattr(windows, "window_shown", lambda hwnd: False)  # closed or minimised
+    assert not restore_window(enlarged)
 
 
-def test_a_start_after_a_session_that_did_not_close_puts_the_viewer_back(hidden_root, tmp_path, desk, kept,
-                                                                         monkeypatch):
-    monkeypatch.setattr(Win, "_put_back_left_enlarged", viewers.ViewerMixin._put_back_left_enlarged, raising=False)
-    crashed = Win(hidden_root, tmp_path)
-    crashed._enlarge_first()
-    crashed.run_later()  # ... and the session ends here, without closing the window
-    later = Win(hidden_root, tmp_path)
-    later._put_back_left_enlarged()
-    assert [e.hwnd for e in kept["restored"]] == [7] and load_ui_table(later.settings.state_dir, TABLE) == {}
+def test_a_size_the_window_clamped_is_the_size_it_kept():
+    enlarged = Enlarged(7, SMALL, WORK)
+    enlarged.given = (0, 0, 800, 656)
+    assert not enlarged.changed  # the same size: a window of a fixed size
+    enlarged.given = (0, 0, 1920, 1000)
+    assert enlarged.changed and enlarged.has_its_size((5, 5, 1925, 1005))
+
+
+def test_a_start_after_an_older_session_that_did_not_close_puts_the_viewer_back(tmp_path, screen, monkeypatch):
+    monkeypatch.setattr(viewers, "put_back_enlarged", recovery.put_back_enlarged)  # (conftest makes it a no-op)
+    recovery.keep_enlarged(tmp_path, Enlarged(7, SMALL, WORK))  # ... and that session ended here
+    later = SimpleNamespace(settings=SimpleNamespace(state_dir=tmp_path))
+    viewers.ViewerMixin._put_back_left_enlarged(later)
+    assert [e.hwnd for e in screen["restored"]] == [7] and load_ui_table(tmp_path, TABLE) == {}

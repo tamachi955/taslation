@@ -1,5 +1,5 @@
-"""A viewer that stays black, and the person told how to bring it back; a viewer's window left enlarged by a session
-that ended without closing the window, put back at the next start.
+"""A viewer that stays black, and the person told how to bring it back; a viewer's window left enlarged by a session of
+an older version that ended without closing the window, put back at the next start.
 
 A browser-based viewer sometimes shows nothing: a loading screen that may just be slow, or that is stuck (a black page
 with a spinner, which a reload cures), or a frame that stays black. `capture.is_black` over the capture
@@ -21,13 +21,13 @@ A frame the capture cannot read while the screen shows it cannot be told from a 
 plain retry, and nothing here works around anything (no flags, no change of hardware acceleration or display
 affinity).
 
-A viewer's window TASlation enlarged (`capture.enlarge_window`) is put back as the window closes
-(`ui.viewers.ViewerMixin._restore_enlarged`). So that a session that ended otherwise - a crash, the process ended -
-does not leave it large, the window and its rectangle before are kept in the state folder's ui.json while it is
-enlarged (`keep_enlarged`, `forget_enlarged`: the table ENLARGED_TABLE, the window's handle -> its process, class,
-rectangle before and rectangle given), and the next start puts back what is still there (`put_back_enlarged`): only a
-window that still exists with the same process and class, shown, not maximised, and still of the size it was given
-(`capture.restore_window`: the person may have resized it since); then the table is cleared. No key is pressed for it.
+TASlation no longer enlarges a viewer's window. Versions up to 1.0.1 did (`capture.enlarge_window`), and kept the
+window and its rectangle before in the state folder's ui.json while it was enlarged (`keep_enlarged`,
+`forget_enlarged`: the table ENLARGED_TABLE, the window's handle -> its process, class, rectangle before and rectangle
+given), so that a session that ended without putting it back - a crash, the process ended - did not leave it large:
+the next start puts back what is still there (`put_back_enlarged`): only a window that still exists with the same
+process and class, shown, not maximised, and still of the size it was given (`capture.restore_window`: the person may
+have resized it since); then the table is cleared. No key is pressed for it.
 """
 
 from __future__ import annotations

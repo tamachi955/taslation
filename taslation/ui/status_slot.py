@@ -1,6 +1,5 @@
-"""The Reader's status slot: in the Reader role the busy badge in the top right corner (`preview.ImageCanvas` with its
-spinner and its seconds) is not shown - the bubbles filling in on the page are the progress -, and one small slot says
-what the page cannot show itself, in fixed words, with no seconds and nothing turning:
+"""The Reader's status slot: in the Reader role the bubbles filling in on the page are the progress, and one small slot
+in the right side pane says what the page cannot show itself, in fixed words, with no seconds and nothing turning:
 
 * no bubble lettered 1 s after the look at a page (`LOOK_S`, from the start of its job or of the wait for the models):
   "Loading the model...", "Reading the page..." or "Translating...", by the job's stage; it goes with the first
@@ -11,18 +10,14 @@ what the page cannot show itself, in fixed words, with no seconds and nothing tu
 * the models still loading at the start (`jobs.JobsMixin._watch_loads`) while no page is under way: "Loading the
   models...", in either role, until everything the start loads is there.
 
-Nothing else is said there. In the window the slot is at the status line's left end (`SlotLabel`); on the full screen
-at the bottom of the page's exit-side margin (`ImageCanvas.set_slot`). The Translator role keeps the badge as it was
-(`badge_allowed`). The slot is looked at whenever the event pump runs (`tick`, from `StatusMixin._flush_busy`): no
-timer of its own."""
+Nothing else is said there. The right side pane says it (`seethrough.right_rows`, the "!" ones as a warning). The
+slot is looked at whenever the event pump runs (`tick`, from `StatusMixin._flush_busy`): no timer of its own."""
 
 from __future__ import annotations
 
 import time
 import tkinter as tk
-import tkinter.font as tkfont
 from dataclasses import dataclass
-from tkinter import ttk
 from typing import Any
 
 from ..i18n import _
@@ -57,7 +52,7 @@ class SlotState:
     error_at: float = 0.0
     nothing: Any = None  # the PageResult with nothing to read
     nothing_until: float = 0.0
-    shown: Any = None  # (what is said, whether on the full screen) as shown last
+    shown: Any = None  # (what is said - `wanted` -, False) as shown last; the right pane reads its first item
 
 
 def reader_role(window: Any) -> bool:
@@ -66,11 +61,6 @@ def reader_role(window: Any) -> bool:
         return role is None or role.get() != "translator"
     except tk.TclError:
         return True
-
-
-def badge_allowed(window: Any) -> bool:
-    """Whether the busy badge shows on the page area: in the Translator role."""
-    return not reader_role(window)
 
 
 def stage_key(window: Any) -> str:
@@ -146,73 +136,18 @@ def nothing_to_read(result: Any) -> bool:
 
 
 def tick(window: Any, now: float | None = None) -> None:
-    """The slot as it is to be now, in the window's status bar and, on the full screen, on the page area; drawn again
-    only when that changed."""
+    """The slot as it is to be now (``SlotState.shown``: the right pane says it, `seethrough.right_rows`)."""
     side = getattr(window, "_side", None)
     if side is None:
         return
     state: SlotState = side.slot
     now = time.monotonic() if now is None else now
-    want = wanted(window, state, now)
-    key = (want, bool(getattr(window, "reading", False)))
-    if key == state.shown:
-        return
-    state.shown = key
-    show(window, want)
-
-
-def show(window: Any, want: tuple[str, bool] | None) -> None:
-    label = getattr(window._side, "slot_label", None)
-    text = slot_text(want[0]) if want is not None else ""
-    warn = bool(want and want[1])
-    if label is not None:
-        try:
-            label.show(text, warn, getattr(window, "status_label", None))
-        except tk.TclError:
-            pass
-    canvas = getattr(window, "canvas", None)
-    if canvas is not None and hasattr(canvas, "set_slot"):
-        canvas.set_slot(text if getattr(window, "reading", False) else "", warn)
+    state.shown = (wanted(window, state, now), False)
 
 
 def again(window: Any) -> None:
-    """The slot said again (a language switch, the full screen in or out)."""
+    """The slot said again (a language switch)."""
     side = getattr(window, "_side", None)
     if side is not None:
         side.slot.shown = None
         tick(window)
-
-
-class SlotLabel(ttk.Frame):
-    """The slot in the window's status bar, at its left end: an orange round "!" for a page that could not be
-    translated, and the words; away while it has nothing to say."""
-
-    def __init__(self, master: tk.Misc):
-        super().__init__(master)
-        self.mark = tk.Canvas(self, width=16, height=16, highlightthickness=0, borderwidth=0, takefocus=0)
-        self.mark.create_oval(1, 1, 15, 15, fill=WARN, outline="#000000")
-        family = tkfont.nametofont("TkDefaultFont").cget("family")
-        self.mark.create_text(8, 8, text="!", fill="#000000", font=(family, 9, "bold"))
-        self.var = tk.StringVar(value="")
-        self.label = ttk.Label(self, textvariable=self.var, anchor="w")
-        self.label.pack(side="right")
-
-    def show(self, text: str, warn: bool, before: tk.Widget | None) -> None:
-        if not text:
-            if self.winfo_manager():
-                self.pack_forget()
-            return
-        self.var.set(text)
-        try:
-            self.mark.configure(bg=str(ttk.Style(self).lookup("TFrame", "background") or "#f0f0f0"))
-        except tk.TclError:
-            pass
-        if warn and not self.mark.winfo_manager():
-            self.mark.pack(side="left", padx=(0, 4), before=self.label)
-        elif not warn and self.mark.winfo_manager():
-            self.mark.pack_forget()
-        if not self.winfo_manager():
-            if before is not None and before.winfo_manager():
-                self.pack(side="left", padx=(0, 12), before=before)
-            else:
-                self.pack(side="left", padx=(0, 12))

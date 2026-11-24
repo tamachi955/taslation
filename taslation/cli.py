@@ -95,19 +95,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="command")
 
-    g = sub.add_parser("gui", help="open the reader window (default)")
+    g = sub.add_parser("gui", help="start TASlation over the viewer (default)")
     g.add_argument("--window", help="pick the viewer window whose title contains this text")
     g.add_argument("--book", help="name used for the translation cache (default: derived from the window title)")
     _book_parts(g)
     g.add_argument("--auto", action=argparse.BooleanOptionalAction, default=True,
                    help="Auto (on by default): every page turn in the viewer is translated; --no-auto starts with it off")
-    g.add_argument("--on-top", action="store_true",
-                   help="keep the window above the viewer (single screen: turn pages with the arrow keys on it)")
-    g.add_argument("--full-screen", "--reading", dest="reading", action="store_true",
-                   help="start on the full screen (the page alone, in the role chosen) once the viewer is chosen; F11 "
-                        "leaves it (--reading, its earlier name, does the same)")
+    # (TASlation's own window went in 2.0.0: these options of 1.0.1 are taken and ignored, said in the log)
+    g.add_argument("--on-top", "--full-screen", "--reading", dest="window_options", action="append_const",
+                   const=True, help=argparse.SUPPRESS)
     g.add_argument("--role", choices=["reader", "translator"],
-                   help="start as a reader (default) or as a translator (mark text, fix translations, keep a glossary)")
+                   help="start with Edit off (reader, the default) or on (translator: the page's regions edited over "
+                        "the viewer)")
 
     sub.add_parser("windows", help="list capturable windows")
     sub.add_parser("doctor", help="check models, fonts, Ollama and the network guard")
@@ -194,20 +193,6 @@ def build_parser() -> argparse.ArgumentParser:
                     help="apply: an extra rendering to replace, e.g. --rename Hja=Hya (repeatable)")
     gl.add_argument("--dry-run", action="store_true", help="apply: only report what would change")
 
-    ky = sub.add_parser("keys", help="the viewer's page keys your keys are passed on as: presets, a viewer's keys, every viewer's")
-    ky.add_argument("action", choices=["list", "show", "set", "apply"],
-                    help="list: the presets and the viewers with keys of their own; show: the keys a viewer gets (and "
-                         "where from); set: keys for a viewer or all viewers; apply PRESET: a preset's keys")
-    ky.add_argument("preset", nargs="?", help="apply: the preset (see `taslation keys list`)")
-    where = ky.add_mutually_exclusive_group()
-    where.add_argument("--viewer", metavar="TITLE",
-                       help="the viewer, by its window's title (the book's name in it does not matter)")
-    where.add_argument("--all", action="store_true",
-                       help="every viewer: each viewer's profile and the defaults of the viewers without one")
-    for meaning, what in (("next", "the next page"), ("prev", "the previous page")):
-        ky.add_argument(f"--{meaning}", metavar="KEY", help=f"set: the key for {what}")
-    ky.add_argument("--reset", action="store_true",
-                    help="set --viewer: drop the viewer's own keys (the defaults again)")
 
     a = sub.add_parser("audit", help="run the pipeline on an image and print every network call that happened")
     a.add_argument("image", type=Path)
@@ -577,8 +562,6 @@ def _book_name(given: str | None, title: str, settings: Settings | None = None) 
     return book
 
 
-ENLARGE_LOOKS = 10  # the enlarged window's frame is looked at this many times at most before reading goes on
-
 
 def _pick_window(query: str):
     """The viewer window *query* names (`capture.match_windows`: its exact title, its tab's title in a browser, the
@@ -767,57 +750,16 @@ def cmd_translate(args: argparse.Namespace, settings: Settings) -> int:
     return 0 if not result.error else 1
 
 
-def enlarge_viewer(hwnd: int, settings: Settings):
-    """The viewer before a command-line read of one page: its window enlarged (`capture.enlarge_window`: no key, no
-    change of the foreground; a maximised window stays as it is), waited for until two frames settle_ms apart are
-    alike; what to put back with `capture.restore_window`, None for a window that was left as it is."""
-    from .frames import frames_differ, thumbnail
-    from .capture import CaptureError, capture_window, enlarge_window, window_rect
-
-    enlarged = enlarge_window(hwnd)
-    if enlarged is None:
-        return None
-    last = None
-    for _ in range(ENLARGE_LOOKS):
-        time.sleep(settings.settle_ms / 1000.0)
-        try:
-            thumb = thumbnail(capture_window(hwnd, allow_screen_fallback=False))
-        except CaptureError:
-            continue
-        if last is not None and not frames_differ(last, thumb, 0.5):
-            break
-        last = thumb
-    try:
-        enlarged.given = window_rect(hwnd)
-    except CaptureError:
-        pass
-    return enlarged
-
-
-def _enlarged(hwnd: int, settings: Settings):
-    """The viewer's window enlarged and settled before it is read (`enlarge_viewer`); what to restore at the end, or
-    None. A window that keeps its size is said in one line."""
-    enlarged = enlarge_viewer(hwnd, settings)
-    if enlarged is not None and not enlarged.changed:
-        print("the viewer's window keeps its size: it is read as it is")
-        return None
-    return enlarged
-
-
 def cmd_read(args: argparse.Namespace, settings: Settings) -> int:
-    from .capture import capture_window, enable_dpi_awareness, restore_window
+    """One page of the viewer's window read as the window is (never enlarged, no key), translated and shown."""
+    from .capture import capture_window, enable_dpi_awareness
 
     _notice_once(settings)
     enable_dpi_awareness()
     win = _pick_window(args.window)
     book = _book_name(_given_book(args, settings), win.title, settings)
     print(f"capturing {win.label()}  (cache: {book})")
-    enlarged = _enlarged(win.hwnd, settings)
-    try:
-        image = capture_window(win.hwnd)
-    finally:
-        if enlarged is not None:
-            restore_window(enlarged)
+    image = capture_window(win.hwnd)
     pipeline = build_pipeline(settings, args.translator, book)
     result = pipeline.process(image, progress=_progress)
     pipeline.release_translator()
@@ -827,67 +769,6 @@ def cmd_read(args: argparse.Namespace, settings: Settings) -> int:
     show_preview(result.image, f"TASlation - {win.title}")
     return 0
 
-
-def _profiles(settings: Settings):
-    from .pagekeys import Profiles
-
-    return Profiles(Path(settings.state_dir) / "profiles.json")
-
-
-def cmd_keys(args: argparse.Namespace, settings: Settings) -> int:
-    """taslation keys list|show|set|apply: the viewer's page keys, kept in profiles.json (`pagekeys`)."""
-    from .pagekeys import BUILTIN_PRESETS, MEANINGS, PageKeys, own_keys
-
-    profiles = _profiles(settings)
-    if args.action == "list":
-        print("presets:")
-        for name, keys in profiles.presets().items():
-            print(f"  {name}{' (built-in)' if name in BUILTIN_PRESETS else ''}: {keys.describe()}")
-        print(f"defaults (viewers without keys of their own): {profiles.default_keys(settings).describe()}")
-        viewers = [v for v in profiles.viewers() if own_keys(profiles, v)]
-        print("viewers with keys of their own:" + ("" if viewers else " none"))
-        for viewer in viewers:
-            print(f"  {viewer}: {profiles.keys_for(viewer, settings).describe()}")
-        return 0
-    if args.action == "show":
-        if args.viewer:
-            own = profiles.own_keys(args.viewer)
-            print(f"{profiles.key_of(args.viewer)}: {profiles.keys_for(args.viewer, settings).describe()}")
-            mine = ", ".join(f"{m} {v or '(none)'}" for m, v in own.items()) if own else "none (the defaults)"
-            print(f"  its own keys: {mine}")
-        else:
-            print(f"defaults: {profiles.default_keys(settings).describe()}")
-        return 0
-    if not args.viewer and not args.all:
-        raise SystemExit(f"error: keys {args.action} needs --viewer TITLE or --all")
-    if args.action == "set" and args.reset:
-        if not args.viewer:
-            raise SystemExit("error: keys set --reset needs --viewer TITLE")
-        profiles.set_keys(args.viewer, None)
-        keys = profiles.keys_for(args.viewer, settings)
-        print(f"{profiles.key_of(args.viewer)}: the defaults again ({keys.describe()})")
-        return 0
-    if args.action == "apply":
-        presets = profiles.presets()
-        if args.preset not in presets:
-            raise SystemExit(f"error: no preset {args.preset!r}; the presets: {', '.join(presets)}")
-        keys = presets[args.preset]
-    else:
-        given = {m: getattr(args, m) for m in MEANINGS if getattr(args, m) is not None}
-        if not given:
-            raise SystemExit("error: keys set needs at least one of --next, --prev")
-        base = profiles.keys_for(args.viewer, settings) if args.viewer else profiles.default_keys(settings)
-        keys = PageKeys.from_mapping(given, base)
-    problems = keys.problems()
-    if problems:
-        raise SystemExit("error: " + "; ".join(problems))
-    if args.all:
-        count = profiles.apply_to_all(keys)
-        print(f"every viewer ({count} with a profile, and the defaults): {keys.describe()}")
-    else:
-        profiles.set_keys(args.viewer, keys)
-        print(f"{profiles.key_of(args.viewer)}: {keys.describe()}")
-    return 0
 
 
 def cmd_annotations(args: argparse.Namespace, settings: Settings) -> int:
@@ -1460,10 +1341,10 @@ def cmd_gui(args: argparse.Namespace, settings: Settings) -> int:
     if role:
         settings = settings.with_overrides(role=role)
         settings.validate()
+    if getattr(args, "window_options", None):
+        LOG.info("--on-top, --full-screen and --reading were for TASlation's own window, which is gone: ignored")
     return run_app(settings, window_query=args.window, book=_given_book(args, settings),
-                   auto=getattr(args, "auto", True),
-                   on_top=getattr(args, "on_top", False) or bool(settings.always_on_top),
-                   reading=getattr(args, "reading", False))
+                   auto=getattr(args, "auto", True))
 
 
 def _complain(text: str, details: bool = False) -> None:
@@ -1511,7 +1392,6 @@ COMMANDS = {
     "cache": cmd_cache, "review": cmd_review,
     "annotations": cmd_annotations,
     "glossary": cmd_glossary,
-    "keys": cmd_keys,
     "audit": cmd_audit,
 }
 
@@ -1525,8 +1405,7 @@ def main(argv: list[str] | None = None) -> int:
         args.window = None
         args.book = args.series = args.volume = None
         args.auto = True
-        args.on_top = False
-        args.reading = False
+        args.window_options = None
         args.role = None
     try:
         settings = load_settings(args)

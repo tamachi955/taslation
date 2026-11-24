@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from taslation import viewerparts
-from taslation.capture import WindowInfo
+from taslation.capture import WindowInfo, looks_like_viewer
 from taslation.ui import app as app_mod
 from taslation.ui import viewers
 
@@ -180,16 +180,16 @@ NEVER = ("Facebook - Google Chrome", "Book1 - Excel", "Bookmarks - Google Chrome
 
 
 def test_what_looks_like_a_viewer():
-    assert app_mod.looks_like_viewer("Zumo Books") and app_mod.looks_like_viewer("見本の物語 1 - 電子書籍")
+    assert looks_like_viewer("Zumo Books") and looks_like_viewer("見本の物語 1 - 電子書籍")
     for title in (*LEARNED, *NEVER):  # nothing learned: a viewer's own name is a word like any other
-        assert not app_mod.looks_like_viewer(title), title
+        assert not looks_like_viewer(title), title
     _learned()
     for title in (*LEARNED, "Zumo Books"):
-        assert app_mod.looks_like_viewer(title), title
+        assert looks_like_viewer(title), title
     for title in NEVER:
-        assert not app_mod.looks_like_viewer(title), title
-    assert not app_mod.looks_like_viewer(CHAT)
-    assert app_mod.looks_like_viewer(YOMIZUQ) and app_mod.looks_like_viewer(STORE)
+        assert not looks_like_viewer(title), title
+    assert not looks_like_viewer(CHAT)
+    assert looks_like_viewer(YOMIZUQ) and looks_like_viewer(STORE)
 
 
 class Choosing(Window):

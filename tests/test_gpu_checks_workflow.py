@@ -268,7 +268,7 @@ def test_scenario_k_runs_once_in_a_short_form_its_rests_never_held():
 
     groups = _groups()
     with_k = [g for g, s in groups.items() if "k" in s.split(",")]
-    assert len(with_k) == 1 and with_k[0].endswith("-k5-k1-k2"), with_k
+    assert len(with_k) == 1 and with_k[0].split("-")[-3:] == ["k5", "k1", "k2"], with_k
     run = _step("standin", "Run: tools/standin_e2e.py")["run"]
     short = "if (($env:SCENARIOS -split ',') -contains 'k') { $arguments += @('--k-turns', '6', '--k-read', '3') }"
     assert short in run and run.index("$arguments = @(") < run.index(short) < run.index("& $env:PY @arguments")
@@ -323,10 +323,10 @@ def test_the_plan_gives_the_jobs_asked_for(tmp_path):
     assert out["program_key"] == "ollama-program-v0.40.17-windows-amd64"
     assert out["store_key"] == "ollama-store-v0.40.17-" + "t" * 16
     assert (out["models_key"], out["pip_key"]) == ("models-" + "m" * 64, "pip-Windows-py3.13-" + "p" * 64)
-    code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "stand-in", "WANTED_GROUPS": "d-e-r-x",
+    code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "stand-in", "WANTED_GROUPS": "d-e-x-f2",
                                                             "WANTED_TITLES": "3"}, tmp_path)
     assert code == 0, said
-    assert json.loads(out["standin_matrix"]) == [{"group": "d-e-r-x", "scenarios": "d,e,r,x"}]  # (an array of one)
+    assert json.loads(out["standin_matrix"]) == [{"group": "d-e-x-f2", "scenarios": "d,e,x,f2"}]  # (an array of one)
     assert (out["standin"], out["benchmark"], json.loads(out["titles"])) == ("true", "false", [3])
     code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "benchmark", "WANTED_TITLES": "5, 1,1",
                                                             "OLLAMA_VERSION": "latest"}, tmp_path)
@@ -490,7 +490,7 @@ def _report(**run) -> dict:
     base = {"failed": "", "seconds": 300.0, "ready_s": 5.0, "captures": {"sharp": 400, "soft": 30, "black": 4},
             "capture_route": {"route": "Windows.Graphics.Capture", "looks": {"frames": 420, "none": 3},
                               "used": "Windows.Graphics.Capture"},
-            "released": {"c": {"waited_s": 1.0, "timed_out": False}, "a": {"waited_s": 20.0, "timed_out": True}},
+            "released": {"c": {"waited_s": 1.0, "timed_out": False}, "a": {"waited_s": 20.0, "timed_out": False}},
             "segments": segments, "turns": turns, "guard": {"refused": [], "only_the_stand_in_chosen": True},
             "jobs": {"started": 5, "on": {"sharp": 5}, "kept_from_unsettled_frames": [],
                      "on_black_spinner_unknown_shown": 0,
@@ -524,8 +524,7 @@ def test_a_stand_in_run_passes_on_its_criteria_of_correctness_with_its_slowness_
     assert out["meaning"]["a"] == "partly: 1 of 2 rested turns translated at rest"
     assert out["meaning"]["x"].startswith("lost: no request on the soft frame, within --cancel-soft-ms (700 ms)")
     # what depends on the computer's speed: reported, never a failure
-    assert out["speed"] == {"scenarios released before their mode was on (the tool's wait for it)": ["a"],
-                            "rested turns not finished within their rest": 1,
+    assert out["speed"] == {"rested turns not finished within their rest": 1,
                             "rested turns not translated at rest": 1,
                             "spells the window did not follow the stand-in (over 1 s)": 2,
                             "lettering of a page left on show over 1 s, until the window captured the new one": 1,
@@ -580,9 +579,10 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
         out = s.standin(_report(**run), "", {}, "c", 600)
         assert out["verdict"] == "fail" and criterion in _failed(out), (criterion, _failed(out))
     assert s.standin(_report(captures={"black": 9}), "", {}, "c")["run"] == "no frames"
-    # the window not at rest within --timeout is a hang; released early (a mode not on in time) is speed
+    # the window not at rest within --timeout is a hang (no scenario is released early since 2.0.0: no mode to wait for)
     hung = s.standin(_report(released={"a": {"waited_s": 600.2, "timed_out": True}}), "", {}, "c", 600)
     assert hung["verdict"] == "fail" and any(c.startswith("the window came to rest") for c in _failed(hung))
+    assert not any("mode" in key for key in hung["speed"])
     report = _report()
     report["server_started"] = None  # (no server of its own: the canned translator, or one already running)
     assert s.standin(report, "", {}, "c", 600)["verdict"] == "pass"
@@ -667,22 +667,22 @@ def test_the_backlog_s_work_computed_low_is_reported_and_any_other_request_compu
 
 def test_a_job_that_gave_its_page_over_to_a_new_size_is_no_cancel_with_its_page_on_show():
     s = _summarise()
-    # scenario o on a runner, as a tool before `resized_away` reported it: the job on the old size's frame cancelled
-    # 2.3 s after the stand-in's size changed, 1.3 s after the window's first capture of the new size
-    cancel = {"id": 9, "t_s": 79.33, "segment": "o", "frame": "sharp", "gate_end": "confirmed", "page_on_show": True,
+    # a change of the stand-in's size on a runner, as a tool before `resized_away` reported it: the job on the old
+    # size's frame cancelled 2.3 s after the size changed, 1.3 s after the window's first capture of the new size
+    cancel = {"id": 9, "t_s": 79.33, "segment": "f2", "frame": "sharp", "gate_end": "confirmed", "page_on_show": True,
               "resize_within_1s": False}
     run = {"cancels": {"page_still_on_show": [cancel], "list": [cancel]},
            "job_list": [{"id": 9, "t_s": 70.91, "size": [1904, 1072]}, {"id": 10, "t_s": 79.44, "size": [1904, 1024]}],
            "resizes": [{"from_s": 77.06, "size_before": [1904, 1072], "size_after": [1904, 1024],
                         "first_capture_ms": 934}]}
     criterion = "no job cancelled while its page was on show"
-    assert s.standin(_report(**run), "", {}, "o", 600)["verdict"] == "pass"
+    assert s.standin(_report(**run), "", {}, "d-e-x-f2", 600)["verdict"] == "pass"
     for other in ({"resizes": []},  # no change of size
                   {"resizes": [{**run["resizes"][0], "first_capture_ms": 3000}]},  # the new size captured after it
                   {"resizes": [{**run["resizes"][0], "from_s": 60.0}]},  # a change before the job began
                   {"resizes": [{**run["resizes"][0], "size_before": [1904, 1024]}]},  # not from the job's size
                   {"cancels": {"page_still_on_show": [{**cancel, "resized_away": False}]}}):  # the tool's own word
-        out = s.standin(_report(**{**run, **other}), "", {}, "o", 600)
+        out = s.standin(_report(**{**run, **other}), "", {}, "d-e-x-f2", 600)
         assert out["verdict"] == "fail" and criterion in _failed(out), other
         assert next(c for c in out["failed"] if c["criterion"] == criterion)["seen"] == [79.33]
 
@@ -727,7 +727,7 @@ def _k_report(**run) -> dict:
 
 def test_scenario_k_is_judged_on_what_the_pages_turned_past_guarantee_and_its_figures_are_reported():
     s = _summarise()
-    out = s.standin(_k_report(), "", {}, "t-t2-k5-k1-k2", 600)
+    out = s.standin(_k_report(), "", {}, "k5-k1-k2", 600)
     assert out["verdict"] == "pass", _failed(out)
     k_criteria = [c for c in s.correctness(_k_report(), 600) if c["scenario"] in ("k5", "k1", "k2")]
     assert len(k_criteria) == 3 * 5 + 2  # (each pace: drawn, last page, told, requests, frames; at the end: two more)

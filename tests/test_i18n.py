@@ -58,7 +58,7 @@ def _keys_used_in_window() -> set[str]:
                 keys.add(ast.literal_eval(toks[i + 2].string))
     from taslation.ui import app
 
-    keys |= set(app.STATUS_WORDS.values()) | {app.READY, app.NO_VIEWER, *app.READING_ONLY}
+    keys |= set(app.STATUS_WORDS.values()) | {app.READY}
     return keys
 
 

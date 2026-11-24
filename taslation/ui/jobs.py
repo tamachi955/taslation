@@ -66,8 +66,7 @@ from ..backlog import (drop_backlog, go_on_after_silence, holds_warming, in_step
                        reading_event, tick as backlog_tick, tracking_for)
 from ..pipeline import keeps_answered, turn_away
 from . import area, name_check, status_slot, updates
-from .constants import (EVENTS_BUSY_MS, EVENTS_IDLE_MS, QUEUE_RANK, READING_NOTE_MS, READY, VIEWER_BLACK,
-                        VIEWER_LOADING)
+from .constants import EVENTS_BUSY_MS, EVENTS_IDLE_MS, QUEUE_RANK, READY, VIEWER_BLACK, VIEWER_LOADING
 from .dialogs import caches as boxes
 from .dialogs.rename_review import RenameReviewDialog
 from .dialogs.review import review_rows
@@ -123,9 +122,6 @@ def recognised_books(request: Recognition) -> tuple[list[str], str]:
     if not names:
         return [], ""
     return names, ("several" if len(names) > 1 else "recognised")
-
-
-WARNING_NOTE_MS = 3 * READING_NOTE_MS  # how long a warning stays on the page over the book (`JobsMixin._warn_unasked`)
 
 
 def keep_page_names(window: Any, result: Any, book: str, model: str, language: str) -> None:
@@ -305,7 +301,6 @@ class JobsMixin:
         by `App.__init__`, and by a test's stand-in)."""
         self._ollama: OllamaStarter | None = None  # starts Ollama when it does not answer (made by `_job_init`)
         self._before_loading: Any = None  # what the page was doing when Ollama's model began to load
-        self._partial_said = False  # the popup about a model partly on the CPU was shown (once a session)
         self._start_load: threading.Thread | None = None  # the model's load at the start (`_load_at_start`)
         self._start_load_cancel = threading.Event()  # ends that load (the window closes)
         self._models_loading = False  # what loads at the start is under way ("Loading the models...": `_watch_loads`)
@@ -624,7 +619,7 @@ class JobsMixin:
 
     def _keep_gpu_short(self) -> None:
         """The "gpu_short_kept" event: Do not ask again on this computer was ticked - ``gpu_short`` "processor" kept
-        in the settings file the window's settings were read from, as Tools > Settings... saves it (the System page's
+        in the settings file the window's settings were read from, as the Settings dialog saves it (the System page's
         box); settings read from no file write the state folder's (`config.settings_file`'s last place)."""
         from .. import config
 
@@ -721,7 +716,7 @@ class JobsMixin:
     def _model_status(self, message: Message, behind: bool = False) -> None:
         """What a load of Ollama's model says (`OllamaTranslator.on_status`, the "model_status" event), on the Tk
         thread: the load shows as the page's stage and hands back to the stage it interrupted; a model partly on the
-        CPU is said in the status line and, once a session, in a popup, since the status line goes on with the page. A
+        CPU is said in the status line (no box comes up over the book: `_warn_unasked`). A
         request without an answer (`OllamaTranslator`'s rule: asked again, the server started again, or the sentence
         that it does not answer) is said in the status line; the page's own line comes back with its next step. What a
         request of the backlog's tells (*behind*: a page turned past, read on behind the reader) is said in the status
@@ -729,9 +724,6 @@ class JobsMixin:
         code = code_of(message)
         if behind:
             self.status(message)
-            if code == "ollama.partly_on_gpu" and not self._partial_said:
-                self._partial_said = True
-                self._warn_unasked(rendered(message))
             return
         if code in NO_ANSWER_CODES:
             if code == "ollama.not_answering":
@@ -743,9 +735,6 @@ class JobsMixin:
             self._handle_event("progress", {"text": message})
         elif code == "ollama.partly_on_gpu":
             self.status(message)
-            if not self._partial_said:
-                self._partial_said = True
-                self._warn_unasked(rendered(message))
         else:
             earlier, self._before_loading = self._before_loading, None
             if earlier:
@@ -1027,16 +1016,10 @@ class JobsMixin:
 
     def _warn_unasked(self, text: str, said: bool = False) -> None:
         """A warning nobody asked for (the worker's: a page that failed, a model partly on the CPU, Ollama not
-        started). While the reader reads - the full screen, or the window over the full-screen viewer - no box comes up
-        over the book to take its keys: the status line says it (*said*: it says it already) and, over the book, the
-        page shows it for a while. Otherwise TASlation's own box, which the window does not wait for."""
-        if self.reading or getattr(self, "_over_on", False):
-            if not said:
-                self.status(text)
-            if not self.reading:  # (the full screen shows the status line on the page by itself)
-                self.canvas.set_note(text, WARNING_NOTE_MS)
-            return
-        boxes.tell(self, text, wait=False)
+        started). The reader reads in the viewer: no box comes up over the book to take its keys; the status line
+        says it (*said*: it says it already), which the right side pane shows (`seethrough.right_rows`)."""
+        if not said:
+            self.status(text)
 
     def _flush_fill(self) -> None:
         """Page events came in since the last look at the queue: the page is drawn again, once for all of them."""
@@ -1125,8 +1108,8 @@ class JobsMixin:
             self.ready = True
             if self._area_hint_due():  # the chosen viewer's frames showed no page panel: Set area... is the way
                 self._area_hinted = True
-                self.status(lambda: _("Ready. Turn the pages here with the page keys, or click the page. F5: translate this page now · F11: full screen.")
-                            + "\n" + _("No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."))
+                self.status(lambda: _(READY) + "\n"
+                            + _("No area is set for this viewer: Set area... (Page menu) lets you drag a rectangle around the page."))
             else:
                 self.say(READY)
             self._load_ocr_if_due()
@@ -1228,7 +1211,7 @@ class JobsMixin:
             if self._fill is not None:  # the job ended without its page (it failed): the viewer's picture again
                 self._fill = None
                 self._redisplay()
-            if self._colophon_found is not None:  # one that waited for the full screen to end
+            if self._colophon_found is not None:  # one that waited for the job to end
                 self._offer_colophon()
             offer_standard_name(self)  # a book kept under an older spelling of its name (`book_fields`)
             self._run_queued()
@@ -1592,14 +1575,14 @@ class JobsMixin:
         annotations, series sheet and notes to the new name (`_plan_rename`: where the new name's series has a sheet
         that says otherwise, after the review; `_rename_book`). Keep leaves the name. The colophon's
         details go into the header of the cache of the name the book ends up with (`_keep_details`, or the rename
-        itself), which keeps the offer from being made again in a later session. It waits while the full screen or a
-        dialog of the start is on."""
+        itself), which keeps the offer from being made again in a later session. It waits while a dialog of the start
+        is on."""
         from .banner import break_lines
         from .dialogs.start import WRAP
         from .layout import place_window
 
         found = self._colophon_found
-        if found is None or self.reading or self._start_dialog is not None:
+        if found is None or self._start_dialog is not None:
             return
         self._colophon_found = None
         book, model, language, col = found
@@ -1843,13 +1826,8 @@ class JobsMixin:
         self._set_stop(bool(cancel is not None and not cancel.is_set()))
 
     def _on_escape(self) -> None:
-        """Esc, one thing at a time: a bubble's pinned panel closed, a drag taken back, the reading order cancelled,
-        the selected region let go, then the full screen left; in the window, Stop. In the Reader role the full
-        screen has none of the Translator's, so Esc leaves it at once; in the Translator role a region selected on a
-        page that is not on show any more (the viewer turned it) holds nothing back."""
-        if getattr(self, "_zoom_pinned", False):  # a bubble's Japanese pinned beside it (`bubble_text`): closed first
-            self._zoom_hide()
-            return
+        """Esc, one thing at a time: a drag taken back, the reading order cancelled, the selected region let go; then
+        Stop."""
         if self._cancel_drag():  # a region being dragged, turned or drawn: back as it was
             return
         if self._ordering is not None:
@@ -1857,11 +1835,8 @@ class JobsMixin:
             self.say("Reading order cancelled.")
             self._redisplay()
             return
-        if self._chosen_region is not None and (not self.reading or self._editing()):
+        if self._chosen_region is not None:
             self._choose(None)
-            return
-        if self.reading:
-            self.leave_reading()
             return
         self.stop_page()
 
@@ -1879,9 +1854,9 @@ class JobsMixin:
     def translate_now(self) -> None:
         """Translate (F5): the page in the viewer read and translated now (from the cache when it is there),
         whether or not Auto has taken it. While the models load or a job runs it waits, and runs after. A viewer
-        not read yet has its window enlarged first (`_enlarge_first`). A Book box that names no book gets its name
-        first (`_ask_name`; not over the full screen, where the page is translated and nothing of it kept). The pages
-        turned past that wait for a translator that did not answer go on too (`backlog.go_on_after_silence`)."""
+        not read yet is looked at first (`_enlarge_first`). A Book box that names no book gets its name first
+        (`_ask_name`). The pages turned past that wait for a translator that did not answer go on too
+        (`backlog.go_on_after_silence`)."""
         go_on_after_silence(self)
         if not self.ready or self.busy:
             self._queue("translate")
@@ -1892,15 +1867,14 @@ class JobsMixin:
         if not self._book_in_front():
             self._say_waiting()  # the live view's line: bring the tab back, or give it a window of its own
             return
-        if not self._enlarge_first(self.translate_now):
-            return
+        self._enlarge_first()
         try:
             image = self._capture(win.hwnd)
         except CaptureError as e:
             self._capture_failed(e)
             return
         thumb = thumbnail(image)
-        if not self.reading and generic_book_name(self.book_var.get()):  # `_name_needed`: the name first
+        if generic_book_name(self.book_var.get()):  # `_name_needed`: the name first
             self._show_live(image, thumb)
             self._ask_name(lambda _name: self.translate_now(), image)
             return
@@ -2033,7 +2007,7 @@ class JobsMixin:
 
     # ------------------------------------------------------------------ the names
     def review_names(self) -> None:
-        """The band's Review names... and Tools > Names rendered in more than one way...: the names the pages read
+        """The band's Review names... and the Menu's Names rendered in more than one way...: the names the pages read
         of the book in the boxes rendered in more than one way, to make one (`name_check`)."""
         name_check.review_names(self)
 

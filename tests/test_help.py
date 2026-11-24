@@ -1,9 +1,9 @@
-"""How to use TASlation, in the window: the help window, the first start's popup, the tooltips and the "?" buttons.
-Everything here stays on the shared hidden root: nothing is ever mapped."""
+"""How to use TASlation: the help window (Menu > Help > How to use...), its topics in every language, the tooltips
+and the "?" buttons. Everything here stays on the shared hidden root: nothing is ever mapped."""
 from __future__ import annotations
 
 import hashlib
-import json
+import re
 import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
@@ -19,20 +19,15 @@ from taslation.i18n import CATALOGS, FEATURE_LANGUAGES, UI_LANGUAGES, _, set_lan
 from taslation.locales.features import help_guide, help_tips
 from taslation.ui import app as app_mod
 from taslation.ui import tooltip
-from taslation.ui.dialogs import help as help_mod
 from taslation.ui.dialogs.area import AreaDialog
 from taslation.ui.dialogs.book_settings import BookSettingsDialog
 from taslation.ui.dialogs.caches import CachesDialog
 from taslation.ui.dialogs.glossary import GlossaryDialog
 from taslation.ui.dialogs.help import (
-    FIRST_LINES,
-    FIRST_STEPS_FLAG,
     TOPICS,
     ExplainBox,
-    FirstSteps,
     HelpWindow,
     explain_button,
-    first_steps_due,
     modal_up,
 )
 from taslation.ui.dialogs.notice import NoticeDialog
@@ -93,18 +88,16 @@ def _widgets(top):
 
 # ------------------------------------------------------------------ the texts
 def _guide_keys() -> list[str]:
-    return [key for heading, paragraphs in TOPICS for key in (heading, *paragraphs)] + list(FIRST_LINES)
+    return [key for heading, paragraphs in TOPICS for key in (heading, *paragraphs)]
 
 
-def test_seven_topics_of_about_forty_lines_each_in_every_language():
-    assert [heading for heading, _p in TOPICS] == ["Getting started", "Full screen", "Page keys", "The Translator role",
-                                                   "Keys", "When something goes wrong", "Your data"]
-    # (+2: over a full-screen viewer; +1: a page gone by; +1: the viewer's own full screen is the person's to switch;
-    # +1: Tab, Alt with the arrows and Help > Keys...; +1: the full screen in each role)
-    assert 36 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 54
-    for key in _guide_keys() + ["How to use...", "How to use TASlation"]:
-        for code in FEATURE_LANGUAGES:
-            assert CATALOGS[code].get(key, "").strip(), (code, key)
+def test_five_topics_of_some_thirty_lines_in_every_language():
+    assert [heading for heading, _p in TOPICS] == ["Getting started", "The side panes", "Edit",
+                                                   "When something goes wrong", "Your data"]
+    assert 30 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 54
+    missing = [(code, key[:40]) for key in _guide_keys() + ["How to use...", "How to use TASlation"]
+               for code in FEATURE_LANGUAGES if not CATALOGS[code].get(key, "").strip()]
+    assert missing == []
 
 
 def test_every_new_string_has_all_sixteen_languages():
@@ -121,61 +114,82 @@ def test_the_guide_names_no_store_or_viewer_and_no_technical_term():
         assert not _names_a_store(key) and not any(word in low for word in BROWSERS), key
         assert not any(word in low for word in TECHNICAL), key
         for code in FEATURE_LANGUAGES:
-            text = CATALOGS[code][key]
+            text = CATALOGS[code].get(key, "")  # (a missing one: test_five_topics_of_some_thirty_lines_...)
             assert not _names_a_store(text), (code, key)
             assert "chrome" not in text.lower(), (code, key)  # ("edge": a word in some languages)
 
 
-def test_the_guide_says_nothing_of_going_back_to_page_one():
+def test_the_guide_says_nothing_of_going_back_to_page_one_nor_of_a_key_of_the_old_window():
     text = " ".join(_guide_keys()).lower()
-    assert "seek bar" in text and "page 1" not in text and "first page key" not in text
+    assert "page 1" not in text and "first page key" not in text
+    assert not re.search(r"\bf\d{1,2}\b", text)  # (the panes and the Menu: no function key to press)
+    for gone in ("full screen", "reader role", "page keys", "toolbar", "over the book"):
+        assert gone not in text, gone
+
+
+def _guide(start: str) -> str:
+    """The key of the topic paragraph that starts with *start*."""
+    found = [key for key in _guide_keys() if key.startswith(start)]
+    assert len(found) == 1, start
+    return found[0]
+
+
+NAMED = (  # (the start of a topic paragraph, the window's words it names)
+    ("TASlation finds the viewer", ("Menu", "Viewer...")),
+    ("Translate translates the page", ("Translate", "Lettering")),
+    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Edit", "Set area...",
+                           "Settings...", "Menu", "Quit")),
+    ("Right of the page,", ("Indicators", "Copy the Japanese", "Copy the translation", "Ask again")),
+    ("Rest the pointer", ("Copy the Japanese", "Copy the translation")),
+    ("The panes lie", ("Menu",)),
+    ("Edit in the left pane", ("Edit",)),
+    ("The numbers' colours", ("Review...",)),
+    ("While Edit is on,", ("Edit", "Menu", "Undo", "Redo", "Reading order", "Add a text area", "Skip page",
+                           "Review...", "My corrections...", "Lines to review...", "Find and replace...",
+                           "Series sheet...", "Book settings...")),
+    ("A bubble stays untranslated", ("Translate", "Edit", "Add a text area", "Menu")),
+    ("TASlation finds no page", ("Set area...",)),
+    ("Nothing happens", ("Indicators", "Menu", "Viewer...", "Auto")),
+    ("A name comes out wrong", ("Edit", "Find and replace...", "Menu")),
+    ("While you read,", ("Menu", "Help", "Check for updates...")),
+    ("Menu > Saved translations...", ("Menu", "Saved translations...", "Help", "About TASlation")),
+    ("To keep a spare", ("Menu", "Saved translations...")),
+)
+
+
+def test_the_guide_names_the_controls_by_the_panes_and_the_menus_own_words():
+    from taslation.ui import see_edit, seethrough
+
+    assert see_edit.EDIT == "Edit" and see_edit.ADD_ENTRY == "Add a text area"
+    assert (seethrough.COPY_JAPANESE, seethrough.COPY_TRANSLATION) == ("Copy the Japanese", "Copy the translation")
+    for start, words in NAMED:
+        key = _guide(start)
+        assert all(word in key for word in words), (start, [w for w in words if w not in key])
 
 
 @pytest.mark.parametrize("code", sorted(FEATURE_LANGUAGES))
 def test_the_guide_calls_the_controls_what_the_window_calls_them(code):
     """The menus and buttons named in the topics are the window's own words in that language."""
     catalog = CATALOGS[code]
-    named = {
-        "Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.":
-            (catalog["Page"], catalog["Page keys..."]),
-        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings, an error log with no text of a book and the time of the last look for a new version, with the newest version found, are kept too, in the folder named in Help > About TASlation.":
-            (catalog["Tools"], catalog["Saved translations..."], catalog["Help"], catalog["About TASlation"]),
-        "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only when you install or update TASlation, when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed, and, only if you turn it on or choose Help > Check for updates..., to look for a new version: then check_update.py, a program of its own, asks GitHub for one small file.":
-            (catalog["Help"], catalog["Check for updates..."]),
-        "Green: translated. Orange: not translated, its label says why. Blue: your own rectangle. Red ?: worth a look (Review...).":
-            (catalog["Review..."],),
-        "Press F11, or the Full screen button, to see the page alone on the full screen, in the role you chose.":
-            (catalog["Full screen"],),
-        "In the Reader role the page keys and clicks on the page go to the viewer, and Auto is on until you leave, so each page you turn is translated.":
-            (catalog["Reader"],),
-        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, leave the full screen first.":
-            (catalog["Translator"],),
-        "A bubble stays untranslated: press F5. If it is still empty, choose the Translator role and drag from outside the text to draw a rectangle round it; if an orange box is already there, drag or resize that box instead.":
-            (catalog["Translator"],),
-        "A name comes out wrong all through the book: in the Translator role, Find and replace... changes it on every page at once.":
-            (catalog["Translator"], catalog["Find and replace..."]),
-    }
-    for key, words in named.items():
+    for start, words in NAMED:
+        key = _guide(start)
+        text = catalog.get(key, "")
+        assert text, (code, key[:40])  # (translated: test_five_topics_of_some_thirty_lines_...)
         for word in words:
-            assert word.lower() in catalog[key].lower(), (code, key, word)
+            assert catalog[word].lower() in text.lower(), (code, start, word)
 
 
 # ------------------------------------------------------------------ the help window
 class Window(tk.Toplevel):
-    """The App's help and first start on a withdrawn window of the hidden root."""
+    """The App's help on a withdrawn window of the hidden root."""
 
     open_help = app_mod.App.open_help
-    _offer_first_steps = app_mod.App._offer_first_steps
-    _first_steps_closed = app_mod.App._first_steps_closed
-    _first_steps_wait = app_mod.App._first_steps_wait
-    _build_menus = app_mod.App._build_menus
 
     def __init__(self, root, state_dir):
         super().__init__(root)
         self.withdraw()
         self.settings = Settings(state_dir=state_dir)
-        self.reading = False
-        self._help = self._first_steps = None
+        self._help = None
         self.later: list = []
 
     def after(self, ms, func=None, *args):  # kept, run by the test
@@ -250,159 +264,35 @@ def test_the_help_keeps_its_place_when_wrapped_anew(tmp_path, hidden_root):
     w.destroy()
 
 
-def test_help_is_the_first_entry_of_the_help_menu(tmp_path, hidden_root):
-    w = Window(hidden_root, tmp_path)
+def test_help_is_the_first_entry_of_the_menus_help(tmp_path, hidden_root):
+    from taslation.ui import see_menu
+
     called = []
-
-    class Menus(Window):
-        def __getattr__(self, name):  # the menus' other commands
-            if name.startswith(("open_", "toggle_", "show_", "_on_", "retranslate", "translate", "set_", "undo", "redo",
-                                "_redisplay", "_apply", "review_")):
-                return lambda *a: called.append(name)
-            raise AttributeError(name)
-
-    m = Menus(hidden_root, tmp_path)
-    m.open_help = lambda: called.append("open_help")
-    for name in ("auto_var", "original_var", "top_var", "over_var", "order_numbers_var"):
-        setattr(m, name, tk.BooleanVar(m))
-    m.role_var, m.ui_lang_var = tk.StringVar(m), tk.StringVar(m)
-    m._build_menus()
-    menus = {str(m.menubar.entrycget(i, "label")): m.menubar.nametowidget(m.menubar.entrycget(i, "menu"))
-             for i in range(int(m.menubar.index("end")) + 1) if m.menubar.type(i) == "cascade"}
-    menu = menus["Help"]
-    assert str(menu.entrycget(0, "label")) == "How to use..."
-    menu.invoke(0)
+    app = SimpleNamespace(ui_lang_var=tk.StringVar(hidden_root, value="en"), _see_hidden=True, _see_through=None,
+                          auto_var=tk.BooleanVar(hidden_root, value=True))
+    for name in ("open_caches", "review_names", "open_help", "open_notice", "open_updates", "open_about",
+                 "open_settings", "_on_ui_language", "_on_close", "translate_now", "set_area"):
+        setattr(app, name, lambda _n=name: called.append(_n))
+    menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
+    see_menu.build(app, menu, language, help_menu)
+    assert str(help_menu.entrycget(0, "label")) == "How to use..."
+    help_menu.invoke(0)
     assert called == ["open_help"]
-    m.destroy()
-    w.destroy()
+    for each in (menu, language, help_menu):
+        each.destroy()
 
 
-# ------------------------------------------------------------------ the first start's popup
-def test_the_first_start_shows_the_popup_once_and_never_again(tmp_path, hidden_root):
-    w = Window(hidden_root, tmp_path)
-    assert first_steps_due(tmp_path)
-    w._offer_first_steps()
-    popup = w._first_steps
-    assert isinstance(popup, FirstSteps) and popup.state() == "withdrawn"
-    assert tk.Toplevel.grab_current(popup) is None  # it holds nothing up
-    assert not [c for c in _widgets(popup) if c.winfo_class() == "TCheckbutton"]  # closing it is the end of it
-    w._offer_first_steps()  # while it is open: not a second one
-    assert w._first_steps is popup and sum(isinstance(c, FirstSteps) for c in w.winfo_children()) == 1
-    popup.close_btn.invoke()
-    assert w._first_steps is None and not popup.winfo_exists()
-    assert json.loads((tmp_path / "ui.json").read_text(encoding="utf-8")) == {FIRST_STEPS_FLAG: True}
-    assert not first_steps_due(tmp_path)
-    w._offer_first_steps()
-    assert w._first_steps is None and not w.later  # never again, and nothing waits
-    other = Window(hidden_root, tmp_path)  # the next start
-    other._offer_first_steps()
-    assert other._first_steps is None
-    other.destroy()
-    w.destroy()
-
-
-def test_the_popup_keeps_the_other_choices(tmp_path, hidden_root):
-    i18n.save_ui_language(tmp_path, "ja")
-    w = Window(hidden_root, tmp_path)
-    w._offer_first_steps()
-    w._first_steps.close()
-    assert not first_steps_due(tmp_path)
-    assert json.loads((tmp_path / "ui.json").read_text(encoding="utf-8")) == {"language": "ja", FIRST_STEPS_FLAG: True}
-    w.destroy()
-
-
-def test_escape_and_the_close_box_answer_as_close_does(tmp_path, hidden_root):
-    w = Window(hidden_root, tmp_path)
-    w._offer_first_steps()
-    popup = w._first_steps
-    assert popup.bind("<Escape>") and popup.protocol("WM_DELETE_WINDOW")
-    popup.close()
-    assert not first_steps_due(tmp_path)
-    w.destroy()
-
-
-def test_its_button_opens_the_help_and_closes_it(tmp_path, hidden_root):
-    w = Window(hidden_root, tmp_path)
-    w._offer_first_steps()
-    popup = w._first_steps
-    assert [str(b.cget("text")) for b in (popup.help_btn, popup.close_btn)] == ["How to use...", "Close"]
-    popup.help_btn.invoke()
-    assert isinstance(w._help, HelpWindow) and w._first_steps is None and not popup.winfo_exists()
-    assert not first_steps_due(tmp_path)
-    w.destroy()
-
-
-def test_a_broken_ui_file_does_not_stop_it(tmp_path, hidden_root):
-    (tmp_path / "ui.json").write_text("[1, 2]", encoding="utf-8")
-    assert first_steps_due(tmp_path)
-    (tmp_path / "ui.json").write_text(json.dumps({FIRST_STEPS_FLAG: "yes"}), encoding="utf-8")
-    assert first_steps_due(tmp_path)  # only true counts
-
-
-def test_the_popup_waits_for_the_legal_notice(tmp_path, hidden_root, monkeypatch):
+def test_a_legal_notice_or_a_grab_holds_the_window(tmp_path, hidden_root, monkeypatch):
     from taslation import notice
 
     monkeypatch.setattr(notice, "default_country", lambda: None)
     w = Window(hidden_root, tmp_path)
+    assert not modal_up(w)
     up = NoticeDialog(w, tmp_path, "en", startup=False)
     up.withdraw()
     assert modal_up(w)
-    w._offer_first_steps()
-    assert w._first_steps is None and [ms for ms, _f in w.later] == [app_mod.FIRST_STEPS_RETRY_MS]  # looked for later
     up.destroy()
     assert not modal_up(w)
-    w.later.pop()[1]()  # the retry: the notice is gone
-    assert isinstance(w._first_steps, FirstSteps) and not w.later
-    w.destroy()
-
-
-def test_the_popup_waits_for_a_books_start_and_gives_way_to_a_dialog_that_holds_the_window(tmp_path, hidden_root,
-                                                                                            monkeypatch):
-    """One window at a time: the start dialog (the book's name) comes first and the popup after it, for
-    the popup's last step is what follows the answer; a dialog that comes while the popup is up puts it away,
-    unclosed, until the dialog is answered."""
-    w = Window(hidden_root, tmp_path)
-    w._start_pending = ("page", None)  # Auto found the book's first page: the setup is checked, then it asks
-    w._offer_first_steps()
-    assert w._first_steps is None and len(w.later) == 1
-    w._start_pending, w._start_dialog = None, object()  # the start dialog on the screen
-    w.later.pop()[1]()
-    assert w._first_steps is None and len(w.later) == 1
-    w._start_dialog = None  # answered
-    w.later.pop()[1]()
-    popup = w._first_steps
-    assert isinstance(popup, FirstSteps)
-    held = [True]
-    monkeypatch.setattr(app_mod, "modal_up", lambda window: held[0])
-    dialog = tk.Toplevel(w)
-    w._first_steps_wait(SimpleNamespace(widget=popup))  # the popup's own showing changes nothing
-    assert w._first_steps is popup
-    w._first_steps_wait(SimpleNamespace(widget=dialog))  # a dialog that holds the window: the popup goes for now
-    assert w._first_steps is None and not popup.winfo_exists() and first_steps_due(tmp_path)
-    w.later.pop()[1]()  # looked for again: the dialog still holds the window
-    assert w._first_steps is None and len(w.later) == 1
-    held[0] = False
-    dialog.destroy()
-    w.later.pop()[1]()
-    assert isinstance(w._first_steps, FirstSteps)
-    w._first_steps_wait(SimpleNamespace(widget=tk.Toplevel(w)))  # a dialog that holds nothing (the help): it stays
-    assert isinstance(w._first_steps, FirstSteps)
-    w.destroy()
-
-
-def test_the_popup_waits_for_any_grab_and_for_reading_mode(tmp_path, hidden_root, monkeypatch):
-    w = Window(hidden_root, tmp_path)
-    monkeypatch.setattr(help_mod, "modal_up", lambda window: True)
-    monkeypatch.setattr(app_mod, "modal_up", lambda window: True)
-    w._offer_first_steps()
-    assert w._first_steps is None and len(w.later) == 1
-    monkeypatch.setattr(app_mod, "modal_up", lambda window: False)
-    w.reading = True
-    w.later.pop()[1]()
-    assert w._first_steps is None and len(w.later) == 1
-    w.reading = False
-    w.later.pop()[1]()
-    assert w._first_steps is not None
     w.destroy()
 
 
@@ -412,21 +302,20 @@ def test_modal_up_asks_tk_for_the_grab(hidden_root):
     assert modal_up(fake)
 
 
-def test_the_start_comes_before_the_popup_only_after_the_notice():
+def test_nothing_starts_before_the_legal_notice_is_answered():
     import inspect
 
     source = inspect.getsource(app_mod.App.__init__)
-    assert source.index("notice_due(state_dir)") < source.index("self.after(FIRST_STEPS_MS, self._offer_first_steps)")
-    assert "quit_before_start = True\n                return" in source  # Quit: no popup is ever scheduled
+    assert source.index("notice_due(state_dir)") < source.index("seethrough.start(self)")
+    assert "quit_before_start = True\n                return" in source  # Quit: nothing is started
 
 
 # ------------------------------------------------------------------ a language switch
-def test_a_language_switch_brings_the_help_and_the_popup_back_in_the_new_language():
+def test_a_language_switch_brings_the_help_back_in_the_new_language():
     import inspect
 
     source = inspect.getsource(app_mod.App._rebuild_ui)
     assert source.index("help_place =") < source.index("child.destroy()") < source.index("self.open_help()")
-    assert source.index("child.destroy()") < source.index("self._offer_first_steps()")
 
 
 # ------------------------------------------------------------------ tooltips
@@ -747,7 +636,7 @@ def test_the_moved_strings_keep_every_translation():
 
 def test_the_architecture_document_names_the_new_modules():
     text = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
-    assert "taslation/ui/tooltip.py" in text and "taslation/ui/dialogs/help.py" in text and "first_steps_done" in text
+    assert "taslation/ui/tooltip.py" in text and "taslation/ui/dialogs/help.py" in text
 
 
 def test_the_window_can_be_told_where_its_flag_lives(tmp_path):

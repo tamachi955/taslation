@@ -1,12 +1,12 @@
-"""The Settings dialog (Tools > Settings...): the settings a reader changes most, written into taslation.toml with the
+"""The Settings dialog (Settings... in the left pane): the settings a reader changes most, written into taslation.toml with the
 file's notes and other lines kept (`config.write_settings`) and applied at once (`on_saved`, `App._settings_saved`);
 an "Open settings file" button for all the others, which makes the file first where there is none (`config.
 create_settings_file`, at the place the settings are read from: `config.settings_file`).
 
 What it holds (`KEYS`): the lettering's smallest and largest size and the size under which a translation is listed
 for review, the lettering size (`text_scale`, `TEXT_SCALES`, 80-200 %; a book may have its own: `book_settings`), capitals,
-slanted lettering; the window's text size (`ui_scale`, `ui.scaling`), its colours (`theme`, `ui.theme`: as Windows
-is set, light or dark, said to wait while Windows' high contrast is on), always on top; the two optional page models
+slanted lettering; the dialogs' text size (`ui_scale`, `ui.scaling`) and colours (`theme`,
+`ui.theme`: as Windows is set, light or dark, said to wait while Windows' high contrast is on); the two optional page models
 (`detect_model`, `art_erase`), said for what they are: their licences as tagged, and that neither says where its
 training images come from. The inpainting has three choices (`ERASE_CHOICES`: not used, only with a
 GPU, always): "Only with a GPU" is the default, and where the rule (`artwork.runs_here`) finds no GPU on this computer
@@ -14,8 +14,7 @@ the row says it is not used here (`NO_GPU_TEXT`). The layout model has three too
 with the inpainting, always): "Only with the inpainting" is the default, so it goes where the inpainting goes. Save
 writes only what was changed, so a choice never made is never written and a later default applies to it.
 
-Three pages (a notebook): General, those settings; Shortcuts, the window's keys (`shortcuts_page.ShortcutsPage`
-over `shortcuts.Keymap`, saved into the state folder with the same Save and applied at once by *on_keys*); System,
+Two pages (a notebook): General, those settings; System,
 what each stage of a page runs on and the seconds a page there (`system_page.SystemPage`, looked at when first
 shown), how many of the translation model's layers Ollama puts on the GPU (``ollama_num_gpu``), whether the window
 loads that model at its start (``load_model_at_start``), where the OCR readers run (``ocr_runs_on``), what a start
@@ -26,15 +25,8 @@ screen leaves room for (`ScrolledPage`), so that Save and Close stay on the scre
 
 Another part's setting is one line in `EXTRA_ROWS` (a `SettingRow`: a checkbox, or a list of choices), shown where
 `Settings` has the key, written and applied like the others. A whole number is one line in `NUMBER_ROWS` (a
-`NumberRow`: a box with arrows, checked on Save): the panel's text size and the delay under the pointer
-(``panel_font_size``, ``hover_delay_ms``), under the hover rows of the window section.
-
-In see-through mode (TASlation's own window not on the screen, `ui.seethrough.hidden`) the rows that act only on the
-window's page and canvas are left out (``mode="window"``, `in_mode`: what the page and a bubble under the pointer show,
-the enlarged bubble, the panel's text size and delay, the pages turned past beside the page, Always on top), and the
-Shortcuts page with them (the window's keys: every key is the viewer's there); the mode's own two rows are shown
-(``mode="see"``: see-through mode itself, from the next start, and the indicators at the right). A row left out keeps
-its value.
+`NumberRow`: a box with arrows, checked on Save): the delay under the pointer (``hover_delay_ms``), under the
+indicators' row.
 
 `warn_ignored`: the keys of the file this version does not know, named once in a box of the window's own (the names
 only; the same names are not named again: ``ui.json``).
@@ -56,7 +48,6 @@ from ...config import (
     HOVER_DELAY_RANGE,
     LAMA_MODEL,
     LAYOUT_MODEL,
-    PANEL_FONT_RANGE,
     ConfigError,
     Settings,
     create_settings_file,
@@ -68,11 +59,8 @@ from ...render import artwork
 from .. import theme
 from ..layout import dialog_area, frame_extents, place_window, work_area
 from ..scaling import UI_SCALES, clamp_scale
-from ..shortcuts import Keymap
-from ..shortcuts import current as keys_in_force
 from ..tooltip import tip
 from .caches import box_chars, in_lines
-from .shortcuts_page import ShortcutsPage
 from .system_page import SystemPage
 
 
@@ -82,9 +70,7 @@ class SettingRow:
     """One more setting in the dialog (`EXTRA_ROWS`): the `Settings` field *key*; *label* and *tip* in English, keys
     of the window's catalogs (the 16 languages in a ``locales/features`` module, as every string of the window); in
     the *section* "lettering" or "window", under the rows there; a checkbox, or with *choices* ((value, label), ...)
-    a list to choose from; *page*: a change letters the page on show again (`PAGE_SETTINGS`); *mode*: shown with
-    TASlation's own window only ("window": what acts on its page and canvas), in see-through mode only ("see"), or in
-    both ("")."""
+    a list to choose from; *page*: a change letters the page on show again (`PAGE_SETTINGS`)."""
 
     key: str
     label: str
@@ -92,7 +78,6 @@ class SettingRow:
     section: str = "window"
     choices: tuple[tuple[str, str], ...] = ()
     page: bool = False
-    mode: str = ""
 
 
 # ---------------------------------------------------------------- other parts' settings: one line each
@@ -105,30 +90,12 @@ SEE_INDICATORS_TIP = ("The pane at the right of the viewer's page: the bubble la
                       "page on show is, the pages turned past. Off: none of these. Also the Indicators switch in the "
                       "controls at the left.")
 EXTRA_ROWS: tuple[SettingRow, ...] = (
-    SettingRow("hover_shows", "On the page:",
-               "In the Reader role: the page translated, a bubble under the pointer showing its original; or the page as the viewer shows it, a bubble under the pointer showing its translation. Also in the View menu.",
-               choices=(("original", "The translation (the original under the pointer)"),
-                        ("translation", "The original (the translation under the pointer)")), mode="window"),
-    SettingRow("hover_reveal", "Under the pointer:",
-               "How a bubble under the pointer shows the other side: in a panel beside it, both in sight at once; or in the bubble itself, with the original lettering, or what was read as text, erased and set. Also in the View menu.",
-               choices=(("panel", "A panel beside the bubble"), ("in_place", "The bubble itself")), mode="window"),
-    SettingRow("bubble_zoom", "Enlarge the bubble under the pointer",
-               "With the translation on the page (always so in the Translator role), a translated bubble the pointer rests on shows its original: enlarged beside it, or in its place (Under the pointer).",
-               mode="window"),
-    SettingRow("side_indicator", "Pages turned past:",
-               "Beside the page, on the side it turns to: the pages you turned past and how far TASlation is with each. A column of small thumbnails where the margin has room for it, and a narrow bar elsewhere; the narrow bar only; or nothing. A page whose words changed since you saw it gets a diamond, and when you turn back to it, its changed bubbles get corner brackets for a moment.",
-               choices=(("column", "Thumbnails where there is room"), ("rail", "A narrow bar"), ("off", "Not shown")),
-               mode="window"),
     SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
                "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
     SettingRow("size_emphasis", "Set larger what the original sets larger",
                "Where the original letters part of a bubble larger than the rest, that part is looked for in the translation (one or two short requests beside the page's; the words never change) and lettered larger too, where the bubble holds both sizes. Off: every translation at one size.",
                section="lettering", page=True),
-    SettingRow("see_through", "See-through mode (from the next start)",
-               "The translation laid over the viewer's own window, with TASlation's controls at its left and the indicators at its right; TASlation's own window is not shown. Off: TASlation's own window, as before. Takes effect at the next start.",
-               mode="see"),
-    SettingRow("see_through_indicators", "Indicators at the right of the viewer",
-               SEE_INDICATORS_TIP, mode="see"),
+    SettingRow("see_through_indicators", "Indicators at the right of the viewer", SEE_INDICATORS_TIP),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 
@@ -144,7 +111,7 @@ class NumberRow:
     and *tip* in English (the 16 languages in `locales/features/panel_size.py`); *bounds* (lowest, highest) and, with
     *zero*, 0 besides (automatic), checked on Save (`number_problem`, which *problem* says them in); *step*: the box's
     arrows; in *section*, right under the row of the setting *after* (at the section's end where that row is not
-    shown); *mode* as a `SettingRow`'s (the panel's two: with TASlation's own window only)."""
+    shown)."""
 
     key: str
     label: str
@@ -154,8 +121,7 @@ class NumberRow:
     zero: bool = False
     step: int = 1
     section: str = "window"
-    after: str = "bubble_zoom"
-    mode: str = "window"
+    after: str = "see_through_indicators"
 
     def fits(self, value: Any) -> bool:
         """Whether *value* is a whole number this row takes."""
@@ -166,26 +132,12 @@ class NumberRow:
 
 SEE_DELAY_TIP = ("How long the pointer rests on a bubble before its translation gives way to the original under it, and "
                  "the pane at the right shows that bubble. 0: at once.")
-# the panel beside a bubble under the pointer (`ui.zoom`), under the rows of how a bubble shows its other side
+# the delay before a bubble under the pointer gives way to the original (`ui.seethrough.hover_delay`)
 NUMBER_ROWS: tuple[NumberRow, ...] = (
-    NumberRow("panel_font_size", "Panel text size (points, 0: automatic):",
-              "The size of the text in the panel beside a bubble under the pointer, in points. It grows with the window's text size and the monitor's scaling, and the panel always stays on the screen. 0: automatic (about twice the review size).",
-              PANEL_FONT_RANGE, "The panel text size: 0 (automatic) or a whole number from {low} to {high} points.",
-              zero=True),
-    NumberRow("hover_delay_ms", "Delay under the pointer (milliseconds):",
-              "How long the pointer rests on a bubble before its other side shows: this long on a bubble that is hard to read and on every bubble while the original is on the page, about 2.7 times as long on the others. 450: 0.45 and 1.2 seconds. 0: at once.",
-              HOVER_DELAY_RANGE, "The delay under the pointer: a whole number from {low} to {high} milliseconds.",
-              step=50),
-    # (see-through mode: the same setting, as that mode takes it - `ui.seethrough.hover_delay`)
     NumberRow("hover_delay_ms", "Delay under the pointer (milliseconds):", SEE_DELAY_TIP,
               HOVER_DELAY_RANGE, "The delay under the pointer: a whole number from {low} to {high} milliseconds.",
-              step=50, after="see_through_indicators", mode="see"),
+              step=50),
 )
-
-
-def in_mode(row: SettingRow | NumberRow, see: bool) -> bool:
-    """Whether *row* is shown in see-through mode (*see*: TASlation's own window not on the screen) or without it."""
-    return row.mode == "" or row.mode == ("see" if see else "window")
 
 
 def number_problem(row: NumberRow, value: Any) -> str | None:
@@ -207,7 +159,7 @@ SHOWN_NUMBERS = tuple(row for row in NUMBER_ROWS if row.key in FIELDS)
 # page, `system_page.SystemPage.num_gpu`, `load_at_start`, `ocr_runs_on`, `gpu_short`, `window_cache` and
 # `update_check`)
 KEYS = ("min_font_size", "max_font_size", "readable_font_size", "text_scale", "uppercase", "slant_text", "ui_scale",
-        "theme", "always_on_top", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
+        "theme", "detect_model", "art_erase", *(row.key for row in SHOWN_ROWS),
         *dict.fromkeys(row.key for row in SHOWN_NUMBERS), "ollama_num_gpu", "load_model_at_start", "ocr_runs_on",
         "gpu_short",
         "ollama_window_cache", "update_check")
@@ -221,11 +173,13 @@ SIZE_RANGE = (0, 200)  # what a size box steps through (the bounds are checked o
 DETECT_CHOICES = (("off", "Not used"), ("auto", "Only with the inpainting"), ("on", "Always used"))
 # art_erase's three values (`artwork.runs_here`): never; only where torch has a CUDA GPU (the default); always, the CPU too
 ERASE_CHOICES = (("off", "Not used"), ("auto", "Only with a GPU"), ("lama", "Always, also on the CPU"))
-# the window's colours (`theme`: applied at once by `App._settings_saved`); the words: `locales/features/window_theme.py`
+# the dialogs' colours (`theme`: applied at once by `App._settings_saved`; the panes take the viewer's); the words:
+# `locales/features/window_theme.py`
 THEME_CHOICES = (("system", "As Windows is set"), ("light", "Light"), ("dark", "Dark"))
-THEME_TIP = ("The window's colours: light, dark, or as Windows has them for apps (the app mode in Windows' colour "
-             "settings). The page keeps its own. While Windows' high contrast is on, the window takes Windows' colours.")
-CONTRAST_TEXT = "Windows' high contrast is on: the window takes Windows' colours."
+THEME_TIP = ("The dialogs' colours: light, dark, or as Windows has them for apps (the app mode in Windows' colour "
+             "settings). The side panes take theirs from the ground of the page in the viewer. While Windows' high "
+             "contrast is on, the dialogs take Windows' colours.")
+CONTRAST_TEXT = "Windows' high contrast is on: the dialogs take Windows' colours."
 TEXT_CHARS = 58  # the dialog's sentences are broken at so many "0" widths of its font: as many words at any scale
 PAGE_LEAST = 160  # the least height a page keeps on a screen too low for the rest of the dialog (pixels)
 IGNORED_TABLE, IGNORED_ENTRY = "settings", "ignored"  # where ui.json keeps the unknown keys named last
@@ -354,26 +308,19 @@ class ScrolledPage(ttk.Frame):
 
 class SettingsDialog(tk.Toplevel):
     """The settings of `KEYS` for *settings* (the window's own object: what is saved is set on it by *on_saved*, the
-    changed settings by name) on the General page, the window's keys over *keymap* (the one in force when None) on
-    the Shortcuts page (saved, they go to *on_keys*), where the stages run on the System page (*pipeline* gives the
+    changed settings by name) on the General page, where the stages run on the System page (*pipeline* gives the
     window's pipeline, for its translator and its seconds a page), the file the settings are written to
     (`config.settings_file`) in a read-only line, Open settings file, Save and Close. ``message`` holds what the last Save or Open said. Not
     modal: the window goes on behind it. Where the whole dialog would be taller than the screen's work area under
     the window, the pages scroll (`ScrolledPage`, `_fit`), so that the buttons stay on the screen."""
 
     def __init__(self, master: tk.Misc, settings: Settings, on_saved: Callable[[dict[str, Any]], None] | None = None,
-                 keymap: Keymap | None = None, on_keys: Callable[[Keymap], None] | None = None,
                  pipeline: Callable[[], Any] | None = None):
         super().__init__(master)
         self.withdraw()  # measured and placed before it first shows
         self._room = self._others = 0  # (`_fit`)
         self.settings = settings
-        # see-through mode (TASlation's own window not on the screen): the rows that act on the window's page and
-        # canvas left out (`in_mode`: the panel, what the page shows under the pointer, the pages turned past beside
-        # it, Always on top) and the Shortcuts page with them - the window's keys; the mode's own rows shown
-        self.see = bool(getattr(master, "_see_hidden", False))
         self.on_saved = on_saved
-        self.on_keys = on_keys
         self.path = settings_file(settings)
         self.title(_("Settings"))
         self.transient(master)
@@ -384,7 +331,7 @@ class SettingsDialog(tk.Toplevel):
         frm.pack(fill="both", expand=True)
         self.pages = ttk.Notebook(frm)
         self.pages.pack(fill="both", expand=True)
-        self.general_tab, self.keys_tab, self.system_tab = (ScrolledPage(self.pages) for _i in range(3))
+        self.general_tab, self.system_tab = (ScrolledPage(self.pages) for _i in range(2))
         general = ttk.Frame(self.general_tab.canvas, padding=8)
         self.pages.add(self.general_tab, text=_("General"))
 
@@ -408,7 +355,7 @@ class SettingsDialog(tk.Toplevel):
         box = ttk.Combobox(letters, textvariable=self.text_scale, values=text_scale_choices(settings.text_scale),
                            state="readonly", width=7)
         box.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=1)
-        tip(_("Every translation lettered smaller or larger by so much (100 %: as large as its bubble allows), never past its bubble or the largest size. A book can have its own: Book settings... in translator mode."), name, box)
+        tip(_("Every translation lettered smaller or larger by so much (100 %: as large as its bubble allows), never past its bubble or the largest size. A book can have its own: Book settings... in the Menu while Edit is on."), name, box)
         self.uppercase = tk.BooleanVar(self, value=bool(settings.uppercase))
         check = ttk.Checkbutton(letters, text=_("Capital letters"), variable=self.uppercase)
         check.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -422,7 +369,7 @@ class SettingsDialog(tk.Toplevel):
         self.numbers: dict[str, tk.StringVar] = {}  # (the boxes of `SHOWN_NUMBERS`)
         self._extra_rows(letters, "lettering", 6)
 
-        window = ttk.LabelFrame(general, text=_("The window"), padding=8)
+        window = ttk.LabelFrame(general, text=_("Dialogs"), padding=8)
         window.pack(fill="x", pady=(10, 0))
         name = ttk.Label(window, text=_("Text size:"))
         name.grid(row=0, column=0, sticky="w")
@@ -433,7 +380,7 @@ class SettingsDialog(tk.Toplevel):
         self.scale = tk.StringVar(self, value=current)
         box = ttk.Combobox(window, textvariable=self.scale, values=scales, state="readonly", width=7)
         box.grid(row=0, column=1, sticky="w", padx=(8, 0))
-        tip(_("The size of this window's text, times what Windows sets for the monitor (100 %: as Windows has it)."), name, box)
+        tip(_("The size of the dialogs' text, times what Windows sets for the monitor (100 %: as Windows has it)."), name, box)
         name = ttk.Label(window, text=_("Colours:"))
         name.grid(row=1, column=0, sticky="w", pady=(4, 0))
         self.colours_var = tk.StringVar(self, value=self._shown(THEME_CHOICES, getattr(settings, "theme", "system")))
@@ -445,11 +392,6 @@ class SettingsDialog(tk.Toplevel):
         if theme.high_contrast():  # the choice waits while Windows' high contrast is on (`theme.effective`)
             ttk.Label(window, text=in_lines(_(CONTRAST_TEXT), self.text_width), justify="left").grid(
                 row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
-        self.on_top = tk.BooleanVar(self, value=bool(settings.always_on_top))
-        if not self.see:
-            check = ttk.Checkbutton(window, text=_("Always on top"), variable=self.on_top)
-            check.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
-            tip(_("Keep this window above the others."), check)
         self._extra_rows(window, "window", 4)
 
         models = ttk.LabelFrame(general, text=_("Optional page models"), padding=8)
@@ -475,11 +417,6 @@ class SettingsDialog(tk.Toplevel):
             row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         self.general_tab.hold(general)
-        self.keys = ShortcutsPage(self.keys_tab.canvas, keymap if keymap is not None else keys_in_force(), self._say,
-                                  self.text_width)
-        self.keys_tab.hold(self.keys)
-        if not self.see:
-            self.pages.add(self.keys_tab, text=_("Shortcuts"))
         self.system = SystemPage(self.system_tab.canvas, settings, self.text_width, pipeline=pipeline)
         self.system_tab.hold(self.system)
         self.pages.add(self.system_tab, text=_("System"))
@@ -540,9 +477,7 @@ class SettingsDialog(tk.Toplevel):
             page.fit()
 
     def scrolled_pages(self) -> tuple[ScrolledPage, ...]:
-        if self.see:  # (no Shortcuts page)
-            return self.general_tab, self.system_tab
-        return self.general_tab, self.keys_tab, self.system_tab
+        return self.general_tab, self.system_tab
 
     def _wheel(self, event: tk.Event) -> None:
         """The mouse wheel anywhere over the dialog scrolls the page in front where it scrolls; not over a box, a list
@@ -579,9 +514,9 @@ class SettingsDialog(tk.Toplevel):
     def _extra_rows(self, frame: ttk.LabelFrame, section: str, row: int) -> None:
         """The rows of `SHOWN_ROWS` in *section*, in *frame* from grid row *row* on (`self.extra`: their variables),
         each number row of the section (`SHOWN_NUMBERS`) under the row it goes after, else at the end."""
-        numbers = [spec for spec in SHOWN_NUMBERS if spec.section == section and in_mode(spec, self.see)]
+        numbers = [spec for spec in SHOWN_NUMBERS if spec.section == section]
         for spec in SHOWN_ROWS:
-            if spec.section != section or not in_mode(spec, self.see):
+            if spec.section != section:
                 continue
             value = getattr(self.settings, spec.key)
             var: tk.Variable
@@ -653,10 +588,9 @@ class SettingsDialog(tk.Toplevel):
         out["slant_text"] = bool(self.slant.get())
         out["ui_scale"] = scale_of(self.scale.get())
         out["theme"] = self._value(THEME_CHOICES, self.colours_var.get())
-        out["always_on_top"] = bool(self.on_top.get())
         out["detect_model"] = self._value(DETECT_CHOICES, self.detect.get())
         out["art_erase"] = self._value(ERASE_CHOICES, self.erase.get())
-        for spec in SHOWN_ROWS:  # (a row not shown in this mode: as it is in force)
+        for spec in SHOWN_ROWS:  # (a row not shown: as it is in force)
             var = self.extra.get(spec.key)
             if var is None:
                 out[spec.key] = getattr(self.settings, spec.key)
@@ -702,25 +636,18 @@ class SettingsDialog(tk.Toplevel):
             self._say(problem, error=True)
             return False
         changed = {key: value for key, value in values.items() if getattr(self.settings, key) != value}
-        if not changed and not self.keys.changed:
+        if not changed:
             self._say(_("Nothing changed."))
             return True
         try:
-            if changed:
-                replace(self.settings, **changed).validate()
-                write_settings(self.path, changed)
-            if self.keys.changed:
-                self.keys.keymap.save(self.settings.state_dir)
+            replace(self.settings, **changed).validate()
+            write_settings(self.path, changed)
         except (ConfigError, OSError) as e:
             why = getattr(e, "strerror", None) or str(e)
             self._say(_("Not saved: {error}").format(error=why), error=True)
             return False
-        if changed and self.on_saved is not None:
+        if self.on_saved is not None:
             self.on_saved(dict(changed))
-        if self.keys.changed:
-            self.keys.saved_now()
-            if self.on_keys is not None:
-                self.on_keys(self.keys.keymap)
         text = _("Saved. The changes apply now.")
         if "ui_scale" in changed:
             text += " " + _("The new text size shows in full after a restart.")
@@ -746,7 +673,7 @@ def ignored_note(settings: Settings) -> str | None:
     names = tuple(getattr(settings, "ignored_keys", ()) or ())
     if not names:
         return None
-    return _("TASlation does not know these settings in taslation.toml and leaves them out: {names}. Tools > Settings... opens the file.").format(
+    return _("TASlation does not know these settings in taslation.toml and leaves them out: {names}. Settings... opens the file.").format(
         names=", ".join(names))
 
 

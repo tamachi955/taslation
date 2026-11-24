@@ -148,7 +148,7 @@ def test_a_page_turned_past_once_confirmed_is_caught_with_its_reading_and_no_fra
     assert _stages(posted) == [("read", "working"), ("read", "done"), ("translate", "working"),
                                ("translate", "waiting")]
     first = next(d for k, d in posted if k == "page_stage")
-    assert first["thumb"].height <= 96 and first["reading"] is True and first["fingerprint"]
+    assert "thumb" not in first and first["reading"] is True and first["fingerprint"]
     assert ("page_on_show", {"seq": 1, "reading": True}) in posted
     assert posted[-1][0] == "backlog" and posted[-1][1]["pages"] == 1
 

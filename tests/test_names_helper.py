@@ -1,5 +1,5 @@
 """The window's side of the name helper (`ui.name_check`, `ui.dialogs.names`): what the pages read found kept for its
-book and offered on the band and in the Tools menu; a rendering chosen changes the name's other lines through the replace
+book and offered on the band and in the Menu; a rendering chosen changes the name's other lines through the replace
 machinery (one step: the dialog's Take back and Ctrl+Z take it back) and goes to the series sheet, which Take back
 gives back as it was; the dialog lists the renderings and says what Apply changes. Synthetic lines only."""
 from __future__ import annotations
@@ -231,7 +231,10 @@ def test_the_band_offers_the_names_the_pages_found():
     assert '"{n} name(s) rendered in more than one way in the pages read so far."' in source
     assert '_("Review names..."), self.review_names' in source
     assert "keep_page_found" in inspect.getsource(jobs)
-    assert 'command=self.review_names' in inspect.getsource(app_mod.App)
+    from taslation.ui import see_menu  # (the Menu: the left pane's and the taskbar button's, since 2.0.0)
+
+    assert ('_("Names rendered in more than one way..."), command=_asking(app, app.review_names)'
+            in inspect.getsource(see_menu.build))
 
 
 # ------------------------------------------------------------------ the dialog

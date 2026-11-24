@@ -340,8 +340,7 @@ def dialog_keys(win: tk.Toplevel, parent: tk.Misc, focus: tk.Misc | None = None)
     """A dialog on the screen takes the keys only when TASlation's own window has them (the reader is in TASlation:
     *focus*, or the dialog, gets them). One that came by itself while the reader is in the book or in another
     program leaves the foreground where it is - in sight above the book (`place_by_book`), a click gives it the keys
-    - and when it closes after the reader went to it from the book, the book gets the foreground back. (Over the
-    full-screen book, the window's over-the-book mode gives its dialogs the foreground: `overbook`.)"""
+    - and when it closes after the reader went to it from the book, the book gets the foreground back."""
     app = parent._root()
     viewer = getattr(getattr(app, "selected", None), "hwnd", 0) or 0
     try:

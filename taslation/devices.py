@@ -1,6 +1,6 @@
 """What each stage of a page runs on - detection, OCR, the translator and the erase - "GPU (its name)" or "CPU", and
 how many seconds a page took there on the last pages lettered (`StageTimes`: numbers alone, kept in
-``<state dir>/timings.json`` when the window closes). Tools > Settings... > System shows it (`ui.dialogs.system_page`),
+``<state dir>/timings.json`` when the window closes). Settings... > System shows it (`ui.dialogs.system_page`),
 and `taslation doctor` prints it (`lines`).
 
 Only CUDA counts as a GPU here. Nothing is started or loaded to find out: torch's CUDA is asked for the GPU's name
@@ -420,6 +420,6 @@ def lines(settings: Any, times: StageTimes | None = None, translator: Any = None
         timing = f"{seconds_text(took)} a page" if took is not None else "not timed yet"
         out.append(f"  {_(STAGE_NAMES[row.stage])}: {row.where()} ({row.what}); {timing}")
     out += [f"  {line}" for line in plan_text().splitlines()]
-    out.append(f"  (seconds a page: the mean of the last {len(times)} page(s) lettered in the window)" if len(times)
-               else "  (seconds a page: none yet; they are kept when the window closes after translating pages)")
+    out.append(f"  (seconds a page: the mean of the last {len(times)} page(s) lettered)" if len(times)
+               else "  (seconds a page: none yet; they are kept when TASlation closes after translating pages)")
     return out

@@ -4,8 +4,8 @@ numbered as the GIF is made, every card line and step following sentences that s
 docs/MANUAL.md, docs/THIRD_PARTY.md or docs/LEGAL.md (or marked as the tool's own words), the cards' facts against the code's
 constants and with nothing that compares or boasts, the version on the
 title card and the credit on every frame with a page, the 5 MB limit, a GIF of made-up frames and one of a recording
-(deleted once the GIF is written), no page text in a recording's facts, and the guard that refuses another
-program's window."""
+(deleted once the GIF is written), no page text in a recording's facts, and no ``record`` since 2.0.0 (TASlation's
+own window, which it pictured, is hidden)."""
 
 from __future__ import annotations
 
@@ -134,25 +134,15 @@ def test_a_changed_sentence_or_a_changed_figure_makes_its_line_stale():
 
 
 def test_a_scene_is_present_only_where_this_checkout_has_what_it_shows(monkeypatch):
-    here = {row["id"]: row["present"] for row in iv.scene_rows()}
+    here = {scene.id: scene.present() for scene in iv.SCENES}
     assert here["turned_past"] == ((ROOT / "taslation" / "backlog.py").is_file()
                                    and (ROOT / "taslation" / "ui" / "side.py").is_file())
     assert all(present for scene_id, present in here.items() if scene_id != "turned_past")
     monkeypatch.setattr(iv, "has_module", lambda name: name != "taslation.backlog")
-    rows = {row["id"]: row["present"] for row in iv.scene_rows()}
-    assert rows["turned_past"] is False
-    assert rows["viewer"] is True and rows["undo"] is True
-    picked = [s.id for s in iv.pick_scenes(None)]
-    assert "turned_past" not in picked and len(picked) == len(ORDER) - 1
-    with pytest.raises(SystemExit, match="not in this checkout"):
-        iv.pick_scenes("viewer,turned_past")
-
-
-def test_scenes_are_picked_in_the_tables_order_and_an_unknown_one_ends_the_run():
-    assert [s.id for s in iv.pick_scenes("undo, viewer,language")] == ["viewer", "language", "undo"]
-    assert [s.id for s in iv.pick_scenes("")] == [s for s in ORDER if iv.scene_of(s).present()]
-    with pytest.raises(SystemExit, match="no such scene: nope"):
-        iv.pick_scenes("viewer,nope")
+    assert iv.scene_of("turned_past").present() is False
+    assert iv.scene_of("viewer").present() is True and iv.scene_of("undo").present() is True
+    made_up = [entry["id"] for entry in iv.sample_source(seconds=0.5, fps=2.0).meta["scenes"]]
+    assert "turned_past" not in made_up and len(made_up) == len(ORDER) - 1  # (the sample: what this checkout has)
 
 
 def test_the_scenes_are_numbered_as_the_gif_is_made():
@@ -380,24 +370,6 @@ def test_the_how_cards_pictures_are_the_page_and_half_way_through_its_lettering(
     assert iv.filling_moment({"moments": {}}) is None
 
 
-def test_a_name_on_the_page_is_two_to_four_kanji_and_a_capitalised_rendering():
-    assert iv.name_like("山田\n太郎", "Taro Yamada.") == ("山田太郎", "Taro Yamada")
-    assert iv.name_like("山田", "Yamada") == ("山田", "Yamada")
-    assert iv.name_like("やまだ", "Yamada") is None  # (kana: not taken for a name)
-    assert iv.name_like("山田太郎", "he is taro") is None
-    assert iv.name_like("山", "Mountain") is None
-    assert iv.name_like("山田太郎", "Taro Yamada, I said") is None
-
-
-def test_the_series_sheets_file_line_is_left_empty_in_the_recording_process(monkeypatch):
-    from taslation.ui.dialogs import glossary
-
-    monkeypatch.setattr(glossary, "break_lines", lambda text, *a, **k: text)
-    assert iv.blank_file_lines() == {"series_sheet_file_line": 1}
-    assert glossary.break_lines("File: C:\\somewhere\\sheet.json", 60, None) == ""
-    assert glossary.break_lines("Facts the model is told", 60, None) == "Facts the model is told"
-
-
 def write_recording(path: Path, source: iv.MemorySource) -> None:
     """*source* as the record leaves a recording: its pictures in a ZIP, its facts in meta.json."""
     writer = pv.RecordingWriter(path)
@@ -443,9 +415,20 @@ def test_a_recording_is_kept_when_asked_or_when_the_gif_is_refused(tmp_path, cap
 
 def test_the_help_says_the_recording_is_scratch_and_deleted(capsys):
     with pytest.raises(SystemExit):
-        iv.parse(["record", "--help"])
+        iv.parse(["render", "--help"])
     text = " ".join(capsys.readouterr().out.split())
-    assert "scratch folder" in text and "deletes it once the GIF is written" in text
+    assert "scratch folder" in text and "deleted once the GIF is written" in text
+
+
+@pytest.mark.parametrize("argv", [["record", "--list"], ["record", "--out", "x.zip"], ["--serve-viewer"]])
+def test_nothing_is_recorded_any_more(argv, capsys):
+    """(``record`` pictured TASlation's own window and drove its widgets; from 2.0.0 on the window is hidden: the
+    command, its stand-in viewer and its guard went with it, and nothing is started)"""
+    with pytest.raises(SystemExit) as stopped:
+        iv.main(argv)
+    assert stopped.value.code == 2 and "error:" in capsys.readouterr().err  # (argparse's: an unknown command)
+    for gone in ("record", "run_window", "Director", "StandIn", "serve_viewer", "guard_table", "check_port"):
+        assert not hasattr(iv, gone), gone
 
 
 # ---------------------------------------------------------------------------------------------------- no text kept
@@ -457,53 +440,6 @@ def test_a_recordings_facts_hold_no_page_text():
             iv.check_no_text(bad)
     iv.check_no_text({"keys": [{"t": 1.0, "key": "Left", "passed_on": True}], "regions": [{"what": "added",
                                                                                           "box": [1, 2, 3, 4]}]})
-
-
-# ---------------------------------------------------------------------------------------------------- the guard
-def test_the_guard_table_opens_the_posted_key_to_the_stand_in_alone():
-    table = iv.guard_table()
-    assert table["post_key"][0] == "viewer"
-    for name in ("press_key", "press_briefly", "post_click", "capture_screen_rect"):
-        assert table[name][0] == "never", name
-    for name in ("capture_window", "enlarge_window", "move_window", "raise_window"):
-        assert table[name][0] == "ours", name
-    assert set(table) == set(dv.GUARDED)
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="the guard asks Windows whose a window is")
-def test_the_guard_refuses_another_programs_window():
-    stand_in, foreign = 0x7654320, 0x1234560  # (handles of no window: nothing is sent anywhere)
-    guard = dv.Guard(stand_in)
-    called: list[tuple] = []
-    table = iv.guard_table()
-    allow, target = table["post_key"]
-    post_key = guard.wrap("post_key", lambda *a, **k: called.append(a), allow, target)
-    with pytest.raises(dv.Refused):
-        post_key(foreign, "Left")
-    assert called == [] and guard.refused == ["post_key"]
-    post_key(stand_in, "Left")
-    assert called == [(stand_in, "Left")] and guard.used == {"post_key": 1}
-    allow, target = table["press_briefly"]
-    press = guard.wrap("press_briefly", lambda *a, **k: called.append(a), allow, target)
-    with pytest.raises(dv.Refused):
-        press(stand_in, "Left")  # (no key is ever pressed for real, not even in the stand-in)
-    assert len(called) == 1
-
-
-def test_the_owners_ollama_and_the_other_tools_ports_are_refused():
-    for port in (11434, 11435, 11436, 11437):
-        with pytest.raises(SystemExit):
-            iv.check_port(port)
-    assert iv.check_port(iv.DEFAULT_PORT) == 11438
-    with pytest.raises(SystemExit):
-        iv.check_port(80)
-
-
-def test_record_list_prints_the_scenes_and_starts_nothing(capsys):
-    assert iv.main(["record", "--list"]) == 0
-    rows = json.loads(capsys.readouterr().out)
-    assert [row["id"] for row in rows] == list(ORDER)
-    assert all(set(row) == {"id", "title", "present"} for row in rows)
 
 
 def test_files_go_to_scratch_and_where_git_ignores_them(tmp_path):

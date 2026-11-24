@@ -2,7 +2,7 @@
 name)" or "CPU" - the layout model and LaMa on the GPU only where torch has CUDA and they are in use, the classical
 detectors on the CPU, the OCR readers where `ocr.place` puts them (tests/test_ocr_place.py), Ollama's model where /api/ps says it is (all, none or a part in video memory,
 never loaded to find out) - with the seconds a page from the last pages lettered (`StageTimes`, kept in the state
-folder when the window closes); Tools > Settings... > System shows it and `taslation doctor` prints it."""
+folder when TASlation closes); Settings... > System shows it and `taslation doctor` prints it."""
 
 from __future__ import annotations
 
@@ -233,7 +233,7 @@ def test_the_doctor_s_lines(tmp_path, models):
     out = lines(settings, times, Ps(None), cuda=False)
     assert out[1] == "  Reading the text (OCR): CPU (The OCR readers); 1.5 s a page"
     assert out[2].startswith("  Translating: Not loaded now")
-    assert out[-1] == "  (seconds a page: the mean of the last 1 page(s) lettered in the window)"
+    assert out[-1] == "  (seconds a page: the mean of the last 1 page(s) lettered)"
 
 
 def test_doctor_prints_where_each_stage_runs(tmp_path, monkeypatch, capsys):
@@ -267,7 +267,7 @@ def test_the_stage_names_are_in_the_window_s_language(tmp_path, models):
         set_language("en")
 
 
-# ------------------------------------------------------------------ Tools > Settings... > System
+# ------------------------------------------------------------------ Settings... > System
 def _rows():
     return [StageDevice("detect", "gpu", "The layout model and the classical detectors", GPU),
             StageDevice("ocr", "cpu", "The OCR readers"),
@@ -364,7 +364,7 @@ def test_the_settings_dialog_has_a_system_page_that_looks_when_chosen(hidden_roo
     window_translator, window_ocr = object(), object()
     d = dlg.SettingsDialog(hidden_root, settings, pipeline=lambda: SimpleNamespace(
         translator=window_translator, ocr=window_ocr, stage_times=StageTimes()))
-    assert [d.pages.tab(t, "text") for t in d.pages.tabs()] == ["General", "Shortcuts", "System"]
+    assert [d.pages.tab(t, "text") for t in d.pages.tabs()] == ["General", "System"]
     assert not d.system.looked
     d.pages.select(d.system_tab)
     hidden_root.update()

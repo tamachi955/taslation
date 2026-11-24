@@ -207,12 +207,51 @@ def test_the_window_starts_with_auto_on_unless_told_otherwise(monkeypatch):
     parser = cli.build_parser()
     assert parser.parse_args(["gui"]).auto is True and parser.parse_args(["gui", "--auto"]).auto is True
     assert parser.parse_args(["gui", "--no-auto"]).auto is False
-    assert parser.parse_args(["gui", "--full-screen"]).reading and not parser.parse_args(["gui"]).reading
-    assert parser.parse_args(["gui", "--reading"]).reading  # (its earlier name)
     seen = []
     monkeypatch.setitem(cli.COMMANDS, "gui", lambda args, settings: seen.append(args) or 0)
-    assert main([]) == 0 and main(["gui", "--no-auto", "--full-screen"]) == 0
-    assert (seen[0].auto, seen[0].reading) == (True, False) and (seen[1].auto, seen[1].reading) == (False, True)
+    assert main([]) == 0 and main(["gui", "--no-auto"]) == 0
+    assert (seen[0].auto, seen[1].auto) == (True, False)
+
+
+def test_the_options_of_the_window_that_is_gone_are_accepted_hidden_and_ignored(monkeypatch, capsys, caplog):
+    """--on-top, --full-screen and --reading (its earlier name) were for TASlation's own window: a shortcut made for
+    an older version still starts, nothing of them reaches the window, and --help no longer names them."""
+    import logging
+
+    from taslation import cli
+    from taslation.ui import app as app_mod
+
+    parser = cli.build_parser()
+    for option in ("--on-top", "--full-screen", "--reading"):
+        args = parser.parse_args(["gui", option])
+        assert args.window_options == [True] and not hasattr(args, "reading") and not hasattr(args, "on_top")
+    assert parser.parse_args(["gui"]).window_options is None
+    assert parser.parse_args(["gui", "--on-top", "--full-screen"]).window_options == [True, True]
+    parser._subparsers._group_actions[0].choices["gui"].print_help()
+    shown = capsys.readouterr().out
+    assert "--on-top" not in shown and "--full-screen" not in shown and "--reading" not in shown
+    assert "--no-auto" in shown
+
+    started = []
+    monkeypatch.setattr("taslation.capture.enable_dpi_awareness", lambda: None)
+    monkeypatch.setattr(app_mod, "run_app", lambda settings, **kw: started.append(kw) or 0)
+    monkeypatch.setattr(cli, "_given_book", lambda args, settings: None)
+    with caplog.at_level(logging.INFO, logger=cli.LOG.name):
+        assert cli.cmd_gui(parser.parse_args(["gui", "--full-screen", "--on-top", "--no-auto"]), cli.Settings()) == 0
+    assert started == [{"window_query": None, "book": None, "auto": False}]  # nothing else reaches the window
+    assert any("ignored" in r.getMessage() for r in caplog.records)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=cli.LOG.name):
+        assert cli.cmd_gui(parser.parse_args(["gui"]), cli.Settings()) == 0
+    assert not any("ignored" in r.getMessage() for r in caplog.records)
+
+
+def test_the_keys_command_is_gone():
+    from taslation import cli
+
+    assert "keys" not in cli.COMMANDS
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["keys"])
 
 
 @requires_ocr

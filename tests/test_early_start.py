@@ -177,7 +177,7 @@ def _environment(hidden_root, monkeypatch, path, counted=True):
         w.settings.early_start = early
         w.selected = selected
         w._starts_book = lambda image: False  # (the book is started: tests/test_start_flow.py)
-        w._enlarge_asked = selected.hwnd  # (the window enlarged for this viewer already: tests/test_enlarge.py)
+        w._enlarge_asked = selected.hwnd  # (the viewer looked at for its size as it was chosen: `_enlarge_first`)
         w.profiles = profiles if profiles is not None else Profiles(path)
         w._jobs = worker = worker(w, clock, lambda image: names.get(id(image), "?"), asks, ask_s)
         w.start()
@@ -598,42 +598,6 @@ def test_a_page_turned_while_its_confirmed_job_runs_cancels_it_once_the_new_fram
     assert three_job.gate is not None and _after(three_job.gate.confirmed_at - (turned + 1.0), KEEP_S)
 
 
-@pytest.mark.parametrize("posted", [False, True])
-def test_a_page_turned_by_a_key_passed_on_while_a_job_runs_starts_with_a_gate_of_its_own(follow, monkeypatch, posted):
-    # (a page key pressed in TASlation's window and passed on to the viewer - pressed for real, a browser's, or posted
-    # - while the page before is still being read or asked for: on the processor a page takes seconds. The page turned
-    # to goes as a page the viewer turned while the job ran - the job cancelled as turned away from once the new frame
-    # has stayed LEFT_PAGE_MS, the page started early, a gate of its own, once the worker is free -, so that it is
-    # caught once turned past in its turn. Before, the key's follow took the page as settled after settle_ms and
-    # queued it, and the look after the job's end started it with no gate: never caught - `backlog` -, and its bar left
-    # "working" once turned past)
-    from taslation.pipeline import keeps_answered
-    from taslation.ui import reading
-
-    keys: list = []
-    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, key: (not posted) and (keys.append(key) or True))
-    monkeypatch.setattr(reading, "post_key", lambda hwnd, key: keys.append(key))
-    monkeypatch.setattr(reading, "window_class", lambda hwnd: "")  # (a posted key is never refused here)
-    monkeypatch.setattr(live, "fully_covered", lambda hwnd: False)
-    w, worker = follow.make(ask_s=1.5)  # the model answers for 1.5 s: page 2's job runs past its confirmation
-    w._raise_for_key = lambda hwnd: None  # (the viewer in front: never raised)
-    follow.show((0.0, "2", _page(2)), run=0.3 + 1.2)
-    two = worker.one("2")
-    assert two.gate is not None and two.gate.confirmed_at is not None and two.ended is None
-    three = _page(3)
-    follow.names[id(three)] = "3"
-    key_at = follow.clock.now
-    follow.viewer.frames.append((key_at + 0.15, three))  # (drawn 150 ms after the key)
-    w.forward_key("Left")
-    follow.clock.run(4)
-    assert keys and two.how == "cancelled" and keeps_answered(two.cancel)
-    three_job = worker.one("3")
-    assert three_job.gate is not None and three_job.gate.confirmed_at is not None
-    assert three_job.start - two.ended <= 0.016 and three_job.how == "done" and worker.kept == ["1", "3"]
-    lag = two.cancel_seen - (key_at + 0.15)
-    assert lag <= LEFT_PAGE_MS / 1000 + 0.15, lag  # (once the frame stayed LEFT_PAGE_MS - before: settle_ms)
-
-
 def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept(follow):
     w, worker = follow.make(asks=False)
     soft, sharp = _page(4, soft=3), _page(4)
@@ -649,17 +613,14 @@ def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept(follow):
 
 # ------------------------------------------------------------------ the profile
 def test_an_old_profile_with_turn_times_loads_and_they_are_never_written(follow, tmp_path):
-    """Older versions kept the viewer's page turns timed in its profile ("settle_seen"): such a profile loads - its
-    area and keys as ever -, the times are ignored, and nothing writes them."""
+    """Older versions kept the viewer's page turns timed in its profile ("settle_seen"), and how it took a key passed
+    on ("key_way"): such a profile loads - its area as ever -, the rest is ignored, and nothing writes it."""
     path = follow.path
-    Profiles(path).set_key_way(VIEWER, "posted")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    key = next(k for k, v in data.items() if isinstance(v, dict) and v.get("key_way") == "posted")
-    data[key]["settle_seen"] = [120, 90, 100]
-    data[key]["margins"] = [0, 85, 0, 0]
+    key = Profiles(path).key_of(VIEWER)
+    data = {key: {"key_way": "posted", "settle_seen": [120, 90, 100], "margins": [0, 85, 0, 0]}}
     path.write_text(json.dumps(data), encoding="utf-8")
     profiles = Profiles(path)
-    assert profiles.key_way_for(VIEWER) == "posted"
+    assert profiles.margins_for(VIEWER) == (0, 85, 0, 0)
     w, worker = follow.make(profiles=profiles)
     for k in range(3):
         turned = follow.show((0.0, f"p{k}", _page(2 + k)))
@@ -667,7 +628,7 @@ def test_an_old_profile_with_turn_times_loads_and_they_are_never_written(follow,
     profiles.set_covered(VIEWER, True)  # (a write of the profile's own: the old entry stays as it was found)
     after = json.loads(path.read_text(encoding="utf-8"))[key]
     assert after["settle_seen"] == [120, 90, 100] and after["margins"] == [0, 85, 0, 0]
-    assert after["while_covered"] == "draws"
+    assert after["key_way"] == "posted" and after["while_covered"] == "draws"
 
 
 # ------------------------------------------------------------------ what goes as without it
@@ -716,7 +677,7 @@ def _trace(hidden_root, monkeypatch, tmp_path, early: bool) -> list[tuple]:
     w.settings.early_start = early
     w.settings.cache_enabled, w.settings.fingerprint_max_distance = True, 10
     w.settings.black_wait_s = Settings().black_wait_s
-    w._enlarge_asked = VIEWER.hwnd
+    w._enlarge_asked = VIEWER.hwnd  # (the viewer looked at for its size as it was chosen: `_enlarge_first`)
     w._starts_book = lambda image: False
     w.profiles = Profiles(tmp_path / f"profiles-{early}.json")
     w.store = CacheStore(tmp_path / f"cache-{early}")

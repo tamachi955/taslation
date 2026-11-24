@@ -25,7 +25,8 @@ request was sent for nothing, no job was cancelled with its page on show (but fo
 frame of a new size, `_resized_away`), nothing of a line asked as it was read and taken back once its page was read
 stayed in the page's lines or on show when the page was finished (the lines so sent and taken back are reported, never
 a failure: `_streamed`), a page translated before came back without a request, each scenario did what
-it is for - the modes entered and left, the page keys handed on, ...). What depends on the
+it is for - the window ready while c turned, b's quick turns drawn, the narrow window's page read at its new size,
+...). What depends on the
 computer's speed - the rested turns translated within their rest, the holds of ``--wait-done`` that reached their
 cap, lettering left on a page until the window's next capture, pages left half done in the cache - is reported beside
 it and never fails a run (`speed`); so is what each scenario was meant to show and whether it still did (`meanings`).
@@ -68,7 +69,7 @@ STOPPED = re.compile(r"^run stopped: (.+)$")  # standin_e2e's Director.stop (its
 PAGE_LINE = re.compile(r"^\s+\S.* p(\d+): gold (\d+), .*\[([0-9.]+) s\]\s*$")  # openmantra_eval, a page read
 TRANSLATED_LINE = re.compile(r"^\s+\S.*: page (\d+)/(\d+) translated, (\d+) lines so far, (\d+) s\s*$")  # ... a page
 OTHER_STATES = ("black", "spinner", "unknown")
-AT_REST = ("a", "d", "r", "o", "z", "f", "f2")  # the scenarios whose rests are for reading translated pages
+AT_REST = ("a", "d", "f2")  # the scenarios whose rests are for reading translated pages
 TURNED = ("next", "previous", "jump")
 K_PACES = ("k5", "k1", "k2", "k3")  # standin_e2e.K_PACES: scenario k, pages flipped past at a pace, then read back
 K_STAYED_MS = 800  # standin_e2e.K_STAYED_MS: a page flipped past whose sharp frame stayed so long is one to catch
@@ -264,10 +265,6 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
             out[name] = (f"holds: {cached} of {len(mine)} turns found their page in the cache" if cached
                          else f"lost: none of {len(mine)} turns back found its page in the cache (the pages before "
                               "were not translated in time)")
-        elif name in ("t", "t2"):
-            keyed = name in (run.get("page_keys") or {})
-            out[name] = (("holds: its turn came by the window's page key; " if keyed
-                          else "lost: no turn came by the window's page key; ") + at_rest(name))
         elif name == "x":
             cancel = run.get("cancel_in_flight") or {}
             soft, cut = cancel.get("requests_on_soft") or 0, cancel.get("cancelled_in_flight") or 0
@@ -381,8 +378,7 @@ def _check(found: list[dict[str, Any]], scenario: str, criterion: str, ok: bool,
 def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[dict[str, Any]]:
     """What the run must show however slow the computer, criterion by criterion ({scenario, criterion, ok, seen}:
     *seen* is what failed it). *timeout_s* is the tool's --timeout: a scenario released by it found the window not at
-    rest for that long, a hang on any computer; one released because its mode was not on within the tool's
-    MODE_WAIT_S is speed (`speed`)."""
+    rest for that long, a hang on any computer."""
     run = report.get("run") or {}
     names = [str(n) for n in report.get("scenarios") or []]
     found: list[dict[str, Any]] = []
@@ -493,7 +489,6 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
     by_name: dict[str, list[dict[str, Any]]] = {}
     for t in turns:
         by_name.setdefault(str(t.get("segment")), []).append(t)
-    entered = (run.get("modes") or {}).get("entered") or {}
     for name in names:
         mine = by_name.get(name) or []
         check(name, "the stand-in drew its turns", bool(mine), len(mine))
@@ -506,31 +501,11 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             check(name, "the window became ready", run.get("ready_s") is not None, run.get("ready_s"))
         elif name == "b":
             check(name, "its 10 quick turns were drawn", len(mine) == 10, len(mine))
-        elif name in ("t", "t2"):
-            key = (run.get("page_keys") or {}).get(name) or {}
-            check(name, "the window handed its page key on to the viewer", "handed_on" in key, sorted(key))
-            if name == "t":
-                facts = entered.get("t") or {}
-                check(name, "the full screen in the Translator role, and the Reader role again after",
-                      facts.get("full_screen") is True and facts.get("role_on_it") == "translator"
-                      and facts.get("role_after") == "reader",
-                      {k: facts.get(k) for k in ("full_screen", "role_on_it", "role_after")})
-        elif name == "r":
-            facts = entered.get("r") or {}
-            check(name, "the full screen entered and left", facts.get("full_screen") is True and facts.get("left") is True,
-                  {k: facts.get(k) for k in ("full_screen", "left")})
-        elif name == "o":
-            facts = entered.get("o") or {}
-            check(name, "over the book entered and left by the hot key",
-                  facts.get("over_before_reading") is True and facts.get("left_by_hot_key") is True,
-                  {k: facts.get(k) for k in ("over_before_reading", "left_by_hot_key")})
         elif name == "x":
             cancel = run.get("cancel_in_flight") or {}
             ran_on = (cancel.get("ran_on_after_cancel_ms") or {}).get("max")
             check(name, f"a request cancelled in flight ended within {RAN_ON_MS} ms of its job's cancel",
                   ran_on is None or ran_on <= RAN_ON_MS, ran_on)
-        elif name == "f":
-            check(name, "the dark theme", (run.get("theme") or {}).get("after") == "dark", run.get("theme"))
         elif name == "f2":
             sizes = [r for r in run.get("resizes") or [] if isinstance(r, dict)]
             check(name, "the narrow window's page read at its new size",
@@ -540,13 +515,13 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
 
 
 def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, Any]:
-    """What depends on the computer's speed, reported and never a failure: scenarios released because a mode was not on
-    within the tool's wait for it, rested turns not finished within their rest or not translated at its end, holds of
-    --wait-done that reached their cap, spells the window did not follow the stand-in, lettering of a page left until
-    the window's next capture showed the change, jobs cancelled as the reader turned away, pages left half done in the
-    cache at the end (their lines kept for later, by design)."""
+    """What depends on the computer's speed, reported and never a failure: rested turns not finished within their rest
+    or not translated at its end, holds of --wait-done that reached their cap, spells the window did not follow the
+    stand-in, lettering of a page left until the window's next capture showed the change, jobs cancelled as the reader
+    turned away, pages left half done in the cache at the end (their lines kept for later, by design). (*timeout_s*:
+    kept for the callers; no scenario is released before the window is at rest but by --timeout, a correctness
+    criterion.)"""
     run = report.get("run") or {}
-    released = {k: v for k, v in (run.get("released") or {}).items() if isinstance(v, dict)}
     segments = run.get("segments") or []
     rested = _rested(_turns(run))
     stale = [s for s in (run.get("incidents") or {}).get("stale_overlays") or [] if isinstance(s, dict)]
@@ -562,9 +537,6 @@ def speed(report: dict[str, Any], timeout_s: float | None = None) -> dict[str, A
     kept_x = sum(1 for row in _displays(run) if row.get("kind") == "translated" and not row.get("lettered")
                  and row.get("from") not in ("sharp", None) and not judged(segment_at(row.get("t_s"))))
     found = {
-        "scenarios released before their mode was on (the tool's wait for it)": sorted(
-            k for k, v in released.items() if v.get("timed_out") and k != "end"
-            and not (timeout_s and (v.get("waited_s") or 0) >= timeout_s - 1)) or None,
         "rested turns not finished within their rest": sum(1 for r in rested if not _finished_in_rest(r)) or None,
         "rested turns not translated at rest": sum((s.get("rested") or 0) - (s.get("translated_at_rest") or 0)
                                                    for s in segments) or None,

@@ -22,8 +22,8 @@ from taslation.i18n import CATALOGS, set_language
 from taslation.locales.features import window_theme
 from taslation.pipeline import manual_region
 from taslation.ui import app as app_mod
-from taslation.ui import banner, bubble_text, theme, translator, zoom
-from taslation.ui.dialogs import book_settings, caches, review, shortcuts_page, system_page
+from taslation.ui import banner, theme, translator
+from taslation.ui.dialogs import book_settings, caches, review, system_page
 from taslation.ui.dialogs import settings as dlg
 from taslation.ui.dialogs.book_settings import BookSettingsDialog
 from taslation.ui.dialogs.corrections import CorrectionsDialog
@@ -160,17 +160,11 @@ def test_every_text_and_ground_pair_meets_wcag_aa(name):
     assert low == []
 
 
-def test_the_page_side_colours_stay_readable():
-    for text in ("text", "hint"):  # the popup over the page, in every mode but high contrast
-        assert ratio(zoom.ZOOM_COLOURS[text], zoom.ZOOM_COLOURS["ground"]) >= 4.5
-    assert ratio(bubble_text.SELECTED[1], bubble_text.SELECTED[0]) >= 4.5
-
-
 def test_the_colours_looked_for_on_a_change_are_told_apart_and_none_is_the_pages():
     for palette in (theme.LIGHT, theme.DARK):
         found = [palette[role].lower() for role in theme.FOUND_ROLES]
         assert len(found) == len(set(found))
-    page = {"#202020", "#000000", *zoom.ZOOM_COLOURS.values(), *banner.PROBLEM_COLOURS, *banner.NOTICE_COLOURS,
+    page = {"#202020", "#000000", *banner.PROBLEM_COLOURS, *banner.NOTICE_COLOURS,
             *banner.BAND_COLOURS, theme.DARK["problem_ground"], theme.DARK["notice_ground"], theme.DARK["banner_text"]}
     for palette in (theme.LIGHT, theme.DARK):
         looked_for = {colour for colour, role in theme._reverse(palette, light=palette is theme.LIGHT).items()
@@ -181,7 +175,7 @@ def test_the_colours_looked_for_on_a_change_are_told_apart_and_none_is_the_pages
 
 def test_the_light_colours_are_the_ones_the_window_always_had():
     assert caches.ERROR_COLOUR == "#b3261e" and review.FLASH == "#fff4bf" and review.FIT_COLOUR == "#c03030"
-    assert shortcuts_page.FIXED_COLOUR == system_page.NOTE_COLOUR == "#6b6b6b" and translator.HINT_COLOUR == "#4a4a4a"
+    assert system_page.NOTE_COLOUR == "#6b6b6b" and translator.HINT_COLOUR == "#4a4a4a"
     assert book_settings.HINT_COLOUR == "#5a5a5a"
     assert banner.PROBLEM_COLOURS == ("#fff4ce", "#1f1f1f") and banner.NOTICE_COLOURS == ("#e5f1fb", "#1f1f1f")
     assert banner.BAND_COLOURS == ("#1f3b63", "#ffffff")
@@ -230,7 +224,8 @@ ROWS = [("Ollama is not running.", banner.PROBLEM_COLOURS, ("Start", lambda: Non
 
 
 def _main_window(root):
-    """The toolbar, translator mode's strip, the menus, the strips over the page, the page and the status line."""
+    """The toolbar, translator mode's strip, the strips over the page, the page and the status line (the hidden
+    window's, which a language or colour change builds again with the dialogs)."""
     w = Bars(root)
     w.build("en")
     strips = ttk.Frame(w)
@@ -416,9 +411,9 @@ def test_high_contrast_keeps_windows_look_and_takes_its_colours(hidden_root, tit
     assert str(hint.cget("foreground")) == "SystemGrayText" and str(error.cget("foreground")) == ""
     assert theme.strip_colours(banner.PROBLEM_COLOURS) == ("SystemInfoBackground", "SystemInfoText")
     assert theme.strip_colours(banner.BAND_COLOURS) == ("SystemHighlight", "SystemHighlightText")
-    assert theme.tooltip_colours() is None and zoom.zoom_colours() == zoom.CONTRAST_ZOOM
+    assert theme.tooltip_colours() is None
     if sys.platform == "win32":  # every colour of the contrast mode is one of Windows' that Tk knows
-        for value in {*theme.CONTRAST.values(), *zoom.CONTRAST_ZOOM.values(), *bubble_text.CONTRAST_SELECTED} - {""}:
+        for value in set(theme.CONTRAST.values()) - {""}:
             hidden_root.winfo_rgb(value)
     # high contrast off again: the setting's own
     assert theme.apply(hidden_root, "dark", contrast=False) == theme.DARK_MODE
@@ -459,7 +454,7 @@ def test_the_title_bars_follow_the_mode_once_each(monkeypatch):
     for window in (main, tip, hidden, main):
         theme._title_bar_for(window)
     assert drawn == [(11, True, False)]  # once; no tooltip, nothing off the screen
-    main.hwnd = 21  # Tk made the frame anew (full screen): drawn again
+    main.hwnd = 21  # Tk made the frame anew: drawn again
     theme._title_bar_for(main)
     assert drawn[-1] == (21, True, False)
     monkeypatch.setattr(theme, "_mode", theme.LIGHT_MODE)

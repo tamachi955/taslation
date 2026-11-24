@@ -1,6 +1,6 @@
 """Other parts' settings in the Settings dialog, one line each (`settings.EXTRA_ROWS`): every row's words in the 16
 languages, a row shown only where `Settings` has its key, a checkbox and a list of choices shown, saved and handed on
-as the dialog's own rows are, and the bubble zoom listed wherever this version has it."""
+as the dialog's own rows are, the indicators' row listed and none of the old window's rows."""
 
 from __future__ import annotations
 
@@ -35,26 +35,31 @@ def test_every_row_s_words_are_in_every_language():
         assert row.section in ("lettering", "window")
 
 
-def test_the_bubble_zoom_is_listed_where_this_version_has_it():
-    key = "bubble_zoom"
+def test_the_indicators_row_is_listed_and_the_old_windows_rows_are_not():
+    key = "see_through_indicators"
     row = next(row for row in dlg.EXTRA_ROWS if row.key == key)
     assert row.section == "window" and not row.page and not row.choices  # a checkbox that leaves the page alone
-    assert (key in dlg.KEYS) == (key in dlg.FIELDS)
+    assert key in dlg.KEYS and key in dlg.FIELDS
+    gone = {"see_through", "bubble_zoom", "hover_shows", "hover_reveal", "side_indicator", "panel_font_size",
+            "always_on_top", "over_book"}
+    assert not gone & {row.key for row in (*dlg.EXTRA_ROWS, *dlg.NUMBER_ROWS)} and not gone & set(dlg.KEYS)
 
 
 def test_a_row_whose_setting_this_version_lacks_is_not_shown():
-    rows = (dlg.SettingRow("no_such_setting", "Always on top"), dlg.SettingRow("over_book", "Always on top"))
-    assert [row.key for row in dlg.shown_rows(rows)] == ["over_book"]
+    rows = (dlg.SettingRow("no_such_setting", "Translate sound effects"),
+            dlg.SettingRow("over_book", "Translate sound effects"),  # (a setting an older version had)
+            dlg.SettingRow("translate_sfx", "Translate sound effects"))
+    assert [row.key for row in dlg.shown_rows(rows)] == ["translate_sfx"]
 
 
 def test_a_checkbox_row_is_shown_saved_and_handed_on(hidden_root, in_force, monkeypatch):
-    _with_rows(monkeypatch, dlg.SettingRow("over_book", "Always on top", "Keep this window above the others."))
+    _with_rows(monkeypatch, dlg.SettingRow("translate_sfx", "Translate sound effects", "Also the sound effects."))
     got = []
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert d.values()["over_book"] is True and d.extra["over_book"].get() is True
-    d.extra["over_book"].set(False)
-    assert d.save() is True and got == [{"over_book": False}]
-    assert Settings.from_toml(in_force.config_path).over_book is False
+    assert d.values()["translate_sfx"] is True and d.extra["translate_sfx"].get() is True
+    d.extra["translate_sfx"].set(False)
+    assert d.save() is True and got == [{"translate_sfx": False}]
+    assert Settings.from_toml(in_force.config_path).translate_sfx is False
 
 
 def test_a_row_of_choices_is_shown_in_the_window_s_language_and_saved_by_value(hidden_root, in_force, monkeypatch):

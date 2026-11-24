@@ -219,7 +219,7 @@ def test_a_dropped_region_comes_back_whole_and_its_spot_is_text_again(window):
     at = next(i for i, r in enumerate(w.last_result.regions) if r is victim)
     w._drop_region(victim)
     dropped = w.state()
-    assert all(r is not victim for r in w.last_result.regions) and w.said[-1] == "Region dropped; Ctrl+Z brings it back."
+    assert all(r is not victim for r in w.last_result.regions) and w.said[-1] == "Region dropped; Menu > Undo brings it back."
     assert len(dropped[0][1]) == 1 and len(dropped[1]) == len(start[1]) - 1  # remembered as not text; its bubble gone
     assert [r.order for r in w.last_result.regions] == list(range(len(w.last_result.regions)))
     w.undo_edit()
@@ -882,7 +882,7 @@ def test_a_series_sheet_that_cannot_be_opened_is_said_in_the_status_line():
 
 
 def test_every_line_translator_mode_says_is_in_every_language():
-    keys = [translator.HINT, translator.CLICK_HINT, *translator.TAKEN_BACK.values(), *translator.MADE_AGAIN.values()]
+    keys = [translator.CLICK_HINT, *translator.TAKEN_BACK.values(), *translator.MADE_AGAIN.values()]
     for code, catalog in CATALOGS.items():
         if code != "en":
             assert all(k in catalog for k in keys), (code, [k for k in keys if k not in catalog])

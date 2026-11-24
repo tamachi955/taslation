@@ -1,14 +1,15 @@
 """DEVELOPER TOOL, NOT PART OF THE APPLICATION: the see-through window (`taslation.capture.seethrough`) watched in an
-end-to-end run on the stand-in viewer (``tools/standin_e2e.py --see-through``), numbers only.
+end-to-end run on the stand-in viewer (``tools/standin_e2e.py``: see-through mode, the program's one mode), numbers
+only.
 
 What `SeeWatch` notes while the run goes on, from the tool's own thread (nothing is sent to any window, no key, no
 click, no message; the foreground is only read):
 
 * every frame the stand-in's capture session delivers (`wgc.add_listener`: when), so that the frames a second of the
-  browser while its bars fade or its spinner turns can be told with the see-through window on and off;
+  browser while its bars fade or its spinner turns can be told with the see-through window over it;
 * which window is in front, every FRONT_EVERY_S, and each change (the stand-in, this process, another);
-* TASlation's own window once a second (`_own_states`): never on a monitor, at alpha 0, a tool window with no taskbar
-  button (it stays shown in Windows' sense), the dialogs of the process on the screen, and when the viewer chooser or
+* TASlation's own window once a second (`_own_states`): never on a monitor, at alpha 0, an application's window with
+  its taskbar button (it stays shown in Windows' sense), the dialogs of the process on the screen, and when the viewer chooser or
   the banner's dialog came and went;
 * the side panes once a second (`_pane_watch`), one click on the left pane's lettering switch posted to the pane
   (`_click_lettering`), and the patch under the pointer (`_hover_measure`: the pointer the see-through window reads is

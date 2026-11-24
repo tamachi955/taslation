@@ -80,7 +80,7 @@ the model whole beside them: `taslation.ocr.place`). Every request carries ``kee
 ``ollama_keep_alive``, in Ollama's own format: `keep_alive_value`): how long Ollama
 keeps the model after it, so the pages that go on needing it keep it, and it goes by
 itself after that; nothing asks for it periodically. `release` unloads it at once: the
-end of a command, Tools > Release the model now, the window's close. ``"-1"`` (never unload) is
+end of a command, Menu > Release the model now, the window's close. ``"-1"`` (never unload) is
 the one setting that keeps the old way: loaded at the start, before the OCR model,
 and never released (`never_unloads`).
 
@@ -100,7 +100,7 @@ judgement at the start sent the model to the processor: `taslation.translate.mod
 server, as before (the requests are what they were, byte for byte); a number goes with every request and every
 warm-up as Ollama's ``num_gpu`` option, the number of the model's layers it puts on the GPU (0: the processor only).
 The option's name is the one Ollama's own options carry (``NumGPU json:"num_gpu"``); a model split on purpose is
-neither loaded again nor said to be partly on the CPU. `release_now` (Tools > Release the model now) unloads the
+neither loaded again nor said to be partly on the CPU. `release_now` (Menu > Release the model now) unloads the
 models this translator had Ollama load or use, whatever ``keep_alive`` says, and names those that were loaded.
 """
 
@@ -1006,7 +1006,7 @@ class OllamaTranslator:
         return True
 
     def release_now(self) -> list[str]:
-        """Tools > Release the model now: every model this translator had Ollama load or use this session unloaded at
+        """Menu > Release the model now: every model this translator had Ollama load or use this session unloaded at
         once, whatever ``keep_alive`` says (even "-1": the next request loads it again, `ensure_loaded`), and waited
         for; the names of those Ollama had loaded (asked /api/ps first: one gone already is not named, and nothing is
         sent for it). A model this translator never used is never asked to go, so another program's model stays.

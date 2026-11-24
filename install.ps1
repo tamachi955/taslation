@@ -1316,7 +1316,7 @@ if (@('off', 'daily') -contains $updateSet) {
     Write-Info (T 'TASlation can look for a new version when it starts, at most once a day.')
     Write-Info (T 'It then asks GitHub for one small file. Nothing about you or your books is sent;')
     Write-Info (T 'GitHub sees your IP address and the time, as any site you open does.')
-    Write-Info (T 'Tools > Settings... can change this later; Help > Check for updates... asks only when you choose it.')
+    Write-Info (T 'Settings... in TASlation''s left pane can change this later; Menu > Help > Check for updates... asks only when you choose it.')
     $wantCheck = Confirm-Choice (T 'Look for a new version when TASlation starts?') -PersonOnly
     if ($Interactive -and -not $Yes -and -not $DryRun) {
         $updateAnswer = 'off'
@@ -1682,7 +1682,7 @@ if ($DryRun -and $updateAsked) {
     if (Save-UpdateCheck $settingsFile $updateAnswer) {
         Write-Ok "update_check = `"$updateAnswer`" kept in $settingsFile"
     } else {
-        Write-Info (T 'The answer about looking for a new version could not be kept in taslation.toml: Tools > Settings... can set it.')
+        Write-Info (T 'The answer about looking for a new version could not be kept in taslation.toml: Settings... in TASlation''s left pane can set it.')
     }
 }
 

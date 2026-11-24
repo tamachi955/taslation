@@ -1,10 +1,10 @@
-"""See-through mode on the Tk side (a prototype behind ``Settings.see_through``, off by default; the viewer's window or
+"""See-through mode on the Tk side - the program's one mode since TASlation's own window went (the viewer's window or
 its full screen): TASlation's lettering lies over the viewer's own window (`capture.seethrough`), and the viewer takes
 every click and key itself - but, with the left pane's Edit on (`see_edit`: the Translator role), the clicks on the
 page's regions.
 
-* `start` makes the see-through window at the window's start when the setting is on (and asks the capture for frames
-  up to every `wgc.FAST_UPDATE_MS`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
+* `start` makes the see-through window at the window's start (Windows; and asks the capture for frames up to every
+  `wgc.FAST_UPDATE_MS`); where it cannot be made the program says so and ends (`could_not_start`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
   hands it the page's patches when they changed (`present`; `_redisplay` asks for that too). The mode holds no hot
   key: every key goes to the viewer, and the lettering is hidden and shown again with the left pane's switch.
 * The patches are where the lettered page differs from the frame it was read from - the page filling in (drafts,
@@ -32,8 +32,8 @@ page's regions.
   file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
   `see_edit`), Set area..., Settings..., Menu (`see_menu`: what the window's menus and toolbar
   offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
-  filling in is (lines lettered of the lines read), the status line, the backlog, the pages that went by too fast and
-  those updated since they were seen (the indicator's own lines), where the translator runs - the window's words with
+  filling in is (lines lettered of the lines read), the status line, the backlog and the pages that went by too fast
+  (the indicator's own lines), where the translator runs - the window's words with
   what they say of keys left out (`panes.without_keys`: the keys are the viewer's here) -, under the bubble last under
   the pointer (`bubble_rows`: Copy the Japanese, Copy the translation and Ask again, then its Japanese and its
   translation; kept once the pointer has left it, so that the pointer can go to the pane, until another bubble is
@@ -95,6 +95,7 @@ COPY_JAPANESE, COPY_TRANSLATION = "Copy the Japanese", "Copy the translation"
 JAPANESE_COPIED = "The bubble's Japanese is on the clipboard."
 TRANSLATION_COPIED = "The bubble's translation is on the clipboard."
 READING = "Reading the Japanese..."
+NOT_KEPT = "This choice holds until TASlation closes: it could not be kept in the settings file ({error})."
 NOT_READ = {"none": "No Japanese was read in this region.",
             "no-ocr": "The reading model is not loaded yet. Try again in a moment."}
 
@@ -144,7 +145,7 @@ def quiet_start(app: Any, settings: Any) -> None:
     app._quiet_decoy = None
     app._quiet_ended = False
     app._see_hidden = False
-    if not (bool(getattr(settings, "see_through", False)) and window.IS_WINDOWS):
+    if not window.IS_WINDOWS:
         return
     app._see_hidden = True
     try:
@@ -486,23 +487,20 @@ def hand_back(app: Any) -> bool:
     return True
 
 
-def unhide(app: Any) -> None:
-    """See-through mode could not start after all (no see-through window): TASlation's own window is the window it
-    always was."""
-    if not hidden(app):
-        return
-    app._see_hidden = False
+COULD_NOT_START = "TASlation could not lay its lettering over the viewer's window on this computer, and ends."
+
+
+def could_not_start(app: Any) -> None:
+    """The see-through window could not be made (no Windows, or Windows refused it): the reader is told, in a box of
+    TASlation's own, and the program ends once it is answered (`App.quit_before_start`, `run_app`)."""
+    log.error("see-through mode: the see-through window could not be made; TASlation ends")
+    app.quit_before_start = True
     try:
-        app.wm_attributes("-toolwindow", False)
-    except tk.TclError:
+        from .dialogs import caches as boxes
+
+        boxes.tell(app, _(COULD_NOT_START))
+    except Exception:  # noqa: BLE001 - (no box either: the log has it)
         pass
-    app._apply_alpha()
-    normal = getattr(app, "_normal_geometry", "")
-    if normal:
-        try:
-            app.wm_geometry(normal)
-        except tk.TclError:
-            pass
 
 
 class HiddenWindowMixin:
@@ -546,19 +544,27 @@ class HiddenWindowMixin:
         over the viewer; None otherwise."""
         return dialog_centre(self)
 
+    def _apply_alpha(self) -> None:
+        """The window unseen (alpha 0) while it is off the screen, before it is first shown (an alpha set later makes
+        a browser behind it flicker)."""
+        if window.IS_WINDOWS and hidden(self):
+            try:
+                self.attributes("-alpha", 0.0)  # type: ignore[attr-defined]
+            except tk.TclError:
+                pass
 
-def without_the_window(app: Any) -> None:
-    """At the start of see-through mode with TASlation's own window hidden: what needs that window is not used, said
-    once in the log - the full screen asked for at the start (``gui --full-screen``: the viewer's own full screen is
-    the one here). (The Translator role is the left pane's Edit here: `see_edit`.)"""
-    if getattr(app, "_reading_at_start", False):
-        app._reading_at_start = False
-        log.info("see-through mode: TASlation's own full screen is not used (the full screen asked for at the start "
-                 "left out)")
+    def _own_hwnd(self) -> int | None:
+        """The window's own top-level handle (None off Windows)."""
+        if not window.IS_WINDOWS:
+            return None
+        import ctypes
+
+        return int(ctypes.windll.user32.GetAncestor(self.winfo_id(), 2))  # type: ignore[attr-defined] - GA_ROOT
 
 
 def start(app: Any) -> bool:
-    """The see-through window made when the setting asks for it (Windows only); whether it runs."""
+    """The see-through window made (Windows only); whether it runs - where it does not, the program ends
+    (`could_not_start`)."""
     app._see_through = None
     app._see_memo = []
     app._see_bars_since = None
@@ -585,11 +591,9 @@ def start(app: Any) -> bool:
     # pane shows (`bubble_tick`)
     app._see_reads = {}  # id of a region from the cache -> (its Japanese's reading: "asked", "" done, or why not, when)
     app._see_right_used = "right"  # the right pane's picture handed over: "bubble" (with the bubble's block) or not
-    if not bool(getattr(app.settings, "see_through", False)):
-        return False
     over = window.SeeThrough.start()
     if over is None:
-        unhide(app)
+        could_not_start(app)
         return False
     app._see_through = over
     app._see_patcher = Patcher(over)
@@ -597,7 +601,6 @@ def start(app: Any) -> bool:
     if hidden(app):
         from . import see_menu
 
-        without_the_window(app)
         see_menu.init(app)
         try:
             app.bind_class("Toplevel", "<Map>", lambda e: _mapped(app, e), add="+")
@@ -763,8 +766,8 @@ def right_rows(app: Any) -> list[pn.Row]:
     problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their buttons
     do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; the
     status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status line, the
-    indicator's lines on the pages behind (the backlog, those that went by too fast, those updated since they were
-    seen: `side_model`), where the translator runs. The window's words name no key and no menu of its own here
+    indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`), where the
+    translator runs. The window's words name no key and no menu of its own here
     (`panes.pane_words`: every key is the viewer's, the window's menus are not on the screen). The reader's notes on a
     page (`_show_notes`, the window's strip under the page) are left out."""
     from . import status_slot
@@ -806,8 +809,6 @@ def right_rows(app: Any) -> list[pn.Row]:
             missed = max(counts["missed"], backlog.dropped)
             if missed:
                 rows.append(pn.Row("", _("{n} turned too fast to catch: turn back to them in the viewer to have them read.").format(n=missed), "text"))
-            if counts["updated"]:
-                rows.append(pn.Row("", _("{n} updated since you saw them.").format(n=counts["updated"]), "text"))
         except Exception:  # noqa: BLE001 - the indicator's lines left out
             pass
     where = getattr(app, "_compute_where", "")
@@ -960,8 +961,6 @@ def _flip_indicators(app: Any) -> None:
     try:
         config.write_settings(config.settings_file(app.settings), {"see_through_indicators": value})
     except (config.ConfigError, OSError) as e:
-        from .hover import NOT_KEPT
-
         say = getattr(app, "say", None)
         if say is not None:
             say(NOT_KEPT, error=getattr(e, "strerror", None) or str(e))

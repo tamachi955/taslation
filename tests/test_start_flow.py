@@ -24,7 +24,6 @@ from taslation.capture import WindowInfo
 from taslation.config import Settings
 from taslation.i18n import load_ui_language, save_ui_language, set_language
 from taslation.messages import Cancelled, Message
-from taslation.pagekeys import opposite_key
 from taslation.regions import PageResult
 from taslation import viewerparts
 from taslation.ui import app as app_mod
@@ -69,13 +68,11 @@ A = app_mod.App
 
 
 class Flow(BlackViewerMixin, tk.Toplevel):
-    _raise_for_key = lambda self, hwnd: None  # (the viewer raised for a look: tests/test_wgc.py)
-
     """The parts of the App that a book's start, the setup checks and their banner, Stop, a slow model and the busy
     signs use. What it would start elsewhere (Auto's next look) is recorded; `after` keeps its callbacks for the test
     to run."""
 
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
+    _enlarge_first = lambda self: True  # (the viewer's window looked at once as it is: tests/test_see_hidden.py)
     _init_flow_state = A._init_flow_state
     _handle_event = A._handle_event
     _warn_unasked = A._warn_unasked
@@ -138,7 +135,6 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _follows_events = A._follows_events
     _say_waiting = A._say_waiting
     close_band = A.close_band
-    _page_keys = A._page_keys
     _on_new_page = A._on_new_page
     _starts_book = A._starts_book
     _all_cached = A._all_cached
@@ -147,7 +143,6 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _post = A._post
     say = A.say
     status = A.status
-    _note_ms = A._note_ms
     _page_status = A._page_status
     _job_line = A._job_line
     _status_follows_page = A._status_follows_page
@@ -194,7 +189,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
         self.auto_var = tk.BooleanVar(self, value=True)
         self.translate_btn, self.stop_btn, self.model_box = {}, {}, {}
         self.progress_bar = Bar()
-        self.ready, self.busy, self.reading, self.pipeline = True, False, False, None
+        self.ready, self.busy, self.pipeline = True, False, None
         self.selected = VIEWER
         self._book_edited = self._busy_shown = self._bar_shown = self._fill_dirty = False
         self._queued = self._fill = self.last_result = self._auto_last = self._auto_candidate = None
@@ -347,10 +342,7 @@ def test_generic_names_name_no_book():
     assert generic_book_name("Google Chrome") and generic_book_name("")
 
 
-def test_the_opposite_key_and_the_durations():
-    assert opposite_key("Left") == "Right" and opposite_key("right") == "Left"
-    assert opposite_key("PageDown") == "PageUp" and opposite_key("Space") is None
-    assert opposite_key("") is None and opposite_key(None) is None
+def test_the_durations():
     assert banner.duration_text(35 * 60) == "35 min" and banner.duration_text(10) == "1 min"
     assert banner.duration_text(65 * 60) == "1 h 5 min"
     set_language("ja")
@@ -1060,10 +1052,10 @@ def test_the_colophons_name_is_offered_once_and_used_when_nothing_is_kept_yet(fl
     offers = Offers()
     monkeypatch.setattr(jobs, "ColophonOffer", offers)
     event = {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"}
-    flow.reading = True  # read behind the full screen: offered once it is left
+    flow._start_dialog = object()  # read while a dialog of the start is on: offered once it has gone
     flow._handle_event("colophon", event)
     assert not offers.made and flow._colophon_found is not None
-    flow.reading = False
+    flow._start_dialog = None
     flow._handle_event("translate_done", {})
     assert [(t, v) for t, v, _answer in offers.made] == [("見本の物語", "3")]
     offers.made[0][2](True)  # Use
@@ -1195,9 +1187,10 @@ def test_a_rename_that_cannot_be_made_says_why_and_the_book_keeps_its_name(flow,
 def test_an_old_cache_kept_under_the_viewers_name_is_renamed_and_the_start_that_waited_goes_on(flow, monkeypatch):
     made = _offers(monkeypatch)
     _cache(flow.store, "Yomizuq", [_page(3), _page(4)])  # kept before the name was asked for
-    flow.reading = True  # read behind the full screen: offered once it is left
+    flow._start_dialog = object()  # read while a dialog of the start is on: offered once it has gone
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"})
-    flow.reading = False
+    assert not made
+    flow._start_dialog = None
     flow._start_pending, flow._start_waits = (_viewer(_page(70)), None), True  # a book's start waits meanwhile
     flow._handle_event("translate_done", {})
     assert _question(made[0]) == "".join("The last page of the book says this is 見本の物語 (3). Rename Yomizuq to it? Its "
@@ -1498,9 +1491,9 @@ def test_f5_while_the_browser_shows_another_tab_says_the_live_views_line(flow):
 
 
 def test_a_colophon_read_under_a_generic_name_names_the_book_at_its_start(flow, monkeypatch):
-    flow.reading = True
+    flow._start_dialog = object()  # read while a dialog of the start is on: kept for the book's start
     flow._handle_event("colophon", {"colophon": COLOPHON, "book": "Yomizuq", "model": "m", "language": "English"})
-    flow.reading = False
+    flow._start_dialog = None
     flow._on_new_page(_viewer(_page(70)), None)  # the start dialog comes first: the colophon's name filled in
     d = flow.asked()
     assert d.matches == ["見本の物語 3"] and d.hint == "colophon"

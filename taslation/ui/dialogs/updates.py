@@ -1,4 +1,4 @@
-"""Help > Check for updates...: asks GitHub for the newest version when it opens (`updates.Check`: check_update.py in a
+"""Menu > Help > Check for updates...: asks GitHub for the newest version when it opens (`updates.Check`: check_update.py in a
 process of its own; TASlation's own process asks nothing), then says one of: this is the newest version (with its
 version and date), GitHub could not be asked (one plain sentence: `reason_text`), or a newer version is out - both
 versions with their dates, the changes since this one in a scrolling plain-text box (`change_lines`: a bullet or a

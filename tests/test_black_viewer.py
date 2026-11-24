@@ -17,7 +17,7 @@ from taslation.capture import is_black, wgc
 from taslation.config import ConfigError, Settings
 from taslation.i18n import UI_LANGUAGES, _, set_language
 from taslation.recovery import GAVE_UP, LOADING, RECOVERED, BlackWatch
-from taslation.ui import jobs, live, reading, viewers
+from taslation.ui import jobs, live, viewers
 from taslation.ui.constants import VIEWER_BLACK, VIEWER_LOADING
 
 HWND = 1
@@ -39,7 +39,7 @@ class Screen:
     def __init__(self, monkeypatch):
         self.keys: list = []
         self.seq: int | None = 1
-        for module in (capture, live, reading, viewers):
+        for module in (capture, live, viewers):
             for name in SENDERS:
                 if hasattr(module, name):
                     monkeypatch.setattr(module, name, lambda *a, _n=name, **k: self.keys.append((_n, a)))
@@ -210,10 +210,7 @@ class Window(live.LiveViewMixin):
     def __init__(self, settings):
         self.settings = settings
         self.selected = SimpleNamespace(hwnd=HWND, title="Book - Browser")
-        self.reading = False
         self.busy = False
-        self._enlarged = None
-        self._enlarging = None
         self.lines: list[str] = []
         self.pages: list[Image.Image] = []
         self.found = 0
@@ -237,9 +234,6 @@ class Window(live.LiveViewMixin):
 
     def _find_page(self, image):
         self.found += 1
-
-    def _sync_area(self):
-        pass
 
     def _apply_found_margins(self):
         pass
@@ -345,21 +339,6 @@ def test_the_window_tells_the_person_to_reload_once_and_presses_nothing(settings
     assert not window._black_open() and window.lines[-1] == "normal"
     assert window.afresh == 1  # the page is taken as the viewer shows it now
     assert stage.screen.keys == []
-
-
-def test_no_spell_while_taslation_gives_the_window_a_new_size(settings, stage):
-    window = Window(settings)
-    window._enlarging = {"enlarged": object()}
-    window._capture(HWND)
-    assert not window._black_open()
-
-
-def test_a_size_given_meanwhile_ends_the_spell(settings, stage):
-    window = Window(settings)
-    window._capture(HWND)
-    window._enlarging = {"enlarged": object()}
-    window._capture(HWND)
-    assert not window._black_open()
 
 
 def test_nothing_is_pressed_while_the_reader_is_in_another_program(settings, stage):

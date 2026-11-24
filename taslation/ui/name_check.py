@@ -1,7 +1,7 @@
 """The window's side of the name consistency helper: the names that the pages read in this session rendered in more
 than one way (`taslation.name_variants`; `keep_page_found`: the lines kept in the worker's memory only,
 `jobs.keep_page_names` - their translations and where each is stored, never their Japanese), offered quietly on the
-band, once for a name new to the book in this session (`JobsMixin._offer_page_names`), and from Tools > Names rendered
+band, once for a name new to the book in this session (`JobsMixin._offer_page_names`), and from Menu > Names rendered
 in more than one way..., and the change the reader chooses in `dialogs.names.NamesDialog`.
 
 A change is the replace machinery's (`ReplaceMixin`): the lines' texts through `BookCache.put_texts` (only a bubble

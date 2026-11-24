@@ -1,7 +1,7 @@
 """TASlation's own message boxes in place of Windows' (`ui.dialogs.caches.ask` and `tell`): buttons in the window's
 language that say what they do, above everything (a full-screen viewer too), the foreground back to the viewer when
-it had it; a warning nobody asked for goes to the status line and the page while the reader reads, never into a box
-over the book. No module of the window uses tkinter's message boxes any more."""
+it had it; a warning nobody asked for goes to the status line (the right pane shows it), never into a box over the
+book. No module of the window uses tkinter's message boxes any more."""
 from __future__ import annotations
 
 import re
@@ -86,20 +86,15 @@ def test_the_viewer_that_had_the_foreground_gets_it_back(hidden_root, answered, 
         del hidden_root.selected
 
 
-@pytest.mark.parametrize("state", ["reading", "over", "window"])
-def test_a_warning_nobody_asked_for_never_comes_up_over_the_book(state, monkeypatch):
+@pytest.mark.parametrize("said", [False, True])
+def test_a_warning_nobody_asked_for_never_comes_up_over_the_book(said, monkeypatch):
     told: list[tuple[str, bool]] = []
     monkeypatch.setattr(caches, "tell", lambda _parent, text, wait=True, **_k: told.append((text, wait)))
-    notes: list[tuple[str, int]] = []
-    w = SimpleNamespace(reading=state == "reading", _over_on=state == "over", statuses=[],
-                        canvas=SimpleNamespace(set_note=lambda text, ms=0: notes.append((text, ms))))
+    w = SimpleNamespace(statuses=[])
     w.status = w.statuses.append
-    jobs.JobsMixin._warn_unasked(w, "The model runs partly on the CPU.")
-    if state == "window":
-        assert told == [("The model runs partly on the CPU.", False)] and not w.statuses  # a box the window goes on past
-    else:
-        assert not told and w.statuses == ["The model runs partly on the CPU."]
-        assert notes == ([] if state == "reading" else [("The model runs partly on the CPU.", jobs.WARNING_NOTE_MS)])
+    jobs.JobsMixin._warn_unasked(w, "The model runs partly on the CPU.", said=said)
+    assert not told  # (no box: the reader reads in the viewer)
+    assert w.statuses == ([] if said else ["The model runs partly on the CPU."])  # (the right pane shows it)
 
 
 def test_no_part_of_the_window_uses_tkinter_s_message_boxes():

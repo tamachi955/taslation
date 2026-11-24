@@ -1,4 +1,4 @@
-# Tools > Settings... in the window changes the common settings and its "Open settings file" makes a taslation.toml
+# Settings... in the Menu of the controls at the left changes the common settings and its "Open settings file" makes a taslation.toml
 # from this file where there is none (each setting a note there, until its "#" is deleted). By hand: copy this file
 # to taslation.toml. TASlation reads the first of: the file given with --config; ./taslation.toml in the
 # directory you run taslation from (or next to this file, in a checkout); taslation.toml in the state folder
@@ -13,10 +13,10 @@ ollama_model = "auto"         # "auto": PLaMo 3 Translate 2B for every language 
 ollama_timeout = 900.0
 ollama_temperature = 0.2
 ollama_num_ctx = 16384        # the chat translator's context window (0 = server default); PLaMo has its own (8192)
-ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); the window's start (load_model_at_start) or the first line to translate loads it, Tools > Release the model now or closing the window releases it. "-1": load it at the start and never unload
-load_model_at_start = true    # the window loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; also Tools > Settings... > System). false: the first line to translate loads it
-ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Tools > Settings... > System). Tools > Release the model now gives the GPU memory back at once
-ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto" (the default) and "on": with it; "off": as before (also Tools > Settings... > System; from Ollama's next start)
+ollama_keep_alive = "5m"      # how long Ollama keeps the model in GPU memory after a request: "5m", "2h", or seconds ("0": unload after each request); TASlation's start (load_model_at_start) or the first line to translate loads it, Menu > Release the model now or quitting TASlation releases it. "-1": load it at the start and never unload
+load_model_at_start = true    # TASlation loads the translation model at its start, beside the OCR model, so the first page does not wait for it (it goes after ollama_keep_alive as ever; also Settings... > System). false: the first line to translate loads it
+ollama_num_gpu = ""           # how many of the model's layers Ollama puts on the GPU: "" lets Ollama decide (the fastest); "0": the processor only, the GPU left free for something else (several times slower); a number: that many layers on the GPU (also Settings... > System). Menu > Release the model now gives the GPU memory back at once
+ollama_window_cache = "auto"  # the Ollama TASlation starts keeps the cache of the model's whole window, and 256 MB of earlier requests in RAM: translation about a quarter faster, for about 130 MB more GPU memory (220 MB above 6 GB). "auto" (the default) and "on": with it; "off": as before (also Settings... > System; from Ollama's next start)
 target_language = "English"
 context_pages = 2             # live mode: previous pages given to the model as context (memory only; PLaMo's earlier
                               # lines grow to 60 and are cut back to the newest 20; 0: none)
@@ -68,37 +68,23 @@ fingerprint_max_distance = 36
 match_min_iou = 0.4
 reuse_lines = true            # a short line translated before in the book or its series gets that translation again, without a request (a correction of yours first); kept in the book's cache under a keyed hash of the line, never the Japanese
 
-# --- following the viewer ---
-# The viewer's page keys, which the page keys you press in TASlation's window are passed on as: Left, Right, Up, Down,
-# PageUp, PageDown, Home, End, Space, Enter, Tab, Backspace, Escape, F1-F12, a letter or a digit. Page > Page keys... (or `taslation keys`) keeps keys per viewer
-# in profiles.json, and "Apply to all viewers" keeps defaults there too; both come before these lines, which are
-# the keys of a viewer that has neither (TASlation never rewrites this file).
-next_page_key = "Left"        # the next page (Left: a manga reader, right-to-left; Right: an image viewer)
-prev_page_key = "Right"       # the previous page
+# --- following the viewer (you turn the pages in the viewer; TASlation presses no key) ---
 # A viewer that stays black (a stuck loading screen, say) may just be loading: after about 8 s the status line says so,
 # after black_wait_s it tells you to reload the book in its own window (click the book, then its reload key: F5 in a
 # browser). TASlation presses no key for it, and goes on by itself once the page shows.
 black_wait_s = 30             # seconds a black viewer is waited for before you are told to reload it
-page_turn_wait_ms = 3000
+page_turn_wait_ms = 3000      # how long a viewer that draws nothing after a turn is waited for before it is looked at again
 settle_ms = 400
 early_start = true            # a new page is read from its first frame; it asks the model and is kept once that frame stays (false: wait settle_ms first)
 
 # --- app ---
-role = "reader"               # "reader" | "translator" (mark text, fix translations, keep a glossary)
-ui_language = ""              # window language: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
-ui_scale = 1.0                # size of the window's text, times what Windows sets for its monitor (0.5-3.0; also Tools > Settings...)
-theme = "system"              # the window's colours: "system" (as Windows' app mode), "light" or "dark"; Windows' high contrast comes first (also Tools > Settings...)
-always_on_top = false         # the window starts above the others (View > Always on top for this session; gui --on-top)
+role = "reader"               # Edit at the start: "reader" (off) | "translator" (on: mark text, fix translations); a book's own choice comes first
+ui_language = ""              # language of the controls and dialogs: en, ja, es, pt, fr, de, it, nl, pl, ru, tr, id, vi, zh, zh-tw, ko, th (empty = first-start choice)
+ui_scale = 1.0                # size of the dialogs' text, times what Windows sets for the monitor (0.5-3.0; also Settings...)
+theme = "system"              # the dialogs' and menus' colours: "system" (as Windows' app mode), "light" or "dark"; Windows' high contrast comes first (also Settings...)
 auto_interval_ms = 700
-over_book = true              # over a viewer in full screen on the same monitor, stay on top without taking its keys (View > Over the full-screen viewer)
-see_through = false           # a prototype: the lettering laid over the viewer's own window, which keeps every click and key; the Lettering switch in the controls at the left hides or shows it; TASlation's own window is not shown then (the controls' Menu has the rest; a click on TASlation's taskbar button brings the viewer to the front, or opens that menu where the controls have no room; the button's Close quits; the Reader role always, the viewer's window never moved nor resized; its Settings... has a row for this, from the next start)
-see_through_indicators = true # see-through mode: the pane at the right edge of the viewer's area - the bubble last under the pointer (its original, its translation, Copy and Ask again) and the indicators; off, neither shows (the switch in the controls at the left, or Settings..., keeps the choice here)
-bubble_zoom = true            # the translation on the page (the Reader role by hover_shows; the Translator role always): a translated bubble the pointer rests on shows its original (beside it or in its place: hover_reveal)
-hover_shows = "original"      # the Reader role (in the window and on the full screen): "original" (the page translated, the panel beside a bubble under the pointer shows its original) | "translation" (the page as the viewer shows it, the panel shows the bubble's translation); also View menu, Tools > Settings...
-hover_reveal = "panel"        # how a bubble under the pointer shows the other side: "panel" (beside it: both in sight at once) | "in_place" (the bubble itself: the original lettering, or what was read as text, erased and set); also View menu, Tools > Settings...
-side_indicator = "column"     # the pages turned past, beside the page on the side it turns to: "column" (small thumbnails with how far each page is, where the margin has room; a narrow bar elsewhere) | "rail" (the narrow bar only) | "off"; also Tools > Settings...
-panel_font_size = 0           # the panel's text in points (6-72; it follows ui_scale and the monitor's scaling, at most 8 % of the screen's height, and the panel stays on the screen); 0: automatic (twice readable_font_size, at least 1.25 times the bubble's lettering on the screen, 16-44 px)
-hover_delay_ms = 450          # how long the pointer rests on a bubble before its other side shows (0-3000): this long on a bubble hard to read and on every one with the original on the page, 8/3 as long on the others (450: 0.45 s and 1.2 s; 0: at once); in see-through mode, how long the pointer rests on a patch before it hides and shows the viewer's original (once, for every patch)
-follow = "events"             # "events": the viewer is captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
-update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... asks, when you choose it; also Tools > Settings...
+see_through_indicators = true # the pane at the right edge of the viewer's area - the bubble last under the pointer (its original, its translation, Copy and Ask again) and the indicators; off, neither shows (the switch in the controls at the left, or Settings..., keeps the choice here)
+hover_delay_ms = 450          # how long the pointer rests on a bubble's lettering before it gives way to the original under it (0-3000; 0: at once)
+follow = "events"             # "events": the viewer is captured every auto_interval_ms only while the viewer itself is in front, never while neither is; "poll": every auto_interval_ms
+update_check = "off"          # "daily": when TASlation starts, look for a new version at most once a day (check_update.py asks GitHub for one small file; nothing about you or your books is sent); "off": only Help > Check for updates... in the Menu asks, when you choose it; also Settings...
 debug = false

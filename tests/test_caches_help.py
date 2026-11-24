@@ -1,7 +1,7 @@
 """The encrypted cache export as the window explains it (the Caches dialog says what the file is for and what an
 export or import did, its times in local time; a warning comes before the file dialog of an export or an import and
 its Cancel asks for nothing more; the passphrase dialog says what the passphrase is and, as it is typed, what keeps
-OK waiting; without the cryptography package both buttons are off and the dialog says why), and the Help menu with
+OK waiting; without the cryptography package both buttons are off and the dialog says why), and the Menu's Help with
 its About dialog. Dialogs on the shared hidden root, never mapped where it can be helped."""
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from taslation.i18n import UI_LANGUAGES, _, set_language
 from taslation.ui import app as app_mod
 from taslation.ui.dialogs import about, caches
 from taslation.ui.dialogs.caches import ERROR_COLOUR, CachesDialog, PassphraseDialog, WarningBox, shown_time
-from taslation.ui.shortcuts import key_text
 
 ROOT = Path(__file__).resolve().parents[1]
 PASSPHRASE = "correct horse battery staple"
@@ -432,40 +431,15 @@ def test_the_package_gone_after_the_dialog_opened_is_said_in_the_windows_languag
     set_language("en")
 
 
-# ------------------------------------------------------------------ the Help menu and About
-class Menus(tk.Toplevel):
-    """The App's menu bar on a withdrawn window, each command recording its name."""
-
-    _build_menus = app_mod.App._build_menus
-
-    def __init__(self, root):
-        super().__init__(root)
-        self.withdraw()
-        self.calls: list[str] = []
-        self.role_var, self.ui_lang_var = tk.StringVar(self, value="reader"), tk.StringVar(self, value="en")
-        for name in ("auto_var", "original_var", "top_var", "over_var", "order_numbers_var"):
-            setattr(self, name, tk.BooleanVar(self))
-
-
-def _recorder(name: str):
-    def record(self, *_args, **_kwargs):
-        self.calls.append(name)
-
-    return record
-
-
-for _name in ("translate_now", "set_area", "clear_area", "open_page_keys",
-              "open_glossary", "open_caches", "_on_role_changed",
-              "toggle_order", "toggle_skip", "retranslate_page",
-              "open_book_settings", "open_review", "open_find_replace", "undo_edit", "redo_edit", "_redisplay", "_apply_on_top",
-              "_on_ui_language", "open_help", "open_keys", "open_notice", "open_updates", "open_about", "toggle_over",
-              "review_names", "open_settings"):
-    setattr(Menus, _name, _recorder(_name))
-
-
-def _cascades(menubar: tk.Menu) -> dict[str, tk.Menu]:
-    return {str(menubar.entrycget(i, "label")): menubar.nametowidget(menubar.entrycget(i, "menu"))
-            for i in range(int(menubar.index("end")) + 1) if menubar.type(i) == "cascade"}
+# ------------------------------------------------------------------ the Menu's Help and About
+def _menu_app(root, calls: list[str]) -> SimpleNamespace:
+    """The window as the Menu (`see_menu.build`) sees it, each command recording its name."""
+    app = SimpleNamespace(ui_lang_var=tk.StringVar(root, value="en"), _see_hidden=True, _see_through=None,
+                          auto_var=tk.BooleanVar(root, value=True))
+    for name in ("open_caches", "review_names", "open_help", "open_notice", "open_updates", "open_about",
+                 "open_settings", "_on_ui_language", "_on_close", "translate_now", "set_area"):
+        setattr(app, name, lambda _n=name: calls.append(_n))
+    return app
 
 
 def _entries(menu: tk.Menu) -> list[tuple[str, str]]:
@@ -473,36 +447,36 @@ def _entries(menu: tk.Menu) -> list[tuple[str, str]]:
             for i in range(int(menu.index("end")) + 1)]
 
 
-def _invoke(w: Menus, menu: tk.Menu, label: str) -> str:
-    w.calls.clear()
+def _invoke(calls: list[str], menu: tk.Menu, label: str) -> str:
+    calls.clear()
     menu.invoke(next(i for i in range(int(menu.index("end")) + 1)
                      if menu.type(i) != "separator" and str(menu.entrycget(i, "label")) == label))
-    return w.calls[-1]
+    return calls[-1]
 
 
 @pytest.mark.parametrize("code", ["en", "ja", "de"])
 def test_the_help_menu_comes_after_language_and_alone_has_the_notice(hidden_root, code):
+    from taslation.ui import see_menu
+
     set_language(code)
-    w = Menus(hidden_root)
-    w._build_menus()
-    menus = _cascades(w.menubar)
-    assert list(menus)[-2:] == [_("Language"), _("Help")]
-    help_menu = menus[_("Help")]
-    assert _entries(help_menu) == [("command", _("How to use...")), ("command", _("Keys...")),
-                                   ("command", _("Legal notice...")), ("separator", ""),
-                                   ("command", _("Check for updates...")), ("command", _("About TASlation"))]
-    assert str(help_menu.entrycget(0, "accelerator")) == "F1"
-    assert str(help_menu.entrycget(1, "accelerator")) == key_text("Shift-F1")  # Umschalt+F1 in German
-    assert _invoke(w, help_menu, _("Keys...")) == "open_keys"
-    assert _invoke(w, help_menu, _("Legal notice...")) == "open_notice"
-    assert _invoke(w, help_menu, _("Check for updates...")) == "open_updates"
-    assert all(_("Legal notice...") != label
-               for name in (_("Language"), _("View")) for _kind, label in _entries(menus[name]))
-    assert ("separator", "") not in _entries(menus[_("Language")]) + _entries(menus[_("View")])
-    assert _invoke(w, help_menu, _("About TASlation")) == "open_about"
+    calls: list[str] = []
+    app = _menu_app(hidden_root, calls)
+    menu, language, help_menu = (tk.Menu(hidden_root, tearoff=0) for _ in range(3))
+    see_menu.build(app, menu, language, help_menu)
+    assert [label for _kind, label in _entries(menu)][-2:] == [_("Language"), _("Help")]
+    assert _entries(help_menu) == [("command", _("How to use...")), ("command", _("Legal notice...")),
+                                   ("separator", ""), ("command", _("Check for updates...")),
+                                   ("command", _("About TASlation"))]
+    assert _invoke(calls, help_menu, _("How to use...")) == "open_help"
+    assert _invoke(calls, help_menu, _("Legal notice...")) == "open_notice"
+    assert _invoke(calls, help_menu, _("Check for updates...")) == "open_updates"
+    assert all(_("Legal notice...") != label for _kind, label in _entries(menu) + _entries(language))
+    assert ("separator", "") not in _entries(language)
+    assert _invoke(calls, help_menu, _("About TASlation")) == "open_about"
     if code == "ja":
         assert _("Help") == "ヘルプ" and _("About TASlation") == "TASlation について"
-    w.destroy()
+    for each in (menu, language, help_menu):
+        each.destroy()
     set_language("en")
 
 

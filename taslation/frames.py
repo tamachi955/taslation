@@ -2,8 +2,7 @@
 the fine `detail` of a frame cell by cell that tells a soft picture of a page from its sharp one (`sharper`), and how
 crisp a picture's edges are whatever it shows (`crispness`, `looks_sharp`, and `SharpSeen` for the pages whose sharp
 picture the live view has seen): how the live view (`ui.live`) and the window's other looks at the viewer judge its
-frames. `thumb_of` makes the small picture of a screen that the indicator beside the page shows (`backlog`: too
-small to read). Nothing here captures, keeps or writes anything: the frames are given."""
+frames. Nothing here captures, keeps or writes anything: the frames are given."""
 
 from __future__ import annotations
 
@@ -32,16 +31,6 @@ CRISP_KEPT = 50  # the crispness of so many soft and sharp pictures of the viewe
 # same); the newest SHARP_SEEN_KEPT such pages are kept, in memory
 PAGE_SHARP_SHARE = 0.85
 SHARP_SEEN_KEPT = 256
-THUMB_HEIGHT = 96  # px: the thumbnail of a screen told to the window (`backlog`)
-
-
-def thumb_of(image: Image.Image, height: int = THUMB_HEIGHT) -> Image.Image:
-    """A thumbnail of *image* at most *height* px high (RGB)."""
-    small = image.convert("RGB")
-    if small.height > height:
-        small = small.resize((max(1, round(small.width * height / small.height)), height), Image.BILINEAR,
-                             reducing_gap=2.0)
-    return small.copy() if small is image else small
 
 
 def detail(image: Image.Image, box: tuple[int, int, int, int] | None = None) -> np.ndarray:

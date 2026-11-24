@@ -1,4 +1,4 @@
-"""The About dialog (Help > About TASlation): the version, the licence, where its data is kept and where to read
+"""The About dialog (Menu > Help > About TASlation): the version, the licence, where its data is kept and where to read
 more, given by path: nothing here opens a browser. The offline guard's state is in Copy details
 (`errorlog.guard_line`), not in the dialog's text."""
 

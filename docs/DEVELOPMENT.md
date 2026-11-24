@@ -92,12 +92,13 @@ starts without the caches of the titles before it.
 
 ## A setting in the Settings dialog
 
-Tools > Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:
+Settings... (`taslation/ui/dialogs/settings.py`) takes another part's setting in one line of `EXTRA_ROWS`:
 `SettingRow(key, label, tip, section="window", choices=(), page=False)`, with *key* a field of `config.Settings`
 (also in `taslation.toml.example`), *label* and *tip* in English with their 16 languages in
-`taslation/locales/features/settings_dialog.py`, *section* "lettering" or "window", *choices* `((value, label), ...)`
+`taslation/locales/features/settings_dialog.py`, *section* "lettering" or "window" (the section labelled Dialogs),
+*choices* `((value, label), ...)`
 for a list instead of a checkbox, and *page* when a change must letter the page on show again. The row shows only
-where `Settings` has the key, Save writes it into taslation.toml and sets it on the window's settings at once
+where `Settings` has the key, Save writes it into taslation.toml and sets it on the running program's settings at once
 (`App._settings_saved`); the part reads `settings.<key>` whenever it acts. `tests/test_settings_rows.py` checks the
 rows' languages.
 
@@ -131,14 +132,12 @@ rows' languages.
   `tools/intro_video.py` (the next entry), the first time with version 0.9.0. Each of these recordings holds
   CC BY-NC 4.0 material. Since version 0.9.4 the README shows a video instead (an attachment kept by GitHub) and the
   repository holds no recording. With the whole-book run gone (2026-11-22) the tool only says so and ends (exit code 2).
-* `tools/intro_video.py` records the README's introduction again from the code its checkout holds (a dev tool, never
-  part of a release). `record --out FILE` runs the real window in English beside a stand-in viewer of its own (a Tk
-  window of a child process showing OpenMantra pages, turned only by the page key the window passes on to it), with
-  the real OCR and PLaMo through an Ollama that TASlation's own starter starts on a spare port (`--start-ollama`, 11438
-  by default; 11434 to 11437 refused) and stops at the end. Its scenes come from a table (`record --list`, `--scenes`),
-  each acted on the window's own Tk widgets with no system-wide input (the pointer is drawn in afterwards); it uses
-  `tools/demo_video.py`'s guard and a scratch state folder, touches no other window, and keeps no page text in the
-  recording. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
+* `tools/intro_video.py` makes the README's introduction (a dev tool, never part of a release). Before 2.0.0 its
+  `record` ran the real window in English beside a stand-in viewer of its own (a Tk window of a child process showing
+  OpenMantra pages, turned only by the page key the window passed on to it), through scenes acted on the window's own
+  Tk widgets. From 2.0.0 on that window is hidden - the lettering lies over the viewer's own window - and no key is
+  passed on, so `record` went with it; a recording of an earlier version can still be rendered. A recording keeps no
+  page text. `render FILE --out GIF` makes a 960x540 GIF of about 90 to 140 s - a title card, the numbered steps and
   cards whose figures come from the code's constants - refuses one over 5 MB (`--allow-large`), and deletes the
   recording once the GIF is written; `render --sample` renders made-up frames. The recording and the GIF hold CC BY-NC
   4.0 material. Each card line and step names the sentences of README.md, docs/MANUAL.md or docs/THIRD_PARTY.md it
@@ -152,7 +151,8 @@ rows' languages.
   (`pipeline.SLANTS_AS_READ`) the same way.
 * `tools/cached_turn_profile.py` times, stage by stage, a page whose translations are cached, from the settled frame to
   the page drawn, on a stand-in viewer in memory.
-* `tools/standin_e2e.py` checks the real window end to end on a browser-type stand-in viewer
+* `tools/standin_e2e.py` checks the real program end to end on a browser-type stand-in viewer, in its one mode (the
+  lettering laid over the stand-in's own window, TASlation's own window hidden)
   (`tools/standin_viewer/`: a local page the browser shows in an app window of its own, with a scratch profile; it
   fetches nothing and turns its pages by its own script: soft first, spreads, black frames, a spinner, a band whose
   cells say the page). The window chooses that window alone (the others are not listed, a guard stops the run when
@@ -207,22 +207,14 @@ rows' languages.
   each with the part of the frame the page view draws against the page the stand-in drew there (rows of the browser's
   title bar and of the band drawn, the ground round the page) and the reading's page units in the capture area and
   outside it, with their fingerprints' distance; no key or click is sent, the state folder is a scratch one, and the
-  profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default, about 6
-  minutes): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and spinners; e,
-  turning back to cached pages; r, the full screen in the Reader role, entered and left by F11's own handler; t, the
-  full screen in the Translator role (the toolbar's Translator, then F11's handler; at rest a region selected by a
-  click on the page and the region editor opened by a double click - Tk's own pointer events on the page - and closed
-  by its Esc, the selection let go by Esc, the page turned by the window's next page key and, t2, back by its
-  previous one - Tk's key events on the page, the key the window hands to the stand-in noted and never sent, its
-  turn released by it -, the full screen left by Esc and the Reader role chosen again; t and t2 come together); o,
-  over the book (the stand-in
-  made to fill its monitor, View > Over the full-screen viewer, the status bar's Move TASlation there, the Full screen
-  button, the full screen left by the F11 hot key); z, TASlation's text size at 150 %; x, a request cancelled in flight
-  at the translator (pages of one or two lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms`
-  at half resolution, so that the window reads the soft frame and asks on it before the sharp one comes; needs the
-  dataset); f, the dark theme, then f2, the narrow window (f brings f2 with it; f2 alone is that window without the
-  dark theme); f3, never in all, a's slow reading in that narrow window (nine screens of one page where f2 has two;
-  after f2 when both are asked, else the stand-in made narrow first). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
+  profile, the state and the model it loaded are gone at the end. Scenarios by `--scenario` (all by default: c, a,
+  b, d, e, x and f2): c, the turns while the model loads; a, slow reading; b, fast flipping; d, black flashes and
+  spinners; e, turning back to cached pages; x, a request cancelled in flight at the translator (pages of one or two
+  lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms` at half resolution, so that the window
+  reads the soft frame and asks on it before the sharp one comes; needs the dataset); f2, the narrow window; f3, never
+  in all, a's slow reading in that narrow window (nine screens of one page where f2 has two; after f2 when both are
+  asked, else the stand-in made narrow first). The scenarios of TASlation's own window went with it in 2.0.0 (r and t
+  with t2, its full screen in the two roles; o, over the book; z, its text size at 150 %; f, its dark theme). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
   1 and 2 s a page (k5, k1, k2; `k` is the three, each once the backlog of the one before has nothing left; k3, 3 s
   a page, only by its name), then a
   jump back to the first of them and `--k-read` of them read at `--k-read-ms` a page (8 s); the tool tells, per pace,
@@ -235,36 +227,27 @@ rows' languages.
   the end (`left_working`: none should be) and how often a stage told done was told at work again.
   `--k-soft off` draws every page sharp at once, `--k-narrow` places the stand-in at the narrow size first (single
   pages), `--k-backlog off` catches nothing (the baseline of
-  the same turns), `--k-keys` releases each turn by the window's next page key once the window hands it on (the reader
-  turning by TASlation's keys: pressed on its page, the window's raise of the viewer before a key left out, with
-  `--standin-draws-covered`; per pace, the keys handed on and after how long), `--k-stay-ms` keeps the last page
+  the same turns), `--k-stay-ms` keeps the last page
   flipped to that long (a page read afresh on show while the pages turned past wait); `--ocr-runs-on` and
   `--ollama-num-gpu` set those settings (`CUDA_VISIBLE_DEVICES=-1 --ocr-runs-on cpu --ollama-num-gpu 0` is a computer
-  without a GPU). `--side-indicator column|rail|off` sets the indicator beside the page (the app's column by default);
-  when it is not off the tool looks at it from the window as normal reading's events come - every screen told has its
-  cell or rail mark in the state last told, the screen on show is outlined, a screen that went by is drawn as missed
-  -, and after scenario k drops the backlog as another book does and looks that nothing is left, with pictures after
-  the flips, after the reads back and on each side of the drop; the report gives the event pump's times
-  (`_poll_events`) either way. `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's
-  runners): each rest of a, d, e, r, o, z, x, f, f2 and f3, the one at a scenario's end too, is held until the page on
+  without a GPU). The report gives the event pump's times (`poll_events_ms`). `--wait-done CAP_S` keeps each scenario's meaning on a slower computer (GitHub's
+  runners): each rest of a, d, e, x, f2 and f3, the one at a scenario's end too, is held until the page on
   show is finished, or the window rests with it unfinished, or CAP_S have passed (the stand-in waits at an `hN` step
   of its script until the tool's word), and x's soft frames stay on show until the window has asked on them (15 s and
   CAP_S at most); the report keeps the holds and their reasons (`waits`). Without it the script and the stand-in's
   control file are the same as ever. A turn's rest ends at the next turn or where the tool changed the window for the
-  next scenario (a mode left or entered, the theme, the text size, the stand-in's size: the report's
+  next scenario (the stand-in's size: the report's
   `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
-  window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). Its global hot keys are never
-  registered with Windows: the tool holds them, notes which the window held, and hands it a press as Windows would.
-  Over the book the window gives the stand-in the foreground from its own window, as the mode does; the tool itself
-  never changes it. `--scale 1.5` draws the stand-in as on a display
-  of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size to it; no system setting
+  window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). The
+  tool never changes the foreground. `--scale 1.5` draws the stand-in as on a display
+  of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size (its dialogs') to it; no system setting
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
   its times are not comparable with runs of earlier versions there.
   `--soft-first off` makes the stand-in draw every turn sharp at once and nothing after it, so that no wait of the
   viewer's is in what is timed: the published timing figures (the README's and the installation guide's table of a
-  screen's time and the first bubble) are measured with it, `--scenario a,f --wait-done 120` on a quiet computer
-  (screens of two pages from a and f, of one page from f2; `a,f,f3` adds f3's nine), from the report's `timing`: per screen of one page and of
+  screen's time and the first bubble) are measured with it, `--scenario a,f2 --wait-done 120` on a quiet computer
+  (screens of two pages from a, of one page from f2; `a,f2,f3` adds f3's nine), from the report's `timing`: per screen of one page and of
   two, over the turns rested on to a page the cache did not hold, the first lettered bubble and the finished page from
   the turn and from the sharp picture's draw (the same in this mode), the first request, and the way from the turn to
   the finishing job's start (the window's first capture, its first capture of the sharp picture, from there to the
@@ -335,16 +318,16 @@ rows' languages.
   click on the ground or the page, the bars in and out, a drag of the knob and a click on the bar (the spinner, the
   washed-out picture), the full screen and back. It prints the page's log and PASS or FAIL for each check, with what
   the e2e tool's decoder reads in each picture (into SCRATCH/shots: the sample pages, scratch only).
-  `--see-through` runs the window in see-through mode (`Settings.see_through`, a prototype off by default: the
-  lettering laid over the viewer's own window by a click-through window of TASlation's, `capture/seethrough.py`;
-  `--see-indicators off` with the indicators' pane switched off, `Settings.see_through_indicators`), and
+  The window is in its one mode, see-through (the lettering laid over the viewer's own window by a click-through
+  window of TASlation's, `capture/seethrough.py`; `--see-indicators off` with the indicators' pane switched off,
+  `Settings.see_through_indicators`; the option `--see-through` of 1.0.1 went with the setting), and
   `tools/standin_seethrough.py` watches it from the tool's own thread, nothing sent to any window: the time from the
   stand-in's change of screen (its spinner, its washed-out picture or its draw) to the see-through window showing none
   of the old page's patches, from its own notes; which window `WindowFromPoint` gives on the patches shown, on the
   page and on the ground (always the stand-in's); who was in front, and each change, with the activations of
   TASlation's own windows from before its window is made (a CBT hook of the tool's Tk thread that refuses none: the
   window starts with a decoy as Tk's first window, `ui.seethrough.quiet_start`, so 0 is expected) and how its main
-  window was on the screen once a second (`hidden_window`: in see-through mode it is never on the screen - its handle
+  window was on the screen once a second (`hidden_window`: it is never on the screen - its handle
   read with `capture.seethrough.window_facts`, "off" when it lies on no monitor, at alpha 0, an application's window
   with its taskbar button (no tool window, owned by none) titled "TASlation" and not minimised, "not shown" before Tk
   first shows it; once shown it stays shown in Windows' sense, since Tk's dialogs need a master in its normal state -
@@ -371,15 +354,14 @@ rows' languages.
   bars went from a page read under
   them, the pages carried over to the frame without them and the bubbles left out (`carries`: those cut by a bar,
   read and asked for again); the stand-in's frames a second
-  while its bars fade or its spinner turns (also without `--see-through`, for the comparison: `--capture-ms 16` asks
-  for the frames as often as see-through mode does); the process's CPU at rest and while following; what the run
+  while its bars fade or its spinner turns; the process's CPU at rest and while following; what the run
   cost (`cost`: the working set, the CPU of the stand-in's processes together - its sandboxed ones too, read with
   `NtQuerySystemInformation` -, the GPU memory of this process and of the stand-in's from Windows' own counter, and
   PyTorch's peak); the stand-in's own frame times (`viewer_frames`: its `anim` and `painted` lines, and each change's
   draw to the first frame captured after it); the Tk thread's steps (`tk_steps`: see-through mode's tick, the
   patches handed over - `seethrough.make_patches` itself runs on the patch thread, `ui.seethrough.Patcher`, and is
-  timed in `pipeline` as `make_patches_ms` -, the panes' rows, sizes and pictures, the window's redisplay and its canvas' picture, which
-  see-through mode no longer draws - each call's ms, and the per cent of a processor each took at rest, while a job
+  timed in `pipeline` as `make_patches_ms` -, the panes' rows, sizes and pictures, the hidden window's redisplay and its canvas' picture, which
+  draw nothing on the screen - each call's ms, and the per cent of a processor each took at rest, while a job
   ran and while following); each change of screen's first patches and whole page over the viewer (`on_screen`); and, from the
   see-through window's notes, why it hid what it showed and the shares of changed pixels it decided by at each new
   frame (the worst among the patches shown, the least among those hidden: `seethrough.CHANGED_SHARE` lies between
@@ -409,7 +391,9 @@ rows' languages.
   of a page lettered in full, go into SCRATCH/shots (the sample pages: delete them after). `--standin-size WxH` gives
   the stand-in's window another size (1904x1024 for a 1920 x 1080 screen) and `--standin-full-screen` starts it in
   the browser's own full screen (the reader's area then the whole frame).
-* `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` runs the real
+* `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` pictures
+  TASlation's own window, so it runs only a package before 2.0.0 (`--package` another checkout's; from 2.0.0 on the
+  window is hidden and such a package, this checkout's too, is refused before anything starts): the real
   window in English, page by page, over OpenMantra pages on the browser-type stand-in viewer (the guard, the scratch
   state and the offline guard of the two tools above; no key or click is sent) and starts only once the model is
   loaded and a page that is not shown has been translated; then it turns N pages at a set pace and keeps pictures of
@@ -504,9 +488,9 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then four stand-in jobs (the scenarios in groups: c, a and b; d, e, r and x, e turning back to d's pages; t with
-t2, then k's three paces; o, z and f with f2; each with `--wait-done`, which holds no rest of k) and five
-benchmark jobs (a title a job, `--series`) run, at most nine at a time beside `tests.yml`'s eight, each restoring the
+Then three stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+three paces; each with `--wait-done`, which holds no rest of k; at most three at a time) and five
+benchmark jobs (a title a job, `--series`; at most five at a time) run beside `tests.yml`'s eight, each restoring the
 caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
 start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at
 each pace, 3 read back): each pace waits until the backlog has nothing left, and on the CPU a caught page takes some 20
@@ -516,7 +500,7 @@ run went through, the window chose the stand-in alone, nothing was kept or shown
 one where the sharp frame came in time, no request was sent for nothing outside x and k - in k only page jobs' asked
 before their frame was confirmed and dropped as the page was flipped past, none on a soft frame, none of the
 backlog's -, a page translated at rest came back without a request, no rested page was left unfinished with the
-window at rest, each scenario's mode was entered and left, its page keys handed on, the
+window at rest, the narrow window's page was read at its new size, the
 backlog held no frame after its read and, the window at rest at the end, nothing at all and no screen told at work,
 ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
 cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first bubble, the

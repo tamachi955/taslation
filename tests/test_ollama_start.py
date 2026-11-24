@@ -908,17 +908,19 @@ def test_the_banner_s_start_again_owns_what_it_starts(machine, tmp_path):
     assert posted == [("translator_restarted", {"message": None})] and owns_server()
 
 
-def test_the_popup_says_it_in_the_window_s_box(monkeypatch):
+def test_a_failed_start_is_said_in_the_status_line_and_no_box_comes_up(monkeypatch):
     shown: list[tuple[str, str]] = []
     monkeypatch.setattr(caches, "tell", lambda _parent, text, title="TASlation", **_k: shown.append((title, text)))
-    w = SimpleNamespace(reading=False, _over_on=False)
+    said: list[str] = []
+    w = SimpleNamespace(status=said.append)
     w._warn_unasked = jobs.JobsMixin._warn_unasked.__get__(w)
     jobs.JobsMixin._handle_event(w, "ollama_failed", {"message": Message("health.ollama_not_installed")})
-    assert shown == [("TASlation", "The translation program is not installed. Double-click install.cmd in the TASlation folder.")]
-    shown.clear()
+    assert said == ["The translation program is not installed. Double-click install.cmd in the TASlation folder."]
+    said.clear()
     jobs.JobsMixin._handle_event(w, "ollama_failed", {"message": Message("health.ollama_no_answer")})
-    assert shown == [("TASlation", "The translation program did not start. Restart your PC, then open TASlation again. Pages already "
-                                   "translated can still be read.")]
+    assert said == ["The translation program did not start. Restart your PC, then open TASlation again. Pages already "
+                    "translated can still be read."]
+    assert shown == []  # (the reader reads in the viewer: nothing comes up over the book)
 
 
 def test_a_request_that_fails_for_good_tells_the_banner(machine):

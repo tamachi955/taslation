@@ -1,105 +1,67 @@
-"""How to use TASlation, in the window: Help > How to use... (F1; `HelpWindow`: short topics, one string per paragraph,
-in the window's language; texts in `locales/features/help_guide.py`), whose Keys topic lists every key as the keymap
-has it (`topic_lines`: `shortcuts.help_lines`) and which Help > Keys... (Shift+F1) opens at that topic
-(`HelpWindow.show_topic`), the small popup of a first start (`FirstSteps`, `first_steps_due`) and the "?" button that
-opens one explanation in a box of its own (`explain_button`, `ExplainBox`). None of them holds anything up: the window
+"""How to use TASlation: Menu > Help > How to use... (`HelpWindow`: short topics, one string per paragraph, in the
+window's language; texts in `locales/features/help_guide.py` and `locales/features/one_mode.py`), and the "?" button
+that opens one explanation in a box of its own (`explain_button`, `ExplainBox`). Neither holds anything up: TASlation
 goes on reading behind them."""
 
 from __future__ import annotations
 
 import tkinter as tk
 import tkinter.font as tkfont
-from pathlib import Path
 from tkinter import ttk
 from typing import Callable
 
-from ...i18n import _, load_ui_flag
-from .. import shortcuts
+from ...i18n import _
 from ..banner import break_lines
-from ..layout import place_by_book, place_window, work_area
+from ..layout import place_window, work_area
 from ..wrap import wrap_line
 from .notice import NoticeDialog
 
 TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (  # (heading, its paragraphs): the keys of the window's catalogs
     ("Getting started", (
         "Open your book in its viewer. A viewer in a browser works best in a browser window of its own.",
-        "TASlation finds the viewer by itself. If it does not, choose the viewer's window in the Viewer list.",
-        "Choose your language in the To list. The first time, TASlation may ask for the book's name.",
-        "Turn the pages here, in TASlation's window: press the viewer's page keys or click the page, and TASlation passes them on to the viewer. With Auto on, it shows each page translated.",
-        "F5 translates the page on show now. Keep a strip of the viewer visible, or use the full screen.",
-        "TASlation may enlarge the viewer's window so that the page reads well; the window goes back to its size when you close TASlation.",
+        "TASlation finds the viewer by itself and lays its lettering over the viewer's window. If it does not find it, it asks you to choose the viewer's window; Menu > Viewer... chooses another one.",
+        "Choose your language with the arrows in the left pane. The first time, TASlation may ask for the book's name.",
+        "Read in the viewer as it is: turn the pages there, with its own keys, buttons or clicks. TASlation presses no key and sends no click to the viewer, turns no page by itself and reads only the page the viewer shows. With Auto on, each page you turn is lettered in your language.",
+        "Translate translates the page on show now; the circular arrow beside it translates it again, asking every line anew. Lettering hides the translation, so that the page shows as the viewer has it, and shows it again.",
     )),
-    ("Full screen", (
-        "Press F11, or the Full screen button, to see the page alone on the full screen, in the role you chose.",
-        "In the Reader role the page keys and clicks on the page go to the viewer, and Auto is on until you leave, so each page you turn is translated.",
-        "In the Translator role the page keys still turn the viewer's pages, and you work on the page as in the window: click a region to select it, drag to move, resize, turn or draw one, double-click to edit it; the Translator's keys work too. No click goes to the viewer. Auto stays as you set it. To change the role or the book's name, leave the full screen first.",
-        "F11 leaves the full screen and gives the window back as it was. Esc does too; in the Translator role it first lets go of a selected region.",
-        "Rest the pointer on a bubble to see its other side. View chooses what the page shows (the translation, or the page as the viewer shows it) and where the other side shows: in a panel beside the bubble, both in sight at once, or in the bubble itself, which shows the original lettering, or what was read as text and how the translation is set. While the translation is on the page, View > Show original shows the whole page as it is in the viewer. The full screen follows these choices as the window does in the role chosen.",
-        "F2 pins the panel of the bubble under the pointer with its Japanese as text to select, and buttons to copy it or the translation; Shift+F2 and Ctrl+F2 copy them at once. TASlation puts nothing on the clipboard by itself, and what you copy stays there until you copy something else.",
-        "Optional: you can put the viewer in its own full screen yourself, in the viewer (often with F11 there). TASlation never does it for you.",
-        "With the viewer in full screen on TASlation's monitor, TASlation stays on top of it without taking its keys, as the on-screen keyboard does: turn the pages in the viewer as usual and TASlation follows. F5 still translates, and on TASlation's full screen F11 and Esc work as ever.",
-        "Clicks on TASlation's buttons and on the thumbnails beside the page work as ever. A box you type in, and every dialog, takes the keys while you use it. View > Over the full-screen viewer turns this off; with the book on another monitor nothing changes.",
+    ("The side panes", (
+        "Left of the page: Translate (Stop while a page is being translated), Auto, your language, Lettering, Indicators, Edit, Set area..., Settings..., Menu and Quit.",
+        "Right of the page, while Indicators is on: the bubble last under the pointer, its Japanese and its translation, with Copy the Japanese, Copy the translation and Ask again; under it how much of the page is done, what TASlation is doing and where the translator runs.",
+        "Rest the pointer on a bubble to see the original lettering in its place. TASlation puts nothing on the clipboard by itself: only Copy the Japanese and Copy the translation do.",
+        "The panes lie on the viewer's ground beside the page, and a pane hides where it would come near the page. TASlation's taskbar button then opens the Menu with the left pane's controls.",
     )),
-    ("Page keys", (
-        "Arrow keys, Page Up, Page Down, Home, End and Space pressed on the page go on to the viewer.",
-        "Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.",
-        "Apply keeps the keys. Try them on the page in TASlation's window: TASlation presses no key by itself.",
-        "To go back to an earlier page, use the viewer's own seek bar.",
+    ("Edit", (
+        "Edit in the left pane shows the page's regions as boxes with numbers in the reading order: click a box to open it in the region editor, drag it to move it, drag a corner to resize it; Shift+click chooses several. Beside the boxes, clicks go to the viewer.",
+        "The numbers' colours: green translated, orange not translated, blue your own region, red worth a look (Review...).",
+        "While Edit is on, the Menu has the editing: Undo and Redo, the page's tools (Reading order, Add a text area, Skip page), and Review..., My corrections..., Lines to review..., Find and replace..., Series sheet... and Book settings... as dialogs of their own.",
+        "The mouse wheel turned over a box does not reach the viewer: move the pointer off the boxes, or turn Edit off, to scroll the viewer.",
     )),
-    ("The Translator role", (
-        "Press F5 first, then double-click a box to edit it.",
-        "Green: translated. Orange: not translated, its label says why. Blue: your own rectangle. Red ?: worth a look (Review...).",
-        "Under the toolbar, this role has its tools: Series sheet..., Review..., Find and replace..., Undo and Redo.",
-    )),
-    ("Keys", ()),  # every key as the keymap has it (`topic_lines`)
     ("When something goes wrong", (
-        "The viewer stays black: TASlation may be covering it completely. Make TASlation smaller or move it so that a strip of the viewer shows.",
-        "If it stays black, TASlation tries to bring it back by itself. If that does not help, check the viewer and press F5.",
+        "The viewer's page reads black: TASlation waits for it to load and, after a while, says so in the right pane. Reload the book in the viewer; TASlation goes on with the page it shows then.",
         "Some viewers do not allow their window to be read and always show black. TASlation leaves that as it is. Such a viewer cannot be used with TASlation.",
-        "A bubble stays untranslated: press F5. If it is still empty, choose the Translator role and drag from outside the text to draw a rectangle round it; if an orange box is already there, drag or resize that box instead.",
+        "A bubble stays untranslated: press Translate. If it is still empty, turn Edit on, choose Add a text area in the Menu and drag a rectangle over the text; if a box is already there, drag or resize it instead.",
         "A line of one character, or lettering far larger than the rest, is not read by itself: add it by hand.",
-        "TASlation finds no page, or reads too much of the window: Page > Set area... lets you mark the page yourself.",
-        "Nothing happens: read the line under the page, and the coloured line above it if there is one. Check the Viewer list and that Auto is on.",
-        "The translation program starts by itself. If new pages are not translated, press F5 in a moment; if that does not help, restart your PC.",
+        "TASlation finds no page, or reads too much of the window: Set area... in the left pane lets you mark the page yourself.",
+        "Nothing happens: read the lines in the right pane (Indicators on). Check Menu > Viewer... and that Auto is on.",
+        "The translation program starts by itself. If new pages are not translated, press Translate in a moment; if that does not help, restart your PC.",
         "When you close TASlation, it stops the translation program it started, unless another program is using it. If you started the translation program yourself, TASlation leaves it running.",
         "With a viewer in a browser, the book's tab must be the one in front.",
-        "A name comes out wrong all through the book: in the Translator role, Find and replace... changes it on every page at once.",
+        "A name comes out wrong all through the book: with Edit on, Find and replace... in the Menu changes it on every page at once.",
     )),
     ("Your data", (
-        "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only when you install or update TASlation, when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed, and, only if you turn it on or choose Help > Check for updates..., to look for a new version: then check_update.py, a program of its own, asks GitHub for one small file.",
+        "While you read, TASlation sends nothing anywhere but to the translation program on this computer. The network is used only when you install or update TASlation, when you agree to download a translation model, which TASlation offers when the model for the language you translate into is not installed, and, only if you turn it on or choose Menu > Help > Check for updates..., to look for a new version: then check_update.py, a program of its own, asks GitHub for one small file.",
         "It keeps the translated text with the place of each bubble, matched to each page by a short code made from its picture, what the book's colophon says of it (title, volume, author, publisher, ISBN), a code made with a secret key from each short line it reuses, and your corrections, series sheets and notes. The book's name is in the names of those files and, with the title of the viewer's window (and its program's name, for an app), in settings files that are not protected.",
         "No page image is ever kept, nor the Japanese lines, and there is no way to save a page. A translation shows only over its page in the viewer.",
-        "Tools > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and the window's settings, an error log with no text of a book and the time of the last look for a new version, with the newest version found, are kept too, in the folder named in Help > About TASlation.",
+        "Menu > Saved translations... lists the translations and deletes them. Series sheets, page marks, the viewers' and TASlation's settings, an error log with no text of a book and the time of the last look for a new version, with the newest version found, are kept too, in the folder named in Menu > Help > About TASlation.",
         "The translations, series sheets and notes are protected for your Windows user on this computer: copied to another computer, or opened by another Windows user, they cannot be read. Programs you run yourself can still read them.",
-        "To keep a spare, or to move a book's translations to another computer, make an encrypted copy of them in Tools > Saved translations...; series sheets and notes stay on this computer. If the translations matter to you, keep such a copy: an administrator's reset of your Windows password, a new Windows profile or a reinstalled Windows leaves the saved files unreadable.",
+        "To keep a spare, or to move a book's translations to another computer, make an encrypted copy of them in Menu > Saved translations...; series sheets and notes stay on this computer. If the translations matter to you, keep such a copy: an administrator's reset of your Windows password, a new Windows profile or a reinstalled Windows leaves the saved files unreadable.",
     )),
 )
-FIRST_LINES = (  # the popup of a first start
-    "1. Open your book in its viewer.",
-    "2. If TASlation does not find it by itself, choose its window in the Viewer list.",
-    "3. Turn the pages here, with the page keys or a click on the page: TASlation shows them translated.",
-)
-FIRST_STEPS_FLAG = "first_steps_done"  # in ui.json: true once the popup has shown
 EXPLAIN_WRAP = 600  # pixels: a "?" box's text is broken into lines this wide
-FIRST_WRAP = 440  # pixels: the first start's lines
 HELP_SIZE = (640, 660)  # the help window's first size, less where the screen has no room
 HELP_MIN = (360, 260)
 HELP_PAD = 14  # pixels of the text box's own margin
 HELP_FIRST_WIDTH = 600  # pixels: the text's width until the window is on the screen
-KEYS_TOPIC = "Keys"  # every key as the keymap in force has it (`topic_lines`); Help > Keys... opens the help there
-
-
-def topic_lines(heading: str, paragraphs: tuple[str, ...]) -> list[str]:
-    """The paragraphs of a topic in the window's language: for the Keys every key as the window has it, the fixed
-    ones and the mouse gestures after them (`shortcuts.help_lines`), with where they are changed."""
-    if heading != KEYS_TOPIC:
-        return [_(p) for p in paragraphs]
-    return [*shortcuts.help_lines(shortcuts.current()), _("Tools > Settings... > Shortcuts changes these keys.")]
-
-
-def first_steps_due(state_dir: Path | str) -> bool:
-    """Whether the popup of a first start still has to show on this machine (ui.json)."""
-    return not load_ui_flag(Path(state_dir), FIRST_STEPS_FLAG)
 
 
 def modal_up(window: tk.Misc) -> bool:
@@ -112,11 +74,10 @@ def modal_up(window: tk.Misc) -> bool:
 
 
 class HelpWindow(tk.Toplevel):
-    """Help > How to use...: `TOPICS` in the window's language in a resizable, scrolling window that holds nothing
-    else up. The box never wraps by itself; `wrap_line` breaks the text for the box's width, again whenever the window
-    is resized (Tk breaks lines only at spaces: not Japanese, not Thai), so it can still be selected. `show_topic`
-    brings a topic's heading to the top (Help > Keys...: the Keys); a heading at the top stays there when the text is
-    broken again (`topics`: where each heading starts)."""
+    """Menu > Help > How to use...: `TOPICS` in the window's language in a resizable, scrolling window that holds
+    nothing else up. The box never wraps by itself; `wrap_line` breaks the text for the box's width, again whenever
+    the window is resized (Tk breaks lines only at spaces: not Japanese, not Thai), so it can still be selected; a
+    heading at the top stays there when the text is broken again (`topics`: where each heading starts)."""
 
     def __init__(self, master: tk.Misc):
         super().__init__(master)
@@ -176,8 +137,8 @@ class HelpWindow(tk.Toplevel):
             pass
 
     def render(self, width: int, again: bool = False) -> None:
-        """Every topic in lines of at most *width* pixels (*again*: also at the width it has, the keys changed); the
-        place in the text stays."""
+        """Every topic in lines of at most *width* pixels (*again*: also at the width it has); the place in the text
+        stays."""
         if width == self.wrapped_at and not again:
             return
         self.wrapped_at = width
@@ -189,8 +150,8 @@ class HelpWindow(tk.Toplevel):
         for heading, paragraphs in TOPICS:
             self.topics[heading] = self.text.index("end-1c")
             self._insert(_(heading), width, self._bold.measure, ("heading",))
-            for paragraph in topic_lines(heading, paragraphs):
-                self._insert(paragraph, width, self._font.measure, ("start",))
+            for paragraph in paragraphs:
+                self._insert(_(paragraph), width, self._font.measure, ("start",))
         self.text.configure(state="disabled")
         if top is not None:
             self.text.yview(self.topics[top])
@@ -205,53 +166,10 @@ class HelpWindow(tk.Toplevel):
             return None
         return next((heading for heading, index in self.topics.items() if index == first), None)
 
-    def show_topic(self, heading: str) -> None:
-        """The topic *heading* (English, as in `TOPICS`) at the top of the text, as far as the text goes on."""
-        index = self.topics.get(heading)
-        if index is not None:
-            self.text.yview(index)
 
     def _insert(self, text: str, width: int, measure: Callable[[str], int], first: tuple[str, ...]) -> None:
         for i, line in enumerate(wrap_line(text, width, measure)):
             self.text.insert("end", line + "\n", first if i == 0 or "heading" in first else ())
-
-
-class FirstSteps(tk.Toplevel):
-    """The first start's popup over the window: what to do first and a button that opens the help. It shows once, and
-    holds nothing up. *on_close* follows its closing; *on_help* follows the help button, which closes it too."""
-
-    def __init__(self, master: tk.Misc, on_close: Callable[[], None], on_help: Callable[[], None]):
-        super().__init__(master)
-        self.withdraw()
-        self.title("TASlation")
-        self.transient(master)
-        self.resizable(False, False)
-        self.on_close, self.on_help = on_close, on_help
-        frm = ttk.Frame(self, padding=14)
-        frm.pack(fill="both", expand=True)
-        for key in FIRST_LINES:
-            label = ttk.Label(frm, justify="left")
-            label.configure(text=break_lines(_(key), FIRST_WRAP, label))
-            label.pack(anchor="w", pady=(0, 4))
-        row = ttk.Frame(frm)
-        row.pack(fill="x", pady=(12, 0))
-        self.close_btn = ttk.Button(row, text=_("Close"), command=self.close)
-        self.close_btn.pack(side="right")
-        self.help_btn = ttk.Button(row, text=_("How to use..."), command=self.open_help)
-        self.help_btn.pack(side="right", padx=(0, 6))
-        self.bind("<Escape>", lambda _e: self.close())
-        self.protocol("WM_DELETE_WINDOW", self.close)
-        place_by_book(self, master)  # where the reader looks; it takes no key (a click closes it)
-        if master.winfo_viewable():  # (a window not on the screen, as in the tests, keeps it out of sight)
-            self.deiconify()
-
-    def close(self) -> None:
-        self.destroy()
-        self.on_close()
-
-    def open_help(self) -> None:
-        self.close()
-        self.on_help()
 
 
 class ExplainBox(tk.Toplevel):

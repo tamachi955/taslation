@@ -1,24 +1,19 @@
-"""Translator mode: its strip under the toolbar (the tools - reading order, skip page, translate again, book settings,
-series sheet, review, find and replace, undo, redo - and a line on what the pointer does), the page's regions
-selected, moved, resized, rotated by a round handle as a word processor's shapes are (Shift+click and a Shift+drag
-rubber band select several, and a drag, the Alt+arrow keys, Delete and T then act on all of them as one change:
-`chosen_regions`, the rest in `selection`), edited (with the formatting of their lettering, shown on the page as it is
-set: `LivePreview`), added and dropped with the pointer,
+"""The Translator role, which the left pane's Edit turns on (`see_edit`, on the lettering laid over the viewer): its
+tools (reading order, skip page, translate again, book settings, series sheet, review, find and replace, undo, redo),
+the page's regions selected, moved, resized, rotated by a round handle as a word processor's shapes are (several
+selected act as one change: `chosen_regions`, the rest in `selection`), edited (with the formatting of their
+lettering, shown as it is set: `LivePreview`), added and dropped,
 every one of those changes taken back and made again (Ctrl+Z, Ctrl+Y: `history`), the model asked again from the
 editor (the Japanese read again first on a page shown from the cache), the editor taken through the page's regions in
-reading order (Previous, Next), and a rendering the reader changed offered to the series sheet; in reader mode a click
-on the page goes to the viewer. All of it works on the full screen too (F11, `reading`), which keeps the role chosen:
-there the strip is away with the toolbar, and its tools are had by their keys."""
+reading order (Previous, Next), and a rendering the reader changed offered to the series sheet. (The hidden main
+window keeps the strip and the page canvas these methods were written for, as the state they work on.)"""
 
 from __future__ import annotations
 
-import re
 import threading
-import time
 from dataclasses import replace
 import tkinter as tk
 from pathlib import Path
-from string import Formatter
 from tkinter import ttk
 from typing import Any, Callable
 
@@ -28,7 +23,6 @@ from ..annotations import CharacterSheet, RegionStyle
 from ..bookid import generic_book_name
 from ..bookname import entry_for
 from ..cache import language_key
-from ..capture import CaptureError, caption_rows, post_click
 from ..i18n import _, load_ui_flag, load_ui_table, save_ui_entry, save_ui_flag
 from ..messages import message_of
 from ..notes import sheet_key
@@ -40,43 +34,25 @@ from .. import review as checks
 from ..review import rendering_changes, sheet_item_for
 from ..translate import TranslationError
 from ..translate.base import HINT_FOLLOWS, hint_support
-from . import area, seethrough, shortcuts, theme
-from .constants import FIRST_PAGE, FORWARDED_KEYS, THIS_PAGE
+from . import area, seethrough, theme
+from .constants import FIRST_PAGE, THIS_PAGE
 from .dialogs import caches as boxes
 from .dialogs.review import DIRECTION_WORDS, EditBubbleDialog, ReviewDialog, review_rows
 from .history import BookStep, Step, carry, owner, page_units, put_back, stores_differ, unit_states
-from .hover import clicks_kept
-from .layout import FlowBar, wrap_label
+from .layout import FlowBar
 from .progress import rendered
 from .series_scope import (ALL_VOLUMES, VolumeCount, change_volumes, changed_lines, changed_somewhere,
                            count_in_volumes, in_the_worker, series_volumes, volume_lines, volume_store)
 from .sheet_changes import rename_edits, shown_pairs
 from .tooltip import tip
 
-# what the pointer and the keys do on the page in translator mode: the strip under the toolbar says it while the role
-# is chosen, each key as the keymap has it (`hint_text`: a part whose action has no key is left out)
-HINT = ("Click: select · drag: move · drag a handle: resize · drag the round handle: rotate (Shift: 15° steps) · "
-        "double-click or {edit}: edit · Esc: deselect · drag on empty space: add · {drop}: drop · "
-        "{direction}: text direction · {undo}: undo · {redo}: redo · {next}: next region · {nudge}: move by 1 px")
-HINT_KEYS = {"edit": "edit_box", "drop": "remove_box", "direction": "text_direction", "undo": "undo", "redo": "redo",
-             "next": "next_region"}  # the hint's placeholders and their actions (`shortcuts.ACTIONS`); {nudge}: `nudge_keys`
-NUDGE_WORDS = "Alt+arrow keys"  # the four nudges on their keys of the table
-# the strip's buttons that name their key: (label, action)
-KEYED_TOOLS = (("Text direction", "text_direction"), ("Undo", "undo"), ("Redo", "redo"))
-# Tab and Shift+Tab on the page: the region selected, said in the status line
-REGION_OF = "Region {n} of {total}: Enter edits it, Alt with the arrow keys moves it."
-# Alt+arrows on the page: the selected region moved by a pixel (with Shift by NUDGE_FAR); presses this close together
-# are one move, stored once (`_nudge_done`) and taken back with one Ctrl+Z
-NUDGES = {"Left": (-1, 0), "Right": (1, 0), "Up": (0, -1), "Down": (0, 1)}
-NUDGE_FAR = 10
-NUDGE_MS = 500
 # the text directions translator mode's T and its button go through on the selected region, in turn
 DIRECTION_CYCLE = ("", "down", "up", "stacked")
 # the spellcheck setting is off by default; turned on, its word lists come from an optional package that TASlation
 # does not install. Where it is missing the editor says so once (ui.json SPELLING_SAID), and where the setting is
 # turned off - no command line, never anything online
 SPELLING_OFF = ("Spelling is not checked: the spellcheck setting is on, but the word lists it needs are an optional "
-                "extra that TASlation does not install. To turn the setting off, open Tools > Settings..., press Open "
+                "extra that TASlation does not install. To turn the setting off, open Settings..., press Open "
                 "settings file and change spellcheck = true to spellcheck = false; it applies at the next start. This "
                 "is said only once.")
 SPELLING_SAID = "spelling_unavailable_said"
@@ -111,10 +87,10 @@ PREVIEW_POLL_MS = 40  # how often the window looks for the editor's preview, whi
 NO_REGION = "This region is no longer on the page: nothing was changed."
 # a rendering changed in the series sheet: the offer to give the lines already translated the new one, its buttons,
 # and what is said once it is done
-SHEET_OFFER = "{n} line(s) already translated use the series sheet's earlier rendering ({changes}). Give them the new one? Ctrl+Z takes it back."
+SHEET_OFFER = "{n} line(s) already translated use the series sheet's earlier rendering ({changes}). Give them the new one? Menu > Undo takes it back."
 SHEET_APPLY = "Apply to the {n} line(s)"
 SHEET_LEAVE = "Leave them as they are"
-SHEET_APPLIED = "Applied to {n} translated line(s) on {pages} page(s). Ctrl+Z takes it back."
+SHEET_APPLIED = "Applied to {n} translated line(s) on {pages} page(s). Menu > Undo takes it back."
 # "Translate again" on a page with lines the person corrected (`CachedBubble.edited`): the question and its box to
 # tick (`locales.features.corrections`)
 AGAIN_KEEPS = ("Translate this page again? Its present translations are replaced, but for the {n} line(s) you "
@@ -123,12 +99,12 @@ REPLACE_MINE_TOO = "Replace the lines I corrected too"
 # ... and when other volumes of the series use the earlier rendering too (`_ask_sheet_renames`): under the offer, the
 # volumes with their lines and the box that takes them too (with its button); or the offer for them alone
 SHEET_OTHERS_TOO = ("Other volumes of the series use it too:\n{volumes}\n\nTick the box to give them the new one as "
-                    "well. They are saved at once, and Ctrl+Z does not reach them; a copy of each file as it was is kept "
+                    "well. They are saved at once, and Menu > Undo does not reach them; a copy of each file as it was is kept "
                     "beside it (<file>.before-replace.<date>.json). To take it back, change the rendering back here and "
                     "apply it to all volumes, or put that copy back.")
 SHEET_GIVE = "Give them the new one"
 SHEET_OTHERS_ONLY = ("No line of this book uses the series sheet's earlier rendering ({changes}), but other volumes of "
-                     "the series do:\n{volumes}\n\nGive them the new one? They are saved at once, and Ctrl+Z does not "
+                     "the series do:\n{volumes}\n\nGive them the new one? They are saved at once, and Menu > Undo does not "
                      "reach them; a copy of each file as it was is kept beside it (<file>.before-replace.<date>.json). "
                      "To take it back, change the rendering back here, or put that copy back.")
 SHEET_WAIT_MS = 300  # how often the offer looks whether the window is free (a page at work) or the cache is open
@@ -137,28 +113,6 @@ SHEET_WAIT_MS = 300  # how often the offer looks whether the window is free (a p
 ROLE_TABLE, ROLES_KEPT = "roles", 500  # ui.json: the role the reader chose for a book, by its name (the latest books)
 ROLE_DELAY_MS = 400  # the Book box rests this long before the role for its book is decided
 
-
-def nudge_keys(keymap: shortcuts.Keymap) -> str:
-    """The keys that nudge the selected regions, as the strip's hint names them: "Alt+arrow keys" in the window's
-    language while the four are on their keys of the table, else those they have ("Ctrl+H/Ctrl+L"; "" for none)."""
-    names = [f"nudge_{direction.lower()}" for direction in NUDGES]
-    if not any(name in keymap.own for name in names):
-        return _(NUDGE_WORDS)
-    return "/".join(keymap.shown(name) for name in names if keymap.of(name))
-
-
-def hint_text(keymap: shortcuts.Keymap) -> str:
-    """The strip's hint (`HINT`) in the window's language with the keys as *keymap* has them; a part whose action has
-    no key is left out with its separator ("·", or "・" in Japanese)."""
-    keys = {field: keymap.shown(name) for field, name in HINT_KEYS.items()}
-    keys["nudge"] = nudge_keys(keymap)
-    pieces = re.split(r"(\s*[·・]\s*)", _(HINT))
-    out: list[str] = []
-    for i, part in enumerate(pieces[0::2]):
-        if all(keys.get(field) for _text, field, _spec, _conv in Formatter().parse(part) if field):
-            out += [pieces[2 * i - 1]] if out else []
-            out.append(part.format(**keys))
-    return "".join(out)
 
 
 def chosen_role(state_dir: Any, book: str) -> str:
@@ -193,10 +147,10 @@ def shift_held(event: Any) -> bool:
 
 
 def chosen_regions(window: Any) -> list[Any]:
-    """The regions selected on the page in translator mode: the selected one (`_chosen_region`, the one Tab goes on
-    from and the editor opens on) first, then those Shift+click and a Shift+drag added (`_also_chosen`) that are still
-    on the page on show; none while nothing is selected. With several, Delete, T, Paste format, Alt+arrows, a drag and
-    the Page menu's Set kind... and Set text size... act on all of them, each as one change (`selection`)."""
+    """The regions selected on the page in translator mode: the selected one (`_chosen_region`, the one the editor
+    opens on) first, then those Shift+click added (`_also_chosen`) that are still on the page on show; none while
+    nothing is selected. With several, Drop the chosen regions, Text direction, Paste format, a drag and the Menu's
+    Page > Set kind... and Set text size... act on all of them, each as one change (`selection`)."""
     primary = getattr(window, "_chosen_region", None)
     if primary is None:
         return []
@@ -461,15 +415,10 @@ class TranslatorMixin:
 
     # ------------------------------------------------------------------ the tools
     def _build_translator_tools(self, parent: tk.Misc) -> None:
-        """Translator mode's strip under the toolbar: its tools in groups that flow into rows as the toolbar's do
-        (reading order, skip page, translate again; book settings, series sheet, review, my corrections, lines to
-        review; find and replace, the selected region's text direction, undo, redo)
-        and a line on what the pointer does on the page: these tools are here and nowhere else. `_sync_tools` shows it
-        while the Translator role is chosen; the full screen hides it with the toolbar. Ctrl+Y makes again what Ctrl+Z took
-        back. The buttons and the line name the keys as the keymap has them (`KEYED_TOOLS`, `hint_text`; again after a
-        change: `_show_tool_keys`)."""
-        keymap = getattr(self, "keymap", None) or shortcuts.current()
-        keyed = dict(KEYED_TOOLS)
+        """Translator mode's strip under the hidden toolbar: its tools in groups (reading order, skip page, translate
+        again; book settings, series sheet, review, my corrections, lines to review; find and replace, the selected
+        region's text direction, undo, redo), never seen - the left pane's Edit menu has them (`see_edit`) -, kept for
+        the state they hold (`_sync_tools`, enabled in the Translator role)."""
         strip = ttk.Frame(parent)
         ttk.Separator(strip, orient="horizontal").pack(fill="x", padx=8)
         tools = FlowBar(strip, gap=TOOLBAR_GAP)
@@ -489,32 +438,18 @@ class TranslatorMixin:
                     _("List the lines of the whole book that are worth a look, page by page."))),
                   ((_("Find and replace..."), self.open_find_replace,
                     _("Search this book's translations and replace a word on every page.")),
-                   ("Text direction", self._turn_direction,
+                   (_("Text direction"), self._turn_direction,
                     _("Change the selected region's text direction: Auto, rotated 90°, rotated 270°, stacked, and Auto again.")),
-                   ("Undo", self.undo_edit, _("Take back your last change.")),
-                   ("Redo", self.redo_edit, _("Make the last change again."))))
-        self._keyed_tools: list[tuple[ttk.Button, str, str]] = []  # (button, label, action) of `KEYED_TOOLS`
+                   (_("Undo"), self.undo_edit, _("Take back your last change.")),
+                   (_("Redo"), self.redo_edit, _("Make the last change again."))))
         for chunk in chunks:
             group = tools.group()
             for i, (text, command, explanation) in enumerate(chunk):
-                shown = shortcuts.with_keys(text, keyed[text], keymap) if text in keyed else text
-                button = ttk.Button(group, text=shown, command=command)
+                button = ttk.Button(group, text=text, command=command)
                 button.pack(side="left", padx=(4 if i else 0, 0))
                 tip(explanation, button)
                 self.tool_btns.append(button)
-                if text in keyed:
-                    self._keyed_tools.append((button, text, keyed[text]))
-        hint = ttk.Label(strip, text=hint_text(keymap), anchor="w", justify="left", foreground=theme.colour("tool_hint"),
-                         padding=(8, 0, 8, 4))
-        hint.pack(fill="x")
-        hint.bind("<Configure>", lambda e: wrap_label(hint, e.width - 16))
-        self._tool_strip, self.tools_bar, self.hint_label = strip, tools, hint
-
-    def _show_tool_keys(self, keymap: shortcuts.Keymap) -> None:
-        """The strip's keyed buttons and its hint with the keys as *keymap* has them (`App._show_keys`)."""
-        for button, label, name in getattr(self, "_keyed_tools", ()):
-            button.configure(text=shortcuts.with_keys(label, name, keymap))
-        self.hint_label.configure(text=hint_text(keymap))
+        self._tool_strip, self.tools_bar = strip, tools
 
     def _sync_tools(self) -> None:
         """Translator mode's tools follow the role: the strip under the toolbar shows while the Translator role is
@@ -568,7 +503,7 @@ class TranslatorMixin:
             self._ordering = []
             self._chosen_region = None
             self._label_order(_("Finish order"))
-            self.say("Reading order: click the regions in the order they are read, then press Finish order (Esc cancels).")
+            self.say("Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu.")
             self._redisplay()
             return
         ordered = self._ordering
@@ -738,8 +673,7 @@ class TranslatorMixin:
 
     def _on_role_changed(self, chosen: bool = True) -> None:
         """The role changed: the reader *chose* it (kept for the book in the Book box, `remember_role`, which opens in
-        it next time), or the book's start set it (`_apply_role`). On the full screen, which keeps the role, the full
-        screen follows it (`ReadingMixin._reading_role`: Auto and the first line as the role has them there)."""
+        it next time), or the book's start set it (`_apply_role`)."""
         book = self.book_var.get().strip()
         if chosen and book and not generic_book_name(book):
             remember_role(self.settings.state_dir, book, self.role_var.get())
@@ -750,23 +684,11 @@ class TranslatorMixin:
             self._on_escape()
         self._chosen_region = None
         self._redisplay()
-        if getattr(self, "reading", False):
-            self._reading_role()
-            if self.role_var.get() == "translator":
-                self._complete_on_show()
-            return
-        if getattr(self, "_see_hidden", False):  # (see-through mode: the left pane's Edit)
-            from .see_edit import EDIT_OFF, EDIT_ON
+        from .see_edit import EDIT_OFF, EDIT_ON
 
-            self.say(EDIT_ON if self.role_var.get() == "translator" else EDIT_OFF)
-            if self.role_var.get() == "translator":
-                self._complete_on_show()
-            return
-        if self.role_var.get() == "translator":  # the strip under the toolbar says the rest
-            self.say("Translator mode: the line under the toolbar says what the pointer does on the page; keys still turn the viewer's pages.")
+        self.say(EDIT_ON if self.role_var.get() == "translator" else EDIT_OFF)
+        if self.role_var.get() == "translator":
             self._complete_on_show()
-        else:
-            self.say("Reader mode: keys and clicks on the page go to the viewer.")
 
     def _complete_on_show(self) -> None:
         """Translator mode came on over a page taken from the cache in reader mode: the regions found on it that the
@@ -782,8 +704,8 @@ class TranslatorMixin:
 
     # ------------------------------------------------------------------ the regions under the pointer
     def _editing(self) -> bool:
-        """Whether the page's regions are edited by the pointer (translator mode, in the window or on the full screen,
-        and the page on show is the one they belong to)."""
+        """Whether the page's regions are edited (translator mode, Edit on, and the page on show is the one they
+        belong to)."""
         return self.role_var.get() == "translator" and self._result_on_show()
 
     def _turn_of(self, region: Any) -> float:
@@ -1022,74 +944,6 @@ class TranslatorMixin:
         self._choose(region)
         self._edit_chosen()
 
-    def _tab_region(self, step: int) -> str | None:
-        """Tab (*step* 1) or Shift+Tab (-1) on the page in translator mode: the next or the previous region in reading
-        order is selected (the first or the last when none is; round from the last to the first), and the status line
-        says which; "break" keeps the keys on the page. Elsewhere (the Reader role, a page not on show, the reading
-        order being set) Tab moves the focus as it always does (None)."""
-        if not self._editing() or self._ordering is not None or self.last_result is None:
-            return None
-        regions = self._page_regions()
-        if not regions:
-            return "break"
-        at = next((i for i, r in enumerate(regions) if r is self._chosen_region), None)
-        target = (0 if step > 0 else len(regions) - 1) if at is None else (at + step) % len(regions)
-        self._grip_box = None
-        self._choose(regions[target])
-        self.say(REGION_OF, n=target + 1, total=len(regions))
-        return "break"
-
-    def _nudge_key(self, event: tk.Event, keysym: str) -> str:
-        """A nudge's key on the page (Alt with an arrow key: `shortcuts.ACTIONS`' nudge_left... on their keys; *keysym*
-        the way it moves): in translator mode the selected region moves by a pixel (by `NUDGE_FAR` with Shift) at once
-        on the page, and is stored as one move once the presses stop (`NUDGE_MS`, `_nudge_done`); several selected
-        move together. Anywhere else an arrow pressed goes on to the viewer as the plain arrow does (`forward_key`),
-        another key does nothing."""
-        if not self._editing() or self._ordering is not None or self.last_result is None:
-            pressed = str(getattr(event, "keysym", "") or "")
-            if pressed in FORWARDED_KEYS:
-                self.forward_key(FORWARDED_KEYS[pressed])
-            return "break"
-        region = self._chosen_region
-        if region is None:
-            self.say("Select a region first (click it).")
-            return "break"
-        if self.busy:
-            return "break"
-        far = NUDGE_FAR if int(getattr(event, "state", 0) or 0) & 0x0001 else 1
-        dx, dy = NUDGES[keysym]
-        group = chosen_regions(self)
-        if len(group) > 1:  # several selected: all of them, by the same amount (`area.shift_within`)
-            ox, oy = group_offset(self)
-            sx, sy = area.shift_within([r.bbox for r in group], ox + dx * far, oy + dy * far,
-                                       self.last_result.original.size)
-            self._grip_box = (region.x0 + sx, region.y0 + sy, region.x1 + sx, region.y1 + sy)
-        else:
-            self._grip_box = area.move(self._grip_box or region.bbox, dx * far, dy * far,
-                                       self.last_result.original.size)
-        self._draw_frame()
-        pending = getattr(self, "_nudging", None)
-        if pending is not None:
-            self.after_cancel(pending)
-        self._nudging = self.after(NUDGE_MS, self._nudge_done)
-        return "break"
-
-    def _nudge_done(self) -> None:
-        """The arrows let go: the selected region stored at the box they moved it to (one move for Ctrl+Z), several
-        selected all of them by as much (`_move_regions`, one move too); a box back where it began, a page gone or a
-        job begun meanwhile change nothing."""
-        self._nudging = None
-        region, box = self._chosen_region, self._grip_box
-        if region is None or box is None or box == region.bbox or self.busy or not self._editing():
-            self._grip_box = None
-            self._draw_frame()
-            return
-        group = chosen_regions(self)
-        if len(group) > 1:
-            self._move_regions(group, box[0] - region.x0, box[1] - region.y0)
-            return
-        self._move_region(region, box)  # its outline stays at the new box until the region is there
-
     def _edit_chosen(self) -> None:
         """Enter (or a double-click): the editor on the selected region."""
         if self._chosen_region is not None and self._editing() and not self.busy:
@@ -1119,14 +973,7 @@ class TranslatorMixin:
         if start is None:
             return
         moved = abs(e.x - start[0]) > 6 or abs(e.y - start[1]) > 6
-        if not self._editing():  # a click that is not TASlation's own goes on to the viewer (`_forward_click`) ...
-            if moved:
-                return
-            if clicks_kept(self):  # ... but for one on the Translator's full screen, which stays TASlation's
-                if not self.busy and self.canvas.inside(e.x, e.y):
-                    self.say(FIRST_PAGE)
-                return
-            self._forward_click(e)
+        if not self._editing():
             return
         if self.last_result is None or self.busy or self.pipeline is None:
             return
@@ -1328,6 +1175,43 @@ class TranslatorMixin:
         if result is self.last_result:
             self._choose(target)
         self._open_editor(target, result, at)
+
+    @staticmethod
+    def _japanese(region: Any) -> str:
+        return str(getattr(region, "source_text", "") or "").strip()
+
+    def _japanese_of(self, result: Any, region: Any, then: Callable[[str, str], None]) -> None:
+        """*region*'s Japanese handed to *then* (the text, and what went wrong: a key of `seethrough.NOT_READ`): at
+        once when it has it, else once it is read from its crop of *result*'s capture in the worker (`_read_source`,
+        nothing stored); a reading under way for it serves every request that comes meanwhile (the right pane's Copy
+        the Japanese)."""
+        text = self._japanese(region)
+        if text:
+            then(text, "")
+            return
+        waiting = getattr(self, "_japanese_waiting", None)
+        if waiting is None:
+            waiting = self._japanese_waiting = {}
+        key = id(region)
+        if key in waiting:
+            waiting[key][1].append(then)
+            return
+        waiting[key] = (region, [then])
+
+        def done(text: str, error: str) -> None:
+            for step in waiting.pop(key, (None, []))[1]:
+                step(text.strip(), error)
+
+        reader = getattr(self, "_read_source", None)
+        if reader is None or reader(region, result, done) is False:  # the reading model is not loaded yet
+            done("", "no-ocr")
+
+    def _to_clipboard(self, text: str, said: str) -> None:
+        """*text* on the clipboard, in place of what was there (the reader asked for it), and *said* in the status
+        line (without the text)."""
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.say(said)
 
     def _read_source(self, region: Any, result: Any, done: Callable[[str, str], None]) -> bool:
         """The editor's "Read the Japanese" (and its Ask again on a region with none): the region's Japanese read
@@ -1569,7 +1453,7 @@ class TranslatorMixin:
         if self.role_var.get() != "translator" or self.pipeline is None or self.busy:
             return
         if self._ordering is not None:
-            self.say("Reading order: click the regions in the order they are read, then press Finish order (Esc cancels).")
+            self.say("Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu.")
             return
         result, pipeline = self.last_result, self.pipeline
         wide = self.history.book_step(owner(pipeline), undone=not back)
@@ -1796,7 +1680,7 @@ class TranslatorMixin:
                 step.settle(pipeline, ok)
                 self._post("result", result=result, edited=True)
                 if ok:
-                    self._post("status", key="Region dropped; Ctrl+Z brings it back.")
+                    self._post("status", key="Region dropped; Menu > Undo brings it back.")
             finally:
                 if step.state == "pending":
                     step.state = "failed"
@@ -1808,34 +1692,3 @@ class TranslatorMixin:
             offer(region, result, step)
 
     # ------------------------------------------------------------------ a click on the page goes to the viewer
-    def _forward_click(self, event: tk.Event) -> None:
-        """A click on the page that is not TASlation's own goes on to the viewer at the same place (a viewer that turns
-        its pages by clicks, its toolbar, a panel's close button), the person's click passed on as a page key is: in the
-        Reader role, in the window and on the full screen, and in the Translator role's window while the page on show
-        is not the translated one (`_editing`: there a click selects and edits the text areas, and the page keys turn
-        the pages). On the full screen in the Translator role no click goes on (`hover.clicks_kept`). It is followed as
-        a page-turn key is (`_follow_change`): from the frame Auto took last, else from the frame on show - also before
-        Auto has taken any page. In the Translator role the status line says so, as it does for a key. In see-through
-        mode no click goes on (`seethrough`): the reader clicks in the viewer itself."""
-        if seethrough.on(self):
-            return
-        if self.selected is None or (self.last_result is None and self._live is None):
-            return
-        if clicks_kept(self):
-            return
-        if not self.canvas.inside(event.x, event.y) or self.canvas.in_busy_band(event.x, event.y):
-            return  # beside the page, or on the busy band
-        if not self._book_in_front():
-            return
-        x, y = self.canvas.to_image_coords(event.x, event.y)
-        try:
-            # the capture is the viewer's client area, without a title bar drawn in it
-            post_click(self.selected.hwnd, x, y + caption_rows(self.selected.hwnd))
-        except CaptureError as e:
-            self.say("Viewer: {error}", error=e)
-            return
-        hwnd = self.selected.hwnd
-        if self.role_var.get() == "translator":  # a reader sees the page turn
-            self.status(lambda: _("Sent a click to the viewer..."))
-        reference = self._auto_last if self._auto_last is not None else self._live_thumb
-        self._follow_change(hwnd, reference, "", time.monotonic(), retried=True)

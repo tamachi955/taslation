@@ -189,17 +189,15 @@ def walk(widget: Any) -> list[Any]:
 
 
 def scratch_state() -> Path:
-    """A state folder of its own for the run (TASLATION_STATE_DIR): the legal notice dismissed, the window in English,
-    the first start's popup seen."""
+    """A state folder of its own for the run (TASLATION_STATE_DIR): the legal notice dismissed, TASlation in
+    English."""
     from taslation import notice
-    from taslation.i18n import save_ui_flag, save_ui_language
-    from taslation.ui.dialogs.help import FIRST_STEPS_FLAG
+    from taslation.i18n import save_ui_language
 
     state = Path(os.environ["TASLATION_STATE_DIR"])
     notice.save_country(state, "JP")
     notice.dismiss(state, "en")
     save_ui_language(state, "en")
-    save_ui_flag(state, FIRST_STEPS_FLAG)
     return state
 
 

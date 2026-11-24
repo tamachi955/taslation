@@ -7,9 +7,7 @@ keeping it the default. PLaMo's licence is agreed to first (`LicenceDialog`), an
 is and Cancel (`InstallDialog`). A no puts the language back when the one before still has its model, else the
 status line says that translating is off and why.
 
-All of it waits while the window is over the book or on the full screen: a check that found the model missing then only
-says so in the status line, once, and asks when the window is back. One offer at a time, and one per language: the "To:"
-box and the setup check that follows it (`JobsMixin._follow_target`) find the same missing model, and only the first
+One offer at a time, and one per language: the "To:" box and the setup check that follows it (`JobsMixin._follow_target`) find the same missing model, and only the first
 asks. A setting ``ollama_model`` naming a model of the person's own is theirs: nothing is offered then
 (`translator_install.plan`).
 
@@ -63,17 +61,13 @@ class ModelSwitchMixin:
     def _model_state(self) -> dict[str, Any]:
         state = getattr(self, "_model_switch", None)
         if state is None:
-            state = self._model_switch = {"asked": set(), "noted": set(), "offered": set(), "installing": False,
-                                          "offering": False}
+            state = self._model_switch = {"asked": set(), "offered": set(), "installing": False, "offering": False}
         return state
 
     def _models_now(self) -> list[str] | None:
         """The models Ollama has now (None: it does not answer)."""
         return health.installed_models(self.settings.ollama_url)
 
-    def _away(self) -> bool:
-        """The window is not where a box nobody asked for may come up: over the book, on the full screen."""
-        return bool(getattr(self, "reading", False) or getattr(self, "_over_on", False))
 
     def _translator_ready(self, language: str, before: str | None = None) -> bool:
         """The "To:" box was left with *language* (*before*: the language it had): whether its translator model is
@@ -110,7 +104,7 @@ class ModelSwitchMixin:
 
     def _model_missing_seen(self, problems: list[Any] | None) -> None:
         """A setup check's problems: one that says the language's translator model is missing leads to the offer, once
-        per language - later, when the window is not over the book (only the status line says so meanwhile)."""
+        per language."""
         state = self._model_state()
         for message in problems or ():
             if code_of(message) != MISSING_CODE:
@@ -119,11 +113,6 @@ class ModelSwitchMixin:
             language = str(params.get("language") or self.lang_var.get().strip() or "English")
             if language in state["asked"] or state["installing"] or state["offering"]:
                 continue
-            if self._away():
-                if language not in state["noted"]:
-                    state["noted"].add(language)
-                    self.status(self._off_text(language, away=True))
-                continue
             state["asked"].add(language)
             self.after(0, lambda language=language: self._offer_missing(language))
 
@@ -131,7 +120,7 @@ class ModelSwitchMixin:
         state = self._model_state()
         if language in state["offered"]:  # the "To:" box asked already
             return
-        if state["installing"] or state["offering"] or self._away():
+        if state["installing"] or state["offering"]:
             state["asked"].discard(language)
             return
         switch = self._plan(language)
@@ -210,10 +199,8 @@ class ModelSwitchMixin:
             return ask(self, theirs_text(switch), _("Remove it"), _("Keep it"), no_first=True)
         return switch.ours
 
-    def _off_text(self, language: str, away: bool = False) -> str:
+    def _off_text(self, language: str) -> str:
         model = tinstall.shown_name(tinstall.model_for_language(language))
-        if away:
-            return _("Translation is off: {language} needs {model}, which is not installed. TASlation asks about it when you are back in its window.").format(language=_shown(language), model=model)
         return _("Translation is off: {language} needs {model}, which is not installed. Choose {language} in the To list again to install it.").format(language=_shown(language), model=model)
 
     def _switch_declined(self, switch: tinstall.Switch, before: str | None) -> None:

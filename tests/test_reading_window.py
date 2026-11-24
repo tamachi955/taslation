@@ -1,16 +1,15 @@
-"""The window's page canvas: the busy badge, the full screen's capture and crop, the offline guard's warning, the
-area dialog's handles. Parts of the App are borrowed onto small stand-ins on the shared hidden root."""
+"""The window's page canvas (the hidden window's, and the area dialog's): the busy badge, the viewer's capture, a crop
+enlarged and a note, the offline guard's warning, the area dialog's handles, and the regions under the pointer in
+translator mode (Edit). Parts of the App are borrowed onto small stand-ins on the shared hidden root."""
 from __future__ import annotations
 
 import tkinter as tk
 from types import SimpleNamespace
 
-import pytest
 from PIL import Image
 
 from taslation.ui.constants import APP_TITLE
 from taslation import i18n, netguard
-from taslation.capture import CaptureError
 from taslation.regions import PageResult
 from taslation.ui import app as app_mod
 from taslation.ui import area, live
@@ -49,11 +48,10 @@ class Bar:
 class Window(BlackViewerMixin):
     _blank_behind = app_mod.App._blank_behind
     _raise_viewer = app_mod.App._raise_viewer
-    _resizing = app_mod.App._resizing
     _window_size = app_mod.App._window_size
     _blank_lasted = app_mod.App._blank_lasted
 
-    """The parts of the App that the worker's events, the busy band, the full screen and the guard use."""
+    """The parts of the App that the worker's events, the busy band, the capture and the guard use."""
 
     _handle_event = app_mod.App._handle_event
     _go_busy = app_mod.App._go_busy
@@ -75,7 +73,7 @@ class Window(BlackViewerMixin):
     _guard_blocked = app_mod.App._guard_blocked
     _sync_guard = app_mod.App._sync_guard
     _show_progress = app_mod.App._show_progress
-    _picture = app_mod.App._picture
+    _hidden_picture = app_mod.App._hidden_picture
     _fill_on_show = app_mod.App._fill_on_show
     _shows_page = app_mod.App._shows_page
     _sharper_than = app_mod.App._sharper_than
@@ -113,7 +111,7 @@ class Window(BlackViewerMixin):
         self.role_var = tk.StringVar(master=root, value="reader")
         self.original_var = tk.BooleanVar(master=root, value=False)
         self.settings = SimpleNamespace(margins=(0, 10, 0, 0))
-        self.busy = self.reading = self._viewer_hidden = self._busy_shown = False
+        self.busy = self._viewer_hidden = self._busy_shown = False
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = None
         self._ordering = None
@@ -189,7 +187,6 @@ def test_the_busy_badge_shows_while_a_page_is_read_and_goes_when_it_is_shown(hid
     w._handle_event("progress", {"text": "Rendering..."})
     assert w.canvas.itemcget("busy-text", "text").startswith("Typesetting... (")
     x0, y0, x1, y1 = w.canvas.bbox("busy")
-    assert w.canvas.in_busy_band((x0 + x1) / 2, (y0 + y1) / 2) and not w.canvas.in_busy_band(x0 + 2, y0 - 5)
     assert 380 <= x1 <= 400 and y0 <= 12 and y1 < 60  # a badge in the top right corner, not a band across the page
     box = next(i for i in w.canvas.find_withtag("busy") if w.canvas.type(i) == "polygon")  # rounded corners
     assert w.canvas.itemcget(box, "fill") == "#202020" and w.canvas.itemcget(box, "stipple") == ""  # solid
@@ -201,35 +198,26 @@ def test_the_busy_badge_shows_while_a_page_is_read_and_goes_when_it_is_shown(hid
     w._handle_event("progress", {"text": "Reading text 1/1..."})
     assert band()
     w._handle_event("translate_done", {})
-    assert not band() and not w.canvas.in_busy_band(x0 + 2, (y0 + y1) / 2) and w.titles[-1] == APP_TITLE
+    assert not band() and w.titles[-1] == APP_TITLE
     assert not w.progress_bar.shown  # gone with the failed job too
 
 
-def test_behind_the_reading_window_only_the_viewers_own_frame_is_taken(hidden_root, monkeypatch):
-    frame = [Image.new("RGB", (64, 48), (0, 0, 0))]  # what PrintWindow gives for a window it cannot draw
+def test_the_viewers_frame_is_taken_with_the_screen_fallback_and_the_canvas_only_keeps_it(hidden_root, monkeypatch):
+    frame = _page()
     asked = []
 
     def capture(hwnd, client_only=True, allow_screen_fallback=True):
         asked.append(allow_screen_fallback)
-        return frame[0]
+        return frame
 
     monkeypatch.setattr(live, "capture_window", capture)
     w = Window(hidden_root)
-    w.reading = True
-    with pytest.raises(CaptureError):
-        w._capture(1)
-    message = "This viewer cannot be read behind the full screen; press F11"
-    assert asked == [False] and w._viewer_hidden and w.canvas.message == message
-    frame[0] = _page()
-    assert w._capture(1) is frame[0] and not w._viewer_hidden and w.canvas.message == ""
-    w.last_result = PageResult(image=frame[0], original=frame[0], regions=[])
-    w._redisplay()  # the page alone: the area (margins 0, 10, 0, 0), enlarged to the screen
-    assert w.canvas.crop == (0, 10, 64, 48) and w.canvas.enlarge and w.canvas.scale == 400 / 64
-    w.reading = False
+    assert w._capture(1) is frame and asked == [True]  # (no window of TASlation's over it: the screen may stand in)
+    assert not w._viewer_hidden and w.canvas.message == ""
+    w.last_result = PageResult(image=frame, original=frame, regions=[])
     w._redisplay()
-    assert w.canvas.crop is None and not w.canvas.enlarge and w.canvas.scale == 1.0
-    w._capture(1)
-    assert asked[-1] is True  # the normal window keeps the screen fallback
+    assert w.canvas._image is frame and w.canvas.crop is None and not w.canvas.enlarge  # kept, never drawn
+    assert w.canvas.find_all() == ()
 
 
 def test_the_canvas_shows_a_part_enlarged_and_a_note(hidden_root):
@@ -346,12 +334,12 @@ class Shapes:
         self.last_result = PageResult(image=page, original=page, regions=regions)
         self.canvas.on_redraw = self._draw_chosen
         self.role_var = tk.StringVar(master=root, value="translator")
-        self.reading = self.busy = False
+        self.busy = False
         self._fill = self._live = None  # the page on show is the result
         self.pipeline = object()
         self._ordering = self._drag_start = self._drag_rect = None
         self._chosen_region = self._grip = self._grip_start = self._grip_box = self._turn = self._frame_cache = None
-        self.moved, self.edited, self.dropped, self.added, self.forwarded, self.statuses = [], [], [], [], [], []
+        self.moved, self.edited, self.dropped, self.added, self.statuses = [], [], [], [], []
         self.canvas.set_image(page)
 
     def _move_region(self, region, box):
@@ -365,9 +353,6 @@ class Shapes:
 
     def _add_region(self, box):
         self.added.append(box)
-
-    def _forward_click(self, event):
-        self.forwarded.append((event.x, event.y))
 
     def status(self, text):
         self.statuses.append(text() if callable(text) else text)
@@ -393,7 +378,7 @@ def test_translator_mode_selects_moves_resizes_edits_and_drops_regions_like_shap
     a, b = _region((50, 50, 150, 120)), _region((200, 150, 300, 250))
     w = Shapes(hidden_root, [a, b])  # the page is shown at its size: a canvas pixel is an image pixel
     w.click(100, 80)  # a click selects; nothing else happens
-    assert w._chosen_region is a and not (w.moved or w.edited or w.forwarded)
+    assert w._chosen_region is a and not (w.moved or w.edited)
     # outlined two-tone (a dark stroke under the yellow), with its eight handles and the rotate handle (its stalk
     # two-tone too)
     assert len(w.canvas.find_withtag("chosen")) == 2 + 8 + 3
@@ -425,68 +410,14 @@ def test_translator_mode_selects_moves_resizes_edits_and_drops_regions_like_shap
     assert w._chosen_region is None and w.statuses
     w.click(320, 20, to=(390, 80))  # a drag on empty space: a new region
     assert w.added == [(320, 20, 390, 80)]
-    w.role_var.set("reader")  # the reader's clicks go to the viewer, nothing is selected
-    w.click(100, 80)
-    assert w.forwarded == [(100, 80)] and w._chosen_region is None
-
-
-class FullScreen(Shapes):
-    """`Shapes` on the full screen: leaving it is recorded."""
-
-    def __init__(self, root, regions):
-        super().__init__(root, regions)
-        self.reading, self.left = True, 0
-
-    def leave_reading(self):
-        self.reading, self.left = False, self.left + 1
-
-    def _fill_on_show(self):  # a page filling in (`_fill`) is the viewer's page
-        return True
-
-
-def test_the_full_screen_keeps_the_translator_s_pointer_and_esc_lets_go_first_then_leaves(hidden_root):
-    a, b = _region((50, 50, 150, 120)), _region((200, 150, 300, 250))
-    w = FullScreen(hidden_root, [a, b])
-    assert w._editing()  # the Translator's, on the full screen as in the window
-    w.click(100, 80)  # a click selects and is not passed on to the viewer
-    assert w._chosen_region is a and w.forwarded == [] and len(w.canvas.find_withtag("chosen")) == 2 + 8 + 3
-    w.click(100, 80, to=(120, 90))  # a drag moves
-    assert w.moved == [(a, (70, 60, 170, 130))]
-    w._grip_box = None
-    w.click(320, 20, to=(390, 80))  # a drag on empty space draws
-    assert w.added == [(320, 20, 390, 80)]
-    w._on_double(SimpleNamespace(x=250, y=200))  # a double-click opens the editor
-    w._on_release(SimpleNamespace(x=250, y=200))
-    assert w._chosen_region is b and w.edited == [b] and w.forwarded == []
-    w._on_escape()  # Esc with a region selected: let go of it, still on the full screen
-    assert w._chosen_region is None and w.reading and w.left == 0
-    w._on_escape()  # ... then it leaves
-    assert not w.reading and w.left == 1
-    w.reading = True
-    w._fill = object()  # the translated page not on show (another page): the click is still not the viewer's ...
-    assert not w._editing()
-    w.statuses.clear()
-    w.click(100, 80)
-    assert w.forwarded == [] and w._chosen_region is None and w.statuses == ["Translate a page first: press F5."]
-    w.busy = True  # ... and while a page is being translated nothing is said over its progress
-    w.statuses.clear()
-    w.click(100, 80)
-    assert w.forwarded == [] and w.statuses == []
-    w.busy = False
-    w.click(100, 80, to=(160, 120))  # a drag there is nobody's
-    assert w.forwarded == [] and w.added == [(320, 20, 390, 80)]
-    w.reading = False  # in the window the Translator's click on a page not translated goes on, as ever
-    w.click(100, 80)
-    assert w.forwarded == [(100, 80)]
-
-
-def test_the_reader_s_full_screen_passes_clicks_on_and_esc_leaves_at_once(hidden_root):
-    a = _region((50, 50, 150, 120))
-    w = FullScreen(hidden_root, [a])
-    w.role_var.set("reader")
+    w.role_var.set("reader")  # the reader role edits nothing: a click selects nothing, a drag draws nothing
     assert not w._editing()
     w.click(100, 80)
-    assert w.forwarded == [(100, 80)] and w._chosen_region is None
-    w._chosen_region = a  # (one left from the Translator role): Esc leaves all the same
-    w._on_escape()
-    assert not w.reading and w.left == 1
+    w.click(320, 20, to=(390, 80))
+    assert w._chosen_region is None and len(w.moved) == 2 and w.added == [(320, 20, 390, 80)]
+    w.role_var.set("translator")
+    w._fill = object()  # the translated page not on show (another page fills in): nothing to edit either
+    w._fill_on_show = lambda: True
+    assert not w._editing()
+    w.click(100, 80)
+    assert w._chosen_region is None

@@ -375,12 +375,11 @@ def test_the_right_pane_names_no_key_the_viewer_has(tmp_path):
 
 
 def test_see_through_mode_holds_no_hot_key(tmp_path, monkeypatch):
-    from taslation.capture import overlay
+    import importlib.util
+    import inspect
 
-    def refused(*a, **k):
-        raise AssertionError("a hot key was asked for")
-
-    monkeypatch.setattr(overlay.HotKeys, "start", classmethod(refused))
+    assert importlib.util.find_spec("taslation.capture.overlay") is None  # (the hot keys' module is gone)
+    assert "RegisterHotKey" not in inspect.getsource(ui) and "RegisterHotKey" not in inspect.getsource(ui.window)
     monkeypatch.setattr(ui.window, "viewer_dpi", lambda hwnd: 96)
     app = fake_app(tmp_path, selected=SimpleNamespace(hwnd=1234), _see_memo=[])
     app._see_through.follow = lambda hwnd: None
@@ -539,8 +538,7 @@ def test_no_status_text_of_the_window_names_a_key_in_any_language_once_without_k
     from taslation.ui import constants, status_slot
     from taslation.ui.progress import rendered
 
-    texts = [status_slot.ERROR_KEY, constants.READY, constants.VIEWER_BLACK, constants.KEPT_FROM_NOW,
-             constants.FIRST_PAGE, constants.THIS_PAGE,
+    texts = [status_slot.ERROR_KEY, constants.READY, constants.VIEWER_BLACK, constants.FIRST_PAGE, constants.THIS_PAGE,
              "Something went wrong on this page. Press F5 to try again; if it repeats, restart TASlation.",
              "Stopped: this page was not translated, and nothing of it was kept. F5 translates it again.",
              "Nothing was read yet: TASlation asks again at the next page. F5 translates this page now.",

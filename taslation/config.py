@@ -10,12 +10,15 @@ never the bubbles' original text).
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+LOG = logging.getLogger(__name__)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_DIR = PACKAGE_DIR.parent
@@ -97,7 +100,6 @@ PAGE_MODELS = (LAYOUT_MODEL, LAMA_MODEL)
 CONFIG_FILENAME = "taslation.toml"
 MIN_UI_SCALE, MAX_UI_SCALE = 0.5, 3.0  # the bounds of `Settings.ui_scale`
 TEXT_SCALE_RANGE = (0.5, 2.0)  # the bounds of `Settings.text_scale` (the dialogs offer 80-200 %)
-PANEL_FONT_RANGE = (6, 72)  # `Settings.panel_font_size` when it is set (points; 0 besides: automatic)
 HOVER_DELAY_RANGE = (0, 3000)  # the bounds of `Settings.hover_delay_ms` (milliseconds)
 
 
@@ -147,6 +149,12 @@ DROPPED_SETTINGS: set[str] = {"first_page_key", "fullscreen_key", "reload_key", 
                               "review_pass", "ollama_prompt_style",
                               "scan_mode", "context_mode", "chunk_bubbles", "lookahead_bubbles", "batch_max_pages",
                               "batch_memory_mb", "flash_when_done", "sound_when_done"}
+# the settings of TASlation's own window, removed 2026-11-24 with it (the lettering is laid over the viewer's window,
+# and every key and click is the viewer's): a file that has them loads, and the log names them once (`from_toml`)
+WINDOW_SETTINGS: frozenset[str] = frozenset({
+    "see_through", "next_page_key", "prev_page_key", "always_on_top", "over_book", "bubble_zoom", "hover_shows",
+    "hover_reveal", "side_indicator", "panel_font_size"})
+DROPPED_SETTINGS |= WINDOW_SETTINGS
 
 
 @dataclass
@@ -163,7 +171,7 @@ class Settings:
     ollama_num_ctx: int = 16384  # the chat translator's context window (0 = server default); PLaMo has its own (8192)
     # How long Ollama keeps the model loaded after a request, in Ollama's own format: a duration ("30m", "2h") or
     # seconds ("0": unloads after every request). Every request carries it; the window's start (`load_model_at_start`)
-    # or else the first line to translate loads the model, and Tools > Release the model now or the window closed
+    # or else the first line to translate loads the model, and Menu > Release the model now or the window closed
     # releases it; "-1": loaded at the start, before the OCR model, and never released (`translate.ollama.never_unloads`).
     ollama_keep_alive: str = "5m"
     # How many of the model's layers Ollama puts on the GPU (its ``num_gpu`` option, for both translators): empty, the
@@ -263,14 +271,7 @@ class Settings:
     # never the Japanese (`linememo`). Off: every line is asked for, and nothing is kept for reuse
     reuse_lines: bool = True
 
-    # --- following the viewer ---
-    # The viewer's page keys, which a page key the person presses in TASlation's window is passed on as (names: Left,
-    # Right, Up, Down, PageUp, PageDown, Home, End, Space, Enter, Tab, Backspace, Escape, F1-F12, a letter or a digit).
-    # A viewer's own keys (Page > Page keys..., kept in profiles.json with the capture area) and the defaults "Apply to
-    # all viewers" keeps there come first (`pagekeys.page_keys_for`); these are the keys of a viewer without either.
-    # TASlation passes on only the keys the person presses: it presses none of its own.
-    next_page_key: str = "Left"  # Japanese books read right-to-left: Left arrow = next page in most viewers
-    prev_page_key: str = "Right"  # the previous page
+    # --- following the viewer (the reader turns the pages in the viewer: TASlation presses no key) ---
     black_wait_s: float = 30.0  # a viewer black this long may just be loading; then the person is told to reload it
     page_turn_wait_ms: int = 3000  # how long to wait for the viewer to show the next page
     settle_ms: int = 400  # frame must stay unchanged this long before it is processed
@@ -281,55 +282,26 @@ class Settings:
     early_start: bool = True
 
     # --- app ---
-    role: str = "reader"  # the window's starting mode: "reader" | "translator" (mark text, fix translations)
+    # Edit at the start (the left side pane's switch, `ui.see_edit`): "reader" (off) | "translator" (on: mark text, fix
+    # translations); a book's own choice, kept as it is switched, comes first
+    role: str = "reader"
     ui_language: str = ""  # language of the window (a code from i18n.UI_LANGUAGES); empty = the first-start choice
-    # the size of the window's text, times what Windows sets for its monitor (1.0 = as Windows has it): applied at the
-    # start and again whenever the window moves to a monitor of another scale (`ui.scaling`)
+    # the size of the text of TASlation's dialogs, times what Windows sets for the monitor (1.0 = as Windows has it;
+    # `ui.scaling`); the side panes follow the viewer's monitor's scaling
     ui_scale: float = 1.0
-    # the window's colours (`ui.theme`): "system" (as Windows has its apps: the app mode, read from the registry),
-    # "light" (Windows' own look) or "dark"; Windows' high contrast comes first, whatever this says
+    # the colours of TASlation's dialogs and menus (`ui.theme`): "system" (as Windows has its apps: the app mode, read
+    # from the registry), "light" (Windows' own look) or "dark"; Windows' high contrast comes first, whatever this says
     theme: str = "system"
-    always_on_top: bool = False  # the window starts above the others (as View > Always on top, or gui --on-top)
     auto_interval_ms: int = 700
-    # over a viewer in full screen on the same monitor, the window stays on top without taking the foreground (the
-    # viewer keeps the keys); View > Over the full-screen viewer turns it off for the next starts too (`ui.overbook`)
-    over_book: bool = True
-    # a prototype, off by default: the lettering laid over the viewer's own window by a click-through window of
-    # TASlation's, the viewer taking every click and key itself (TASlation holds no key then); the Lettering switch of
-    # the left side pane hides it or shows it again (`ui.seethrough`). TASlation's own window is never on the screen
-    # then: the side panes, their Menu (`ui.see_menu`), its taskbar button and its dialogs are all there is of it - the
-    # Reader role always, no full screen of its own, the viewer's window never moved nor resized.
-    # In that mode its Settings dialog has a row for it (from the next start)
-    see_through: bool = False
-    # see-through mode's right side pane at the right edge of the viewer's area (`ui.seethrough`): the block of the
-    # bubble last under the pointer (its original, its translation, Copy and Ask again) and the indicators, shown or
-    # not; the switch in its left pane and the Settings dialog in that mode write it here, kept for the next starts
+    # the right side pane at the right edge of the viewer's area (`ui.seethrough`): the block of the bubble last under
+    # the pointer (its original, its translation, Copy and Ask again) and the indicators, shown or not; the switch in
+    # the left pane and the Settings dialog write it here, kept for the next starts
     see_through_indicators: bool = True
-    # the translation on the page (the Reader role by hover_shows, the Translator role always; on the full screen as
-    # in the window): a translated bubble the pointer rests on shows its original (enlarged beside it, `ui.zoom`, or in its
-    # place, `ui.in_place`); off, nothing shows under the pointer
-    bubble_zoom: bool = True
-    # the Reader role, in the window and on the full screen: what a bubble the pointer rests on shows, the page showing the other
-    # (`ui.hover`): "original" (the page translated, the bubble's original under the pointer: `bubble_zoom`) or
-    # "translation" (the page as the viewer shows it, the bubble's translation under the pointer); also the View menu
-    hover_shows: str = "original"
-    # ... and how that bubble shows the other side (`ui.hover`): "panel" (a panel beside it, both in sight at once) or
-    # "in_place" (the bubble itself, the original lettering or what was read, erased and set); also the View menu
-    hover_reveal: str = "panel"
-    # the pages turned past in normal reading, beside the page on its exit side (`ui.side`): "column" (thumbnails with
-    # how far each is, where the margin has room, a narrow bar elsewhere), "rail" (the narrow bar only) or "off"
-    side_indicator: str = "column"
-    # the text of the panel beside a bubble (`ui.zoom.panel_text_px`): 0, automatic (twice readable_font_size, at least
-    # 1.25 times the bubble's lettering on the screen, 16-44 px); else this many points, which follow ui_scale and the
-    # monitor's scaling as the window's text does, at most a share of the work area's height (PANEL_FONT_RANGE)
-    panel_font_size: int = 0
-    # how long the pointer rests on a bubble before its other side shows (`ui.zoom.hover_delays`): this long on a
-    # bubble hard to read where it is and on every one with the original on the page, 8/3 as long on the others
-    # (450: 0.45 s and 1.2 s; 0: at once; HOVER_DELAY_RANGE); in see-through mode, how long the pointer rests on a
-    # patch before it hides (`capture.seethrough.SeeThrough.set_hover_delay`), once for every patch
+    # how long the pointer rests on a bubble's lettering before it gives way to the original under it
+    # (`capture.seethrough.SeeThrough.set_hover_delay`): 0, at once; HOVER_DELAY_RANGE
     hover_delay_ms: int = 450
-    follow: str = "events"  # how the window follows the viewer: "events" (Windows: captured after TASlation turns its page, every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
-    # whether the window looks for a new version when it starts (`ui.updates`): "off" (the default: only Help > Check
+    follow: str = "events"  # how the viewer is followed: "events" (Windows: every auto_interval_ms only while the viewer itself is in front, never while neither is) | "poll" (every auto_interval_ms)
+    # whether the window looks for a new version when it starts (`ui.updates`): "off" (the default: only Menu > Help > Check
     # for updates... asks, when it is chosen) or "daily" (at most once a day, by check_update.py in a process of its
     # own, which asks GitHub for one small file; the window's own process stays offline). install.ps1 asks once.
     update_check: str = "off"
@@ -415,11 +387,6 @@ class Settings:
             raise ConfigError(f"text_scale must be between {TEXT_SCALE_RANGE[0]} and {TEXT_SCALE_RANGE[1]} (1.0: as it fits)")
         if any(m < 0 for m in self.margins):
             raise ConfigError("margins must be >= 0")
-        from .pagekeys import PageKeys
-
-        problems = PageKeys.from_settings(self).problems()
-        if problems:
-            raise ConfigError("; ".join(problems))
         if float(self.black_wait_s) <= 0:
             raise ConfigError("black_wait_s must be more than 0")
         if not MIN_UI_SCALE <= float(self.ui_scale) <= MAX_UI_SCALE:
@@ -430,19 +397,8 @@ class Settings:
             raise ConfigError("follow must be 'events' or 'poll'")
         if self.role not in ("reader", "translator"):
             raise ConfigError("role must be 'reader' or 'translator'")
-        if self.hover_shows not in ("original", "translation"):
-            raise ConfigError("hover_shows must be 'original' or 'translation'")
-        if self.hover_reveal not in ("panel", "in_place"):
-            raise ConfigError("hover_reveal must be 'panel' or 'in_place'")
         if self.update_check not in ("off", "daily"):
             raise ConfigError("update_check must be 'off' or 'daily'")
-        if self.side_indicator not in ("column", "rail", "off"):
-            raise ConfigError("side_indicator must be 'column', 'rail' or 'off'")
-        size = self.panel_font_size
-        if (not isinstance(size, int) or isinstance(size, bool)
-                or (size != 0 and not PANEL_FONT_RANGE[0] <= size <= PANEL_FONT_RANGE[1])):
-            raise ConfigError(f"panel_font_size must be 0 (automatic) or a whole number of points from "
-                              f"{PANEL_FONT_RANGE[0]} to {PANEL_FONT_RANGE[1]}; got {size!r}")
         delay = self.hover_delay_ms
         if (not isinstance(delay, int) or isinstance(delay, bool)
                 or not HOVER_DELAY_RANGE[0] <= delay <= HOVER_DELAY_RANGE[1]):
@@ -488,6 +444,9 @@ class Settings:
         settings of older versions (`DROPPED_SETTINGS`) are left out without a word. A file that is no TOML, or a
         value that does not fit its setting, is a ConfigError."""
         data = _file_table(path)
+        window = sorted(set(data) & WINDOW_SETTINGS)
+        if window:
+            LOG.info("settings of TASlation's former window left out (they do nothing now): %s", ", ".join(window))
         unknown = tuple(sorted(set(data) - setting_names() - DROPPED_SETTINGS))
         values = {k: v for k, v in data.items() if k in setting_names()}
         try:
@@ -545,7 +504,7 @@ _ACTIVE_KEY = re.compile(r"^(?P<lead>[ \t]*)(?P<key>[A-Za-z_][A-Za-z0-9_-]*)(?P<
 _COMMENTED_KEY = re.compile(r"^(?P<lead>[ \t]*)#[ \t]?(?P<key>[A-Za-z_][A-Za-z0-9_-]*)(?P<eq>[ \t]*=[ \t]*)(?P<rest>.*)$")
 _TABLE = re.compile(r"^[ \t]*\[\[?[ \t]*(?P<name>[^\]]+?)[ \t]*\]\]?[ \t]*(#.*)?$")
 
-NEW_FILE_HEADER = """# TASlation's settings. Tools > Settings... changes the common ones; this file has them all.
+NEW_FILE_HEADER = """# TASlation's settings. Settings... changes the common ones; this file has them all.
 # A line that starts with "#" is a note, or a setting left at its default: delete the "#" before a setting
 # to change it. TASlation reads this file when it starts.
 """

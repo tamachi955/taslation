@@ -1,27 +1,19 @@
-"""The window's keys in one table (`ui.shortcuts`): the table's keys bound as they always were, a key made from a key
-press and named as the keyboard does, what a key may not be, the reader's keys kept in the state folder, the bindings
-moved when a key changes, translator mode's tools only in that role, the menus, the toolbar and Help's Keys naming
-the keys in force, and the Shortcuts page of Tools > Settings...."""
+"""The keys of TASlation's own dialogs in one table (`ui.shortcuts`): the region editor's Previous and Next and its
+Copy format and Paste format. The table's keys bound as they always were, a key named as the keyboard does, what a key
+may not be, the reader's keys an earlier version kept in the state folder (the keys of actions this version no longer
+has left out), the keys bound on a dialog's widgets and named on its buttons. TASlation binds no key over the viewer:
+there is nothing else here."""
 
 from __future__ import annotations
 
 import json
 import tkinter as tk
-from types import SimpleNamespace
 
 import pytest
 
-from taslation.config import Settings
 from taslation.i18n import FEATURE_LANGUAGES, set_language
-from taslation.locales.features import settings_dialog as texts
-from taslation.ui import app as app_mod
 from taslation.ui import shortcuts
-from taslation.ui.dialogs import help as help_mod
-from taslation.ui.dialogs import settings as dlg
-from taslation.ui.hover import HOVER_LABELS, REVEAL_LABELS
-from taslation.ui.shortcuts import ACTIONS, BY_NAME, Keymap, key_of_event, key_text, normal, sequences
-
-ALT = shortcuts.ALT_MASK
+from taslation.ui.shortcuts import ACTIONS, BY_NAME, Keymap, key_text, normal, sequences
 
 
 @pytest.fixture(autouse=True)
@@ -32,80 +24,52 @@ def table_keys_in_force():
 
 
 # ------------------------------------------------------------------ the table
-def test_every_action_and_fixed_key_is_named_in_every_language():
+def test_every_action_is_named_in_every_language():
     from taslation import i18n
     from taslation.locales.keys import KEYS
 
-    assert len({a.name for a in ACTIONS}) == len(ACTIONS) and all(a.scope in shortcuts.SCOPES for a in ACTIONS)
-    for english in [a.label for a in ACTIONS] + [shortcuts.FIXED_ESCAPE, shortcuts.FIXED_PAGE_KEYS]:
+    assert [a.name for a in ACTIONS] == ["copy_format", "paste_format", "editor_previous", "editor_next"]
+    for english in [a.label for a in ACTIONS]:
         homes = [found for found in i18n.FEATURES.values() if english in found]
         assert english in KEYS or (homes and sorted(homes[0][english]) == sorted(FEATURE_LANGUAGES)), english
-    assert all(sorted(texts.TEXTS[english]) == sorted(FEATURE_LANGUAGES)
-               for english in (shortcuts.FIXED_ESCAPE, shortcuts.FIXED_PAGE_KEYS))
 
 
 def test_the_table_s_keys_are_bound_as_they_always_were():
     keymap = Keymap()
-    bound = {a.name: [s for key in keymap.of(a.name) for s in sequences(key)] for a in ACTIONS if keymap.of(a.name)}
-    assert bound == {"translate_now": ["<F5>"], "reading_mode": ["<F11>"],
-                     "undo": ["<Control-Key-z>", "<Control-Lock-Key-Z>"], "redo": ["<Control-Key-y>", "<Control-Lock-Key-Y>"],
-                     "how_to_use": ["<F1>"], "keys_help": ["<Shift-F1>"],
-                     # a bubble's Japanese and translation at hand (`bubble_text`)
-                     "show_japanese": ["<F2>"], "copy_japanese": ["<Shift-F2>"], "copy_translation": ["<Control-F2>"],
-                     "next_bubble": ["<F3>"], "previous_bubble": ["<Shift-F3>"],  # ... from bubble to bubble
-                     "edit_box": ["<Return>", "<KP_Enter>"], "remove_box": ["<Delete>"],
-                     "text_direction": ["<Key-t>", "<Key-T>"],
-                     # translator mode's keys of the region editing branch, in the table since its merge
-                     "next_region": ["<Tab>"], "previous_region": ["<Shift-Tab>"], "nudge_left": ["<Alt-Left>"],
-                     "nudge_right": ["<Alt-Right>"], "nudge_up": ["<Alt-Up>"], "nudge_down": ["<Alt-Down>"],
-                     "copy_format": ["<Control-Key-C>", "<Control-Shift-Key-c>"],
+    bound = {a.name: [s for key in keymap.of(a.name) for s in sequences(key)] for a in ACTIONS}
+    assert bound == {"copy_format": ["<Control-Key-C>", "<Control-Shift-Key-c>"],
                      "paste_format": ["<Control-Key-V>", "<Control-Shift-Key-v>"],
-                     "copy_region": ["<Control-Key-c>", "<Control-Lock-Key-C>"],
-                     "paste_region": ["<Control-Key-v>", "<Control-Lock-Key-V>"],
                      "editor_previous": ["<Alt-Up>"], "editor_next": ["<Alt-Down>"]}
     assert all(keymap.problem(a.name, key) is None for a in ACTIONS for key in a.keys)
 
 
-def test_the_table_s_own_tab_arrows_and_ctrl_c_pass_for_their_action_alone():
+def test_the_editor_s_keys_and_the_formats_keys_are_apart_and_each_refused_to_the_other():
     keymap = Keymap()
-    assert "a key of Windows" in keymap.problem("review", "Tab")  # Tab moves the focus: never another action's
-    assert "a key of Windows" in keymap.with_key("next_region", None).problem("previous_region", "Tab")
-    assert keymap.with_key("next_region", None).problem("next_region", "Tab") is None  # put back as it was
-    assert "turns the viewer's pages" in keymap.problem("nudge_left", "Control-Left")
-    assert keymap.problem("nudge_left", "Alt-h") is None and keymap.problem("nudge_left", "h") is None  # the page's
-    assert "editing the text" in keymap.problem("settings", "Control-c")  # in the window Ctrl+C stays the boxes'
-    assert "already the key of Copy region" in keymap.problem("review", "Control-c")
-
-
-def test_a_key_works_where_its_action_does_so_the_page_and_the_editor_may_share_one():
-    keymap = Keymap()
-    assert keymap.of("nudge_down") == keymap.of("editor_next") == ("Alt-Down",)  # the page, the editor: apart
-    assert keymap.owner("Alt-Down", near="editor_next") == "editor_next"
-    assert keymap.owner("Alt-Down", near="nudge_down") == "nudge_down"
-    assert "already the key of Paste format" in keymap.problem("editor_next", "Control-Shift-v")  # also the editor's
-    assert "already the key of Region editor" in keymap.with_key("editor_next", "Alt-n").problem("copy_format", "Alt-n")
+    assert keymap.owner("Alt-Down") == "editor_next" and keymap.owner("Control-Shift-c") == "copy_format"
+    assert keymap.owner("Control-c") is None  # (the boxes' own Ctrl+C: no action's)
+    assert "already the key of paste_format" in keymap.problem("editor_next", "Control-Shift-v")
+    assert "already the key of editor_next" in keymap.with_key("editor_next", "Alt-n").problem("copy_format", "Alt-n")
     assert keymap.problem("editor_next", "Alt-n") is None and keymap.problem("editor_next", "F8") is None
-    assert "works in the region editor needs Ctrl or Alt" in keymap.problem("editor_next", "Down")  # its text box
-    assert "works in the region editor needs Ctrl or Alt" in keymap.problem("copy_format", "c")  # the editor's too
+    assert "plain key" in keymap.problem("editor_next", "Down")  # its text box would take it
+    assert "plain key" in keymap.problem("copy_format", "c")
     assert "editing the text" in keymap.problem("editor_next", "Control-v")
-    assert keymap.problem("translate_now", "F1") is not None and keymap.problem("editor_next", "F1") is None
+    assert keymap.problem("editor_next", "F1") is None
 
 
-def test_a_key_press_makes_a_key_and_a_modifier_alone_none():
-    press = lambda keysym, state=0: key_of_event(SimpleNamespace(keysym=keysym, state=state))  # noqa: E731
-    assert press("F6") == "F6" and press("F6", 1) == "Shift-F6" and press("z", 4) == "Control-z"
-    assert press("Z", 5) == "Control-Shift-z" and press("T", 1) == "t" and press("r", ALT | 4) == "Control-Alt-r"
-    assert press("KP_Enter") == "Return" and press("Control_L", 4) is None and press("Shift_R", 1) is None
-    assert press("1") == "1" and sequences("1") == ["<Key-1>"]
+def test_a_key_is_bound_in_both_cases_and_with_the_keypad_s_enter():
+    assert sequences("1") == ["<Key-1>"] and sequences("t") == ["<Key-t>", "<Key-T>"]
     # Caps Lock turns the letter: Ctrl+Z and Ctrl+Shift+Z are told apart with it on too
     assert sequences("Control-z") == ["<Control-Key-z>", "<Control-Lock-Key-Z>"]
     assert sequences("Control-Shift-z") == ["<Control-Key-Z>", "<Control-Shift-Key-z>"]
     assert normal("Shift-Control-Z") == "Control-Shift-z" and sequences("Alt-F2") == ["<Alt-F2>"]
+    assert normal("KP_Enter") == "Return" and sequences("Return") == ["<Return>", "<KP_Enter>"]
+    assert normal("T") == "t" and normal("Shift-t") == "t"  # (Shift belongs to a letter only with Ctrl or Alt)
 
 
 def test_a_key_is_named_as_the_keyboard_names_it_in_the_window_s_language():
     assert [key_text(k) for k in ("Control-Shift-z", "Return", "t", "Delete", "Prior", "Left", "Alt-F4")] == [
         "Ctrl+Shift+Z", "Enter", "T", "Del", "Page Up", "←", "Alt+F4"]
+    assert shortcuts.keys_text(("F5", "Control-r")) == "F5, Ctrl+R" and shortcuts.keys_text(()) == ""
     set_language("de")
     try:
         assert key_text("Control-z") == "Strg+Z" and key_text("Delete") == "Entf"
@@ -114,34 +78,32 @@ def test_a_key_is_named_as_the_keyboard_names_it_in_the_window_s_language():
 
 
 @pytest.mark.parametrize("name, key, why", [
-    ("review", "Left", "turns the viewer's pages"), ("settings", "Control-Next", "turns the viewer's pages"),
-    ("review", "Escape", "Esc is fixed"), ("review", "Tab", "a key of Windows"), ("settings", "F10", "a key of Windows"),
-    ("settings", "Alt-F4", "a key of Windows"), ("settings", "s", "needs Ctrl or Alt"),
-    ("settings", "Control-c", "editing the text"), ("review", "t", "already the key of Text direction"),
-    ("settings", "F5", "already the key of Translate the page on show")])
+    ("copy_format", "Escape", "Esc closes the dialogs"), ("copy_format", "Tab", "a key of Windows"),
+    ("editor_next", "F10", "a key of Windows"), ("editor_next", "Alt-F4", "a key of Windows"),
+    ("editor_next", "s", "plain key"), ("copy_format", "Control-c", "editing the text"),
+    ("paste_format", "Control-x", "editing the text"), ("editor_next", "Alt-Up", "already the key of editor_previous")])
 def test_what_a_key_may_not_be(name, key, why):
     assert why in Keymap().problem(name, key)
 
 
-def test_a_page_key_may_be_plain_and_a_window_key_an_f_key_or_with_ctrl_or_alt():
+def test_an_editor_key_may_be_an_f_key_or_with_ctrl_or_alt():
     keymap = Keymap()
-    assert keymap.problem("review", "r") is None and keymap.problem("review", "Control-r") is None
-    assert keymap.problem("settings", "F4") is None and keymap.problem("settings", "Alt-s") is None
-    assert keymap.problem("settings", "F2") is not None  # (the Japanese of the bubble under the pointer's)
-    assert keymap.problem("settings", "F3") is not None  # (the next bubble's)
-    assert keymap.problem("settings", "Control-comma") is None
+    assert keymap.problem("editor_next", "F4") is None and keymap.problem("editor_next", "Alt-s") is None
+    assert keymap.problem("editor_previous", "Control-comma") is None
+    assert keymap.problem("copy_format", "Control-Alt-c") is None  # (not the boxes' Ctrl+C)
 
 
 # ------------------------------------------------------------------ the keymap and its file
 def test_the_keymap_keeps_what_differs_from_the_table_and_its_file_holds_that_alone(tmp_path):
-    keymap = Keymap().with_key("translate_now", "F6").with_key("review", "r").with_key("redo", None)
-    assert keymap.of("translate_now") == ("F6",) and keymap.of("redo") == () and keymap.customised
-    assert keymap.shown("translate_now") == "F6" and keymap.shown("redo") == "" and keymap.owner("r") == "review"
-    assert keymap.with_default("translate_now").of("translate_now") == ("F5",)
-    assert Keymap().with_key("translate_now", "F5") == Keymap() and not Keymap.reset().customised
+    keymap = Keymap().with_key("copy_format", "F6").with_key("editor_next", "Alt-n").with_key("paste_format", None)
+    assert keymap.of("copy_format") == ("F6",) and keymap.of("paste_format") == () and keymap.customised
+    assert keymap.shown("copy_format") == "F6" and keymap.shown("paste_format") == ""
+    assert keymap.owner("Alt-n") == "editor_next"
+    assert keymap.with_default("copy_format").of("copy_format") == ("Control-Shift-c",)
+    assert Keymap().with_key("copy_format", "Control-Shift-C") == Keymap() and not Keymap.reset().customised
     path = keymap.save(tmp_path)
     assert json.loads(path.read_text(encoding="utf-8")) == {
-        "keys": {"redo": [], "review": ["r"], "translate_now": ["F6"]}}
+        "keys": {"copy_format": ["F6"], "editor_next": ["Alt-n"], "paste_format": []}}
     assert Keymap.load(tmp_path) == keymap
 
 
@@ -149,229 +111,51 @@ def test_a_damaged_file_or_a_key_that_cannot_be_is_left_out(tmp_path):
     assert Keymap.load(tmp_path) == Keymap()  # no file
     (tmp_path / shortcuts.SHORTCUTS_FILE).write_text("{not json", encoding="utf-8")
     assert Keymap.load(tmp_path) == Keymap()
+    (tmp_path / shortcuts.SHORTCUTS_FILE).write_text(json.dumps(["not", "a", "table"]), encoding="utf-8")
+    assert Keymap.load(tmp_path) == Keymap()
     (tmp_path / shortcuts.SHORTCUTS_FILE).write_text(json.dumps({"keys": {
-        "settings": ["F5"], "translate_now": ["F6"], "review": ["Left"], "gone": ["F7"], "undo": "x"}}), encoding="utf-8")
-    keymap = Keymap.load(tmp_path)  # F5 moved: the keys let go first
-    assert keymap.of("settings") == ("F5",) and keymap.of("translate_now") == ("F6",)
-    assert keymap.of("review") == () and keymap.of("undo") == ("Control-z",)
+        "editor_next": ["Alt-Up"], "editor_previous": ["F6"], "copy_format": ["Left"], "gone": ["F7"],
+        "paste_format": "x"}}), encoding="utf-8")
+    keymap = Keymap.load(tmp_path)  # Alt+Up moved: the keys let go first
+    assert keymap.of("editor_next") == ("Alt-Up",) and keymap.of("editor_previous") == ("F6",)
+    assert keymap.of("copy_format") == () and keymap.of("paste_format") == ("Control-Shift-v",)
 
 
-def test_a_key_saved_for_the_whole_book_run_of_earlier_versions_is_left_out(tmp_path):
+def test_the_keys_an_earlier_version_kept_for_actions_this_one_has_not_are_left_out(tmp_path):
     (tmp_path / shortcuts.SHORTCUTS_FILE).write_text(json.dumps({"keys": {
-        "read_whole_book": ["Control-b"], "translate_now": ["F6"]}}), encoding="utf-8")
+        "read_whole_book": ["Control-b"], "translate_now": ["F6"], "reading_mode": [], "copy_format": ["F6"]}}),
+        encoding="utf-8")
     keymap = Keymap.load(tmp_path)
-    assert "read_whole_book" not in BY_NAME and keymap.owner("Control-b") is None
-    assert keymap.of("translate_now") == ("F6",) and keymap == Keymap().with_key("translate_now", "F6")
+    assert not {"read_whole_book", "translate_now", "reading_mode"} & set(BY_NAME) and keymap.owner("Control-b") is None
+    assert keymap == Keymap().with_key("copy_format", "F6") and keymap.of("copy_format") == ("F6",)
 
 
-# ------------------------------------------------------------------ the bindings
-def test_the_bindings_move_with_the_keys_and_what_the_parts_bound_is_let_go(hidden_root):
-    window, page = tk.Frame(hidden_root), tk.Canvas(hidden_root)
-    window.bind("<Control-y>", lambda e: "the part's own")  # as the translator strip binds Ctrl+Y
+# ------------------------------------------------------------------ on a dialog
+def test_a_dialog_binds_its_keys_on_its_widgets_and_its_buttons_name_them(hidden_root):
+    window, text = tk.Frame(hidden_root), tk.Text(hidden_root)
     calls = []
-    handlers = {a.name: (lambda e, n=a.name: calls.append(n)) for a in ACTIONS}
-    bound = shortcuts.bind_keys({"window": window, "page": page}, Keymap(), handlers)
-    assert set(window.bind()) == {"<Key-F5>", "<Key-F11>", "<Key-F1>", "<Shift-Key-F1>", "<Control-Key-z>",
-                                  "<Control-Lock-Key-Z>", "<Control-Key-y>", "<Control-Lock-Key-Y>",
-                                  "<Key-F2>", "<Shift-Key-F2>", "<Control-Key-F2>",  # (a bubble's text: `bubble_text`)
-                                  "<Key-F3>", "<Shift-Key-F3>"}
-    assert set(page.bind()) == {"<Key-Return>", "<Key-KP_Enter>", "<Key-Delete>", "t", "T",  # (as Tk lists them)
-                                "<Key-Tab>", "<Shift-Key-Tab>", "<Alt-Key-Left>", "<Alt-Key-Right>", "<Alt-Key-Up>",
-                                "<Alt-Key-Down>", "<Control-Key-C>", "<Control-Shift-Key-c>", "<Control-Key-V>",
-                                "<Control-Shift-Key-v>", "<Control-Key-c>", "<Control-Lock-Key-C>", "<Control-Key-v>",
-                                "<Control-Lock-Key-V>"}
-    keymap = Keymap().with_key("redo", "Control-Shift-z").with_key("text_direction", "d").with_key("review", "r")
-    bound = shortcuts.bind_keys({"window": window, "page": page}, keymap, handlers, bound)
-    assert "<Control-Key-y>" not in window.bind() and "<Control-Key-Z>" in window.bind()
-    assert {"d", "D", "r", "R"} <= set(page.bind()) and "t" not in page.bind()
-    shortcuts.bind_keys({"window": window, "page": page}, Keymap(), handlers, bound)
-    assert "r" not in page.bind() and "t" in page.bind() and "<Control-Key-y>" in window.bind()
+    handlers = {"editor_previous": lambda e: calls.append("previous"), "editor_next": lambda e: calls.append("next")}
+    shortcuts.bind_on((window, text), Keymap(), handlers)
+    assert set(window.bind()) == set(text.bind()) == {"<Alt-Key-Up>", "<Alt-Key-Down>"}
+    keymap = Keymap().with_key("editor_next", "F8").with_key("editor_previous", None)
+    other = tk.Frame(hidden_root)
+    shortcuts.bind_on((other,), keymap, handlers)
+    assert set(other.bind()) == {"<Key-F8>"}
+    assert shortcuts.with_keys("Previous", "editor_previous") == "Previous (Alt+↑)"
+    assert shortcuts.with_keys("Next", "editor_next", keymap) == "Next (F8)"
+    assert shortcuts.with_keys("Previous", "editor_previous", keymap) == "Previous"  # no key: the label alone
+    shortcuts.set_current(keymap)  # the reader's keys, in force for the dialogs made from now on
+    assert shortcuts.with_keys("Next", "editor_next") == "Next (F8)"
 
 
-def _fake_window(hidden_root, role="reader"):
-    done = []
-    record = lambda name: (lambda *a, **k: done.append(name))  # noqa: E731
-    w = SimpleNamespace(role_var=tk.StringVar(hidden_root, value=role),
-                        original_var=tk.BooleanVar(hidden_root, value=False),
-                        top_var=tk.BooleanVar(hidden_root, value=False), over_var=tk.BooleanVar(hidden_root, value=True),
-                        order_numbers_var=tk.BooleanVar(hidden_root, value=False),
-                        _edit_key=lambda e, step: step(), _nudge_key=lambda e, d: done.append(f"nudge {d}"),
-                        _tab_region=lambda step: done.append(f"tab {step}"))
-    for name in ("translate_now", "toggle_reading", "undo_edit", "redo_edit", "_redisplay", "_apply_on_top", "toggle_over",
-                 "set_area", "open_page_keys", "open_caches", "review_names", "open_settings", "open_help",
-                 "open_keys", "toggle_order_numbers", "_edit_chosen", "_drop_chosen", "_turn_direction", "toggle_order",
-                 "toggle_skip", "retranslate_page", "open_book_settings", "open_glossary", "open_review", "open_find_replace",
-                 "copy_format", "paste_format", "copy_region", "paste_region", "ignore_area_everywhere",
-                 "paste_format_on_kind", "set_kind_of_selection", "set_size_of_selection", "place_in_order"):
-        setattr(w, name, record(name))
-    return w, done
+def test_the_buttons_name_the_keys_in_the_window_s_language():
+    from taslation.i18n import _
 
-
-def test_every_action_has_its_step_and_translator_mode_s_tools_wait_for_that_role(hidden_root):
-    w, done = _fake_window(hidden_root)
-    handlers = app_mod.App._shortcut_handlers(w)
-    assert set(handlers) == {a.name for a in ACTIONS if a.scope != "editor"}  # the editor's: `ReviewDialog`
-    for name in ("review", "find_replace", "skip_page", "next_region", "copy_region", "paste_format", "set_kind"):
-        handlers[name](None)
-    assert done == []  # the Reader role: their buttons are not there (and Tab goes on to move the focus)
-    handlers["nudge_left"](None)  # Alt+arrows: `_nudge_key` sends them on to the viewer outside translator mode
-    handlers["keys_help"](None)
-    handlers["order_numbers"](None)
-    assert done == ["nudge Left", "open_keys", "toggle_order_numbers"] and w.order_numbers_var.get() is True
-    done.clear()
-    w.role_var.set("translator")
-    handlers["review"](None)
-    handlers["translate_now"](None)
-    handlers["show_original"](None)
-    handlers["over_viewer"](None)
-    handlers["previous_region"](None)
-    handlers["copy_format"](None)
-    handlers["ignore_area"](None)
-    assert done == ["open_review", "translate_now", "_redisplay", "toggle_over", "tab -1", "copy_format",
-                    "ignore_area_everywhere"]
-    assert w.original_var.get() is True and w.over_var.get() is False  # flipped as the View menu's tick does
-
-
-def test_the_menus_and_the_toolbar_name_the_keys_in_force(hidden_root):
-    menu = tk.Menu(hidden_root, tearoff=0)
-    menu.add_command(label="Settings...")
-    menu.add_checkbutton(label="Show original")
-    w = SimpleNamespace(keymap=Keymap(), _menu_keys=[(menu, 0, "settings"), (menu, 1, "show_original")],
-                        translate_btn=tk.Button(hidden_root), reading_btn=tk.Button(hidden_root))
-    app_mod.App._show_keys(w)
-    assert menu.entrycget(0, "accelerator") == "" and w.translate_btn.cget("text") == "Translate (F5)"
-    assert w.reading_btn.cget("text") == "Full screen (F11)"
-    w.keymap = Keymap().with_key("settings", "Control-comma").with_key("translate_now", "F6").with_key("reading_mode", None)
-    app_mod.App._show_keys(w)
-    assert menu.entrycget(0, "accelerator") == "Ctrl+," and w.translate_btn.cget("text") == "Translate (F6)"
-    assert w.reading_btn.cget("text") == "Full screen"
-
-
-def test_saved_keys_are_bound_at_once_and_help_says_them(hidden_root):
-    rendered, bound = [], []
-    w = SimpleNamespace(keymap=Keymap(), _bind_shortcuts=lambda: bound.append(True),
-                        _help=SimpleNamespace(winfo_exists=lambda: True, wrapped_at=400,
-                                              render=lambda width, again=False: rendered.append((width, again))))
-    keymap = Keymap().with_key("translate_now", "F6")
-    app_mod.App._shortcuts_saved(w, keymap)
-    assert w.keymap is keymap and shortcuts.current() is keymap and bound == [True] and rendered == [(400, True)]
-
-
-def test_help_s_keys_follow_the_keymap_in_force():
-    topic = dict(help_mod.TOPICS)["Keys"]
-    lines = help_mod.topic_lines("Keys", topic)  # the table's keys, Esc and the mouse's ways (the one Keys list)
-    assert lines == [*shortcuts.help_lines(Keymap()), "Tools > Settings... > Shortcuts changes these keys."]
-    assert "F5: Translate the page on show" in lines and "Tab: Select the next region" in lines
-    assert "Ctrl+Shift+C: Copy format" in lines and "Several selected: " + shortcuts.FIXED_GESTURES[-1][0] in lines
-    shortcuts.set_current(Keymap().with_key("translate_now", "F6").with_key("review", "r").with_key("next_region", None))
-    lines = help_mod.topic_lines("Keys", topic)
-    assert "F6: Translate the page on show" in lines and "R: Review..." in lines
-    assert not any(line.startswith(("F5", "Tab")) for line in lines)
-    assert "Esc: Let go of the chosen box, or leave full screen" in lines
-    assert help_mod.topic_lines("Page keys", ("Page > Page keys... sets the keys that turn pages in your viewer. A right-to-left book often turns with the left arrow.",))[0].startswith("Page >")
-
-
-def test_the_menus_name_the_entries_they_hold_whatever_else_a_menu_has(hidden_root, monkeypatch):
-    from taslation.ui import app as app_mod
-
-    monkeypatch.setattr(app_mod, "tip_menu", lambda *a, **k: None)
-    w = tk.Toplevel(hidden_root)
-    w.withdraw()
-    for name in ("set_area", "open_page_keys", "open_caches", "review_names", "open_settings", "_redisplay", "_apply_on_top",
-                 "toggle_over", "_on_ui_language", "open_help", "open_keys", "open_notice", "open_updates", "open_about"):
-        setattr(w, name, lambda *a: None)
-    w.original_var, w.top_var, w.over_var, w.order_numbers_var = (tk.BooleanVar(w) for _ in range(4))
-    w.ui_lang_var = tk.StringVar(w)
-    shortcuts.set_current(Keymap().with_key("copy_region", "Alt-c"))
-    app_mod.App._build_menus(w)
-    labels = {"set_area": "Set area...", "page_keys": "Page keys...", "saved_translations": "Saved translations...",
-              "settings": "Settings...", "show_original": "Show original", "always_on_top": "Always on top",
-              "over_viewer": "Over the full-screen viewer", "how_to_use": "How to use...", "keys_help": "Keys...",
-              "ignore_area": "Ignore this area on all pages of this book", "copy_format": "Copy format",
-              "paste_format": "Paste format", "paste_format_on_kind": "Paste format on every region of this kind...",
-              "copy_region": "Copy region", "paste_region": "Paste region", "set_kind": "Set kind...",
-              "set_text_size": "Set text size...", "place_in_order": "Place in reading order...",
-              "order_numbers": "Reading-order numbers"}
-    choices = {"hover_shows": {label for _v, label in HOVER_LABELS},
-               "hover_reveal": {label for _v, label in REVEAL_LABELS}}
-    assert sorted(name for _m, _i, name in w._menu_keys) == sorted([*labels, *choices, *choices])  # (two entries each)
-    for menu, index, name in w._menu_keys:  # the keys in force from the start, before `_show_keys`
-        assert menu.entrycget(index, "label") in choices.get(name, {labels.get(name)})
-        assert menu.entrycget(index, "accelerator") == shortcuts.current().shown(name)
-    accelerators = {name: menu.entrycget(index, "accelerator") for menu, index, name in w._menu_keys}
-    assert accelerators["copy_region"] == "Alt+C" and accelerators["copy_format"] == "Ctrl+Shift+C"
-    assert accelerators["how_to_use"] == "F1" and accelerators["keys_help"] == "Shift+F1" and accelerators["set_kind"] == ""
-
-# ------------------------------------------------------------------ the Shortcuts page
-@pytest.fixture
-def dialog(hidden_root, tmp_path, monkeypatch):
-    monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
-    settings = Settings(state_dir=tmp_path / "state", models_dir=tmp_path / "models",
-                        config_path=tmp_path / "taslation.toml")
-    got = []
-    d = dlg.SettingsDialog(hidden_root, settings, on_saved=got.append, keymap=Keymap(), on_keys=got.append)
-    return d, got, settings
-
-
-def _press(page, keysym, state=0):
-    return page._take(SimpleNamespace(keysym=keysym, state=state))
-
-
-def test_the_page_lists_every_action_and_the_fixed_keys_in_grey(dialog):
-    d, _got, _s = dialog
-    page = d.keys
-    assert [d.pages.tab(i, "text") for i in range(d.pages.index("end"))][:2] == ["General", "Shortcuts"]
-    assert list(page.tree.get_children())[:len(ACTIONS)] == [a.name for a in ACTIONS]
-    assert page.tree.set("translate_now", "key") == "F5" and page.tree.set("review", "key") == ""
-    fixed = [iid for iid in page.tree.get_children() if "fixed" in page.tree.item(iid, "tags")]
-    keys = [page.tree.set(iid, "key") for iid in fixed]  # Esc, the page keys, then the mouse's ways
-    assert keys[0] == "Esc" and len(fixed) == 2 + len(shortcuts.FIXED_GESTURES) and keys[2:] == [
-        shortcuts._(how) for _what, how in shortcuts.FIXED_GESTURES]
-
-
-def test_a_key_is_changed_checked_and_saved_with_the_dialog(dialog):
-    d, got, settings = dialog
-    page = d.keys
-    page.change()
-    assert d.message_var.get() == "Choose an action in the list first." and page.capturing is None
-    page.tree.selection_set("review")
-    page.change()
-    assert page.capturing == "review" and "Review..." in page.capture_var.get()
-    assert _press(page, "Control_L", 4) == "break" and page.capturing == "review"  # a modifier alone: waits on
-    _press(page, "t")
-    assert "already the key of Text direction" in d.message_var.get() and page.capturing == "review"
-    _press(page, "r")
-    assert page.capturing is None and page.tree.set("review", "key") == "R" and page.changed
-    assert d.save() is True and got == [page.keymap] and d.message_var.get() == "Saved. The changes apply now."
-    assert Keymap.load(settings.state_dir).of("review") == ("r",) and not page.changed
-    assert d.save() is True and d.message_var.get() == "Nothing changed."
-
-
-def test_esc_cancels_and_no_key_default_and_reset_all(dialog):
-    d, got, _s = dialog
-    page = d.keys
-    page.tree.selection_set("translate_now")
-    page.change()
-    _press(page, "F11")  # refused: said in the message line, the wait goes on
-    assert "Full screen" in d.message_var.get() and page.capturing == "translate_now"
-    _press(page, "Escape")
-    assert page.capturing is None and page.keymap == Keymap() and d.winfo_exists()
-    assert d.message_var.get() == ""  # the refusal goes with the wait
-    page.clear()
-    assert page.tree.set("translate_now", "key") == ""
-    page.tree.selection_set("settings")
-    page.change()
-    _press(page, "F5")
-    assert page.keymap.of("settings") == ("F5",)
-    page.tree.selection_set("translate_now")
-    page.default()  # F5 is the settings' now
-    assert "already the key of Settings..." in d.message_var.get() and page.keymap.of("translate_now") == ()
-    page.reset()
-    assert page.keymap == Keymap() and page.tree.set("settings", "key") == "" and not page.changed
-
-
-def test_the_dialog_in_japanese_names_the_keys_page(hidden_root, tmp_path, monkeypatch):
-    monkeypatch.setattr(dlg, "place_window", lambda win, parent=None: None)
-    set_language("ja")
-    d = dlg.SettingsDialog(hidden_root, Settings(state_dir=tmp_path, config_path=tmp_path / "t.toml"))
-    assert d.pages.tab(1, "text") == "ショートカット" and d.keys.tree.item("undo", "text") == "元に戻す"
+    set_language("de")
+    try:
+        shown = key_text("Control-Shift-c")
+        assert shown.startswith("Strg+") and shown.endswith("+C")
+        assert shortcuts.with_keys("Copy format", "copy_format") == f"{_('Copy format')} ({shown})"
+        assert _("Copy format") != "Copy format"
+    finally:
+        set_language("en")

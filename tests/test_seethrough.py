@@ -232,8 +232,14 @@ def test_one_look_finds_it_all_on_every_fourth_pixel_and_bars_are_painted_over()
     assert clean[:40].min() == 255 and np.array_equal(clean[40:], frame[40:])
 
 
-def test_the_setting_is_off_by_default():
-    assert Settings().see_through is False
+def test_see_through_mode_is_no_setting_but_the_programs_one_mode():
+    import dataclasses
+
+    from taslation import config
+
+    assert "see_through" not in {f.name for f in dataclasses.fields(Settings)}
+    assert "see_through" in config.WINDOW_SETTINGS  # (a file that still has it loads: the log names it once)
+    assert Settings().see_through_indicators is True  # (its indicators' pane: on until the reader switches it off)
 
 
 # ------------------------------------------------------------------ the window's side (no window)
@@ -349,20 +355,26 @@ def test_the_window_is_click_through_never_activated_and_shows_nothing_until_it_
 
 
 # ------------------------------------------------------------------ nothing goes to the viewer, nothing takes the front
-def test_in_see_through_mode_no_key_and_no_click_is_passed_on_to_the_viewer(monkeypatch):
-    from taslation.ui import reading, translator
+def test_no_key_and_no_click_is_passed_on_to_the_viewer():
+    """(see-through mode, the program's one mode: every key and click is the viewer's. The functions that could send
+    one are left in `capture.windows` for the tools' guards and stand-ins alone; no module of the program calls them)"""
+    import re
+    from pathlib import Path
 
-    sent = []
-    for module, names in ((reading, ("post_key", "press_briefly")), (translator, ("post_click",))):
-        for name in names:
-            monkeypatch.setattr(module, name, lambda *a, _n=name, **k: sent.append(_n))
-    app = SimpleNamespace(_see_through=object())  # (nothing else: a path past the first line would fail here)
-    reading.ReadingMixin.forward_key(app, "Left")
-    translator.TranslatorMixin._forward_click(app, SimpleNamespace(x=10, y=10))
-    assert sent == []
+    import taslation
+
+    root = Path(taslation.__file__).resolve().parent
+    senders = re.compile(r"\b(post_key|post_click|press_briefly|press_key|SendInput|keybd_event|mouse_event)\b")
+    callers = sorted(path.relative_to(root).as_posix() for path in root.rglob("*.py")
+                     if senders.search(path.read_text(encoding="utf-8"))
+                     and path.relative_to(root).as_posix() not in ("capture/windows.py", "capture/__init__.py"))
+    assert callers == []
+    from taslation.ui import translator
+
+    assert not hasattr(translator.TranslatorMixin, "_forward_click")
 
 
-def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and_drops_it(monkeypatch):
+def test_the_quiet_start_makes_a_decoy_first_window_on_windows_and_drops_it(monkeypatch):
     from taslation.ui import seethrough as ui
 
     made = []
@@ -391,11 +403,13 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     titles = []
     app = SimpleNamespace(after=lambda ms, f: later.append((ms, f)),
                           wm_attributes=lambda *a: attributes.append((len(made), a)), wm_title=titles.append)
+    monkeypatch.setattr(ui.window, "IS_WINDOWS", False)  # (elsewhere than on Windows: no decoy, nothing hidden)
     ui.quiet_start(app, Settings())
     assert made == [] and not ui.quiet(app) and not ui.hidden(app) and attributes == [] and titles == []
     ui.quiet_started(app)
     assert later == []
-    ui.quiet_start(app, Settings(see_through=True))
+    monkeypatch.setattr(ui.window, "IS_WINDOWS", True)
+    ui.quiet_start(app, Settings())
     box, decoy = made
     # the first top-level window Tk makes is one inside a frame of the window's own: a child window, never activated
     assert box.options == {"container": True} and decoy.options == {"use": "4242"}
@@ -409,7 +423,7 @@ def test_the_quiet_start_makes_a_decoy_first_window_only_in_see_through_mode_and
     drop()
     assert made[2:] == [("gone", "Toplevel"), ("gone", "Frame")] and not ui.quiet(app)
     assert ui.hidden(app) and len(later) == 1  # (nothing put aside, nothing minimised: it never was on the screen)
-    ui.quiet_start(app, Settings(see_through=True))
+    ui.quiet_start(app, Settings())
     ui.quiet_end(app)  # (the legal notice: the reader's to answer)
     assert not ui.quiet(app) and ui.hidden(app)  # (off the screen all the same)
 

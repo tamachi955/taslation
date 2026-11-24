@@ -67,7 +67,7 @@ def test_a_settings_file_that_turns_it_on_gets_the_line_once(tmp_path, monkeypat
 def test_the_line_says_what_to_do_without_a_command_line():
     line = translator.SPELLING_OFF
     assert "pip" not in line and "pyspellchecker" not in line  # nothing a person without Python could run
-    assert "not install" in line and "Tools > Settings..." in line and "Open settings file" in line
+    assert "not install" in line and "open Settings..." in line and "Open settings file" in line
     assert "spellcheck = false" in line
 
 

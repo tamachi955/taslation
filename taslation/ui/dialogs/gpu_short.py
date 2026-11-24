@@ -5,7 +5,7 @@ TASlation's own box, as `caches.WarningBox` (its warning icon, its lines broken 
 the window, in front and modal), with three ways out: Check again (the person closed something: the start judges
 anew), Start on the processor (what does not fit runs there for the session, the parts it names - least loss first:
 `place.TO_PROCESSOR`) and Quit (the window closes; closing the box or Escape is Quit too); and a box to tick, Do not ask
-again on this computer (``gpu_short`` "processor": the next starts take that way without asking; Tools > Settings... >
+again on this computer (``gpu_short`` "processor": the next starts take that way without asking; Settings... >
 System changes it back). Check again has the focus. Nothing is sent anywhere: the figures are the card's own (NVML)
 and Ollama's on this computer.
 

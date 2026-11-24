@@ -25,7 +25,7 @@ LINE_WRAP = 660  # pixels
 BOOK, SERIES = "book", "series"
 LOOK_IN = "Look in:"
 SCOPE_TIP = ("All volumes of the series: Replace all also replaces in the other volumes of this series kept in this "
-             "language, after it shows how many lines each has. They are saved at once; Ctrl+Z takes back this book "
+             "language, after it shows how many lines each has. They are saved at once; Menu > Undo takes back this book "
              "only. Replace selected stays in this book.")
 SERIES_NOTE = "The list shows this book; Replace all counts every volume first and asks."
 
@@ -118,7 +118,7 @@ class FindReplaceDialog(tk.Toplevel):
         tip(_("Replace the lines selected in the list."), self.selected_btn)
         self.all_btn = ttk.Button(btns, text=_("Replace all"), command=self.replace_all)
         self.all_btn.pack(side="left", padx=(6, 0))
-        tip(_("Replace every match in the book. Ctrl+Z takes it all back."), self.all_btn)
+        tip(_("Replace every match in the book. Menu > Undo takes it all back."), self.all_btn)
         ttk.Button(btns, text=_("Close"), command=self.destroy).pack(side="right")
 
         for var in (self.find_var, self.case_var, self.word_var, self.scope_var):

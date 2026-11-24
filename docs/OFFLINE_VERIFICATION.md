@@ -22,8 +22,8 @@ Python 3.13.2, torch 2.14.1+cpu, transformers 5.20.2, manga-ocr 0.1.16).
 
 ## How the program's own process is kept off the network
 
-What follows holds for TASlation's own process (the window and the
-`taslation` commands). Ollama is a program of its own, which TASlation starts
+What follows holds for TASlation's own process (`taslation gui` and the
+other `taslation` commands). Ollama is a program of its own, which TASlation starts
 when it is not running and asks to load, release and run the translation
 model on 127.0.0.1; what else Ollama does is not under TASlation's control.
 The installer, `setup_models.py` and `check_update.py`, which use the network, run
@@ -52,10 +52,10 @@ without the guard.
    disabled.
 5. **Separate download scripts**: the code a user runs that uses the network
    is the installer (`install.cmd` / `install.ps1`, also run by `update.cmd`)
-   and `setup_models.py`, which the installer runs and which the window and
+   and `setup_models.py`, which the installer runs and which TASlation and
    the command line run as a separate process when the person agrees to
-   download a translation model, and `check_update.py`, which the window
-   (Help > Check for updates..., and at most once a day at its start for who
+   download a translation model, and `check_update.py`, which TASlation
+   (Menu > Help > Check for updates..., and at most once a day at its start for who
    turned that on) and `update.cmd` run as a separate process to ask GitHub
    for the newest version and, when the person updates, to download that
    version's ZIP ("Looking for a new version and updating (2026-11-21)");
@@ -94,7 +94,7 @@ The audit's last part, `--- saved files (at rest) ---`, counts the files with
 text of a book in the state folder and ends with "plain files with text of a
 book: none" when every one is protected; it changes nothing.
 
-Then disconnect (Wi-Fi off / cable out) and use the window normally. Ollama
+Then disconnect (Wi-Fi off / cable out) and read with TASlation as usual. Ollama
 keeps answering on loopback; the models load from disk.
 
 In a source checkout with the development tools (`pip install -e .[dev]`),

@@ -360,8 +360,9 @@ def test_saved_layers_are_set_on_the_window_s_translators(tmp_path):
     assert translator.num_gpu is None and other.num_gpu is None
 
 
-def test_the_tools_menu_has_the_entry():
-    with open(app_mod.__file__, encoding="utf-8") as f:
+def test_the_menu_has_the_entry():
+    from taslation.ui import see_menu
+
+    with open(see_menu.__file__, encoding="utf-8") as f:
         text = f.read()
-    assert "tools.add_command(label=_(RELEASE_ENTRY), command=lambda: release_now(self))" in text
-    assert "_(RELEASE_TIP))" in text  # (its tip, last among the Tools menu's)
+    assert "menu.add_command(label=_(RELEASE_ENTRY), command=_asking(app, lambda: release_now(app)))" in text

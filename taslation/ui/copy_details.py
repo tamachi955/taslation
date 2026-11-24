@@ -1,5 +1,5 @@
 """Copy details: what TASlation runs on and the last error, for a report, on the clipboard (`errorlog.details_text`:
-no text, title or path of the reader's). In Help > About TASlation (`dialogs.about`) and in the window's error boxes:
+no text, title or path of the reader's). In Menu > Help > About TASlation (`dialogs.about`) and in the window's error boxes:
 `watch_error_boxes` gives every `WarningBox` that tells of a problem (one button, the warning icon) a Copy details
 button as it comes up, so that the boxes need not know of it."""
 

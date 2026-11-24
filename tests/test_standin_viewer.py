@@ -19,7 +19,6 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import standin_e2e  # noqa: E402
 import standin_viewer as sv  # noqa: E402
-from test_side_indicator import Window, no_way_to_the_viewer  # noqa: E402,F401 - the window, and its fixture
 
 
 # ---------------------------------------------------------------------------------------------------- the script
@@ -47,7 +46,7 @@ def test_the_page_knows_every_step_the_script_has():
 
 def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     names = standin_e2e.wanted("all")
-    assert names == ["c", "a", "b", "d", "e", "r", "t", "t2", "o", "z", "x", "f", "f2"]
+    assert names == ["c", "a", "b", "d", "e", "x", "f2"]
     count = standin_e2e.pages_needed(names)
     segments, steps = standin_e2e.build_plan(names, count + 6, cancel_first=count, soft_ms=700)
     text = sv.format_script(steps)
@@ -57,13 +56,12 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     turns = {s.name: s.screens for s in segments}
     assert turns["c"] == [(2, True), (4, True), (6, True)]
     assert turns["e"][:3] == [(48, True), (46, True), (44, True)]  # turning back
-    # t: on the Translator's full screen the next page by the window's page key, t2 back by its previous one
-    assert turns["t"] == [(56, True)] and turns["t2"] == [(54, True)]
+    assert turns["e"][-1] == (48, True)
     # x: the screens of little text added after the others, soft long and half as sharp, then back where it was
-    assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (64, True)]
-    assert f"t700,b2,j{count},w5000," in text and ",t,b,j64,w4000," in text
-    assert turns["f2"] == [(69, False), (70, False)]  # single pages once the window is narrow
-    assert standin_e2e.wanted("f,a") == ["a", "f", "f2"]
+    assert turns["x"] == [(count, True), (count + 2, True), (count + 4, True), (48, True)]
+    assert f"t700,b2,j{count},w5000," in text and ",t,b,j48,w4000," in text
+    assert turns["f2"] == [(49, False), (50, False)]  # single pages once the window is narrow
+    assert standin_e2e.wanted("f2,a") == ["a", "f2"]
     assert standin_e2e.wanted("f2") == ["f2"]  # the narrow window alone
     # f3 (by its name only): a's slow reading on single pages, after f2 when both are asked
     assert "f3" not in names and standin_e2e.wanted("f3,f2") == ["f2", "f3"]
@@ -71,9 +69,17 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
     assert narrow[0].screens == [(k, False) for k in range(1, 10)]
     both, _steps = standin_e2e.build_plan(["f2", "f3"], standin_e2e.pages_needed(["f2", "f3"]))
     assert both[1].screens == [(k, False) for k in range(3, 12)]
-    assert standin_e2e.wanted("t2") == standin_e2e.wanted("t") == ["t", "t2"]  # the key forward, then back
     with pytest.raises(SystemExit):
         standin_e2e.wanted("a,y")  # (q is scenario q, for a stand-in with a profile)
+
+
+@pytest.mark.parametrize("gone", ["r", "t", "t2", "o", "z", "f"])
+def test_the_scenarios_of_the_former_own_window_are_unknown_ones(gone):
+    """(the scenarios that turned pages through TASlation's window, its full screen, over the book, the side view
+    and the enlarged window went with that window in 2.0.0: asked by name, the run stops before anything starts)"""
+    assert gone not in standin_e2e.SCENARIOS
+    with pytest.raises(SystemExit, match=f"unknown scenario.*{gone}"):
+        standin_e2e.wanted(f"a,{gone}")
 
 
 def _plan(wait_done=None):
@@ -91,7 +97,7 @@ def test_without_wait_done_the_script_is_as_written():
             assert s.steps == standin_e2e.SCENARIOS[s.name][1]
     x = next(s for s in segments if s.name == "x")
     assert x.steps == ["t700", "b2", f"j{first}", "w5000", f"j{first + 2}", "w5000", f"j{first + 4}", "w5000", "t",
-                       "b", "j64", "w4000"]
+                       "b", "j48", "w4000"]  # (back to e's last page)
 
 
 def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
@@ -101,7 +107,7 @@ def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
     holds = [s.a for s in held_steps if s.op == "h"]
     assert holds == list(range(1, len(holds) + 1))  # numbered through the script
     for p, h in zip(plain, held):
-        if h.name not in standin_e2e.HOLD_SCENARIOS:  # c, b, t, t2: as written
+        if h.name not in standin_e2e.HOLD_SCENARIOS:  # c, b: as written
             assert h.steps == p.steps
             continue
         bare = [s for s in h.steps if not s.startswith("h")]
@@ -122,10 +128,10 @@ def test_wait_done_holds_every_rest_the_last_too_and_keeps_x_soft_until_asked():
     assert [s for s in by["d"] if s.startswith("h")] == ["h10", "h11", "h12", "h13", "h14"]
     assert "w300" in by["d"] and by["d"][by["d"].index("w300") + 1] == "f700"  # (a quick turn: no hold)
     assert sum(1 for s in by["x"] if s.startswith("h")) == 4
-    assert by["f"] == ["n", "w6000", next(s for s in by["f"] if s.startswith("h")), "n", "w6000", by["f"][-1]]
-    text = sv.format_script(held_steps)  # f's last page is held before f2's narrow window comes
+    assert by["f2"] == ["n", "w6000", next(s for s in by["f2"] if s.startswith("h")), "n", "w6000", by["f2"][-1]]
+    text = sv.format_script(held_steps)  # x's last page is held before f2's narrow window comes
     f2 = next(s for s in held if s.name == "f2")
-    assert f",w6000,{by['f'][-1]},g{f2.go},m{f2.go}," in text
+    assert f",w4000,{by['x'][-1]},g{f2.go},m{f2.go}," in text
     _first, (short, _s) = _plan(wait_done=8.0)
     assert next(s for s in short if s.name == "x").steps[0] == "k8000"  # never longer than the cap
 
@@ -155,12 +161,11 @@ def test_the_control_file_is_the_go_alone_without_wait_done(tmp_path):
     assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 0});\n'
     standin_e2e.Director.release(me, sharp=1)
     assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 1});\n'
-    # --k-keys: the turns released go with the rest once there is one
-    standin_e2e.Director.release(me, turns=2)
-    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "hold": 2, "sharp": 1, "turns": 2});\n'
     me.wait_done = None
     standin_e2e.Director.release(me, go=4)
-    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 4, "turns": 2});\n'
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 4});\n'
+    with pytest.raises(TypeError):
+        standin_e2e.Director.release(me, turns=2)  # (no turn is released by a key of TASlation's: it sends none)
 
 
 def test_wait_done_lets_a_hold_go_when_its_page_is_finished_and_a_soft_frame_when_the_window_asked():
@@ -217,18 +222,18 @@ def _on_show(t, page, kind, lettered=0, state="sharp"):
 
 
 def test_a_rest_ends_where_the_driver_changed_the_window_for_the_next_scenario():
-    # t2's page came back from the cache at once; then, as the stand-in waited for o, the driver left the full screen
-    # and went over the book, whose live frame of the same page came before o's first turn
-    turns = [{"segment": "t2", "screen": (0, True), "why": "previous", "soft_t": 1000.0, "sharp_t": 1100.0,
+    # e's last page came back from the cache at once; then, as the stand-in waited for f2, the driver made the
+    # stand-in narrow, whose live frame of the same page came before f2's first turn
+    turns = [{"segment": "e", "screen": (0, True), "why": "previous", "soft_t": 1000.0, "sharp_t": 1100.0,
               "next_t": 8000.0},
-             {"segment": "o", "screen": (2, True), "why": "next", "soft_t": 8000.0, "sharp_t": 8300.0,
+             {"segment": "f2", "screen": (2, True), "why": "next", "soft_t": 8000.0, "sharp_t": 8300.0,
               "next_t": 12000.0}]
     displays = [_on_show(1300.0, 0, "translated", 6), _on_show(6000.0, 0, "live"), _on_show(8500.0, 2, "reading")]
     notes = SimpleNamespace(jobs=[], displays=displays, captures=[], requests=[], status_lines=[],
-                            acts=[{"t": 5000.0, "segment": "t2", "act": "left"},
-                                  {"t": 5050.0, "segment": "o", "act": "entered"}])
+                            acts=[{"t": 5000.0, "segment": "f2", "act": "narrow window"}])
     rows = standin_e2e.turn_rows(turns, notes, 12000.0)
-    assert (rows[0]["at_rest"], rows[0]["rest_ms"], rows[0]["rest_ended_by"]) == ("translated", 3900, "t2 left")
+    assert (rows[0]["at_rest"], rows[0]["rest_ms"], rows[0]["rest_ended_by"]) == ("translated", 3900,
+                                                                                   "f2 narrow window")
     assert (rows[1]["at_rest"], rows[1]["rest_ms"], rows[1]["rest_ended_by"]) == ("being read", 3700, None)
     assert rows[0]["finished_ms"] == 200  # (its times are the page's own, as before)
     notes.acts = []  # without the driver's changes: the next turn ends the rest, as it always did
@@ -296,16 +301,16 @@ def test_without_soft_first_the_stand_in_draws_every_turn_sharp_at_once_and_x_is
     assert standin_e2e.soft_first_scenarios(everything, "all", True) == (everything, None)
     names, why = standin_e2e.soft_first_scenarios(standin_e2e.wanted("all"), "all", False)
     assert names == [n for n in everything if n != "x"] and "soft frames" in why
-    assert standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,f"), "a,f", False) == (["a", "f", "f2"], None)
+    assert standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,f2"), "a,f2", False) == (["a", "f2"], None)
     with pytest.raises(SystemExit):
         standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,x"), "a,x", False)
-    args = standin_e2e.parse(["--scenario", "a,f", "--soft-first", "off"])
+    args = standin_e2e.parse(["--scenario", "a,f2", "--soft-first", "off"])
     assert args.soft_first == "off" and standin_e2e.parse([]).soft_first == "on"
 
 
 def test_a_job_whose_page_went_on_at_a_new_size_was_not_cancelled_with_its_page_on_show():
-    # scenario o on a runner: the stand-in back from its monitor's size at 77.06 s, the window's first capture of the
-    # new size 0.93 s later, the job on the old size's frame cancelled at 79.33 s, a job on the new frame after it
+    # a runner: the stand-in back from its monitor's size at 77.06 s, the window's first capture of the new size
+    # 0.93 s later, the job on the old size's frame cancelled at 79.33 s, a job on the new frame after it
     job = {"t": 70910.0, "cancelled_t": 79330.0, "size": [1904, 1072]}
     captures = [{"t": 70000.0, "size": [1904, 1072]}, {"t": 77994.0, "size": [1904, 1024]},
                 {"t": 79400.0, "size": [1904, 1024]}]
@@ -342,20 +347,17 @@ def test_scenario_k_flips_fresh_pages_past_then_reads_them_back_and_is_never_in_
     assert narrow[0].screens == [(1, False), (2, False), (3, False), (4, False), (2, False), (3, False), (4, False)]
 
 
-def test_scenario_k_by_the_windows_page_key_waits_for_each_release_and_its_last_flip_may_stay(tmp_path):
-    keyed = standin_e2e.k_steps("k5", 8, 2, 4, 2, False, keyed=True)  # (--k-keys: no wait of the stand-in's own)
-    assert keyed == ["t0", "b1", "j8", "u", "n", "u", "n", "u", "n", "u", "n", "u", "j10", "u", "n", "u", "t", "b"]
-    times = standin_e2e.k_key_times(500, 4, 2)  # (the waits of the steps without keys)
-    assert times == [(8.0, "key"), (8.5, "key"), (9.0, "key"), (9.5, "key"), (10.0, "driver"), (18.0, "key"),
-                     (26.0, "driver")]
-    assert keyed.count("u") == len(times)
+def test_scenario_k_s_last_flip_may_stay_and_every_turn_is_the_stand_in_s_own(tmp_path):
     stay = standin_e2e.k_steps("k1", 8, 2, 3, 2, True, stay_ms=6000)  # (--k-stay-ms: the last page flipped to)
     assert stay == ["j8", "w8000", "n", "w1000", "n", "w1000", "n", "w6000", "j10", "w8000", "n", "w8000"]
-    assert standin_e2e.k_key_times(1000, 3, 2, stay_ms=6000)[2:4] == [(10.0, "key"), (16.0, "driver")]
     plan = {"turns": 3, "read": 3, "soft": False, "narrow": True}
-    plain, _ = standin_e2e.build_plan(["k2"], 40, k=plan)
-    keys, steps = standin_e2e.build_plan(["k2"], 40, k={**plan, "keys": True})
-    assert keys[0].screens == plain[0].screens and sv.Step("u") in steps  # (the same turns, released otherwise)
+    plain, steps = standin_e2e.build_plan(["k2"], 40, k=plan)
+    assert sv.Step("u") not in steps  # (no turn waits for a key: TASlation hands none on, the stand-in turns itself)
+    assert standin_e2e.build_plan(["k2"], 40, k={**plan, "keys": True})[1] == steps  # (an old plan's word: ignored)
+    with pytest.raises(TypeError):
+        standin_e2e.k_steps("k5", 8, 2, 4, 2, False, keyed=True)
+    assert not standin_e2e.parse([]).__dict__.keys() & {"k_keys", "see_through", "side_indicator", "capture_ms"}
+    # (the stand-in's own turn by a released key, ``u``, is still its own: its control file carries it)
     control = sv.write_control(tmp_path, 3, turns=2)
     assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "turns": 2});\n'
 
@@ -380,21 +382,6 @@ def test_the_pages_of_little_text_come_from_the_annotation_counts_alone(tmp_path
         "images/s2/ja/002.jpg", "images/s2/ja/004.jpg", "images/s1/ja/000.jpg"]
     assert len(standin_e2e.little_text_pages([], 9, dataset)) == 5  # all there are
     assert standin_e2e.little_text_pages([], 2, tmp_path / "none") == []
-
-
-def test_the_hot_keys_reach_no_system_and_a_press_is_taken_only_for_a_key_held():
-    notes = standin_e2e.Notes(31, 1.0)
-    keys = standin_e2e.HotKeys(notes)
-    assert keys.register("F5", 0x74) and keys.register("F11", 0x7A) and keys.registered == {"F5", "F11"}
-    keys.press("F11")
-    keys.press("Escape")  # (not held: the viewer's key)
-    assert keys.take() == ["F11"] and keys.take() == []
-    keys.unregister("F11")
-    keys.clear()
-    assert keys.registered == frozenset()
-    held = [h["held"] for h in notes.hotkeys if "held" in h]
-    assert held == [["F5"], ["F11", "F5"], ["F5"], []]
-    assert [(h["pressed"], h["taken"]) for h in notes.hotkeys if "pressed" in h] == [("F11", True), ("Escape", False)]
 
 
 def test_the_part_drawn_is_told_against_the_page_the_stand_in_drew():
@@ -483,7 +470,7 @@ def test_the_log_tap_keeps_each_line_of_the_rule_for_no_answer_with_what_the_ser
     assert "server_says" not in tap.no_answer[1] and tap.levels["WARNING taslation.translate.ollama"] == 3
 
 
-def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hidden_wholly(monkeypatch, capsys):
+def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it(monkeypatch, capsys):
     """(the very lines `ui.order` logs, from its own calls on made-up windows)"""
     import logging
     import threading
@@ -504,25 +491,24 @@ def test_the_log_tap_keeps_the_windows_lines_of_the_viewer_kept_under_it_and_hid
         monkeypatch.setattr(order, "window_class", lambda hwnd: "Chrome_WidgetWin_1")
         monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: True)
         w = SimpleNamespace(selected=SimpleNamespace(hwnd=20), _own_hwnd=lambda: 10, _raised=None,
-                            _resizing=lambda: False, _frame_count=lambda: 7, _status_key=None,
-                            say=lambda key: None, status=lambda text: None)
+                            _frame_count=lambda: 7, _status_key=None, say=lambda key: None, status=lambda text: None)
         t = 100.0
-        order.turn_asked(w, 20, 7, t)  # (a page key handed on to it, whose frame does not come)
         for _ in range(order.ORDER_MOST + 1):
             order.beat(w, t)
-            t += max(order.ORDER_EVERY_S, order.COVER_EVERY_S)
+            t += order.ORDER_EVERY_S
         order.keep_under(w, t)
+        log.info("a line of something else")  # (not the window order's: not kept)
     finally:
         log.removeHandler(tap)
         log.setLevel(level)
     lines = [n["line"] for n in tap.window_order]
     assert sum("put directly under" in x for x in lines) == order.ORDER_MOST
     assert sum("left as it is" in x for x in lines) == 1
-    assert sum(x.startswith("the viewer is hidden wholly") for x in lines) == 1
+    assert len(lines) == order.ORDER_MOST + 1 and all(x.startswith("window order:") for x in lines)
     standin_e2e.print_table({"translator": "t", "browser": "b", "pages": 1,
                              "run": {"seconds": 1, "window_order": tap.window_order}}, Path("report.json"))
-    assert (f"put under the window {order.ORDER_MOST} time(s), left as it was 1 time(s), refused 0 time(s); hidden "
-            "wholly, no frame after a page key 1 time(s)") in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"put under the window {order.ORDER_MOST} time(s), left as it was 1 time(s), refused 0 time(s)\n" in out
 
 
 def _frames_watched(monkeypatch, tmp_path, captures, drawn_page=5, capture_n=5):
@@ -1083,70 +1069,3 @@ def test_the_view_is_the_one_the_stand_in_says_once_its_window_is_in_place():
     events.append((0.2, {"ev": "size", "w": "2847", "h": "1485", "vw": "1898", "vh": "990", "dpr": "1.5"}))
     view = standin_e2e.placed_view(browser, ready, 2, seconds=0.5, quiet=0.1)
     assert view["vh"] == "990" and view["w"] == "2847" and view["count"] == "70" and view["ev"] == "ready"
-
-
-
-# ---------------------------------------------------------------------------------------------------- the indicator
-@pytest.mark.parametrize("setting", ["column", "rail"])
-def test_the_indicator_is_looked_at_as_told_and_a_wrong_one_is_found(setting, hidden_root, no_way_to_the_viewer):
-    """`SideCheck` on the indicator's own window (`test_side_indicator.Window`) fed by the real backlog: what it was
-    told agrees with what it holds and draws, a screen that went by is drawn as such, the screen on show outlined; a
-    stage the model holds that was never told is found, and so is a drop that left anything."""
-    from fake_side import fingerprint, page
-
-    from taslation.backlog import backlog_of
-
-    w = Window(hidden_root, setting=setting, size=(1560, 900))
-    hidden_root.update()
-    errors: list = []
-    check = standin_e2e.SideCheck(SimpleNamespace(error=lambda *a: errors.append(a)))
-    handle = w._handle_event
-
-    def handled(kind, data):  # (as the tool's hook on `App._handle_event`, the later look made at once below)
-        reading = kind in ("page_on_show", "backlog") or (kind == "page_stage" and data.get("reading"))
-        if reading:
-            check.told_event(w, kind, data)
-        out = handle(kind, data)
-        if reading and kind == "backlog" and data.get("dropped") is True:
-            check.drop_looked(w)
-        return out
-
-    w._handle_event = handled
-    b = backlog_of(w)
-
-    def unit(n):
-        return SimpleNamespace(fingerprint=fingerprint(n), aspect=0.7)
-
-    try:
-        s1 = b.screen_for([unit(1)], 4)
-        w.show(page(1))
-        b.tell(s1, "read", "done", page(1))
-        b.tell(s1, "translate", "working", page(1))
-        b.show(s1)
-        b.totals()
-        gone = b.screen_for([unit(2)], 4)  # went by too fast
-        gone.missed = True
-        b.tell(gone, "read", "missed")
-        s3 = b.screen_for([unit(3)], 4)
-        w.show(page(3))
-        b.tell(s3, "read", "working", page(3))
-        b.show(s3)
-        b.totals()
-        w.pump()
-        check.check(w)
-        assert errors == [] and check.checks == 1
-        assert check.wrong == {}, check.examples
-        assert check.on_show_drawn == check.on_show_checked == 1
-        assert check.missed_told == check.missed_drawn == {(2, fingerprint(2))}
-        assert check.layouts == {setting: 1}
-        w._side.model.screens[1].stages["translate"] = "failed"  # (never told: the model and its drawing are wrong)
-        check.check(w)
-        assert check.wrong["stages"] == 1
-        assert check.wrong["bar" if setting == "column" else "rail_mark"] >= 1
-        b.drop("another book")
-        w.pump()
-        assert len(check.drops) == 1 and "drop_not_cleared" not in check.wrong
-        assert check.drops[0]["screens_left"] == 0 and check.drops[0]["drawn_left"] == 0
-    finally:
-        b.close()
-        w.destroy()

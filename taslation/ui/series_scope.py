@@ -38,7 +38,7 @@ ALL_VOLUMES = "All volumes of the series"
 VOLUME_LINE = "{book}: {n} line(s)"
 VOLUME_UNREADABLE = "{book}: could not be opened ({error})"
 MORE_VOLUMES = "{n} more volume(s): {lines} line(s)"
-VOLUMES_SAVED = ("Other volumes of the series: {n} line(s) changed in {volumes} volume(s), saved at once. Ctrl+Z "
+VOLUMES_SAVED = ("Other volumes of the series: {n} line(s) changed in {volumes} volume(s), saved at once. Menu > Undo "
                  "does not reach them; a copy of each file as it was is kept beside it.")
 VOLUME_LEFT = "{book} was left as it was: {error}"
 

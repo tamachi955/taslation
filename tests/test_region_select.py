@@ -1,8 +1,9 @@
 """Several regions selected at once in translator mode: Shift+click adds or takes out one, a Shift+drag rubber band
-adds those inside it, and with several selected a drag, Alt+arrows, Delete, T, Paste format and Page > Set kind... and
-Set text size... act on all of them, each one change that Ctrl+Z takes back (selecting them all again); Esc, Tab and a
-plain click select one or none again. The pointer on the real canvas with what it starts recorded, the changes on the
-real pipeline and stores; the geometry; the two questions; every line in every language."""
+adds those inside it, and with several selected a drag, Drop the chosen regions, Text direction, Paste format and the
+Menu's Page > Set kind... and Set text size... act on all of them, each one change that Undo takes back (selecting
+them all again); Esc and a plain click select one or none again. The pointer on the hidden canvas with what it starts
+recorded, the changes on the real pipeline and stores; the geometry; the two questions; every line in every
+language."""
 
 from __future__ import annotations
 
@@ -17,12 +18,10 @@ from test_translator_mode import Rotating, _move, _picture, window  # noqa: F401
 from taslation.annotations import STYLE_SIZES, RegionStyle
 from taslation.i18n import CATALOGS
 from taslation.ui import app as app_mod
-from taslation.ui import area, selection, shortcuts, translator
+from taslation.ui import area, selection, translator
 from taslation.ui.dialogs import review
 from taslation.ui.dialogs import selection as asks
 from taslation.ui.translator import BAND_TAG, chosen_regions, group_offset
-
-SHIFT = SimpleNamespace(state=0x0001)
 
 
 def _at(x, y, shift=False):
@@ -80,14 +79,11 @@ class Several(Shapes):
     _band_select = app_mod.App._band_select
     _set_chosen = app_mod.App._set_chosen
     _say_selection = app_mod.App._say_selection
-    _tab_region = app_mod.App._tab_region
-    _nudge_key = app_mod.App._nudge_key
-    _nudge_done = app_mod.App._nudge_done
 
     def __init__(self, root, regions):
         super().__init__(root, regions)
         self._also_chosen = []
-        self.group_moves, self.group_drops, self.later = [], [], []
+        self.group_moves, self.group_drops = [], []
 
     def _move_regions(self, regions, dx, dy):
         self.group_moves.append((_ids(regions), dx, dy))
@@ -95,13 +91,6 @@ class Several(Shapes):
 
     def _drop_regions(self, regions):
         self.group_drops.append(_ids(regions))
-
-    def after(self, _ms, call):
-        self.later.append(call)
-        return "nudge"
-
-    def after_cancel(self, _job):
-        pass
 
     def shift_click(self, x, y, to=None):
         self._on_press(_at(x, y, shift=True))
@@ -168,16 +157,12 @@ def test_a_drag_on_any_selected_region_moves_them_all_and_a_click_selects_one_al
     assert _ids(chosen_regions(w)) == _ids([b]) and len(w.group_moves) == 2
 
 
-def test_esc_tab_and_a_click_elsewhere_select_one_or_none_again(page3):
+def test_esc_and_a_click_elsewhere_select_one_or_none_again(page3):
     w, a, b, _c = page3
     w.click(100, 80)
     w.shift_click(250, 200)
     w._on_escape()
     assert chosen_regions(w) == [] and not w.canvas.find_withtag("chosen")
-    w.click(100, 80)
-    w.shift_click(250, 200)
-    assert w._tab_region(1) == "break"
-    assert len(chosen_regions(w)) == 1 and chosen_regions(w)[0] is not a  # the next one in reading order, alone
     w.click(100, 80)
     w.shift_click(355, 50)
     w.click(250, 200)  # a plain click on a region not selected: it alone
@@ -209,22 +194,6 @@ def test_a_plain_drag_on_empty_space_still_adds_a_region(page3):
     assert w.added == [(10, 200, 40, 290)] and chosen_regions(w) == []
 
 
-def test_alt_arrows_move_the_selected_regions_together_as_one_move(page3):
-    w, a, b, _c = page3
-    w.click(100, 80)
-    w.shift_click(250, 200)
-    w._nudge_key(SimpleNamespace(state=0), "Right")
-    w._nudge_key(SimpleNamespace(state=0), "Right")
-    w._nudge_key(SHIFT, "Down")
-    assert w._grip_box == (52, 60, 152, 130)
-    w.later[-1]()  # the presses stop
-    assert w.group_moves == [(_ids([a, b]), 2, 10)] and not w.moved
-    for _ in range(9):
-        w._nudge_key(SHIFT, "Down")  # b meets the bottom: they stop together
-    w.later[-1]()
-    assert w.group_moves[-1] == (_ids([a, b]), 0, 50)
-
-
 def test_a_turned_region_among_several_is_framed_turned_without_handles(page3):
     w, a, b, _c = page3
     b.style = RegionStyle(slant=30.0)
@@ -251,7 +220,6 @@ class Group(Rotating):
     _drop_chosen = app_mod.App._drop_chosen
     set_kind_of_selection = app_mod.App.set_kind_of_selection
     set_size_of_selection = app_mod.App.set_size_of_selection
-    _focus_back = app_mod.App._focus_back
 
     def _choose(self, region):
         self._chosen_region, self._also_chosen = region, []
@@ -382,12 +350,9 @@ def test_the_size_question_gives_a_size_within_bounds_or_auto(hidden_root):
 
 def test_every_line_of_the_selection_is_in_every_language():
     keys = [selection.SEVERAL, selection.NOTHING_TO_CHANGE, selection.DROPPED, selection.KIND_SET, selection.SIZE_SET,
-            *selection.UNDONE.values(), *selection.REDONE.values(), *selection.PAGE_SELECTION_TIPS[:2],
-            asks.KIND_LINE, asks.SIZE_LINE, "Set kind...", "Set text size..."]
-    keys += [text for row in shortcuts.FIXED_GESTURES for text in row  # the Keys topic's rows of the selection
-             if text.startswith(("Shift+click", "Shift+drag", "Several selected", "Add a region to", "Add every",
-                                 "Removing, the text"))]
-    assert len(keys) == 23
+            *selection.UNDONE.values(), *selection.REDONE.values(), asks.KIND_LINE, asks.SIZE_LINE, "Set kind...",
+            "Set text size..."]
+    assert len(keys) == 15
     for code, catalog in CATALOGS.items():
         if code != "en":
             assert all(k in catalog for k in keys), (code, [k for k in keys if k not in catalog])

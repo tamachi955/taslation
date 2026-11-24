@@ -1,6 +1,6 @@
-"""See-through mode's pure parts (a prototype behind ``Settings.see_through``, off by default): TASlation's lettering
-laid over the viewer's own window by a click-through window of its own (`capture.seethrough`), each patch shown only
-while the viewer's pixels under it are those it was made from.
+"""See-through mode's pure parts (the mode is the program): TASlation's lettering laid over the viewer's own window
+by a click-through window of its own (`capture.seethrough`), each patch shown only while the viewer's pixels under it
+are those it was made from.
 
 * A patch is a piece of the translated page: where the lettered page differs from the frame it was read from (the
   erased ground and the lettering), grouped into one piece per bubble (`make_patches`). It keeps the frame's pixels

@@ -608,7 +608,7 @@ class EditBubbleDialog(tk.Toplevel):
         btns.pack(fill="x", pady=(8, 0))
         self.drop_btn = ttk.Button(btns, text=_("Drop this region"), command=lambda: (self.destroy(), on_drop()))
         self.drop_btn.pack(side="left")
-        tip(_("Take this box off the page: the book shows as it is here. Ctrl+Z brings it back."), self.drop_btn)
+        tip(_("Take this box off the page: the book shows as it is here. Menu > Undo brings it back."), self.drop_btn)
         self.ask_btns: list[ttk.Button] = []
         if on_ask is not None and (region.source_text or on_read is not None):  # (with no Japanese: read first)
             for text, mode, explanation in ((_("Ask again"), "again", _("Ask the model for this line once more.")),):

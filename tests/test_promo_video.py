@@ -677,3 +677,25 @@ def test_the_probe_notes_what_the_page_showed_and_each_result_taken():
     assert [(r["screen"], r["bubbles"]) for r in probe.results] == [([4, 0], 3)]
     probe.displayed(SimpleNamespace(canvas=SimpleNamespace(_image=frame), _fill=SimpleNamespace()))
     assert probe.errors  # (a window of another shape: noted, never raised into it)
+
+
+def test_record_pictures_a_package_that_shows_its_own_window_and_holds_its_hot_keys_off_the_system():
+    """(`record` pictures TASlation's own window: a package before 2.0.0 - no see-through mode, or one as a setting of
+    its window -; this checkout's window is hidden, see-through mode its one mode, and is refused before anything runs)"""
+    import dataclasses
+    import importlib.util
+
+    from taslation.config import Settings
+
+    @dataclasses.dataclass
+    class Older:
+        see_through: bool = False
+
+    assert pv.own_window_shown(Settings, importlib.util.find_spec("taslation.ui.seethrough") is not None) is False
+    assert pv.own_window_shown(Older, True) and pv.own_window_shown(Settings, False)
+    keys = pv.HotKeys()  # (an older package's global hot keys: never registered with Windows, no press ever comes)
+    assert keys.register("F11", 0x7A) and keys.register("F5", 0x74) and keys.registered == {"F11", "F5"}
+    keys.unregister("F5")
+    assert keys.take() == [] and keys.registered == {"F11"}
+    keys.close()
+    assert keys.registered == frozenset()

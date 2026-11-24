@@ -1,9 +1,7 @@
 """The viewer the person chose kept directly under TASlation's window while TASlation is in front (`ui.order`,
 `capture.keep_viewer_under`), with no activation, no key and no click - only the viewer's place in the order of the
-windows -, and the status line for a viewer hidden wholly that drew no frame of a page key handed on to it (never for
-a still page under a cover, which draws no frame either). Every window here is made up: a
-list of windows from the top down (`Desk`) stands in for Windows' order, and the window's side gets fakes for who is
-in front; no real window is touched."""
+windows. Every window here is made up: a list of windows from the top down (`Desk`) stands in for Windows' order, and
+the window's side gets fakes for who is in front; no real window is touched."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -115,7 +113,7 @@ def test_a_window_of_taslations_process_that_tk_did_not_make_counts_as_another_p
 
 
 def test_under_a_topmost_taslation_the_viewer_goes_to_the_top_of_the_windows_not_topmost_never_above_it():
-    """(Always on top, the full screen: put after a topmost window, the viewer would become topmost itself)"""
+    """(TASlation's window topmost: put after a topmost window, the viewer would become topmost itself)"""
     always = other(50, topmost=True, rect=(0, 0, 300, 300))
     desk = Desk(own(topmost=True), always, other(), viewer())
     assert keep_viewer_under(VIEWER, OWN, desk) == "placed"
@@ -158,7 +156,7 @@ def test_outside_windows_nothing_is_asked(monkeypatch):
 
 
 def test_a_browser_is_hidden_wholly_for_its_rule_only_by_windows_that_hide_what_lies_under_them(monkeypatch):
-    """(`capture.fully_covered` with *opaque*: TASlation's own window at WINDOW_ALPHA over all of it hides nothing so)"""
+    """(`capture.fully_covered` with *opaque*: TASlation's see-through window over all of it hides nothing so)"""
     order_ = {1: 2, 2: 3, 3: 0}
     rects = {2: (0, 0, 1920, 1080), 3: (0, 0, 1920, 1080)}
     opaque = {2: False, 3: False}
@@ -201,7 +199,7 @@ def front(monkeypatch):
 
 def _window(**kw) -> SimpleNamespace:
     w = SimpleNamespace(selected=SimpleNamespace(hwnd=VIEWER), _own_hwnd=lambda: OWN, _raised=None,
-                        _resizing=lambda: False, said=[], lines=[], _status_key=None)
+                        said=[], lines=[], _status_key=None)
     w.say = lambda key: (w.said.append(key), setattr(w, "_status_key", key))
     w.status = lambda text: (w.lines.append(text), setattr(w, "_status_key", None))
     for k, v in kw.items():
@@ -292,9 +290,8 @@ def test_the_log_says_which_window_between_was_another_one_of_the_viewers_progra
     assert line.endswith("now under it: Chrome_WidgetWin_1 (the viewer's program))")
 
 
-def test_nothing_is_asked_while_the_viewer_is_raised_for_a_look_resized_or_not_chosen(front):
+def test_nothing_is_asked_while_the_viewer_is_raised_for_a_look_or_not_chosen(front):
     assert order.keep_under(_window(_raised=object()), 100.0) == ""
-    assert order.keep_under(_window(_resizing=lambda: True), 100.0) == ""
     assert order.keep_under(_window(selected=None), 100.0) == ""
     assert order.keep_under(_window(_own_hwnd=lambda: None), 100.0) == ""
     assert front["asked"] == []
@@ -310,137 +307,3 @@ def test_no_key_no_click_and_no_foreground_go_anywhere(front, monkeypatch):
     for t in (100.0, 100.5, 101.0):
         order.beat(w, t)
     assert front["asked"]
-
-
-@pytest.fixture
-def cover(monkeypatch):
-    """The second measure's view of the viewer: hidden wholly or not (``state["hidden"]``, what *opaque* was asked
-    with), its frame count (``state["count"]``) and its class."""
-    state = {"hidden": True, "count": 5, "class": "Chrome_WidgetWin_1", "opaque": []}
-    monkeypatch.setattr(order, "IS_WINDOWS", True)
-    monkeypatch.setattr(order, "window_class", lambda hwnd: state["class"])
-
-    def covered(hwnd, opaque=False):
-        state["opaque"].append(opaque)
-        return state["hidden"]
-
-    monkeypatch.setattr(order, "fully_covered", covered)
-    return state
-
-
-def _looks(w, start, end):
-    """The second measure's looks at every second from *start* to *end* (both in); whether any said the line."""
-    return any([order.covered_line(w, float(t)) for t in range(int(start), int(end) + 1)])
-
-
-def test_a_still_page_under_a_whole_cover_is_never_said_to_have_stopped_drawing(cover):
-    """(a page that does not change draws no frame: before, frames standing still for COVERED_STILL_S under a whole
-    cover said the line - again in each such spell, the false alarm of the covered runs)"""
-    w = _window(_frame_count=lambda: cover["count"])
-    assert not _looks(w, 100, 400)
-    assert w.said == [] and cover["opaque"] == []  # (no turn asked for: not even looked at)
-
-
-def test_a_key_handed_on_that_brings_no_frame_is_said_once_and_the_next_frame_takes_it_back(cover):
-    w = _window(_frame_count=lambda: cover["count"])
-    order.turn_asked(w, VIEWER, cover["count"], 100.0)  # (the count before the key)
-    assert not _looks(w, 100, 102)
-    assert order.covered_line(w, 103.0) and w.said == [order.COVERED_KEY]  # (COVERED_STILL_S with no new frame)
-    assert set(cover["opaque"]) == {True}  # (a browser: by the windows that hide what lies under them)
-    order.turn_asked(w, VIEWER, cover["count"], 103.5)  # (another key while it is said: nothing changes)
-    assert not _looks(w, 104, 120) and len(w.said) == 1  # (once for that key)
-    cover["count"] = 6  # (a frame came: it draws)
-    assert not order.covered_line(w, 121.0) and w.lines == [""]  # (the line taken back)
-    assert not _looks(w, 122, 200) and len(w.said) == 1  # (its frames standing still after it: no key, nothing)
-    order.turn_asked(w, VIEWER, cover["count"], 201.0)  # (a key of its own: said again)
-    assert _looks(w, 201, 205) and len(w.said) == 2
-
-
-def test_a_frame_after_the_key_says_nothing_and_a_key_handed_on_in_sight_asks_nothing(cover):
-    w = _window(_frame_count=lambda: cover["count"])
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    cover["count"] = 6  # (the turn drawn)
-    assert not _looks(w, 100, 110) and w.said == []
-    cover["hidden"] = False  # (in sight: it draws for the eye)
-    order.turn_asked(w, VIEWER, 6, 111.0)
-    order.covered_line(w, 111.0)
-    cover["hidden"] = True  # (covered later, nothing drawn since: the key was not handed on to a hidden viewer)
-    assert not _looks(w, 112, 130) and w.said == []
-
-
-def test_the_line_goes_once_the_viewer_is_in_sight_and_a_key_asked_of_another_window_asks_nothing(cover):
-    w = _window(_frame_count=lambda: cover["count"])
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    assert _looks(w, 100, 103)
-    cover["hidden"] = False
-    order.covered_line(w, 104.0)
-    assert w.lines == [""]
-    cover["hidden"] = True
-    order.turn_asked(w, OTHER, 5, 105.0)  # (a window that is not the viewer chosen)
-    assert not _looks(w, 105, 120) and len(w.said) == 1
-
-
-def test_a_line_said_since_is_not_taken_back(cover):
-    w = _window(_frame_count=lambda: cover["count"])
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    assert _looks(w, 100, 103)
-    w._status_key = "Something else the window said since"
-    cover["hidden"] = False
-    order.covered_line(w, 104.0)
-    assert w.lines == []
-
-
-def test_nothing_is_looked_at_while_the_viewer_is_raised_for_a_look_and_a_frame_drawn_then_says_nothing(cover):
-    """(`live.LiveViewMixin._raise_for_key`: a viewer that draws nothing while covered is raised for each key)"""
-    w = _window(_frame_count=lambda: cover["count"], _raised=object())
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    assert not _looks(w, 100, 105) and cover["opaque"] == []
-    w._raised = None  # (lowered again, nothing drawn: it has stopped)
-    assert order.covered_line(w, 106.0)
-    cover["count"] = 6
-    order.covered_line(w, 107.0)
-    w._raised = object()
-    order.turn_asked(w, VIEWER, 6, 110.0)
-    cover["count"] = 7  # (drawn while raised)
-    assert not _looks(w, 110, 112)
-    w._raised = None
-    assert not _looks(w, 113, 120) and len(w.said) == 1
-
-
-def test_a_viewer_that_is_no_browser_is_said_only_once_seen_to_draw_nothing_while_covered(cover):
-    cover["class"] = "TkTopLevel"
-    seen = {"draws": None}
-    w = _window(_frame_count=lambda: cover["count"], _draws_covered=lambda hwnd: seen["draws"])
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    assert not _looks(w, 100, 104) and w.said == []  # (not known yet: nothing said)
-    seen["draws"] = True
-    order.turn_asked(w, VIEWER, 5, 105.0)
-    assert not _looks(w, 105, 109) and w.said == []  # (it draws while covered)
-    seen["draws"] = False
-    order.turn_asked(w, VIEWER, 5, 110.0)
-    assert _looks(w, 110, 114)
-    assert w.said == [order.COVERED_KEY] and cover["opaque"][-1] is False  # (by any window)
-
-
-def test_nothing_is_said_while_taslations_own_covering_has_its_band_up(cover):
-    """(`live.LiveViewMixin._set_covered`: the viewer draws nothing behind TASlation - its band and line say so)"""
-    w = _window(_frame_count=lambda: cover["count"], _covered=True)
-    order.turn_asked(w, VIEWER, 5, 100.0)
-    assert not _looks(w, 100, 104)
-    assert w.said == [] and cover["opaque"] == []
-
-
-def test_without_a_frame_count_nothing_is_said(cover):
-    w = _window(_frame_count=lambda: None)
-    order.turn_asked(w, VIEWER, 5, 100.0)  # (counted before the key, not at the looks)
-    assert not _looks(w, 100, 104)
-    w = _window(_frame_count=lambda: cover["count"])
-    order.turn_asked(w, VIEWER, None, 100.0)  # (not counted before the key: a frame drawn by then would go unseen)
-    assert not _looks(w, 100, 104)
-    assert w.said == [] and order.state_of(w).asked_at is None
-
-
-def test_the_line_said_is_the_key_its_spell_takes_back():
-    import inspect
-
-    assert f'window.say("{order.COVERED_KEY}")' in inspect.getsource(order.covered_line)

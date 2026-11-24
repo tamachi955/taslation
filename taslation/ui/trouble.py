@@ -6,9 +6,7 @@ viewer):
   that look like a viewer equally well, or the viewer closed - Choose viewer opens the Viewer list
   (`choose_viewer`); the viewer's window minimised, or black - Show viewer (`show_viewer`: a minimised window shown
   again behind TASlation's, as choosing it does, `viewers.show_minimised`; else the viewer's window put in front of
-  the others, not activated, so that the person can click the book and reload it); the viewer covered by TASlation -
-  Move TASlation aside (`move_aside`: un-maximised, then narrowed so that a strip of the viewer shows,
-  `aside_rect`).
+  the others, not activated, so that the person can click the book and reload it).
 * the setup (`health.check`'s Messages): Ollama not running - Start translator again (the window's
   `restart_translator`); the translation model the language needs not installed - Download model
   (`ModelSwitchMixin.download_model`), with the window's own words for the line instead of "run install.cmd"
@@ -24,30 +22,27 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-from ..capture import (IS_WINDOWS, lower_window, move_window, raise_window, window_exists, window_minimised,
-                       window_rect, work_area)
+from ..capture import lower_window, raise_window, window_exists, window_minimised
 from ..i18n import _
 from .constants import VIEWER_BLACK, VIEWER_CLOSED, VIEWER_RESTORED
 from .progress import code_of, rendered
 from .viewers import show_minimised
 
 TROUBLE_LOOK_S = 0.5  # how often the event pump looks at the viewer for the banner's line
-ASIDE_STRIP = 160  # px of the viewer left in view when TASlation is moved aside
-ASIDE_MIN_WIDTH = 640  # px: TASlation's window is not made narrower than this
 LINES_PER_PAGE = 8  # a manga page's lines, about: what the seconds a page come from
 CPU_SECONDS_PER_LINE = 4.0  # PLaMo 3 Translate 2B on a laptop's processor, about
 LOG_HEAD = 256 * 1024  # bytes of Ollama's server log read: the devices are written at its start
 
-TIED, CLOSED, MINIMISED, COVERED, BLACK = "tied", "closed", "minimised", "covered", "black"
-CHOOSE, SHOW, ASIDE = "choose", "show", "aside"
-TROUBLE_ACTIONS = {TIED: CHOOSE, CLOSED: CHOOSE, MINIMISED: SHOW, BLACK: SHOW, COVERED: ASIDE}
+TIED, CLOSED, MINIMISED, BLACK = "tied", "closed", "minimised", "black"
+CHOOSE, SHOW = "choose", "show"
+TROUBLE_ACTIONS = {TIED: CHOOSE, CLOSED: CHOOSE, MINIMISED: SHOW, BLACK: SHOW}
 DOWN_CODES = frozenset({"health.ollama_down", "health.ollama_no_answer"})
 MODEL_CODES = frozenset({"translator.model_missing", "translator.other_model", "health.model_missing",
                          "health.other_model"})
 
 
 def viewer_trouble(window: Any) -> str | None:
-    """What keeps the window from reading the viewer: `TIED`, `CLOSED`, `MINIMISED`, `COVERED` or `BLACK`; None when
+    """What keeps TASlation from reading the viewer: `TIED`, `CLOSED`, `MINIMISED` or `BLACK`; None when
     nothing does (or no viewer is chosen yet and none was closed: the page says how to choose one)."""
     win = getattr(window, "selected", None)
     if win is None:
@@ -56,8 +51,6 @@ def viewer_trouble(window: Any) -> str | None:
         return CLOSED if getattr(window, "_viewer_closed", None) is not None else None
     if window_minimised(win.hwnd):
         return MINIMISED
-    if getattr(window, "_covered", False):
-        return COVERED
     watch = getattr(window, "_black_watch", None)
     if watch is not None and getattr(watch, "told", False):
         return BLACK
@@ -72,18 +65,14 @@ def trouble_line(kind: str) -> str:
         return _(VIEWER_CLOSED)
     if kind == MINIMISED:
         return _("The viewer's window is minimised, so TASlation cannot see the page.")
-    if kind == COVERED:
-        return _("The viewer stopped drawing because TASlation covers it completely. Un-maximise TASlation, or move it so that a strip of the viewer stays visible.")
     return _(VIEWER_BLACK)
 
 
 def action_button(window: Any, action: str) -> tuple[str, Callable[[], None]]:
-    """The button for *action* (`CHOOSE`, `SHOW`, `ASIDE`), in the window's language."""
+    """The button for *action* (`CHOOSE`, `SHOW`), in the window's language."""
     if action == CHOOSE:
         return _("Choose viewer"), lambda: choose_viewer(window)
-    if action == SHOW:
-        return _("Show viewer"), lambda: show_viewer(window)
-    return _("Move TASlation aside"), lambda: move_aside(window)
+    return _("Show viewer"), lambda: show_viewer(window)
 
 
 def setup_line(message: Any) -> str:
@@ -156,48 +145,6 @@ def front(hwnd: int) -> bool:
         return False
     lower_window(dataclasses.replace(raised, above=0))
     return True
-
-
-def aside_rect(own: tuple[int, int, int, int], viewer: tuple[int, int, int, int], area: tuple[int, int, int, int],
-               strip: int = ASIDE_STRIP, least: int = ASIDE_MIN_WIDTH) -> tuple[int, int, int, int] | None:
-    """Where TASlation's window (*own*, screen rect) goes so that *strip* px of the viewer's window (*viewer*) show
-    beside it on the monitor's work area (*area*): narrowed from the side where more of TASlation stays, at least
-    *least* px wide; else moved to the right edge of the area at that width. None when the viewer already shows."""
-    show_left = max(viewer[0], area[0])
-    show_right = min(viewer[2], area[2])
-    if show_right <= show_left:
-        return None
-    if own[0] > show_left or own[2] < show_right or own[1] > max(viewer[1], area[1]) or own[3] < min(viewer[3], area[3]):
-        return None  # a part of the viewer shows already
-    top, bottom = max(own[1], area[1]), min(own[3], area[3])
-    from_left = (show_left + strip, top, min(own[2], area[2]), bottom)  # the strip on the viewer's left
-    from_right = (max(own[0], area[0]), top, show_right - strip, bottom)  # ... or on its right
-    best = max((from_left, from_right), key=lambda r: r[2] - r[0])
-    if best[2] - best[0] >= least:
-        return best
-    width = max(least, min(area[2] - area[0] - strip, own[2] - own[0]))
-    return (area[2] - width, top, area[2], bottom)
-
-
-def move_aside(window: Any) -> None:
-    """Move TASlation aside: its window un-maximised and narrowed (`aside_rect`) so that a strip of the viewer shows
-    and the viewer draws again (it stops when TASlation covers it completely). Nothing for a viewer that shows."""
-    win = getattr(window, "selected", None)
-    if win is None:
-        return
-    try:
-        if window.state() == "zoomed":
-            window.state("normal")
-            window.update_idletasks()
-        own_hwnd = window._own_hwnd() if hasattr(window, "_own_hwnd") else None
-        if not IS_WINDOWS or not own_hwnd:
-            return
-        area = work_area(own_hwnd)
-        rect = aside_rect(window_rect(own_hwnd), window_rect(win.hwnd), area) if area is not None else None
-        if rect is not None:
-            move_window(own_hwnd, rect)
-    except Exception:  # noqa: BLE001 - (a window that went meanwhile: nothing moved)
-        return
 
 
 # ------------------------------------------------------------------ the translator on the processor

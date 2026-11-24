@@ -36,7 +36,10 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
    On a computer with an NVIDIA GPU, Enter installs them ([Y/n]; TASlation uses both on the GPU by default),
    and on a computer without a GPU, Enter does not ([y/N]; on such a computer they are models not used by default). A run without a console, and `-Yes`, do not install them on either kind of computer.
    The questions are shown in Japanese if Windows' display language is Japanese, and in English otherwise.
-4. Start it from "TASlation" in the Start menu.
+4. Start it from "TASlation" in the Start menu. Open the book in its viewer first: TASlation finds the viewer's window
+   and lays the translation over the page the viewer shows (real-time translation). You turn the pages in the viewer as always.
+   There is no account and no limit on the pages you translate, and nothing of the book leaves this computer.
+   Menu > Help > "How to use..." explains the rest.
 
 PyTorch (the component TASlation uses for the OCR and LaMa) is installed as the GPU build (the CUDA build; a download of about 2.6 GB, or about 2.0 GB for the newest GPUs such as the RTX 50 series) on a computer with an NVIDIA GPU,
 and as the CPU build (about 0.13 GB) on a computer without one. Whether there is a GPU is found out only by asking `nvidia-smi`, which comes with NVIDIA's driver (no network is used), and you are asked nothing about it.
@@ -72,13 +75,13 @@ and tells you to start Ollama from the Start menu or restart the PC (the setting
 open "Edit environment variables for your account", delete the variable and restart Ollama.
 
 The Ollama TASlation starts also gets the full window cache: `LLAMA_ARG_SWA_FULL=1`, and `LLAMA_ARG_CACHE_RAM=256` instead of `0`
-(the setting "Translator's window cache" in Tools > Settings... > System, `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
+(the setting "Translator's window cache" in Settings... > System, `ollama_window_cache` in `taslation.toml`). As above, a variable that is already set
 (in TASlation's environment, or kept by Windows for this user or this computer) is passed on as it is.
 With it, llama.cpp keeps the cache of the translation model's whole window, so that each request goes on from the one before instead of computing its whole prompt again,
 and keeps 256 MB of earlier requests in RAM. "On" (the default) uses it, "Off" does not.
 The check of the GPU's memory as TASlation starts counts the translation model with the window cache (docs/MANUAL.md, "What runs on the GPU"):
 on a 6 GB GPU with the default settings it asks when other programs hold more than about 1.7 GB of it.
-The window and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
+Settings... > System and `taslation doctor` say in the translation's row whether the Ollama TASlation started has it.
 
 For an Ollama you run yourself, neither the installer nor TASlation sets these two variables. To use the window cache there,
 set `LLAMA_ARG_SWA_FULL=1` and `LLAMA_ARG_CACHE_RAM=256` for your account as above and restart Ollama; they apply to every model that Ollama runs.
@@ -106,8 +109,8 @@ When the installation gets to its end but TASlation cannot translate yet (the fi
 its last line says so, and what to do. Any warnings are listed before it.
 
 The network is used during the installation: Python, Ollama and the translation model are downloaded, with your agreement, if they are missing.
-After that, TASlation connects to nothing outside this computer, except to download a translation model when you agree to it (the window offers this when the language you translate into needs a model that is not installed),
-and to look for a new version only if you turn that on or choose Help → "Check for updates..." (then `check_update.py`, a program of its own, asks GitHub; see "Updating" below).
+After that, TASlation connects to nothing outside this computer, except to download a translation model when you agree to it (TASlation offers this when the language you translate into needs a model that is not installed),
+and to look for a new version only if you turn that on or choose Menu > Help > "Check for updates..." (then `check_update.py`, a program of its own, asks GitHub; see "Updating" below).
 
 All the questions come first. Once you have answered them, you can leave the computer. Depending on your connection, it takes about 15 to 60 minutes.
 Download progress is shown in percent and MB. If the connection breaks partway, it goes on from where it broke off.
@@ -133,18 +136,18 @@ If it does not start, the shortcut is removed, and the installation makes it aga
 
 ## Updating
 
-The easiest way is Help → "Check for updates..." in TASlation's window. Only when you choose it, a program of its own, `check_update.py`, asks GitHub (raw.githubusercontent.com) for the first 16 KB of one file, `CHANGELOG.md`: the request stays this small however long the list of changes grows.
+The easiest way is Menu > Help > "Check for updates..." in TASlation. Only when you choose it, a program of its own, `check_update.py`, asks GitHub (raw.githubusercontent.com) for the first 16 KB of one file, `CHANGELOG.md`: the request stays this small however long the list of changes grows.
 Nothing about you, this computer, the installed version or your books is sent; GitHub sees your IP address and the time, as any site you open does.
 It shows this version and the new one with their dates, and what changed. "Update now" closes TASlation, and `update.cmd` runs in a window of its own:
 it downloads the new version's ZIP (about 5 MB) from GitHub, keeps the files it replaces or deletes in the folder `.previous`, copies the new files,
 goes on with the same installation as `install.cmd` (if the new version needs anything more, it asks before downloading), and starts TASlation again once that has got to its end.
 The window of `update.cmd` stays open so that you can read what it did (Enter closes it).
-When `update.cmd` cannot be started, the window says so and TASlation stays open.
+When `update.cmd` cannot be started, TASlation says so and stays open.
 
 When you install, the installer asks once whether TASlation should look for a new version when it starts (the default is No). With Yes, it asks at most once a day,
-30 seconds or more after the window is ready and while no page is read or translated. A newer version is named in the Help menu's item (as "Check for updates... (0.9.0 is available)")
-and in one line at the bottom of the window: no dialog, and nothing over the page in full screen. When it could not ask, it says nothing.
-Nothing is downloaded or installed without asking you. Tools → "Settings..." → System, or the box in the "Check for updates..." window, changes it later
+30 seconds or more after TASlation is ready and while no page is read or translated. A newer version is named in the item of Menu > Help (as "Check for updates... (0.9.0 is available)")
+and in one status line of the right pane (while Indicators is on): no dialog, and nothing on the page. When it could not ask, it says nothing.
+Nothing is downloaded or installed without asking you. Settings... > System, or the box in the "Check for updates..." window, changes it later
 (`update_check` in `taslation.toml`). In a git clone there is no look at the start, and "Check for updates..." only says to update it with git.
 
 A double-click on `update.cmd` first asks whether to look on GitHub for the newest version (the default is No). With Yes, it shows the versions and what changed, asks once to confirm,
@@ -175,7 +178,7 @@ The installation after an update also makes the Ollama settings above (so an Oll
 `update.cmd` uses the network only when it is asked to look for and download a new version ("Update now", a Yes to its first question, `-Download`):
 then `check_update.py` asks raw.githubusercontent.com for the first 16 KB of `CHANGELOG.md` and downloads that version's ZIP from github.com (GitHub sends it on to codeload.github.com).
 Given a ZIP or a folder, it uses no network and reads only what it was given.
-You can also check the current version and its date under Help → "About TASlation".
+You can also check the current version and its date under Menu > Help > "About TASlation".
 
 To copy by hand, close TASlation, copy the **contents** of the `taslation-main` folder in the ZIP into the folder that holds `install.cmd`
 (do not copy the folder itself; when asked, choose "Replace"), and run `install.cmd`.

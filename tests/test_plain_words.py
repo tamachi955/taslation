@@ -182,7 +182,7 @@ def test_the_numbers_show_only_with_the_debug_setting(hidden_root):
 
 def test_the_new_help_is_in_the_topics_and_in_every_language():
     keys = [key for heading, paragraphs in TOPICS for key in (heading, *paragraphs)]
-    assert "The Translator role" in keys and "Keys" in keys
+    assert "The side panes" in keys and "Edit" in keys and "The Translator role" not in keys and "Keys" not in keys
     for key in keys:
         for code in LANGUAGES:
             assert CATALOGS[code][key].strip(), (code, key)

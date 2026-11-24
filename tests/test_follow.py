@@ -1,9 +1,9 @@
 """Following the viewer by events (Settings.follow = "events"): no capture while TASlation is in front and nothing
-happens, polling while the viewer itself is, nothing while neither is, one look when a window comes back to the front,
-when the viewer's window stops moving or is renamed; an operation of TASlation's followed until the frame changes and
-settles, the page started at once and looked at once more a second later (a soft picture first, then the sharp one).
-Also the pure parts: the decision, the fine detail of a frame, who is in front, Windows' notes. Parts of the App are
-borrowed onto a stand-in on the shared hidden root; time is a fake clock."""
+happens, polling while the viewer itself is (and a look at each new frame it draws), nothing while neither is, one
+look when a window comes back to the front, when the viewer's window stops moving or is renamed; a page turned in the
+viewer followed until its frame settles, the page started at once and looked at again (a soft picture first, then the
+sharp one). Also the pure parts: the decision, the fine detail of a frame, who is in front, Windows' notes. Parts of
+the App are borrowed onto a stand-in on the shared hidden root; time is a fake clock."""
 from __future__ import annotations
 
 import heapq
@@ -19,14 +19,13 @@ import pytest
 from conftest import windows_only
 from PIL import Image, ImageDraw
 
-from taslation import capture, frames, i18n
+from taslation import capture, frames
 from taslation.frames import DETAIL_GRID, detail, frames_differ, sharper, thumbnail
 from taslation.capture import WindowInfo, windows
 from taslation.config import ConfigError, Settings
-from taslation.pagekeys import key_ways
 from taslation.regions import PageResult
 from taslation.ui import app as app_mod
-from taslation.ui import jobs, live, reading, status, translator
+from taslation.ui import jobs, live, status
 from taslation.ui.live import Following, follow_decision
 from taslation.ui.preview import ImageCanvas
 from taslation.ui.live import BlackViewerMixin
@@ -96,7 +95,7 @@ def test_a_soft_picture_is_told_from_the_sharp_one_though_their_thumbnails_are_a
 
 def test_who_is_in_front():
     own = os.getpid()
-    assert capture.front_owner(own, (5, 5, 5), own, viewer=7) == "own"  # the window, the full screen, a dialog
+    assert capture.front_owner(own, (5, 5, 5), own, viewer=7) == "own"  # the window, a pane, a dialog
     assert capture.front_owner(99, (7, 7, 7), own, viewer=7) == "viewer"
     assert capture.front_owner(99, (8, 8, 7), own, viewer=7) == "viewer"  # a popup the viewer's window owns
     assert capture.front_owner(99, (9, 9, 9), own, viewer=7) == "other"  # another window of the same browser too
@@ -247,10 +246,10 @@ WINDOW_PARTS = {name: value for part in (jobs.JobsMixin, status.StatusMixin) for
 
 
 class Window(BlackViewerMixin):
-    """The App's live view, the full screen's keys, the status line and the requests, borrowed; the viewer, the
-    clock and Windows' notes are the test's."""
+    """The App's live view, the status line and the requests, borrowed; the viewer, the clock and Windows' notes are
+    the test's."""
 
-    _enlarge_first = lambda self, then=None: True  # (the window enlarged: tests/test_enlarge.py)
+    _enlarge_first = lambda self, then=None: True  # (the viewer looked at as it is chosen: tests/test_early_start.py)
     _viewer_gone = lambda self: None  # (a viewer closed: tests/test_window_state.py)
     locals().update(WINDOW_PARTS)
     locals().update(BORROWED)
@@ -271,13 +270,6 @@ class Window(BlackViewerMixin):
     _run_queued = app_mod.App._run_queued
     _start_translate = app_mod.App._start_translate
     _editing = app_mod.App._editing
-    forward_key = app_mod.App.forward_key
-    _key_viewer = app_mod.App._key_viewer
-    _hand_over = app_mod.App._hand_over
-    _pass_on = app_mod.App._pass_on
-    _key_for_viewer = app_mod.App._key_for_viewer
-    _page_key_pair = app_mod.App._page_key_pair
-    _forward_click = translator.TranslatorMixin._forward_click
     say = app_mod.App.say
 
     def __init__(self, root, clock, owner="own", auto=True, follow="events"):
@@ -300,7 +292,7 @@ class Window(BlackViewerMixin):
         self.settings = SimpleNamespace(margins=(0, 0, 0, 0), auto_interval_ms=700, settle_ms=400,
                                         page_turn_wait_ms=3000, follow=follow)
         self.selected = VIEWER
-        self.busy = self.reading = self._viewer_hidden = self._busy_shown = self._waiting = False
+        self.busy = self._viewer_hidden = self._busy_shown = self._waiting = False
         self.ready, self._bar_shown = True, False
         self._progress, self._busy_since = "", 0.0
         self._chosen_region = self._grip_box = self._review = self.last_result = self._ordering = None
@@ -371,7 +363,7 @@ def setup(hidden_root, monkeypatch):
     """A window following a viewer whose frame the test sets (a frame, or a list of (from time, frame)); every capture
     is counted. Windows' answer to who is in front: the test's table."""
     clock = Clock()
-    viewer = SimpleNamespace(frames=[(0.0, _page(1))], captures=[], keys=[], pressed=[], input=[1], pointer=[0])
+    viewer = SimpleNamespace(frames=[(0.0, _page(1))], captures=[], input=[1], pointer=[0])
     owners = {OWN: "own", BROWSER: "viewer", OTHER: "other"}
 
     def frame_now():
@@ -385,9 +377,6 @@ def setup(hidden_root, monkeypatch):
         viewer.captures.append(clock.now)
         return frame_now()
 
-    def post_key(hwnd, key):
-        viewer.keys.append((clock.now, key))
-
     monkeypatch.setattr(live, "time", SimpleNamespace(monotonic=clock.monotonic))
     monkeypatch.setattr(live, "capture_window", capture_window)
     monkeypatch.setattr(live, "window_exists", lambda hwnd: True)
@@ -396,8 +385,6 @@ def setup(hidden_root, monkeypatch):
     monkeypatch.setattr(live, "foreground_window", lambda: OWN)
     monkeypatch.setattr(live, "last_input", lambda: viewer.input[0])  # the session's last input, as Windows ticks
     monkeypatch.setattr(live, "window_at_pointer", lambda: viewer.pointer[0])
-    monkeypatch.setattr(reading, "post_key", post_key)
-    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, key: viewer.pressed.append((clock.now, key)) or True)
 
     def make(**kwargs):
         return Window(hidden_root, clock, **kwargs)
@@ -460,27 +447,26 @@ def test_nothing_while_neither_is_in_front_and_one_look_when_one_comes_back(setu
     assert len(v.captures) == before
 
 
-def test_over_the_book_a_click_on_the_window_leaves_the_viewer_in_front_and_its_turns_followed(setup, monkeypatch):
-    """Over a full-screen viewer the window never takes the foreground, but a click on it (one of its buttons, a
-    thumbnail beside the page) gives Windows' note that it came to the front, and no note follows: who is in front is what Windows says
-    now, and the pages turned in the viewer are followed - on the full screen too."""
+def test_over_the_viewer_a_click_on_a_pane_leaves_the_viewer_in_front_and_its_turns_followed(setup, monkeypatch):
+    """Over the viewer (see-through) TASlation's panes never take the foreground, but a click on one gives Windows'
+    note that TASlation came to the front, and no note follows: who is in front is what Windows says now
+    (`_front_as_it_is`), and the pages turned in the viewer are followed."""
     v = setup.viewer
     monkeypatch.setattr(live, "foreground_window", lambda: BROWSER)  # the viewer keeps the foreground throughout
-    for reading_mode in (False, True):
-        w = setup.make(owner="viewer")
-        w._over_on, w.reading = True, reading_mode
-        w.start()
-        setup.clock.run(3)
-        w.job_done()
-        pages = len(w.new_pages)
-        w.events.notes.append(("front", OWN))  # a button of the window clicked
-        setup.clock.run(0.15)
-        assert w._following.owner == "viewer"
-        v.frames.append((setup.clock.now + 0.3, _page(10 + reading_mode)))  # the reader turns the page in the viewer
-        setup.clock.run(3)
-        assert len(w.new_pages) == pages + 1 and w.new_pages[-1][1] is v.frames[-1][1]
-        w.job_done()
-    w = setup.make(owner="viewer")  # not over the book: a note that TASlation came to the front is taken as it is
+    w = setup.make(owner="viewer")
+    w._see_hidden = True
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    pages = len(w.new_pages)
+    w.events.notes.append(("front", OWN))  # a button of a pane clicked
+    setup.clock.run(0.15)
+    assert w._following.owner == "viewer"
+    v.frames.append((setup.clock.now + 0.3, _page(10)))  # the reader turns the page in the viewer
+    setup.clock.run(3)
+    assert len(w.new_pages) == pages + 1 and w.new_pages[-1][1] is v.frames[-1][1]
+    w.job_done()
+    w = setup.make(owner="viewer")  # not over the viewer: a note that TASlation came to the front is taken as it is
     w.start()
     setup.clock.run(3)
     w.job_done()
@@ -547,50 +533,21 @@ def test_the_viewer_given_another_size_is_looked_at_at_once_and_again_once_it_st
     assert len(v.captures) == 6
 
 
-def _turn(setup, w, *frames):
-    """Press Left in the window: the viewer shows *frames* (delay, frame) after the key."""
+def _turn(setup, *frames):
+    """The reader turns the page in the viewer: it shows *frames* (delay, frame) from now on."""
     now = setup.clock.now
     setup.viewer.frames += [(now + delay, frame) for delay, frame in frames]
-    w.forward_key("Left")
     return now
 
 
-def test_a_key_is_followed_until_the_page_settles_and_the_page_starts_at_once(setup):
-    v = setup.viewer
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    assert len(w.new_pages) == 1
-    setup.clock.run(60)
-    v.captures.clear()
-    page2 = _page(2)
-    pressed = _turn(setup, w, (0.15, page2))
-    assert v.keys[-1] == (pressed, "Left") and "Sent ← to the viewer..." not in w.statuses  # a reader sees the page turn
-    setup.clock.run(5)
-    assert [p for _t, p in w.new_pages][1:] == [page2]
-    delay = w.new_pages[1][0] - pressed
-    assert 0.5 <= delay <= 0.75  # the change seen at the next 100 ms step, then settle_ms: not two polls
-    assert len(v.captures) == 1 + 2 + 1 + 1  # before the key, until the change, the settle, a second later
-    setup.clock.run(60)
-    assert len(v.captures) == 5  # nothing after that
-    w.job_done()
-    w.reading = True  # the Reader's full screen: no note about the key either
-    lines = len(w.statuses)
-    _turn(setup, w, (0.1, _page(3)))
-    assert len(w.statuses) == lines
-    setup.clock.run(3)
-    assert len(w.new_pages) == 3
-
-
-def test_a_soft_picture_first_is_read_again_from_the_sharp_one(setup):
-    v = setup.viewer
-    w = setup.make()
+def test_a_soft_picture_first_is_read_again_from_the_sharp_one(setup, monkeypatch):
+    _count_frames(setup, monkeypatch)
+    w = setup.make(owner="viewer")
     w.start()
     setup.clock.run(3)
     w.job_done()
     soft, sharp = _page(4, soft=3), _page(4)
-    pressed = _turn(setup, w, (0.15, soft), (1.0, sharp))  # a browser-based viewer: a soft picture, the sharp one later
+    turned = _turn(setup, (0.15, soft), (1.0, sharp))  # a browser-based viewer: a soft picture, the sharp one later
     setup.clock.run(0.8)
     assert [p for _t, p in w.new_pages][1:] == [soft] and w.busy  # taken at once, as it settled
     setup.clock.run(1.2)  # a second later: sharper, while the job on the soft one runs: it waits for the job
@@ -599,11 +556,11 @@ def test_a_soft_picture_first_is_read_again_from_the_sharp_one(setup):
     w.job_done(result)
     assert [p for _t, p in w.new_pages][2:] == [sharp]  # read again, from the sharp frame ...
     assert w.pipeline.forgotten == [result]  # ... what the soft one put in the cache dropped first
-    assert w.new_pages[2][0] - pressed < 2.5
+    assert w.new_pages[2][0] - turned < 2.5
 
     w.job_done()
     soft, sharp = _page(5, soft=3), _page(5)
-    _turn(setup, w, (0.15, soft), (1.0, sharp))
+    _turn(setup, (0.15, soft), (1.0, sharp))
     setup.clock.run(0.8)
     w.job_done(PageResult(image=soft.copy(), original=soft.copy(), regions=[], cache_hits=1))  # came from the cache
     setup.clock.run(1.2)
@@ -611,7 +568,7 @@ def test_a_soft_picture_first_is_read_again_from_the_sharp_one(setup):
     w.job_done()
 
     sharp = _page(6)
-    _turn(setup, w, (0.15, sharp))  # a sharp page at once: one take, one look a second later
+    _turn(setup, (0.15, sharp))  # a sharp page at once: one take
     setup.clock.run(5)
     assert [p for _t, p in w.new_pages][-1] is sharp and sum(1 for _t, p in w.new_pages if p is sharp) == 1
 
@@ -665,8 +622,7 @@ def test_a_turn_stops_the_backlog_s_step_before_the_turned_page_is_drawn(setup, 
     """A step of the backlog's under way (``pipeline.behind_stop``) stops at the window's first capture of a turned
     page, before that page is drawn - not only once the page's job is queued (on a runner's 4 cores the server's work
     for the step kept the window from drawing the captured page for 2.6 s) -, and no step begins while the window
-    follows that page (`backlog.follows_viewer`). A frame of the page on show drawn again stops nothing; a key passed
-    on to the viewer stops the step as it is passed on, before any frame of the page it goes to."""
+    follows that page (`backlog.follows_viewer`). A frame of the page on show drawn again stops nothing."""
     from taslation import backlog
 
     _count_frames(setup, monkeypatch)
@@ -692,12 +648,6 @@ def test_a_turn_stops_the_backlog_s_step_before_the_turned_page_is_drawn(setup, 
     assert backlog.follows_viewer(w) and w._following.op.phase == "settle" and not w.new_pages[1:]
     setup.clock.run(2)
     assert [p for _t, p in w.new_pages][1:] == [page2]
-    w.job_done()
-    setup.clock.run(3)
-    stop = backlog.Preempt()
-    w.pipeline.behind_stop = stop
-    _turn(setup, w, (0.15, _page(3)))
-    assert stop.is_set() and backlog.follows_viewer(w)  # (at the key, before the viewer drew anything of it)
 
 
 def test_once_the_viewer_drew_a_page_soft_first_a_page_the_cache_holds_is_taken_on_its_sharp_frame(setup, monkeypatch):
@@ -904,100 +854,26 @@ def test_a_recorded_sequence_of_frames_leads_to_the_same_decisions_with_every_ch
     assert sum(1 for entry in now if entry[0] == "capture" and entry[2] == "1") > 5  # page 1 captured again and again
 
 
-def test_a_page_that_settles_while_a_job_runs_is_taken_after_it(setup):
+def test_a_page_that_settles_while_a_job_runs_is_taken_after_it(setup, monkeypatch):
+    _count_frames(setup, monkeypatch)
     v = setup.viewer
-    w = setup.make()
+    w = setup.make(owner="viewer")
     w.start()
     setup.clock.run(3)
     assert w.busy  # the first page is being translated
     page2 = _page(2)
-    _turn(setup, w, (0.15, page2))
+    _turn(setup, (0.15, page2))
     setup.clock.run(2)
     assert len(w.new_pages) == 1 and w._queued == ("auto", ())  # waits for the job
     w.job_done()
     assert [p for _t, p in w.new_pages] == [v.frames[0][1], page2]  # taken at once after it
     w.job_done()
     w.ready = False  # the models still load: the page waits for them, the badge says so
-    _turn(setup, w, (0.15, _page(3)))
+    _turn(setup, (0.15, _page(3)))
     setup.clock.run(2)
     assert len(w.new_pages) == 2 and w._queued == ("auto", ()) and w.canvas.find_withtag("busy")
     w._handle_event("ready", {"ocr": True})
     assert len(w.new_pages) == 3
-
-
-def test_a_key_the_viewer_ignores_is_pressed_for_real(setup, monkeypatch):
-    v = setup.viewer
-    pressed = []
-    monkeypatch.setattr(live, "press_briefly", lambda hwnd, key: pressed.append(hwnd) or
-                        v.frames.append((setup.clock.now + 0.1, _page(9))) or True)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    w.forward_key("Left")  # posted, and nothing happens: not pressed again before page_turn_wait_ms
-    setup.clock.run(2.85)
-    assert not pressed
-    setup.clock.run(0.3)
-    assert pressed == [VIEWER.hwnd]
-    setup.clock.run(2)
-    assert len(w.new_pages) == 2 and not any("two pages" in line for line in w.statuses)  # one turn: nothing said
-    w.job_done()
-    w.forward_key("Left")  # the end of the book: nothing changes, even pressed for real
-    setup.clock.run(0.05)  # (the keys gathered for one handover: reading.KEY_QUIET_MS)
-    assert len(v.pressed) == 1 and len(v.keys) == 1  # pressed at once: this viewer took no posted key
-    v.frames = [(0.0, v.frames[-1][1])]
-    monkeypatch.setattr(live, "press_briefly", lambda hwnd, key: True)
-    setup.clock.run(2.5)
-    assert w.statuses[-1] != "The viewer did not change (end of book, or the key means nothing there)."
-    setup.clock.run(1)  # page_turn_wait_ms after the press
-    assert w.statuses[-1] == "The viewer did not change (end of book, or the key means nothing there)."
-    assert len(pressed) == 1  # and no second press of that key
-
-
-def test_a_click_passed_on_is_followed_as_a_key_is_also_before_any_page_was_taken(setup, monkeypatch):
-    v = setup.viewer
-    clicks = []
-    monkeypatch.setattr(translator, "post_click", lambda hwnd, x, y: clicks.append((hwnd, x, y)))
-    w = setup.make(auto=False)
-    w.start()
-    setup.clock.run(2)
-    assert w._auto_last is None and len(v.captures) == 1 and w._live_thumb is not None
-    assert not hasattr(w, "_watch_page_clicks") and not hasattr(w, "_page_released")  # no watchers of their own
-    w.canvas.set_image(w._live)
-    w.canvas._shown = (0, 0, 400, 300)  # where the page is on the canvas
-    now = setup.clock.now
-    v.frames.append((now + 0.2, _page(7)))  # the click opens the viewer's toolbar
-    w._forward_click(SimpleNamespace(x=50, y=60))  # reader mode: the click goes on to the viewer
-    assert clicks and clicks[0][0] == VIEWER.hwnd and w._following.op is not None  # followed from the frame on show
-    assert w._following.op.reference is w._live_thumb and w._following.op.key == ""
-    setup.clock.run(2)
-    assert w._live is v.frames[-1][1] and len(v.captures) >= 4  # followed: shown, and translated (Auto off)
-    assert w._auto_last is not None and w.busy
-    w.job_done()
-
-    taken = w._auto_last  # once a page was taken: followed from that one, as a key is
-    v.frames.append((setup.clock.now + 0.2, _page(8)))
-    w.role_var.set("translator")  # (a page not translated on show: the Translator's click goes on too, and is said)
-    w._forward_click(SimpleNamespace(x=50, y=60))
-    assert w._following.op.reference is taken and w.statuses[-1] == "Sent a click to the viewer..."
-    w.role_var.set("reader")
-    setup.clock.run(2)
-    assert w._live is v.frames[-1][1]
-    w.job_done()
-    count = len(v.captures)
-    w._forward_click(SimpleNamespace(x=500, y=60))  # beside the page: nothing goes on, nothing is followed
-    setup.clock.run(5)
-    assert len(clicks) == 2 and len(v.captures) == count
-    w.reading = True  # the full screen keeps the role: the Translator's click goes nowhere, whatever the page shows
-    w.role_var.set("translator")
-    w._forward_click(SimpleNamespace(x=50, y=60))
-    setup.clock.run(5)
-    assert len(clicks) == 2 and len(v.captures) == count
-    w.role_var.set("reader")  # the Reader's goes on to the viewer there as in the window
-    v.frames.append((setup.clock.now + 0.2, _page(9)))
-    w._forward_click(SimpleNamespace(x=50, y=60))
-    assert len(clicks) == 3 and clicks[-1][0] == VIEWER.hwnd and w._following.op is not None
-    w.reading = False
 
 
 def test_without_the_hooks_the_viewer_is_polled_as_before(hidden_root, monkeypatch):
@@ -1109,12 +985,12 @@ def test_taslation_moved_or_resized_is_followed_by_one_look_once_it_stops(setup)
     assert len(v.captures) == 2
 
 
-def test_a_page_job_the_window_can_cancel_gives_way_to_the_sharp_frame_and_to_a_new_page(setup):
+def test_a_page_job_the_window_can_cancel_gives_way_to_the_sharp_frame_and_to_a_new_page(setup, monkeypatch):
     """Where a page job carries its own cancel event (the window's `_page_cancel`, as Stop cancels it), the job on
     a soft picture is cancelled as soon as the sharp one is there - nothing of it reaches the cache, so nothing is
     dropped - and so is the job on a page the reader has turned away from."""
-    v = setup.viewer
-    w = setup.make()
+    _count_frames(setup, monkeypatch)
+    w = setup.make(owner="viewer")
     real_start = w._start_translate
 
     def start(image, complete=None, thumb=None):
@@ -1133,7 +1009,7 @@ def test_a_page_job_the_window_can_cancel_gives_way_to_the_sharp_frame_and_to_a_
     setup.clock.run(3)
     w.job_done()
     soft, sharp = _page(4, soft=3), _page(4)
-    _turn(setup, w, (0.15, soft), (1.0, sharp))
+    _turn(setup, (0.15, soft), (1.0, sharp))
     setup.clock.run(0.8)
     cancel = w._page_cancel
     assert [p for _t, p in w.new_pages][-1] is soft and w.busy and not cancel.is_set()
@@ -1143,7 +1019,7 @@ def test_a_page_job_the_window_can_cancel_gives_way_to_the_sharp_frame_and_to_a_
     assert [p for _t, p in w.new_pages][-1] is sharp and not w.pipeline.forgotten  # nothing of the soft job to drop
     cancel = w._page_cancel  # the job on the sharp page runs ...
     page5 = _page(5)
-    _turn(setup, w, (0.15, page5))  # ... and the reader turns on: it gives way to the new page
+    _turn(setup, (0.15, page5))  # ... and the reader turns on: it gives way to the new page
     setup.clock.run(1)
     assert cancel.is_set() and w._queued == ("auto", ())
     cancelled_job_ends()
@@ -1194,171 +1070,6 @@ def test_a_page_turned_by_the_wheel_while_a_job_runs_does_not_wait_for_the_job(s
     assert not any("Stopped" in line for line in w.statuses)  # a page given way is not "stopped"
 
 
-def _pressing(setup, monkeypatch):
-    """Keys pressed for real (`capture.press_briefly`), kept as the times they came."""
-    pressed: list[float] = []
-    monkeypatch.setattr(live, "press_briefly", lambda hwnd, key: pressed.append(setup.clock.now) or True)
-    return pressed
-
-
-def test_a_slow_viewer_is_waited_for_and_the_key_is_sent_once(setup, monkeypatch):
-    """The browser-based viewer showed the next page only 2.5 s after the posted key: no second press before
-    page_turn_wait_ms without any change at all, so no page is skipped."""
-    v = setup.viewer
-    pressed = _pressing(setup, monkeypatch)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    page2 = _page(2)
-    sent = _turn(setup, w, (2.5, page2))
-    setup.clock.run(6)
-    assert [key for _t, key in v.keys] == ["Left"] and pressed == []  # exactly one key
-    assert [p for _t, p in w.new_pages][1:] == [page2] and 2.5 < w.new_pages[1][0] - sent < 3.2
-
-
-def test_a_loading_indicator_says_the_viewer_took_the_key(setup, monkeypatch):
-    """Any change of the frame at all after the key - a loading indicator, a partial repaint - says the viewer took
-    it: never pressed again, and the page is waited for beyond page_turn_wait_ms."""
-    v = setup.viewer
-    pressed = _pressing(setup, monkeypatch)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    loading = v.frames[0][1].copy()
-    ImageDraw.Draw(loading).rectangle((470, 350, 480, 360), fill=(120, 120, 120))  # a spinner over the page
-    assert not frames_differ(thumbnail(v.frames[0][1]), thumbnail(loading))  # no page turn to Auto's look ...
-    page2 = _page(2)
-    sent = _turn(setup, w, (0.5, loading), (4.2, page2))  # ... but a change all the same
-    setup.clock.run(8)
-    assert [key for _t, key in v.keys] == ["Left"] and pressed == []
-    assert [p for _t, p in w.new_pages][1:] == [page2] and w.new_pages[1][0] - sent > 4.2
-    assert "The viewer did not change (end of book, or the key means nothing there)." not in w.statuses
-
-
-def test_a_key_pressed_for_real_that_turns_two_pages_is_said(setup, monkeypatch):
-    """The posted key changed nothing for page_turn_wait_ms and was pressed for real; then the page turned twice
-    within a second (the posted key had arrived after all): the status line says so, with the key back one page."""
-    v = setup.viewer
-    w = setup.make()
-    pages = [_page(2), _page(3)]
-
-    def press(hwnd, key):  # the posted key arrives late, together with the real press: two turns
-        v.frames.extend([(setup.clock.now + 0.1, pages[0]), (setup.clock.now + 0.75, pages[1])])
-        return True
-
-    monkeypatch.setattr(live, "press_briefly", press)
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    w.forward_key("Left")
-    setup.clock.run(6)
-    line = "The viewer turned two pages; press → once to go back."
-    assert line in w.statuses and w.canvas.note == line  # on the page for a while too
-    assert [p for _t, p in w.new_pages][-1] is pages[1] and w.statuses.count(line) == 1
-    w.job_done()
-    w._say_two_turns("Space")  # a key without one that turns back: the turns alone
-    assert w.statuses[-1] == "The viewer turned two pages."
-    i18n.set_language("ja")
-    try:
-        w._say_two_turns("PageUp")  # in the window's language, the key back named as the reader knows it
-        assert w.statuses[-1] == "ビューアが 2 ページめくりました。PageDown を 1 回押すと 1 ページ戻ります。"
-    finally:
-        i18n.set_language("en")
-
-
-def _ignores_posted(setup, monkeypatch, delay=0.1):
-    """A viewer that ignores posted keys and turns one page for each key pressed for real (`press_briefly`), *delay*
-    after the press and a key 0.6 s after the one before it; every handover recorded as the list of its keys."""
-    v = setup.viewer
-    handovers: list[list[str]] = []
-
-    def press(hwnd, keys):
-        keys = [keys] if isinstance(keys, str) else list(keys)
-        handovers.append(keys)
-        turned = sum(map(len, handovers)) - len(keys)
-        for n, _key in enumerate(keys):
-            v.frames.append((setup.clock.now + delay + 0.6 * n, _page(30 + turned + n)))
-        return True
-
-    monkeypatch.setattr(live, "press_briefly", press)
-    return handovers
-
-
-@pytest.mark.parametrize("keys", [("Left", "Left"), ("Left", "Right"), ("Left", "Left", "Left")])
-def test_keys_pressed_before_a_posted_key_was_found_ignored_each_turn_a_page(setup, monkeypatch, keys):
-    """A viewer not known yet that ignores posted keys: the reader pressed again before the first key's
-    page_turn_wait_ms was over (each press a second after the one before). Every key is pressed for real once that
-    wait is over, in order, in one handover - one press one page - and nothing is said of two turns. A key that came
-    while the one before was still awaited used to end that wait: the keys before it were never pressed for real, and
-    two presses turned one page."""
-    v = setup.viewer
-    handovers = _ignores_posted(setup, monkeypatch)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    first = setup.clock.now
-    for key in keys:
-        w.forward_key(key)
-        setup.clock.run(1.0)
-    for _step in range(16):
-        setup.clock.run(0.5)
-        if w.busy:
-            w.job_done()
-    assert [key for _t, key in v.keys] == list(keys)  # posted first, as to any viewer not known yet
-    assert handovers == [list(keys)]  # then every one of them pressed for real, once
-    assert w.new_pages[-1][1] is v.frames[-1][1] and w.new_pages[-1][0] - first > 3  # the last page they turned to
-    assert not any("turned two pages" in line for line in w.statuses)
-    assert key_ways(w).real(VIEWER.hwnd)  # the next keys go for real at once
-
-
-def test_a_key_pressed_while_the_one_before_is_pressed_for_real_is_pressed_for_real_too(setup, monkeypatch):
-    """The first key, posted, did nothing and was pressed for real after page_turn_wait_ms; the reader pressed again
-    just after, before the viewer drew the page that press turned to. The new key is pressed for real at once - it
-    does not take the page turn of the key before it for its own, nor the viewer for one that takes posted keys - and
-    each key turns its page."""
-    v = setup.viewer
-    handovers = _ignores_posted(setup, monkeypatch, delay=0.5)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    w.forward_key("Left")
-    setup.clock.run(3.1)
-    assert handovers == [["Left"]]  # pressed for real; the page not drawn yet
-    w.forward_key("Left")
-    assert handovers == [["Left"], ["Left"]]
-    for _step in range(12):
-        setup.clock.run(0.5)
-        if w.busy:
-            w.job_done()
-    assert len(v.keys) == 2 and w.new_pages[-1][1] is v.frames[-1][1]
-    assert key_ways(w).real(VIEWER.hwnd) and not key_ways(w).posted(VIEWER.hwnd)
-    assert not any("turned two pages" in line or "did not change" in line for line in w.statuses)
-
-
-def test_a_key_after_the_page_turned_at_a_posted_key_is_followed_as_its_own(setup, monkeypatch):
-    """A viewer that takes posted keys: a key pressed after the page turned at the one before is posted and followed
-    from the page it turned to, with no key pressed for real."""
-    v = setup.viewer
-    handovers = _ignores_posted(setup, monkeypatch)
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    page2, page3 = _page(2), _page(3)
-    _turn(setup, w, (0.4, page2))
-    setup.clock.run(1.0)
-    _turn(setup, w, (0.4, page3))
-    for _step in range(10):
-        setup.clock.run(0.5)
-        if w.busy:
-            w.job_done()
-    assert len(v.keys) == 2 and handovers == [] and [p for _t, p in w.new_pages][-2:] == [page2, page3]
-
-
 def test_a_viewer_chosen_while_another_window_is_in_front_gets_its_first_frame_on_the_page(setup, monkeypatch):
     """After a restart with a terminal in front: the viewer chosen is looked at at once whoever is in front, and
     while no frame of it could be shown yet (it drew nothing) again every auto_interval_ms; once one is on the page,
@@ -1383,219 +1094,3 @@ def test_a_viewer_chosen_while_another_window_is_in_front_gets_its_first_frame_o
     assert len(v.captures) == count + 1 and w._following.owner == "other" and not w._following.unseen
     setup.clock.run(30)
     assert len(v.captures) == count + 1
-
-
-def _learned_real(setup, monkeypatch, w):
-    """The first key of *w*'s viewer: posted, ignored, and taken pressed for real."""
-    v = setup.viewer
-    monkeypatch.setattr(live, "press_briefly",
-                        lambda hwnd, key: v.frames.append((setup.clock.now + 0.1, _page(9))) or True)
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    w.forward_key("Left")
-    setup.clock.run(6)
-    w.job_done()
-
-
-@pytest.mark.parametrize("follow", ["events", "poll"])
-def test_a_viewer_of_real_keys_gets_them_at_once_for_the_session(setup, monkeypatch, follow):
-    """No wait for a posted key that does nothing: the page turns within a second, not after page_turn_wait_ms."""
-    v = setup.viewer
-    monkeypatch.setattr(reading, "time", live.time)  # (the test's clock)
-    w = setup.make(follow=follow, auto=False) if follow == "poll" else setup.make()
-    _learned_real(setup, monkeypatch, w)
-    assert len(v.keys) == 1 and key_ways(w).real(VIEWER.hwnd) and not key_ways(w).posted(VIEWER.hwnd)
-    turned = []
-    monkeypatch.setattr(reading, "press_briefly",
-                        lambda hwnd, key: turned.append(key) or v.frames.append((setup.clock.now + 0.1, _page(10))) or True)
-    before = len(w.statuses)
-    w.role_var.set("translator")
-    w.forward_key("Left")
-    setup.clock.run(0.05)  # (the keys gathered for one handover: reading.KEY_QUIET_MS)
-    assert turned == ["Left"] and len(v.keys) == 1  # nothing posted
-    assert w.statuses[before:] == ["Sent ← to the viewer..."]  # the status line as for a posted key
-    setup.clock.run(1.2)
-    assert w._live is v.frames[-1][1]
-
-
-def _real_keys(setup, monkeypatch):
-    """A window whose viewer has been seen to take only keys pressed for real; every handover recorded as the list
-    of its keys (a viewer that turns one page a key)."""
-    v = setup.viewer
-    monkeypatch.setattr(reading, "time", live.time)  # (the test's clock)
-    w = setup.make()
-    _learned_real(setup, monkeypatch, w)
-    handovers = []
-
-    def press(hwnd, keys):
-        keys = [keys] if isinstance(keys, str) else list(keys)
-        handovers.append(keys)
-        for _ in keys:
-            v.frames.append((setup.clock.now + 0.1, _page(20 + sum(map(len, handovers)))))
-        return True
-
-    monkeypatch.setattr(reading, "press_briefly", press)
-    return w, handovers
-
-
-def test_keys_pressed_while_the_window_was_busy_go_in_one_handover(setup, monkeypatch):
-    """Keys that came while the window was busy come out of its queue a few ms apart: one handover for all of them,
-    in order, none dropped, none twice, and the page followed once from the frame before them."""
-    w, handovers = _real_keys(setup, monkeypatch)
-    followed = []
-    monkeypatch.setattr(w, "_follow_change", lambda hwnd, reference, key, started, retried=False, seq=None:
-                        followed.append((key, retried)), raising=False)
-    for key in ("Left", "Left", "Right"):
-        w.forward_key(key)
-    setup.clock.run(reading.KEY_QUIET_MS / 1000 + 0.001)
-    assert handovers == []  # (not yet: two came after the first, more may come)
-    setup.clock.run(reading.KEY_QUIET_MS / 1000)
-    assert handovers == [["Left", "Left", "Right"]] and followed == [("Right", True)]
-    setup.clock.run(1)
-    assert handovers == [["Left", "Left", "Right"]]  # sent once
-
-
-def test_a_key_within_the_quiet_time_joins_the_handover_and_each_later_key_gets_its_own(setup, monkeypatch):
-    w, handovers = _real_keys(setup, monkeypatch)
-    quiet = reading.KEY_QUIET_MS / 1000
-    w.forward_key("Left")
-    setup.clock.run(quiet * 0.75)
-    w.forward_key("Left")  # the wait starts again
-    setup.clock.run(quiet * 0.75)
-    assert handovers == []
-    setup.clock.run(quiet)
-    assert handovers == [["Left", "Left"]]
-    for _ in range(3):  # a person's keys, 0.5 s apart: one handover each, at once
-        w.forward_key("Left")
-        setup.clock.run(0.5)
-    assert handovers == [["Left", "Left"], ["Left"], ["Left"], ["Left"]]
-
-
-def test_keys_that_keep_coming_are_held_back_only_briefly(setup, monkeypatch):
-    w, handovers = _real_keys(setup, monkeypatch)
-    quiet = reading.KEY_QUIET_MS / 1000
-    sent_at = None
-    for n in range(40):  # a key every 3/4 of the quiet time: the wait would never end
-        w.forward_key("Left")
-        setup.clock.run(quiet * 0.75)
-        if handovers and sent_at is None:
-            sent_at = n
-    assert sent_at is not None and sent_at * quiet * 0.75 <= (reading.KEY_GATHERS + 1) * quiet
-    assert sum(map(len, handovers)) <= 40 and all(handovers)
-    setup.clock.run(1)
-    assert sum(map(len, handovers)) == 40  # every key went, once
-
-
-def test_a_key_for_a_viewer_no_longer_chosen_is_dropped(setup, monkeypatch):
-    w, handovers = _real_keys(setup, monkeypatch)
-    w.forward_key("Left")
-    w.selected = SimpleNamespace(hwnd=VIEWER.hwnd + 1, title=VIEWER.title)
-    setup.clock.run(0.1)
-    assert handovers == []
-
-
-@pytest.mark.parametrize("follow", ["events", "poll"])
-def test_a_viewer_that_takes_posted_keys_keeps_getting_them(setup, monkeypatch, follow):
-    v = setup.viewer
-    monkeypatch.setattr(reading, "time", live.time)  # (the test's clock)
-    w = setup.make(follow=follow, auto=False) if follow == "poll" else setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    for page in (2, 3):
-        w.forward_key("Left")
-        v.frames.append((setup.clock.now + 0.1, _page(page)))
-        setup.clock.run(2)
-        w.job_done()
-    assert len(v.keys) == 2 and v.pressed == [] and key_ways(w).posted(VIEWER.hwnd)
-    assert not key_ways(w).real(VIEWER.hwnd)
-
-
-def test_a_real_key_that_cannot_be_pressed_is_posted_and_followed_as_ever(setup, monkeypatch):
-    v = setup.viewer
-    w = setup.make()
-    _learned_real(setup, monkeypatch, w)
-    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, key: False)
-    pressed = []
-    monkeypatch.setattr(live, "press_briefly", lambda hwnd, key: pressed.append(hwnd) or
-                        v.frames.append((setup.clock.now + 0.1, _page(10))) or True)
-    w.forward_key("Left")
-    setup.clock.run(0.05)  # (the keys gathered for one handover: reading.KEY_QUIET_MS)
-    assert len(v.keys) == 2
-    setup.clock.run(3.2)
-    assert pressed == [VIEWER.hwnd]
-
-
-def test_a_key_a_browser_did_not_take_is_never_posted(setup, monkeypatch):
-    """Measured: a key posted to a browser that is not in front reaches nothing (0 of 9, Chrome and Edge 156). When
-    the foreground did not come for a real press, nothing is posted and the reader is told to turn the page there."""
-    from taslation.capture import windows as W
-
-    v = setup.viewer
-    for module in (reading, live, W):
-        monkeypatch.setattr(module, "window_class", lambda hwnd: W.BROWSER_CLASSES[0])
-    w = setup.make()
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, key: False)
-    w.forward_key("Left")
-    setup.clock.run(0.05)  # (the keys gathered for one handover: reading.KEY_QUIET_MS)
-    assert v.keys == [] and w.statuses[-1] == "The browser did not take the key: click the book and turn the page there."
-
-
-@pytest.mark.parametrize("state", ["idle", "busy", "reading", "translator"])
-@pytest.mark.parametrize("way", ["browser", "posted", "real"])
-def test_every_press_is_one_key_to_the_viewer_and_one_page(setup, monkeypatch, way, state):
-    """Presses of the reader, some quick after the one before (0.15 s, 0.3 s), some after a while: the viewer gets
-    each of them once - a browser pressed for real, a desktop viewer known to take posted keys posted, one known to
-    take only real presses pressed for real - and turns one page for each; no key goes that the reader did not press.
-    So between pages (idle), while the page is translated (busy: the job never ends), on the full screen and in the
-    Translator role."""
-    from taslation.capture import windows as W
-
-    v = setup.viewer
-    monkeypatch.setattr(reading, "time", live.time)  # (the test's clock)
-    if way == "browser":
-        for module in (reading, live, W):
-            monkeypatch.setattr(module, "window_class", lambda hwnd: W.BROWSER_CLASSES[0])
-    w = setup.make()
-    if way != "browser":
-        key_ways(w).seed(VIEWER.hwnd, way)
-    turns: list[str] = []
-
-    def turn(keys):
-        for key in [keys] if isinstance(keys, str) else keys:
-            turns.append(key)
-            v.frames.append((setup.clock.now + 0.1, _page(50 + len(turns))))
-
-    real: list[str] = []
-    monkeypatch.setattr(reading, "press_briefly", lambda hwnd, keys: real.extend([keys] if isinstance(keys, str)
-                                                                                  else keys) or turn(keys) or True)
-    monkeypatch.setattr(live, "press_briefly", lambda hwnd, keys: pytest.fail("a key pressed for real once more"))
-    monkeypatch.setattr(reading, "post_key", lambda hwnd, key: v.keys.append((setup.clock.now, key)) or turn(key))
-    w.start()
-    setup.clock.run(3)
-    w.job_done()
-    if state == "reading":
-        w.reading = True
-    elif state == "translator":
-        w.role_var.set("translator")
-    presses = ["Left", "Left", "Right", "Left", "Left", "Left"]
-    for key, gap in zip(presses, (2.0, 0.3, 1.0, 4.0, 0.15, 3.0)):
-        w.forward_key(key)
-        setup.clock.run(gap)
-        if w.busy and state != "busy":
-            w.job_done()
-    setup.clock.run(4)
-    delivered = real if way != "posted" else [key for _t, key in v.keys]
-    assert delivered == presses and turns == presses  # one press one key one page, in order
-    assert (v.keys == []) if way != "posted" else (real == [])
-    assert not any("turned two pages" in line or "did not change" in line for line in w.statuses)
-
-
-def test_each_window_handle_learns_for_itself(setup, monkeypatch):
-    w = setup.make()
-    _learned_real(setup, monkeypatch, w)
-    assert key_ways(w).real(VIEWER.hwnd) and not key_ways(w).real(VIEWER.hwnd + 1)

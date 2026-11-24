@@ -1,6 +1,8 @@
-"""The window's strings for being over a full-screen viewer (`ui.overbook`): the View menu's entry and its tip, the line
-said when it starts, the line for a page key a browser did not take (`reading.forward_key`), and the help's two
-paragraphs (Full screen). The menu's name is the same in every string that names it (`_ENTRY`, `_VIEW`)."""
+"""The strings of TASlation's former window for being over a full-screen viewer, which went with that window in 2.0.0
+(the lettering is laid over the viewer's own window now, and every key is the viewer's): the View menu's entry and
+its tip, the line said when it started, the line for a page key a browser did not take, and the help's two paragraphs.
+No part of the program shows them any more. The menu's name is the same in every string that names it (`_ENTRY`,
+`_VIEW`). Machine-translated; no native review."""
 
 _VIEW = {"ja": "表示", "es": "Ver", "pt": "Exibir", "fr": "Affichage", "de": "Ansicht", "it": "Visualizza", "nl": "Beeld",
          "pl": "Widok", "ru": "Вид", "tr": "Görünüm", "id": "Tampilan", "vi": "Xem", "zh": "视图", "zh-tw": "檢視",

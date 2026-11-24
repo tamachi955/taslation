@@ -1,4 +1,4 @@
-"""The System page of Tools > Settings... (`SystemPage`): what each stage of a page runs on (`devices.stage_devices`:
+"""The System page of Settings... (`SystemPage`): what each stage of a page runs on (`devices.stage_devices`:
 detection, OCR, the translator, the erase; "GPU (its name)" or "CPU"), what runs there, and the seconds a page took
 there on the last pages lettered (`devices.StageTimes`: this session's, else those kept when the window last closed).
 It looks when the page is first shown and on Look again, on a thread of its own (Ollama is asked /api/ps, which may
@@ -46,7 +46,7 @@ NUM_GPU_PROBLEM = "The layers on the GPU: leave the box empty, or a whole number
 LOAD_AT_START_LABEL = "Load the translation model at start"
 LOAD_AT_START_TEXT = ("The translation model loads while TASlation starts, so the first page to translate does not wait "
                       "a few seconds for it. Off: it loads when the first line to translate comes up. Either way it "
-                      "leaves the GPU after a while without requests (ollama_keep_alive), or at once with Tools > "
+                      "leaves the GPU after a while without requests (ollama_keep_alive), or at once with Menu > "
                       "Release the model now. From the next start.")
 # where the OCR readers run (``ocr_runs_on``, `taslation.ocr.place`); the 16 languages: `locales/features/ocr_release.py`
 OCR_RUNS_ON_LABEL = "OCR runs on:"
@@ -75,8 +75,8 @@ WINDOW_CACHE_TEXT = ("The Ollama TASlation starts keeps the cache of the transla
 UPDATE_CHECK_LABEL = "Look for a new version once a day when TASlation starts"
 UPDATE_CHECK_TEXT = ("A program of its own, check_update.py, then asks GitHub for one small file, at most once a day and "
                      "never while a page is read. Nothing about you or your books is sent; GitHub sees your IP address "
-                     "and the time, as any site you open does. A newer version is named in the Help menu. Off: only "
-                     "Help > Check for updates... asks, when you choose it. From the next start.")
+                     "and the time, as any site you open does. A newer version is named in Menu > Help. Off: only "
+                     "Menu > Help > Check for updates... asks, when you choose it. From the next start.")
 POLL_MS = 100  # how often the page looks whether the thread is done
 NOTE_COLOUR = theme.LIGHT["note"]  # the notes under the rows (light: `theme.colour("note")`)
 SHARES = (0.27, 0.53, 0.20)  # of the page's width: the stage, where it runs (and with what), the seconds a page
@@ -281,7 +281,7 @@ class SystemPage(ttk.Frame):
             self.shown_rows.append(shown)
             self._row(n, shown)
         note = (_("Seconds a page: the mean of the last {count} pages lettered.").format(count=len(times)) if len(times)
-                else _("Seconds a page: none yet. They show once pages have been translated, and are kept when the window closes."))
+                else _("Seconds a page: none yet. They show once pages have been translated, and are kept when TASlation closes."))
         note += " " + _("Only an NVIDIA GPU with CUDA counts here; nothing is loaded to find out.")
         planned = devices.plan_text()  # (the judgement at the start: short, and what went to the processor)
         if planned:

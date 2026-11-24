@@ -1,8 +1,8 @@
-"""The indicator beside the page joined to the engine: the REAL `taslation.backlog.Backlog` (its `screen_for`, `tell`,
-`show`, `totals`, `catch`, `drop`, `merge_missed`, `close`) posting into the window's own event handler
-(`App._handle_event` through `JobsMixin._handle_event` and `backlog.reading_event` to the ``_on_reading_<kind>``
-handlers), the events drained as the window's event pump drains them. The window is `test_side_indicator.Window`
-(the page area and the status bar of the window, with the indicator built as `App` builds it); the pages
+"""The pages behind joined to the engine: the REAL `taslation.backlog.Backlog` (its `screen_for`, `tell`, `show`,
+`totals`, `catch`, `drop`, `merge_missed`, `close`) posting into the window's own event handler (`App._handle_event`
+through `JobsMixin._handle_event` and `backlog.reading_event` to the ``_on_reading_<kind>`` handlers), the events
+drained as the window's event pump drains them, and what the right side pane says of them. The window is
+`test_side_indicator.Window` (the hidden window's event handler, with the model built as `App` builds it); the pages
 are made-up ones (`fake_side`); no viewer, no model, nothing sent to any window."""
 
 from __future__ import annotations
@@ -11,11 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 from fake_side import fingerprint, page, result
-from test_side_indicator import Window, no_way_to_the_viewer  # noqa: F401 - the window, and its fixture
+from test_side_indicator import Window, no_way_to_the_viewer, pane_lines  # noqa: F401 - the window, its fixture
 
 from taslation.backlog import Backlog, backlog_of, merge_missed
 from taslation.ui import app as app_mod
-from taslation.ui.side_model import summary_lines
 
 WITHIN = 4  # the fingerprint distance the backlog is given here (the window's own is 36: another book is far)
 
@@ -58,15 +57,15 @@ def seam(hidden_root, no_way_to_the_viewer):  # noqa: F811
 
 def tell_on_show(b: Backlog, screen, image, read_done: bool = False) -> None:
     """A page job's screen confirmed on show, as `Tracking._report` tells it."""
-    b.tell(screen, "read", "done" if read_done else "working", image)
+    b.tell(screen, "read", "done" if read_done else "working")
     if read_done:
-        b.tell(screen, "translate", "working", image)
+        b.tell(screen, "translate", "working")
     b.show(screen)
     b.totals()
 
 
 def test_a_screen_told_its_stages_the_page_on_show_and_the_totals(seam):
-    w, b, posted = seam(size=(1560, 900))
+    w, b, posted = seam()
     model = w._side.model
     s1 = b.screen_for([unit(fingerprint(1))], WITHIN)
     w.show(page(1))
@@ -74,51 +73,47 @@ def test_a_screen_told_its_stages_the_page_on_show_and_the_totals(seam):
     w.pump()
     assert all(d.get("reading") for _k, d in posted)  # (the shape the engine gives them)
     assert model.order == [1] and model.on_show == 1 and model.screens[1].mark == "working"
-    assert model.screens[1].thumb is not None and model.screens[1].thumb.height <= 80  # memory only, small
-    b.tell(s1, "read", "done", page(1))
-    b.tell(s1, "translate", "working", page(1))
+    b.tell(s1, "read", "done")
+    b.tell(s1, "translate", "working")
     w.pump()
-    assert model.screens[1].stages == {"read": "done", "translate": "working"}
-    view = w._side.view
-    assert view.shown and view.layout.kind == "column" and view.animating  # its stripe moves
+    assert model.screens[1].stages == {"read": "done", "translate": "working"} and model.working()
     # turned past while it was at work: caught, its frame to read behind the reader
     s2 = b.screen_for([unit(fingerprint(2))], WITHIN)
     w.show(page(2))
     tell_on_show(b, s2, page(2))
     assert b.catch(s1, page(1), None, None, hwnd=1)
-    b.tell(s1, "read", "waiting", page(1))
-    b.tell(s1, "translate", "waiting", page(1))
+    b.tell(s1, "read", "waiting")
+    b.tell(s1, "translate", "waiting")
     b.totals()
     w.pump()
     assert model.order == [1, 2] and model.on_show == 2 and model.screens[1].mark == "waiting"
     assert model.backlog.pages == 1
-    assert "Working on the others: 1 page(s), 0 line(s) to go." in summary_lines(model, 0.0)
+    assert "Working on the others: 1 page(s), 0 line(s) to go." in pane_lines(w)
 
 
-def test_the_work_behind_finishing_a_page_seen_marks_it_updated_from_the_cache(seam):
-    w, b, _posted = seam(size=(1560, 900))
+def test_the_work_behind_finishing_a_page_marks_it_done(seam):
+    w, b, _posted = seam()
     s1 = b.screen_for([unit(fingerprint(1))], WITHIN)
     seen = result(1, ["Who's there?", "", "Wait!"])
     w.show(seen.original)
     tell_on_show(b, s1, seen.original, read_done=True)
     w.pump()
-    w.show(seen.original, seen)  # seen lettered, one bubble still in its original
-    assert 1 in w._side.seen.shown
+    w.show(seen.original, seen)  # lettered, one bubble still in its original
     s2 = b.screen_for([unit(fingerprint(2))], WITHIN)
     w.show(page(2))
     tell_on_show(b, s2, page(2))
     assert b.catch(s1, seen.original, None, None, hwnd=1)
     w.pump()
+    assert w._side.model.screens[1].mark != "done"
     entry = next(e for e in b.entries if e.screen is s1)
     w.cache.put(1, ["Who is there?", "Look.", "Wait!"])  # stored first (`_Host._store_unit`) ...
     b._finish(entry, "translate", "done")  # ... then told done
     w.pump()
-    w.update()  # (the cache is looked at once the events are in)
-    assert w._side.model.screens[1].updated and w._side.model.screens[1].mark == "done"
+    assert w._side.model.screens[1].mark == "done" and w._side.model.counts()["done"] == 1
 
 
 def test_a_screen_that_went_by_one_not_caught_and_one_merged_into_the_next(seam):
-    w, b, _posted = seam(size=(1560, 900))
+    w, b, _posted = seam()
     model = w._side.model
     s1 = b.screen_for([unit(fingerprint(1))], WITHIN)
     tell_on_show(b, s1, page(1))
@@ -127,36 +122,36 @@ def test_a_screen_that_went_by_one_not_caught_and_one_merged_into_the_next(seam)
     b.tell(gone, "read", "missed")
     b.totals()
     w.pump()
-    assert model.screens[2].mark == "missed" and model.screens[2].thumb is None
+    assert model.screens[2].mark == "missed"
     assert model.screens[2].state("translate") == "missed" and model.backlog.dropped == 1
     w.show(page(1))
-    assert any("1 turned too fast" in line for line in summary_lines(model, 0.0))
+    assert any("1 turned too fast" in line for line in pane_lines(w))
     # a soft picture that went by, then its page confirmed: the placeholder merged into it
     soft = b.screen_for([unit(near(fingerprint(3), 6))], WITHIN)
     soft.missed = True
     b.tell(soft, "read", "missed")
     sharp = b.screen_for([unit(fingerprint(3))], WITHIN)
     assert sharp is not soft  # (6 bits apart: another screen at WITHIN, the same page at twice that)
-    b.tell(sharp, "read", "working", page(3))
+    b.tell(sharp, "read", "working")
     merge_missed(b, sharp, WITHIN)
     b.show(sharp)
     b.totals()
     w.pump()
     assert soft.seq == 3 and 3 not in model.screens and model.order == [1, 2, 4] and model.on_show == 4
     # on show, turned past and not caught: its read done, its translation "missed" - read when shown again
-    b.tell(sharp, "read", "done", page(3))
-    b.tell(sharp, "translate", "missed", page(3))
+    b.tell(sharp, "read", "done")
+    b.tell(sharp, "translate", "missed")
     sharp.missed = True
     b.totals()
     w.pump()
-    assert model.screens[4].mark == "missed" and model.screens[4].thumb is not None
+    assert model.screens[4].mark == "missed"
     assert model.backlog.dropped == 2
-    assert [line for line in summary_lines(model, 0.0) if "too fast" in line] == [
-        "2 turned too fast to catch: turn back to them in the viewer to have them read."]
+    assert [line for line in pane_lines(w) if "too fast" in line] == [
+        "2 turned too fast to catch: turn back to them in the viewer to have them read."]  # one count, said once
 
 
 def test_the_page_on_show_before_its_screen_is_numbered_is_none(seam):
-    w, b, _posted = seam(size=(1560, 900))
+    w, b, _posted = seam()
     s1 = b.screen_for([unit(fingerprint(1))], WITHIN)
     tell_on_show(b, s1, page(1))
     w.pump()
@@ -166,7 +161,7 @@ def test_the_page_on_show_before_its_screen_is_numbered_is_none(seam):
 
 
 def test_a_drop_then_a_new_screen_one_of_another_book(seam):
-    w, b, posted = seam(size=(1560, 900))
+    w, b, posted = seam()
     model = w._side.model
     for n in (1, 2, 3):
         tell_on_show(b, b.screen_for([unit(fingerprint(n))], WITHIN), page(n))
@@ -189,15 +184,14 @@ def test_a_drop_then_a_new_screen_one_of_another_book(seam):
 
 
 def test_a_drop_told_as_such_clears_and_the_totals_after_it_count(seam):
-    w, b, _posted = seam(size=(1560, 900))
+    w, b, _posted = seam()
     model = w._side.model
     for n in (1, 2):
         tell_on_show(b, b.screen_for([unit(fingerprint(n))], WITHIN), page(n))
     w.pump()
-    model.screens[1].updated = True
     w._post("backlog", pages=0, lines=0, paused=False, dropped=True, reading=True)  # (the drop: `Backlog.drop`)
     w.pump()
-    assert len(model) == 0 and model.backlog.dropped == 0 and not w._side.seen.shown
+    assert len(model) == 0 and model.backlog.dropped == 0 and model.on_show is None
     w._post("backlog", pages=2, lines=9, paused=True, dropped=1, reading=True)  # (the totals after it)
     w.pump()
     assert (model.backlog.pages, model.backlog.lines, model.backlog.paused, model.backlog.dropped) == (2, 9, True, 1)
