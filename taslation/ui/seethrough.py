@@ -106,6 +106,7 @@ MEMO_KEPT = 4
 LOOK_INFO = "taslation.see_look"  # (the picture's info) the look a frame read with its bars painted over was given
 PAINTED_INFO = "taslation.see_painted"  # (the picture's info) the rows painted over in it
 GONE_LOOK_MS = 150  # once the bars have gone, the viewer is looked at so soon (a page read under them: read_under_bars)
+REST_S = 0.3  # a frame not at rest (`note_frame`) is the page at rest once it has stayed so long, no press held
 CUT_PX = 3  # a bubble read this close to rows painted over was cut by them (`read_under_bars`)
 # (CUT_PX and the patches' and the look's pixel sizes are at 96 DPI: `px` takes them to the viewer's, `tick`)
 
@@ -574,6 +575,9 @@ def start(app: Any) -> bool:
     app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
     app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour, the capture area's columns)
     # at the last rest (`note_frame`)
+    app._see_unrested = None  # (when, page box, ground) of a frame not at rest yet (`note_frame`, `rest_tick`)
+    app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
+    app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
     app._see_language = None  # (language, after job) while the left pane's arrows are being clicked
     app._see_clicked = []  # (when, control) of each click acted on, for the tools
@@ -850,6 +854,7 @@ def panes_tick(app: Any) -> None:
         if pane_click(app, side, x, y) == "quit":
             return  # (the window has gone)
     bubble_tick(app, over)
+    rest_tick(app)
     ground = getattr(app, "_see_ground", None)
     if ground is None:
         for side, memo in list(app._see_pane_memo.items()):
@@ -1380,12 +1385,35 @@ def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
     return facts.get(("see_look",), make)
 
 
+def held(app: Any) -> bool:
+    """Whether the button is held down in the viewer (`LiveViewMixin._held_in_viewer`): a page some viewers drag
+    along with the pointer is out of its place meanwhile."""
+    ask = getattr(app, "_held_in_viewer", None)
+    try:
+        return bool(ask()) if callable(ask) else False
+    except Exception:  # noqa: BLE001 - not known: as with no press
+        return False
+
+
+def _same_box(a: Any, b: Any, near: int) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return all(abs(int(x) - int(y)) <= near for x, y in zip(a, b))
+
+
 def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     """A frame just captured of the viewer (`LiveViewMixin._capture_frame`): since when bars lie over the page (and a
     look once they have stayed BAR_WAIT_S: a viewer draws no new frame while they stand still), and the page box of
     the last frame at rest (which tells half a spread) with what the side panes are placed by: the frame's size, the
     steady band's rows (`seethrough.steady_box` of the capture area: where bars never come), the ground's colour
-    (none at rest on no flat ground: the panes hide) and the capture area's columns (the panes at its edges)."""
+    (none at rest on no flat ground: the panes hide) and the capture area's columns (the panes at its edges).
+
+    Only a frame of the page at rest in its place is that (`_at_rest`): its page box the one the frame before had
+    (within LOOK_STEP; the first frame of a viewer or of a size counts), and no button held in the viewer (`held`).
+    Another is kept aside (`_see_unrested`) and becomes it once REST_S has passed with no frame after it and no press
+    (`rest_tick`). Before, every frame was: a page that a viewer drags along with the pointer, out of its place and
+    over the panes' places, hid the panes while it was held there, and the frame of a page taken while it moved, or
+    found on no flat ground, set the panes by it until the next frame at rest."""
     found = frame_look(app, image, facts)
     if found.kind is not None:
         return
@@ -1396,13 +1424,15 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
             except Exception:  # noqa: BLE001 - no Tk loop (a test)
                 pass
         app._see_bars_since = None
+        ground = None
         if found.box is not None:
-            app._see_rest_box = found.box
             _rgb, area = area_rgb(app, image, facts)
             steady = st.steady_box(image.size, area)
-            app._see_ground = (image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2]))
+            ground = (image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2]))
+        if _at_rest(app, image, found.box):
+            _rest(app, found.box, ground)
         else:
-            app._see_ground = None
+            app._see_unrested = (time.monotonic(), found.box, ground)
         return
     if app._see_bars_since is None:
         app._see_bars_since = time.monotonic()
@@ -1410,6 +1440,42 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
             app.after(int(BAR_WAIT_S * 1000) + 30, lambda: _bars_due(app))
         except Exception:  # noqa: BLE001 - no Tk loop (a test)
             pass
+
+
+def _at_rest(app: Any, image: Image.Image, box: Any) -> bool:
+    """Whether the frame *image*, its page box *box* (None: none found), shows the page at rest in its place (see
+    `note_frame`); the box is kept for the next frame's look."""
+    win = getattr(app, "selected", None)
+    key = (int(win.hwnd) if win is not None else 0, image.size)
+    seen, app._see_box_seen = getattr(app, "_see_box_seen", None), (key, box)
+    if held(app):
+        app._see_held_at = time.monotonic()
+        return False
+    return seen is None or seen[0] != key or _same_box(seen[1], box, px(app, st.LOOK_STEP))
+
+
+def _rest(app: Any, box: Any, ground: Any) -> None:
+    """The page at rest: its box (which tells half a spread) and the side panes' ground (None: no page on a flat
+    ground, the panes hide)."""
+    app._see_unrested = None
+    if box is not None:
+        app._see_rest_box = box
+    app._see_ground = ground
+
+
+def rest_tick(app: Any) -> None:
+    """(each tick) The frame kept aside by `note_frame` becomes the page at rest once REST_S has passed with no frame
+    after it and no button held in the viewer since (the viewer's own frames stopped coming: a page at rest is drawn
+    once)."""
+    pending = getattr(app, "_see_unrested", None)
+    if pending is None:
+        return
+    now = time.monotonic()
+    if held(app):
+        app._see_held_at = now
+        return
+    if now - max(pending[0], getattr(app, "_see_held_at", 0.0)) >= REST_S:
+        _rest(app, pending[1], pending[2])
 
 
 def _bars_due(app: Any, gone: bool = False) -> None:

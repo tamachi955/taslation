@@ -40,6 +40,11 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
      counted from 1), N ms at most    k drawn sharp after the soft time again
   u wait for the next turn the control file's "turns" releases (it grows by one for each: a page key TASlation
     handed on, or the driver's own release)
+  rN the page pressed in its middle and slid with the pointer to the right (towards the next screen: a book read
+     right to left) over N ms (700) as far as the window's edge, then held there    lN the same to the left (the
+     screen before)    rN-D, lN-D slid D CSS px only    o let go: slid as far as the edge, the screen it was slid
+     towards is turned to (a turn as any other: why=next|previous); else the page snaps back into its place
+     (why=slide_back). Without a profile only (with one: said, nothing done). See "a slide" below.
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
@@ -77,7 +82,8 @@ them, not waited on; ``a`` the side arrows shown as a pointer move shows them. I
 What it does is said on the console (`STANDIN ev=... t=...`, the time in ms since the epoch; a draw with the page's
 rectangle and the band's height in the canvas's pixels), which the driver reads from the browser's log; the title
 stays as it is, as a reader's tab title does. A strip of cells in the band carries the screen on show (its first
-page, spread or single, soft or sharp, spinner or not) for the driver to tell the frames TASlation captured apart;
+page, spread or single, soft or sharp, spinner or not; soft and spinner together: a slide's frame) for the driver to
+tell the frames TASlation captured apart;
 nothing else reads it. */
 
 const CONTROL_MS = 100;
@@ -924,6 +930,85 @@ function spinner(ms) {  // a spinner over the page on show, for a while
   });
 }
 
+// ------------------------------------------------------------------------------------------------ a slide
+// The script's "rN", "lN" and "o" (no profile): the page pressed in its middle and slid with the pointer, as a
+// viewer that moves the whole page along with a drag does, the screen it is slid towards coming in beside it; slid as
+// far as the window's edge, the release turns to that screen, else the page snaps back. The frames in between are
+// drawn sharp, both screens shifted, their cells saying soft and spinner together (a slide: `Shown.state`). Said:
+// ``ev=slide on=1 dir= x0= x1= y= ms= press=`` as the press begins (the pointer's way in the canvas's pixels: held
+// still at x0 for press ms, then moved to x1 over ms; the driver moves its own pointer along it - nothing here takes
+// the system's pointer), ``ev=slide held=1 dx=`` once it has got there, ``ev=slide on=0 to= turn=`` at the release.
+const SLIDE_PRESS_MS = 300;  // the press held still before the drag moves (a person's press, then the drag)
+let slid = null;  // the slide under way: {dir, x0, x1, ms, dx, edge, here, other, toward, token}
+async function screenLayer(n) {  // the screen whose first page is n, drawn sharp into a canvas of its own (no ground)
+  const pages = [n];
+  if (spread && n + 1 < entries.length) pages.push(n + 1);
+  const pics = await Promise.all(pages.map(load));
+  const c = document.createElement("canvas");
+  c.width = view.width; c.height = view.height;
+  const cg = c.getContext("2d");
+  const rs = rects(pics);
+  pics.forEach((p, k) => drawPicture(cg, p, rs[k], false));
+  const box = [Math.min(...rs.map(r => r.x)), Math.min(...rs.map(r => r.y)),
+               Math.max(...rs.map(r => r.x + r.w)), Math.max(...rs.map(r => r.y + r.h))];
+  return { canvas: c, box };
+}
+function drawSlide(dx) {  // both screens shifted by dx (canvas pixels), under the band
+  const W = view.width, H = view.height, B = Math.round(cfg.band * dpr());
+  slid.dx = dx;
+  g.fillStyle = GROUND; g.fillRect(0, 0, W, H);
+  g.save();
+  g.beginPath(); g.rect(0, B, W, H - B); g.clip();
+  g.drawImage(slid.here.canvas, dx, 0);
+  if (slid.other) g.drawImage(slid.other.canvas, dx + (slid.dir === "r" ? -W : W), 0);
+  g.restore();
+  band(); counter(); slider(); code(true, true);
+  shown = "slide";
+}
+async function slideStart(dir, ms, dist) {
+  if (P || black || slid) { say("slide", "on=0 why=" + (P ? "profile" : black ? "black" : "held")); return; }
+  stopSharp();
+  spinning = false;
+  const token = ++drawToken;
+  const width = spread ? 2 : 1;
+  const toward = first(Math.max(0, Math.min(entries.length - 1, dir === "r" ? index + width : index - width)));
+  const here = await screenLayer(index);
+  const other = toward !== index && toward >= 0 && toward < entries.length ? await screenLayer(toward) : null;
+  if (token !== drawToken || black) { say("slide", "on=0 why=cut"); return; }
+  const W = view.width;
+  const x0 = Math.round((here.box[0] + here.box[2]) / 2), y = Math.round((here.box[1] + here.box[3]) / 2);
+  const edge = dist === null;
+  const x1 = edge ? (dir === "r" ? W - 1 : 0) : Math.max(0, Math.min(W - 1, x0 + (dir === "r" ? 1 : -1) * Math.round(dist * dpr())));
+  slid = { dir, x0, x1, ms, dx: 0, edge, here, other, toward, token };
+  say("slide", "on=1 dir=" + dir + " x0=" + x0 + " x1=" + x1 + " y=" + y + " ms=" + ms + " press=" + SLIDE_PRESS_MS +
+      " edge=" + (edge ? 1 : 0));
+  drawSlide(0);
+  await sleep(SLIDE_PRESS_MS);
+  if (!slid || slid.token !== drawToken) return;
+  const start = now();
+  await new Promise(resolve => {
+    function frame() {
+      if (!slid || slid.token !== drawToken) { resolve(); return; }
+      const t = Math.min(1, (now() - start) / Math.max(1, ms));
+      drawSlide(Math.round((x1 - x0) * t));
+      if (t >= 1) { resolve(); return; }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+  if (slid && slid.token === drawToken) say("slide", "held=1 dx=" + slid.dx);
+}
+function slideEnd() {  // the release
+  const s = slid;
+  slid = null;
+  if (!s) { say("slide", "on=0 why=none"); return; }
+  if (s.token !== drawToken) { say("slide", "on=0 why=gone"); return; }
+  const turn = s.edge && s.other !== null;
+  say("slide", "on=0 to=" + (turn ? s.toward : index) + " turn=" + (turn ? 1 : 0));
+  if (turn) turnTo(s.toward, s.dir === "r" ? "next" : "previous");
+  else drawScreen(false, "slide_back");
+}
+
 // ------------------------------------------------------------------------------------------------ the control file
 const control = { go: 0, hold: 0, sharp: 0, turns: 0 };  // (each only ever raised)
 let turnsTaken = 0;  // the turns of the control file the "u" steps have taken
@@ -952,7 +1037,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfstbmehkuva])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbmehkuvarlo])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -983,6 +1068,8 @@ async function run(steps) {
     else if (s.op === "h") { say("hold", "id=" + s.a); await until(() => control.hold >= s.a); say("held", "id=" + s.a); }
     else if (s.op === "k") { keepMs = s.a; say("soft", "keep=" + (keepMs === null ? "off" : keepMs)); }
     else if (s.op === "u") { await until(() => control.turns > turnsTaken); turnsTaken++; say("released", "turn=" + turnsTaken); }
+    else if (s.op === "r" || s.op === "l") await slideStart(s.op, s.a === null ? 700 : s.a, s.b);
+    else if (s.op === "o") slideEnd();
     else if (s.op === "e") break;
   }
   say("end");

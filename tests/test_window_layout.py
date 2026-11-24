@@ -429,6 +429,7 @@ class Viewer(BlackViewerMixin):
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
     _find_page = app_mod.App._find_page
+    _held_in_viewer = app_mod.App._held_in_viewer
     _found_margins = app_mod.App._found_margins
     _margins_of = app_mod.App._margins_of
     _apply_found_margins = app_mod.App._apply_found_margins
@@ -570,6 +571,33 @@ def test_the_found_boxes_join_and_a_new_size_starts_over(viewer, monkeypatch):
     found[0] = (100, 50, 900, 580)
     viewer._capture(VIEWER.hwnd)
     assert tuple(viewer.settings.margins) == (100, 50, 100, 20)
+
+
+def test_a_frame_taken_while_the_button_is_held_in_the_viewer_joins_nothing(viewer, monkeypatch):
+    """A page some viewers drag along with the pointer: a frame of it, out of its place - half of it and half of the
+    next one across the whole window -, is not the page; the area is found again from the frames at rest."""
+    found = [(300, 44, 660, 520)]
+    monkeypatch.setattr(live, "find_page_area", lambda image: found[0])
+    held = [False]
+    monkeypatch.setattr(live.overlay, "button_down", lambda: held[0])
+    monkeypatch.setattr(live, "foreground_window", lambda: 77)
+    front = ["viewer"]
+    monkeypatch.setattr(live, "foreground_owner", lambda hwnd, viewer_hwnd: front[0])
+    viewer._capture(VIEWER.hwnd)
+    assert tuple(viewer.settings.margins) == (300, 44, 300, 20)
+    held[0] = True
+    found[0] = (0, 44, 960, 520)  # the page dragged half out of the window, the next one beside it
+    viewer._capture(VIEWER.hwnd)
+    assert tuple(viewer.settings.margins) == (300, 44, 300, 20) and len(viewer._page_areas) == 1
+    assert viewer._page_areas[next(iter(viewer._page_areas))][1] == (300, 44, 660, 520)  # nothing joined
+    front[0] = "other"  # the button held in another program: the viewer's frame is its page as ever
+    found[0] = (150, 50, 810, 520)
+    viewer._capture(VIEWER.hwnd)
+    assert tuple(viewer.settings.margins) == (150, 44, 150, 20)
+    front[0], held[0] = "viewer", False  # let go: found again from the frames at rest
+    found[0] = (100, 50, 860, 520)
+    viewer._capture(VIEWER.hwnd)
+    assert tuple(viewer.settings.margins) == (100, 44, 100, 20)
 
 
 def test_set_area_starts_from_the_page_found(viewer, monkeypatch):

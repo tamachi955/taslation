@@ -598,6 +598,27 @@ def test_a_page_turned_while_its_confirmed_job_runs_cancels_it_once_the_new_fram
     assert three_job.gate is not None and _after(three_job.gate.confirmed_at - (turned + 1.0), KEEP_S)
 
 
+def test_a_page_dragged_while_its_job_runs_neither_cancels_the_job_nor_starts_one(follow, monkeypatch):
+    """A viewer that slides its page along with the pointer while the button is held: the frames of the drag are not
+    another page - the job of the page goes on past LEFT_PAGE_MS, none is started on them -, and the page snapped
+    back once let go short of the edge is the job's page still."""
+    held = [False]
+    monkeypatch.setattr(live.overlay, "button_down", lambda: held[0])
+    w, worker = follow.make(ask_s=1.5)  # the model answers for 1.5 s: page 2's job runs on through the drag
+    two = _page(2)
+    turned = follow.show((0.0, "2", two), run=0.3 + 0.9)
+    job = worker.one("2")
+    assert job.gate.confirmed_at is not None and job.asked is not None and job.shown is None
+    held[0] = True
+    follow.show((0.0, "slid", _page(50)), (0.1, "slid", _page(51)), (0.2, "slid", _page(52)), run=0.75)
+    assert follow.clock.now - (turned + 1.2) > LEFT_PAGE_MS / 1000 + 0.2  # (held well past it)
+    assert not job.cancel.is_set() and job.how is None and [j.name for j in worker.jobs] == ["1", "2"]
+    held[0] = False  # let go short of the edge: the page snaps back at once
+    follow.viewer.frames.append((follow.clock.now + 0.02, two))
+    follow.clock.run(3)
+    assert job.how == "done" and [j.name for j in worker.jobs] == ["1", "2"] and worker.kept == ["1", "2"]
+
+
 def test_a_sharper_frame_after_the_confirmation_replaces_the_page_kept(follow):
     w, worker = follow.make(asks=False)
     soft, sharp = _page(4, soft=3), _page(4)

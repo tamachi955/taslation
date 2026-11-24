@@ -408,9 +408,21 @@ class SeeWatch:
 
     def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
                  front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None,
-                 viewer_pids: Callable[[], set[int]] | None = None, edit: bool = False) -> None:
+                 viewer_pids: Callable[[], set[int]] | None = None, edit: bool = False, standin: Any = None,
+                 top: int = 0, state_of: Callable[[Any], str] | None = None) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
         self.edit = bool(edit)  # (the left pane's Edit on: `_edit_measure` in place of `_hover_measure`)
+        # (scenario s) the stand-in's browser (`standin_viewer.StandinBrowser`: what its page says), whose slides of
+        # the page the pointer the window reads follows (`_follow_slides`; no hover measure then); *top*: the rows
+        # above the page's content in the client area; *state_of*: a frame to what the stand-in drew in it ("slide":
+        # the page out of its place, `standin_viewer.Shown.state`)
+        self.standin, self.top, self.state_of = standin, int(top), state_of
+        self.fake_button = False  # whether the see-through window and the live view are told the button is held
+        self._said = 0
+        self._slide: dict[str, Any] | None = None
+        self.slide_rows: list[dict[str, Any]] = []
+        self.slide_sets: set[int] = set()  # the keys of the patch sets made of a frame of a page slid out of place
+        self.slide_error = ""
         self.edit_result: dict[str, Any] = {}
         self.viewer_pids = viewer_pids  # (the stand-in's processes: their CPU and GPU memory, `cost`)
         self.viewer_cpu: list[tuple[float, bool, dict[int, float]]] = []  # (ms, a job ran, pid -> CPU seconds)
@@ -471,6 +483,9 @@ class SeeWatch:
         # the pointer as the see-through window reads it is this tool's (`fake_point`: none but while `_hover_measure`
         # sets one): the real pointer is never moved, and wherever it rests it changes nothing in a run
         window.cursor_pos = lambda: self.fake_point
+        # ... and so is the button (`fake_button`: held only while a slide of scenario s presses the page), so that a
+        # press of the person's own elsewhere on the computer changes nothing in a run either
+        window.button_down = lambda: self.fake_button
         pairs = ui.pairs
 
         def noted(app: Any) -> Any:
@@ -480,6 +495,8 @@ class SeeWatch:
                 if not any(img is original for _k, img in self._made):
                     self.screens[key] = self.decode(original)
                     self._made = [(key, original), *self._made[:63]]
+                    if self.state_of is not None and self.state_of(original) == "slide":
+                        self.slide_sets.add(key)
             return out
 
         ui.pairs = noted
@@ -606,7 +623,14 @@ class SeeWatch:
                     self._click_lettering()
                 except Exception as e:  # noqa: BLE001 - noted
                     self.pane_click = {"error": type(e).__name__}
-            if self.hover_thread is None and now - self.started >= HOVER_AFTER_S:
+            if self.standin is not None:
+                if not self.slide_error:
+                    try:
+                        self._follow_slides()
+                    except Exception as e:  # noqa: BLE001 - noted, and no more slides followed
+                        self.fake_button, self.fake_point = False, None
+                        self.slide_error = type(e).__name__
+            elif self.hover_thread is None and now - self.started >= HOVER_AFTER_S:
                 self.hover_thread = threading.Thread(target=self._edit_safe if self.edit else self._hover_safe,
                                                      name="see-hover", daemon=True)
                 self.hover_thread.start()
@@ -776,6 +800,136 @@ class SeeWatch:
         clicked = [n for _t, n in getattr(self.app, "_see_clicked", ())]
         self.pane_click = {"posted_to_the_pane": 4, "rows": rows, "front_before": self._who(front),
                            "acted_on": clicked}
+
+    def _follow_slides(self) -> None:
+        """(scenario s) The stand-in's slides of its page as its page says them: the pointer the see-through window
+        and the live view read (`fake_point`, `fake_button`: this tool's own, the real pointer is never moved)
+        pressed where the page was pressed, moved along with it to where the slide ends and let go at the release. On
+        a slide to the left, once it is held at its end, the pointer is put on the left pane's lettering switch with
+        the button still down - a move with the button's flag posted to the pane -, and at the release the button's
+        release is posted to the pane as well, as if the viewer had held no capture (`_probe_plate`): the switch must
+        not change."""
+        from taslation.capture import windows
+
+        said = self.standin.said(self._said)
+        self._said += len(said)
+        for _mono, e in said:
+            if e.get("ev") != "slide":
+                continue
+            if e.get("on") == "1" and "x0" in e:
+                x, y, _w, _h = windows._client_box(self.hwnd)
+                start = (x + int(e["x0"]), y + self.top + int(e["y"]))
+                end = (x + int(e["x1"]), start[1])
+                s: dict[str, Any] = {"dir": e.get("dir"), "edge": e.get("edge") == "1", "start": start, "end": end,
+                                     "moves_at": float(e["t"]) + float(e.get("press", 0)),
+                                     "ms": max(1.0, float(e.get("ms", 1))), "on_t": float(e["t"]), "held_t": None,
+                                     "off_t": None, "probe": None}
+                self._slide = s
+                self.fake_point, self.fake_button = start, True
+            elif e.get("held") == "1" and self._slide is not None:
+                self._slide["held_t"] = float(e["t"])
+                if self._slide["dir"] == "l":
+                    self._probe_plate(self._slide)
+            elif e.get("on") == "0":
+                s, self._slide = self._slide, None  # type: ignore[assignment]
+                self.fake_button = False
+                if s is None:
+                    continue
+                s["off_t"], s["turned"] = float(e["t"]), e.get("turn") == "1"
+                probe = s.get("probe")
+                if probe and probe.get("lparam") is not None:
+                    _user32.PostMessageW(probe["pane"], WM_LBUTTONUP, 0, probe["lparam"])
+                    probe["released_t"] = time.time() * 1000
+                self.fake_point = None
+                self.slide_rows.append(s)
+        s = self._slide
+        if s is not None and s["probe"] is None:  # the pointer along with the page
+            share = min(1.0, max(0.0, (time.time() * 1000 - s["moves_at"]) / s["ms"]))
+            self.fake_point = (round(s["start"][0] + (s["end"][0] - s["start"][0]) * share), s["start"][1])
+        for row in self.slide_rows:
+            probe = row.get("probe")
+            if probe and probe.get("released_t") and "after" not in probe \
+                    and time.time() * 1000 - probe["released_t"] > 1500:
+                probe["after"] = self._plate_state()
+
+    def _plate_state(self) -> dict[str, Any]:
+        over = self.over()
+        return {"lettering_on": None if over is None else bool(over.on),
+                "acted_on": len(getattr(self.app, "_see_clicked", ()) or ()),
+                "clicks_taken": None if over is None else int(over.counts.get("clicks", 0))}
+
+    def _probe_plate(self, s: dict[str, Any]) -> None:
+        """The pointer, its button held since the page was pressed, put on the left pane's lettering switch from
+        outside it: a WM_MOUSEMOVE with MK_LBUTTON posted to the pane (its release follows at the slide's, posted
+        too: `_follow_slides`)."""
+        over = self.over()
+        memo = (getattr(self.app, "_see_pane_memo", None) or {}).get("left")
+        box = over.pane_shown("left") if over is not None else None
+        plate = dict(memo[1].hits).get("lettering") if memo is not None else None
+        pane = over.panes.get("left", 0) if over is not None else 0
+        if box is None or plate is None or not pane:
+            s["probe"] = {"done": False, "why": "the left pane hidden" if box is None else "no switch"}
+            return
+        x, y = (plate[0] + plate[2]) // 2, (plate[1] + plate[3]) // 2
+        lparam = (y << 16) | (x & 0xFFFF)
+        self.fake_point = (box[0] + x, box[1] + y)
+        s["probe"] = {"done": True, "pane": pane, "lparam": lparam, "before": self._plate_state()}
+        _user32.PostMessageW(pane, WM_MOUSEMOVE, MK_LBUTTON, lparam)
+
+    def slide_report(self, jobs: dict[str, Any]) -> dict[str, Any]:
+        """(scenario s) Each slide of the page with the pointer: ms from its press, whether it turned the page, each
+        spell a side pane was hidden from the press until 10 s after the release (from, to - None: not back -, why),
+        the pane moves while the button was held, the patches made of a frame of the page out of place shown more than
+        300 ms after the release, and what the left pane's switch did with a press that did not begin on it
+        (`_probe_plate`); *jobs*: what the window made of such frames (`standin_e2e.slide_jobs`)."""
+        over = self.over()
+        notes = list(over.notes) if over is not None else []
+        marks = [(n["t"] * 1000 + self.delta_ms, n["side"], n["ev"] == "pane", n.get("why")) for n in notes
+                 if n["ev"] in ("pane", "pane_hide")]
+        serial_key = {n["set"]: n["key"] for n in notes if n["ev"] == "present"}
+        shows = [(n["t"] * 1000 + self.delta_ms, n["set"]) for n in notes if n["ev"] == "show" and n.get("shown")]
+
+        def shown_at(side: str, t: float) -> bool:
+            got = False
+            for when, s, shown, _why in marks:
+                if when > t:
+                    break
+                if s == side:
+                    got = shown
+            return got
+
+        rows = []
+        for s in self.slide_rows:
+            on, off = s["on_t"], s["off_t"]
+            spells: list[list[Any]] = []
+            for side in ("left", "right"):
+                open_: list[Any] | None = None if shown_at(side, on - 1) else [side, None, None, "before"]
+                for t, sd, shown, why in marks:
+                    if sd != side or t < on or t > off + 10000:
+                        continue
+                    if not shown and open_ is None:
+                        open_ = [side, round(t - on), None, why]
+                    elif shown and open_ is not None:
+                        open_[2] = round(t - on)
+                        spells.append(open_)
+                        open_ = None
+                if open_ is not None:
+                    spells.append(open_)
+            moved = sum(1 for t, _sd, shown, _w in marks if shown and on <= t <= off)
+            late = [round(t - off) for t, serial in shows if serial_key.get(serial) in self.slide_sets and t > off + 300]
+            probe = s.get("probe")
+            if probe:
+                probe = {k: v for k, v in probe.items() if k in ("done", "why", "before", "after")}
+            rows.append({"dir": s["dir"], "to_the_edge": s["edge"], "turned": s.get("turned"),
+                         "release_ms": round(off - on), "held_ms": None if s["held_t"] is None else round(off - s["held_t"]),
+                         "panes_shown_before": {side: shown_at(side, on - 1) for side in ("left", "right")},
+                         "panes_shown_at_release": {side: shown_at(side, off) for side in ("left", "right")},
+                         "hidden_spells_ms_from_press": spells, "pane_draws_while_pressed": moved,
+                         "slide_patches_shown_after_release_ms": late[:10], "plate_probe": probe})
+        return {"slides": rows, "error": self.slide_error or None,
+                "sets_made_of_slide_frames": len(self.slide_sets),
+                "slide_set_shows": sum(1 for _t, serial in shows if serial_key.get(serial) in self.slide_sets),
+                "jobs": jobs}
 
     def _hover_safe(self) -> None:
         try:

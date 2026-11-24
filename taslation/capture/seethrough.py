@@ -32,11 +32,14 @@ taking every click and key itself.
   plates - no WS_EX_TRANSPARENT; a layered window passes on a click on a pixel of alpha 0, so between its rows and
   round them the viewer takes it -, answers WM_MOUSEACTIVATE with MA_NOACTIVATE (a click never activates it: the
   viewer keeps the keyboard), and keeps each click (`take_clicks`: where in the pane) for the Tk thread, which acts on
-  it. The RIGHT one (the indicators, and the plates of the bubble last under the pointer) is click-through as the
-  lettering's window is, but while the pointer is on one of the plates the Tk thread named (`set_panes`): then it
-  takes the click as the left one does (`_right_plates`: WS_EX_TRANSPARENT off, at the look that finds the pointer
-  there; on again at the look that finds it elsewhere), so that its words never keep a click from the viewer. The
-  panes take no key, and send, post and press nothing either.
+  it. A click is a press and its release on the pane itself: a press that began on the viewer - a page some viewers
+  drag along with the pointer - fires nothing where it is let go, and a press on a pane let go elsewhere is
+  forgotten (`_pane_proc`, `_pane_presses`). The RIGHT one (the indicators, and the plates of the bubble last under
+  the pointer) is click-through as the lettering's window is, but while the pointer is on one of the plates the Tk
+  thread named (`set_panes`): then it takes the click as the left one does (`_right_plates`: WS_EX_TRANSPARENT off, at
+  the look that finds the pointer there; on again at the look that finds it elsewhere; neither while the button is
+  held, `button_down`), so that its words never keep a click from the viewer. The panes take no key, and send, post
+  and press nothing either.
 * Edit (`set_edit`: the regions of the page on show, `seethrough.Marks`, from the Tk thread while its Edit switch is
   on): the lettering's window takes the mouse on the regions' boxes alone - no WS_EX_TRANSPARENT then, its window
   procedure answering HTCLIENT and MA_NOACTIVATE (a click never activates it: the viewer keeps the keyboard), each box
@@ -340,6 +343,16 @@ def cursor_pos() -> tuple[int, int] | None:
     return int(point.x), int(point.y)
 
 
+def button_down() -> bool:
+    """Whether the mouse's primary button is held down now (``GetAsyncKeyState``; a mouse with its buttons swapped
+    for the left hand counted), read only - no hook, nothing taken; False outside Windows. (The tools put their own
+    in its place, as for `cursor_pos`.)"""
+    if not IS_WINDOWS:
+        return False
+    button = VK_RBUTTON if _user32.GetSystemMetrics(SM_SWAPBUTTON) else VK_LBUTTON
+    return bool(_user32.GetAsyncKeyState(button) & 0x8000)
+
+
 def viewer_dpi(viewer: int) -> int:
     """The DPI of the monitor the viewer's window *viewer* is on (its effective DPI: 96 at 100 %, 120 at 125 %, 144 at
     150 %), which is how much larger than at 100 % the viewer's frames show what it draws - whether the viewer scales
@@ -380,16 +393,23 @@ def _proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
 
 
 _pane_clicks: dict[int, Any] = {}  # a left pane's window -> what takes its clicks: (x, y) in its own pixels
+# a side pane's window -> when the left button was pressed on it (`_pane_proc`): a release is a click only after a
+# press on the pane itself, so that a press that began on the viewer - a page dragged with the pointer - and ends on a
+# pane's control fires nothing; one whose release went elsewhere is forgotten (`SeeThrough._pane_presses`)
+_pane_downs: dict[int, float] = {}
+PRESS_STALE_S = 0.25  # a press on a pane is forgotten once the button is up, the pointer off the pane, so long after
 
 
 def _pane_proc(hwnd, message, wparam, lparam):  # type: ignore[no-untyped-def]
     if message == WM_MOUSEACTIVATE:
         return MA_NOACTIVATE  # (a click is taken, the window never activated: the viewer keeps the keyboard)
     if message == WM_LBUTTONDOWN:
+        _pane_downs[int(hwnd or 0)] = time.monotonic()
         return 0
     if message == WM_LBUTTONUP:
+        pressed = _pane_downs.pop(int(hwnd or 0), None)
         take = _pane_clicks.get(int(hwnd or 0))
-        if take is not None:
+        if take is not None and pressed is not None:
             take(ctypes.c_short(int(lparam) & 0xFFFF).value, ctypes.c_short((int(lparam) >> 16) & 0xFFFF).value)
         return 0
     return _user32.DefWindowProcW(hwnd, message, wparam, lparam)
@@ -861,9 +881,11 @@ class SeeThrough:
         new_frame = frame.seq != self._seq
         pointer = cursor_pos()
         moved, self._pointer = pointer != self._pointer, pointer
+        held = button_down()
+        self._pane_presses(pointer, held, now)
         if not new_frame and changed == self._seen_changed and geometry == self._geometry and \
                 now - self._covers_at < COVER_S:
-            self._right_plates(pointer, panes)
+            self._right_plates(pointer, panes, held)
             self._edit_held()
             waiting = self._hover_wait is not None  # (a patch the pointer rests on, to be left out once its wait is over)
             if (moved or waiting or self._edit_dirty) and on and self._last_look is not None:  # only the pointer
@@ -886,7 +908,7 @@ class SeeThrough:
             self._dpi = viewer_dpi(viewer)
         self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
         self._place_panes(panes, origin, size)
-        self._right_plates(pointer, panes)
+        self._right_plates(pointer, panes, held)
         self._edit_held()
         if not on:  # (the left pane's Lettering switched off: the lettering hidden, the side panes as they are)
             self._last_look = None
@@ -1262,10 +1284,28 @@ class SeeThrough:
         self._marks_live = None
         self._edit_cancel(why)
 
-    def _right_plates(self, point: tuple[int, int] | None, panes: dict[str, Any]) -> None:
+    def _pane_presses(self, point: tuple[int, int] | None, held: bool, now: float) -> None:
+        """A press on a side pane whose release did not come to it (let go over another window, the button up by
+        now): forgotten once the pointer is off that pane, PRESS_STALE_S after the press, so that no later release
+        on the pane is taken for a click (`_pane_proc`)."""
+        if held or not _pane_downs:
+            return
+        for side, hwnd in self.panes.items():
+            pressed = _pane_downs.get(hwnd)
+            if pressed is None or now - pressed < PRESS_STALE_S:
+                continue
+            box = self.pane_shown(side)
+            if point is None or box is None or not (box[0] <= point[0] < box[2] and box[1] <= point[1] < box[3]):
+                _pane_downs.pop(hwnd, None)
+                self._note("press_forgotten", side=side)
+
+    def _right_plates(self, point: tuple[int, int] | None, panes: dict[str, Any], held: bool = False) -> None:
         """The right pane takes a click while the pointer at *point* (screen pixels) is on one of its plates that
         take one (WS_EX_TRANSPARENT off), and lets every other one through to the viewer (on), as the lettering's
-        window does."""
+        window does - as it was while the button is *held*: a press that began on the viewer and comes over a plate
+        (a page dragged with the pointer) does not change which window takes it."""
+        if held:
+            return
         hwnd = self.panes.get("right", 0)
         want, shown = panes.get("right"), self._pane_shown.get("right")
         takes = False

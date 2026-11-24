@@ -224,7 +224,17 @@ rows' languages.
   lines of text, by the annotation's counts, drawn soft for `--cancel-soft-ms` at half resolution, so that the window
   reads the soft frame and asks on it before the sharp one comes; needs the dataset); f2, the narrow window; f3, never
   in all, a's slow reading in that narrow window (nine screens of one page where f2 has two; after f2 when both are
-  asked, else the stand-in made narrow first). The scenarios of TASlation's own window went with it in 2.0.0 (r and t
+  asked, else the stand-in made narrow first); s, never in all and refused with `--standin-profile`, the page pressed
+  and slid along with the pointer, as a viewer that moves the whole page with a drag does (the stand-in's steps `rN`
+  and `lN` slide it to the right or left edge over N ms, `rN-D` only D CSS px; `o` lets go: at the edge the next or
+  the previous screen, else the page snaps back; each frame of a slide has its cells say "slide"): to the edge and
+  let go, 150 px and let go, to the other edge, and a slow slide held long. The tool's own pointer and button follow
+  each slide (`SeeWatch._follow_slides`: the window reads them, the real ones never move), and on the hold of the
+  slide to the left the press is moved over the left pane's lettering plate and let go there (posted to TASlation's
+  own pane). The report's `see_through.slides` gives per slide the panes' hidden spells from the press and why, the
+  panes' draws while pressed, the patches of slide frames shown after the release and the plate's probe (nothing may
+  fire, nothing stay stuck), and the jobs, requests and pictures made of slide frames (none should be). The
+  scenarios of TASlation's own window went with it in 2.0.0 (r and t
   with t2, its full screen in the two roles; o, over the book; z, its text size at 150 %; f, its dark theme). And k, never in all: on pages no scenario before turned to, `--k-turns` pages (20) flipped past at 0.5,
   1 and 2 s a page (k5, k1, k2; `k` is the three, each once the backlog of the one before has nothing left; k3, 3 s
   a page, only by its name), then a

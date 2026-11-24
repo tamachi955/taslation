@@ -834,11 +834,16 @@ def test_early_start_goes_on_once_the_viewer_was_looked_at(monkeypatch):
     window = SimpleNamespace(_see_hidden=True, selected=SimpleNamespace(hwnd=5), _enlarge_asked=None,
                              _early=None, ready=True, busy=False, _early_on=lambda: True, _black_open=lambda: False,
                              auto_var=SimpleNamespace(get=lambda: True), _auto_last=None, _start_pending=None,
-                             _starts_book=lambda image: False, _all_cached=lambda image: False)
+                             _starts_book=lambda image: False, _all_cached=lambda image: False,
+                             _held_in_viewer=lambda: window.held)
+    window.held = False
     op = SimpleNamespace(operation=None)
     assert not live.LiveViewMixin._early_allowed(window, op, None, None)  # (the viewer's first page: not looked at)
     viewers.ViewerMixin._enlarge_first(window)
     assert live.LiveViewMixin._early_allowed(window, op, None, None)
+    window.held = True  # (the button held in the viewer: a page dragged along with the pointer, tests/test_see_slide.py)
+    assert not live.LiveViewMixin._early_allowed(window, op, None, None)
+    window.held = False
     window.auto_var = SimpleNamespace(get=lambda: False)  # (Auto off: nothing starts by itself)
     assert not live.LiveViewMixin._early_allowed(window, op, None, None)
 

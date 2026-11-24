@@ -229,11 +229,18 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "q": ("profile: jumps, bars and arrows", ["n", "w7000", "v2500", "w6000", "n", "w300", "v1500", "w7000", "j30",
                                              "w9000", "a", "w500", "n", "w7000", "v2000", "w600", "n", "w7000", "j44",
                                              "w9000", "p", "w6000", "j56", "v15000", "w17000"]),
+    # (by its name only; no profile) the page pressed and slid with the pointer, as a viewer that moves the whole page
+    # along with a drag does: to the window's edge and let go (the next screen), slid a little and let go (it snaps
+    # back), to the other edge (the screen before; the pointer held on the left pane's lettering switch meanwhile,
+    # `SeeWatch._follow_slides`), and a slow slide held long; the pointer the window reads follows each slide
+    "s": ("the page slid with the pointer", ["n", "w6000", "r700", "w1500", "o", "w7000", "r600-150", "w1500", "o",
+                                             "w5000", "l700", "w1500", "o", "w7000", "r1500", "w3000", "o", "w8000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
-NAMED_ONLY = ("q", "f3")  # scenarios never in "all", only by their names
+NAMED_ONLY = ("q", "f3", "s")  # scenarios never in "all", only by their names
+SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
 # draws, kept in the report with its time (`stand_in_profile_events`; words and numbers only)
@@ -379,7 +386,16 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
         segment = Segment(name, go, steps)
         if name in NARROW:
             spread = False
+        slid: re.Match[str] | None = None  # (the slide the next "o" lets go: to the edge, a turn)
         for step in steps:
+            if SLIDE.fullmatch(step):
+                slid = SLIDE.fullmatch(step)
+                continue
+            if step == "o":
+                turn, slid = (slid.group(1) if slid is not None and slid.group(2) is None else None), None
+                if turn is None:
+                    continue
+                step = "n" if turn == "r" else "p"
             if step in ("n", "p") or (step.startswith("j") and step[1:].isdigit()):
                 width = 2 if spread else 1
                 if cover:
@@ -400,7 +416,7 @@ def build_plan(names: list[str], count: int, cancel_first: int | None = None, so
 
 
 def pages_needed(names: list[str], k_turns: int = 20) -> int:
-    turns = sum(SCENARIOS[n][1].count("n") * (1 if n in NARROW else 2) for n in names)
+    turns = sum((SCENARIOS[n][1].count("n") + SCENARIOS[n][1].count("o")) * (1 if n in NARROW else 2) for n in names)
     turns += sum(2 * (k_turns + 2) for n in names if n in K_PACES)
     turns += max((int(s[1:]) for n in names for s in SCENARIOS[n][1] if s[:1] == "j" and s[1:].isdigit()), default=0)
     return turns + 8
@@ -4227,6 +4243,8 @@ def run(args: argparse.Namespace) -> int:
     if profile_options and not args.standin_profile:
         raise SystemExit("--standin-option is for a stand-in with a profile (--standin-profile)")
     cover = bool(args.standin_profile) and profile_options.get("cover", "1") != "0"
+    if "s" in names and args.standin_profile:
+        raise SystemExit("scenario s slides the stand-in's page without a profile (no --standin-profile)")
     segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan, cover)
     if args.standin_profile:
         report["standin_profile"] = {"name": args.standin_profile, "options": profile_options}
@@ -4415,7 +4433,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                       shots=out / "shots" if args.see_truth else None, front_before=front_before,
                                       activations=activations,
                                       pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
-                                      viewer_pids=lambda: {pid, *browser.tree}, edit=edit)
+                                      viewer_pids=lambda: {pid, *browser.tree}, edit=edit,
+                                      standin=browser if any(s.name == "s" for s in segments) else None, top=top,
+                                      state_of=lambda image: notes.shown(image).state())
     see.install()
     see.start()
     queue_put = app._events.put
@@ -4467,11 +4487,26 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     lat = [e["recv"] - e["t"] for e in director.events]
     run_["see_through"] = see.report(director.events, min(lat) if lat else 0.0, ended)
     run_["see_through"]["guard_refused"] = dict(Counter(guard.refused))
+    if see.standin is not None:  # (scenario s: the slides with the pointer, and the jobs and pictures of their frames)
+        run_["see_through"]["slides"] = see.slide_report(slide_jobs(notes))
     see_pipeline = run_["see_through"].get("pipeline") or {}
     see_pipeline["present_to_display_ms"] = see_lags(notes, see_pipeline.get("presents_t", []))
     see_pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
     run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
     return run_
+
+
+def slide_jobs(notes: Notes) -> dict[str, Any]:
+    """Scenario s: what the window made of the frames of a page slid out of its place (the stand-in's cells say
+    "slide"): the page jobs started on one, the captures (each change of what they showed), and the pictures it
+    showed that were read from one."""
+    with notes.lock:
+        jobs = [j for j in notes.jobs if j["started"] and j["state"] == "slide"]
+        captures = Counter(c["state"] for c in notes.captures)
+        displays = [d for d in notes.displays if d.get("from") == "slide"]
+    return {"jobs_started": len(jobs), "requests": sum(j.get("requests", 0) for j in jobs),
+            "capture_changes_by_state": dict(captures), "displays_read_from_one": len(displays),
+            "lettered_displays_read_from_one": sum(1 for d in displays if lettered_shown(d))}
 
 
 def see_lags(notes: Notes, presents: list[float]) -> dict[str, Any]:

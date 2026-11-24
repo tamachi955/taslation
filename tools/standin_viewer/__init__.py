@@ -43,9 +43,11 @@ TITLE = "Stand-in reader"  # the page's title, the token after it
 PAGE_LIST, CONTROL = "pages.js", "control.js"
 REPLACE_TRIES_S = 2.0  # the control file's rename is tried again so long while the browser holds it open
 # go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released, the
-# bars shown for a while (a profile), the side arrows shown (a profile)
-OPS = "gwnpjfstbmehkuva"
+# bars shown for a while (a profile), the side arrows shown (a profile), the page slid with the pointer to the right
+# and to the left (ms; to the window's edge, or "-D" CSS px), let go
+OPS = "gwnpjfstbmehkuvarlo"
 WITH_NUMBER = "gwjmh"  # steps that need a number
+RANGED = "wrl"  # steps that take a second number: a wait's range (low to high), a slide's distance
 CELL, CODE_X, CODE_Y = 6, 12, 12  # the page's code cells (CSS pixels from the content's top left), as standin.html
 LEAD = (1, 0, 1, 0)
 # the page's behaviour profiles (``profile=``) and the names of their parts, each switchable alone in the query (as
@@ -63,7 +65,8 @@ DARK = 16  # a frame no brighter than this at every point looked at is black
 @dataclass(frozen=True)
 class Step:
     """One step of the page's script: *op* one of `OPS`, *a* its number (ms, page, go, mark), *b* the end of a range
-    of waits (``w6000-8000``)."""
+    of waits (``w6000-8000``) or a slide's distance in CSS px (``r700-120``: slid 120 px over 700 ms, not to the
+    edge)."""
 
     op: str
     a: int | None = None
@@ -74,8 +77,8 @@ class Step:
             raise ValueError(f"unknown step {self.op!r}")
         if self.op in WITH_NUMBER and self.a is None:
             raise ValueError(f"step {self.op!r} needs a number")
-        if self.b is not None and (self.op != "w" or self.a is None or self.b < self.a):
-            raise ValueError("a range is for a wait, low to high")
+        if self.b is not None and (self.op not in RANGED or self.a is None or (self.op == "w" and self.b < self.a)):
+            raise ValueError("a range is for a wait, low to high (or a slide's distance)")
         for v in (self.a, self.b):
             if v is not None and (not isinstance(v, int) or v < 0):
                 raise ValueError("numbers are whole and not negative")
@@ -503,7 +506,8 @@ def _end_process(pid: int) -> bool:
 @dataclass(frozen=True)
 class Shown:
     """What a captured frame of the stand-in shows: the screen (its first *page*, a *spread* or a single page), the
-    picture *soft* or sharp, the *spinner* over it; or *black*; *known* False when the cells could not be read."""
+    picture *soft* or sharp, the *spinner* over it (both: the page slid with the pointer, out of its place); or
+    *black*; *known* False when the cells could not be read."""
 
     page: int = -1
     spread: bool = False
@@ -521,6 +525,8 @@ class Shown:
             return "black"
         if not self.known:
             return "unknown"
+        if self.spinner and self.soft:
+            return "slide"
         return "spinner" if self.spinner else "soft" if self.soft else "sharp"
 
 

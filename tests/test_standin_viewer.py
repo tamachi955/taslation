@@ -73,6 +73,20 @@ def test_the_plan_foresees_the_screens_and_holds_each_scenario():
         standin_e2e.wanted("a,y")  # (q is scenario q, for a stand-in with a profile)
 
 
+def test_scenario_s_slides_the_page_with_the_pointer_and_turns_only_where_it_is_let_go_at_the_edge():
+    """(by its name only) the page slid to the window's edge and let go: the next screen; slid 150 px and let go: it
+    snaps back, no turn; slid the other way to the edge: the screen before; a slow slide held long: the next."""
+    assert "s" not in standin_e2e.wanted("all") and standin_e2e.wanted("s") == ["s"]
+    segments, steps = standin_e2e.build_plan(["s"], standin_e2e.pages_needed(["s"]))
+    (s,) = segments
+    assert s.screens == [(2, True), (4, True), (2, True), (4, True)]
+    slides = [(step.op, step.a, step.b) for step in steps if step.op in "rlo"]
+    assert slides == [("r", 700, None), ("o", None, None), ("r", 600, 150), ("o", None, None), ("l", 700, None),
+                      ("o", None, None), ("r", 1500, None), ("o", None, None)]
+    with pytest.raises(ValueError):
+        sv.parse_script("n,o-5")  # (a distance is a slide's alone)
+
+
 @pytest.mark.parametrize("gone", ["r", "t", "t2", "o", "z", "f"])
 def test_the_scenarios_of_the_former_own_window_are_unknown_ones(gone):
     """(the scenarios that turned pages through TASlation's window, its full screen, over the book, the side view
@@ -1045,7 +1059,7 @@ def frame(page: int, spread: bool, soft: bool = False, spinner: bool = False, to
 def test_the_band_code_reads_back(page, spread, soft, spinner):
     shown = sv.decode(frame(page, spread, soft, spinner), 31)
     assert shown.known and (shown.page, shown.spread, shown.soft, shown.spinner) == (page, spread, soft, spinner)
-    assert shown.state() == ("spinner" if spinner else "soft" if soft else "sharp")
+    assert shown.state() == ("slide" if spinner and soft else "spinner" if spinner else "soft" if soft else "sharp")
 
 
 def test_a_black_frame_and_a_frame_without_code():

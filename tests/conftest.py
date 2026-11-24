@@ -84,6 +84,16 @@ def no_real_window_reordered(monkeypatch):
     monkeypatch.setattr(order, "fully_covered", lambda hwnd, opaque=False: False)
 
 
+@pytest.fixture(autouse=True)
+def no_real_button_read(monkeypatch):
+    """No test reads the mouse's real button (`capture.seethrough.button_down`: a press of the person's own on this
+    machine while the tests run would hold the follow and the side panes as a page dragged in the viewer does); the
+    tests that want a press held patch their own in."""
+    from taslation.capture import seethrough as overlay
+
+    monkeypatch.setattr(overlay, "button_down", lambda: False)
+
+
 def _real_state_folder(state_dir) -> bool:
     """Whether *state_dir* is (or is in) a state folder of this machine's own: the home folder's, by any of the
     project's names."""

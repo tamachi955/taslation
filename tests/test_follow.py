@@ -618,6 +618,43 @@ def test_a_page_turned_in_the_viewer_is_followed_at_its_first_frame(setup, monke
     assert len(v.captures) <= captures + 1 + 30 // 0.7  # no new frame: polled every auto_interval_ms, as before
 
 
+def test_a_page_dragged_with_the_button_held_is_taken_only_once_let_go(setup, monkeypatch):
+    """A viewer that slides its page along with the pointer while the button is held, and turns it once it is let go
+    at the screen's edge: no frame of the drag is taken - not one the cache holds whole either, which is otherwise
+    taken on its first frame -, and the frame the release leaves is taken once it settled. The button held while
+    another program is in front holds nothing."""
+    _count_frames(setup, monkeypatch)
+    v = setup.viewer
+    held = [False]
+    monkeypatch.setattr(live.overlay, "button_down", lambda: held[0])
+    monkeypatch.setattr(live, "foreground_window", lambda: BROWSER)
+    w = setup.make(owner="viewer")
+    w.start()
+    setup.clock.run(3)
+    w.job_done()
+    setup.clock.run(2)
+    pages = len(w.new_pages)
+    assert w._held_in_viewer() is False
+    held[0] = True
+    assert w._held_in_viewer() is True
+    for cached in (False, True):
+        w._all_cached = lambda image, cached=cached: cached
+        now = setup.clock.now
+        v.frames += [(now + 0.1 * k, _page(20 + k + 10 * cached)) for k in range(1, 4)]  # the page following the pointer
+        setup.clock.run(3)  # (held there for well over settle_ms)
+        assert len(w.new_pages) == pages, cached
+    held[0] = False  # let go at the edge: the next page
+    turned = setup.clock.now + 0.05
+    v.frames.append((turned, _page(40)))
+    setup.clock.run(2)
+    assert [p for _t, p in w.new_pages][pages:] == [v.frames[-1][1]]
+    w.job_done()
+    setup.clock.run(2)
+    monkeypatch.setattr(live, "foreground_window", lambda: OTHER)
+    held[0] = True  # held in another program: not the viewer's press
+    assert w._held_in_viewer() is False
+
+
 def test_a_turn_stops_the_backlog_s_step_before_the_turned_page_is_drawn(setup, monkeypatch):
     """A step of the backlog's under way (``pipeline.behind_stop``) stops at the window's first capture of a turned
     page, before that page is drawn - not only once the page's job is queued (on a runner's 4 cores the server's work

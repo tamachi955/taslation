@@ -117,6 +117,7 @@ class Window(BlackViewerMixin):
     _run_queued = app_mod.App._run_queued
     _start_translate = app_mod.App._start_translate
     _find_page = app_mod.App._find_page
+    _held_in_viewer = app_mod.App._held_in_viewer
     _found_margins = app_mod.App._found_margins
     _apply_found_margins = app_mod.App._apply_found_margins
     _margins_of = app_mod.App._margins_of

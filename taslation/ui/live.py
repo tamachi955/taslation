@@ -54,6 +54,10 @@ With "events" (Windows; "poll" whenever the hooks cannot be had) it is captured 
   the job never cancelled; a black flash or a spinner over the page changes nothing (`_look_over_job`). A frame of
   another size (the viewer's window resized) is another page so, read by its own size's capture area from the first
   (`_margins_of`): the job's area stays in force for the job alone until it is gone;
+* never on a frame taken while the mouse's button is held down with the viewer in front (`_held_in_viewer`): a page
+  some viewers drag along with the pointer is out of its place, and is turned once let go at the screen's edge -
+  nothing is taken, started or cancelled on such a frame, nor learnt from it (the capture area, the side panes'
+  ground), and the page settles from the release on;
 * never while neither is in front - except for a viewer just chosen (at the start, from the list, by the watch): it
   is looked at at once whoever is in front, and every auto_interval_ms until a frame of it is on the page
   (`Following.unseen`, `_follow_viewer`), and after a viewer's window took another size: the fresh frame goes on the
@@ -79,6 +83,7 @@ from .. import fingerprint as fp
 from .. import recovery
 from ..frames import CRISP_KEPT, SharpSeen, crispness, detail, frames_differ, looks_sharp, sharper, thumbnail
 from ..capture.windows import BROWSER_CLASSES, covered_by_opaque, window_class
+from ..capture import seethrough as overlay
 from ..config import Settings
 from ..capture import (
     IS_WINDOWS,
@@ -538,9 +543,11 @@ class LiveViewMixin(BlackViewerMixin):
         own header, links and page slider in it), joined the same way per viewer, capture size and area
         (`_inner_areas`), and the capture area is what the two have in common - the area alone while nothing is found
         (`_inner_margins`); a page that fills the area within TIGHT_PX joins the area itself (a cover narrower than the
-        spreads the area was drawn around narrows it only until a spread is shown)."""
+        spreads the area was drawn around narrows it only until a spread is shown). A frame taken while the button is
+        held in the viewer joins nothing (`_held_in_viewer`: a page dragged along with the pointer is out of its
+        place)."""
         win = self.selected
-        if win is None:
+        if win is None or self._held_in_viewer():
             return
         key, size = viewer_key(win), image.size
         see = seethrough.on(self)
@@ -914,12 +921,13 @@ class LiveViewMixin(BlackViewerMixin):
         a frame still on its way is read for nothing. A frame not *shown* yet becomes the live frame without being
         drawn: the page goes from the old page's translation to the new one's, not by way of the untranslated page
         (drawing a full-screen frame took some 40 ms, measured). False when the page is not wholly in the cache (then
-        it settles first, as ever), and for a soft picture of a viewer that draws a page soft first (`_looks_soft`):
+        it settles first, as ever), while the button is held in the viewer (`_held_in_viewer`: it settles once let
+        go), and for a soft picture of a viewer that draws a page soft first (`_looks_soft`):
         the page is taken at once on its sharp frame as that comes, or as it settles. What the cache held was lettered
         where the soft picture let its bubbles be found: on the browser-type stand-in viewer a quarter of them (11 of
         44 over 4 pages), 2-25 px (median 10) from where the sharp picture has them, and that left the page as the
         sharp picture came, for 0.2-1.6 s until it was read; the soft picture stays 0.15-0.45 s there."""
-        if not self._all_cached(image) or self._looks_soft(image):
+        if self._held_in_viewer() or not self._all_cached(image) or self._looks_soft(image):
             return False
         if not shown:
             self._quiet_live(image, thumb)
@@ -1048,6 +1056,9 @@ class LiveViewMixin(BlackViewerMixin):
                     if not self._take_at_once(win.hwnd, image, thumb, frame_detail):
                         self._begin_follow(win.hwnd, None, phase="settle", last=thumb, last_detail=frame_detail,
                                            image=image)
+                return
+            if self._held_in_viewer():  # (a press in the viewer that has not ended: no frame of it is a candidate)
+                self._auto_candidate = None
                 return
             if self._auto_last is None or frames_differ(self._auto_last, thumb):
                 if self._auto_candidate is not None and not frames_differ(self._auto_candidate, thumb, 0.5):
@@ -1549,9 +1560,9 @@ class LiveViewMixin(BlackViewerMixin):
             if self.auto_var.get() and seethrough.on(self) and seethrough.after_bars(self, image):
                 self._take_retake(image, thumb)  # (the bubbles held bars cut, read now they have gone: `after_bars`)
             return
-        if seen is not None and not frames_differ(seen, thumb, 0.5):
+        if seen is not None and not frames_differ(seen, thumb, 0.5) and not self._held_in_viewer():
             self._take(image, thumb)
-        else:
+        else:  # (the button held in the viewer: followed until let go and settled, `_step`)
             self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
                                last_detail=_detail(self, image, self._area_box(image)), image=image)
 
@@ -1608,7 +1619,9 @@ class LiveViewMixin(BlackViewerMixin):
         if self._on_job_page(image):
             self._check_sharper(image, thumb)
             return
-        gave = self._tail_gives_way()  # (a job past its page: cancelled now, not once the frame stayed LEFT_PAGE_MS)
+        # (a job past its page: cancelled now, not once the frame stayed LEFT_PAGE_MS - but not for a frame taken while
+        # the button is held in the viewer, `_held_in_viewer`: a page dragged with the pointer may snap back)
+        gave = not self._held_in_viewer() and self._tail_gives_way()
         self._begin_follow(win.hwnd, None, phase="settle", last=thumb,
                            last_detail=_detail(self, image, self._area_box(image)), image=image, over_job=True,
                            gave_way=gave)
@@ -1657,12 +1670,15 @@ class LiveViewMixin(BlackViewerMixin):
         """A settled frame of the viewer taken as the page (follow = "events"). With Auto on a new page is started at
         once (`_on_new_page`), or - while the models load or a job runs - as soon as it can be (`_queue`: the viewer is
         looked at again then); with Auto off nothing is taken (F5 translates the page on show).
-        *complete*: the page job's (`_on_new_page`). Returns "started", "queued" or "same" (nothing to take)."""
+        *complete*: the page job's (`_on_new_page`). Returns "started", "queued", "same" (nothing to take) or "held"
+        (the button held down in the viewer: no frame is the page at rest until it is let go, `_held_in_viewer`)."""
         f = self._following
         if not self.auto_var.get():
             return "same"
         if self._auto_last is not None and not frames_differ(self._auto_last, thumb):
             return "same"
+        if self._held_in_viewer():
+            return "held"
         if not self.ready or self.busy:
             f.taken = None
             self._cancel_page(turned=True)  # the page being read is not on show any more
@@ -1672,6 +1688,20 @@ class LiveViewMixin(BlackViewerMixin):
         self._mark_taken(image, thumb, frame_detail)
         self._on_new_page(image, thumb, complete=complete)
         return "started"
+
+    def _held_in_viewer(self) -> bool:
+        """Whether the mouse's primary button is held down while the viewer is in front (`overlay.button_down`, read
+        only): a press on the viewer that has not ended - a page some viewers drag along with the pointer, out of its
+        place, and turn once it is let go at the screen's edge. No frame of that time is the page at rest: none is
+        taken, started or lets a running job go (`_step`, `_take`, `_early_allowed`, `_take_at_once`), and none is
+        learnt from - the capture area found (`_find_page`) nor the side panes' ground (`seethrough.note_frame`)."""
+        win = self.selected
+        if win is None or not IS_WINDOWS:
+            return False
+        try:
+            return overlay.button_down() and foreground_owner(foreground_window(), win.hwnd) == "viewer"
+        except Exception:  # noqa: BLE001 - not known: as with no press
+            return False
 
     def _mark_taken(self, image: Image.Image, thumb: np.ndarray, frame_detail: np.ndarray | None = None) -> None:
         """The page just taken, for the looks after it (a sharper frame of it may come), with the gate its job is
@@ -1916,11 +1946,14 @@ class LiveViewMixin(BlackViewerMixin):
     def _early_allowed(self, op: Operation, image: Image.Image, thumb: np.ndarray) -> bool:
         """Whether *op*'s frame *image* may be started at once, before it settles (`_early_start`): early_start on,
         none started early yet, the models ready, the worker free; Auto on and the frame a new page whose start asks
-        nothing (no book start); the viewer's window looked at once as it was chosen (`_enlarge_first`); and a page
-        the cache does not hold whole (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
+        nothing (no book start); the viewer's window looked at once as it was chosen (`_enlarge_first`); no button held
+        in the viewer (`_held_in_viewer`: a page dragged out of its place); and a page the cache does not hold whole
+        (one it does is taken as ever: at once, `_take_at_once`, or settled)."""
         if not self._early_on() or getattr(self, "_early", None) is not None:
             return False
         if not self.ready or self.busy or not self.auto_var.get():
+            return False
+        if self._held_in_viewer():
             return False
         if self._black_open():
             return False
@@ -2201,6 +2234,14 @@ class LiveViewMixin(BlackViewerMixin):
             if moving and self._early_of(op) is not None:
                 self._early_drop()  # the frame changed under the page started on it: nothing of that job lasts ...
                 op.redo = True  # ... and the page starts again on this frame once the worker is free of it
+            if self._held_in_viewer():
+                # (the button held in the viewer: a page some viewers drag along with the pointer, out of its place,
+                # and turn once it is let go at the screen's edge - no frame of it is taken, started or cancels the
+                # running job; it settles from the release on)
+                op.last, op.last_detail, op.last_image = thumb, frame_detail, image
+                op.last_at = op.settle_from = now
+                self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
+                return
             if (moving or op.redo or (op.over_job and not self.busy)) and not (op.redo and self.busy):
                 op.redo = False
                 # (a page the cache holds: taken now, then rechecked - unless a job runs that this frame, not
@@ -2258,6 +2299,9 @@ class LiveViewMixin(BlackViewerMixin):
             if took == "started":
                 op.phase = "recheck"
                 self._next_step(op, RECHECK_MS)
+            elif took == "held":  # (pressed just now: settled once let go)
+                op.last_at = op.settle_from = now
+                self._next_step(op, FRAME_STEP_MS if op.seq is not None else FOLLOW_STEP_MS)
             return
         taken = f.taken  # "recheck"
         if taken is None:

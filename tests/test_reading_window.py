@@ -88,6 +88,7 @@ class Window(BlackViewerMixin):
     _covers_viewer = app_mod.App._covers_viewer
     _run_queued = app_mod.App._run_queued
     _find_page = app_mod.App._find_page
+    _held_in_viewer = app_mod.App._held_in_viewer
     _apply_found_margins = app_mod.App._apply_found_margins
     say = app_mod.App.say
     _init_flow_state = app_mod.App._init_flow_state
