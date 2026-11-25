@@ -45,6 +45,10 @@ The hash holds the script (`#s=...`), steps separated by commas, run by the page
      screen before)    rN-D, lN-D slid D CSS px only    o let go: slid as far as the edge, the screen it was slid
      towards is turned to (a turn as any other: why=next|previous); else the page snaps back into its place
      (why=slide_back). Without a profile only (with one: said, nothing done). See "a slide" below.
+  xN another tab shown (N 0: a plain page, neutral title; 1: made-up Japanese lines and title)   xN-D its title D ms
+     after its page    y the book's tab again   yD its title D ms before its page    c the other tab closed
+  zN the book's tab moved out into a window of its own (the driver opens it; this window shows the other tab N).
+     Without a profile only. See "the tabs" below.
 Arrow keys work for a person trying it by hand: Left the next screen, Right the one before (a book read right to
 left).
 
@@ -107,6 +111,9 @@ const cfg = {
   slider: ["1", "2"].includes(query.get("slider")) ? Number(query.get("slider")) : 0,  // the page slider under the page
   script: hashed.get("s") || "",
   focusBlack: query.get("focus_black") !== "0",  // false: the focus draws no black
+  // the book's tab moved out into this window ("z"; ``held=1``): opened at the start, it waits for the control file
+  held: query.get("held") === "1", skip: 0,
+  startTab: ["0", "1"].includes(query.get("tab")) ? Number(query.get("tab")) : null,  // the other tab from the start
 };
 
 // ------------------------------------------------------------------------------------------------ the profiles
@@ -221,7 +228,9 @@ const SLIDER_FOOT = 56, SLIDER_Y = 26, SLIDER_X0 = 0.12, SLIDER_X1 = 0.80, SLIDE
       BAR_REACH = 10;
 const SLIDER_BAR_COLOUR = "#8a8d92", SLIDER_KNOB_COLOUR = "#e8e8e8";
 const softQuery = [cfg.softMin, cfg.softMax], factorQuery = cfg.factor;  // (a script's "t" and "b" put them back)
-document.title = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
+const BOOK_TITLE = "Stand-in reader" + (cfg.token ? " " + cfg.token : "");
+// (the book's own window: not the book's title yet, nor one the token is in - the window is named by its token)
+document.title = cfg.held && !P ? "held" + cfg.token.slice(1) : BOOK_TITLE;
 
 // ------------------------------------------------------------------------------------------------ the log
 let step = -1;
@@ -321,8 +330,11 @@ function band() {
   g.fillRect(Math.round(W * 0.3), Math.round((cfg.band / 2) * d), Math.round(W * 0.35), Math.max(1, Math.round(3 * d)));
 }
 
-function code(soft, spin) {  // the screen on show, as cells: 1010, 12 bits (page, spread, soft, spinner), 4 bits of check
-  const data = (index & 511) | ((spread ? 1 : 0) << 9) | ((soft ? 1 : 0) << 10) | ((spin ? 1 : 0) << 11);
+function code(soft, spin, page) {  // the screen on show, as cells: 1010, 12 bits (page, spread, soft, spinner), 4 bits
+  // of check; *page* OTHER_PAGE: the other tab (no spread, sharp, no spinner)
+  const other = page === OTHER_PAGE;
+  const data = ((other ? OTHER_PAGE : index) & 511) | ((spread && !other ? 1 : 0) << 9) | ((soft ? 1 : 0) << 10) |
+               ((spin ? 1 : 0) << 11);
   const check = ((data & 15) + ((data >> 4) & 15) * 3 + ((data >> 8) & 15) * 5 + 7) & 15;
   const bits = [1, 0, 1, 0];
   for (let k = 0; k < 12; k++) bits.push((data >> k) & 1);
@@ -807,10 +819,11 @@ if (P) profileInput();
 
 async function drawScreen(soft, why) {
   if (P) return drawProfile(soft, why);
+  if (tab !== "book") { drawOther("draw"); return false; }  // (the other tab on show: the book's draws wait for it)
   const token = ++drawToken;
   const began = now();
   const pics = await Promise.all(screenPages().map(load));
-  if (token !== drawToken || black) return false;  // another drawing came meanwhile
+  if (token !== drawToken || black || tab !== "book") return false;  // another drawing came meanwhile
   sizeCanvas();
   g.fillStyle = GROUND; g.fillRect(0, 0, view.width, view.height);
   const rs = rects(pics);
@@ -898,7 +911,7 @@ function flash(ms) {  // the window drew black, as a browser does as it gets the
 }
 
 function spinner(ms) {  // a spinner over the page on show, for a while
-  if (black || base === null) return Promise.resolve();
+  if (black || base === null || tab !== "book") return Promise.resolve();
   spinning = true;
   const token = ++drawToken;
   const start = now();
@@ -966,7 +979,10 @@ function drawSlide(dx) {  // both screens shifted by dx (canvas pixels), under t
   shown = "slide";
 }
 async function slideStart(dir, ms, dist) {
-  if (P || black || slid) { say("slide", "on=0 why=" + (P ? "profile" : black ? "black" : "held")); return; }
+  if (P || black || slid || tab !== "book") {
+    say("slide", "on=0 why=" + (P ? "profile" : black ? "black" : slid ? "held" : "tab"));
+    return;
+  }
   stopSharp();
   spinning = false;
   const token = ++drawToken;
@@ -1009,8 +1025,90 @@ function slideEnd() {  // the release
   else drawScreen(false, "slide_back");
 }
 
+// ------------------------------------------------------------------------------------------------ the tabs
+// The script's "x", "y", "c" and "z" (no profile): a second tab of the browser window, as a program outside the browser
+// sees one - the window's title is the active tab's, its frames show the active tab's page, the band (the browser's
+// own bar) stays. "xN" opens the other tab and shows it (N 0: a plain page with a neutral title; 1: a page of made-up
+// Japanese lines with a made-up Japanese title), "xN-D" with its title changed D ms after its page is drawn (a browser
+// slow to retitle); "y" the book's tab shown again (its page as it was, sharp at once), "yD" its title back D ms before
+// its page is drawn; "c" the other tab closed (the browser shows the tab beside it: the book's); "zN" the book's tab
+// moved out into a window of its own: this window shows the other tab N from then on and runs no more of the script,
+// which the book's own window runs on from the next step. That window (``held=1``, the same token and script) is opened
+// by the driver at the start right behind this one - a browser's window started later in a run, or restored from
+// minimised, took the foreground -: blank under a title of its own (`held_title`) until the control file's ``out``,
+// then the screen ``at`` this one showed, under the book's title, and the script from step ``to``. ``tab=N`` in the
+// query: the other tab N is on show from the start once the first screen of the book has been drawn (the window found
+// by its title first). Said:
+// ``ev=tab on=other kind=N late=D``, ``ev=tab on=book how=switch|close lead=D``, ``ev=tab on=out kind=N to=STEP
+// index=SCREEN``, ``ev=tab held=1`` and ``ev=tab on=own at=SCREEN to=STEP`` (the book's own window), ``ev=tab
+// title=other|book`` as the title changes, ``ev=tab redraw=1`` (the other tab drawn again at a new size). The other
+// tab's cells say OTHER_PAGE.
+const OTHER_PAGE = 511;
+const OTHER_TITLES = ["Notes", "週末の予定メモ"];
+const OTHER_LINES = ["週末の予定", "土曜日は朝から雨が降るらしい", "午後は駅前の本屋に寄ってみる",
+                     "日曜日は友達と公園で走る約束", "夕ご飯はカレーにしようかな"];
+const OTHER_COLUMNS = ["明日も晴れるといいね", "きっと大丈夫だよ"];
+const bookTitle = BOOK_TITLE;
+let tab = "book", otherKind = 0, moved = false;
+function setTitle(which) {
+  document.title = which === "book" ? bookTitle : OTHER_TITLES[otherKind] || OTHER_TITLES[0];
+  say("tab", "title=" + which);
+}
+function drawOther(why) {  // a plain web page under the band: a header, grey lines; with kind 1 made-up Japanese text
+  sizeCanvas();
+  const d = dpr(), W = view.width, H = view.height, B = Math.round(cfg.band * d);
+  g.fillStyle = "#f6f6f4"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#dfe3e8"; g.fillRect(0, B, W, Math.round(56 * d));
+  g.fillStyle = "#c4c9d0";
+  const left = Math.round(Math.max(40 * d, W * 0.12)), wide_ = Math.round(W * 0.6);
+  if (otherKind === 1) {
+    g.fillStyle = "#1c1c1c"; g.textAlign = "left"; g.textBaseline = "top";
+    OTHER_LINES.forEach((line, k) => {
+      g.font = (k === 0 ? "bold " : "") + Math.round((k === 0 ? 40 : 30) * d) + "px 'Yu Gothic', 'Meiryo', sans-serif";
+      g.fillText(line, left, B + Math.round((96 + k * 64) * d));
+    });
+    const s = Math.round(34 * d);  // two columns written from the top, right to left, as in a speech balloon
+    g.font = s + "px 'Yu Gothic', 'Meiryo', sans-serif"; g.textAlign = "center";
+    OTHER_COLUMNS.forEach((col, k) => {
+      const x = W - left - k * Math.round(52 * d);
+      [...col].forEach((ch, i) => g.fillText(ch, x, B + Math.round(110 * d) + i * Math.round(s * 1.08)));
+    });
+  } else {
+    for (let k = 0; k < 9; k++) {
+      g.fillRect(left, B + Math.round((100 + k * 44) * d), Math.round(wide_ * (k % 3 === 2 ? 0.55 : 0.9)),
+                 Math.round(14 * d));
+    }
+  }
+  band(); code(false, false, OTHER_PAGE);
+  shown = "tab";
+  if (why === "resize") say("tab", "redraw=1");
+}
+function showOther(kind, late) {  // "x": the other tab opened and shown (its title *late* ms after its page)
+  stopSharp();
+  drawToken++;
+  spinning = false;
+  tab = "other"; otherKind = kind;
+  drawOther("show");
+  say("tab", "on=other kind=" + kind + " late=" + late);
+  if (late > 0) setTimeout(() => { if (tab === "other") setTitle("other"); }, late);
+  else setTitle("other");
+}
+async function showBook(how, lead) {  // "y" (how=switch) and "c" (how=close): the book's tab on show again
+  if (tab === "book") { say("tab", "on=book how=" + how + " already=1"); return; }
+  say("tab", "on=book how=" + how + " lead=" + lead);
+  if (lead > 0) { setTitle("book"); await sleep(lead); }
+  tab = "book";
+  if (!(lead > 0)) setTitle("book");
+  drawScreen(false, "tab");
+}
+function moveOut(kind, at) {  // "z": the book's tab moved out into a window of its own; this one shows the other tab
+  showOther(kind, 0);
+  moved = true;
+  say("tab", "on=out kind=" + kind + " to=" + (at + 1) + " index=" + index);
+}
+
 // ------------------------------------------------------------------------------------------------ the control file
-const control = { go: 0, hold: 0, sharp: 0, turns: 0 };  // (each only ever raised)
+const control = { go: 0, hold: 0, sharp: 0, turns: 0, tab: 0, out: 0, at: 0, to: 0 };  // (each only ever raised)
 let turnsTaken = 0;  // the turns of the control file the "u" steps have taken
 let polls = 0;
 window.standinControl = function (c) {
@@ -1020,6 +1118,11 @@ window.standinControl = function (c) {
   if (typeof c.hold === "number" && c.hold > control.hold) { control.hold = c.hold; say("control", "hold=" + c.hold); }
   if (typeof c.sharp === "number" && c.sharp > control.sharp) { control.sharp = c.sharp; say("control", "sharp=" + c.sharp); }
   if (typeof c.turns === "number" && c.turns > control.turns) { control.turns = c.turns; say("control", "turns=" + c.turns); }
+  if (typeof c.tab === "number" && c.tab > control.tab) { control.tab = c.tab; say("control", "tab=" + c.tab); }
+  if (typeof c.out === "number" && c.out > control.out) {  // (the book's own window: the screen and the step with it)
+    control.at = Math.max(0, Math.round(Number(c.at) || 0)); control.to = Math.max(0, Math.round(Number(c.to) || 0));
+    control.out = c.out; say("control", "out=" + c.out);
+  }
   if (typeof c.band === "number" && c.band >= 0 && c.band !== bandBefore) {
     cfg.band = c.band;
     say("control", "band=" + c.band);
@@ -1037,7 +1140,7 @@ function poll() {
 // ------------------------------------------------------------------------------------------------ the script
 function parse(text) {
   return text.split(",").map(t => t.trim()).filter(Boolean).map(t => {
-    const m = /^([gwnpjfstbmehkuvarlo])(\d+)?(?:-(\d+))?$/.exec(t);
+    const m = /^([gwnpjfstbmehkuvarloxycz])(\d+)?(?:-(\d+))?$/.exec(t);
     if (!m) throw new Error("bad step " + t);
     return { op: m[1], a: m[2] === undefined ? null : Number(m[2]), b: m[3] === undefined ? null : Number(m[3]) };
   });
@@ -1045,7 +1148,12 @@ function parse(text) {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(test) { while (!test()) await sleep(50); }
 async function run(steps) {
-  for (let k = 0; k < steps.length; k++) {
+  if (cfg.startTab !== null && !P) {  // (``tab=N``: the other tab on show from the start, once the driver says so)
+    say("tab", "wait=1");
+    await until(() => control.tab >= 1);
+    showOther(cfg.startTab, 0);
+  }
+  for (let k = cfg.skip; k < steps.length; k++) {
     step = k;
     const s = steps[k];
     if (s.op === "g") { say("wait", "go=" + s.a); await until(() => control.go >= s.a); say("go", "go=" + s.a); }
@@ -1070,6 +1178,11 @@ async function run(steps) {
     else if (s.op === "u") { await until(() => control.turns > turnsTaken); turnsTaken++; say("released", "turn=" + turnsTaken); }
     else if (s.op === "r" || s.op === "l") await slideStart(s.op, s.a === null ? 700 : s.a, s.b);
     else if (s.op === "o") slideEnd();
+    else if ("xycz".includes(s.op) && P) say("tab", "on=0 why=profile");
+    else if (s.op === "x") showOther(s.a || 0, s.b || 0);
+    else if (s.op === "y") await showBook("switch", s.a || 0);
+    else if (s.op === "c") await showBook("close", 0);
+    else if (s.op === "z") { moveOut(s.a || 0, k); return; }  // (the book's new window runs on from the next step)
     else if (s.op === "e") break;
   }
   say("end");
@@ -1097,6 +1210,8 @@ addEventListener("resize", () => {
   say("size", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +
       (P ? " full=" + (fullScreen() ? 1 : 0) + " band=" + bandPx() : ""));
   if (black || spinning) return;
+  if (shown === "held") { g.fillStyle = "#ffffff"; g.fillRect(0, 0, view.width, view.height); return; }
+  if (tab !== "book") { drawOther("resize"); return; }
   if (P && P.resize === "spinner") load_then("resize", between(P.resize_ms[0], P.resize_ms[1]), () => drawProfile(false, "resize"));
   else drawScreen(false, "resize");
 });
@@ -1110,6 +1225,26 @@ function begin() {
   if (!entries.length) entries = Array.from({ length: 40 }, (_v, n) => ({ placeholder: n }));
   sizeCanvas();
   spread = spreadNow();
+  if (cfg.held && !P) {  // (the book's own window, waiting for its tab to come: blank, under a title of its own)
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, view.width, view.height);
+    shown = "held";
+    setInterval(poll, CONTROL_MS);
+    poll();
+    say("tab", "held=1");
+    until(() => control.out >= 1).then(() => {
+      index = first(Math.min(control.at, entries.length - 1));
+      keepNear(index);
+      document.title = bookTitle;
+      drawScreen(false, "start").then(() => {
+        say("tab", "on=own at=" + control.at + " to=" + control.to);
+        let steps = [];
+        try { steps = parse(cfg.script); } catch (e) { say("bad_script"); }
+        cfg.skip = control.to;
+        run(steps);
+      });
+    });
+    return;
+  }
   keepNear(0);
   drawScreen(false, "start").then(() => {
     say("ready", "w=" + view.width + " h=" + view.height + " vw=" + innerWidth + " vh=" + innerHeight + " dpr=" + dpr() +

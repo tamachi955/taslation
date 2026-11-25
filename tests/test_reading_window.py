@@ -63,6 +63,7 @@ class Window(BlackViewerMixin):
     _page_line = app_mod.App._page_line
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
+    _shows_other_tab = app_mod.App._shows_other_tab
     _set_viewer_hidden = app_mod.App._set_viewer_hidden
     _redisplay = app_mod.App._redisplay
     _status_follows_page = app_mod.App._status_follows_page

@@ -93,6 +93,7 @@ class Guard:
 
     def __init__(self, viewer: int):
         self.viewer = viewer
+        self.also: set[int] = set()  # (the stand-in's second window: the book's tab moved out, `standin_tabs`)
         self.own_pid = os.getpid()
         self.refused: list[str] = []
         self.used: dict[str, int] = {}
@@ -107,7 +108,8 @@ class Guard:
 
     def is_viewer(self, hwnd: Any) -> bool:
         try:
-            return bool(hwnd) and self._root(int(hwnd)) == self.viewer
+            root = self._root(int(hwnd)) if hwnd else 0
+            return bool(hwnd) and (root == self.viewer or root in self.also)
         except (TypeError, ValueError, OSError):
             return False
 

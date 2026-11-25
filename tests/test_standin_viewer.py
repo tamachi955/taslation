@@ -32,7 +32,7 @@ def test_script_round_trips():
     assert steps[10:14] == [sv.Step("t", 700), sv.Step("b", 2), sv.Step("t"), sv.Step("b")]
 
 
-@pytest.mark.parametrize("bad", ["x1", "w", "g", "j", "w9-3", "n5-6", "w-3", "ww1"])
+@pytest.mark.parametrize("bad", ["q1", "w", "g", "j", "w9-3", "n5-6", "w-3", "ww1", "x2", "z5", "y3-4", "c1-2"])
 def test_bad_steps_refused(bad):
     with pytest.raises(ValueError):
         sv.parse_script(bad)
@@ -320,6 +320,68 @@ def test_without_soft_first_the_stand_in_draws_every_turn_sharp_at_once_and_x_is
         standin_e2e.soft_first_scenarios(standin_e2e.wanted("a,x"), "a,x", False)
     args = standin_e2e.parse(["--scenario", "a,f2", "--soft-first", "off"])
     assert args.soft_first == "off" and standin_e2e.parse([]).soft_first == "on"
+
+
+def test_the_tab_steps_are_the_stand_in_s_own_and_the_book_s_own_window_waits_held(tmp_path):
+    from urllib.parse import parse_qs, urlparse
+
+    steps = sv.parse_script("n,x1-400,y400,c,z0,e")
+    assert steps[1] == sv.Step("x", 1, 400) and steps[2] == sv.Step("y", 400) and steps[4] == sv.Step("z", 0)
+    plain = sv.page_url("t1234", steps, tmp_path)
+    assert "tab=" not in plain and "held=" not in plain  # (none asked: the URL as it always was)
+    assert parse_qs(urlparse(sv.page_url("t1234", steps, tmp_path, start_tab=1)).query)["tab"] == ["1"]
+    assert parse_qs(urlparse(sv.page_url("t1234", steps, tmp_path, held=True)).query)["held"] == ["1"]
+    for bad in ({"start_tab": len(sv.OTHER_TITLES)}, {"start_tab": 0, "held": True}, {"held": True, "profile": "dark"},
+                {"start_tab": 0, "profile": "dark"}):
+        with pytest.raises(ValueError):
+            sv.page_url("t1234", steps, tmp_path, **bad)
+    control = sv.write_control(tmp_path, 3, tab=1, out=(4, 7))
+    assert control.read_text(encoding="utf-8") == 'standinControl({"go": 3, "tab": 1, "out": 1, "at": 4, "to": 7});\n'
+    html = sv.HTML.read_text(encoding="utf-8")
+    # the book's own window: never the book's title, nor one the token is in, before it is told to go on
+    assert 'document.title = cfg.held && !P ? "held" + cfg.token.slice(1) : BOOK_TITLE;' in html
+    held = sv.held_title("t1234")
+    assert "t1234" not in held and sv.find_window({7}, "t1234", windows=[(70, 7)], title=lambda _h: held) is None
+    assert sv.find_window({7}, held, windows=[(70, 7)], title=lambda _h: held + " - Browser") == 70
+    # the scenarios: by their names only, tab0 first and tab6 last
+    assert not set(standin_e2e.wanted("all")) & set(standin_e2e.TAB_SCENARIOS)
+    assert standin_e2e.wanted("tab") == list(standin_e2e.TAB_STEPS_ASKED)
+    assert standin_e2e.tab_order(["tab6", "tab2", "tab0", "tab1"]) == ["tab0", "tab2", "tab1", "tab6"]
+
+
+def test_a_spell_on_another_tab_is_counted_from_the_other_tab_drawn_to_the_book_s_page_drawn_again():
+    import threading
+
+    import standin_tabs
+
+    notes = SimpleNamespace(lock=threading.Lock(), capture_n=0, capture_counts={}, jobs=[], requests=[], lookups=[],
+                            drew_soft=[], status_lines=[])
+    browser = SimpleNamespace(hwnd=0, more_facts={})
+    run = standin_tabs.TabRun(SimpleNamespace(), browser, notes, 0, lambda _i, _s: None, lambda _h, _r: None,
+                              (0, 0, 10, 10), lambda _app: False)
+    run.event({"on": "other", "kind": "1", "late": "400", "t": "1000"}, "tab5")
+    run.event({"on": "other", "kind": "1", "late": "400", "t": "1050"}, "tab5")  # (said again: the same spell)
+    notes.capture_n, notes.capture_counts = 3, {"tab": 2}
+    run.event({"on": "book", "how": "switch", "lead": "400", "t": "5000"}, "tab5")
+    run.drawn({"why": "tab", "t": "5100"})
+    run.event({"on": "out", "kind": "0", "to": "9", "index": "4", "t": "6000"}, "tab6")  # (no window held: said)
+    spells = run.report(9000.0)["spells"]
+    assert [s["kind"] for s in spells] == ["switch", "out"]
+    first = spells[0]
+    assert first["away_ms"] == 4000 and first["title_late_ms"] == 400 and first["title_lead_ms"] == 400
+    assert first["while_away"]["captures"] == 3 and first["while_away"]["tab_captures"] == 2
+    assert first["back_to_lettered_ms"] is None  # (nothing sampled: no lettering seen)
+    assert run.second_facts["failed"] and spells[1]["second_window"]["failed"]
+    memo = {"right": ((("block",), (SimpleNamespace(text="the line"),)), None, 1)}
+    assert standin_tabs.right_pane_says(SimpleNamespace(_see_pane_memo=memo), "the line")
+    assert not standin_tabs.right_pane_says(SimpleNamespace(_see_pane_memo=memo), "another")
+    # the lettering on the book's own window, which lies within the first one's place: told by its client's origin
+    first_box, own_box = (0, 0, 1000, 800), (40, 40, 980, 780)
+    assert standin_tabs._lies_on((40, 40), [first_box, own_box]) == 2
+    assert standin_tabs._lies_on((0, 0), [first_box, own_box]) == 1
+    assert standin_tabs._lies_on((60, 60), [first_box, own_box]) == 2
+    assert standin_tabs._lies_on((5, 5), [first_box]) == 1
+    assert standin_tabs._lies_on((2000, 5), [first_box, own_box]) == 0
 
 
 def test_a_job_whose_page_went_on_at_a_new_size_was_not_cancelled_with_its_page_on_show():

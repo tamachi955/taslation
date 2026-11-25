@@ -5,7 +5,9 @@ docstring says how); this module starts it in a throwaway browser window and tal
 `tools/standin_e2e.py`:
 
 * the script the page runs by itself (`Step`, `format_script`, `parse_script`): no key, no click, nothing sent to
-  any window;
+  any window; among its steps a second tab of the browser window (`TAB_STEPS`: shown, the book's tab again, closed,
+  the book's tab moved out into a window of its own - `StandinBrowser.open_held`, `show_held` -; `OTHER_TITLES`,
+  `OTHER_PAGE`);
 * the page's behaviour profiles (`PROFILES`, ``profile=dark|light``: two kinds of web viewer, their parts each
   switchable alone, `PROFILE_OPTIONS`, `parse_options`), off unless asked for;
 * the page list and the control file, both written into a scratch folder given (`write_page_list`,
@@ -44,10 +46,17 @@ PAGE_LIST, CONTROL = "pages.js", "control.js"
 REPLACE_TRIES_S = 2.0  # the control file's rename is tried again so long while the browser holds it open
 # go, wait, next, previous, jump, flash, spinner, soft time, blur factor, mark, end, hold, keep, turn released, the
 # bars shown for a while (a profile), the side arrows shown (a profile), the page slid with the pointer to the right
-# and to the left (ms; to the window's edge, or "-D" CSS px), let go
-OPS = "gwnpjfstbmehkuvarlo"
+# and to the left (ms; to the window's edge, or "-D" CSS px), let go; another tab shown (N: 0 plain, 1 made-up
+# Japanese; "-D": its title D ms late), the book's tab again (N: its title N ms before its page), the other tab
+# closed, the book's tab moved out into a window of its own (`TAB_STEPS`)
+OPS = "gwnpjfstbmehkuvarloxycz"
 WITH_NUMBER = "gwjmh"  # steps that need a number
-RANGED = "wrl"  # steps that take a second number: a wait's range (low to high), a slide's distance
+RANGED = "wrlx"  # steps that take a second number: a wait's range (low to high), a slide's distance, a title's lateness
+TAB_STEPS = "xycz"
+# the other tab (standin.html's "the tabs"): its cells' page, and its titles (a neutral one, a made-up Japanese one);
+# no title holds the token, so that the window shows another tab by its title as a browser's does
+OTHER_PAGE = 511
+OTHER_TITLES = ("Notes", "週末の予定メモ")
 CELL, CODE_X, CODE_Y = 6, 12, 12  # the page's code cells (CSS pixels from the content's top left), as standin.html
 LEAD = (1, 0, 1, 0)
 # the page's behaviour profiles (``profile=``) and the names of their parts, each switchable alone in the query (as
@@ -78,7 +87,9 @@ class Step:
         if self.op in WITH_NUMBER and self.a is None:
             raise ValueError(f"step {self.op!r} needs a number")
         if self.b is not None and (self.op not in RANGED or self.a is None or (self.op == "w" and self.b < self.a)):
-            raise ValueError("a range is for a wait, low to high (or a slide's distance)")
+            raise ValueError("a range is for a wait, low to high (or a slide's distance, a title's lateness)")
+        if self.op in "xz" and self.a is not None and self.a >= len(OTHER_TITLES):
+            raise ValueError(f"the other tab is 0 to {len(OTHER_TITLES) - 1}")
         for v in (self.a, self.b):
             if v is not None and (not isinstance(v, int) or v < 0):
                 raise ValueError("numbers are whole and not negative")
@@ -136,11 +147,14 @@ def write_page_list(folder: Path, pictures: Sequence[Path | tuple[Path, str]]) -
 
 
 def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int | None = None,
-                  sharp: int | None = None, turns: int | None = None) -> Path:
+                  sharp: int | None = None, turns: int | None = None, tab: int | None = None,
+                  out: tuple[int, int] | None = None) -> Path:
     """The control file (`CONTROL`) in the scratch *folder*: how far the page's script may go (*go*), the height
     of its band (CSS pixels; None: as it is), and, for a script that has them, how far its holds may go (*hold*,
-    ``hN``), how many of its turns kept soft may be drawn sharp (*sharp*, ``kN``) and the turns released so far
-    for its ``u`` steps (*turns*); None: not in the file. Written whole at once (a file beside it renamed over it);
+    ``hN``), how many of its turns kept soft may be drawn sharp (*sharp*, ``kN``), the turns released so far
+    for its ``u`` steps (*turns*), for a page started with ``tab=N``, the word to show that other tab (*tab* 1), and
+    for the book's own window (``held=1``) the word to go on in it (*out*: the screen the first window showed and the
+    step after its ``z``); None: not in the file. Written whole at once (a file beside it renamed over it);
     while the browser has the file open for a read, Windows refuses the rename, and it is tried again for up to
     REPLACE_TRIES_S (a run stopped on it at its first release once)."""
     target = _inside(folder, CONTROL)
@@ -153,6 +167,10 @@ def write_control(folder: Path, go: int = 0, band: int | None = None, hold: int 
         data["sharp"] = int(sharp)
     if turns is not None:
         data["turns"] = int(turns)
+    if tab is not None:
+        data["tab"] = int(tab)
+    if out is not None:
+        data.update({"out": 1, "at": int(out[0]), "to": int(out[1])})
     temporary = _inside(folder, CONTROL + ".new")
     temporary.write_text("standinControl(" + json.dumps(data) + ");\n", encoding="utf-8")
     end = time.monotonic() + REPLACE_TRIES_S
@@ -183,16 +201,24 @@ def parse_options(texts: Iterable[str]) -> dict[str, str]:
 def page_url(token: str, steps: Sequence[Step], folder: Path, seed: int = 1, band: int = 54,
              soft: tuple[int, int] = (150, 400), factor: int = 6, flash_ms: int = 800, layout: str = "auto",
              soft_first: bool | None = None, slider: int = 0, profile: str = "",
-             options: dict[str, Any] | None = None) -> str:
+             options: dict[str, Any] | None = None, start_tab: int | None = None, held: bool = False) -> str:
     """The stand-in page's URL: the page itself (`HTML`), its token, the page list and the control file in the
     scratch *folder*, its draws; the script in the hash. *soft_first* False (``soft_first=0`` in the query): the page
     draws every turn sharp at once and nothing after it; *slider* 1 or 2 (``slider=N``): the page slider under the
     page, 2 with the pages drawn as its knob is dragged (standin.html says how). *profile* "dark" or "light"
     (``profile=``): it behaves as that kind of web viewer, each of its parts in *options* (`PROFILE_OPTIONS`) given
-    another value; a profile draws every turn sharp at once unless *soft_first* is True (``soft_first=1``). With none
-    of them the URL is what it always was."""
+    another value; a profile draws every turn sharp at once unless *soft_first* is True (``soft_first=1``).
+    *start_tab* 0 or 1 (``tab=N``): the other tab on show from the start, once the control file's ``tab`` says so;
+    *held* (``held=1``): the book's own window, opened at the start and waiting for the book's tab to be moved out
+    into it (the script's ``z``, the control file's *out*). With none of them the URL is what it always was."""
     if slider not in (0, 1, 2):
         raise ValueError("slider is 0, 1 or 2")
+    if start_tab is not None and start_tab not in range(len(OTHER_TITLES)):
+        raise ValueError(f"the other tab is 0 to {len(OTHER_TITLES) - 1}")
+    if (start_tab is not None or held) and profile:
+        raise ValueError("the tabs are a stand-in's without a profile")
+    if start_tab is not None and held:
+        raise ValueError("the book's own window starts with the book's tab to come, not another tab")
     if profile not in ("", *PROFILES):
         raise ValueError(f"profile is one of {PROFILES} or none")
     options = dict(options or {})
@@ -208,7 +234,9 @@ def page_url(token: str, steps: Sequence[Step], folder: Path, seed: int = 1, ban
                        "seed": seed, "band": band, "soft_min": soft[0], "soft_max": soft[1], "factor": factor,
                        "flash_ms": flash_ms, "layout": layout, **first,
                        **({"slider": slider} if slider else {}), **({"profile": profile} if profile else {}),
-                       **{k: options[k] for k in PROFILE_OPTIONS if k in options}})
+                       **{k: options[k] for k in PROFILE_OPTIONS if k in options},
+                       **({"tab": start_tab} if start_tab is not None else {}),
+                       **({"held": 1} if held else {})})
     return file_url(HTML) + "?" + query + "#s=" + format_script(steps)
 
 
@@ -317,6 +345,8 @@ if sys.platform == "win32":
     _user32.GetForegroundWindow.restype = wintypes.HWND
     _user32.IsIconic.argtypes = [wintypes.HWND]
     _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, wintypes.UINT]
     _user32.LockSetForegroundWindow.argtypes = [wintypes.UINT]
     _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     _kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -383,6 +413,8 @@ def window_text(hwnd: int) -> str:
 
 
 SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE = 7, 4
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
 STARTF_USESHOWWINDOW = 0x00000001
 LSFW_LOCK, LSFW_UNLOCK = 1, 2
 
@@ -423,6 +455,13 @@ def foreground() -> tuple[int, int]:
     return (hwnd, int(pid.value))
 
 
+def held_title(token: str) -> str:
+    """The title of the book's own window while it waits (`StandinBrowser.open_held`): one word, the token's digits
+    after "held" - not the token, as a word or inside it, so that neither the driver (`find_window`) nor TASlation
+    (named by the token: `capture.match_windows`) takes it for the stand-in's window."""
+    return "held" + token[1:]
+
+
 def find_window(pids: set[int], token: str, windows: Iterable[tuple[int, int]] | None = None,
                 title: Callable[[int], str] | None = None) -> int | None:
     """The stand-in's window: a window of a process in *pids* (the tree the tool started) whose title holds *token*
@@ -445,6 +484,7 @@ class StandinBrowser:
                  scale: float = 1.0, draws_covered: bool = False, full_screen: bool = False):
         self.profile = make_profile(profile)
         self.token = token
+        self.scale, self.draws_covered = scale, draws_covered  # (a second window's browser started alike: `open_held`)
         self.started_from = foreground()  # (the window in front before: whose it is, `start_facts`)
         # how the window came (`wait_window`): minimised without activation, then shown without activation, the
         # foreground locked meanwhile (`lock_foreground`); whether the browser took the foreground at any look (it must
@@ -468,12 +508,16 @@ class StandinBrowser:
         self.events: list[tuple[float, dict[str, str]]] = []
         self.lock = threading.Lock()
         self.hwnd: int | None = None
+        self.more: list[int] = []  # (windows of the book's own it opened since: `open_held`) ...
+        self.more_browsers: list[tuple[subprocess.Popen, Path]] = []  # ... each its browser and profile ...
+        self.more_trees: list[set[int]] = []  # ... and the processes seen under it
+        self.more_facts: dict[str, Any] = {}  # (how the last of them came: as `start_facts`)
         self.tree: set[int] = {self.proc.pid}
-        self._reader = threading.Thread(target=self._read, name="standin-log", daemon=True)
+        self._reader = threading.Thread(target=self._read, args=(self.proc,), name="standin-log", daemon=True)
         self._reader.start()
 
-    def _read(self) -> None:
-        for line in self.proc.stderr:  # type: ignore[union-attr]
+    def _read(self, proc: subprocess.Popen) -> None:
+        for line in proc.stderr:  # type: ignore[union-attr]
             said = parse_line(line)
             if said is not None:
                 with self.lock:
@@ -510,36 +554,38 @@ class StandinBrowser:
             self._locked = False
             lock_foreground(False)
 
-    def _front_look(self, at: str = "opening") -> None:
+    def _front_look(self, at: str = "opening", facts: dict[str, Any] | None = None) -> None:
         """Whether the window in front is the browser's now (the window the person had keeps it, or it went to
         another window of theirs, but never to the stand-in); the first look that found it so is named (*at*:
-        "opening", "shown", or the caller's word)."""
+        "opening", "shown", or the caller's word) in *facts* (`start_facts` by default)."""
+        facts = self.start_facts if facts is None else facts
         front = foreground()
         if front[1] and front[1] in self.tree and front != self.started_from \
-                and not self.start_facts["took_the_foreground"]:
-            self.start_facts["took_the_foreground"] = True
-            self.start_facts["took_it_at"] = at
+                and not facts.get("took_the_foreground"):
+            facts["took_the_foreground"] = True
+            facts["took_it_at"] = at
 
-    def _show_quietly(self, hwnd: int) -> None:
+    def _show_quietly(self, hwnd: int, facts: dict[str, Any] | None = None) -> None:
         if sys.platform != "win32":
             return
+        facts = self.start_facts if facts is None else facts
         iconic = bool(_user32.IsIconic(hwnd))
-        self.start_facts["came_minimised"] = iconic
+        facts["came_minimised"] = iconic
         if iconic:
             _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
             deadline = time.monotonic() + 2.0
             while _user32.IsIconic(hwnd) and time.monotonic() < deadline:
                 time.sleep(0.02)
-        self.start_facts["shown_without_activation"] = not bool(_user32.IsIconic(hwnd))
+        facts["shown_without_activation"] = not bool(_user32.IsIconic(hwnd))
         time.sleep(0.3)  # (a browser that would activate itself as it is shown does so at once)
-        self._front_look("shown")
-        if self.start_facts["took_the_foreground"] and self._in_front(hwnd):
+        self._front_look("shown", facts)
+        if facts.get("took_the_foreground") and self._in_front(hwnd):
             # (it took it all the same - the lock refused, the person busy: minimised without activation, Windows gives
             # the foreground to the window behind, and shown again without activation; nothing of the person's touched)
             _user32.ShowWindow(hwnd, SW_SHOWMINNOACTIVE)
             time.sleep(0.1)
             _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-            self.start_facts["minimised_again"] = True
+            facts["minimised_again"] = True
 
     def _in_front(self, hwnd: int) -> bool:
         front = foreground()
@@ -564,11 +610,82 @@ class StandinBrowser:
         if self.alive():
             self.tree |= process_tree(self.proc.pid)
 
+    def open_held(self, program: Path, url: str, rect: tuple[int, int, int, int], seconds: float = 20.0) -> int:
+        """The book's own window for the page's ``z`` (the book's tab moved out into a window of its own), opened now,
+        at the start, and kept behind the first one until `show_held`: *url* a ``held=1`` page (`page_url`), at *rect*
+        (inside the first one's place: covered by it wholly) - no key, no click. A browser of its own on a throwaway
+        profile beside the first one's (`make_profile`; deleted at `close`), started as the first one is (minimised,
+        not activated: `quiet_start`; the foreground locked meanwhile), its window shown without activation once found
+        (`_show_quietly`, the lock still on) and put right behind the first one. (Opened later in a run - on the first
+        one's profile, which hands the page to the browser running, or on its own - the new window took the foreground
+        both times on 2026-11-25, and a window kept minimised from the start took it as it was shown again: a browser's
+        window restored from minimised activates itself once the person has given no input for a while. So it is never
+        minimised here.) The program is the same and its window of the same class, so that TASlation sees what a tab
+        dragged out gives: a window of that browser titled as the book's tab. Its log is read into the same `events`;
+        its window found by its own title (`held_title`) in its own process tree. How it came is kept in `more_facts`
+        (as `start_facts`); its handle, also in `more`."""
+        profile = make_profile(self.profile.parent / f"{self.profile.name}-{len(self.more_browsers) + 2}")
+        self.more_facts = {"asked": "minimised, not activated", "foreground_locked": False, "came_minimised": None,
+                           "shown_without_activation": None, "took_the_foreground": False, "took_it_at": None,
+                           "minimised_again": False}
+        self._locked = self.more_facts["foreground_locked"] = lock_foreground(True)
+        try:
+            proc = subprocess.Popen(browser_command(program, url, profile, rect, self.scale, self.draws_covered),
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                    text=True, encoding="utf-8", errors="replace",
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), startupinfo=quiet_start())
+            self.more_browsers.append((proc, profile))
+            own: set[int] = {proc.pid}
+            self.more_trees.append(own)
+            threading.Thread(target=self._read, args=(proc,), name="standin-log-2", daemon=True).start()
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                if proc.poll() is not None:
+                    raise RuntimeError("the book's window of its own: its browser ended at its start")
+                own |= process_tree(proc.pid)
+                self.tree |= own
+                self._front_look("held", self.more_facts)
+                hwnd = find_window(own, held_title(self.token))
+                if hwnd is not None and hwnd != self.hwnd:
+                    self.more.append(hwnd)
+                    self._show_quietly(hwnd, self.more_facts)
+                    if sys.platform == "win32":
+                        x, y, w, h = rect
+                        _user32.SetWindowPos(hwnd, self.hwnd or 0, x, y, w, h, SWP_NOACTIVATE)  # (behind the first)
+                    time.sleep(0.3)
+                    self._front_look("held", self.more_facts)
+                    return hwnd
+                time.sleep(0.1)
+            raise RuntimeError("the book's window of its own did not come")
+        finally:
+            self._unlock()
+
+    def show_held(self, hwnd: int) -> dict[str, Any]:
+        """The book's own window (`open_held`, behind the first one) brought above the first one without activation
+        (as the first one is put on top at the start: topmost, then not), the foreground locked meanwhile, now that the
+        book's tab is moved out into it. What came, as flags: whether the lock was taken, whether the window in front
+        was the browser's after it."""
+        facts: dict[str, Any] = {"locked": False, "took_the_foreground": False, "took_it_at": None}
+        if sys.platform != "win32":
+            return facts
+        self._locked = facts["locked"] = lock_foreground(True)
+        try:
+            flags = SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE
+            _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+            _user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+            time.sleep(0.3)  # (a browser that would activate itself as it is raised does so at once)
+            self._front_look("raised", facts)
+        finally:
+            self._unlock()
+        return facts
+
     def close(self) -> dict[str, Any]:
         """The window closed (WM_CLOSE to it), the processes of the tree still there after a while ended, the profile
         deleted. What was done, numbers and flags only."""
         out: dict[str, Any] = {"closed_by_window": False, "processes_ended": 0, "profile_deleted": False}
         self._unlock()  # (a window that never came: the lock on the foreground lifted all the same)
+        if self.more_browsers:  # (a window of the book's own, `open_held`: closed first, with its browser)
+            out["more"] = [self._close_more(i, proc, profile) for i, (proc, profile) in enumerate(self.more_browsers)]
         if self.hwnd is not None and self.alive():
             _user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
             try:
@@ -589,6 +706,39 @@ class StandinBrowser:
         for _attempt in range(20):
             shutil.rmtree(self.profile, ignore_errors=True)
             if not self.profile.exists():
+                out["profile_deleted"] = True
+                break
+            time.sleep(0.5)
+        return out
+
+    def _close_more(self, index: int, proc: subprocess.Popen, profile: Path) -> dict[str, Any]:
+        """A browser `open_held` started, as `close` closes the first: its window asked to close, what is left of
+        its process tree ended, its profile deleted."""
+        out: dict[str, Any] = {"closed_by_window": False, "processes_ended": 0, "profile_deleted": False}
+        hwnd = self.more[index] if index < len(self.more) else None
+        if hwnd and proc.poll() is None:
+            _user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+            try:
+                proc.wait(10)
+                out["closed_by_window"] = True
+            except subprocess.TimeoutExpired:
+                pass
+        table = processes()
+        alive = {pid: parent for pid, parent in table}
+        seen = self.more_trees[index] if index < len(self.more_trees) else {proc.pid}
+        if proc.poll() is None:
+            seen |= process_tree(proc.pid, table)
+        left = {pid for pid in seen if pid in alive and (pid == proc.pid or alive[pid] in seen)}
+        for pid in sorted(left):
+            if pid not in (self.proc.pid, os.getpid()) and _end_process(pid):
+                out["processes_ended"] += 1
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        for _attempt in range(20):
+            shutil.rmtree(profile, ignore_errors=True)
+            if not profile.exists():
                 out["profile_deleted"] = True
                 break
             time.sleep(0.5)
@@ -628,13 +778,21 @@ class Shown:
 
     @property
     def screen(self) -> tuple[int, bool] | None:
-        return (self.page, self.spread) if self.known and not self.black else None
+        return (self.page, self.spread) if self.known and not self.black and not self.other_tab else None
+
+    @property
+    def other_tab(self) -> bool:
+        """The frame shows the stand-in's other tab, no page of the book (`OTHER_PAGE`, single, sharp, no spinner)."""
+        return (self.known and not self.black and self.page == OTHER_PAGE and not self.spread and not self.soft
+                and not self.spinner)
 
     def state(self) -> str:
         if self.black:
             return "black"
         if not self.known:
             return "unknown"
+        if self.other_tab:
+            return "tab"
         if self.spinner and self.soft:
             return "slide"
         return "spinner" if self.spinner else "soft" if self.soft else "sharp"
@@ -686,18 +844,20 @@ class SelectionGuard:
 
     def __init__(self, hwnd: int):
         self.hwnd = int(hwnd)
+        self.also: set[int] = set()  # (the stand-in's second window: the book's tab moved out, `open_window`)
         self.stopped = ""
 
     def check(self, selected: Any) -> str:
         if self.stopped:
             return self.stopped
         hwnd = getattr(selected, "hwnd", None) if selected is not None else None
-        if selected is not None and hwnd != self.hwnd:
+        if selected is not None and hwnd != self.hwnd and hwnd not in self.also:
             self.stopped = "TASlation chose a window that is not the stand-in's"
         return self.stopped
 
 
-__all__ = ["CONTROL", "HTML", "OPS", "PAGE_LIST", "PROFILES", "PROFILE_OPTIONS", "SelectionGuard", "Shown", "StandinBrowser", "Step", "TITLE",
+__all__ = ["CONTROL", "HTML", "OPS", "OTHER_PAGE", "OTHER_TITLES", "PAGE_LIST", "PROFILES", "PROFILE_OPTIONS",
+           "SelectionGuard", "Shown", "StandinBrowser", "Step", "TAB_STEPS", "TITLE",
            "browser_command", "cells_of", "decode", "file_url", "find_browser", "find_window", "format_script",
            "make_profile", "page_url", "parse_line", "parse_options", "parse_script", "process_tree", "write_control",
            "write_page_list"]

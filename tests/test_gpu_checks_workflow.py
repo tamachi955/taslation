@@ -237,8 +237,15 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
         names = standin_e2e.wanted(scenarios)
         assert group == "-".join(names), group  # (the group says what the tool runs: a pair comes along)
         covered += names
-    # every scenario of "all" once, and scenario k's three paces (never in "all") once
-    assert sorted(covered) == sorted([*standin_e2e.ORDER, *standin_e2e.K_ASKED]) and len(covered) == len(set(covered))
+    # every scenario of "all" once, and scenario k's three paces (never in "all") once; of those by their names only,
+    # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized (r6
+    # and r7: the tool reads no page in a maximised frame yet), the page slid, a start behind another window
+    by_name = [*standin_e2e.TAB_STEPS_ASKED, *(r for r in standin_e2e.R_STEPS if r not in ("r6", "r7")), "s", "h"]
+    assert sorted(covered) == sorted([*standin_e2e.ORDER, *standin_e2e.K_ASKED, *by_name])
+    assert len(covered) == len(set(covered))
+    assert not set(covered) & set(standin_e2e.M_STEPS)  # (a second monitor: none on a runner)
+    behind = "if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }"
+    assert behind in _step("standin", "Run: tools/standin_e2e.py")["run"]
     # e turns back to the pages d translated: never alone, never without d
     assert any(standin_e2e.wanted(s)[:2] == ["d", "e"] for s in groups.values())
     choice = _on(_workflow())["workflow_dispatch"]["inputs"]["groups"]["description"]
@@ -617,6 +624,94 @@ def test_a_stand_in_run_fails_on_a_fault_and_only_on_one():
     gone = s.standin(None, "Traceback (most recent call last):\n  x\nOSError: boom\n", {}, "c")
     assert gone["verdict"] == "no report" and gone["console"]["exception_types"] == {"OSError": 1}
     assert _failed(gone) == ["the tool wrote its report"]
+
+
+def test_the_tab_resize_slide_and_behind_scenarios_fail_on_what_their_rule_forbids_and_only_on_it():
+    s = _summarise()
+
+    def failed(judge, run: dict, names: list[str]) -> tuple[list[str], int]:
+        found: list[tuple[str, bool]] = []
+        judge(run, names, lambda _scenario, criterion, ok, seen=None: found.append((criterion, bool(ok))))
+        return [c for c, ok in found if not ok], len(found)
+
+    # another tab shown: nothing read, asked, stored or learnt of it, no lettering or mouse over it a second after its
+    # title came, the right pane's line; the book's tab followed into its own window (its page areas its own there)
+    switch = {"segment": "tab1", "kind": "switch", "lettering_over_the_other_tab_last_ms": 40,
+              "mouse_over_the_other_tab_last_ms": None, "memory_titles_added": 0, "book_changed": False,
+              "page_areas_changed": False, "right_pane_line_shown": True}
+    out = {**switch, "segment": "tab6", "kind": "out", "followed_the_book_s_window_ms": 500, "page_areas_changed": True,
+           "right_pane_line_shown": False}
+
+    def tabs(*spells: dict, **more) -> dict:
+        return {"tabs": {"spells": list(spells), "jobs_on_the_other_tab": {"made": 0, "requests": 0, "stored": 0},
+                         "memory_holds_an_other_tab_title": False, "chosen_by_the_other_tab_s_title": False, **more}}
+
+    assert failed(s._tab_correctness, tabs(switch, out), ["tab1", "tab6"]) == ([], 11)
+    assert failed(s._tab_correctness, tabs(switch), ["c"]) == ([], 0)  # (no tab scenario: nothing judged)
+    faults = {
+        "no page job made on a frame of the other tab, nothing asked or stored for it":
+            tabs(switch, jobs_on_the_other_tab={"made": 1, "requests": 0, "stored": 0}),
+        "nothing of the other tab's title learnt in the viewer's memory, the window never chosen by it":
+            tabs(switch, memory_holds_an_other_tab_title=True),
+        f"no lettering and no mouse taken over the other tab's page {s.TAB_AFTER_TITLE_MS} ms after its title came":
+            tabs({**switch, "mouse_over_the_other_tab_last_ms": 1200}),
+        "nothing learnt and the book's name kept while the other tab showed (and its page areas, the tab back in the "
+        "same window)": tabs({**switch, "page_areas_changed": True}),
+        "the right pane said in one line that the window shows another tab":
+            tabs({**switch, "right_pane_line_shown": False}),
+        "the window followed the book's tab into its own window":
+            tabs(switch, {**out, "followed_the_book_s_window_ms": None}),
+        "the stand-in showed another tab": tabs(out),
+        "the tool told the spells away from the book's tab": {"tabs": {"failed": "KeyError"}},
+    }
+    for criterion, run in faults.items():
+        bad, _n = failed(s._tab_correctness, run, ["tab1", "tab6"] if "tab6" in str(run) else ["tab1"])
+        assert bad == [criterion], (criterion, bad)
+    assert s.meanings({"scenarios": ["tab1"], "run": {"tabs": {"spells": [{**switch, "away_ms": 6000,
+                                                                          "back_to_lettered_ms": 280}]}}})[
+        "tab1"].startswith("holds: another tab shown [6000] ms")
+
+    # the window resized: no job or request while the button was held, no side pane outside the window, each pane back
+    # at rest (or hidden for want of room)
+    panes = {"left": {"outside_the_viewer_looks": 0, "at_end": "shown"},
+             "right": {"outside_the_viewer_looks": 0, "at_end": "hidden: no room"}}
+    drag = {"button": True, "jobs_started_while_pressed": 0, "requests_while_pressed": 0, "panes": panes}
+
+    def resized(r1: dict, r5: dict | None = None, step: dict | None = None) -> dict:
+        return {"monitors": {"places": [{"segment": "r1", "step": step or {}, "resize": r1},
+                                        {"segment": "r5", "step": {}, "resize": r5 or {
+                                            **drag, "button": False, "jobs_started_while_pressed": 2}}]}}
+
+    assert failed(s._resize_correctness, resized(drag), ["r1", "r5"]) == ([], 8)
+    for criterion, run in {
+        "no page job started and nothing asked while the button was held":
+            resized({**drag, "requests_while_pressed": 1}),
+        "no side pane outside the viewer's window": resized(drag, {**drag, "button": False, "panes": {
+            **panes, "left": {"outside_the_viewer_looks": 2, "at_end": "shown"}}}),
+        "each side pane back at rest (or hidden for want of room beside the page)": resized({**drag, "panes": {
+            **panes, "right": {"outside_the_viewer_looks": 0, "at_end": "hidden: sizing"}}}),
+        "the step was done to the stand-in's window": resized(drag, step={"refused": "no such place"}),
+    }.items():
+        assert failed(s._resize_correctness, run, ["r1", "r5"])[0] == [criterion], criterion
+
+    # the page slid with the pointer: no side pane hidden (but by the window's closing at the end of the run)
+    def slid(*spells: list) -> dict:
+        rows = [{"dir": "r", "hidden_spells_ms_from_press": []},
+                {"dir": "l", "hidden_spells_ms_from_press": list(spells)}]
+        return {"see_through": {"slides": {"slides": rows, "error": None}}}
+
+    assert failed(s._slide_correctness, slid(["left", 13085, None, "closed"]), ["s"]) == ([], 2)
+    assert failed(s._slide_correctness, slid(["right", 300, 900, "turn"]), ["s"])[0] == [
+        "no side pane hidden on a slide (from its press until 10 s after its release)"]
+    assert failed(s._slide_correctness, {"see_through": {}}, ["s"])[0] == ["the tool told the slides"]
+
+    # a start behind another window: both panes on the screen once the stand-in is back in sight, and there they stay
+    behind = {"behind": {"behind": {"made": True, "ended_t": 8171}, "panes_back_ms": 278, "panes_stayed": True}}
+    assert failed(s._behind_correctness, behind, ["h"]) == ([], 3)
+    assert failed(s._behind_correctness, {"behind": {**behind["behind"], "panes_stayed": False}}, ["h"])[0] == [
+        "the side panes stayed on the screen"]
+    assert failed(s._behind_correctness, {}, ["h"]) == (
+        ["the stand-in was out of sight at the start and back in sight"], 1)
 
 
 def test_lines_taken_back_are_reported_and_fail_a_run_only_when_something_of_them_stayed():

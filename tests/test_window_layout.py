@@ -428,6 +428,7 @@ class Viewer(BlackViewerMixin):
     _enlarge_first = lambda self: True  # (the viewer's window looked at once: tests/test_see_hidden.py)
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
+    _shows_other_tab = app_mod.App._shows_other_tab
     _find_page = app_mod.App._find_page
     _held_in_viewer = app_mod.App._held_in_viewer
     _found_margins = app_mod.App._found_margins

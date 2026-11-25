@@ -48,5 +48,16 @@ READY = "Ready. Turn the pages in the viewer: with Auto on, each page you turn i
 BROWSER_MINIMISED = "Waiting: the browser window with the book is minimised. Click it on the taskbar to bring it back."
 VIEWER_RESTORED = "Viewer: {title}  (restored from the taskbar)"  # the viewer chosen was minimised: it is shown again
 VIEWER_CLOSED = "The viewer was closed. Open your book again and choose its window."  # (the viewer chooser comes again)
+# A browser window chosen for the book that shows another tab (`viewers.ViewerMixin._tab_seen`): the status line with
+# Auto on, the right pane's line (its changing part), and the viewer chooser's line under its list (a browser window is
+# listed by the title of the tab in front)
+TAB_WAITING = ("Waiting: the browser shows another tab. Bring the book's tab back, or drag that tab out into a window "
+               "of its own.")
+TAB_AWAY = "The viewer's window shows another tab."
+CHOOSER_TAB = "If the book is in a browser, bring its tab to the front first, then List again."
+# ... while it does, a window of the same browser that shows the book's tab (the tab dragged out) is looked for this
+# often; another book in the same viewer's tab is followed once no page job runs, looked at again this often meanwhile
+TAB_WATCH_MS = 1000
+TAB_FOLLOW_MS = 250
 FIRST_PAGE = "Translate a page first: press Translate."  # the page tools with no page translated
 THIS_PAGE = "Translate this page first: press Translate."  # ... and with another page on show than the one translated

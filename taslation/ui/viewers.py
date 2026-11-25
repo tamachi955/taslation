@@ -8,6 +8,7 @@ resized: `_enlarge_first`), and the offline guard's warning once it has blocked 
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Sequence
 
 from .. import netguard, viewerparts
@@ -34,7 +35,7 @@ from ..detect.page_area import panel_inside
 from ..i18n import _
 from ..recovery import put_back_enlarged
 from . import area
-from .constants import VIEWER_CLOSED, VIEWER_RESTORED, WINDOW_WATCH_MS
+from .constants import TAB_FOLLOW_MS, TAB_WATCH_MS, VIEWER_CLOSED, VIEWER_RESTORED, WINDOW_WATCH_MS
 from .dialogs import caches as boxes
 from .dialogs.area import AreaDialog
 
@@ -206,11 +207,13 @@ class ViewerMixin:
         if self.selected is None:
             self.after(WINDOW_WATCH_MS, self._watch_windows)
 
-    def _on_window_selected(self, picked: bool = False, named: bool = False) -> None:
+    def _on_window_selected(self, picked: bool = False, named: bool = False, same_book: bool = False) -> None:
         """A viewer chosen in the Viewer list (*picked*: by the person, in the viewer chooser or the toolbar's list;
-        *named*: by the --window the person gave; else the list shown again, the viewer kept): remembered for the next
-        start (`_learn_viewer`, viewers.json), its book (the name its title gives: `_title_book`) and area, its line on
-        the status line (the right pane's foot names it all the time: `seethrough.right_rows`), its window shown
+        *named*: by the --window the person gave; else the list shown again, the viewer kept; *same_book*: a window
+        that shows the book of the one before, its tab dragged out of it, `_tab_moved_out`: the book's name stays):
+        remembered for the next start (`_learn_viewer`, viewers.json), its book (the name its title gives:
+        `_title_book`) and area, its line on the status line (the right pane's foot names it all the time:
+        `seethrough.right_rows`), its window shown
         again when it is minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window
         followed; once it has settled whether it draws while covered is found out (`_learn_covered_soon`). A window
         chosen again keeps what it has."""
@@ -224,7 +227,7 @@ class ViewerMixin:
             return
         left = before if before is not None else getattr(self, "_viewer_closed", None)
         self._viewer_closed = None
-        if left is not None and not getattr(self, "_book_given", False) and another_book(
+        if left is not None and not same_book and not getattr(self, "_book_given", False) and another_book(
                 left, chosen, getattr(self, "window_query", "")):
             self._book_edited = False  # the name given to the book before does not go on to this one
         if before is not None and not same:
@@ -287,16 +290,121 @@ class ViewerMixin:
         self.after(WINDOW_WATCH_MS, self._watch_windows)
 
     def _book_in_front(self) -> bool:
-        """The chosen window still shows the book (`capture.still_the_book`): a browser window while its title - its
-        active tab's - is the book's; any other window (an image viewer, whose title is the file it shows) while it
-        is there, visible and not minimised, whatever its title."""
+        """The chosen window still shows the book: a browser window while its tab - its title is its active tab's - is
+        the one chosen (`_tab_of`: "book"; what another tab brings, `_tab_seen`); any other window (an image viewer,
+        whose title is the file it shows) while it is there, visible and not minimised, whatever its title
+        (`capture.still_the_book`)."""
         if self.selected is None or not window_exists(self.selected.hwnd):
             return False
         hwnd = self.selected.hwnd
         title = window_title(hwnd)
         if not is_browser_class(self.selected.class_name):
             self._viewer_retitled(title)
-        return still_the_book(self.selected, title, self.window_query, shown=window_shown(hwnd))
+            return still_the_book(self.selected, title, self.window_query, shown=window_shown(hwnd))
+        kind = self._tab_of(title)
+        self._tab_seen(kind)
+        return kind == "book"
+
+    # ------------------------------------------------------------------ the tab a browser window shows
+    def _tab_of(self, title: str) -> str:
+        """What the tab the chosen browser window shows, titled *title* now, is: "book" - the tab chosen (its title,
+        the query, the same book's name: `capture.still_the_book`) -, "viewer" - a tab the rules learned on this
+        computer take for the same viewer's (`viewerparts.viewer_tab`: a viewer's part at its start or its end, or the
+        end of a window chosen before with another book before it): another book in the viewer, followed
+        (`_follow_tab`) -, or "other": another tab, of which nothing is read. Asked once per title."""
+        win = self.selected
+        query = getattr(self, "window_query", "")
+        key = (win.hwnd, win.title, query, title)
+        memo = getattr(self, "_tab_memo", None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        if still_the_book(win, title, query):
+            kind = "book"
+        else:
+            try:
+                kind = "viewer" if viewerparts.viewer_tab(title) else "other"
+            except Exception:  # noqa: BLE001 - nothing known of the viewer: another tab
+                kind = "other"
+        self._tab_memo = (key, kind)
+        return kind
+
+    def _tab_now(self) -> str:
+        """What the chosen window shows now (`_tab_of`; "book" for a window that is no browser's, none chosen or one
+        gone: no tab to tell of), what follows from it done (`_tab_seen`). Asked at each tick of the see-through
+        window (`seethrough.tick`) and before each capture (`live.LiveViewMixin._capture`)."""
+        win = self.selected
+        if win is None or not is_browser_class(win.class_name) or not window_exists(win.hwnd):
+            kind = "book"
+        else:
+            kind = self._tab_of(window_title(win.hwnd))
+        self._tab_seen(kind)
+        return kind
+
+    def _tab_seen(self, kind: str) -> None:
+        """The chosen window's tab as it is now (*kind*, `_tab_of`). Another tab come ("other"): the follow under way
+        ends (a page started early on a frame of it is dropped with it: `live.LiveViewMixin._end_follow`), nothing of
+        it is captured for reading (`OtherTab`), the lettering hides and takes no mouse (`SeeThrough.set_away`), the
+        right pane says so in one line (`seethrough.right_rows`), nothing is learned of it, and every TAB_WATCH_MS a
+        window of the same browser that shows the book's tab - the tab dragged out - is looked for (`_tab_moved_out`).
+        A page job under way and the pages behind go on: their lines are the book's. The book's tab back: looked at at
+        once. Another book of the same viewer ("viewer"): followed (`_follow_tab`)."""
+        before = getattr(self, "_tab_kind", "book")
+        self._tab_kind = kind
+        self._tab_away = kind == "other"
+        if kind != before:
+            if before == "book":
+                self._end_follow()
+            elif kind == "book":
+                self._look_soon()
+            self._tab_watch_at = time.monotonic() + TAB_FOLLOW_MS / 1000  # (the window dragged out comes soon after)
+        if kind == "viewer" and not getattr(self, "_tab_following", False):
+            self._tab_following = True
+            self.after(0, self._follow_tab)
+        elif kind == "other" and time.monotonic() >= getattr(self, "_tab_watch_at", 0.0):
+            self._tab_watch_at = time.monotonic() + TAB_WATCH_MS / 1000
+            self.after(0, self._tab_moved_out)
+
+    def _follow_tab(self) -> None:
+        """The chosen browser window's tab shows another book of the same viewer (`_tab_of`: "viewer"): the window is
+        chosen again as it is now (`_on_window_selected`: the book its title names, its area, a look at once; nothing
+        is learned of it) - once no page job runs (the job of the book before is that book's, and ends first)."""
+        self._tab_following = False
+        win = self.selected
+        if win is None or not window_exists(win.hwnd) or self._tab_of(window_title(win.hwnd)) != "viewer":
+            return
+        if getattr(self, "busy", False):
+            self._tab_following = True
+            self.after(TAB_FOLLOW_MS, self._follow_tab)
+            return
+        self._choose_listed(lambda w: w.hwnd == win.hwnd)
+
+    def _tab_moved_out(self) -> None:
+        """While the chosen browser window shows another tab: a window of the same browser (its program and class)
+        whose tab is the book's (`capture.still_the_book` against the tab chosen) - the book's tab dragged out into a
+        window of its own - becomes the viewer followed in its place (`_on_window_selected`), once no page job runs."""
+        win = self.selected
+        if win is None or not getattr(self, "_tab_away", False) or getattr(self, "busy", False):
+            return
+        query = getattr(self, "window_query", "")
+        self._choose_listed(lambda w: w.hwnd != win.hwnd and w.class_name == win.class_name
+                            and w.program == win.program and still_the_book(win, w.title, query), same_book=True)
+
+    def _choose_listed(self, wanted: Callable[[WindowInfo], bool], same_book: bool = False) -> bool:
+        """The windows listed again, and the first one *wanted* takes chosen as the viewer (`_on_window_selected`, as
+        the list shown again does: not a pick of the reader's; *same_book*: it shows the book of the one before).
+        Whether one was."""
+        try:
+            windows = list_windows()
+        except Exception:  # noqa: BLE001 - looked for again later
+            return False
+        found = next((i for i, w in enumerate(windows) if wanted(w)), None)
+        if found is None:
+            return False
+        self.windows = windows
+        self.window_box["values"] = [w.label() for w in windows]
+        self.window_box.current(found)
+        self._on_window_selected(same_book=same_book)
+        return True
 
     # ------------------------------------------------------------------ what is learned of the viewer
     def _learn_viewer(self, win: WindowInfo, by_reader: bool) -> None:
@@ -382,6 +490,9 @@ class ViewerMixin:
         once an area is chosen or cleared (its Clear area: `clear_area`), *then()*."""
         win = self._current_window()
         if win is None:
+            return
+        if self._shows_other_tab(win.hwnd):
+            self._say_waiting()  # (another tab on show: nothing of it to set the area on)
             return
         self._enlarge_first()
         try:

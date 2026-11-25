@@ -1,13 +1,15 @@
 # The two checks that need the developer's computer with its GPU for their timings - the real window beside the
 # stand-in viewer (tools/standin_e2e.py) and the OpenMantra benchmark (tools/openmantra_eval.py) - run for their
 # verdicts on GitHub's own Windows runners (4 processors, 16 GB, no GPU: the OCR, the layout model and the translator
-# run on the CPU), in parallel jobs: the stand-in's scenarios in three groups, each with --wait-done (a rest held until
+# run on the CPU), in parallel jobs: the stand-in's scenarios in seven groups, each with --wait-done (a rest held until
 # its page is finished, scenario x's soft frames kept until the window asked on them, so that every scenario keeps its
 # meaning on a slower computer), scenario k (pages flipped past, read behind the reader, then read back) in a short
-# form, and the benchmark's five titles a job each. A stand-in job fails when a criterion of correctness fails
-# (summarise.py's `correctness`: the run went through, nothing kept or shown from a frame that was not the sharp one, no
-# request sent for nothing, a page translated before came back without a request, the narrow window's page read at its
-# new size, no frame held behind the reader after its read and nothing at the end, ...)
+# form, another tab shown, the window resized, the page slid, a start behind another window, and the benchmark's five
+# titles a job each. A stand-in job fails when a criterion of correctness fails (summarise.py's `correctness`: the run
+# went through, nothing kept or shown from a frame that was not the sharp one, no request sent for nothing, a page
+# translated before came back without a request, the narrow window's page read at its new size, no frame held behind
+# the reader after its read and nothing at the end, nothing read or learnt of another tab, no job while the window is
+# sized with the button held, no side pane outside the window or hidden on a slide, the panes back after a cover, ...)
 # and only then: what depends on the computer's speed is reported beside it. A benchmark job fails when a title's F1,
 # CER or chrF leaves its tolerance around the runners' own figures (.github/gpu-checks/benchmark-expected.json). The GPU
 # computer keeps only the timing figures.
@@ -37,7 +39,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,d-e-x-f2,k5-k1-k2"
+        description: "The stand-in's groups: all, or some of c-a-b,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r8,s,h"
         type: string
         default: all
       titles:
@@ -93,8 +95,12 @@ env:
   # The stand-in's groups, a job each: its scenarios in the tool's order (e turns back to d's pages; f2, the narrow
   # window, last of its group, so that no scenario after it runs on single pages; k is its three paces, k5, k1 and k2,
   # on pages no scenario before turned to, on spreads as before), the short ones together, some three to seven minutes
-  # of run each with --wait-done (k some five to nine: the backlog emptied after k's 2 s pace is its longest wait)
-  STANDIN_GROUPS: '{"c-a-b": "c,a,b", "d-e-x-f2": "d,e,x,f2", "k5-k1-k2": "k"}'
+  # of run each with --wait-done (k some five to nine: the backlog emptied after k's 2 s pace is its longest wait); and
+  # the ones by their names only that need no second monitor: another tab shown (tab1-tab6, tab6 last: the book's tab
+  # moved out into a window of its own), the window resized (but r6 and r7, maximised and restored: the tool reads no
+  # page in a maximised frame yet), the page slid with the pointer (s), a start behind another window (h, with
+  # --start-behind cover)
+  STANDIN_GROUPS: '{"c-a-b": "c,a,b", "d-e-x-f2": "d,e,x,f2", "k5-k1-k2": "k", "tab1-tab2-tab3-tab4-tab5-tab6": "tab", "r1-r2-r3-r4-r5-r8": "r1,r2,r3,r4,r5,r8", "s": "s", "h": "h"}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}
@@ -364,7 +370,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 7  # (a job a group; with the benchmark's 5 and tests.yml's 8, GitHub's 20 at once)
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.standin_matrix) }}
     defaults:
@@ -456,6 +462,8 @@ jobs:
           # is 20 and all 20). On the CPU the window reads and translates a caught page in some 20 to 30 s, and each
           # pace waits until the backlog has nothing left: 20 pages would take near --timeout at the 2 s pace
           if (($env:SCENARIOS -split ',') -contains 'k') { $arguments += @('--k-turns', '6', '--k-read', '3') }
+          # scenario h: the stand-in behind a plain window of the tool's own at the start (tools/standin_cover.py)
+          if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }
           Write-Host "python $($arguments -join ' ')"
           $ErrorActionPreference = 'Continue'  # what the tool writes to stderr is part of its output
           $clock = [Diagnostics.Stopwatch]::StartNew()

@@ -83,6 +83,15 @@ class ViewerCovered(CaptureError):
         super().__init__(message or "the viewer draws nothing behind a dialog of TASlation")
 
 
+class OtherTab(CaptureError):
+    """The chosen browser window shows another tab than the book's (`ui.viewers.ViewerMixin._tab_now`): nothing of it
+    is captured for reading. Nothing is said of it at each look (the right pane says it once: `ui.seethrough`); its
+    message is a ``viewer.error`` for the log."""
+
+    def __init__(self, message: Message | str = ""):
+        super().__init__(message or "the browser window shows another tab")
+
+
 Rect = tuple[int, int, int, int]  # left, top, right, bottom in screen pixels (right and bottom exclusive)
 
 

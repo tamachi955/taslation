@@ -491,7 +491,23 @@ rows' languages.
   size, the jobs started while the button was held and on the sizes between, the capture area found again, the
   marks, an open editor's place and its region carried to the page at the new size, and a timeline (numbers only);
   the hover on the stand-in's monitor; and how far a region read at one size lies from the same region read at
-  another (`region_fit`).
+  another (`region_fit`). The tab scenarios, never in all and by their names only ("tab" asks for tab1-tab6), give
+  the stand-in's browser window a second tab through the page's own script - no key, no click (standin.html's "the
+  tabs": the window's title is the active tab's, its frames that tab's page, the band stays; the other tab a plain
+  page with a neutral title or one of made-up Japanese lines with a made-up Japanese title): another tab shown and
+  the book's again (tab1, tab2 the Japanese one), the other tab closed (tab3), shown 0.7 s into the page's job (tab4),
+  the titles late - the other tab's 0.4 s after its page, the book's 0.4 s before its page - (tab5), and the book's
+  tab moved out into a window of its own (tab6, always last: a second browser of the same program on a throwaway
+  profile, opened at the start right behind the first and covered by it - a browser's window opened later in a run,
+  or restored from minimised, took the foreground -, and brought above it without activation at the move).
+  `--standin-start-tab plain|japanese` starts the window with the other tab on show (with tab0, which brings the
+  book's tab back after 3 s; with `--chooser` the chooser is answered while it shows). `run.tabs`
+  (`tools/standin_tabs.py`) gives per spell away from the book's tab what was captured, read, asked, looked up,
+  learned and said while it lasted, the lettering's, the editing ground's and the mouse's looks over the other tab
+  (and the last of the lettering and of the mouse taken there, in ms after its title came; a look lies on the window
+  whose client area's origin is the lettering's, the book's own window lying within the first one's place), the
+  panes, the right pane's line, the window followed, and the ms from the book's page drawn again to the panes and to
+  the lettering (tab6: to the book's own window followed, and lettered there).
 * `tools/promo_video.py` makes short videos of the time from a page turn to the lettered page. `record` pictures
   TASlation's own window, so it runs only a package before 2.0.0 (`--package` another checkout's; from 2.0.0 on the
   window is hidden and such a package, this checkout's too, is refused before anything starts): the real
@@ -589,8 +605,12 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then three stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
-three paces; each with `--wait-done`, which holds no rest of k; at most three at a time) and five
+Then seven stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
+shown; r1-r2-r3-r4-r5-r8, the window resized - r6 and r7 not yet, maximised and restored: the tool reads no page in a
+maximised frame, although on a runner, `GITHUB_ACTIONS`, it may maximise on the primary monitor -; s, the page slid
+with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor; each with `--wait-done`, which holds
+no rest of k; all seven at a time) and five
 benchmark jobs (a title a job, `--series`; at most five at a time) run beside `tests.yml`'s eight, each restoring the
 caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
 start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at
@@ -602,8 +622,12 @@ one where the sharp frame came in time, no request was sent for nothing outside 
 before their frame was confirmed and dropped as the page was flipped past, none on a soft frame, none of the
 backlog's -, a page translated at rest came back without a request, no rested page was left unfinished with the
 window at rest, the narrow window's page was read at its new size, the
-backlog held no frame after its read and, the window at rest at the end, nothing at all and no screen told at work,
-...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
+backlog held no frame after its read and, the window at rest at the end, nothing at all and no screen told at work;
+while another tab showed no page job on a frame of it, nothing asked, stored or learnt of it, no lettering and no mouse
+taken over it a second after its title came, the right pane's line, the book's tab followed into its own window;
+while the window was sized with the button held no job and no request, at no look a side pane outside the window,
+each pane back at rest or hidden for want of room; no side pane hidden on a slide; both panes on the screen once the
+stand-in was back in sight, and there they stayed, ...); what depends on the computer's speed is reported beside it (`speed`: rests too short for a page, holds at their
 cap, pages left half done, ...; for k the pages caught, how the pages read back began and their first bubble, the
 time the backlog took to empty), with what each scenario was meant to show and whether it still did. A benchmark job
 fails when its title's F1, CER or chrF leaves its tolerance around

@@ -19,7 +19,7 @@ There is no account to make and no limit on the pages it translates. Nothing of 
    with a "Viewer" list of the windows on the screen, each named as its taskbar button is (a browser window by its tab's title and the browser's name;
    a long name is shortened in the middle). TASlation never chooses a window by itself. It carries no list of stores or viewers: the viewer you chose before
    comes first in the list and is already selected, so Enter or "OK" is enough; then come the windows whose titles look like a viewer's (without the viewer you chose before, the first of them
-   is selected), then the rest.
+   is selected), then the rest. A browser window is listed by the title of the tab in front, so when the book is in a browser, bring its tab to the front first (the line under the list says so).
    When none looks like one, nothing is selected and "OK" is greyed until you choose the viewer's window in the list. "List again" lists the windows again
    (a window opened while the dialog is up comes into the list by itself too), and "Quit" ends TASlation. Nothing of any window is followed, shown or read
    before you press "OK"; then the right pane's foot says "Viewer: <title>" for as long as that window is followed. When the viewer's window is closed, the lettering and the side panes go
@@ -508,8 +508,14 @@ A desktop viewer is an app of its own, so it does not need this. A window other 
 changes with every page you turn, and a change of title does not make it wait. Only when the window is hidden or minimised
 does the status line say so and wait for it to come back.
 
-If the window shows another tab even so, Auto notices the change of title, says so on the status line and waits for the book to come back.
-It never reads the wrong page.
+If the window shows another tab even so, nothing of that tab is captured, lettered, cached or learned.
+The side panes stay, and the right pane says in one line "The viewer's window shows another tab." (with "Auto" on, the status line says so too).
+Once the book's tab is in front again, the reading goes on by itself. A page of the book that was being translated is finished meanwhile.
+A tab with another book of the same viewer (its title starts or ends with the viewer's name, or ends as a window chosen before did, with another book before that) is read as the book's tab, under the name its title gives.
+When you drag the book's tab out into a window of its own, TASlation finds that window and reads on there, under the same book name.
+
+In the dialog that chooses the viewer, a browser window is listed by the title of the tab in front.
+Bring the book's tab to the front first, then press "List again" (the line under the list says so). A window chosen while another tab is in front is read with that tab as the book's.
 
 When the reading reaches the end of the volume, some viewers show an end-of-book panel (ratings, the next volume). The arrow keys may not get you out of this panel,
 so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers:

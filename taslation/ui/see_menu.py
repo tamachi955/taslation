@@ -52,7 +52,7 @@ from typing import Any, Callable, Sequence
 from ..i18n import UI_LANGUAGES, _
 from . import seethrough
 from .banner import break_lines
-from .constants import VIEWER_CLOSED, WINDOW_WATCH_MS
+from .constants import CHOOSER_TAB, VIEWER_CLOSED, WINDOW_WATCH_MS
 
 MENU_GRACE_MS = 300  # a menu is taken to be up so long after it ended (`_menu_down`)
 VIEWER_LIST_CHARS = 48  # the chooser's list, in "0" widths: its entries are shortened in the middle to it
@@ -422,7 +422,9 @@ class ViewerDialog(_Dialog):
     followed, else the one remembered from an earlier choice, else one with a viewer's part or a reading word in its
     title; none ranking: none, and OK greyed until the person picks one). List again lists the windows again (as the
     list does as it opens, and every WINDOW_WATCH_MS by itself: a viewer opened meanwhile comes into the list,
-    preselected while the person has picked nothing). OK (Enter) chooses the window as a pick in the toolbar does
+    preselected while the person has picked nothing). Under the list one line: a browser window is listed by the tab in
+    front, so the book's tab comes to the front first (`CHOOSER_TAB`). OK (Enter) chooses the window as a pick in the
+    toolbar does
     (`ViewerMixin._on_window_selected`, *picked*: remembered in viewers.json, followed from then on). The last button
     is Quit while no viewer is followed - TASlation then has nothing to do: it ends, as the left pane's Quit does -,
     else Close (the viewer stays as it is); Escape and the dialog's own close do what it does. Nothing is followed,
@@ -445,6 +447,8 @@ class ViewerDialog(_Dialog):
         self.box = ttk.Combobox(row, state="readonly", width=VIEWER_LIST_CHARS, postcommand=self.relist)
         self.box.pack(side="left", fill="x", expand=True, padx=(4, 0))
         self.box.bind("<<ComboboxSelected>>", self._picked, add="+")
+        # (a browser window is listed by the title of the tab in front: the book's tab first, or another tab is read)
+        self.wrapped(self.frame, _(CHOOSER_TAB)).pack(anchor="w", pady=(6, 0))
         buttons = ttk.Frame(self.frame)
         buttons.pack(fill="x", pady=(14, 0))
         self.last_button = ttk.Button(buttons, command=self.close)

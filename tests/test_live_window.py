@@ -109,6 +109,7 @@ class Window(BlackViewerMixin):
     _job_line = app_mod.App._job_line
     _capture = app_mod.App._capture
     _capture_frame = app_mod.App._capture_frame
+    _shows_other_tab = app_mod.App._shows_other_tab
     _covers_viewer = app_mod.App._covers_viewer
     _capture_failed = app_mod.App._capture_failed
     _set_viewer_hidden = app_mod.App._set_viewer_hidden

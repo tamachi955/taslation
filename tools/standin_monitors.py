@@ -102,6 +102,11 @@ def where(e: BaseException) -> list[str]:
     return [f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in traceback.extract_tb(e.__traceback__)[-3:]]
 
 
+def on_a_runner() -> bool:
+    """Whether this runs on one of GitHub's runners (its own GITHUB_ACTIONS): a computer of its own, one monitor."""
+    return os.environ.get("GITHUB_ACTIONS") == "true"
+
+
 def spread(values: list[float]) -> dict[str, Any]:
     v = sorted(x for x in values if x is not None)
     if not v:
@@ -226,12 +231,13 @@ class WindowSteps:
         _u.SetWindowPos(self.hwnd, None, x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER)
 
     def maximise(self) -> dict[str, Any]:
-        """Maximised on the monitor that holds most of it - refused on the primary -, the foreground locked meanwhile;
-        whether it took the foreground all the same (then minimised without activation and shown again without it:
-        Windows gives the foreground back to the window behind)."""
+        """Maximised on the monitor that holds most of it - refused on the primary (but on one of GitHub's runners,
+        `on_a_runner`: its one monitor, with nothing of a person's on it) -, the foreground locked meanwhile; whether it
+        took the foreground all the same (then minimised without activation and shown again without it: Windows gives
+        the foreground back to the window behind)."""
         n = self.screens.of_window(self.hwnd)
         monitor = self.screens.monitor(n)
-        if monitor is None or monitor["primary"]:
+        if monitor is None or (monitor["primary"] and not on_a_runner()):
             return {"refused": "the primary monitor is never covered by a maximised window", "monitor": n}
         before = self.front()
         locked = self.lock(True)

@@ -10,6 +10,7 @@ from .windows import (  # noqa: F401
     NOT_VIEWERS,
     VIEWER_WORDS,
     CaptureError,
+    OtherTab,
     Rect,
     ViewerCovered,
     WindowEvents,

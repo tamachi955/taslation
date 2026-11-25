@@ -112,6 +112,7 @@ from ..capture import wgc
 from ..i18n import _
 from ..i18n import current as ui_language
 from ..render.lettering import strip_marks
+from .constants import TAB_AWAY, TAB_WAITING
 
 log = logging.getLogger(__name__)
 # what the bubble's block says (the window's own words: its popup's buttons and lines, the region editor's)
@@ -901,6 +902,9 @@ def tick(app: Any) -> None:
     win = getattr(app, "selected", None)
     hwnd = int(win.hwnd) if win is not None else 0
     over.follow(hwnd)
+    tab_now, set_away = getattr(app, "_tab_now", None), getattr(over, "set_away", None)
+    if set_away is not None:  # (a browser window that shows another tab: nothing lettered over it, `_tab_seen`)
+        set_away(bool(hwnd) and tab_now is not None and tab_now() != "book")
     events = getattr(getattr(app, "_following", None), "events", None)
     poke = getattr(over, "poke", None)
     if events is not None and poke is not None and getattr(events, "on_moved", None) != poke:
@@ -1049,8 +1053,10 @@ def right_rows(app: Any) -> tuple[list[pn.Row], list[pn.Row]]:
     something to say, grow down from the pane's top (under the bubble's block): the setup banner's lines (the setup's
     problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their
     buttons do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would
-    show; the status slot (`status_slot`: what the page cannot show itself), the status line, the indicator's lines
-    on the pages behind (the backlog, those that went by too fast: `side_model`); those that do not fit above the
+    show; while the viewer's window shows another tab, a line that says so (`viewers.ViewerMixin._tab_seen`; the
+    status line's waiting line left out then); the status slot (`status_slot`: what the page cannot show itself), the
+    status line, the indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`);
+    those that do not fit above the
     foot are left out, the oldest and least urgent first, the warnings last (`_drop_order`). The foot's rows
     (`foot_rows`) stay at the pane's bottom, where they are whatever the rest says: the line of the page filling in
     (its room kept while none is), the mode, where the translator runs (and the readers where they run elsewhere),
@@ -1068,7 +1074,12 @@ def right_rows(app: Any) -> tuple[list[pn.Row], list[pn.Row]]:
     guard = str(_get(getattr(app, "guard_var", None), "") or "").strip()
     if guard:
         rows.append(pn.Row("", guard, "text", warn=True))
+    away = bool(getattr(app, "_tab_away", False))
+    if away:  # (the viewer's window shows another tab: said in one line, `viewers.ViewerMixin._tab_seen`)
+        rows.append(pn.Row("", _(TAB_AWAY), "text"))
     status = str(_get(getattr(app, "status_var", None), "") or "").strip()
+    if away and getattr(app, "_status_key", None) == TAB_WAITING:
+        status = ""  # (the status line's waiting line says it again, at more length: once)
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None

@@ -38,8 +38,14 @@ only a page job's asked before its frame's confirmation and dropped as the page 
 was not the sharp one, none of the backlog's), the backlog holds no frame after its read, and once the window has come
 to rest at the end it holds nothing and no screen is told at work; the stale lettering, the soft frames kept and left
 are the criteria of all the scenarios. How many pages it caught, how the pages read back began and how long they took
-are reported (`k_figures`, and its meaning). With --check, ``standin`` exits 1 when a criterion of correctness failed
-(or there is no report), and only then.
+are reported (`k_figures`, and its meaning). Another tab shown in the stand-in's window (tab1-tab6) is judged on
+nothing read, asked, stored or learnt of it, no lettering or mouse over it a second after its title came, the right
+pane's line, and the book's tab followed into a window of its own (`_tab_correctness`); the window resized (r1-r8) on
+no job or request while the button was held, no side pane outside the window and each pane back at rest
+(`_resize_correctness`); the page slid with the pointer (s) on no side pane hidden (`_slide_correctness`); a start
+behind other windows (h, with --start-behind) on both panes on the screen once the stand-in is back in sight
+(`_behind_correctness`). With --check, ``standin`` exits 1 when a criterion of correctness failed (or there is no
+report), and only then.
 
 A benchmark title is judged by its scores against the expected ones (`EXPECTED`, the runner's own figures per title),
 within their tolerance: with --check, ``bench`` exits 1 when one of F1, CER or chrF leaves it, or the translation did
@@ -73,6 +79,10 @@ AT_REST = ("a", "d", "f2")  # the scenarios whose rests are for reading translat
 TURNED = ("next", "previous", "jump")
 K_PACES = ("k5", "k1", "k2", "k3")  # standin_e2e.K_PACES: scenario k, pages flipped past at a pace, then read back
 K_STAYED_MS = 800  # standin_e2e.K_STAYED_MS: a page flipped past whose sharp frame stayed so long is one to catch
+TAB_NAMES = ("tab0", "tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # standin_e2e.TAB_SCENARIOS: another tab shown
+TAB_AFTER_TITLE_MS = 1000  # no lettering, and no mouse taken, over the other tab's page so long after its title came
+R_NAMES = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # standin_e2e.R_STEPS: the stand-in's window resized
+PANE_AT_REST = ("shown", "hidden: no room")  # (`standin_monitors.drag_block`: a side pane at the end of a step)
 
 
 def read_json(path: Path | None) -> Any:
@@ -276,6 +286,29 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
                          else f"lost: no request on the soft frame, {how}: the window read it too slowly here")
         elif name in K_PACES:
             out[name] = _k_meaning(_k_paces(run).get(name))
+        elif name in TAB_NAMES:
+            spells = [s for s in (run.get("tabs") or {}).get("spells") or [] if s.get("segment") == name]
+            back = [s.get("back_to_lettered_ms") for s in spells]
+            out[name] = ("unclear: no spell away from the book's tab" if not spells else
+                         f"holds: another tab shown {[s.get('away_ms') for s in spells]} ms, the book's page lettered "
+                         f"again {back} ms after it was drawn again" if all(b is not None for b in back) else
+                         f"partly: the book's page lettered again {back} ms after it was drawn again (none within "
+                         "20 s: a page takes longer here)")
+        elif name in R_NAMES:
+            place = next((p for p in (run.get("monitors") or {}).get("places") or [] if p.get("segment") == name), {})
+            r = place.get("resize") or {}
+            back = r.get("lettering_back_at_new_size_ms_after_release")
+            out[name] = ("unclear: the step told nothing" if not r else
+                         f"holds: lettered at the new size {back} ms after the last size" if back is not None else
+                         "partly: not lettered at the new size within the step")
+        elif name == "s":
+            rows = ((run.get("see_through") or {}).get("slides") or {}).get("slides") or []
+            out[name] = (f"holds: {len(rows)} slides, {sum(1 for r in rows if r.get('turned'))} of them turned the "
+                         "page" if rows else "unclear: no slide told")
+        elif name == "h":
+            back = (run.get("behind") or {}).get("panes_back_ms")
+            out[name] = (f"holds: both side panes on the screen {back} ms after the stand-in was back in sight"
+                         if back is not None else "unclear: the panes not seen back (or no --start-behind)")
         else:
             out[name] = at_rest(name)
     return out
@@ -369,6 +402,113 @@ def _k_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
           not last.get("bytes_at_end"), last.get("bytes_at_end"))
     left = ((run.get("scenario_k") or {}).get("told") or {}).get("left_working")
     check(mine[-1], "no screen was left told at work at the end of the run, the window at rest", not left, left)
+
+
+def _tab_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """The tab scenarios' criteria (`standin_tabs.TabRun.report`), true on any computer however slow: while the
+    stand-in's window showed another tab, no page job made on a frame of it and nothing asked or stored for it, no
+    lettering over its page and no mouse taken there TAB_AFTER_TITLE_MS after its title came (the title tells the
+    window), nothing of its title learnt (the viewer's memory, the window chosen by it, the book's name), the right
+    pane's line said in each spell; the book's tab moved out into a window of its own followed there. How soon the
+    lettering came back is its meaning (`meanings`)."""
+    mine = [n for n in names if n in TAB_NAMES]
+    if not mine:
+        return
+    tabs = run.get("tabs")
+    told = isinstance(tabs, dict) and not tabs.get("failed")
+    check(mine[0], "the tool told the spells away from the book's tab", told,
+          tabs.get("failed") if isinstance(tabs, dict) else tabs)
+    if not told:
+        return
+    other = tabs.get("jobs_on_the_other_tab") or {}
+    check(mine[0], "no page job made on a frame of the other tab, nothing asked or stored for it",
+          not other.get("made") and not other.get("requests") and not other.get("stored"), other)
+    learnt = [k for k in ("memory_holds_an_other_tab_title", "chosen_by_the_other_tab_s_title") if tabs.get(k)]
+    check(mine[0], "nothing of the other tab's title learnt in the viewer's memory, the window never chosen by it",
+          not learnt, learnt)
+    spells = [s for s in tabs.get("spells") or [] if isinstance(s, dict)]
+    for name in mine:
+        its = [s for s in spells if s.get("segment") == name]
+        check(name, "the stand-in showed another tab", bool(its), len(its))
+        for s in its:
+            late = {k: s.get(k) for k in ("lettering_over_the_other_tab_last_ms", "mouse_over_the_other_tab_last_ms")
+                    if (s.get(k) or 0) > TAB_AFTER_TITLE_MS}
+            check(name, f"no lettering and no mouse taken over the other tab's page {TAB_AFTER_TITLE_MS} ms after its "
+                  "title came", not late, late)
+            keys = ("memory_titles_added", "book_changed") + (("page_areas_changed",) if s.get("kind") != "out" else ())
+            kept = {k: s.get(k) for k in keys if s.get(k)}
+            check(name, "nothing learnt and the book's name kept while the other tab showed (and its page areas, the "
+                  "tab back in the same window)", not kept, kept)
+            if s.get("kind") == "out":
+                check(name, "the window followed the book's tab into its own window",
+                      s.get("followed_the_book_s_window_ms") is not None, s.get("followed_the_book_s_window_ms"))
+            elif s.get("kind") == "switch":
+                check(name, "the right pane said in one line that the window shows another tab",
+                      s.get("right_pane_line_shown") is True, s.get("right_pane_line_shown"))
+
+
+def _resize_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """The resize scenarios' criteria (`standin_monitors.WindowRun.report`, its places' ``resize``), true on any
+    computer however slow: each step done to the stand-in's window; while the window was sized with the button held
+    (r1-r4) no page job started and nothing asked; at no look a side pane outside the viewer's window; at the end of
+    each step each pane shown, or hidden for want of room beside the page."""
+    mine = [n for n in names if n in R_NAMES]
+    if not mine:
+        return
+    mon = run.get("monitors")
+    told = isinstance(mon, dict) and not mon.get("failed")
+    check(mine[0], "the tool told the window's steps", told, mon.get("failed") if isinstance(mon, dict) else mon)
+    if not told:
+        return
+    places = {p.get("segment"): p for p in mon.get("places") or [] if isinstance(p, dict)}
+    for name in mine:
+        place = places.get(name) or {}
+        step, r = place.get("step") or {}, place.get("resize")
+        why = step.get("refused") or step.get("error") or (None if r else "no resize block")
+        check(name, "the step was done to the stand-in's window", not why, why)
+        if not isinstance(r, dict) or not r:
+            continue
+        if r.get("button"):
+            held = [r.get("jobs_started_while_pressed"), r.get("requests_while_pressed")]
+            check(name, "no page job started and nothing asked while the button was held", not any(held), held)
+        panes = r.get("panes") or {}
+        outside = {side: (panes.get(side) or {}).get("outside_the_viewer_looks") for side in ("left", "right")}
+        check(name, "no side pane outside the viewer's window", not any(outside.values()), outside)
+        ends = {side: (panes.get(side) or {}).get("at_end") for side in ("left", "right")}
+        check(name, "each side pane back at rest (or hidden for want of room beside the page)",
+              all(e in PANE_AT_REST for e in ends.values()), ends)
+
+
+def _slide_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """Scenario s's criteria (`standin_seethrough.SeeWatch.slide_report`), true on any computer however slow: every
+    slide of the page with the pointer told, and no side pane hidden from its press until 10 s after its release (but
+    by the window's closing at the end of the run)."""
+    if "s" not in names:
+        return
+    slides = (run.get("see_through") or {}).get("slides")
+    rows = [r for r in (slides or {}).get("slides") or [] if isinstance(r, dict)] if isinstance(slides, dict) else []
+    check("s", "the tool told the slides", bool(rows) and not slides.get("error"),
+          slides.get("error") if isinstance(slides, dict) else slides)
+    hidden = [[k + 1, *spell] for k, r in enumerate(rows) for spell in r.get("hidden_spells_ms_from_press") or []
+              if not (isinstance(spell, list) and spell[-1] == "closed")]
+    check("s", "no side pane hidden on a slide (from its press until 10 s after its release)", not hidden, hidden)
+
+
+def _behind_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
+    """Scenario h's criteria (with --start-behind: `standin_e2e.Director.behind_report`), true on any computer however
+    slow: the stand-in out of sight at the start and back in sight, then both side panes on the screen, and there they
+    stayed."""
+    if "h" not in names:
+        return
+    b = run.get("behind")
+    ended = ((b.get("behind") or {}).get("ended_t")) if isinstance(b, dict) else None
+    check("h", "the stand-in was out of sight at the start and back in sight", ended is not None,
+          (b.get("behind") or {}).get("made") if isinstance(b, dict) else b)
+    if ended is None:
+        return
+    check("h", "both side panes on the screen once the stand-in was back in sight", b.get("panes_back_ms") is not None,
+          b.get("panes_back_ms"))
+    check("h", "the side panes stayed on the screen", b.get("panes_stayed") is True, b.get("panes_stayed"))
 
 
 def _check(found: list[dict[str, Any]], scenario: str, criterion: str, ok: bool, seen: Any = None) -> None:
@@ -511,6 +651,8 @@ def correctness(report: dict[str, Any], timeout_s: float | None = None) -> list[
             check(name, "the narrow window's page read at its new size",
                   any(r.get("first_capture_ms") is not None for r in sizes), len(sizes))
     _k_correctness(run, names, check)
+    for judge in (_tab_correctness, _resize_correctness, _slide_correctness, _behind_correctness):
+        judge(run, names, check)
     return found
 
 

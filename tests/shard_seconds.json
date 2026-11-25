@@ -104,6 +104,7 @@
  "test_update_now_run.py": 16.8,
  "test_update_script.py": 64.2,
  "test_updates_window.py": 5.2,
+ "test_viewer_tab.py": 1.0,
  "test_warm_ahead.py": 4.5,
  "test_warm_models.py": 10.1,
  "test_wgc.py": 5.1,

@@ -110,7 +110,17 @@ def test_the_maximise_is_refused_on_the_primary(monkeypatch):
     monkeypatch.setattr(s, "of_window", lambda hwnd: 1)
     locks = []
     steps = sm.WindowSteps(1, s, lambda: set(), lambda on: locks.append(on) or True)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     assert "refused" in steps.maximise() and locks == []
+    # on one of GitHub's runners (one monitor, nothing of a person's on it) it is maximised there
+    calls = []
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(sm, "_u", SimpleNamespace(ShowWindow=lambda h, how: calls.append(how) or True,
+                                                  IsZoomed=lambda h: True))
+    monkeypatch.setattr(steps, "front", lambda: "other")
+    monkeypatch.setattr(sm, "time", SimpleNamespace(monotonic=lambda: 0.0, sleep=lambda s: None))  # (the module's)
+    done = steps.maximise()
+    assert "refused" not in done and done["zoomed"] and calls == [sm.SW_MAXIMIZE] and locks == [True, False]
 
 
 class FakeTour:

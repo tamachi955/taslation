@@ -88,6 +88,7 @@ from ..config import Settings
 from ..capture import (
     IS_WINDOWS,
     CaptureError,
+    OtherTab,
     ViewerCovered,
     WindowEvents,
     ask_repaint,
@@ -136,6 +137,7 @@ from .constants import (
     RECHECK_MS,
     RETAKE_WITHIN_MS,
     SETTLE_TRIES,
+    TAB_WAITING,
     VIEWER_BLACK,
     VIEWER_LOADING,
 )
@@ -1100,7 +1102,9 @@ class LiveViewMixin(BlackViewerMixin):
         if win is not None and not is_browser_class(win.class_name):
             self.say("Waiting: the viewer's window is hidden or minimised; bring it back.")
             return
-        self.say("Waiting: the browser shows another tab. Bring the book's tab back, or drag that tab out into a window of its own.")
+        if getattr(self, "_tab_kind", "book") == "viewer":
+            return  # (another book of the same viewer: followed once its page job is done, `_follow_tab`)
+        self.say(TAB_WAITING)
 
     # ------------------------------------------------------------------ the capture
     def _capture(self, hwnd: int) -> Image.Image:
@@ -1109,8 +1113,12 @@ class LiveViewMixin(BlackViewerMixin):
         frame behind other windows is looked at raised, once (`_blank_behind`): a viewer whose frames are coming
         shows a blank page then, and that is no failure. The frame taken is remembered with the viewer's frame count
         before it (``_captured``), and the look with when it began
-        (`Look`: the wait for a page started early is counted from it, and its job told of its frame, `_frame_seen`)."""
+        (`Look`: the wait for a page started early is counted from it, and its job told of its frame, `_frame_seen`).
+        Nothing is captured of a browser window while it shows another tab than the book's (`OtherTab`, before the
+        capture and again right after it: `_shows_other_tab`)."""
         self._captured = None
+        if self._shows_other_tab(hwnd):
+            raise OtherTab()
         looked = time.monotonic()
         try:
             seq = frame_count(hwnd)
@@ -1124,6 +1132,8 @@ class LiveViewMixin(BlackViewerMixin):
         """`_capture`'s capture itself (*seq*: the viewer's frame count before it)."""
         covered = self._covers_viewer(hwnd)
         image = capture_window(hwnd, allow_screen_fallback=not covered)
+        if self._shows_other_tab(hwnd):  # (the tab switched while it was taken: the frame may be the other tab's)
+            raise OtherTab()
         _captured_facts(self, hwnd, seq, image)  # (the very bytes of the capture before: worked out once)
         if covered and _blank(self, image) and self._blank_behind(hwnd):
             raise ViewerCovered("the viewer draws nothing behind TASlation")
@@ -1145,6 +1155,13 @@ class LiveViewMixin(BlackViewerMixin):
         if seq is not None:
             self._captured = (hwnd, seq, image)
         return image
+
+    def _shows_other_tab(self, hwnd: int) -> bool:
+        """Whether *hwnd*, the chosen viewer's, is a browser window that shows another tab than the book's now
+        (`viewers.ViewerMixin._tab_now`: not "book")."""
+        win = getattr(self, "selected", None)
+        tab_now = getattr(self, "_tab_now", None)
+        return win is not None and win.hwnd == hwnd and tab_now is not None and tab_now() != "book"
 
     def _blank_behind(self, hwnd: int) -> bool:
         """A blank frame of the viewer: whether it stands for a viewer that draws nothing. The viewer is raised for a
@@ -1360,8 +1377,9 @@ class LiveViewMixin(BlackViewerMixin):
     def _capture_failed(self, error: CaptureError) -> None:
         """A capture that failed, said in the status line - but for a viewer drawing nothing where a dialog of
         TASlation's own lies over it (`ViewerCovered`): the last good frame stays, nothing is said, and the next look
-        once the dialog has gone takes the page again."""
-        if not isinstance(error, ViewerCovered):
+        once the dialog has gone takes the page again; and but for a browser window that shows another tab
+        (`OtherTab`: the right pane says so, and the status line once with Auto on, `_say_waiting`)."""
+        if not isinstance(error, (ViewerCovered, OtherTab)):
             self.say(error.message if error.message.code != "viewer.error" else Message("viewer.gone"))
 
     # ------------------------------------------------------------------ after a page turn

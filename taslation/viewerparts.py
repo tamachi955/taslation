@@ -477,6 +477,21 @@ def shares_an_end(title: str, memory: Memory | None = None) -> bool:
     return any(trailing_parts(title, seen) for seen in reversed(memory.titles))
 
 
+def viewer_tab(title: str, memory: Memory | None = None) -> bool:
+    """Whether the tab title *title* (a browser window's: what the browser adds left out, `tab_of`) is the viewer's by
+    what was learned on this computer: a viewer's part at its start or its end, or it ends as a window chosen before
+    did with another book before it (`shares_an_end`) - another book in the same viewer. A title chosen before by
+    itself (`Memory.chose`) does not count here: that is a book's own title, not the viewer's."""
+    memory = memory if memory is not None else current()
+    tab = tab_of(title)
+    if not tab:
+        return False
+    found = segments(tab)
+    if found and (memory.is_part(found[0]) or memory.is_part(found[-1])):
+        return True
+    return shares_an_end(tab, memory)
+
+
 def kept_names(store: Any, name: str) -> bool:
     """Whether the cache folder of *store* (`cache.CacheStore`) keeps files of the book *name* (in any language)."""
     if store is None or not name:

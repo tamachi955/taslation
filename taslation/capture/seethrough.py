@@ -671,6 +671,7 @@ class SeeThrough:
         # last change outlined until the Tk thread's marks have taken it (press serial, boxes)
         self._marks: st.Marks | None = None
         self._ground = False  # (the Tk thread's, `set_ground`) editing: the whole page takes the mouse
+        self._away = False  # (the Tk thread's, `set_away`) the viewer's window shows another tab than the book's
         self._edit_takes = False
         self._marks_live: st.Marks | None = None
         self._left_out: frozenset[int] = frozenset()
@@ -726,6 +727,19 @@ class SeeThrough:
     @property
     def on(self) -> bool:
         return self._on
+
+    def set_away(self, away: bool) -> None:
+        """Whether the viewer's window shows another tab than the book's (a browser's:
+        `ui.viewers.ViewerMixin._tab_now`): while it does nothing is lettered over it and the mouse is not taken there,
+        editing too (the page on show is not the book's), the Insert key is let go of; the side panes stay as they are,
+        the patches are kept. The book's tab back: as it was."""
+        with self._lock:
+            if bool(away) == self._away:
+                return
+            self._away = bool(away)
+            self._changed += 1
+        self._note("away", on=int(bool(away)))
+        self._poke()
 
     def present(self, key: int, size: tuple[int, int], patches: tuple[st.Patch, ...], final: bool = False) -> None:
         """The patches of the page read from the frame *key* (of *size*) as lettered now: they replace the set of that
@@ -992,12 +1006,13 @@ class SeeThrough:
         from . import windows
 
         with self._lock:
-            viewer, on, changed = self._viewer, self._on, self._changed
+            viewer, away, changed = self._viewer, self._away, self._changed
+            on = self._on and not away  # (another tab on show: nothing lettered, the mouse not taken, `set_away`)
             sets = list(self._store.sets)
             panes = dict(self._pane_want)
             marks, ground = self._marks, self._ground
         self.counts["looks"] += 1
-        self._key_tick(viewer)
+        self._key_tick(0 if away else viewer)
         self._edit_take((marks is not None or ground) and on, sets)
         if not viewer:
             self._nothing("no viewer")
@@ -1051,11 +1066,11 @@ class SeeThrough:
             self._place_panes(panes, origin, size)
         self._right_plates(pointer, panes, held)
         self._edit_held()
-        if not on:  # (the left pane's Lettering switched off: the lettering hidden, the side panes as they are)
-            self._last_look = None
+        if not on:  # (the left pane's Lettering switched off, another tab on show: the lettering hidden, the side
+            self._last_look = None  # panes as they are)
             self._unhover()
             self._marks_live = None
-            self._hide("off")
+            self._hide("away" if away else "off")
             return
         self._new_frame = new_frame
         if new_frame:

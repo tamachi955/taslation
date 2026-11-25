@@ -51,9 +51,14 @@ class Front:
 
     _book_in_front = viewers.ViewerMixin._book_in_front
     _viewer_retitled = viewers.ViewerMixin._viewer_retitled
+    _tab_of = viewers.ViewerMixin._tab_of
 
     def __init__(self, selected):
         self.selected, self.window_query = selected, ""
+        self.seen: list[str] = []
+
+    def _tab_seen(self, kind):
+        self.seen.append(kind)
 
 
 def test_the_chosen_image_viewer_is_in_front_while_its_title_changes(monkeypatch):

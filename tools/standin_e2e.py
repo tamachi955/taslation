@@ -13,6 +13,7 @@ part of a release.
                                 [--standin-full-screen] [--no-viewer-s S] [--book-asked]
                                 [--start-behind cover|part|max|front|minimised] [--behind-s S] [--behind-before-s S]
                                 [--behind-end close|raise] [--chooser] [--standin-bars-held MS]
+                                [--standin-start-tab plain|japanese]
 
 What runs, all on this computer:
 
@@ -76,6 +77,11 @@ stand-in's own:
      smaller -, then without a button: snapped to its monitor's left half, maximised, restored, its corner resized in
      steps; then a turn. *--standin-monitor N* starts the stand-in on monitor N, *--standin-maximised* maximised there
      (never on the primary). The tables are in ``run.monitors`` (`standin_monitors.WindowRun.report`)
+  tab (by its name only: tab1-tab6; tab0 by its own name, with --standin-start-tab) a second tab of the stand-in's
+     browser window, its page's own (standin.html's "the tabs", `standin_tabs`): another tab shown and the book's tab
+     again, one of made-up Japanese lines, one closed, one shown while the page is read, their titles late, the book's
+     tab moved out into a window of its own (always last); *--standin-start-tab plain|japanese* has the other tab on
+     show before the window starts. The table is in ``run.tabs`` (`standin_tabs.TabRun.report`)
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
 the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2 and f3, the one at its end
@@ -296,6 +302,18 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
     "r6": ("maximised", ["n", "w7000"]),
     "r7": ("restored", ["n", "w7000"]),
     "r8": ("resized in steps with no button", ["n", "w7000"]),
+    # (by their names only, "tab" asks for tab1-tab6; tab0 with --standin-start-tab) a second tab of the stand-in's
+    # browser window (`standin_tabs`, standin.html's "the tabs"): shown and back, of made-up Japanese lines, closed,
+    # shown while the page is read, its titles late, the book's tab moved out into a window of its own (always last)
+    "tab0": ("the book's tab brought to the front after a start with another tab", ["w3000", "y", "w7000", "n",
+                                                                                     "w7000"]),
+    "tab1": ("another tab shown, then the book's tab again", ["n", "w7000", "x0", "w6000", "y", "w7000"]),
+    "tab2": ("another tab of made-up Japanese lines", ["n", "w7000", "x1", "w8000", "y", "w7000"]),
+    "tab3": ("another tab closed", ["n", "w7000", "x0", "w5000", "c", "w7000"]),
+    "tab4": ("another tab shown while the page is read", ["n", "w700", "x1", "w7000", "y", "w7000"]),
+    "tab5": ("the titles late: the other tab's after its page, the book's before", ["n", "w7000", "x1-400", "w7000",
+                                                                                   "y400", "w7000"]),
+    "tab6": ("the book's tab moved out into a window of its own", ["n", "w7000", "z0", "w4000", "n", "w7000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
@@ -303,7 +321,9 @@ K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
 M_STEPS = ("m0", "m1", "m2", "m3", "m4")  # what "m" asks for: the window's places over the monitors
 R_STEPS = ("r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8")  # what "resize" asks for: the window resized
 WINDOW_STEPS = (*M_STEPS, *R_STEPS)
-NAMED_ONLY = ("q", "f3", "s", "g", "h", *WINDOW_STEPS)  # scenarios never in "all", only by their names
+TAB_STEPS_ASKED = ("tab1", "tab2", "tab3", "tab4", "tab5", "tab6")  # what "tab" asks for (tab0 only by its name)
+TAB_SCENARIOS = ("tab0", *TAB_STEPS_ASKED)  # (tab6 moves the book into a window of its own: always the last)
+NAMED_ONLY = ("q", "f3", "s", "g", "h", *WINDOW_STEPS, *TAB_SCENARIOS)  # scenarios never in "all", by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
@@ -347,13 +367,22 @@ def wanted(text: str) -> list[str]:
     if text.strip().lower() in ("", "all"):
         return list(ORDER)
     asked = {p.strip().lower() for p in text.split(",") if p.strip()}
-    for group, members in (("k", K_ASKED), ("m", M_STEPS), ("resize", R_STEPS)):  # (not "r": the former own window's)
+    for group, members in (("k", K_ASKED), ("m", M_STEPS), ("resize", R_STEPS), ("tab", TAB_STEPS_ASKED)):
+        # (not "r": the former own window's)
         if group in asked:
             asked = (asked - {group}) | set(members)
     unknown = asked - set(SCENARIOS)
     if unknown:
         raise SystemExit(f"unknown scenario(s): {', '.join(sorted(unknown))}")
     return [n for n in [*ORDER, *K_PACES, *NAMED_ONLY] if n in asked]
+
+
+def tab_order(names: list[str]) -> list[str]:
+    """*names* with tab0 first (the book's tab brought back after a start with another tab on show: nothing before
+    it is read) and tab6 last (after it the book is in a window of its own), the others as they were."""
+    head = [n for n in names if n == "tab0"]
+    tail = [n for n in names if n == "tab6"]
+    return [*head, *(n for n in names if n not in ("tab0", "tab6")), *tail]
 
 
 def soft_first_scenarios(names: list[str], text: str, soft_first: bool) -> tuple[list[str], str | None]:
@@ -2346,8 +2375,11 @@ def priority_report(notes: Notes, rel: Callable[[Any], Any]) -> dict[str, Any]:
                                    for r in low_others][:20]}
 
 
-def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Callable[[], Any]) -> dict[str, Any]:
-    """The guard (`demo_video`'s, keys and clicks refused), and the hooks that take the notes; what was replaced."""
+def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_infos: Callable[[], list[Any]]
+            ) -> dict[str, Any]:
+    """The guard (`demo_video`'s, keys and clicks refused), and the hooks that take the notes; what was replaced.
+    The window's list of windows is *viewer_infos*() (the stand-in's window, and the book's own once its tab was
+    moved out: `standin_tabs`)."""
     import demo_video
 
     import taslation.capture.wgc as wgc
@@ -2371,7 +2403,7 @@ def install(notes: Notes, args: argparse.Namespace, guard: Any, viewer_info: Cal
             return []
         if hidden_for and "offered_t" not in notes.no_viewer:
             notes.no_viewer["offered_t"] = now_ms()
-        return [w for w in [viewer_info()] if w]
+        return [w for w in viewer_infos() if w]
 
     done = {"list_windows": demo_video.replace_everywhere(windows.list_windows, listed)}
     for name, (allow, target) in table.items():
@@ -2823,6 +2855,7 @@ class Director:
         self.behind: Behind | None = None  # (--start-behind: `behind_step`)
         self.see: Any = None  # (the see-through watch: the run's end waits for a scene of its being acted, `step`)
         self.mon: Any = None  # (`standin_monitors.WindowRun`: the m and r scenarios' window steps and tours)
+        self.tabs: Any = None  # (`standin_tabs.TabRun`: the tab scenarios' events and looks)
         self.client_size: tuple[int, int] | None = None  # (the stand-in's client area at its last draw: `pull`)
         self.behind_samples: list[dict[str, Any]] = []  # (the side panes' state where it changed: `behind_step`)
         self.behind_sampled = 0.0
@@ -2895,6 +2928,8 @@ class Director:
                 self.behind_step()
                 if self.mon is not None:
                     self.mon.tick()
+                if self.tabs is not None:
+                    self.tabs.tick()
         except Exception as e:  # noqa: BLE001 - said by its type and where it rose (no message: no text), and the run ends
             self.stop(f"{type(e).__name__} in the driver{_where(e)}")
         if not self.over:
@@ -3173,6 +3208,10 @@ class Director:
             elif ev == "black" and e.get("on") == "1":
                 with self.notes.lock:
                     self.notes.drawn_last = None
+            if self.tabs is not None and ev == "tab":  # (the stand-in's other tab: `standin_tabs.TabRun`)
+                self.tabs.event(e, self.current)
+            elif self.tabs is not None and ev == "draw":
+                self.tabs.drawn(e)
             if ev == "wait":
                 self.waiting_go = int(e.get("go", 0))
             elif ev == "mark":
@@ -3271,6 +3310,8 @@ class Director:
             app = self.app
             if seg.name == "c":
                 go = ready_go and getattr(app, "selected", None) is not None
+            elif seg.name == "tab0":  # (a start with another tab on show: no page read before the book's tab is back)
+                go = ready_go and rested
             elif seg.name in NARROW:
                 go = ready_go and rested and self.resized()
             elif seg.name in WINDOW_STEPS and self.mon is not None:
@@ -3291,6 +3332,9 @@ class Director:
                 self.release(go=seg.go)
                 self.phase, self.phase_at = "running", now
             return
+        if self.phase == "running" and self.tabs is not None and self.tabs.second_facts.get("failed"):
+            self.stop("the book's window of its own did not come")  # (its steps after the "z" would never run)
+            return
         if self.phase == "running" and (self.waiting_go > seg.go or self.ended):
             self.index += 1
             self.phase, self.phase_at = "prepare", now
@@ -3302,11 +3346,12 @@ class Director:
         for key, value in (("go", go), ("hold", hold), ("sharp", sharp)):
             if value is not None:
                 self.control[key] = int(value)
+        out = self.control.get("out")  # (the book's own window told to go on: kept in every write from then on)
         if self.wait_done is None:
-            sv.write_control(self.standin_dir, self.control["go"])
+            sv.write_control(self.standin_dir, self.control["go"], out=out)
         else:
             sv.write_control(self.standin_dir, self.control["go"], hold=self.control["hold"],
-                             sharp=self.control["sharp"])
+                             sharp=self.control["sharp"], out=out)
 
     def waits(self, now: float) -> None:
         """--wait-done, at every look: the hold the stand-in is at let go once `hold_over` says why (its page finished,
@@ -4603,6 +4648,10 @@ def run(args: argparse.Namespace) -> int:
 
     soft_first = getattr(args, "soft_first", "on") == "on"
     names, x_out = soft_first_scenarios(wanted(args.scenario), args.scenario, soft_first)
+    names = tab_order(names)
+    start_tab = {"plain": 0, "japanese": 1}.get(getattr(args, "standin_start_tab", None) or "")
+    if (start_tab is not None or any(n in TAB_SCENARIOS for n in names)) and args.standin_profile:
+        raise SystemExit("the stand-in's tabs are a stand-in's without a profile (no --standin-profile)")
     count = pages_needed(names, args.k_turns)
     report: dict[str, Any] = {"scenarios": names, "seed": args.seed, "front": args.front, "scale": args.scale,
                               "front_for_order": getattr(args, "front_for_order", "as-is"),
@@ -4710,7 +4759,10 @@ def run(args: argparse.Namespace) -> int:
     narrow_rect = (standin_rect[0], standin_rect[1], NARROW_SIZE[0], NARROW_SIZE[1])
     token = "t" + secrets.token_hex(5)
     page = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first, slider=args.standin_slider,
-                       profile=args.standin_profile, options=profile_options)
+                       profile=args.standin_profile, options=profile_options, start_tab=start_tab)
+
+    if start_tab is not None:
+        report["standin_start_tab"] = args.standin_start_tab
     report["standin_draws_covered"] = bool(args.standin_draws_covered)
     browser = sv.StandinBrowser(found[1], page, standin_dir / "profile", standin_rect, token, args.scale,
                                 draws_covered=args.standin_draws_covered, full_screen=args.standin_full_screen)
@@ -4729,6 +4781,18 @@ def run(args: argparse.Namespace) -> int:
                 hwnd, screens, lambda: set(browser.tree), sv.lock_foreground).maximise()
         ready = placed_view(browser, ready, since)
         browser._front_look("placed")  # (the stand-in shown and placed: it has not taken the foreground meanwhile)
+        if any(s.op == "z" for s in steps):  # (the book's own window for the "z", opened now and held minimised)
+            import standin_tabs
+
+            x_, y_, sw_, sh_ = standin_rect
+            gap = standin_tabs.SPACING_PX  # (within the first one's place: on its monitor as it is)
+            args._held_rect = (x_ + gap, y_ + gap, sw_ - gap, sh_ - gap)
+            held_url = sv.page_url(token, steps, standin_dir, seed=args.seed, soft_first=soft_first,
+                                   slider=args.standin_slider, held=True)
+            browser.open_held(found[1], held_url, args._held_rect)
+            report["standin_held"] = dict(browser.more_facts)
+        if start_tab is not None:  # (the other tab shown now, before the window starts: found by its title before)
+            report["standin_start_tab_shown"] = start_other_tab(browser, standin_dir)
         report["browser_start"] = dict(browser.start_facts)
         report["run"] = run_app(args, report, browser, hwnd, ready, segments, out, standin_dir, url, app_rect,
                                 narrow_rect, mode)
@@ -4750,6 +4814,20 @@ def run(args: argparse.Namespace) -> int:
     path.write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     print_table(report, path)
     return 0 if not report["run"].get("failed") else 1
+
+
+def start_other_tab(browser: sv.StandinBrowser, standin_dir: Path, seconds: float = 10.0) -> bool:
+    """--standin-start-tab: the stand-in's other tab shown (its control file's ``tab``), and waited for until its
+    window's title is the other tab's (no longer holding the token); whether it came."""
+    since = len(browser.said())
+    sv.write_control(standin_dir, 0, tab=1)
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        shown = any(s.get("ev") == "tab" and s.get("on") == "other" for _t, s in browser.said(since))
+        if shown and browser.hwnd and browser.token not in sv.window_text(browser.hwnd).split():
+            return True
+        time.sleep(0.05)
+    return False
 
 
 def stop_started(url: str, state: Path) -> dict[str, Any]:
@@ -4793,7 +4871,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     from taslation.ui.dialogs import caches, start  # noqa: F401
 
     guard = demo_video.Guard(hwnd)
-    if guard.is_own(hwnd) or sv.find_window(browser.tree, browser.token) != hwnd:
+    other_first = bool(getattr(args, "standin_start_tab", None)) and hwnd == browser.hwnd  # (no token in its title)
+    if guard.is_own(hwnd) or (sv.find_window(browser.tree, browser.token) != hwnd and not other_first):
         raise SystemExit("the stand-in's window is not what it should be")
     _x, _y, _w, client_h = client_rect_on_screen(hwnd)
     dpr = float(ready.get("dpr", 1) or 1)
@@ -4804,15 +4883,24 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     report["area"] = list(area)
     sv.write_control(standin_dir, 0, band=round((area[1] - top) / dpr))
     selection = sv.SelectionGuard(hwnd)
+    for more in browser.more:  # (the book's own window, opened at the start for a "z": the stand-in's as much)
+        guard.also.add(int(more))
+        selection.also.add(int(more))
     pid = next(p for w, p in sv.top_windows() if w == hwnd)
 
-    def viewer_info() -> Any:
-        if not guard.is_viewer(hwnd) or pid not in browser.tree:
+    def viewer_info(of: int = hwnd) -> Any:
+        if not guard.is_viewer(of):
             return None
-        return WindowInfo(hwnd, sv.window_text(hwnd), window_class(hwnd), pid, window_rect(hwnd), program_name(pid))
+        own = pid if of == hwnd else next((p for w, p in sv.top_windows() if w == of), 0)
+        if own not in browser.tree:
+            return None
+        return WindowInfo(of, sv.window_text(of), window_class(of), own, window_rect(of), program_name(own))
+
+    def viewer_infos() -> list[Any]:  # (the book's own window too, held minimised until its tab is moved out)
+        return [w for w in (viewer_info(), *(viewer_info(more) for more in browser.more)) if w is not None]
 
     notes = Notes(top, dpr)
-    patched = install(notes, args, guard, viewer_info)
+    patched = install(notes, args, guard, viewer_infos)
     watch_stuck(notes, out / "stacks.txt", url)
     watch_frames(notes, hwnd, os.getpid(), out / "stacks.txt", standin_pids=lambda: {pid, *browser.tree})
     watch_input(notes)
@@ -4902,6 +4990,31 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                            editing=editing)
         sampler.start()
         director.mon = mon
+    tabs = None
+    if any(s.name in TAB_SCENARIOS for s in segments) or getattr(args, "standin_start_tab", None):
+        import standin_tabs
+
+        from taslation.ui import constants as constants_mod
+
+        # the right pane's one line while another tab shows (`constants.TAB_AWAY`); before it, the status line's
+        lines = [constants_mod.TAB_AWAY] if hasattr(constants_mod, "TAB_AWAY") else [
+            "Waiting: the browser shows another tab. Bring the book's tab back, or drag that tab out into a window of "
+            "its own."]
+
+        def away_line(app_: Any) -> bool:
+            from taslation.i18n import _ as tr
+
+            return any(standin_tabs.right_pane_says(app_, tr(line)) for line in lines)
+
+        def release_out(at: int, to: int) -> None:  # (the book's own window goes on: the control file's *out*)
+            director.control["out"] = (int(at), int(to))
+            sv.write_control(standin_dir, director.control["go"], out=director.control["out"])
+
+        held = int(browser.more[0]) if browser.more else 0
+        tabs = standin_tabs.TabRun(app, browser, notes, held, release_out, lambda more, rect: place_own(more, rect),
+                                   tuple(getattr(args, "_held_rect", None) or report["standin_rect"]), away_line)
+        tabs.start()
+        director.tabs = tabs
     director.start()
     began = now_ms()
     try:
@@ -4911,6 +5024,8 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         if mon is not None:
             mon.sampler.stop.set()
             mon.sampler.join(3.0)
+        if tabs is not None:
+            tabs.close()
         if director.failed and director.selection.stopped:
             try:
                 app.destroy()  # (another window was chosen: nothing more is done with it)
@@ -4941,6 +5056,12 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         except Exception as e:  # noqa: BLE001 - said by its type and where, the rest of the report kept
             traceback.print_exc()
             run_["monitors"] = {"failed": f"{type(e).__name__}{_where(e)}"}
+    if tabs is not None:
+        try:
+            run_["tabs"] = tabs.report(ended)
+        except Exception as e:  # noqa: BLE001 - said by its type and where, the rest of the report kept
+            traceback.print_exc()
+            run_["tabs"] = {"failed": f"{type(e).__name__}{_where(e)}"}
     behind_facts = director.behind_report()
     if behind_facts is not None:
         notes_now = list(see.over().notes) if see.over() is not None else []
@@ -5285,7 +5406,8 @@ def summarise(director: Director, notes: Notes, tap: LogTap, browser: sv.Standin
             "under_t": rel(notes.tool_cover.get("under_t")), "own_top_t": rel(notes.tool_cover.get("own_top_t"))},
         "guard": {"patched": patched, "refused": guard.refused, "chosen": sorted(set(notes.selected)),
                   "stand_in": browser.hwnd, "reached_the_stand_in": guard.used,
-                  "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd}},
+                  # (the book's own window, tab6's, is the stand-in's as much: `standin_tabs`)
+                  "only_the_stand_in_chosen": set(notes.selected) <= {browser.hwnd, *browser.more}},
         "shots": director.shots,
         "stand_in_events": dict(Counter(e["ev"] for e in events)),
         **({"stand_in_profile_events": [[rel(float(e["t"]) + offset), e["ev"],
@@ -5806,6 +5928,40 @@ def print_table(report: dict[str, Any], path: Path) -> None:
               f"{waits['held_ms']}; soft frames kept {len(waits['keeps'])} {waits['keeps_by_why']}, kept ms "
               f"{waits['kept_ms']}")
     print_monitors(run_.get("monitors"))
+    print_tabs(run_.get("tabs"))
+
+
+def print_tabs(tabs: dict[str, Any] | None) -> None:
+    """The tab scenarios' table (`standin_tabs.TabRun.report`): one row per spell away from the book's tab."""
+    if not tabs:
+        return
+    if tabs.get("failed"):
+        print(f"tabs: report FAILED: {tabs['failed']}")
+        return
+    other = tabs["jobs_on_the_other_tab"]
+    print(f"tabs: captures of the other tab {tabs['captures_of_the_other_tab']}; jobs on it {other['made']} (started "
+          f"{other['started']}, requests {other['requests']}, translated {other['translated']}, stored "
+          f"{other['stored']}, units {other['units_stored']}); lettering looks over it "
+          f"{tabs['lettering_looks_over_the_other_tab']}; chosen by its title "
+          f"{tabs['chosen_by_the_other_tab_s_title']}; "
+          f"remembered {tabs['memory_holds_an_other_tab_title']}")
+    for s in tabs["spells"]:
+        away = s["while_away"]
+        print(f"  {s['segment'] or 'start'} {s['kind']}/{s.get('how')} other {s['other']} late {s['title_late_ms']} "
+              f"lead {s['title_lead_ms']}: away {s['away_ms']} ms; captures {away['captures']} (of it "
+              f"{away['tab_captures']}), jobs {away['jobs_started']}/{away['jobs']} {s['away_jobs_by_frame']}, "
+              f"requests {away['requests']} (its {s['away_requests_of_jobs_on_the_other_tab']}), lookups "
+              f"{away['lookups']}, drew soft {away['drew_soft']}; lettering looks {s['lettering_looks_away']} (the "
+              f"last over it {s.get('lettering_over_the_other_tab_last_ms')} ms after its title), "
+              f"ground {s['ground_looks_away']}, mouse {s['mouse_taken_looks_away']} (the last "
+              f"{s.get('mouse_over_the_other_tab_last_ms')} ms after its title) of {s['looks_away']}; panes "
+              f"{s['panes_looks_away']}; follows {s['followed_away']}; line {s['right_pane_line_shown']}; status "
+              f"{s['status_lines_away']}; areas changed {s['page_areas_changed']}, book changed {s['book_changed']}, "
+              f"remembered +{s['memory_titles_added']}; back: lettered {s.get('back_to_lettered_ms')} ms, panes "
+              f"{s.get('back_to_panes_ms')} ms"
+              + (f"; followed its window {s.get('followed_the_book_s_window_ms')} ms, lettered there "
+                 f"{s.get('lettered_on_the_book_s_window_ms')} ms, window {s.get('second_window')}"
+                 if s["kind"] == "out" else ""))
 
 
 def print_monitors(mon: dict[str, Any] | None) -> None:
@@ -6024,6 +6180,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--chooser", action="store_true",
                     help="the window names no viewer (no window_query): its viewer chooser comes at the start, and "
                          "the driver chooses the stand-in in it through the dialog's own object (run.behind.chooser)")
+    ap.add_argument("--standin-start-tab", choices=("plain", "japanese"), default=None,
+                    help="the stand-in's other tab (a plain page with a neutral title, or one of made-up Japanese "
+                         "lines) on show from before the window starts, as a browser showing another tab; scenario "
+                         "tab0 brings the book's tab back (run.tabs, `standin_tabs`)")
     ap.add_argument("--standin-bars-held", type=int, default=0, metavar="MS",
                     help="a stand-in with a profile: its bars up over the page from its start, held MS ms (as while "
                          "the pointer rests on them; with --standin-option bar_key_hide=0 a turn leaves them up)")
