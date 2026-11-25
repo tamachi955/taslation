@@ -349,10 +349,13 @@ def test_the_order_after_reading_keeps_the_readers_hints(settings):
     a, b = _region(400, 100, 480, 140), _region(100, 100, 180, 140)
     for r in (a, b):
         r.status, r.source_text = "untranslated", "そうだ"
-    b.order_hint = 0
+    b.order_hint, a.order_hint = 0, 1
     regions = [a, b]
     Pipeline(settings, ocr=None, translator=None)._order_read(img, (0, 0, SIZE[1], SIZE[0]), regions)
     assert regions == [b, a]
+    a.order_hint = -1  # (a region the reader's order never had, read before b: it stays before it)
+    Pipeline(settings, ocr=None, translator=None)._order_read(img, (0, 0, SIZE[1], SIZE[0]), regions)
+    assert regions == [a, b]
 
 
 def test_the_pipeline_orders_again_after_reading(sample_page, settings, monkeypatch):
@@ -365,8 +368,30 @@ def test_the_pipeline_orders_again_after_reading(sample_page, settings, monkeypa
 
 def test_the_readers_hints_win():
     a, b, c = _region(400, 100, 560, 220), _region(400, 500, 560, 620), _region(60, 60, 200, 160)
-    c.order_hint = 0
+    c.order_hint, a.order_hint, b.order_hint = 0, 1, 2
     assert apply_order_hints(order_on_page(page(TALL_RIGHT), (0, 0, SIZE[1], SIZE[0]), [a, b, c])) == [c, a, b]
+
+
+def test_a_region_added_after_a_hand_made_order_lands_by_its_place():
+    """Detected order a, n, b, c, m; the reader's order c, a, b: n (unordered) is read after a, the one ordered
+    region detected before it; m after the highest of those before it, b; one detected before them all comes first."""
+    def ids(regions):  # (by identity: `==` on regions reaches their masks)
+        return [id(r) for r in regions]
+
+    a, n, b, c, m, first = (_region(0, 0, 1, 1) for _ in range(6))
+    c.order_hint, a.order_hint, b.order_hint = 0, 1, 2
+    assert ids(apply_order_hints([a, n, b, c, m])) == ids([c, a, n, b, m])
+    assert ids(apply_order_hints([first, a, b, c])) == ids([first, c, a, b])
+    assert [r.order for r in (first, c, a, b)] == [0, 1, 2, 3]
+    # each page unit of a spread keeps its own numbers; the units keep their order
+    left = [_region(0, 0, 1, 1) for _ in range(3)]
+    for r in left:
+        r.unit = 1
+    left[1].order_hint, left[0].order_hint = 0, 1
+    assert ids(apply_order_hints([a, n, b, c, *left])) == ids([c, a, n, b, left[1], left[0], left[2]])
+    # with no order made, the detected order is kept as it is
+    fresh = [_region(0, 0, 1, 1) for _ in range(3)]
+    assert ids(apply_order_hints(fresh)) == ids(fresh)
 
 
 def test_a_page_takes_little_time_and_the_old_calls_stay():

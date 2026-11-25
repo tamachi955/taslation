@@ -134,7 +134,7 @@ def test_follow_ups_come_only_when_their_param_is_set():
     failed = Message("pipeline.translated", review=2, error=error, **page)
     assert [s.code for s in failed.sentences()] == ["pipeline.translated", "pipeline.to_review", "pipeline.page_error"]
     assert dict(failed.sentences()[1].params) == {"review": 2} and dict(failed.sentences()[2].params) == {"error": error}
-    assert str(failed) == str(clean) + JOINER + "2 worth a look (turn Edit on, then Menu > Review...)." + JOINER + (
+    assert str(failed) == str(clean) + JOINER + "2 worth a look (with Reader mode off, Menu > Review...)." + JOINER + (
         "The translation took too long. Press Translate to try again.")
 
 

@@ -22,7 +22,7 @@ There is no account to make and no limit on the pages it translates. Nothing of 
    is selected), then the rest.
    When none looks like one, nothing is selected and "OK" is greyed until you choose the viewer's window in the list. "List again" lists the windows again
    (a window opened while the dialog is up comes into the list by itself too), and "Quit" ends TASlation. Nothing of any window is followed, shown or read
-   before you press "OK"; then the right pane says "Viewer: <title>" for a few seconds. When the viewer's window is closed, the lettering and the side panes go
+   before you press "OK"; then the right pane's foot says "Viewer: <title>" for as long as that window is followed. When the viewer's window is closed, the lettering and the side panes go
    and the same dialog comes again, saying so: a new window of the same viewer is selected in it, not chosen by itself. "Menu > Viewer..." opens the dialog
    to choose another window (its last button is then "Close"). A browser window is judged by its tab title without the browser's name. In a browser-based reader,
    the part that is the page, without the tabs, the address bar and the reader's own frame, is found automatically, and only that part is read. If that does not work, use "Set area..." in the left pane once
@@ -32,17 +32,17 @@ There is no account to make and no limit on the pages it translates. Nothing of 
 4. Read in the viewer as it is: turn the pages there, with its own keys, buttons or clicks. TASlation presses no key and sends no click to the viewer,
    turns no page by itself, and reads only the page the viewer shows. "Auto" is on from the start: each page you turn is translated, or lettered from the cache.
    "Translate" in the left pane processes the page on show by hand (when the page is in the cache, it is lettered from there); the circular arrow at the right end of its row
-   translates it again without using the cache (see "Edit: correcting the page"). If you press Translate while the OCR model is still loading, for example, it runs as soon as it can.
+   translates it again without using the cache (see "Editing: correcting the page"). If you press Translate while the OCR model is still loading, for example, it runs as soon as it can.
    "Lettering" hides TASlation's lettering, so that the page shows as the viewer has it, and shows it again.
 
-The lettering lies in a window of its own over the viewer's, which takes no click and no key: every click and key goes to the viewer, as without TASlation,
-Insert alone excepted, which adds a text area while the viewer is in front (with "Edit" on, the boxes of the page's regions take the clicks on them too;
-see "Edit: correcting the page"). Each piece of the lettering belongs to the pixels
+The lettering lies in a window of its own over the viewer's. In Reader mode it takes no click and no key: every click and key goes to the viewer, as without TASlation,
+Insert alone excepted, which adds a text area while the viewer is in front. While editing (as TASlation starts), the mouse over the viewer's window is TASlation's and the keys
+stay the viewer's: turn the pages with the keys (see "Editing: correcting the page"). Each piece of the lettering belongs to the pixels
 it was made from, and shows only while the viewer shows those very pixels there: when you turn the page, the old lettering goes at the first picture of the new page,
 and where the viewer draws something over the page (a bar, a menu, a panel) or another window lies over it, the lettering there is left out.
 A page whose translations are all in the cache is lettered as soon as the viewer shows it.
 With a viewer that has drawn a blurred picture first, though, a blurred picture is left as it is, and the page is lettered from the cache as soon as the sharp picture arrives
-(on a blurred picture only some of the bubbles are found, and the translations would sit off their places). With "Edit" on,
+(on a blurred picture only some of the bubbles are found, and the translations would sit off their places). While editing,
 once the picture has settled (no new picture for 0.4 seconds), the page is read once more and the bubbles not in the cache are added.
 While the viewer is in front, each new picture it draws is looked at (and it is looked at every 0.7 seconds besides); while another program is in front, it is not looked at
 (after a move, a resize or a tab switch it is looked at once). Windows tells it which window is in front, so it does not read the contents of other windows.
@@ -81,14 +81,16 @@ TASlation's controls and indicators lie in two panes on the viewer's ground besi
 They take their colours from that ground (light on a dark ground, dark on a light one) and their size from the scaling of the viewer's monitor, and they move with the viewer's window.
 
 * **The left pane** holds the controls: "Translate" ("Stop" while a page is being translated), with the circular arrow at the right end of its row that translates the page on show again;
-  "Auto"; the target language (a click lists every language at the right side of the pane, and a click on one takes it at once; a click elsewhere, or Esc, closes the list with no change); "Lettering"; "Indicators"; "Edit";
-  "Add area" (or Insert while the viewer is in front; see "Edit: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and a click between the rows goes to the viewer.
-* **The right pane** (while "Indicators" is on) shows, at its top, the bubble last under the pointer (see "The bubble under the pointer"); under it the lines of the setup
-  (what is missing and how to fix it), how far the page on show is, the status line, how many pages turned past are still to do, and whether the translator runs on the GPU or the processor.
-  Clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
+  "Auto"; the target language (a click lists every language at the right side of the pane, and a click on one takes it at once; a click elsewhere, or Esc, closes the list with no change); "Lettering"; "Indicators"; "Reader mode" (checked: the mouse is the viewer's; unchecked: editing);
+  "Add area" (or Insert while the viewer is in front; see "Editing: correcting the page"); "Set area..."; "Settings..."; "Menu"; "Quit". A click on a control never takes the keyboard from the viewer, and in Reader mode a click between the rows goes to the viewer.
+* **The right pane** (while "Indicators" is on) shows, at its top, the bubble last under the pointer (see "The bubble under the pointer"); under it what changes: the lines of the setup
+  (what is missing and how to fix it), the status line and how many pages turned past are still to do. Its foot keeps its rows in their places whatever the rest says:
+  how far the page on show is, the mode ("Editing: turn pages with the keys" or "Reader mode"), where the translator runs (on the GPU or the processor; and the OCR, where it runs elsewhere),
+  the viewer followed ("Viewer: <title>", a long title shortened in the middle), and, where there is room, the target language with the book's name. What does not fit above the foot is left out,
+  the oldest lines first and the warnings last. In Reader mode, clicks on it go to the viewer, except on the bubble's three buttons. With "Indicators" off ("Indicators at the right of the viewer" in "Settings...", `see_through_indicators`),
   the right pane is not shown, and the lines of the setup come in a small dialog of their own while there is something to say.
 * **"Menu"** opens the rest: "Viewer...", "Series and Volume...", "Saved translations...", "Names rendered in more than one way...", "Release the model now",
-  "Language" and "Help" ("How to use...", "Legal notice...", "Check for updates...", "About TASlation"). While "Edit" is on, the editing comes first (see "Edit: correcting the page").
+  "Language" and "Help" ("How to use...", "Legal notice...", "Check for updates...", "About TASlation"). While editing, the editing comes first (see "Editing: correcting the page").
   While the setup has something TASlation can fix for you ("Start translator again", "Download model", "Show viewer"), those buttons come first in the Menu.
 
 A pane needs room beside the page: one that would come near the page, or that the viewer's ground is too short for, hides rather than cover the page
@@ -105,7 +107,7 @@ A dialog that comes by itself while you read (a warning, a question after a chan
 
 Rest the pointer on a bubble, and after a moment (`hover_delay_ms`, 450 milliseconds by default; "Delay under the pointer" in "Settings...", 0 to 3000, 0 at once)
 its lettering gives way to the original lettering in its place. The lettering comes back once the pointer leaves the bubble.
-The pointer is only read: the viewer keeps the keyboard, and a click there goes to the viewer as ever.
+The pointer is only read: the viewer keeps the keyboard, and in Reader mode a click there goes to the viewer as ever (while editing, the bubble's box is outlined instead, and a click opens the region editor).
 
 With "Indicators" on, the right pane shows that bubble at its top: "Copy the Japanese", "Copy the translation" and "Ask again", then its Japanese and its translation
 (up to five lines each). It stays after the pointer has left the bubble, so that the pointer can go to the pane, until another bubble is under the pointer or the viewer shows another page.
@@ -167,7 +169,7 @@ The pages you translate are also checked for the same character's name written m
 Each name is listed with its spellings and how many lines use each; choose the spelling to keep, or type one in "Other:", and press "Apply": the lines with the other spellings are changed to it.
 If "Keep it in the series sheet" is ticked (the default), it also goes into the character's rendering in the series sheet, and later translations use that spelling.
 Nothing is changed until you press "Apply". Only the name itself is changed, and only in the lines whose Japanese has that name; the rest of the line, the review flags, the notes to the reader and the positions stay as they are.
-"Take back" restores both the lines and the series sheet (with "Edit" on, "Undo" in the Menu can also take back the lines alone; pressing "Take back" after that restores the series sheet too).
+"Take back" restores both the lines and the series sheet (while editing, "Undo" in the Menu can also take back the lines alone; pressing "Take back" after that restores the series sheet too).
 The names are found by fixed rules; no model is used. Only names that carry an honorific such as "さん", "くん" or "様" in the Japanese (2 or more katakana, or 2 to 4 kanji) are considered,
 and a name is listed only when the translations write it in two or more ways, each in separate lines, that look like spellings of the same name (missing a case is preferred to making a wrong suggestion).
 It lists nothing for translations in languages without capital letters (Chinese, Korean, Thai and so on).
@@ -230,7 +232,7 @@ Translations saved before this version under a spelling such as "Some Title 3巻
 (the same series and the same volume make the same book). Nothing is renamed by itself. For such a book, once each time TASlation starts,
 it offers to rename the book to the one spelling. "Rename" moves the translations, the information attached to pages and the series sheet, as the colophon's rename does (next section;
 if the series sheets disagree, the table to answer comes first). With "Not now" the old name stays, and everything works as before.
-Whether "Edit" was on for the book carries over after the rename. A series sheet that an earlier version kept under a whole name with a kanji volume
+Whether the book was in Reader mode carries over after the rename. A series sheet that an earlier version kept under a whole name with a kanji volume
 ("第一巻" and the like) as its series is found and used too, and moves along when the book is renamed.
 
 On the command line, `--series` and `--volume` name the book the same way. A name given with `--book` is split as one string by the same rules
@@ -249,7 +251,7 @@ If that series already has a series sheet (when you renamed an earlier volume to
 What is added is taken in as it is. Where the two disagree (a term's rendering, a character's first-person pronoun, a policy in the style guide and so on),
 the series' value and this book's value are shown side by side, one item at a time, before anything is moved,
 and you choose "Keep the series'" or "Take this book's" (you can also choose for all at once). "Rename" renames the book following those answers;
-with "Cancel" the name stays as it is, and the colophon's title is offered again next time. This table appears only while "Edit" is on. With "Edit" off it does not ask, and merges keeping the series' value in every row.
+with "Cancel" the name stays as it is, and the colophon's title is offered again next time. This table appears only while editing. In Reader mode it does not ask, and merges keeping the series' value in every row.
 If there is nothing to answer, it merges at once and shows how many entries were added, how many were taken from this book, and how many were kept as the series had them.
 
 The series' defaults (see "Book settings...") follow too when the new name belongs to another series. If the new series has none yet, the old series' defaults are moved to it,
@@ -274,19 +276,21 @@ Translations can be into any of the 20 languages of the left pane's language row
 "Menu > Help > About TASlation" shows the version, the licence,
 the folder where the cache, series sheets and settings are kept, and where the README and docs/THIRD_PARTY.md are.
 
-### Edit: correcting the page
+### Editing: correcting the page
 
-"Edit" in the left pane turns editing on and off. It stays as you left it for each book (a book you have not chosen for starts with it off,
-or on with "Start with Edit on" in "Settings...", `--role translator` or `role = "translator"` in the settings file). With "Edit" on, the regions of the page on show appear over the viewer as boxes,
-each with its number in the reading order on a small plate of its colour (green: translated, orange: not translated, blue: a region you marked yourself,
-red: translated but flagged for review). Beside the boxes every click still goes to the viewer, and so do the keys (Insert alone excepted: "Adding a text area", below),
-except while a dialog of TASlation's (the region editor among them) is open.
+TASlation starts editing. "Reader mode" in the left pane (checked: you only read) switches editing off, and unchecked again, on. It stays as you left it for each book (a book you have not chosen for
+starts editing, or in Reader mode with "Start in Reader mode" in "Settings...", `--role reader` or `role = "reader"` in the settings file). While editing, every region of the page on show
+is outlined over the viewer in its colour, with its number in the reading order on a small plate of that colour (green: translated, orange: not translated, blue: a region you marked yourself,
+red: translated but flagged for review). The right pane's foot says "Editing: turn pages with the keys" or "Reader mode".
 
-* **Adding a text area** works with "Edit" on or off: press "Add area" in the left pane (it shows pressed), or Insert while the viewer is in front,
+* **The viewer takes the keys only**: while editing, the mouse over the viewer's window is TASlation's, and the keys stay the viewer's (Insert alone excepted: "Adding a text area", below).
+  Turn the pages with the keys; to use the mouse in the viewer (its buttons, its page slider, the wheel), check "Reader mode". The wheel reaches nothing while editing,
+  and the viewer's bars do not come up under the pointer (bars already up go when the viewer hides them by itself). While a dialog of TASlation's (the region editor among them) is open, the keys are the dialog's.
+* **Adding a text area** works while editing and in Reader mode: press "Add area" in the left pane (it shows pressed), or Insert while the viewer is in front,
   and drag a rectangle around text that was not detected. It is read, translated and added to the page (later readings use it too), and the page goes back to
   reading as before. Until the rectangle is drawn, the whole page takes the mouse; a click without a drag, a right click, Insert again or "Add area" again gives it up.
   A text area can be added once the page on show is translated, with "Lettering" on and the book named (the status line says what is missing).
-  With "Edit" on, "Add a text area" in the Menu's "Page" does the same.
+  While editing, a rectangle dragged on the page's empty ground adds a text area in the same way, and "Add a text area" in the Menu's "Page" does the same as "Add area".
   Insert is the only key TASlation takes, and only while the viewer is the window in front: not while another program or a dialog of TASlation's is, nor while the viewer
   is minimised. Only Insert alone is taken (Shift+Insert and Ctrl+Insert stay the viewer's). "Insert adds a text area" in "Settings..." (`add_area_key`) turns it off,
   and TASlation then takes no key at all. Where another program holds Insert already, the key does nothing and "Add area" still works (the log says so once).
@@ -294,9 +298,14 @@ except while a dialog of TASlation's (the region editor among them) is open.
 * **The mouse on the boxes**: a click on a box opens the region editor beside it. Like shapes in office software, a region is moved by dragging and resized with its corner handles,
   and it is read again only when the new frame covers a larger area (a right click during a drag gives the drag up). Shift+click adds a box to the chosen regions,
   or takes it out; dragging one of the chosen regions moves them all together (the whole group stops when one of them reaches the edge of the page). The box under the pointer
-  is outlined with its corner handles instead of giving way to the original, and the right pane shows its words.
-* **The mouse wheel** turned over a box does not reach the viewer (Windows gives the wheel to the window under the pointer): move the pointer off the boxes, or turn "Edit" off, to scroll the viewer.
-* **The Menu** has the editing while "Edit" is on: "Undo" and "Redo"; "Page" ("Reading order", "Add a text area", "Skip page"; then, for the chosen regions, "Set kind...",
+  gets a stronger outline with its corner handles instead of giving way to the original, and the right pane shows its words. A click on the empty ground does nothing,
+  but drops a choice of several regions.
+* **The number plates**: a click on a box's number opens a small field over it to type the region's place in the reading order (1 to the number of regions on the page).
+  Enter takes it: the regions are numbered anew, and the lines whose earlier lines changed (from the first place that changed on) are translated again, your own corrections kept;
+  "Undo" takes the new order and those translations back in one step. Esc, or a click anywhere else, gives it up. A drag from the number moves the box.
+  A region added later to a page whose order you set by hand takes its place by its position, the others keeping the order you gave.
+  "Reading order" (click the regions in order) and "Place in reading order..." stay in the Menu; they set the order without translating again.
+* **The Menu** has the editing while editing: "Undo" and "Redo"; "Page" ("Reading order", "Add a text area", "Skip page"; then, for the chosen regions, "Set kind...",
   "Set text size...", "Place in reading order...", "Copy format", "Paste format", "Paste format on every region of this kind...", "Copy region", "Paste region",
   "Drop the chosen regions" and "Ignore this area on all pages of this book"; and "Use these areas for the series"); and "Review...", "My corrections...", "Lines to review...",
   "Find and replace...", "Series sheet..." and "Book settings...", each a dialog of its own. A click on a box chooses that region.
@@ -645,7 +654,7 @@ taslation glossary list | show <series> | set <series> <term> <rendering> [--not
 taslation glossary apply <series> --rename OLD=NEW [..] [--dry-run]   replace OLD with NEW in what is already translated
 taslation glossary font <series> "Comic Neue" | --clear   the lettering font the series suggests (checks whether this PC has it)
 taslation glossary lettering <series> thought|shout|narration|handwritten|sfx [--family NAME] [--italic|--no-italic] [--bold|--no-bold] [--reset]
-taslation gui --role translator   start with Edit on
+taslation gui --role reader       start in Reader mode
 taslation audit page.png       run the processing and show every network connection made (and at the end, whether any saved file is left unprotected)
 taslation annotations list [--json]          list the books that have a notes file on this PC (pages, frames, memos, skipped pages, reading orders; no text is shown)
 ```
@@ -757,10 +766,10 @@ Switch models with `--model NAME` or `ollama_model` in the settings file (`"auto
 The settings you change often are in "Settings..." in the left pane. Its "General" page has, under "Lettering", the smallest and largest lettering size; the size below which a translation is put on the list for a second look (Review);
 the lettering size (80 to 200 %; 100 % keeps the largest size that fits the bubble, and 90 % sets every translation a tenth smaller;
 above 100 %, nothing goes past the bubble or the largest size, and only translations that were held back to keep sizes even on the page get larger;
-in the settings file it is `text_scale`, and a book's own value is in "Book settings...", in the Menu while "Edit" is on); whether to letter in capitals; whether to set slanted lettering at the same slant; and whether to set larger what the original sets larger.
+in the settings file it is `text_scale`, and a book's own value is in "Book settings...", in the Menu while editing); whether to letter in capitals; whether to set slanted lettering at the same slant; and whether to set larger what the original sets larger.
 Under "Dialogs" it has the size of the dialogs' text, the dialogs' colours (light, dark, or as Windows is set), reusing the translation of a short line seen before,
 "Indicators at the right of the viewer" (`see_through_indicators`, the same as "Indicators" in the left pane), "Delay under the pointer" (`hover_delay_ms`: 0 to 3000 milliseconds, 450 by default; a number out of these bounds is not saved),
-"Insert adds a text area" (`add_area_key`, on by default; off, TASlation takes no key at all) and "Start with Edit on" (`role = "translator"`; from the next start, for a book you have not turned "Edit" on or off for).
+"Insert adds a text area" (`add_area_key`, on by default; off, TASlation takes no key at all) and "Start in Reader mode" (`role = "reader"`, off by default; from the next start, for a book you have not switched "Reader mode" for).
 Last come the optional page models (the layout model and the inpainting).
 "Set larger what the original sets larger" (`size_emphasis`, on by default): where the original letters part of a bubble larger than the rest (its characters are measured as they are read: a part at least 1.25 times the size of the rest, in whole lines),
 that part is looked for in the translation once the page's translations are final, and no word of the translation changes. First the Japanese part is translated alone and looked for in the translation;
@@ -796,7 +805,7 @@ Updating with `update.cmd` does not overwrite `taslation.toml` in the TASlation 
 Settings changed in the file take effect from the next start.
 
 TASlation has no keys of its own to set: every key goes to the viewer, except Insert, which adds a text area while the viewer is in front
-("Insert adds a text area" turns it off; "Edit: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
+("Insert adds a text area" turns it off; "Editing: correcting the page"). In the region editor, "Previous" and "Next" are Alt+↑ and Alt+↓, and copying and pasting formatting
 Ctrl+Shift+C and Ctrl+Shift+V. Keys an earlier version saved for these in `shortcuts.json` in the state folder still apply, but there is no page to change them any more.
 
 The "System" page of "Settings" shows, for each stage of processing a page (finding the text, reading the text, translation, erasing and lettering), where it runs ("GPU (the GPU's name)" or "CPU") and how many seconds a page took.
@@ -859,7 +868,7 @@ font_path = ""               # auto: the series sheet's font where installed, th
 reuse_lines = true           # a short line translated before in the book or its series gets that translation again
 see_through_indicators = true  # the right pane: the bubble under the pointer, how far the page is, the status line
 hover_delay_ms = 450         # the wait before a bubble under the pointer gives way to the original (0-3000; 0: at once)
-role = "reader"              # Edit at the start: "reader" (off) or "translator" (on); a book keeps its own choice ("Start with Edit on")
+role = "translator"          # at the start: "translator" (editing) or "reader" (Reader mode); a book keeps its own choice ("Start in Reader mode")
 add_area_key = true          # Insert adds a text area while the viewer is in front (the one key TASlation takes); false: no key at all
 update_check = "off"         # "daily": at the start, look for a new version at most once a day (check_update.py asks GitHub); "off": only Menu > Help > Check for updates...
 ```

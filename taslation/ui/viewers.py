@@ -8,7 +8,6 @@ resized: `_enlarge_first`), and the offline guard's warning once it has blocked 
 
 from __future__ import annotations
 
-import time
 from typing import Any, Callable, Sequence
 
 from .. import netguard, viewerparts
@@ -52,9 +51,6 @@ def show_minimised(app: Any, win: WindowInfo) -> bool:
         return unminimise_window(win.hwnd, own() if own is not None else None)
     except Exception:  # a window that went meanwhile: nothing restored
         return False
-
-
-VIEWER_NOTE_S = 5.0  # after a choice in the viewer chooser, the right pane says "Viewer: <title>" so long
 
 
 def named_window(windows: Sequence[WindowInfo], query: str) -> WindowInfo | None:
@@ -106,23 +102,11 @@ def entry_titles(windows: Sequence[WindowInfo]) -> list[str]:
 
 
 def middle_cut(text: str, fits: Callable[[str], bool], mark: str = "…") -> str:
-    """*text* as it is when it *fits*, else shortened in the middle - its start and its end kept, as much of them as
-    fits, *mark* between them (the start one character longer than the end)."""
-    if fits(text):
-        return text
+    """*text* as it is when it *fits*, else shortened in the middle (`panes.middle_cut`: the right pane's foot cuts
+    the viewer's title so too)."""
+    from ..panes import middle_cut as cut
 
-    def kept(n: int) -> str:
-        head, tail = (n + 1) // 2, n // 2
-        return text[:head].rstrip() + mark + (text[len(text) - tail:].lstrip() if tail else "")
-
-    low, high = 0, len(text) - 1
-    while low < high:
-        middle = (low + high + 1) // 2
-        if fits(kept(middle)):
-            low = middle
-        else:
-            high = middle - 1
-    return kept(low)
+    return cut(text, fits, mark)
 
 
 def another_book(left: WindowInfo, chosen: WindowInfo, query: str = "") -> bool:
@@ -226,7 +210,7 @@ class ViewerMixin:
         """A viewer chosen in the Viewer list (*picked*: by the person, in the viewer chooser or the toolbar's list;
         *named*: by the --window the person gave; else the list shown again, the viewer kept): remembered for the next
         start (`_learn_viewer`, viewers.json), its book (the name its title gives: `_title_book`) and area, its line on
-        the status line (and, picked, in the right pane for VIEWER_NOTE_S: ``_see_viewer_note``), its window shown
+        the status line (the right pane's foot names it all the time: `seethrough.right_rows`), its window shown
         again when it is minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window
         followed; once it has settled whether it draws while covered is found out (`_learn_covered_soon`). A window
         chosen again keeps what it has."""
@@ -262,8 +246,6 @@ class ViewerMixin:
         self._auto_last = None
         self._live_thumb = None  # the next tick shows this viewer
         title = self.selected.title
-        if picked:
-            self._see_viewer_note = (title, time.monotonic() + VIEWER_NOTE_S)  # (`seethrough.right_rows`)
         if restored:
             self.status(lambda: _(VIEWER_RESTORED).format(title=title))
         elif margins is not None and any(margins):

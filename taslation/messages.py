@@ -145,7 +145,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "cancelled",
     "pipeline.from_cache": "{bubbles} line(s) shown from earlier translations.",
     "pipeline.translated": "{bubbles} line(s) translated in {seconds:.0f} s.",
-    "pipeline.to_review": "{review} worth a look (turn Edit on, then Menu > Review...).",
+    "pipeline.to_review": "{review} worth a look (with Reader mode off, Menu > Review...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "No page found in the viewer. Check the book is open, or use Set area... in the left pane.",
     "pipeline.no_text": "No text on this page.",

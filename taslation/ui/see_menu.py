@@ -10,7 +10,7 @@ hosts the dialogs), in places of their own.
   in the right pane). Its entries: the viewer chooser and the book's Series and Volume (`ViewerDialog`,
   `BookDialog`, small dialogs), Saved translations..., Names rendered in more than one way..., Release the model now,
   TASlation's language, and Help (How to use..., Legal notice..., Check for updates..., About TASlation). While the
-  left pane's Edit is on, the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the
+  page is being edited (Reader mode off), the editing comes first (`see_edit.build_menu`: Undo, Redo, the cascade Page with the
   page's tools and what acts on the regions chosen, then Review..., My corrections..., Lines to review..., Find
   and replace..., Series sheet..., Book settings...). Every entry but Quit counts as the reader asking
   (`seethrough.asked`): a dialog it opens takes the keys.
@@ -120,7 +120,7 @@ def build(app: Any, menu: tk.Menu, language: tk.Menu, help_menu: tk.Menu, full: 
         menu.add_separator()
     from . import see_edit
 
-    if see_edit.on(app):  # (Edit: Undo, Redo, the page's tools, the editing lists; a cascade kept with the menu)
+    if see_edit.on(app):  # (editing: Undo, Redo, the page's tools, the editing lists; a cascade kept with the menu)
         page = getattr(menu, "_see_page", None)
         if page is None:
             page = menu._see_page = tk.Menu(menu, tearoff=0)

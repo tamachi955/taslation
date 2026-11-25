@@ -2,8 +2,8 @@
 the lettering's window's hot key only while it is wanted and the viewer is in front (`_key_tick`, `viewer_in_front`),
 let go otherwise, a registration that fails counted and logged once; a press of it handed to the Tk thread
 (``WM_HOTKEY``, `take_keys`), which starts or gives up adding; a right click while adding gives it up; adding with
-Edit off (marks of no box, the rectangle stored and read); the left pane's Add area row; the two Settings rows (Insert
-adds a text area, Start with Edit on). A fake user32 only: no key is taken from this machine and nothing is sent to
+in Reader mode (marks of no box, the rectangle stored and read); the left pane's Add area row; the two Settings rows (Insert
+adds a text area, Start in Reader mode). A fake user32 only: no key is taken from this machine and nothing is sent to
 another program."""
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ def test_the_key_starts_adding_with_edit_off_and_a_rectangle_is_stored_and_read(
     app = add_app()
     over = app._see_through
     see_edit.tick(app, over)
-    assert over.marks[-1] is None  # (Edit off, nothing to add: no marks, every click the viewer's)
+    assert over.marks[-1] is None  # (Reader mode, nothing to add: no marks, every click the viewer's)
     over.keys.append(1.0)  # (Insert pressed with the viewer in front)
     see_edit.tick(app, over)
     marks = over.marks[-1]
@@ -352,11 +352,11 @@ def test_the_new_words_are_in_every_language_and_name_the_controls_as_the_window
         area = catalog[see_edit.ADD_AREA]
         assert area.lower() in catalog[see_edit.ADDING].lower(), code
         assert catalog["Lettering"].lower() in catalog[see_edit.ADD_NO_LETTERING].lower(), code
-    for english in ("Insert adds a text area", dlg.ADD_KEY_TIP, "Start with Edit on", dlg.START_EDIT_TIP):
+    for english in ("Insert adds a text area", dlg.ADD_KEY_TIP, "Start in Reader mode", dlg.START_READER_TIP):
         assert sorted(settings_texts.TEXTS[english]) == sorted(FEATURE_LANGUAGES), english
     for code in FEATURE_LANGUAGES:
         catalog = CATALOGS[code]
-        assert catalog["Edit"].lower() in catalog["Start with Edit on"].lower(), code
+        assert catalog[see_edit.READER_MODE].lower() in catalog["Start in Reader mode"].lower(), code
         assert catalog[see_edit.ADD_AREA].lower() in catalog[dlg.ADD_KEY_TIP].lower(), code  # (the row as it reads)
 
 
@@ -376,21 +376,31 @@ def test_insert_adds_a_text_area_is_ticked_by_default_and_saved_off(hidden_root,
     assert Settings.from_toml(in_force.config_path).add_area_key is False
 
 
-def test_start_with_edit_on_is_the_translator_role(hidden_root, in_force):
+def test_start_in_reader_mode_is_off_by_default_and_is_the_reader_role(hidden_root, in_force):
     got = []
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
-    assert in_force.role == "reader" and d.extra["role"].get() is False and d.values()["role"] == "reader"
+    assert in_force.role == "translator" and d.extra["role"].get() is False and d.values()["role"] == "translator"
     d.extra["role"].set(True)
-    assert d.save() is True and got == [{"role": "translator"}]
-    assert Settings.from_toml(in_force.config_path).role == "translator"
-    in_force.role = "translator"
+    assert d.save() is True and got == [{"role": "reader"}]
+    assert Settings.from_toml(in_force.config_path).role == "reader"
+    in_force.role = "reader"
     d.destroy()
     d = dlg.SettingsDialog(hidden_root, in_force, on_saved=got.append)
     assert d.extra["role"].get() is True
     d.extra["role"].set(False)
-    assert d.save() is True and got[-1] == {"role": "reader"}
+    assert d.save() is True and got[-1] == {"role": "translator"}
     row = next(row for row in dlg.EXTRA_ROWS if row.key == "role")
-    assert row.ticked("translator") and not row.ticked("reader") and row.value_of(True) == "translator"
+    assert row.ticked("reader") and not row.ticked("translator") and row.value_of(True) == "reader"
+
+
+def test_a_settings_file_of_before_keeps_the_role_it_says(tmp_path):
+    for role in ("reader", "translator"):
+        path = tmp_path / f"{role}.toml"
+        path.write_text(f'role = "{role}"\n', encoding="utf-8")
+        assert Settings.from_toml(path).role == role
+    path = tmp_path / "none.toml"
+    path.write_text("", encoding="utf-8")
+    assert Settings.from_toml(path).role == "translator"  # (none said: editing, the default)
 
 
 def test_the_two_rows_leave_the_page_alone():

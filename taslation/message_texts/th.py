@@ -28,7 +28,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "ยกเลิกแล้ว",
     "pipeline.from_cache": "แสดง {bubbles} บรรทัดจากคำแปลก่อนหน้า",
     "pipeline.translated": "แปล {bubbles} บรรทัดใน {seconds:.0f} วินาที",
-    "pipeline.to_review": "ควรดูสักหน่อย {review} จุด (เปิด แก้ไข แล้วใช้ เมนู > ตรวจทาน...)",
+    "pipeline.to_review": "ควรดูสักหน่อย {review} จุด (ปิด โหมดผู้อ่าน แล้วใช้ เมนู > ตรวจทาน...)",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "ไม่พบหน้าในโปรแกรมอ่าน ตรวจสอบว่าเปิดหนังสืออยู่ หรือใช้ กำหนดพื้นที่... ในแผงด้านซ้าย",
     "ollama.unreachable": "TASlation เชื่อมต่อโปรแกรมแปลไม่ได้ กด แปล อีกสักครู่ โปรแกรมจะเริ่มเอง",

@@ -1471,7 +1471,7 @@ class LiveViewMixin(BlackViewerMixin):
 
     def _front_as_it_is(self, f: Following, now: float) -> None:
         """Over the viewer (`seethrough`): who is in front as Windows has it now, whatever the notes said. A click on
-        a window that never takes the foreground (WS_EX_NOACTIVATE: the side panes, a box in Edit) may give a note
+        a window that never takes the foreground (WS_EX_NOACTIVATE: the side panes, a box while editing) may give a note
         that TASlation came to the front while the viewer keeps the foreground, and no note follows, for nothing
         changed: from the notes alone TASlation would stay "in front" and no page turned in the viewer would be
         followed. As with a note, a window back in front is looked at once."""
@@ -1694,12 +1694,18 @@ class LiveViewMixin(BlackViewerMixin):
         only): a press on the viewer that has not ended - a page some viewers drag along with the pointer, out of its
         place, and turn once it is let go at the screen's edge. No frame of that time is the page at rest: none is
         taken, started or lets a running job go (`_step`, `_take`, `_early_allowed`, `_take_at_once`), and none is
-        learnt from - the capture area found (`_find_page`) nor the side panes' ground (`seethrough.note_frame`)."""
+        learnt from - the capture area found (`_find_page`) nor the side panes' ground (`seethrough.note_frame`). A
+        press the see-through window takes while editing (on the page, whose mouse is its own there: `SeeThrough.pressing`)
+        is none of the viewer's: the frames go on meanwhile, the viewer's page does not move."""
         win = self.selected
         if win is None or not IS_WINDOWS:
             return False
         try:
-            return overlay.button_down() and foreground_owner(foreground_window(), win.hwnd) == "viewer"
+            if not overlay.button_down() or foreground_owner(foreground_window(), win.hwnd) != "viewer":
+                return False
+            over = getattr(self, "_see_through", None)
+            pressing = getattr(over, "pressing", None)
+            return not (callable(pressing) and pressing())
         except Exception:  # noqa: BLE001 - not known: as with no press
             return False
 

@@ -30,7 +30,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "iptal edildi",
     "pipeline.from_cache": "Önceki çevirilerden gösterilen satır: {bubbles}.",
     "pipeline.translated": "Çevrilen satır: {bubbles} ({seconds:.0f} sn).",
-    "pipeline.to_review": "Bakmaya değer: {review} (Düzenle'yi açın, sonra Menü > Gözden geçir...).",
+    "pipeline.to_review": "Bakmaya değer: {review} (Okuyucu modu'nu kapatın, sonra Menü > Gözden geçir...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Görüntüleyicide sayfa bulunamadı. Kitabın açık olduğunu denetleyin veya sol bölmedeki Alan belirle... seçeneğini kullanın.",
     "ollama.unreachable": "TASlation çeviri programına ulaşamadı. Biraz sonra Çevir'e basın; kendiliğinden başlar.",

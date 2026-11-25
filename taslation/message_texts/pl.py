@@ -31,7 +31,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "anulowano",
     "pipeline.from_cache": "Wiersze pokazane z wcześniejszych tłumaczeń: {bubbles}.",
     "pipeline.translated": "Przetłumaczone wiersze: {bubbles} ({seconds:.0f} s).",
-    "pipeline.to_review": "Warto spojrzeć: {review} (włącz Edycja, potem Menu > Przegląd...).",
+    "pipeline.to_review": "Warto spojrzeć: {review} (wyłącz Tryb czytelnika, potem Menu > Przegląd...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Nie znaleziono strony w czytniku. Sprawdź, czy książka jest otwarta, albo użyj Ustaw obszar... w lewym panelu.",
     "ollama.unreachable": "TASlation nie może połączyć się z programem tłumaczącym. Naciśnij Przetłumacz za chwilę; uruchamia się sam.",

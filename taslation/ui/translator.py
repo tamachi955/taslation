@@ -1,4 +1,4 @@
-"""The Translator role, which the left pane's Edit turns on (`see_edit`, on the lettering laid over the viewer): its
+"""The Translator role, which editing is - the left pane's Reader mode unchecked - (`see_edit`, on the lettering laid over the viewer): its
 tools (reading order, skip page, translate again, book settings, series sheet, review, find and replace, undo, redo),
 the page's regions selected, moved, resized, rotated by a round handle as a word processor's shapes are (several
 selected act as one change: `chosen_regions`, the rest in `selection`), edited (with the formatting of their
@@ -419,7 +419,7 @@ class TranslatorMixin:
     def _build_translator_tools(self, parent: tk.Misc) -> None:
         """Translator mode's strip under the hidden toolbar: its tools in groups (reading order, skip page, translate
         again; book settings, series sheet, review, my corrections, lines to review; find and replace, the selected
-        region's text direction, undo, redo), never seen - the left pane's Edit menu has them (`see_edit`) -, kept for
+        region's text direction, undo, redo), never seen - the Menu has them while editing (`see_edit`) -, kept for
         the state they hold (`_sync_tools`, enabled in the Translator role)."""
         strip = ttk.Frame(parent)
         ttk.Separator(strip, orient="horizontal").pack(fill="x", padx=8)
@@ -661,8 +661,8 @@ class TranslatorMixin:
 
     def _apply_role(self, role: str, chosen: bool) -> None:
         """The role a book opens in (*chosen*: the reader's for it). In see-through mode, where the Translator role is
-        the left pane's Edit (`see_edit`), only the reader's own choice for the book: Edit stays as the start had it
-        otherwise (off, unless the start asked for the Translator role)."""
+        editing (`see_edit`), only the reader's own choice for the book: the mode stays as the start had it
+        otherwise (editing, unless the start asked for Reader mode)."""
         if getattr(self, "_see_hidden", False) and not chosen:
             return
         if self.role_var.get() == role:
@@ -706,7 +706,7 @@ class TranslatorMixin:
 
     # ------------------------------------------------------------------ the regions under the pointer
     def _editing(self) -> bool:
-        """Whether the page's regions are edited (translator mode, Edit on, and the page on show is the one they
+        """Whether the page's regions are edited (translator mode, editing, and the page on show is the one they
         belong to)."""
         return self.role_var.get() == "translator" and self._result_on_show()
 

@@ -270,7 +270,7 @@ def test_a_page_fills_in_on_the_frame_as_its_events_come(hidden_root, viewer):
     assert w._fill.states[0] == "lettered" and w._fill.filled == 1  # lettered
     assert np.asarray(w.shown())[50, 60].tolist() == [200, 0, 0] and np.asarray(frame)[50, 60].tolist() == [20, 20, 20]
     assert w.canvas.band().startswith("Translating... 1 of 1 line(s) done (")
-    assert "This page: 1 of 1 lines" in [row.text for row in seethrough.right_rows(w)]  # what the right pane says
+    assert "This page: 1 of 1 lines" in [row.text for row in seethrough.right_rows(w)[1]]  # the right pane's foot
     final = _translated(frame)
     w._handle_event("page", {"image": final.image})
     w._handle_event("result", {"result": final})

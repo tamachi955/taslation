@@ -817,7 +817,7 @@ def test_edit_follows_only_the_role_kept_for_the_book_while_the_window_is_hidden
     translator.TranslatorMixin._apply_role(window, "translator", chosen=False)  # (a book with no translations)
     assert window.role_var.get() == "reader" and changed == []  # Edit stays off: never switched on by itself
     translator.TranslatorMixin._apply_role(window, "translator", chosen=True)  # (the role kept for a book)
-    assert window.role_var.get() == "translator" and changed == ["translator"]  # Edit on, nothing said of why
+    assert window.role_var.get() == "translator" and changed == ["translator"]  # editing, nothing said of why
     window.role_var.set("translator")
     translator.TranslatorMixin._apply_role(window, "reader", chosen=False)  # (a book with translations)
     assert window.role_var.get() == "translator" and changed == ["translator"]
@@ -899,7 +899,7 @@ def test_the_banners_lines_and_the_guards_warning_are_in_the_right_pane_and_thei
     assert [r[0] for r in window._see_banner_rows][0] == "The translator is not running."
     window.guard_var = SimpleNamespace(get=lambda: "Blocked a connection to the internet.")
     window.status_var = SimpleNamespace(get=lambda: "The translator is not running.")  # (said once only)
-    rows = ui.right_rows(window)
+    rows, _foot = ui.right_rows(window)
     texts = [r.text for r in rows]
     assert texts[0] == "The translator is not running." and rows[0].warn
     assert texts.count("The translator is not running.") == 1

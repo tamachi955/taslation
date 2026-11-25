@@ -123,7 +123,8 @@ def test_a_changed_sentence_makes_its_line_stale():
     stale = stale_lines(facts, changed)
     assert [s.split(":")[0] for s in stale] == ["card points"]
     assert "no longer says 'There is no account to make and no limit on the pages it translates.'" in stale[0]
-    edited = dict(docs, **{iv.MANUAL: docs[iv.MANUAL].replace("turns editing on and off", "turns editing on")})
+    edited = dict(docs, **{iv.MANUAL: docs[iv.MANUAL].replace("switches editing off, and unchecked again, on",
+                                                              "switches editing off")})
     assert [s.split(":")[0] for s in stale_lines(facts, edited)] == ["step edit"]
 
 

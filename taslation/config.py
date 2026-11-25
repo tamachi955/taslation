@@ -282,10 +282,10 @@ class Settings:
     early_start: bool = True
 
     # --- app ---
-    # Edit at the start (the left side pane's switch, `ui.see_edit`): "reader" (off) | "translator" (on: mark text, fix
-    # translations); a book's own choice, kept as it is switched, comes first (the Settings dialog's "Start with Edit
-    # on")
-    role: str = "reader"
+    # the mode at the start (the left side pane's Reader mode, `ui.see_edit`): "translator" (editing: the page's
+    # regions take the mouse, the viewer the keys only) | "reader" (Reader mode: every click and the wheel the
+    # viewer's); a book's own choice, kept as it is switched, comes first (the Settings dialog's "Start in Reader mode")
+    role: str = "translator"
     # the Insert key adds a text area, as the left pane's Add area does (`ui.see_edit`): held only while the viewer
     # is the window in front, the one key TASlation takes (`capture.seethrough.SeeThrough.set_add_key`); off, none
     add_area_key: bool = True

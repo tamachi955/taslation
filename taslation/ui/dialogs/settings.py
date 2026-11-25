@@ -102,8 +102,9 @@ SEE_INDICATORS_TIP = ("The pane at the right of the viewer's page: the bubble la
 ADD_KEY_TIP = ("While the viewer is in front, the Insert key starts adding a text area, as Add area in the controls "
                "at the left does; Insert again gives it up. It is the only key TASlation takes. Off: TASlation takes "
                "no key at all.")
-START_EDIT_TIP = ("Edit is on when TASlation starts, for a book you have not turned Edit on or off for; a book keeps "
-                  "the choice you made for it. From the next start.")
+START_READER_TIP = ("TASlation starts in Reader mode, every click going to the viewer, for a book you have not "
+                    "switched Reader mode on or off for; a book keeps the choice you made for it. Off: it starts "
+                    "editing, the page's bubbles taking the mouse and the viewer the keys. From the next start.")
 EXTRA_ROWS: tuple[SettingRow, ...] = (
     SettingRow("reuse_lines", "Reuse the translation of a short line seen before",
                "A short line already translated in this book or its series (a cry, a reply) gets the same translation again without asking the model: faster, and alike each time. A correction of yours comes first. The book's cache keeps a keyed hash of the line, never the Japanese."),
@@ -112,7 +113,7 @@ EXTRA_ROWS: tuple[SettingRow, ...] = (
                section="lettering", page=True),
     SettingRow("see_through_indicators", "Indicators at the right of the viewer", SEE_INDICATORS_TIP),
     SettingRow("add_area_key", "Insert adds a text area", ADD_KEY_TIP),
-    SettingRow("role", "Start with Edit on", START_EDIT_TIP, values=("reader", "translator")),
+    SettingRow("role", "Start in Reader mode", START_READER_TIP, values=("translator", "reader")),
 )
 FIELDS = frozenset(f.name for f in fields(Settings))
 
@@ -372,7 +373,7 @@ class SettingsDialog(tk.Toplevel):
         box = ttk.Combobox(letters, textvariable=self.text_scale, values=text_scale_choices(settings.text_scale),
                            state="readonly", width=7)
         box.grid(row=3, column=1, sticky="w", padx=(8, 0), pady=1)
-        tip(_("Every translation lettered smaller or larger by so much (100 %: as large as its bubble allows), never past its bubble or the largest size. A book can have its own: Book settings... in the Menu while Edit is on."), name, box)
+        tip(_("Every translation lettered smaller or larger by so much (100 %: as large as its bubble allows), never past its bubble or the largest size. A book can have its own: Book settings... in the Menu while editing."), name, box)
         self.uppercase = tk.BooleanVar(self, value=bool(settings.uppercase))
         check = ttk.Checkbutton(letters, text=_("Capital letters"), variable=self.uppercase)
         check.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 0))

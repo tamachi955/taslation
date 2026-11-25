@@ -26,7 +26,7 @@ BUTTONS = {
                                          "ollama.connection_failed", "ollama.bad_json", "ollama.reported_error",
                                          "ollama.broke_off", "ollama.bad_answer", "ollama.not_answering")},
     "pipeline.no_content": ("Set area...",),
-    "pipeline.to_review": ("Edit", "Menu", "Review..."),
+    "pipeline.to_review": ("Reader mode", "Menu", "Review..."),
 }
 
 MESSAGE_PARAMS = {"error"}
@@ -225,7 +225,7 @@ def test_japanese_reads_as_the_review_asked():
     page = dict(cached=1, new=0, review=0, error="")
     assert render(Message("pipeline.from_cache", bubbles=6, seconds=0.1, **page), ja) == "6 行を以前の翻訳から表示しました。"
     assert render(Message("pipeline.translated", bubbles=6, seconds=2.1, **{**page, "review": 2}), ja) == (
-        "6 行を翻訳しました（2 秒）。" + JOINER + "確認するとよいものが 2 件あります（「編集」をオンにして「メニュー」>「レビュー...」）。")
+        "6 行を翻訳しました（2 秒）。" + JOINER + "確認するとよいものが 2 件あります（「読者モード」をオフにして「メニュー」>「レビュー...」）。")
     assert ja["translator.model_missing"].startswith("この言語の翻訳モデル")
 
 

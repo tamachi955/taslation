@@ -1,6 +1,6 @@
 """The window's page canvas (the hidden window's, and the area dialog's): the busy badge, the viewer's capture, a crop
 enlarged and a note, the offline guard's warning, the area dialog's handles, and the regions under the pointer in
-translator mode (Edit). Parts of the App are borrowed onto small stand-ins on the shared hidden root."""
+translator mode (editing). Parts of the App are borrowed onto small stand-ins on the shared hidden root."""
 from __future__ import annotations
 
 import tkinter as tk

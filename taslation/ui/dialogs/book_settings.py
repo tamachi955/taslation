@@ -44,7 +44,7 @@ UNDO_TIP = "Put back the choices Clear all dropped (while this window is open)."
 AREAS_HEADING = "Areas ignored on all pages of this book (watermarks, page numbers, banners):"
 AREA_ROW = "{pages}: {x0}-{x1} % across, {y0}-{y1} % down"
 SIDE_WORDS = {"": "All pages", "right": "Right-hand pages", "left": "Left-hand pages"}
-NO_AREAS = "None yet: with Edit on, Menu > Page > Ignore this area on all pages of this book adds one."
+NO_AREAS = "None yet: while editing, Menu > Page > Ignore this area on all pages of this book adds one."
 REMOVE_AREA = "Remove area"
 REMOVE_AREA_TIP = "Look for text in the selected area again on every page of this book (Delete in the list)."
 AREA_REMOVED = "Area removed: text is looked for there again. Undo puts it back."
@@ -64,7 +64,7 @@ FOLLOWS_LINE = "Values marked as the series' default come from the defaults of {
 FROM_SERIES = "(the series' default)"
 AS_SERIES = "As the series' default ({value})"
 SERIES_VALUE = "(series' default: {value})"
-AREAS_FROM_SERIES = ("These are the areas of {series}. Removing one here, or adding one with Edit on, gives "
+AREAS_FROM_SERIES = ("These are the areas of {series}. Removing one here, or adding one while editing, gives "
                      "this book a list of its own.")
 CLEAR_QUESTION_SERIES = ("Clear this book's {n} choice(s) of its own? The series' defaults apply to it again, and your "
                          "own settings where the series has none. Undo in this window puts them back.")

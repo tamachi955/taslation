@@ -105,8 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--on-top", "--full-screen", "--reading", dest="window_options", action="append_const",
                    const=True, help=argparse.SUPPRESS)
     g.add_argument("--role", choices=["reader", "translator"],
-                   help="start with Edit off (reader, the default) or on (translator: the page's regions edited over "
-                        "the viewer)")
+                   help="start in Reader mode (reader: every click goes to the viewer) or editing (translator, the "
+                        "default: the page's regions edited over the viewer, which takes the keys only)")
 
     sub.add_parser("windows", help="list capturable windows")
     sub.add_parser("doctor", help="check models, fonts, Ollama and the network guard")

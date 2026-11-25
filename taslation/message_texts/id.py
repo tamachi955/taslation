@@ -29,7 +29,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "dibatalkan",
     "pipeline.from_cache": "{bubbles} baris ditampilkan dari terjemahan sebelumnya.",
     "pipeline.translated": "{bubbles} baris diterjemahkan dalam {seconds:.0f} dtk.",
-    "pipeline.to_review": "{review} layak dilihat (aktifkan Sunting, lalu Menu > Tinjau...).",
+    "pipeline.to_review": "{review} layak dilihat (dengan Mode pembaca mati, Menu > Tinjau...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Tidak ada halaman di penampil. Pastikan buku terbuka, atau pakai Atur area... di panel kiri.",
     "ollama.unreachable": "TASlation tidak dapat menjangkau program penerjemah. Tekan Terjemahkan sebentar lagi; program berjalan sendiri.",

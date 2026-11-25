@@ -92,7 +92,7 @@ def _guide_keys() -> list[str]:
 
 
 def test_five_topics_of_some_thirty_lines_in_every_language():
-    assert [heading for heading, _p in TOPICS] == ["Getting started", "The side panes", "Edit",
+    assert [heading for heading, _p in TOPICS] == ["Getting started", "The side panes", "Editing",
                                                    "When something goes wrong", "Your data"]
     assert 30 <= sum(1 + len(paragraphs) for _h, paragraphs in TOPICS) <= 54
     missing = [(code, key[:40]) for key in _guide_keys() + ["How to use...", "How to use TASlation"]
@@ -137,21 +137,21 @@ def _guide(start: str) -> str:
 NAMED = (  # (the start of a topic paragraph, the window's words it names)
     ("At every start TASlation asks", ("OK", "Quit", "Menu", "Viewer...")),
     ("Translate translates the page", ("Translate", "Lettering")),
-    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Edit", "Add area", "Set area...",
+    ("Left of the page:", ("Translate", "Stop", "Auto", "Lettering", "Indicators", "Reader mode", "Add area", "Set area...",
                            "Settings...", "Menu", "Quit")),
     ("Right of the page,", ("Indicators", "Copy the Japanese", "Copy the translation", "Ask again")),
     ("Rest the pointer", ("Copy the Japanese", "Copy the translation")),
     ("The panes lie", ("Menu",)),
-    ("Edit in the left pane", ("Edit",)),
-    ("Add area in the left pane", ("Add area", "Edit", "Settings...")),
+    ("While editing, the viewer", ("Reader mode", "Settings...")),
+    ("Add area in the left pane", ("Add area", "Reader mode", "Settings...")),
     ("The numbers' colours", ("Review...",)),
-    ("While Edit is on,", ("Edit", "Menu", "Undo", "Redo", "Reading order", "Add a text area", "Skip page",
+    ("While editing, the Menu", ("Menu", "Undo", "Redo", "Reading order", "Add a text area", "Skip page",
                            "Review...", "My corrections...", "Lines to review...", "Find and replace...",
                            "Series sheet...", "Book settings...")),
-    ("A bubble stays untranslated", ("Translate", "Add area", "Edit")),
+    ("A bubble stays untranslated", ("Translate", "Add area")),
     ("TASlation finds no page", ("Set area...",)),
     ("Nothing happens", ("Indicators", "Menu", "Viewer...", "Auto")),
-    ("A name comes out wrong", ("Edit", "Find and replace...", "Menu")),
+    ("A name comes out wrong", ("Find and replace...", "Menu")),
     ("While you read,", ("Menu", "Help", "Check for updates...")),
     ("Menu > Saved translations...", ("Menu", "Saved translations...", "Help", "About TASlation")),
     ("To keep a spare", ("Menu", "Saved translations...")),
@@ -161,7 +161,7 @@ NAMED = (  # (the start of a topic paragraph, the window's words it names)
 def test_the_guide_names_the_controls_by_the_panes_and_the_menus_own_words():
     from taslation.ui import see_edit, seethrough
 
-    assert see_edit.EDIT == "Edit" and see_edit.ADD_ENTRY == "Add a text area" and see_edit.ADD_AREA == "Add area"
+    assert see_edit.READER_MODE == "Reader mode" and see_edit.ADD_ENTRY == "Add a text area" and see_edit.ADD_AREA == "Add area"
     assert (seethrough.COPY_JAPANESE, seethrough.COPY_TRANSLATION) == ("Copy the Japanese", "Copy the translation")
     for start, words in NAMED:
         key = _guide(start)

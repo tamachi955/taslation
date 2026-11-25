@@ -1,54 +1,75 @@
-"""The window's strings for Edit in see-through mode (`ui.see_edit`): the left pane's switch and its Add area (as wide as
-the pane's other rows at the most), the lines the status says as it is switched and while the reading order is
-clicked or a region is drawn to add (and why none can be added now), the Menu's entries of its own (Add a text area,
-Cancel the reading order, Drop the chosen regions) and the tip of the region editor's Show original.
+"""The window's strings for editing in see-through mode (`ui.see_edit`): the left pane's switch Reader mode and its
+Add area (as wide as the pane's other rows at the most), the lines the status says as it is switched, while a
+region's place in the reading order is typed on its number and while the reading order is clicked or a region is
+drawn to add (and why none can be added now), the Menu's entries of its own (Add a text area, Cancel the reading
+order, Drop the chosen regions) and the tip of the region editor's Show original.
 The Menu's other entries are the window's own (Undo, Redo, Page, Reading order, Finish order, Skip page, Set kind...,
 Review..., ...); a region is worded as the window's "Drop this region" has it (ja 「領域」), a bubble as the right
-pane's tips (ja 「吹き出し」), Finish order and the Menu as their entries (ja 「読み順を確定」「メニュー」).
+pane's tips (ja 「吹き出し」), Finish order and the Menu as their entries (ja 「読み順を確定」「メニュー」), Reader mode
+as Settings' "Start in Reader mode" (ja 「読者モード」), editing as the window's Edit (ja 「編集」).
 
 Machine-translated; no native review."""
 
 TEXTS: dict[str, dict[str, str]] = {
-    "Edit": {
-        "ja": "編集", "es": "Editar", "pt": "Editar", "fr": "Modifier", "de": "Bearbeiten", "it": "Modifica",
-        "nl": "Bewerken", "pl": "Edycja", "ru": "Правка", "tr": "Düzenle", "id": "Sunting", "vi": "Sửa",
-        "zh": "编辑", "zh-tw": "編輯", "ko": "편집", "th": "แก้ไข",
+    "Reader mode": {
+        "ja": "読者モード", "es": "Modo lector", "pt": "Modo leitor", "fr": "Mode lecteur", "de": "Lesermodus",
+        "it": "Modalità lettore", "nl": "Lezersmodus", "pl": "Tryb czytelnika", "ru": "Режим читателя",
+        "tr": "Okuyucu modu", "id": "Mode pembaca", "vi": "Chế độ người đọc", "zh": "读者模式", "zh-tw": "讀者模式",
+        "ko": "독자 모드", "th": "โหมดผู้อ่าน",
     },
-    "Edit: click a bubble to edit it, drag it to move it, drag a corner to resize it; Shift+click chooses several. Beside the bubbles, clicks go to the viewer.": {
-        "ja": "編集：吹き出しをクリックすると編集、ドラッグで移動、角のドラッグで大きさを変更します。Shift+クリックで複数を選べます。吹き出しの外のクリックはビューアに届きます。",
-        "es": "Editar: haz clic en un globo para editarlo, arrástralo para moverlo, arrastra una esquina para cambiar su tamaño; Mayús+clic elige varios. Fuera de los globos, los clics van al visor.",
-        "pt": "Editar: clique num balão para editá-lo, arraste-o para movê-lo, arraste um canto para redimensioná-lo; Shift+clique escolhe vários. Fora dos balões, os cliques vão para o visualizador.",
-        "fr": "Modifier : cliquez sur une bulle pour la modifier, faites-la glisser pour la déplacer, faites glisser un coin pour la redimensionner ; Maj+clic en choisit plusieurs. À côté des bulles, les clics vont à la visionneuse.",
-        "de": "Bearbeiten: Klicken Sie auf eine Sprechblase, um sie zu bearbeiten, ziehen Sie sie, um sie zu verschieben, ziehen Sie eine Ecke, um ihre Größe zu ändern; Umschalt+Klick wählt mehrere. Neben den Sprechblasen gehen Klicks an den Viewer.",
-        "it": "Modifica: fai clic su un balloon per modificarlo, trascinalo per spostarlo, trascina un angolo per ridimensionarlo; Maiusc+clic ne sceglie diversi. Fuori dai balloon, i clic vanno al visualizzatore.",
-        "nl": "Bewerken: klik op een ballon om hem te bewerken, sleep hem om hem te verplaatsen, sleep een hoek om de grootte te wijzigen; Shift+klik kiest er meerdere. Naast de ballonnen gaan klikken naar de viewer.",
-        "pl": "Edycja: kliknij dymek, aby go edytować, przeciągnij go, aby przenieść, przeciągnij róg, aby zmienić rozmiar; Shift+klik wybiera kilka. Poza dymkami kliknięcia trafiają do przeglądarki.",
-        "ru": "Правка: щёлкните пузырь, чтобы изменить его, перетащите, чтобы переместить, перетащите угол, чтобы изменить размер; Shift+щелчок выбирает несколько. Вне пузырей щелчки идут в программу просмотра.",
-        "tr": "Düzenle: düzenlemek için bir balona tıklayın, taşımak için sürükleyin, boyutunu değiştirmek için bir köşesini sürükleyin; Shift+tıklama birden fazlasını seçer. Balonların dışındaki tıklamalar görüntüleyiciye gider.",
-        "id": "Sunting: klik balon untuk menyuntingnya, seret untuk memindahkannya, seret sudutnya untuk mengubah ukurannya; Shift+klik memilih beberapa. Di luar balon, klik masuk ke penampil.",
-        "vi": "Sửa: bấm vào một bong bóng để sửa, kéo để di chuyển, kéo một góc để đổi kích thước; Shift+bấm để chọn nhiều cái. Ngoài các bong bóng, cú bấm đi tới trình xem.",
-        "zh": "编辑：点击气泡进行编辑，拖动可移动，拖动角可调整大小；Shift+点击可选择多个。气泡以外的点击交给阅读器。",
-        "zh-tw": "編輯：點選對話框即可編輯，拖曳可移動，拖曳角落可調整大小；Shift+點選可選取多個。對話框以外的點選交給閱讀器。",
-        "ko": "편집: 말풍선을 클릭하면 편집, 끌면 이동, 모서리를 끌면 크기를 바꿉니다. Shift+클릭으로 여러 개를 고릅니다. 말풍선 밖의 클릭은 뷰어로 갑니다.",
-        "th": "แก้ไข: คลิกลูกโป่งคำพูดเพื่อแก้ไข ลากเพื่อย้าย ลากมุมเพื่อปรับขนาด Shift+คลิกเพื่อเลือกหลายอัน คลิกนอกลูกโป่งคำพูดจะไปที่โปรแกรมอ่าน",
+    "Editing: click a bubble to edit it, drag it to move it, drag on empty space to add one, click its number to change its place in the reading order. Turn pages with the keys.": {
+        "ja": "編集：吹き出しをクリックすると編集、ドラッグで移動、何もないところのドラッグで追加、番号のクリックで読み順の位置を変えます。ページはキーでめくってください。",
+        "es": "Edición: haz clic en un globo para editarlo, arrástralo para moverlo, arrastra en un espacio vacío para añadir uno, haz clic en su número para cambiar su lugar en el orden de lectura. Pasa las páginas con las teclas.",
+        "pt": "Edição: clique num balão para editá-lo, arraste-o para movê-lo, arraste num espaço vazio para adicionar um, clique no número dele para mudar seu lugar na ordem de leitura. Vire as páginas com as teclas.",
+        "fr": "Modification : cliquez sur une bulle pour la modifier, faites-la glisser pour la déplacer, faites glisser sur un espace vide pour en ajouter une, cliquez sur son numéro pour changer sa place dans l'ordre de lecture. Tournez les pages avec les touches.",
+        "de": "Bearbeiten: Klicken Sie auf eine Sprechblase, um sie zu bearbeiten, ziehen Sie sie, um sie zu verschieben, ziehen Sie auf freier Fläche, um eine hinzuzufügen, klicken Sie auf ihre Nummer, um ihre Stelle in der Lesereihenfolge zu ändern. Blättern Sie mit den Tasten um.",
+        "it": "Modifica: fai clic su un balloon per modificarlo, trascinalo per spostarlo, trascina su uno spazio vuoto per aggiungerne uno, fai clic sul suo numero per cambiarne il posto nell'ordine di lettura. Gira le pagine con i tasti.",
+        "nl": "Bewerken: klik op een ballon om hem te bewerken, sleep hem om hem te verplaatsen, sleep op een lege plek om er een toe te voegen, klik op zijn nummer om zijn plaats in de leesvolgorde te wijzigen. Sla de pagina's om met de toetsen.",
+        "pl": "Edycja: kliknij dymek, aby go edytować, przeciągnij go, aby przenieść, przeciągnij w pustym miejscu, aby dodać nowy, kliknij jego numer, aby zmienić jego miejsce w kolejności czytania. Przewracaj strony klawiszami.",
+        "ru": "Правка: щёлкните пузырь, чтобы изменить его, перетащите, чтобы переместить, перетащите по пустому месту, чтобы добавить новый, щёлкните его номер, чтобы изменить его место в порядке чтения. Листайте страницы клавишами.",
+        "tr": "Düzenleme: düzenlemek için bir balona tıklayın, taşımak için sürükleyin, eklemek için boş bir yerde sürükleyin, okuma sırasındaki yerini değiştirmek için numarasına tıklayın. Sayfaları tuşlarla çevirin.",
+        "id": "Penyuntingan: klik balon untuk menyuntingnya, seret untuk memindahkannya, seret di tempat kosong untuk menambah balon, klik nomornya untuk mengubah tempatnya dalam urutan baca. Balik halaman dengan tombol.",
+        "vi": "Sửa: bấm vào một bong bóng để sửa, kéo để di chuyển, kéo ở chỗ trống để thêm một cái, bấm vào số của nó để đổi vị trí trong thứ tự đọc. Hãy lật trang bằng phím.",
+        "zh": "编辑：点击气泡进行编辑，拖动可移动，在空白处拖动可添加，点击编号可更改它在阅读顺序中的位置。请用按键翻页。",
+        "zh-tw": "編輯：點選對話框即可編輯，拖曳可移動，在空白處拖曳可新增，點選編號可變更它在閱讀順序中的位置。請用按鍵翻頁。",
+        "ko": "편집: 말풍선을 클릭하면 편집, 끌면 이동, 빈 곳을 끌면 추가, 번호를 클릭하면 읽기 순서에서의 위치를 바꿉니다. 페이지는 키로 넘기세요.",
+        "th": "แก้ไข: คลิกลูกโป่งคำพูดเพื่อแก้ไข ลากเพื่อย้าย ลากบนที่ว่างเพื่อเพิ่ม คลิกหมายเลขเพื่อเปลี่ยนตำแหน่งในลำดับการอ่าน ให้พลิกหน้าด้วยปุ่มกด",
     },
-    "Edit is off: every click goes to the viewer.": {
-        "ja": "編集はオフです。クリックはすべてビューアに届きます。",
-        "es": "Editar está desactivado: todos los clics van al visor.",
-        "pt": "Editar está desligado: todos os cliques vão para o visualizador.",
-        "fr": "Modifier est désactivé : tous les clics vont à la visionneuse.",
-        "de": "Bearbeiten ist aus: Jeder Klick geht an den Viewer.",
-        "it": "Modifica è disattivata: ogni clic va al visualizzatore.",
-        "nl": "Bewerken staat uit: elke klik gaat naar de viewer.",
-        "pl": "Edycja jest wyłączona: każde kliknięcie trafia do przeglądarki.",
-        "ru": "Правка выключена: все щелчки идут в программу просмотра.",
-        "tr": "Düzenle kapalı: tüm tıklamalar görüntüleyiciye gider.",
-        "id": "Sunting mati: setiap klik masuk ke penampil.",
-        "vi": "Sửa đang tắt: mọi cú bấm đều đi tới trình xem.",
-        "zh": "编辑已关闭：所有点击都交给阅读器。",
-        "zh-tw": "編輯已關閉：所有點選都交給閱讀器。",
-        "ko": "편집이 꺼져 있습니다. 모든 클릭은 뷰어로 갑니다.",
-        "th": "ปิดการแก้ไขแล้ว: ทุกการคลิกจะไปที่โปรแกรมอ่าน",
+    "Reader mode: every click and the wheel go to the viewer.": {
+        "ja": "読者モード：クリックもホイールもすべてビューアに届きます。",
+        "es": "Modo lector: todos los clics y la rueda van al visor.",
+        "pt": "Modo leitor: todos os cliques e a roda vão para o visualizador.",
+        "fr": "Mode lecteur : tous les clics et la molette vont à la visionneuse.",
+        "de": "Lesermodus: Jeder Klick und das Mausrad gehen an den Viewer.",
+        "it": "Modalità lettore: ogni clic e la rotellina vanno al visualizzatore.",
+        "nl": "Lezersmodus: elke klik en het muiswiel gaan naar de viewer.",
+        "pl": "Tryb czytelnika: każde kliknięcie i kółko myszy trafiają do czytnika.",
+        "ru": "Режим читателя: все щелчки и колесо мыши идут в программу просмотра.",
+        "tr": "Okuyucu modu: tüm tıklamalar ve fare tekerleği görüntüleyiciye gider.",
+        "id": "Mode pembaca: setiap klik dan roda mouse masuk ke penampil.",
+        "vi": "Chế độ người đọc: mọi cú bấm và con lăn chuột đều đi tới trình xem.",
+        "zh": "读者模式：所有点击和滚轮都交给阅读器。",
+        "zh-tw": "讀者模式：所有點選和滾輪都交給閱讀器。",
+        "ko": "독자 모드: 모든 클릭과 휠은 뷰어로 갑니다.",
+        "th": "โหมดผู้อ่าน: ทุกการคลิกและล้อเมาส์จะไปที่โปรแกรมอ่าน",
+    },
+    "Type the bubble's place in the reading order (1 to {n}) and press Enter; Esc gives it up.": {
+        "ja": "吹き出しの読み順での位置（1～{n}）を入力して Enter を押してください。Esc で取りやめます。",
+        "es": "Escribe el lugar del globo en el orden de lectura (de 1 a {n}) y pulsa Intro; Esc lo cancela.",
+        "pt": "Digite o lugar do balão na ordem de leitura (de 1 a {n}) e pressione Enter; Esc desiste.",
+        "fr": "Tapez la place de la bulle dans l'ordre de lecture (de 1 à {n}) et appuyez sur Entrée ; Échap y renonce.",
+        "de": "Tippen Sie die Stelle der Sprechblase in der Lesereihenfolge ein (1 bis {n}) und drücken Sie die Eingabetaste; Esc bricht ab.",
+        "it": "Scrivi il posto del balloon nell'ordine di lettura (da 1 a {n}) e premi Invio; Esc annulla.",
+        "nl": "Typ de plaats van de ballon in de leesvolgorde (1 tot {n}) en druk op Enter; Esc ziet ervan af.",
+        "pl": "Wpisz miejsce dymka w kolejności czytania (od 1 do {n}) i naciśnij Enter; Esc rezygnuje.",
+        "ru": "Введите место пузыря в порядке чтения (от 1 до {n}) и нажмите Enter; Esc отменяет.",
+        "tr": "Balonun okuma sırasındaki yerini yazın (1 ile {n} arası) ve Enter'a basın; Esc vazgeçer.",
+        "id": "Ketik tempat balon dalam urutan baca (1 sampai {n}) lalu tekan Enter; Esc membatalkannya.",
+        "vi": "Gõ vị trí của bong bóng trong thứ tự đọc (từ 1 đến {n}) rồi nhấn Enter; Esc để bỏ qua.",
+        "zh": "输入气泡在阅读顺序中的位置（1 到 {n}），然后按 Enter；按 Esc 放弃。",
+        "zh-tw": "輸入對話框在閱讀順序中的位置（1 到 {n}），然後按 Enter；按 Esc 放棄。",
+        "ko": "말풍선의 읽기 순서 위치(1~{n})를 입력하고 Enter를 누르세요. Esc로 그만둡니다.",
+        "th": "พิมพ์ตำแหน่งของลูกโป่งคำพูดในลำดับการอ่าน (1 ถึง {n}) แล้วกด Enter กด Esc เพื่อยกเลิก",
     },
     "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu.": {
         "ja": "読み順：読む順番に吹き出しをクリックし、メニューの「読み順を確定」を選んでください。",

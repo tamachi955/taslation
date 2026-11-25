@@ -27,7 +27,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "취소됨",
     "pipeline.from_cache": "이전 번역에서 {bubbles}줄을 표시했습니다.",
     "pipeline.translated": "{bubbles}줄을 {seconds:.0f}초 만에 번역했습니다.",
-    "pipeline.to_review": "살펴볼 만한 곳 {review}개 (편집을 켜고 메뉴 > 검토...).",
+    "pipeline.to_review": "살펴볼 만한 곳 {review}개 (독자 모드를 끄고 메뉴 > 검토...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "뷰어에서 페이지를 찾지 못했습니다. 책이 열려 있는지 확인하거나 왼쪽 패널의 영역 설정...을 사용하세요.",
     "ollama.unreachable": "TASlation이 번역 프로그램에 연결하지 못했습니다. 잠시 후 번역을 누르세요. 프로그램은 저절로 시작됩니다.",

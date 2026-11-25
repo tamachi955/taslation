@@ -223,6 +223,104 @@ def test_words_without_spaces_are_broken_anywhere_and_cut_after_the_last_line():
     assert all(pn._text_w(face, line) <= 120 for line in lines)
 
 
+# ------------------------------------------------------------------ the right pane by its rule
+def foot(progress="", mode="Editing: turn pages with the keys", viewer="Viewer: Book"):
+    return [pn.Row("", progress, "text", lines=2, alike=("This page: 888 of 888 lines",)),
+            pn.Row("", mode, "text", lines=2, alike=("Editing: turn pages with the keys", "Reader mode")),
+            pn.Row("", "Translator: on the GPU", "text", lines=2,
+                   alike=("Translator: not loaded yet", "Translator: on the processor; OCR: on the GPU")),
+            pn.Row("", viewer, "text", lines=1),
+            pn.Row("", "English · Book", "text", lines=1, spare=True)]
+
+
+def column(top, changing, rows, height, drop=()):
+    return pn.render_column(top, changing, rows, 200, height, "en", 96, pn.DARK, drop)
+
+
+def test_the_right_pane_s_foot_stands_at_the_column_s_bottom_its_rows_at_their_places_whatever_is_said():
+    height = pn.column_height(FRAME, BAND, 96)
+    assert height == BAND[1] - BAND[0] - 2 * pn.GAP
+    quiet = column([], [], foot(), height)
+    busy = column([], [pn.Row("", "Reading the page...", "text"), pn.Row("", "Translating... " * 6, "text")],
+                  foot("This page: 3 of 8 lines", "Reader mode", "Viewer: Another book"), height)
+    block = [pn.Row("copy_source", "Copy the Japanese"), pn.Row("", "やあ、元気？", "text", lang="ja", lines=5)]
+    with_block = column(block, [pn.Row("", "Translated 8 bubbles.", "text")], foot("This page: 8 of 8 lines"), height)
+    for picture in (quiet, busy, with_block):
+        assert picture.size == (200, height) and len(picture.foot) == 5 and picture.foot[-1][3] == height
+    assert quiet.foot == busy.foot == with_block.foot  # (each row at its place, whatever it says)
+    first = quiet.foot[0]
+    assert not quiet.bgra[first[1]:first[3], :, 3].any()  # (no page filling in: the row's room kept, empty)
+    assert busy.bgra[first[1]:first[3], :, 3].any()
+    assert not quiet.bgra[:first[1], :, 3].any()  # (nothing changing: nothing above the foot)
+    assert with_block.hit(10, 5) == "copy_source"  # (the bubble's block from the top, its plate taking a click)
+    assert [name for name, _box in with_block.hits] == ["copy_source"]  # (the foot takes no click: the viewer's)
+    ready = [pn.Row("", "Ready.", "text")]
+    assert column([], ready, [], height).size[1] == pn._measure(ready, 200, "en", 96)[0][3]  # (no foot: as its rows)
+
+
+def test_the_changing_rows_that_do_not_fit_go_in_the_order_given_and_the_spare_foot_row_where_the_band_is_short():
+    gap = pn.scaled(pn.ROW_GAP, 96)
+    rows = [pn.Row("", f"Line {i}.", "text") for i in range(8)]
+    row_h = pn._measure(rows[:1], 200, "en", 96)[0][3]
+    lasting = foot()[:4]  # (no spare row: the foot as it is whatever the height)
+    feet = pn._stacked(pn._measure(lasting, 200, "en", 96), gap)
+    height = feet + 5 * (row_h + gap) + row_h // 2  # (room for five of the eight)
+    cut = column([], rows, lasting, height, drop=(5, 2))
+    kept = [rows[i] for i in (0, 1, 3, 4, 6)]  # (5 and 2 first, then the newest: 7)
+    assert np.array_equal(cut.bgra, column([], kept, lasting, height).bgra) and len(cut.foot) == 4
+    assert not np.array_equal(cut.bgra, column([], rows[:5], lasting, height).bgra)
+    feet = pn._stacked(pn._measure(foot(), 200, "en", 96), gap)
+    assert np.array_equal(column([], rows, foot(), 5000).bgra[:200], column([], rows, foot(), 6000).bgra[:200])
+    short = int(feet / pn.FOOT_SHARE) - 1  # (the foot would take more than its share: the spare row goes)
+    picture = column([], [], foot(), short)
+    assert len(picture.foot) == 4 and picture.foot[-1][3] == short
+    tall = [pn.Row("", "やあ" * 80, "text", lang="ja", lines=5)]
+    assert column(tall, [], foot(), feet + 10) is None  # (the block does not fit with the foot: none)
+
+
+def test_the_right_pane_s_foot_says_the_mode_the_translator_s_place_the_viewer_the_language_and_the_book(tmp_path):
+    from taslation.capture import WindowInfo
+
+    app = fake_app(tmp_path, book_var=Var("Sample"))
+    assert [r.text for r in ui.foot_rows(app)] == ["", "Translator: not loaded yet", "Viewer: none chosen",
+                                                   "English · Sample"]  # (TASlation's window shown: no mode)
+    app._see_hidden, app.role_var, app._compute_where = True, Var("translator"), "gpu"
+    rows = ui.foot_rows(app)
+    assert [r.text for r in rows][1:3] == ["Editing: turn pages with the keys", "Translator: on the GPU"]
+    assert rows[-1].spare and not any(r.spare for r in rows[:-1]) and all(r.alike for r in rows[:3])
+    app.role_var.set("reader")
+    assert ui.foot_rows(app)[1].text == "Reader mode"
+    app.pipeline = SimpleNamespace(ocr=SimpleNamespace(placement=SimpleNamespace(device="cpu", why="room")))
+    assert ui.foot_rows(app)[2].text == "Translator: on the GPU; OCR: on the processor"
+    app.pipeline.ocr.placement = SimpleNamespace(device="gpu", why="room")
+    assert ui.foot_rows(app)[2].text == "Translator: on the GPU"  # (the readers with it: said once)
+    app.pipeline.ocr.placement = SimpleNamespace(device="cpu", why=ui.READERS_NOT_PLACED)
+    assert ui.foot_rows(app)[2].text == "Translator: on the GPU"  # (not judged yet)
+    app._fill = SimpleNamespace(final=None, states=["lettered", "read", "skipped"], filled=1)
+    assert ui.foot_rows(app)[0].text == "This page: 1 of 2 lines"
+    app.selected = WindowInfo(hwnd=5, title="Viewer window", class_name="Reader", pid=5, rect=(0, 0, 800, 600))
+    app.book_var = Var("A book whose name goes on and on " * 4 + "Volume 9")
+    rows = ui.foot_rows(app)
+    fits = pn.fits_line("en", 96)
+    assert rows[3].text == "Viewer: Viewer window" and "…" in rows[4].text and rows[4].text.endswith("9")
+    assert fits(rows[4].text) and rows[4].text.startswith("English · A book")
+
+
+def test_the_oldest_and_least_urgent_changing_rows_are_left_out_first_the_warnings_last(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(ui.time, "monotonic", lambda: now[0])
+    app = SimpleNamespace()
+    old, new = pn.Row("", "Old.", "text"), pn.Row("", "New.", "text")
+    warn = pn.Row("", "The translator is not running.", "text", warn=True)
+    assert ui._drop_order(app, [old]) == (0,)
+    now[0] = 105.0
+    assert ui._drop_order(app, [warn, old, new]) == (1, 2, 0)
+    assert ui._drop_order(app, [warn, new, old]) == (2, 1, 0)  # (by when each was first said, not by its place)
+    now[0] = 110.0
+    ui._drop_order(app, [new])
+    assert set(app._see_row_seen) == {"New."}  # (one gone is forgotten: said again, it is new)
+
+
 # ------------------------------------------------------------------ the Tk side
 class FakeOver:
     def __init__(self, clicks=()):
@@ -377,10 +475,10 @@ def test_the_right_pane_shows_the_window_s_words_as_they_are(tmp_path):
     no key (`test_no_shown_word_names_a_key_or_a_place_of_the_former_window`)."""
     line = "Stopped: this page was not translated, and nothing of it was kept. Translate translates it again."
     app = fake_app(tmp_path, status_var=Var(line))
-    assert line in [r.text for r in ui.right_rows(app)]
-    app.status_var = Var("Read 4 bubbles - 3 worth a look (turn Edit on, then Menu > Review...).")
-    assert "Read 4 bubbles - 3 worth a look (turn Edit on, then Menu > Review...)." in [
-        r.text for r in ui.right_rows(app)]
+    assert line in [r.text for r in ui.right_rows(app)[0]]
+    app.status_var = Var("Read 4 bubbles - 3 worth a look (with Reader mode off, Menu > Review...).")
+    assert "Read 4 bubbles - 3 worth a look (with Reader mode off, Menu > Review...)." in [
+        r.text for r in ui.right_rows(app)[0]]
     assert not hasattr(pn, "without_keys") and not hasattr(pn, "pane_words")
 
 
@@ -524,6 +622,27 @@ def test_shown_again_or_moved_the_windows_go_under_an_open_menu_of_this_process_
     assert window.own_menu() == 0 and calls == [(5, window.HWND_TOPMOST, 0, 0, 0, 0, flags | window.SWP_NOMOVE)]
     # the lettering's window and both panes come into the order only through `_raise`
     assert inspect.getsource(window).count("_user32.SetWindowPos(") == 1
+
+
+def test_the_lettering_shown_again_goes_under_the_panes_on_show(monkeypatch):
+    """While editing the lettering's window takes the mouse over the whole page: shown again (the Lettering switched
+    back on, say), it goes to the top of the topmost windows and the panes on show are put back over it, so that
+    their controls still take a click (`SeeThrough._raise_under_panes`; a pane hidden is left as it is)."""
+    import inspect
+
+    from taslation.capture import seethrough as window
+
+    raised = []
+    monkeypatch.setattr(window, "_raise", lambda hwnd, at=None: raised.append(hwnd))
+    shown = SimpleNamespace(hwnd=5, panes={"left": 6, "right": 7},
+                            _pane_shown={"left": (1, (40, 80), (180, 400)), "right": None})
+    window.SeeThrough._raise_under_panes(shown)
+    assert raised == [5, 6]
+    shown._pane_shown["right"] = (2, (1400, 80), (200, 700))
+    raised.clear()
+    window.SeeThrough._raise_under_panes(shown)
+    assert raised == [5, 6, 7]
+    assert "self._raise_under_panes()" in inspect.getsource(window.SeeThrough._draw)
 
 
 def test_the_pane_settings_entry_is_known_to_the_settings_file():

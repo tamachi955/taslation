@@ -16,7 +16,7 @@ own (`SCRIPT`: held, one turn, held to the end) and drives the scenes of `SCENES
 2. ``panes``: the tool's pointer goes down the left pane's controls and over to the right pane;
 3. ``original``: it rests on a bubble - the original in its place, the bubble's block in the right pane - and goes
    on to that block;
-4. ``edit``: Edit switched on in the left pane, a region's box dragged and dragged back, Edit off again.
+4. ``edit``: Reader mode unchecked in the left pane, a region's box dragged and dragged back, Reader mode again.
 
 The pointer is the tool's own: the see-through window is told where it is (`standin_seethrough.SeeWatch`'s fake
 point, whose own measures that would move it or click a pane are left out here); the real pointer never moves. The
@@ -112,7 +112,7 @@ def panes_present() -> bool:
 
 
 def edit_present() -> bool:
-    """Edit on the lettering over the viewer (`taslation.ui.see_edit`)."""
+    """Editing on the lettering over the viewer (`taslation.ui.see_edit`)."""
     return has_module("taslation.ui.see_edit")
 
 
@@ -181,12 +181,13 @@ SCENES: tuple[Scene, ...] = (
                         "With \"Indicators\" on, the right pane shows that bubble at its top: \"Copy the Japanese\", "
                         "\"Copy the translation\" and \"Ask again\", then its Japanese and its translation (up to five "
                         "lines each).")),
-    Scene("edit", "Edit: move a region",
-          "Turn Edit on in the left pane: the page's regions appear as boxes over the viewer. Drag a box to move it; "
-          "the lettering follows a moment later.", 12.0, present=edit_present,
-          follows=cites(MANUAL, "\"Edit\" in the left pane turns editing on and off.",
-                        "With \"Edit\" on, the regions of the page on show appear over the viewer as boxes, each with "
-                        "its number in the reading order on a small plate of its colour",
+    Scene("edit", "Editing: move a region",
+          "Uncheck Reader mode in the left pane: the page's regions are outlined over the viewer. Drag a box to move "
+          "it; the lettering follows a moment later.", 12.0, present=edit_present,
+          follows=cites(MANUAL, "\"Reader mode\" in the left pane (checked: you only read) switches editing off, and "
+                                "unchecked again, on.",
+                        "While editing, every region of the page on show is outlined over the viewer in its colour, "
+                        "with its number in the reading order on a small plate of that colour",
                         "Like shapes in office software, a region is moved by dragging and resized with its corner "
                         "handles, and it is read again only when the new frame covers a larger area (a right click "
                         "during a drag gives the drag up).",
@@ -479,7 +480,7 @@ def verdict(covers: int, tiles: int) -> str:
 def own_masks(over: Any, x: int, y: int, run: Run | None = None) -> list[tuple[int, int, int, int]]:
     """Where TASlation's own windows draw over the stand-in, in the copy's px (its client area at *x*, *y*): every
     patch of the set shown and of the one shown at the frame before (all of them, shown or given way: a look may
-    change that between the copy and the frames it is told by), the panes, and with Edit on its boxes with their
+    change that between the copy and the frames it is told by), the panes, and while editing its boxes with their
     plates and handles (and the sweep of a drag); the check leaves those out."""
     from taslation import seethrough as st
 
@@ -623,7 +624,7 @@ def biggest_patch(over: Any, panes: Sequence[tuple[int, ...]]) -> tuple[int, int
 
 
 def edit_settled(director: Any, over: Any) -> bool:
-    """Edit on with its boxes taking the mouse, no press held, no change being stored, the window at rest."""
+    """Editing, its boxes taking the mouse, no press held, no change being stored, the window at rest."""
     marks = getattr(over, "_marks_live", None)
     return (bool(getattr(over, "_edit_takes", False)) and marks is not None and not marks.locked
             and getattr(over, "_press", None) is None and getattr(over, "_last_look", None) is not None
@@ -766,15 +767,15 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
     yield 1.8
     run.end("original")
 
-    # 4. Edit: on, a box dragged and back, off
+    # 4. editing: Reader mode unchecked, a box dragged and back, Reader mode checked again
     run.begin("edit")
     at = pane_point(app, over(), "left", "edit")
     if at is None:
-        raise SceneFailed("no Edit in the left pane")
+        raise SceneFailed("no Reader mode in the left pane")
     yield from glide(run, at[0], 0.8)
     yield 0.3
     yield from click_pane(run, over(), "left", at[1])
-    yield (lambda: edit_ready(director, over()), PAGE_S, "Edit on, the page's boxes")
+    yield (lambda: edit_ready(director, over()), PAGE_S, "editing, the page's boxes")
     yield 1.3
     o = over()
     picked_box = drag_box_pick(o)
@@ -800,7 +801,7 @@ def scenes_program(director: Any, run: Run) -> Iterator[Any]:
     yield from glide(run, at[0], 0.8)
     yield 0.3
     yield from click_pane(run, over(), "left", at[1])
-    yield (lambda: not getattr(over(), "_edit_takes", False) and director.idle(), 15.0, "Edit off")
+    yield (lambda: not getattr(over(), "_edit_takes", False) and director.idle(), 15.0, "Reader mode again")
     yield 1.6
     run.end("edit")
     run.on.clear()

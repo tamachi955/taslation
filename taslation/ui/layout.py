@@ -356,7 +356,7 @@ def stay_on_top(win: tk.Toplevel) -> None:
 def show_quietly(win: tk.Toplevel, focus: tk.Misc | None = None) -> None:
     """*win*, a dialog placed and still withdrawn, shown without taking the foreground: Tk's ``wm state normal``
     (SW_SHOWNOACTIVATE; ``wm deiconify`` would raise it and force the focus into it, SetForegroundWindow, which
-    Windows lets through while the pointer's last input went to TASlation - a box in Edit), then topmost
+    Windows lets through while the pointer's last input went to TASlation - a box while editing), then topmost
     (`stay_on_top`, SWP_NOACTIVATE). It waits in sight until the person clicks it (Windows activates it then: it takes
     the keys, *focus* the first) and is marked meanwhile (``_see_quiet``: `seethrough.front_tick` brings no such
     dialog to the front, a region editor's closing gives the foreground back past it)."""

@@ -25,7 +25,8 @@ What runs, all on this computer:
   is sent to any window by this tool, and TASlation sends none either (its key and click functions refuse here);
 * TASlation in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: its one mode, see-through -
   the lettering laid over the stand-in's own window by a click-through window of TASlation's, its own window hidden -,
-  Auto on, Edit off, early start and the load of the model at the start as the defaults have them), on a scratch
+  Auto on, early start and the load of the model at the start as the defaults have them, Reader mode on unless
+  *--see-edit*), on a scratch
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
   English; the reader's capture area 0,85,0,0 as on the owner's browser reader, its top scaled with *--scale*),
   with the real OCR models
@@ -97,7 +98,7 @@ The see-through window is watched by `standin_seethrough.SeeWatch` (``run.see_th
 stand-in's change of screen to the old page's patches gone, the hits, the foreground, the frames a second, the CPU;
 with *--see-truth* copies of the stand-in's place on the screen in memory, checked for old patches over a new page,
 two of them into shots/; *--see-indicators off* with the indicators' pane switched off,
-``Settings.see_through_indicators``; *--see-edit* with Edit on, the region under the pointer measured,
+``Settings.see_through_indicators``; *--see-edit* editing (Reader mode off), the region under the pointer measured,
 ``run.see_through.edit``). *--standin-size
 WxH* gives the stand-in's window another size, *--standin-full-screen* starts it in the browser's own full screen (the
 reader's area the whole frame). TASlation's own window is never on the screen: the watch reads its handle once a
@@ -150,7 +151,7 @@ cancelled with its page on show, ``resized_away``); overlays left on a page the 
 the scratch state keeps
 turn times; where the OCR read (the readers' placement, through every load of the model, and the System page's
 facts); errors (type names and counts, also from the log); the pages in the cache at the end against those the
-stand-in rested on; the window's role (Edit) as it changed; the requests of scenario x sent for nothing and what
+stand-in rested on; the window's role (Reader mode or editing) as it changed; the requests of scenario x sent for nothing and what
 their cancel cost. Into *--out*: report.json
 (with the lines of the rule for a request without an answer and of the backlog's pause for it, ``no_answer``, each silence with what the server answered just then: `LogTap`); stacks.txt
 when a request to the translator stays under way too long (`watch_stuck`: the threads' stacks, files, lines and
@@ -779,7 +780,7 @@ class Notes:
         # stand-in drew on the two frames it took for the soft and the sharp picture
         self.drew_soft: list[dict[str, Any]] = []
         self.margins: list[dict[str, Any]] = []  # the capture area in force and the frame's own, as they changed
-        self.modes: list[dict[str, Any]] = []  # the role (Edit off: reader, on: translator), as changed
+        self.modes: list[dict[str, Any]] = []  # the role (Reader mode: reader, editing: translator), as changed
         # what the driver changed between scenarios (the stand-in's size), and when: a rest on the page before ends
         # there (`turn_rows`)
         self.acts: list[dict[str, Any]] = []
@@ -1096,7 +1097,7 @@ class Notes:
                 self.margins.append(rec)
 
     def mode(self, app: Any) -> None:
-        """The window's role (Edit), noted as it changes."""
+        """The window's role (Reader mode or editing), noted as it changes."""
         rec = {"t": now_ms(), "role": str(app.role_var.get())}
         with self.lock:
             last = self.modes[-1] if self.modes else None
@@ -3196,7 +3197,7 @@ class Director:
             if self.phase != "end":
                 self.phase, self.phase_at = "end", now
                 return
-            acting = self.see is not None and self.see.acting()  # (a scene of the watch's - Edit's, say - not cut)
+            acting = self.see is not None and self.see.acting()  # (a scene of the watch's - editing's, say - not cut)
             if (self.ended and rested and self.backlog_done() and not acting) or waited > self.args.timeout:
                 if waited > self.args.timeout:
                     self.released["end"] = {"timed_out": True}
@@ -4745,7 +4746,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     state = demo_video.scratch_state()
     info = viewer_info()
     edit = bool(getattr(args, "see_edit", False))
-    remember_role(state, BOOK, "translator" if edit else "reader")  # (the Translator's: the left pane's Edit on)
+    remember_role(state, BOOK, "translator" if edit else "reader")  # (editing: the left pane's Reader mode off)
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
     settings = Settings(state_dir=state, ui_language="en", target_language="English", ui_scale=args.scale,
@@ -4777,7 +4778,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
                                       activations=activations,
                                       pane_shot=out / "shots" if getattr(args, "see_pane_shot", False) else None,
                                       viewer_pids=lambda: {pid, *browser.tree}, edit=edit,
-                                      add=bool(getattr(args, "see_add", False)),
+                                      add=bool(getattr(args, "see_add", False)), standin_said=browser.said,
                                       standin=browser if any(s.name == "s" for s in segments) else None, top=top,
                                       state_of=lambda image: notes.shown(image).state())
     see.install()
@@ -5823,12 +5824,14 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "both side panes show beside a spread whose page is done and the copy shows nothing of another "
                          "program's, into shots/ (it shows a sample page: delete it after)")
     ap.add_argument("--see-edit", action="store_true",
-                    help="the book's role kept as the Translator's, so that the left pane's Edit "
-                         "is on from the start; a click and a drag on a region, posted to the lettering's own window, "
-                         "are measured in place of the patch under the pointer (run.see_through.edit)")
+                    help="the book's role kept as editing (the program's default; without it a run sets Reader mode), "
+                         "so that the left pane's Reader mode is off from the start; a click and drags on a region, "
+                         "a click on its number plate with its place typed, and a rectangle drawn on the empty "
+                         "ground, posted to TASlation's own windows, are measured in place of the patch under the "
+                         "pointer (run.see_through.edit)")
     ap.add_argument("--see-add", action="store_true",
-                    help="adding text areas measured in place of both (run.see_through.add), Edit on with --see-edit "
-                         "and off without: once a page is done, the left pane's Add area and the Insert key's "
+                    help="adding text areas measured in place of both (run.see_through.add), editing with --see-edit "
+                         "and Reader mode without: once a page is done, the left pane's Add area and the Insert key's "
                          "message, each with a rectangle dragged on the page's empty space, then each way of giving "
                          "it up, all posted to TASlation's own windows, and who is in front against whether the key "
                          "is held (read only); best with scenario g")

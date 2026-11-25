@@ -11,7 +11,7 @@ are those it was made from.
 * What the overlay shows (`visible`): the patches of the newest set whose pixels match, those that match.
 * The window's picture (`compose`): the frame's size, transparent but for the patches shown (premultiplied BGRA, as
   ``UpdateLayeredWindow`` wants it).
-* Edit (`Marks`, `edit_grip`, `edit_drag`, `edit_compose`): the regions of the page on show, numbered, take the mouse
+* Editing (`Marks`, `edit_grip`, `edit_drag`, `edit_compose`): the regions of the page on show, numbered, take the mouse
   where their boxes are - a click edits one, a drag moves it, a drag on a corner resizes it - and nowhere else.
 * `steady_thumb`, `bands`, `ground_box`, `loading_kind`: what decides whether the page under the lettering is another
   page (most of the page area changed), not a band of it (bars over the page come and go), and whether a frame is a
@@ -260,32 +260,38 @@ class SetStore:
         self.sets = []
 
 
-# ------------------------------------------------------------------ Edit: the page's regions under the pointer
-EDIT_ALPHA = 1  # a region's box in Edit, where no lettering is: next to nothing shows (1 of 255 darker), but the
-# layered window takes the mouse there (a pixel of alpha 0 lets it through to the viewer)
+# ------------------------------------------------------------------ editing: the page's regions under the pointer
+EDIT_ALPHA = 1  # the page while editing, where no lettering is: next to nothing shows (1 of 255 darker), but the layered
+# window takes the mouse there - the whole page does, the viewer has the keys alone (a pixel of alpha 0 lets the mouse
+# through to the window under it: a window over the viewer, `edit_compose`'s holes)
 GRIP_PX = 7  # a press this near a corner of a region's box resizes it (px at 96 DPI)
 DRAG_PX = 4  # the pointer moved farther than this with the button down: a drag, not a click (px at 96 DPI)
-LINE_PX = 2  # the outline round a region's box (px at 96 DPI)
+LINE_PX = 2  # the outline round a region's box, in its colour (px at 96 DPI)
+HOVER_LINE_PX = 3  # the stronger outline round the box under the pointer (px at 96 DPI)
 HANDLE_PX = 7  # the squares at the corners of the box under the pointer (px at 96 DPI)
 MIN_BOX = 8  # a region's shortest side after a resize, and the least a rectangle drawn to add one (`area.MIN_REGION`)
 OUTLINE = (0, 212, 255)  # (BGR) the box under the pointer, the one in the editor and those selected (the window's
 # FRAME_COLOUR, #ffd400)
 ADDING = (255, 163, 77)  # (BGR) the rectangle drawn to add a region (the window's NEW_REGION_COLOUR, #4da3ff)
 CORNERS = ("nw", "ne", "se", "sw")
+PLATE = "plate"  # (a grip) a press on a box's number plate: a click types its place in the reading order, a drag
+# moves the box
 
 
 @dataclass(frozen=True)
 class Marks:
-    """Edit's marks on one page, from the Tk thread (`capture.seethrough.SeeThrough.set_edit`): *key* the page's
+    """the editing marks on one page, from the Tk thread (`capture.seethrough.SeeThrough.set_edit`): *key* the page's
     frame (its patches' set), *boxes* the regions a press takes hold of, in their reading order (frame pixels), each
-    one's number plate (*plates*: premultiplied BGRA and its top left, or None), the regions *chosen* (outlined; a
+    one's number plate (*plates*: premultiplied BGRA and its top left, or None) and the colour it is outlined in all
+    the time (*colours*: BGR, the plate's; none given: outlined only as below), the regions *chosen* (outlined; a
     drag of one of them moves them all), the one in the editor (*held*: outlined, its patches shown whatever the frame
     says) and the one whose original is shown (*bare*: its patches left out), whether presses only click (*locked*:
     an editor open, a change being stored, the reading order being clicked), whether the next drag draws a region to
-    add (*adding*: the whole page takes the mouse meanwhile), the boxes a change was made to, outlined until the page
-    has them (*ghosts*), and the newest press the Tk thread had taken when it made these (*seen*). *serial* tells one
-    set of marks from the next. *probes* holds, for each box, the frame's pixels round it (`probe`, or None): a box
-    with no patch takes nothing while the viewer's pixels there are not those (its bars over it, another page)."""
+    add (*adding*: in Reader mode too; the whole page takes the mouse meanwhile, as it does while editing), the boxes a
+    change was made to, outlined until the page has them (*ghosts*), and the newest press the Tk thread had taken
+    when it made these (*seen*). *serial* tells one set of marks from the next. *probes* holds, for each box, the
+    frame's pixels round it (`probe`, or None): a box with no patch takes nothing while the viewer's pixels there are
+    not those (its bars over it, another page)."""
 
     key: int
     boxes: tuple[Box, ...]
@@ -299,10 +305,15 @@ class Marks:
     seen: int = 0
     serial: int = 0
     probes: tuple[Patch | None, ...] = ()
+    colours: tuple[tuple[int, int, int], ...] = ()
+
+
+GROUND = Marks(key=0, boxes=())  # (the window's) the whole page taking the mouse while editing on a page with no marks of
+# its own (not translated yet, another page): a drag draws a rectangle, a click does nothing
 
 
 def probe(near: Box, pixels: np.ndarray, step: int = STEP) -> Patch:
-    """What a region's box with no patch of its own is checked by in Edit (`Marks.probes`): a patch with no picture
+    """What a region's box with no patch of its own is checked by while editing (`Marks.probes`): a patch with no picture
     that keeps the frame's pixels in *near* (the box with MARGIN about it, within the frame) - *pixels* the frame's
     there, (h, w, >=3) BGR as the viewer's come -, every *step*-th one, as `make_patches` keeps them."""
     return Patch(near, np.zeros((0, 0, 4), np.uint8), near, np.ascontiguousarray(pixels[::step, ::step, :3]))
@@ -318,37 +329,41 @@ def plate_box(plate: tuple[np.ndarray, tuple[int, int]] | None) -> Box | None:
 def edit_grip(marks: Marks, point: tuple[int, int], reach: int, left_out: frozenset[int] = frozenset()
               ) -> tuple[int, str] | None:
     """What a press at *point* (frame pixels) takes hold of: (the index of a region's box, one of CORNERS - within
-    *reach* px of that corner, it is resized - or "move"), the smallest box the point is in (or its number plate);
-    None for none. The boxes of *left_out* (covered by a window over the viewer) take nothing."""
+    *reach* px of that corner, it is resized -, PLATE - its number plate, drawn over everything else - or "move",
+    the smallest box the point is in); a corner first, then a plate, then a box; None for none (the page's empty
+    ground). The boxes of *left_out* (covered by a window over the viewer) take nothing."""
     x, y = point
-    best: tuple[int, int, str] | None = None
+    corner: tuple[int, int, str] | None = None
+    inside: tuple[int, int] | None = None
+    plate_at: int | None = None
     for i, box in enumerate(marks.boxes):
         if i in left_out:
             continue
         left, top, right, bottom = box
+        area = (right - left) * (bottom - top)
         corners = {"nw": (left, top), "ne": (right, top), "se": (right, bottom), "sw": (left, bottom)}
         for name in CORNERS:
             cx, cy = corners[name]
-            if abs(x - cx) <= reach and abs(y - cy) <= reach:
-                area = (right - left) * (bottom - top)
-                if best is None or area < best[0]:
-                    best = (area, i, name)
-        inside = left <= x < right and top <= y < bottom
+            if abs(x - cx) <= reach and abs(y - cy) <= reach and (corner is None or area < corner[0]):
+                corner = (area, i, name)
         plate = plate_box(marks.plates[i]) if i < len(marks.plates) else None
-        on_plate = plate is not None and plate[0] <= x < plate[2] and plate[1] <= y < plate[3]
-        if inside or on_plate:
-            area = (right - left) * (bottom - top)
-            if best is None or (best[2] == "move" and area < best[0]):
-                best = (area, i, "move")
-    return None if best is None else (best[1], best[2])
+        if plate is not None and plate[0] <= x < plate[2] and plate[1] <= y < plate[3]:
+            plate_at = i  # (the last drawn: the one on top)
+        if left <= x < right and top <= y < bottom and (inside is None or area < inside[0]):
+            inside = (area, i)
+    if corner is not None:
+        return corner[1], corner[2]
+    if plate_at is not None:
+        return plate_at, PLATE
+    return None if inside is None else (inside[1], "move")
 
 
 def edit_drag(marks: Marks, index: int, grip: str, start: tuple[int, int], now: tuple[int, int],
               size: tuple[int, int]) -> dict[int, Box]:
     """The boxes as a drag from *start* to *now* (frame pixels, a frame of *size*) holding *grip* of the box *index*
-    leaves them: a corner resizes that box (MIN_BOX at the least), "move" moves it - and with it the others chosen
-    when it is one of them, all by as much, stopping at the frame's edge (`area.shift_within`). Only the boxes that
-    move, by index."""
+    leaves them: a corner resizes that box (MIN_BOX at the least), "move" (or PLATE: the box by its number plate)
+    moves it - and with it the others chosen when it is one of them, all by as much, stopping at the frame's edge
+    (`area.shift_within`). Only the boxes that move, by index."""
     from .ui import area
 
     box = marks.boxes[index]
@@ -400,27 +415,39 @@ def _square(out: np.ndarray, centre: tuple[int, int], side: int, bgr: tuple[int,
 
 
 def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[int, Box] | None,
-                 sheet: bool, dpi: int | float, left_out: frozenset[int] = frozenset(),
-                 drawing: Box | None = None) -> None:
-    """Edit's marks laid on the overlay's picture *out* (premultiplied BGRA with the patches on it, changed in place):
-    EDIT_ALPHA wherever nothing is drawn inside each region's box (or, with *sheet* - a press held, a region to add
-    -, over the whole picture: every pointer move and the release are the window's then), the number plates, an
-    outline round the box under the pointer (*hover*, with its corner handles), the one in the editor, those chosen and
-    the ghosts; the boxes of a drag where it has them now (*moved*, by index), and the rectangle being drawn
-    (*drawing*). The boxes of *left_out* (covered) get nothing."""
+                 dpi: int | float, left_out: frozenset[int] = frozenset(), drawing: Box | None = None,
+                 holes: tuple[Box, ...] = ()) -> None:
+    """the editing marks laid on the overlay's picture *out* (premultiplied BGRA with the patches on it, changed in place):
+    EDIT_ALPHA wherever nothing is drawn, over the whole picture (every press, every move and every release on the
+    page are the window's: the viewer gets the keys alone); every region's box outlined in its colour
+    (`Marks.colours`), with its number plate; the one in the editor, those chosen, the boxes of a drag where it has
+    them now (*moved*, by index) and the ghosts outlined in OUTLINE, the box under the pointer (*hover*) in OUTLINE's
+    stronger line with its corner handles (none while presses only click); the rectangle being drawn (*drawing*).
+    The boxes of *left_out* (covered, or not over their page now) get nothing, and the *holes* (the windows over the
+    viewer, frame pixels) are left at alpha 0: a press there is that window's."""
     height, width = out.shape[:2]
     alpha = out[..., 3]
-    if sheet:
-        alpha[alpha == 0] = EDIT_ALPHA
-    else:
-        for i, box in enumerate(marks.boxes):
-            if i in left_out:
-                continue
-            left, top = max(0, box[0]), max(0, box[1])
-            right, bottom = min(width, box[2]), min(height, box[3])
-            if right > left and bottom > top:
-                part = alpha[top:bottom, left:right]
-                part[part == 0] = EDIT_ALPHA
+    alpha[alpha == 0] = EDIT_ALPHA
+    line = scaled(LINE_PX, dpi)
+    for i, colour in enumerate(marks.colours[:len(marks.boxes)]):
+        if i not in left_out:
+            _frame(out, (moved or {}).get(i, marks.boxes[i]), colour, line)
+    outlined = {i for i in (*marks.chosen, marks.held) if i is not None and i not in left_out}
+    for i in sorted(outlined):
+        if 0 <= i < len(marks.boxes):
+            _frame(out, (moved or {}).get(i, marks.boxes[i]), OUTLINE, line)
+    for i, box in (moved or {}).items():
+        if i not in outlined:
+            _frame(out, box, OUTLINE, line)
+    for box in marks.ghosts:
+        _frame(out, box, OUTLINE, line)
+    if hover is not None and 0 <= hover < len(marks.boxes) and hover not in left_out:
+        left, top, right, bottom = (moved or {}).get(hover, marks.boxes[hover])
+        _frame(out, (left, top, right, bottom), OUTLINE, scaled(HOVER_LINE_PX, dpi))
+        if not marks.locked:
+            side = scaled(HANDLE_PX, dpi)
+            for corner in ((left, top), (right - 1, top), (right - 1, bottom - 1), (left, bottom - 1)):
+                _square(out, corner, side, OUTLINE)
     for i, plate in enumerate(marks.plates):
         if plate is None or i in left_out:
             continue
@@ -433,23 +460,13 @@ def edit_compose(out: np.ndarray, marks: Marks, hover: int | None, moved: dict[i
         dst = out[y0:y1, x0:x1].astype(np.uint16)
         keep = 255 - src[..., 3:4]
         out[y0:y1, x0:x1] = np.minimum(255, src + (dst * keep + 127) // 255).astype(np.uint8)
-    line = scaled(LINE_PX, dpi)
-    outlined = {i for i in (*marks.chosen, marks.held, hover) if i is not None and i not in left_out}
-    for i in sorted(outlined):
-        if 0 <= i < len(marks.boxes):
-            _frame(out, (moved or {}).get(i, marks.boxes[i]), OUTLINE, line)
-    for i, box in (moved or {}).items():
-        if i not in outlined:
-            _frame(out, box, OUTLINE, line)
-    for box in marks.ghosts:
-        _frame(out, box, OUTLINE, line)
-    if hover is not None and 0 <= hover < len(marks.boxes) and hover not in left_out and not marks.locked:
-        left, top, right, bottom = (moved or {}).get(hover, marks.boxes[hover])
-        side = scaled(HANDLE_PX, dpi)
-        for corner in ((left, top), (right - 1, top), (right - 1, bottom - 1), (left, bottom - 1)):
-            _square(out, corner, side, OUTLINE)
     if drawing is not None:
         _frame(out, drawing, ADDING, line)
+    for box in holes:
+        left, top = max(0, int(box[0])), max(0, int(box[1]))
+        right, bottom = min(width, int(box[2])), min(height, int(box[3]))
+        if right > left and bottom > top:
+            out[top:bottom, left:right] = 0
 
 
 # ------------------------------------------------------------------ another page, or a band of it

@@ -180,6 +180,45 @@ def test_several_selected_go_to_one_place_together(window, monkeypatch):
     assert len(w.history.done) == 1
 
 
+class Asked(Ordered):
+    """`Ordered` with the place typed on a region's plate (see-through mode), the lines after it asked again."""
+
+    _ask_after_order = app_mod.App._ask_after_order
+
+
+def test_a_place_typed_on_a_plate_asks_the_lines_after_it_again_but_the_persons_own_and_undo_takes_all_back(
+        window, monkeypatch):
+    w = Asked(window.pipeline, window.last_result)
+    regions = w._page_regions()
+    mine = regions[1]
+    assert w.pipeline.set_translation(w.last_result, mine, "My own words.") and w.pipeline.corrected(w.last_result,
+                                                                                                    mine)
+    assert not w.pipeline.corrected(w.last_result, regions[0])
+    start, before = w.state(), w.texts()
+    asked = []
+
+    def ask_again(result, region, source=None):
+        asked.append((region, [r.translated_text for r in result.regions[:3]]))
+        return "Said anew."
+
+    monkeypatch.setattr(w.pipeline, "ask_again", ask_again)
+    w._place_regions([regions[2]], 1, ask=True)
+    placed = [regions[2], regions[0], regions[1], *regions[3:]]
+    assert all(a is b for a, b in zip(w._page_regions(), placed))
+    lines = [r for r in placed if r is not mine and r.status == "translated"]
+    assert len(lines) >= 3 and [r for r, _context in asked] == lines  # (from the first place changed on, in order)
+    assert asked[1][1][0] == "Said anew."  # (each after the lines before it as they are by then)
+    assert w.texts()[2] == "My own words." and w.texts().count("Said anew.") == len(lines)
+    assert w.said[-1] == selection.PLACED_ASKED and not w.busy and len(w.history.done) == 1
+    assert w.history.done[-1].kind == "order" and _skipped_and_order(w) == (False, len(before))
+    w.undo_edit()
+    assert w.said[-1] == "Reading order taken back." and _skipped_and_order(w) == (False, 0)
+    assert w.state()[1] == start[1] and w.texts() == before  # (the translations as they were, the order too)
+    asked.clear()
+    w._place_regions([w._page_regions()[0]], 1, ask=True)  # (where it is already: nothing asked)
+    assert w.said[-1] == selection.PLACED_ALREADY and not asked
+
+
 def test_place_in_reading_order_waits_while_the_order_is_set_by_clicks(window, monkeypatch):
     w = Ordered(window.pipeline, window.last_result)
     monkeypatch.setattr(selection, "ask_dialog", lambda make: pytest.fail("asked while ordering"))

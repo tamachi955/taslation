@@ -13,11 +13,12 @@ click, no message; the foreground is only read):
   the banner's dialog came and went;
 * the side panes once a second (`_pane_watch`), one click on the left pane's lettering switch posted to the pane
   (`_click_lettering`), and the patch under the pointer (`_hover_measure`: the pointer the see-through window reads is
-  this tool's for the whole run, `install`; the real pointer is never moved) - or, with *edit* (the left pane's Edit
-  on), Edit on the overlay instead (`_edit_measure`: a click and a drag on a region, posted to the lettering's own
-  window);
+  this tool's for the whole run, `install`; the real pointer is never moved) - or, with *edit* (editing: the left
+  pane's Reader mode off), editing on the overlay instead (`_edit_measure`: a click and drags on a region, its
+  number plate's place typed and a rectangle drawn on the empty ground, posted to TASlation's own windows);
 * every HIT_EVERY_S, which window `WindowFromPoint` gives at the middle of each patch shown, at the page's middle and
-  on the ground beside it: the stand-in's, never the see-through window;
+  on the ground beside it: the stand-in's, never the see-through window, in Reader mode (while editing the
+  see-through window's: it takes the mouse over the whole client area);
 * the process's CPU time and working set, every CPU_EVERY_S, with whether a page job ran, and the CPU time of the
   stand-in's processes (`process_seconds`: its sandboxed ones too); every GPU_EVERY_S, the GPU memory this process
   and the stand-in's hold (`GpuMemory`: Windows' own counter);
@@ -76,7 +77,7 @@ HOVER_FOR_S = 60.0  # ... for so long at the most (a round in which another page
 WM_LBUTTONDOWN, WM_LBUTTONUP, MK_LBUTTON = 0x0201, 0x0202, 0x0001
 WM_MOUSEMOVE, WM_CLOSE = 0x0200, 0x0010
 GWL_EXSTYLE, WS_EX_TRANSPARENT = -20, 0x00000020
-EDIT_FOR_S = 60.0  # (with *edit*) a region to measure Edit on is waited for so long at the most
+EDIT_FOR_S = 60.0  # (with *edit*) a region to measure editing on is waited for so long at the most
 EDIT_DRAG = (24, 12)  # px (at 100 %) the region's box is dragged by
 EDIT_MIN_BOX = 24  # px: the least side of a box the measure takes
 EDITOR_TITLE = "Edit region"  # (the region editor's title, the window's language being English in a run)
@@ -84,6 +85,7 @@ EDITOR_TITLE = "Edit region"  # (the region editor's title, the window's languag
 # region's box and from the rectangles drawn before; the messages posted to TASlation's own windows
 ADD_BOX, ADD_CLEAR = (90, 50), 14
 WM_RBUTTONDOWN, WM_RBUTTONUP, WM_HOTKEY, VK_INSERT = 0x0204, 0x0205, 0x0312, 0x2D
+WM_KEYDOWN, WM_KEYUP, WM_CHAR, VK_RETURN = 0x0100, 0x0101, 0x0102, 0x0D  # (posted to the place entry's own window)
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -413,10 +415,17 @@ class SeeWatch:
     def __init__(self, app: Any, hwnd: int, decode: Callable[[Any], Any], truth: bool, shots: Path | None,
                  front_before: int = 0, activations: Activations | None = None, pane_shot: Path | None = None,
                  viewer_pids: Callable[[], set[int]] | None = None, edit: bool = False, standin: Any = None,
-                 top: int = 0, state_of: Callable[[Any], str] | None = None, add: bool = False) -> None:
+                 top: int = 0, state_of: Callable[[Any], str] | None = None, add: bool = False,
+                 standin_said: Callable[[], list[tuple[float, dict[str, str]]]] | None = None) -> None:
         self.app, self.hwnd, self.decode = app, int(hwnd), decode
-        self.edit = bool(edit)  # (the left pane's Edit on: `_edit_measure` in place of `_hover_measure`)
-        self.add = bool(add)  # (adding text areas measured, `_add_measure`, in place of both; Edit as *edit* has it)
+        # what the stand-in's page said so far ((monotonic s, its words), `StandinBrowser.said`): the bars, presses and
+        # clicks it had while editing was measured (`_edit_measure`: none, the whole client area being the overlay's)
+        self.standin_said = standin_said
+        self.foot_y: dict[str, Counter[str]] = {}  # (`_pane_watch`) the right pane's foot rows: from the foot's bottom
+        # (-1 the lowest) -> their tops in the client area at each look, "frame WxH:y"
+        self.foot_rows: Counter[int] = Counter()  # ... how many rows the foot had at each look
+        self.edit = bool(edit)  # (editing, Reader mode off: `_edit_measure` in place of `_hover_measure`)
+        self.add = bool(add)  # (adding text areas measured, `_add_measure`, in place of both; editing as *edit* has it)
         self.add_result: dict[str, Any] = {}
         # (scenario s) the stand-in's browser (`standin_viewer.StandinBrowser`: what its page says), whose slides of
         # the page the pointer the window reads follows (`_follow_slides`; no hover measure then); *top*: the rows
@@ -551,7 +560,7 @@ class SeeWatch:
         self.thread.start()
 
     def acting(self) -> bool:
-        """Whether a scene of the watch's own (the pointer on a bubble, Edit's click and drags, Add area) is being
+        """Whether a scene of the watch's own (the pointer on a bubble, editing's clicks and drags, Add area) is being
         acted now: the run's end waits for it (`standin_e2e.Director.step`), so that its measures are not cut."""
         thread = self.hover_thread
         return thread is not None and thread.is_alive()
@@ -676,7 +685,9 @@ class SeeWatch:
         """The side panes, once a second: shown or hidden beside which kind of page (a single page or a spread, by
         its box), how many px each shares with the page box (none, ever), how far from it, their sizes, and which window
         `WindowFromPoint` gives on the right pane (the stand-in: it is click-through), on a control of the left one
-        (the pane) and between two of its rows (the stand-in: nothing there). With *pane_shot*, the first time both
+        (the pane) and between two of its rows (the stand-in: nothing there; while editing, the overlay under both),
+        and the tops of the right pane's foot rows in the client area (`foot_y`: one per frame size, whatever the
+        rows above them say). With *pane_shot*, the first time both
         show beside a spread whose page is done, one copy of the stand-in's place on the screen."""
         over = self.over()
         ground = getattr(self.app, "_see_ground", None)
@@ -710,6 +721,14 @@ class SeeWatch:
 
             if side == "right":
                 self.hits[f"pane_right:{who((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)}"] += 1
+                memo = (getattr(self.app, "_see_pane_memo", None) or {}).get(getattr(self.app, "_see_right_used",
+                                                                                     "right"))
+                foot = tuple(getattr(memo[1], "foot", ())) if memo is not None else ()
+                if memo is not None and memo[1].size[1] == box[3] - box[1]:  # (the picture on show: its height)
+                    self.foot_rows[len(foot)] += 1
+                    frame = f"{ground[0][0]}x{ground[0][1]}"
+                    for k, row in enumerate(reversed(foot)):
+                        self.foot_y.setdefault(str(-1 - k), Counter())[f"{frame}:{box[1] + row[1] - y0}"] += 1
                 continue
             memo = (getattr(self.app, "_see_pane_memo", None) or {}).get("left")
             if memo is None:
@@ -1111,12 +1130,14 @@ class SeeWatch:
         return found[0] if found else 0
 
     def _edit_measure(self) -> None:
-        """(a thread of its own, from HOVER_AFTER_S on, with *edit*: the left pane's Edit on) Edit on the overlay, by
-        messages POSTED to the lettering's own window (no input of the system's, nothing to any other window; the
-        pointer the window reads is this tool's, and its look at the physical button - which a posted press does not
-        hold - is left out, `SeeThrough._edit_held`): on a region of the page on show, its box at least EDIT_MIN_BOX px
-        a side, its middle in no other box nor on a pane: whether the window takes the mouse (no WS_EX_TRANSPARENT),
-        which window `WindowFromPoint` gives on the box (the overlay) and beside every box (the stand-in); the pointer
+        """(a thread of its own, from HOVER_AFTER_S on, with *edit*: editing, the left pane's Reader mode off) Editing on
+        the overlay, by messages POSTED to TASlation's own windows (the lettering's, the place entry's; no input of the
+        system's, nothing to any other window; the pointer the window reads is this tool's, and its look at the
+        physical button - which a posted press does not hold - is left out, `SeeThrough._edit_held`): on a region of
+        the page on show, its box at least EDIT_MIN_BOX px a side, its middle in no other box nor on a pane: whether
+        the window takes the mouse (no WS_EX_TRANSPARENT), which window `WindowFromPoint` gives on the box, beside
+        every box and on the ground at the client area's corner (the overlay: it takes the mouse over the whole client
+        area) and just above the client area (the stand-in's own frame); the pointer
         on it (its patches stay, outlined, and the right pane holds the bubble's block); a click: how long until the
         region editor is on the screen, whether it lies over the box, on a monitor, the box's own, whether it took the
         foreground (it takes the keys) and the region it holds (the page done: its set handed over as final); a
@@ -1124,7 +1145,9 @@ class SeeWatch:
         the stand-in is in front again; then a drag of the box by EDIT_DRAG px: the press handed over, the box
         outlined at its new place meanwhile, how long until the change is stored and the page's marks have the box
         there, and the fewest patches shown meanwhile against those before; then a drag of its bottom right corner by
-        as much: handed over as a resize, and how long until the page's marks have the box at its new size."""
+        as much: handed over as a resize, and how long until the page's marks have the box at its new size
+        (`_edit_more`: the number plate's place typed, a click and a rectangle drawn on the empty ground). Meanwhile,
+        what the stand-in's page said of the pointer (its bars, presses, clicks: none expected)."""
         from taslation import seethrough as st
         from taslation.capture import seethrough as window
 
@@ -1132,6 +1155,7 @@ class SeeWatch:
         fronts: set[str] = set()
         out: dict[str, Any] = {"front_before": self._who(front)}
         self.edit_result = out
+        said_from = len(self.standin_said()) if self.standin_said is not None else None
 
         def wait(until: Callable[[], bool], limit: float) -> float | None:
             t = time.monotonic()
@@ -1196,7 +1220,15 @@ class SeeWatch:
                                            (size[0] // 2, size[1] - 6))
                        if not any(b[0] - 8 <= x < b[2] + 8 and b[1] - 8 <= y < b[3] + 8 for b in marks.boxes)), None)
         out["hit_beside"] = who_at(origin[0] + beside[0], origin[1] + beside[1]) if beside is not None else None
-        # the pointer on the box: its patches stay (none gives way in Edit), the box outlined, the bubble's block
+        from taslation.capture import windows
+
+        cx0, cy0, cw, ch = windows._client_box(self.hwnd)
+        panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+        corner = next(((x, y) for x, y in ((cx0 + 3, cy0 + ch - 4), (cx0 + cw - 4, cy0 + ch - 4))
+                       if not any(p[0] <= x < p[2] and p[1] <= y < p[3] for p in panes)), None)
+        out["hit_ground"] = who_at(*corner) if corner is not None else None  # (the client area's bottom corner)
+        out["hit_above"] = who_at(cx0 + cw // 2, cy0 - 3) if cy0 >= 3 else None  # (the stand-in's frame, its title)
+        # the pointer on the box: its patches stay (none gives way while editing), the box outlined, the bubble's block
         first = over.shown()
         before = tuple(first[1]) if first is not None else ()
         self.fake_point = (origin[0] + cx, origin[1] + cy)
@@ -1302,11 +1334,170 @@ class SeeWatch:
                 drag["resize"] = resize
             else:
                 drag["resize"] = why
+        self._edit_more(over, origin, size, wait, lp, out)
         kinds = Counter(n["ev"] for n in list(over.notes)
                         if n["ev"] in ("edit", "press", "edit_click", "edit_move", "edit_resize", "edit_add",
-                                       "press_given_up"))
+                                       "edit_draw", "edit_ground", "edit_plate", "press_given_up"))
         out["window_notes"] = dict(kinds)
         out["fronts_meanwhile"] = sorted(fronts)
+        if said_from is not None:  # (the stand-in's words meanwhile: bars, presses and clicks would be the pointer's)
+            said = self.standin_said()[said_from:]
+            out["standin_said_meanwhile"] = dict(Counter(
+                f"{w.get('ev')}:{w.get('on', w.get('kind', ''))}:{w.get('why', '')}" for _t, w in said
+                if w.get("ev") in ("bars", "pointer", "click", "wheel", "turn")))
+
+    def _edit_more(self, over: Any, origin: tuple[int, int], size: tuple[int, int],
+                   wait: Callable[[Callable[[], bool], float], float | None], lp: Callable[[int, int], int],
+                   out: dict[str, Any]) -> None:
+        """(`_edit_measure`, after the drags) The rest of editing, posted to TASlation's own windows: a click on the
+        number plate of the last region of the page's first unit that has one free (`edit_grip` gives it the plate; a
+        reading order is kept per page unit, `Pipeline.set_reading_order`, so place 1 keeps it on its own): handed
+        over as a "plate", how long until the place entry shows and has the keys, then "1" and Enter posted to the
+        entry's own window: how long until it is gone, the stand-in in front again, the job (the lines after the
+        place asked again) and its end; whether the region is first now, the others in their order, the newest change
+        of the history an "order" one, and the marks with its box first (its plate numbered 1). Then a click on the
+        empty ground (a "ground": nothing opens, nothing is stored) and a rectangle of ADD_BOX px drawn there (a
+        "draw": the job, a region of the reader's at the rectangle, and the others still in the order typed)."""
+        from taslation import seethrough as st
+
+        app = self.app
+
+        def busy() -> bool:
+            return bool(getattr(app, "busy", False))
+
+        def idle() -> bool:
+            marks = over._marks_live
+            return marks is not None and not marks.locked and not busy() and over._press is None
+
+        def order() -> list[tuple[int, ...]]:  # (the page's regions the marks number: the dropped ones left out)
+            for _attempt in range(3):
+                try:
+                    return [tuple(int(v) for v in r.bbox) for r in app._page_regions()]
+                except Exception:  # noqa: BLE001 - (the worker changing the page meanwhile: looked at again)
+                    time.sleep(0.01)
+            return []
+
+        def kept(before: list[tuple[int, ...]], after: list[tuple[int, ...]]) -> bool:
+            """The boxes of *before* in *after* in the same order (each within 2 px; one not found: False)."""
+            at = [next((j for j, b in enumerate(after) if max(abs(x - y) for x, y in zip(a, b)) <= 2), None)
+                  for a in before]
+            return None not in at and at == sorted(at)  # type: ignore[type-var]
+
+        def handed(serial: int) -> tuple[float | None, str | None]:
+            ms = wait(lambda: over._edit_serial > serial, 2.0)
+            return ms, next((n["ev"] for n in reversed(list(over.notes)) if n["ev"].startswith("edit_")
+                             and n["ev"] != "edit"), None)
+
+        def click(x: int, y: int) -> None:
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(x, y))
+            _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(x, y))
+
+        panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+
+        def free(x: int, y: int) -> bool:
+            sx, sy = origin[0] + x, origin[1] + y
+            return not any(p[0] <= sx < p[2] and p[1] <= sy < p[3] for p in panes)
+
+        # the number plate: its place typed
+        plate: dict[str, Any] = {"idle_ms": wait(idle, 30.0)}
+        out["plate"] = plate
+        marks = over._marks_live
+        reach = st.scaled(st.GRIP_PX, over._dpi)
+        target: tuple[int, tuple[int, int], st.Box] | None = None
+        try:  # (the page units of the regions the marks number: a reading order is kept per unit, `set_reading_order`)
+            units = [int(getattr(r, "unit", 0)) for r in app._page_regions()]
+        except Exception:  # noqa: BLE001 - (the worker changing the page meanwhile)
+            units = []
+        if marks is not None and len(units) != len(marks.boxes):
+            units = []
+        for i in (range(len(marks.boxes) - 1, 0, -1) if marks is not None else ()):
+            box = st.plate_box(marks.plates[i]) if i < len(marks.plates) else None
+            if box is None or i in over._left_out or (units and units[i] != units[0]):
+                continue  # (a region of the first unit: typed to place 1, it stays on its own unit)
+            middle = ((box[0] + box[2]) // 2, (box[1] + box[3]) // 2)
+            spots = [middle, *((x, y) for y in range(box[1], box[3], 2) for x in range(box[0], box[2], 2))]
+            point = next((p for p in spots
+                          if free(*p) and st.edit_grip(marks, p, reach, over._left_out) == (i, st.PLATE)), None)
+            if point is not None:
+                target = (i, point, box)
+                break
+        if marks is None or target is None:
+            plate["region"] = None
+        else:
+            index, point, box = target
+            plate["region"] = {"place": index + 1, "of": len(marks.boxes), "units": len(set(units)) or None,
+                               "plate_px": [box[2] - box[0], box[3] - box[1]]}
+            moved = tuple(int(v) for v in marks.boxes[index])
+            before = order()
+            steps = len(app.history.done)
+            serial, t = over._edit_serial, time.monotonic()
+            click(*point)
+            plate["handed_ms"], plate["handed_as"] = handed(serial)
+            plate["entry_ms"] = wait(lambda: getattr(app, "_see_place_entry", None) is not None, 3.0)
+            entry = getattr(app, "_see_place_entry", None)
+            if entry is not None:
+                plate["took_the_keys_ms"] = wait(lambda: bool(entry.focused), 1.5)
+                plate["front_with_entry"] = self._who(int(_user32.GetForegroundWindow() or 0))
+                if entry.focused:
+                    t = time.monotonic()
+                    _user32.PostMessageW(entry.hwnd, WM_CHAR, ord("1"), 1)
+                    _user32.PostMessageW(entry.hwnd, WM_KEYDOWN, VK_RETURN, 1)
+                    _user32.PostMessageW(entry.hwnd, WM_KEYUP, VK_RETURN, 0xC0000001)
+                    plate["closed_ms"] = wait(lambda: bool(entry.closed), 2.0)
+                    plate["viewer_in_front_ms"] = wait(lambda: int(_user32.GetForegroundWindow() or 0) == self.hwnd,
+                                                       3.0)
+                    plate["job_ms"] = wait(busy, 3.0)
+                    plate["done_ms"] = wait(lambda: not busy() and len(app.history.done) > steps, 90.0)
+                    plate["since_enter_ms"] = round((time.monotonic() - t) * 1000, 1)
+                    after = order()
+                    plate["first_now"] = bool(after) and after[0] == moved
+                    plate["others_in_order"] = kept([b for b in before if b != moved], after)
+                    newest = app.history.done[-1] if app.history.done else None
+                    plate["change"] = None if newest is None else [newest.kind, newest.state]
+                    plate["marks_first_ms"] = wait(lambda: (over._marks_live is not None and over._marks_live.boxes
+                                                            and tuple(over._marks_live.boxes[0]) == moved), 5.0)
+                else:
+                    plate["entry_gone_by_itself_ms"] = wait(lambda: getattr(app, "_see_place_entry", None) is None, 3.0)
+        # a click on the empty ground: nothing opens, nothing is stored; then a rectangle drawn there
+        ground: dict[str, Any] = {"idle_ms": wait(idle, 30.0)}
+        out["ground_click"] = ground
+        box = self._spot(over, origin, size, [])
+        if box is None or not free(box[0], box[1]) or not free(box[2], box[3]):
+            ground["spot"] = None
+            return
+        steps = len(app.history.done)
+        serial = over._edit_serial
+        click(box[0] + 4, box[1] + 4)
+        ground["handed_ms"], ground["handed_as"] = handed(serial)
+        ground["job_ms"] = wait(busy, 0.8)
+        ground["editor"] = self._editor_window() != 0
+        ground["changes"] = len(app.history.done) - steps
+        draw: dict[str, Any] = {"idle_ms": wait(idle, 30.0), "spot": [box[2] - box[0], box[3] - box[1]]}
+        out["draw"] = draw
+        before = order()
+        x0, y0, x1, y1 = box
+        serial, t = over._edit_serial, time.monotonic()
+        _user32.PostMessageW(over.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lp(x0, y0))
+        _user32.PostMessageW(over.hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp((x0 + x1) // 2, (y0 + y1) // 2))
+        _user32.PostMessageW(over.hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(x1, y1))
+        _user32.PostMessageW(over.hwnd, WM_LBUTTONUP, 0, lp(x1, y1))
+        draw["handed_ms"], draw["handed_as"] = handed(serial)
+        draw["job_ms"] = wait(busy, 3.0)
+
+        def made() -> list[Any]:
+            result = getattr(app, "last_result", None)
+            return [g for g in (result.regions if result is not None else ())
+                    if str(getattr(g, "kind", "")).startswith("manual")
+                    and max(abs(int(a) - int(b)) for a, b in zip(g.bbox, box)) <= 4]
+
+        draw["stored_ms"] = wait(lambda: not busy() and bool(made()), 60.0)
+        draw["since_release_ms"] = round((time.monotonic() - t) * 1000, 1)
+        regions = made()
+        draw["region_status"] = regions[0].status if regions else None
+        after = order()
+        draw["place"] = None if not regions else [
+            next((i + 1 for i, b in enumerate(after) if b == tuple(int(v) for v in regions[0].bbox)), None), len(after)]
+        draw["others_in_order"] = kept(before, after)
 
     def _add_safe(self) -> None:
         try:
@@ -1316,15 +1507,15 @@ class SeeWatch:
             self.add_result = {**self.add_result, "error": type(e).__name__}
 
     def _add_measure(self) -> None:
-        """(a thread of its own, from HOVER_AFTER_S on, with *add*) Adding text areas, with Edit on or off as *edit*
-        has it, by messages POSTED to TASlation's own windows only (the left pane, the lettering's window; the pointer
+        """(a thread of its own, from HOVER_AFTER_S on, with *add*) Adding text areas, editing or in Reader mode as
+        *edit* has it, by messages POSTED to TASlation's own windows only (the left pane, the lettering's window; the pointer
         the window reads is this tool's, and its look at the physical button - which a posted press does not hold - is
         left out, `SeeThrough._edit_held`). Once a page is done and on show, each way of asking in turn - the left
         pane's Add area row ("row") and the Insert key's message (``WM_HOTKEY``, "key"); a window that has neither gets
         what the Menu's entry sets ("flag") -, then a rectangle of ADD_BOX px dragged on the page's empty space: how
         long until the row shows pressed and the sheet is drawn (the whole page takes the mouse), which window
         `WindowFromPoint` gives there, the drag handed over as an "add", the job, the page with a region of the
-        reader's at the rectangle (its status), and with Edit off how long until every click is the viewer's again.
+        reader's at the rectangle (its status), and in Reader mode how long until every click is the viewer's again.
         Then the ways of giving it up (the row again, the key again, a right click: how long until nothing is to be
         added and the page lets the mouse through). Meanwhile, every 50 ms, who is in front (the stand-in, a window of
         TASlation's, another program: read only, the tool moves no foreground) against whether the key is held; and
@@ -1373,26 +1564,7 @@ class SeeWatch:
         drawn: list[tuple[int, int, int, int]] = []
 
         def spot() -> tuple[int, int, int, int] | None:
-            """Empty space on the page at rest: ADD_BOX px, ADD_CLEAR px from every region's box, from the rectangles
-            drawn before and from the panes."""
-            result = getattr(app, "last_result", None)
-            boxes = [tuple(int(v) for v in r.bbox) for r in (result.regions if result is not None else ())] + drawn
-            page = getattr(app, "_see_rest_box", None) or (0, 0, size[0], size[1])
-            w, h = st.scaled(ADD_BOX[0], over._dpi), st.scaled(ADD_BOX[1], over._dpi)
-            clear = st.scaled(ADD_CLEAR, over._dpi)
-            panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
-            for y in range(int(page[1]) + clear, int(page[3]) - h - clear, max(8, h // 2)):
-                for x in range(int(page[0]) + clear, int(page[2]) - w - clear, max(8, h // 2)):
-                    box = (x, y, x + w, y + h)
-                    if any(box[0] - clear < b[2] and b[0] - clear < box[2] and box[1] - clear < b[3]
-                           and b[1] - clear < box[3] for b in boxes):
-                        continue
-                    sx, sy = origin[0] + x, origin[1] + y
-                    if any(p[0] - clear < sx + w and sx < p[2] + clear and p[1] - clear < sy + h and sy < p[3] + clear
-                           for p in panes):
-                        continue
-                    return box
-            return None
+            return self._spot(over, origin, size, drawn)
 
         def row_click(name: str) -> bool:
             memo = (getattr(app, "_see_pane_memo", None) or {}).get("left")
@@ -1418,15 +1590,16 @@ class SeeWatch:
         def adding() -> bool:
             return bool(getattr(app, "_see_adding", False))
 
-        def sheet() -> bool:  # (drawn: the window's shown state has the sheet, after UpdateLayeredWindow)
-            marks, shown = over._marks_live, over._shown
+        def sheet() -> bool:  # (drawn: the window's shown state has the marks of a region to add, the whole page
+            marks, shown = over._marks_live, over._shown  # taking the mouse, after UpdateLayeredWindow)
             return bool(over._edit_takes and marks is not None and marks.adding and shown is not None
-                        and len(shown) > 4 and shown[4] is not None and shown[4][3])
+                        and len(shown) > 4 and shown[4] is not None)
 
-        def let_through() -> bool:  # (nothing to add, no sheet drawn; with Edit off the window click-through again)
-            shown = over._shown
-            drawn = shown is not None and len(shown) > 4 and shown[4] is not None and shown[4][3]
-            return not adding() and not drawn and (self.edit or not over._edit_takes)
+        def let_through() -> bool:  # (nothing to add; in Reader mode no marks drawn and the window click-through again)
+            marks, shown = over._marks_live, over._shown
+            drawn = shown is not None and len(shown) > 4 and shown[4] is not None
+            return not adding() and not (marks is not None and marks.adding) and (
+                self.edit or (not drawn and not over._edit_takes))
 
         def row_on() -> bool | None:
             memo = (getattr(app, "_see_pane_memo", None) or {}).get("left")
@@ -1535,6 +1708,31 @@ class SeeWatch:
                                                                          "key", "key_held"))
         out["window_notes"] = dict(kinds)
 
+    def _spot(self, over: Any, origin: tuple[int, int], size: tuple[int, int],
+              drawn: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int] | None:
+        """Empty space on the page at rest: ADD_BOX px, ADD_CLEAR px from every region's box, from the rectangles
+        *drawn* before and from the panes (frame pixels; None: none)."""
+        from taslation import seethrough as st
+
+        result = getattr(self.app, "last_result", None)
+        boxes = [tuple(int(v) for v in r.bbox) for r in (result.regions if result is not None else ())] + drawn
+        page = getattr(self.app, "_see_rest_box", None) or (0, 0, size[0], size[1])
+        w, h = st.scaled(ADD_BOX[0], over._dpi), st.scaled(ADD_BOX[1], over._dpi)
+        clear = st.scaled(ADD_CLEAR, over._dpi)
+        panes = [b for b in (over.pane_shown(s) for s in ("left", "right")) if b is not None]
+        for y in range(int(page[1]) + clear, int(page[3]) - h - clear, max(8, h // 2)):
+            for x in range(int(page[0]) + clear, int(page[2]) - w - clear, max(8, h // 2)):
+                box = (x, y, x + w, y + h)
+                if any(box[0] - clear < b[2] and b[0] - clear < box[2] and box[1] - clear < b[3]
+                       and b[1] - clear < box[3] for b in boxes):
+                    continue
+                sx, sy = origin[0] + x, origin[1] + y
+                if any(p[0] - clear < sx + w and sx < p[2] + clear and p[1] - clear < sy + h and sy < p[3] + clear
+                       for p in panes):
+                    continue
+                return box
+        return None
+
     def pane_report(self) -> dict[str, Any]:
         over = self.over()
         counts = dict(over.counts) if over is not None else {}
@@ -1545,6 +1743,11 @@ class SeeWatch:
                 "click": self.pane_click, "shot": self.pane_shot_saved, "shot_put_off": self.pane_shot_skipped,
                 "shot_put_off_why": dict(self.pane_shot_why.most_common(8)), "shot_rows_cut": self.pane_shot_cut,
                 "window": {k: counts.get(k) for k in ("pane_draws", "pane_moves", "pane_hides", "clicks", "hovers")},
+                # the right pane's foot: its rows (from the lowest up) at one height in the client area for each frame
+                # size the stand-in had (`constant`: every row at one place per frame size)
+                "foot": {"rows": dict(self.foot_rows), "tops": {k: dict(v) for k, v in self.foot_y.items()},
+                         "constant": all(len({key.split(":")[0] for key in v}) == len(v)
+                                         for v in self.foot_y.values()) if self.foot_y else None},
                 "hides_by_why": dict(Counter(n["why"] for n in (list(over.notes) if over is not None else [])
                                              if n["ev"] == "pane_hide"))}
 
@@ -1846,7 +2049,7 @@ class SeeWatch:
                 "frames_per_s": fps, "cpu": cpu, "cost": cost, "viewer_frames": viewer_frames, "pipeline": pipeline,
                 "tk_steps": self._tk_steps(changes), "on_screen": on_screen,
                 "panes": self.pane_report(),
-                "edit": self.edit_result if self.edit and not self.add else None,  # (`_edit_measure`: Edit on)
+                "edit": self.edit_result if self.edit and not self.add else None,  # (`_edit_measure`: editing)
                 "add": self.add_result if self.add else None,  # (`_add_measure`: text areas added)
                 "truth": {"copies": self.copies, "with_old_patch": len(late), "old_patch_ms_after_change": late[:20],
                           "old_rows": old_rows,

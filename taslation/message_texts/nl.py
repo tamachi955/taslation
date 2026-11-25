@@ -28,7 +28,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "geannuleerd",
     "pipeline.from_cache": "{bubbles:regel|regels} getoond uit eerdere vertalingen.",
     "pipeline.translated": "{bubbles:regel|regels} vertaald in {seconds:.0f} s.",
-    "pipeline.to_review": "{review:regel is|regels zijn} een blik waard (zet Bewerken aan, dan Menu > Nakijken...).",
+    "pipeline.to_review": "{review:regel is|regels zijn} een blik waard (zet Lezersmodus uit, dan Menu > Nakijken...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Geen pagina gevonden in de viewer. Controleer of het boek open is, of gebruik Gebied instellen... in het linkerpaneel.",
     "ollama.unreachable": "TASlation kon het vertaalprogramma niet bereiken. Druk zo meteen op Vertalen; het start vanzelf.",

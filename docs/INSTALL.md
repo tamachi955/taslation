@@ -39,6 +39,8 @@ The computer used for the measurements has an Intel Core i7-9700F (8 cores), 48 
 4. Start it from "TASlation" in the Start menu. Open the book in its viewer first: at every start TASlation asks which window is the viewer
    (choose it in the list and press OK; the viewer you chose before comes first, already selected), then lays the translation
    over the page the viewer shows (real-time translation). You turn the pages in the viewer as always.
+   TASlation starts editing: the page's regions are outlined over the viewer, the mouse there is TASlation's, and the keys stay the viewer's, so turn the pages with the viewer's keys.
+   Check "Reader mode" in the left pane to give the mouse back to the viewer ("Start in Reader mode" in "Settings..." starts that way).
    There is no account and no limit on the pages you translate, and nothing of the book leaves this computer.
    Menu > Help > "How to use..." explains the rest.
 

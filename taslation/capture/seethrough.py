@@ -40,20 +40,25 @@ taking every click and key itself.
   the look that finds the pointer there; on again at the look that finds it elsewhere; neither while the button is
   held, `button_down`), so that its words never keep a click from the viewer. The panes take no key, and send, post
   and press nothing either.
-* Edit (`set_edit`: the regions of the page on show, `seethrough.Marks`, from the Tk thread while its Edit switch is
-  on): the lettering's window takes the mouse on the regions' boxes alone - no WS_EX_TRANSPARENT then, its window
-  procedure answering HTCLIENT and MA_NOACTIVATE (a click never activates it: the viewer keeps the keyboard), each box
-  drawn at alpha EDIT_ALPHA where nothing else is (a pixel of alpha 0 lets a click through to the viewer: beside the
-  boxes the viewer takes them) - and gives no patch way under the pointer: the box there is outlined, with its corner
-  handles, and numbered as every box is. A press takes hold of a box, and the whole page takes the mouse while it is
-  held (the capture besides, which a window not in front has only over its own pixels); a drag moves the box (those
-  chosen with it), a drag on a corner resizes it, a right click gives the drag up (and a region to add: an "add" with
-  no box), and the release is kept for the Tk thread (`take_edits`: a click, a move, a resize, a rectangle drawn to
-  add a region), which acts on it. With Edit off, marks of no box while a region is to be added (`Marks.adding`) have
-  the whole page take the mouse for that rectangle alone. The box
-  in the editor and one being dragged keep their patches whatever the frame says; the one whose original is shown
-  has none. The thread then waits for its messages too (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its
-  own window), so a drag follows the pointer at once. It sends, posts and presses nothing to another window.
+* Editing (`set_ground`: the Tk thread is editing - Reader mode off -; `set_edit`: the regions of the page on show,
+  `seethrough.Marks`): the lettering's window takes the mouse over the viewer's whole client area - no
+  WS_EX_TRANSPARENT then, its window procedure answering HTCLIENT and MA_NOACTIVATE (a click never activates it: the
+  viewer keeps the keyboard, and gets the keys alone), the page drawn at alpha EDIT_ALPHA wherever nothing else is,
+  whatever page the viewer shows (one with no marks: `seethrough.GROUND`); the viewer's title bar and frame stay its
+  own, and so do the windows over the viewer (alpha 0 there: `edit_compose`'s holes). The wheel, the middle and side
+  buttons reach nothing. No patch gives way under the pointer: every box is outlined in its colour and numbered, the
+  one under the pointer in the stronger outline with its corner handles. A press takes hold of a box (the capture
+  besides, which a window not in front has only over its own pixels); a drag moves the box (those chosen with it), a
+  drag on a corner resizes it, a click on a box's number plate types its place in the reading order (a drag from it
+  moves the box), a drag on the empty ground draws a rectangle, a click there is kept as no more than that, a right
+  click gives a press up (and a region to add: an "add" with no box), and the release is kept for the Tk thread
+  (`take_edits`: a click, a plate, a move, a resize, a rectangle drawn - "draw", or "add" for Add area -, a click on
+  the ground), which acts on it. In Reader mode, marks of no box while a region is to be added (`Marks.adding`) have
+  the whole page take the mouse for that rectangle alone. The box in the editor and one being dragged keep their
+  patches whatever the frame says; the one whose original is shown has none. A press the window holds is no press
+  on the viewer (`pressing`: frames go on being taken). The thread then waits for its messages too
+  (``MsgWaitForMultipleObjectsEx``; `_poke` posts one to its own window), so a drag follows the pointer at once. It
+  sends, posts and presses nothing to another window.
 * The Insert key (`set_add_key`: ``Settings.add_area_key``; the Tk thread's Add area, `ui.see_edit`) is the one key
   TASlation takes: a hot key of the lettering's window (``RegisterHotKey``, Insert alone - Shift+Insert and
   Ctrl+Insert stay the viewer's - with MOD_NOREPEAT), held only while the viewer is the window in front and not
@@ -111,15 +116,22 @@ PANE_CLASS = "TASlationSeeThroughPane"
 PANE_EX_STYLE = WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
 WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0201, 0x0202
 IDC_ARROW = 32512
-# Edit (`set_edit`): the lettering's window takes the mouse on the regions' boxes (no WS_EX_TRANSPARENT then, its
-# window procedure answering HTCLIENT): a press, the pointer's moves while it is held and the release, a right click
-# to give a drag up; the pointer shows what a press there does (the system's cursors)
+# Editing (`set_ground`, `set_edit`): the lettering's window takes the mouse over the whole page (no WS_EX_TRANSPARENT
+# then, its window procedure answering HTCLIENT): a press, the pointer's moves while it is held and the release, a
+# right click to give a drag up; the pointer shows what a press there does (the system's cursors)
 WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETCURSOR, WM_CAPTURECHANGED = 0x0200, 0x0204, 0x0020, 0x0215
+# the rest of the mouse's messages (the class has no CS_DBLCLKS: no double clicks), none of which reaches anything
+# while editing: the right button's release, the middle and side buttons, the wheels
+WM_RBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL = 0x0205, 0x0207, 0x0208, 0x020A
+WM_XBUTTONDOWN, WM_XBUTTONUP, WM_MOUSEHWHEEL = 0x020B, 0x020C, 0x020E
+SWALLOWED = frozenset({WM_RBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_MOUSEHWHEEL})
+SIDE_BUTTONS = frozenset({WM_XBUTTONDOWN, WM_XBUTTONUP})  # (answered TRUE: no WM_APPCOMMAND - Back, Forward - made)
 HTCLIENT, MK_SHIFT, WM_APP = 1, 0x0004, 0x8000
 QS_ALLINPUT, MWMO_INPUTAVAILABLE = 0x04FF, 0x0004
 VK_LBUTTON, VK_RBUTTON, SM_SWAPBUTTON = 0x01, 0x02, 23
 CURSOR_IDS = {"move": 32649, "drag": 32646, "nw": 32642, "se": 32642, "ne": 32643, "sw": 32643, "add": 32515,
-              None: IDC_ARROW}  # IDC_HAND (a click edits), IDC_SIZEALL, IDC_SIZENWSE, IDC_SIZENESW, IDC_CROSS
+              st.PLATE: 32513, None: IDC_ARROW}  # IDC_HAND (a click edits), IDC_SIZEALL, IDC_SIZENWSE, IDC_SIZENESW,
+# IDC_CROSS (a rectangle drawn), IDC_IBEAM (a number plate: a click types its place)
 EDITS_KEPT = 64  # presses on the regions not taken yet by the Tk thread (`take_edits`)
 # the Insert key (`set_add_key`): a hot key of the lettering's window while the viewer is in front (`_key_tick`)
 WM_HOTKEY, VK_INSERT, MOD_NOREPEAT = 0x0312, 0x2D, 0x4000
@@ -412,7 +424,7 @@ def viewer_dpi(viewer: int) -> int:
     return st.BASE_DPI
 
 
-_edit_hooks: dict[int, Any] = {}  # the lettering's window -> what makes Edit's messages (`SeeThrough._edit_message`)
+_edit_hooks: dict[int, Any] = {}  # the lettering's window -> what makes editing's messages (`SeeThrough._edit_message`)
 _key_hooks: dict[int, Any] = {}  # the lettering's window -> what takes the Insert key's presses (`SeeThrough._hot_key`)
 
 
@@ -619,7 +631,7 @@ class SeeThrough:
         self._pane_shown: dict[str, tuple[int, tuple[int, int], tuple[int, int]] | None] = {s: None for s in PANES}
         self._clicks: deque[tuple[str, int, int, float]] = deque(maxlen=CLICKS_KEPT)
         # the window thread's own state
-        self._shown: tuple[Any, ...] | None = None  # (set serial, indices, origin, size[, Edit's marks as drawn]) on
+        self._shown: tuple[Any, ...] | None = None  # (set serial, indices, origin, size[, the editing marks as drawn]) on
         # show; None: hidden
         self._seq = -1
         self._seen_changed = -1
@@ -637,11 +649,12 @@ class SeeThrough:
         self._right_takes = False  # the right pane takes clicks now (the pointer on one of its plates)
         self._dpi = st.BASE_DPI  # the viewer's (`viewer_dpi`), at each change of its place or size
         self._last_look: tuple[Any, ...] | None = None  # (set, patches shown but for the pointer, shares, frame, ms)
-        # Edit (`set_edit`): the marks from the Tk thread; the window thread's own: whether the lettering's window
+        # Editing (`set_edit`): the marks from the Tk thread; the window thread's own: whether the lettering's window
         # takes the mouse, the marks the last draw laid on the page (None: none on show), the boxes left out of them
         # (covered, or their page's pixels not there), the press held, the presses for the Tk thread, the boxes of the
         # last change outlined until the Tk thread's marks have taken it (press serial, boxes)
         self._marks: st.Marks | None = None
+        self._ground = False  # (the Tk thread's, `set_ground`) editing: the whole page takes the mouse
         self._edit_takes = False
         self._marks_live: st.Marks | None = None
         self._left_out: frozenset[int] = frozenset()
@@ -720,7 +733,7 @@ class SeeThrough:
         self._poke()
 
     def shown(self) -> tuple[Any, ...] | None:
-        """(set serial, patch indices, screen origin, size) of what shows now; None when nothing does. (In Edit the
+        """(set serial, patch indices, screen origin, size) of what shows now; None when nothing does. (While editing the
         window's own state has what the marks are too; not given here.)"""
         shown = self._shown
         return shown[:4] if shown is not None else None
@@ -790,7 +803,7 @@ class SeeThrough:
         return frozenset(h for h in (self.hwnd, *self.panes.values()) if h)
 
     def set_edit(self, marks: st.Marks | None) -> None:
-        """Edit's marks on the page (`seethrough.Marks`), or None: Edit off (the lettering's window click-through
+        """the editing marks on the page (`seethrough.Marks`), or None: Reader mode (the lettering's window click-through
         again, a press held given up). The same marks handed again change nothing."""
         with self._lock:
             if marks is self._marks:
@@ -799,11 +812,39 @@ class SeeThrough:
             self._changed += 1
         self._poke()
 
+    def set_ground(self, on: bool) -> None:
+        """Whether the Tk thread is editing (Reader mode off, `ui.see_edit`): the lettering's window then takes the
+        mouse over the viewer's whole page whatever page it shows - one with no marks of its own too (`set_edit`:
+        those of the page on show), where a drag draws a rectangle ("draw", no marks) and a click does nothing - and
+        the viewer gets the keys alone. Off: only marks take it (a region to add in Reader mode)."""
+        with self._lock:
+            if bool(on) == self._ground:
+                return
+            self._ground = bool(on)
+            self._changed += 1
+        self._poke()
+
+    def pressing(self) -> bool:
+        """Whether a press on the page is the window's own (editing: one held, or the button down over the page while
+        the window takes the mouse there): no press of the viewer's, whose page some viewers drag along meanwhile
+        (`ui.live`'s `_held_in_viewer`). Read from the Tk thread: the window's state as its last look left it."""
+        if self._press is not None:
+            return True
+        if not self._edit_takes:
+            return False
+        shown, point = self._shown, cursor_pos()
+        if shown is None or point is None:
+            return False
+        (x, y), (w, h) = shown[2], shown[3]
+        return x <= point[0] < x + w and y <= point[1] < y + h and not any(
+            c[0] <= point[0] < c[2] and c[1] <= point[1] < c[3] for c in list(self._covers))
+
     def take_edits(self) -> list[dict[str, Any]]:
-        """The presses on the regions since the last call, the oldest first: dicts with "kind" ("click": "index",
-        "shift"; "move" and "resize": "boxes", index -> the box it was dragged to; "add": "box", None when the drag
-        drew nothing), "press" (their serial, which `Marks.seen` gives back), "marks" (the serial of the marks the
-        press was made on) and "key" (their page)."""
+        """The presses on the page since the last call, the oldest first: dicts with "kind" ("click" and "plate" - a
+        click on a box's number plate -: "index", "shift"; "move" and "resize": "boxes", index -> the box it was dragged
+        to; "add" - Add area's rectangle - and "draw" - one drawn on the empty ground while editing -: "box", None when the
+        drag drew nothing; "ground": a click on the empty ground), "press" (their serial, which `Marks.seen` gives
+        back), "marks" (the serial of the marks the press was made on, 0 for none) and "key" (their page)."""
         out = []
         while self._edits:
             try:
@@ -847,14 +888,14 @@ class SeeThrough:
 
     # ------------------------------------------------------------------ the window's thread
     def _poke(self) -> None:
-        """The window thread looks again at once: its event set - and, while it waits for the mouse too (Edit), a
+        """The window thread looks again at once: its event set - and, while it waits for the mouse too (editing), a
         message posted to its own window."""
         self._wake.set()
         if self._edit_takes and self.hwnd and IS_WINDOWS:
             _user32.PostMessageW(self.hwnd, WM_APP, 0, 0)
 
     def _wait(self) -> None:
-        """Until something is to be looked at, LOOK_S at the most: the event (`_poke`) - in Edit, any message of the
+        """Until something is to be looked at, LOOK_S at the most: the event (`_poke`) - while editing, any message of the
         thread's too (a press, the pointer's moves), so that a drag follows the pointer at once."""
         if self._edit_takes and IS_WINDOWS:
             _user32.MsgWaitForMultipleObjectsEx(0, None, int(LOOK_S * 1000), QS_ALLINPUT, MWMO_INPUTAVAILABLE)
@@ -933,10 +974,10 @@ class SeeThrough:
             viewer, on, changed = self._viewer, self._on, self._changed
             sets = list(self._store.sets)
             panes = dict(self._pane_want)
-            marks = self._marks
+            marks, ground = self._marks, self._ground
         self.counts["looks"] += 1
         self._key_tick(viewer)
-        self._edit_take(marks is not None and on, sets)
+        self._edit_take((marks is not None or ground) and on, sets)
         if not viewer:
             self._nothing("no viewer")
             return
@@ -1009,7 +1050,8 @@ class SeeThrough:
     def _show_look(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], any_sets: bool) -> None:
         """What a look found shown (*shown* of the set *chosen*, none covered), less the patch under the pointer - or,
-        in Edit, with the page's marks on it (`_show_edit`)."""
+        while editing, with the page's marks on it (`_show_edit`); while editing on a page with no marks (not translated yet,
+        another one), over the whole page taking the mouse (`_show_ground`)."""
         self._look_key = chosen.key if chosen is not None else None
         marks = self._marks_for(chosen)
         if marks is not None:
@@ -1017,21 +1059,49 @@ class SeeThrough:
             return
         self._marks_live = None
         self._left_out = frozenset()
+        ground = self._edit_takes  # (editing: the whole page takes the mouse though none of its regions is edited)
         if chosen is None or not shown:
             why = "covered" if chosen is not None else ("no match" if any_sets else "no patches")
             self._unhover()
+            if ground:
+                self._show_ground(chosen, (), shares, seq, compare_ms, origin, size)
+                return
             self._hide(why, seq, compare_ms, shares)
             return
         under = self._under_pointer(chosen, shown, origin)
         if under is not None:
             shown = tuple(i for i in shown if i != under)
-            if not shown:
+            if not shown and not ground:
                 self._hide("hover", seq, compare_ms, shares)
                 return
+        if ground:
+            self._show_ground(chosen, shown, shares, seq, compare_ms, origin, size)
+            return
         state = (chosen.serial, shown, origin, size)
         if state == self._shown:
             return
         self._draw(chosen, shown, origin, size, seq, compare_ms, shares)
+
+    def _holes(self, origin: tuple[int, int]) -> tuple[st.Box, ...]:
+        """The windows over the viewer (`cover_rects`) in the frame's pixels: left at alpha 0 while editing, their own."""
+        return tuple((c[0] - origin[0], c[1] - origin[1], c[2] - origin[0], c[3] - origin[1]) for c in self._covers)
+
+    def _show_ground(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
+                     compare_ms: float, origin: tuple[int, int], size: tuple[int, int]) -> None:
+        """A look while editing on a page with no marks of its own (`seethrough.GROUND`): the patches *shown* (the one under
+        the pointer gives way as ever), the whole page taking the mouse but the windows over the viewer, and the
+        rectangle a press on it draws."""
+        press = self._press
+        drawing = (st.drawn_box(press["start"], press["now"], size)
+                   if press is not None and press.get("draw") and press["moved"] else None)
+        holes = self._holes(origin)
+        key = ("ground", drawing, holes)
+        self._edit_dirty = False
+        state = (chosen.serial if chosen is not None else -1, shown, origin, size, key)
+        if state == self._shown:
+            return
+        self._draw(chosen, shown, origin, size, seq, compare_ms, shares,
+                   (st.GROUND, None, None, frozenset(), drawing, (), holes), key)
 
     # ------------------------------------------------------------------ the Insert key (the window's thread)
     def _key_tick(self, viewer: int) -> None:
@@ -1079,11 +1149,12 @@ class SeeThrough:
         self._keys.append(time.monotonic())
         self._note("key")
 
-    # ------------------------------------------------------------------ Edit (the window's thread)
+    # ------------------------------------------------------------------ editing (the window's thread)
     def _edit_take(self, wanted: bool, sets: list[st.PatchSet]) -> None:
-        """The lettering's window takes the mouse while Edit has marks for it and the lettering is on (no
-        WS_EX_TRANSPARENT; its window procedure answers for Edit, `_edit_message`), and is click-through again
-        otherwise, a press held given up. Which page's marks have no patch to go by (`_patchless`)."""
+        """The lettering's window takes the mouse while the Tk thread is editing (`set_ground`) or has marks for it
+        (a region to add in Reader mode) and the lettering is on (no WS_EX_TRANSPARENT; its window procedure answers
+        for editing, `_edit_message`), and is click-through again otherwise, a press held given up. Which page's marks
+        have no patch to go by (`_patchless`)."""
         marks = self._marks
         self._patchless = None
         if marks is not None:
@@ -1101,7 +1172,7 @@ class SeeThrough:
         self._note("edit", on=int(wanted))
 
     def _marks_for(self, chosen: st.PatchSet | None) -> st.Marks | None:
-        """The marks a look lays on the page: Edit's, when they are of the page the look found (its set chosen; or,
+        """The marks a look lays on the page: the editing's, when they are of the page the look found (its set chosen; or,
         with no set chosen, a page with no patch at all - nothing tells it is not there but the Tk thread, which gives
         none once the viewer shows another page)."""
         marks = self._marks if self._edit_takes else None
@@ -1112,7 +1183,7 @@ class SeeThrough:
         return marks if self._patchless == marks.key else None
 
     def _failed_probes(self, chosen: st.PatchSet | None, view: Any) -> frozenset[st.Box]:
-        """(a full look) The boxes of Edit's marks with no patch of their own whose pixels round them the viewer's
+        """(a full look) The boxes of the editing marks with no patch of their own whose pixels round them the viewer's
         frame *view* has not (`Marks.probes`): bars over them, another page. They take nothing (`_show_edit`)."""
         marks = self._marks_for(chosen)
         if marks is None or not marks.probes:
@@ -1136,7 +1207,7 @@ class SeeThrough:
 
     def _show_edit(self, chosen: st.PatchSet | None, shown: tuple[int, ...], shares: list[float], seq: int,
                    compare_ms: float, origin: tuple[int, int], size: tuple[int, int], marks: st.Marks) -> None:
-        """A look in Edit: the patches the frame has (*shown*), and also those of the region in the editor and of a
+        """A look while editing: the patches the frame has (*shown*), and also those of the region in the editor and of a
         region being dragged whatever the frame says, less those of the region whose original is shown (*bare*); no
         patch gives way under the pointer - the box there is outlined instead, with its corner handles -, and the
         right pane is told of that region (`hovered`). The boxes a window over the viewer meets, those whose patches
@@ -1172,7 +1243,7 @@ class SeeThrough:
         drawing: st.Box | None = None
         hover: int | None = None
         if press is not None:
-            if press.get("adding"):
+            if press.get("adding") or press.get("draw"):
                 drawing = st.drawn_box(press["start"], press["now"], size) if press["moved"] else None
             else:
                 hover = press["index"]
@@ -1191,11 +1262,11 @@ class SeeThrough:
             self._ghost = None
         self._hover_wait = None
         self._set_hover(marks.boxes[hover] if hover is not None else None, marks.key)
-        sheet = press is not None or marks.adding
         indices = tuple(sorted(keep))
-        edit = (marks, hover, moved, sheet, left_out_set, drawing, ghosts)
-        key = (marks.serial, hover, None if moved is None else tuple(sorted(moved.items())), sheet, left_out_set,
-               drawing, ghosts)
+        holes = self._holes(origin)
+        edit = (marks, hover, moved, left_out_set, drawing, ghosts, holes)
+        key = (marks.serial, hover, None if moved is None else tuple(sorted(moved.items())), left_out_set, drawing,
+               ghosts, holes)
         self._edit_dirty = False
         state = (chosen.serial if chosen is not None else -1, indices, origin, size, key)
         if state == self._shown:
@@ -1203,10 +1274,12 @@ class SeeThrough:
         self._draw(chosen, indices, origin, size, seq, compare_ms, shares, edit, key)
 
     def _edit_message(self, message: int, wparam: Any, lparam: Any) -> int | None:
-        """(the window thread: the lettering's window procedure, `_proc`) What Edit answers to *message* while the
-        window takes the mouse; None: the window's own answer. A press takes hold of a box (`_edit_press`), the
-        pointer's moves while it is held follow it, the release ends it (`_edit_release`); a right click, or the
-        capture taken by another window, gives it up; the cursor says what a press would do (`_set_cursor`)."""
+        """(the window thread: the lettering's window procedure, `_proc`) What editing answers to *message* while the
+        window takes the mouse; None: the window's own answer. A press takes hold of a box, or of the empty ground
+        (`_edit_press`), the pointer's moves while it is held follow it, the release ends it (`_edit_release`); a right
+        click, or the capture taken by another window, gives it up; the wheels, the middle and the side buttons are
+        taken and do nothing (no window gets them: the viewer has the keys alone); the cursor says what a press would
+        do (`_set_cursor`)."""
         if not self._edit_takes:
             return None
         if message == WM_NCHITTEST:
@@ -1215,6 +1288,10 @@ class SeeThrough:
             return MA_NOACTIVATE
         if message == WM_SETCURSOR:
             self._set_cursor()
+            return 1
+        if message in SWALLOWED:
+            return 0
+        if message in SIDE_BUTTONS:
             return 1
         if message in (WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN):
             point = (ctypes.c_short(int(lparam) & 0xFFFF).value, ctypes.c_short((int(lparam) >> 16) & 0xFFFF).value)
@@ -1241,21 +1318,26 @@ class SeeThrough:
         return (int(look[6][0]), int(look[6][1])) if look is not None else None
 
     def _edit_press(self, point: tuple[int, int], shift: bool) -> None:
-        """A press on the page in Edit: on a box (or its number plate) it takes hold of it - a corner to resize it,
-        else the box to move it, or a click (`Marks.locked`: a click only) -, and with a region to add, it begins the
-        rectangle. The whole page takes the mouse at once while it is held (`edit_compose`'s sheet, drawn here and
-        now: the next moves are the window's whatever the pointer passes over)."""
+        """A press on the page while editing: on a box (or its number plate) it takes hold of it - a corner to resize it,
+        the plate to type its place (or move the box), else the box to move it, or a click (`Marks.locked`: a click
+        only) -; with a region to add, it begins the rectangle; on the empty ground - or on a page with no marks of
+        its own - it begins a rectangle drawn to add a region ("draw"; a click only while presses only click). The
+        capture is the window's until it is let go: the next moves are the window's whatever the pointer passes
+        over."""
         marks = self._marks_live
-        if marks is None or self._edit_size() is None:
+        if self._edit_size() is None or (marks is None and not self._edit_takes):
             return
-        if marks.adding:
+        if marks is not None and marks.adding:
             press: dict[str, Any] = {"adding": True, "start": point, "now": point, "moved": False, "marks": marks}
         else:
-            grip = st.edit_grip(marks, point, st.scaled(st.GRIP_PX, self._dpi), self._left_out)
+            grip = (st.edit_grip(marks, point, st.scaled(st.GRIP_PX, self._dpi), self._left_out)
+                    if marks is not None else None)
             if grip is None:
-                return
-            press = {"index": grip[0], "grip": "move" if marks.locked else grip[1], "start": point, "now": point,
-                     "shift": shift, "moved": False, "marks": marks}
+                press = {"draw": marks is None or not marks.locked, "start": point, "now": point, "moved": False,
+                         "marks": marks, "key": marks.key if marks is not None else int(self._look_key or 0)}
+            else:
+                press = {"index": grip[0], "grip": "move" if marks.locked else grip[1], "start": point,
+                         "now": point, "shift": shift, "moved": False, "marks": marks}
         self._press = press
         if IS_WINDOWS:
             _user32.SetCapture(self.hwnd)
@@ -1274,9 +1356,10 @@ class SeeThrough:
         self._edit_dirty = True
 
     def _edit_release(self, point: tuple[int, int]) -> None:
-        """The press let go: what it did kept for the Tk thread (`take_edits`) - a click, a box moved or resized (the
-        others chosen with it), a rectangle drawn (or none: a press without a drag gives adding up) -, the boxes it
-        changed outlined at their new places until the Tk thread's marks have seen it (`Marks.seen`)."""
+        """The press let go: what it did kept for the Tk thread (`take_edits`) - a click (on a number plate: "plate"),
+        a box moved or resized (the others chosen with it), a rectangle drawn (Add area's, or none: a press without a
+        drag gives adding up; one on the empty ground, "draw"), a click on the empty ground -, the boxes it changed
+        outlined at their new places until the Tk thread's marks have seen it (`Marks.seen`)."""
         press, self._press = self._press, None
         if IS_WINDOWS:
             _user32.ReleaseCapture()
@@ -1287,13 +1370,16 @@ class SeeThrough:
         self._edit_move(point)
         marks = press["marks"]
         self._edit_serial += 1
-        event: dict[str, Any] = {"press": self._edit_serial, "marks": marks.serial, "key": marks.key}
+        event: dict[str, Any] = {"press": self._edit_serial, "marks": marks.serial if marks is not None else 0,
+                                 "key": marks.key if marks is not None else press.get("key", 0)}
         ghosts: tuple[st.Box, ...] = ()
-        if press.get("adding"):
+        if press.get("adding") or (press.get("draw") and press["moved"]):
             box = st.drawn_box(press["start"], point, size)
             big = box[2] - box[0] >= st.MIN_BOX and box[3] - box[1] >= st.MIN_BOX
-            event.update(kind="add", box=box if press["moved"] and big else None)
-            ghosts = (box,) if event["box"] is not None else ()
+            event.update(kind="add" if press.get("adding") else "draw", box=box if press["moved"] and big else None)
+            ghosts = (box,) if event["box"] is not None and marks is not None else ()
+        elif "index" not in press:
+            event.update(kind="ground")
         elif press["moved"] and not marks.locked:
             moved = st.edit_drag(marks, press["index"], press["grip"], press["start"], point, size)
             changed = {i: b for i, b in moved.items() if b != marks.boxes[i]}
@@ -1304,7 +1390,8 @@ class SeeThrough:
                          index=press["index"])
             ghosts = tuple(changed.values())
         else:
-            event.update(kind="click", index=press["index"], shift=bool(press.get("shift")))
+            event.update(kind="plate" if press["grip"] == st.PLATE else "click", index=press["index"],
+                         shift=bool(press.get("shift")))
         self._edits.append(event)
         if ghosts:
             self._ghost = (self._edit_serial, ghosts)
@@ -1312,7 +1399,7 @@ class SeeThrough:
         self._edit_redraw()
 
     def _edit_cancel(self, why: str) -> None:
-        """A press held given up (a right click, the capture gone, Edit off, the viewer gone): nothing is done."""
+        """A press held given up (a right click, the capture gone, Reader mode, the viewer gone): nothing is done."""
         if self._press is None:
             return
         self._press = None
@@ -1340,19 +1427,22 @@ class SeeThrough:
             self._edit_cancel("let go elsewhere")
 
     def _edit_redraw(self) -> None:
-        """The page drawn again now, with what the press changed (its sheet first of all)."""
+        """The page drawn again now, with what the press changed (a box dragged, a rectangle drawn)."""
         self._edit_dirty = True
         if self._last_look is not None and self._on:
             self._show_look(*self._last_look)
 
     def _set_cursor(self) -> None:
-        """The cursor over the window in Edit: a hand on a box (a click edits it, a drag moves it), the move cursor
-        while one is dragged, a corner's resize cursor, a cross while a region is to be added."""
+        """The cursor over the window while editing: a hand on a box (a click edits it, a drag moves it), the text cursor on
+        its number plate (a click types its place), the move cursor while one is dragged, a corner's resize cursor, a
+        cross while a region is to be added or a rectangle is drawn on the ground; the arrow on the ground."""
         press, marks = self._press, self._marks_live
         name: str | None = None
         if press is not None:
-            name = "add" if press.get("adding") else ("drag" if press["moved"] and press["grip"] == "move"
-                                                       else press["grip"])
+            if press.get("adding") or press.get("draw"):
+                name = "add" if press.get("adding") or press["moved"] else None
+            else:
+                name = "drag" if press["moved"] and press["grip"] in ("move", st.PLATE) else press["grip"]
         elif marks is not None and marks.adding:
             name = "add"
         elif marks is not None and self._last_look is not None:
@@ -1513,6 +1603,16 @@ class SeeThrough:
         self._pane_shown[side] = (serial, at, size)
         self._note("pane", side=side, set=serial, x=at[0], y=at[1], w=size[0], h=size[1])
 
+    def _raise_under_panes(self) -> None:
+        """The lettering's window, shown again, to the top of the topmost windows - and the side panes on show put
+        back over it: while editing it takes the mouse over the whole page, and a pane left under it would take no
+        click (its controls, Reader mode among them, out of reach)."""
+        _raise(self.hwnd)
+        for side in PANES:
+            hwnd = self.panes.get(side, 0)
+            if hwnd and self._pane_shown.get(side) is not None:
+                _raise(hwnd)
+
     def _pane_hide(self, side: str, why: str) -> None:
         if self._pane_shown.get(side) is None:
             return
@@ -1532,7 +1632,7 @@ class SeeThrough:
     def _draw(self, chosen: st.PatchSet | None, shown: tuple[int, ...], origin: tuple[int, int],
               size: tuple[int, int], seq: int, compare_ms: float, shares: list[float],
               edit: tuple[Any, ...] | None = None, edit_key: Any = None) -> None:
-        """The patches *shown* of the set *chosen* drawn over the viewer's client area at *origin* (*size*) - in Edit
+        """The patches *shown* of the set *chosen* drawn over the viewer's client area at *origin* (*size*) - while editing
         with the marks on them (*edit*: `edit_compose`'s, *edit_key* what they are: a picture of the same is only
         moved)."""
         started = time.perf_counter()
@@ -1544,14 +1644,14 @@ class SeeThrough:
         if not same_picture:
             st.compose(size, [chosen.patches[i] for i in shown] if chosen is not None else [], pixels)
             if edit is not None:
-                marks, hover, moved, sheet, left_out, drawing, ghosts = edit
+                marks, hover, moved, left_out, drawing, ghosts, holes = edit
                 if ghosts != marks.ghosts:
                     marks = replace(marks, ghosts=ghosts)
-                st.edit_compose(pixels, marks, hover, moved, sheet, self._dpi, left_out, drawing)
+                st.edit_compose(pixels, marks, hover, moved, self._dpi, left_out, drawing, holes)
         ok = _layered(self.hwnd, dc, origin, size)
         if before is None:
             _user32.ShowWindow(self.hwnd, SW_SHOWNOACTIVATE)
-            _raise(self.hwnd)
+            self._raise_under_panes()
         self._shown = (serial, shown, origin, size) if edit is None else (serial, shown, origin, size, edit_key)
         draw_ms = (time.perf_counter() - started) * 1000
         self.counts["draws" if not same_picture else "moves"] += 1

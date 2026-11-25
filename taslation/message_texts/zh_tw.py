@@ -27,7 +27,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "已取消",
     "pipeline.from_cache": "已顯示先前翻譯的 {bubbles} 行。",
     "pipeline.translated": "已翻譯 {bubbles} 行，用時 {seconds:.0f} 秒。",
-    "pipeline.to_review": "有 {review} 處值得看一下（開啟「編輯」，再用「選單 > 檢查...」）。",
+    "pipeline.to_review": "有 {review} 處值得看一下（關閉「讀者模式」，再用「選單 > 檢查...」）。",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "在檢視器中找不到頁面。請確認書已開啟，或使用左側窗格中的「設定區域...」。",
     "ollama.unreachable": "TASlation 無法連線翻譯程式。請稍後按「翻譯」；它會自動啟動。",

@@ -3148,6 +3148,18 @@ class Pipeline:
         self.rerender(result)
         return True
 
+    def corrected(self, result: PageResult, region: TextRegion) -> bool:
+        """Whether *region*'s translation on its cached page is the person's own (`CachedBubble.edited`), found as
+        `set_translation` finds the bubble; False without a cache or a bubble there."""
+        if self.cache is None or region.unit >= len(result.units):
+            return False
+        unit = result.units[region.unit]
+        page = self._page_for(unit)
+        nbox = unit.normalize(region.bbox)
+        best = max(page.bubbles, key=lambda b: box_iou(b.box, nbox), default=None)  # type: ignore[arg-type]
+        return bool(best is not None and box_iou(best.box, nbox) >= self.settings.match_min_iou  # type: ignore[arg-type]
+                    and best.edited)
+
     def set_large(self, result: PageResult, region: TextRegion, large: Any) -> bool:
         """Store *large* as the part of *region*'s translation to set larger (the region editor's Larger and One
         size, the text itself unchanged: `TextRegion.large`, checked against the text; None: none) on its cached

@@ -22,6 +22,13 @@ ground, and their pictures (`ui.seethrough` fills them, `capture.seethrough` sho
   glyph (`Row.square`: the circular arrow of "translate this page again"); the colours follow the ground's
   (`colours`: light on a dark ground, dark on a light one). The hit boxes of the controls come with it, in the
   picture's pixels.
+* The right pane by its rule (`render_column`): a column as high as the band (`column_height`). What changes - the
+  bubble's block, whole, then the status rows - grows from the column's top down; what lasts - the foot: how much of
+  the page is done, the mode, where the translator runs, the viewer, the target language and the book - stands at
+  its bottom, each row at its place whatever the rows say (a row's height is that of the longest text it may say:
+  `Row.alike`; one with nothing to say keeps its room). The changing rows that do not fit above the foot are left
+  out, in the order the caller gives (the oldest and least urgent first, the warnings last); the foot's spare rows
+  go only where the column is short, by its height alone.
 
 Every pixel size here is at 96 DPI and goes with the viewer's (`seethrough.scaled`)."""
 
@@ -51,6 +58,7 @@ INDICATORS_W = 200  # the right pane's width (its ground less the gaps when that
 RADIUS = 5  # the plates' corners
 ALPHA = 225  # the plates' opacity (of 255)
 TEXT_LINES = 4  # the right pane's status text is wrapped into at most so many lines
+FOOT_SHARE = 0.5  # the right pane's foot leaves its spare rows out where it would take more of the column than this
 LIST_LEAST = 72  # px of a list's words at the least (a longer name is cut with an ellipsis to the pane's width)
 
 # the window's language -> the system's fonts for its script (Windows; the first found); others: Segoe UI
@@ -69,7 +77,11 @@ class Row:
     translated). *square*: the name of a button at the row's right end, a square plate of the row's height with a
     glyph (`GLYPHS`) and no words ("" for none), dim and taking no click when not *square_enabled*. *lang*: the
     language whose script the words are set in (`font`; "" the pane's: the window's language) - a bubble's Japanese,
-    its translation; *lines*: a text row wrapped into at most so many lines (0: TEXT_LINES)."""
+    its translation; *lines*: a text row wrapped into at most so many lines (0: TEXT_LINES). A row of the right
+    pane's foot (`render_column`) keeps its height whatever it says: *alike* holds the other texts it may say, and
+    its plate is as high as the longest of them all wraps to; one whose *text* is "" keeps its room with nothing
+    drawn (the line of the page filling in, while none is); a *spare* one is left out where the foot would take
+    more than FOOT_SHARE of the column."""
 
     name: str
     text: str
@@ -81,6 +93,8 @@ class Row:
     square_enabled: bool = True
     lang: str = ""
     lines: int = 0
+    alike: tuple[str, ...] = ()
+    spare: bool = False
 
 
 @dataclass(frozen=True)
@@ -108,10 +122,13 @@ def colours(ground: tuple[int, int, int] | None) -> Colours:
 
 @dataclass(frozen=True)
 class Picture:
-    """A pane's picture: premultiplied BGRA (H, W, 4) and the hit boxes of its controls, (name, box) in its pixels."""
+    """A pane's picture: premultiplied BGRA (H, W, 4) and the hit boxes of its controls, (name, box) in its pixels;
+    for the right pane's column (`render_column`) the boxes of its foot's rows too, from the top down (*foot*: each
+    row's room, whether it says anything now or not)."""
 
     bgra: np.ndarray
     hits: tuple[tuple[str, Box], ...]
+    foot: tuple[Box, ...] = ()
 
     @property
     def size(self) -> tuple[int, int]:
@@ -296,23 +313,108 @@ def glyph(name: str, size: int, ink: tuple[int, int, int], dpi: float) -> Image.
     return mark
 
 
-def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colours) -> Picture:
-    """The picture of a pane of *rows*, *width* px wide (`width_for`), at *dpi*, in *scheme*'s colours."""
+Plate = tuple[Row, Any, list[str], int]  # a row, its font, its lines, its plate's height
+
+
+def _measure(rows: list[Row], width: int, language: str, dpi: float) -> list[Plate]:
+    """Each of *rows* as it is drawn *width* px wide: its font, its lines (a text row's wrapped), its plate's height
+    (a row with *alike* texts: the most lines any of them takes)."""
     pane_face = font(language, scaled(FONT_PX, dpi))
-    pad, gap = scaled(PAD, dpi), scaled(ROW_GAP, dpi)
-    plates: list[tuple[Row, Any, list[str], int]] = []
+    pad = scaled(PAD, dpi)
+    plates: list[Plate] = []
     for row in rows:
         face = font(row.lang, scaled(FONT_PX, dpi)) if row.lang else pane_face
-        lines = (wrap(face, row.text, width - 2 * pad - _lead(row, dpi), row.lines or TEXT_LINES)
-                 if row.kind == "text" else [row.text])
-        plates.append((row, face, lines, row_height(face, dpi, len(lines))))
-    height = sum(h for _r, _f, _l, h in plates) + gap * max(0, len(plates) - 1)
-    image = Image.new("RGBA", (width, max(1, height)), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
+        if row.kind == "text":
+            room, most = width - 2 * pad - _lead(row, dpi), row.lines or TEXT_LINES
+            lines = wrap(face, row.text, room, most)
+            count = max([len(lines)] + [len(wrap(face, text, room, most)) for text in row.alike])
+        else:
+            lines, count = [row.text], 1
+        plates.append((row, face, lines, row_height(face, dpi, count)))
+    return plates
+
+
+def _stacked(plates: list[Plate], gap: int) -> int:
+    return sum(h for _r, _f, _l, h in plates) + gap * max(0, len(plates) - 1)
+
+
+def _picture_of(image: Image.Image, hits: list[tuple[str, Box]], foot: tuple[Box, ...] = ()) -> Picture:
+    rgba = np.asarray(image, dtype=np.uint8)
+    alpha = rgba[..., 3:4].astype(np.uint16)
+    bgra = np.empty_like(rgba)
+    bgra[..., :3] = (rgba[..., 2::-1].astype(np.uint16) * alpha // 255).astype(np.uint8)  # premultiplied
+    bgra[..., 3] = rgba[..., 3]
+    return Picture(np.ascontiguousarray(bgra), tuple(hits), foot)
+
+
+def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colours) -> Picture:
+    """The picture of a pane of *rows*, *width* px wide (`width_for`), at *dpi*, in *scheme*'s colours."""
+    plates = _measure(rows, width, language, dpi)
+    gap = scaled(ROW_GAP, dpi)
+    image = Image.new("RGBA", (width, max(1, _stacked(plates, gap))), (0, 0, 0, 0))
     hits: list[tuple[str, Box]] = []
-    y = 0
+    _draw(image, plates, 0, width, dpi, scheme, hits)
+    return _picture_of(image, hits)
+
+
+def column_height(size: tuple[int, int], band: tuple[int, int], dpi: float) -> int:
+    """The px a pane may be high in a frame of *size* whose steady band is the rows *band* (`place`: from the band's
+    top GAP px down to GAP px above its bottom)."""
+    gap = scaled(GAP, dpi)
+    return max(0, (min(size[1], band[1]) - gap) - (max(0, band[0]) + gap))
+
+
+def render_column(top: list[Row], changing: list[Row], foot: list[Row], width: int, height: int, language: str,
+                  dpi: float, scheme: Colours, drop: tuple[int, ...] = ()) -> Picture | None:
+    """The right pane as a column *height* px high (`column_height`; the band's height less its gaps): *top* (the
+    bubble's block, whole) and the *changing* rows under it, from the column's top down, and the *foot* rows at its
+    bottom, where they stay whatever the rest says (each keeps its height: `Row.alike`; its *spare* ones are left out
+    where the foot would take more than FOOT_SHARE of the column - by the column's height alone, so they come and go
+    with the viewer's size only). The changing rows that do not fit above the foot are left out in the order *drop*
+    gives (indices of *changing*; those it does not name after it, the last first), the others keeping their order.
+    With no foot the picture is as high as its rows. None when the foot and the block alone do not fit."""
+    gap = scaled(ROW_GAP, dpi)
+    feet = _measure(foot, width, language, dpi)
+    if feet and _stacked(feet, gap) > height * FOOT_SHARE:
+        feet = [p for p in feet if not p[0].spare]
+    heads = _measure(top, width, language, dpi)
+    middle = _measure(changing, width, language, dpi)
+    order = [i for i in dict.fromkeys(drop) if 0 <= i < len(middle)]
+    order += [i for i in range(len(middle) - 1, -1, -1) if i not in order]
+    kept = list(range(len(middle)))
+
+    def used() -> int:
+        upper = heads + [middle[i] for i in kept]
+        return _stacked(upper, gap) + _stacked(feet, gap) + (gap if upper and feet else 0)
+
+    for i in order:
+        if used() <= height:
+            break
+        kept.remove(i)
+    if used() > height:
+        return None
+    upper = heads + [middle[i] for i in kept]
+    total = height if feet else _stacked(upper, gap)
+    image = Image.new("RGBA", (width, max(1, total)), (0, 0, 0, 0))
+    hits: list[tuple[str, Box]] = []
+    _draw(image, upper, 0, width, dpi, scheme, hits)
+    boxes = _draw(image, feet, total - _stacked(feet, gap), width, dpi, scheme, hits)
+    return _picture_of(image, hits, tuple(boxes))
+
+
+def _draw(image: Image.Image, plates: list[Plate], y: int, width: int, dpi: float, scheme: Colours,
+          hits: list[tuple[str, Box]]) -> list[Box]:
+    """*plates* drawn on *image* one under the other from *y* down, ROW_GAP apart; the controls' hit boxes added to
+    *hits*. A text row of no words keeps its room with nothing drawn. Each plate's box (its room), in order."""
+    draw = ImageDraw.Draw(image)
+    pad, gap = scaled(PAD, dpi), scaled(ROW_GAP, dpi)
     radius = scaled(RADIUS, dpi)
+    boxes: list[Box] = []
     for row, face, lines, h in plates:
+        boxes.append((0, y, width, y + h))
+        if row.kind == "text" and not row.text:
+            y += h + gap
+            continue
         ascent, descent = face.getmetrics()
         line_h = ascent + descent
         plate_w = width - (h + gap if row.square else 0)  # (a square button takes the row's right end)
@@ -352,38 +454,59 @@ def render(rows: list[Row], width: int, language: str, dpi: float, scheme: Colou
         if row.kind in ("button", "toggle", "list") and row.enabled and row.name:
             hits.append((row.name, (0, y, plate_w, y + h)))
         y += h + gap
-    rgba = np.asarray(image, dtype=np.uint8)
-    alpha = rgba[..., 3:4].astype(np.uint16)
-    bgra = np.empty_like(rgba)
-    bgra[..., :3] = (rgba[..., 2::-1].astype(np.uint16) * alpha // 255).astype(np.uint8)  # premultiplied
-    bgra[..., 3] = rgba[..., 3]
-    return Picture(np.ascontiguousarray(bgra), tuple(hits))
+    return boxes
 
 
-BADGE_PX = 11  # the text of a region's number plate in Edit (`badge`)
+def middle_cut(text: str, fits: Any, mark: str = "…") -> str:
+    """*text* as it is when it *fits* (a function of a text: whether it fits), else shortened in the middle - its
+    start and its end kept, as much of them as fits, *mark* between them (the start one character longer than the
+    end)."""
+    if fits(text):
+        return text
+
+    def kept(n: int) -> str:
+        head, tail = (n + 1) // 2, n // 2
+        return text[:head].rstrip() + mark + (text[len(text) - tail:].lstrip() if tail else "")
+
+    low, high = 0, len(text) - 1
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(kept(middle)):
+            low = middle
+        else:
+            high = middle - 1
+    return kept(low)
+
+
+def fits_line(language: str, dpi: float, width: int | None = None) -> Any:
+    """Whether a text fits one line of a text row of the right pane (INDICATORS_W wide unless *width*), at *dpi*."""
+    face = font(language, scaled(FONT_PX, dpi))
+    room = (width if width is not None else scaled(INDICATORS_W, dpi)) - 2 * scaled(PAD, dpi)
+    return lambda text: _text_w(face, text) <= room
+
+
+BADGE_PX = 13  # the text of a region's number plate in editing (`badge`)
+BADGE_MIN_PX = 18  # the plate's least height and width: a click on it types the region's place in the reading order
 BADGE_ALPHA = 235
 
 
 def badge(text: str, colour: tuple[int, int, int], dpi: float) -> np.ndarray:
-    """A region's number plate in Edit (see-through mode): *text* (its place in the reading order) in black or white
-    on a small rounded plate of *colour* (RGB: the window's outline colours for what the region is), premultiplied
-    BGRA at *dpi*."""
+    """A region's number plate in editing (see-through mode): *text* (its place in the reading order) in black or
+    white on a rounded plate of *colour* (RGB: the window's outline colours for what the region is), BADGE_MIN_PX
+    high and wide at the least (a click on it types the place), premultiplied BGRA at *dpi*."""
     face = font("en", scaled(BADGE_PX, dpi))
     ascent, descent = face.getmetrics()
     pad = scaled(4, dpi)
-    width = max(ascent + descent, _text_w(face, text)) + 2 * pad
-    height = ascent + descent + scaled(2, dpi)
+    least = scaled(BADGE_MIN_PX, dpi)
+    height = max(least, ascent + descent + scaled(2, dpi))
+    width = max(least, max(ascent + descent, _text_w(face, text)) + 2 * pad)
     image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((0, 0, width - 1, height - 1), radius=scaled(4, dpi), fill=(*colour, BADGE_ALPHA))
     ink = (0, 0, 0) if 0.299 * colour[0] + 0.587 * colour[1] + 0.114 * colour[2] >= 128 else (255, 255, 255)
-    draw.text(((width - _text_w(face, text)) // 2, scaled(1, dpi)), text, font=face, fill=(*ink, 255))
-    rgba = np.asarray(image, dtype=np.uint8)
-    alpha = rgba[..., 3:4].astype(np.uint16)
-    bgra = np.empty_like(rgba)
-    bgra[..., :3] = (rgba[..., 2::-1].astype(np.uint16) * alpha // 255).astype(np.uint8)
-    bgra[..., 3] = rgba[..., 3]
-    return np.ascontiguousarray(bgra)
+    draw.text(((width - _text_w(face, text)) // 2, (height - ascent - descent) // 2), text, font=face,
+              fill=(*ink, 255))
+    return _picture_of(image, []).bgra
 
 
 # ------------------------------------------------------------------ where they go

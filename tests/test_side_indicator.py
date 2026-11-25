@@ -169,8 +169,9 @@ class Window(SideMixin, tk.Frame):
 
 
 def pane_lines(w):
-    """What the right side pane says (`seethrough.right_rows`)."""
-    return [row.text for row in seethrough.right_rows(w)]
+    """What the right side pane says (`seethrough.right_rows`: its changing rows, then its foot's)."""
+    changing, foot = seethrough.right_rows(w)
+    return [row.text for row in (*changing, *foot)]
 
 
 @pytest.fixture

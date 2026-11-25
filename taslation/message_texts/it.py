@@ -27,7 +27,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "annullato",
     "pipeline.from_cache": "{bubbles:riga mostrata|righe mostrate} da traduzioni precedenti.",
     "pipeline.translated": "{bubbles:riga tradotta|righe tradotte} in {seconds:.0f} s.",
-    "pipeline.to_review": "{review:riga merita|righe meritano} un'occhiata (attiva Modifica, poi Menu > Rivedi...).",
+    "pipeline.to_review": "{review:riga merita|righe meritano} un'occhiata (con Modalità lettore disattivata, Menu > Rivedi...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Nessuna pagina trovata nel visualizzatore. Controlla che il libro sia aperto, oppure usa Imposta area... nel pannello sinistro.",
     "ollama.unreachable": "TASlation non è riuscito a raggiungere il programma di traduzione. Premi Traduci tra un momento; si avvia da solo.",

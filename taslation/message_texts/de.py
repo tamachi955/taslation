@@ -28,7 +28,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "abgebrochen",
     "pipeline.from_cache": "{bubbles:Zeile|Zeilen} aus früheren Übersetzungen angezeigt.",
     "pipeline.translated": "{bubbles:Zeile|Zeilen} in {seconds:.0f} s übersetzt.",
-    "pipeline.to_review": "{review:Zeile ist|Zeilen sind} einen Blick wert (Bearbeiten einschalten, dann Menü > Durchsehen...).",
+    "pipeline.to_review": "{review:Zeile ist|Zeilen sind} einen Blick wert (Lesermodus aus, dann Menü > Durchsehen...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Keine Seite im Viewer gefunden. Prüfen Sie, ob das Buch offen ist, oder verwenden Sie Bereich festlegen... im linken Bereich.",
     "ollama.unreachable": "TASlation konnte das Übersetzungsprogramm nicht erreichen. Drücken Sie gleich Übersetzen; es startet von selbst.",

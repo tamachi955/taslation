@@ -1,7 +1,7 @@
 """The program's Tk root, never on the screen: TASlation is the lettering laid over the viewer's own window and the two
 side panes beside its page (`seethrough`, `capture.seethrough`), with the Menu of the left pane (`see_menu`) and the
 dialogs. The root hosts the dialogs and holds the state the panes and the dialogs share - the viewer chosen, the
-target language, Auto, the book's Series and Volume, the page's regions in Edit (`see_edit`) - in widgets of its own
+target language, Auto, the book's Series and Volume, the page's regions while editing (`see_edit`) - in widgets of its own
 that are laid out but never seen (the toolbar's boxes, the page's canvas, the status line). All heavy work runs in one
 worker thread; Tk only draws. Page images live in memory only; nothing is written to disk except the text-only
 translation cache and the per-window capture margins.
@@ -178,7 +178,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
     """The program's Tk root. Its state is made here (`__init__`), and its widgets (`_build_ui`, again after a
     language switch); the small dialogs open from here. What it does comes from the mixins: the status line and the
     busy state (`status`), the capture, the live frame and Auto (`live`), the worker, its events and the requests
-    (`jobs`), the Translator role's regions, which Edit works on (`translator`; several regions selected and the
+    (`jobs`), the Translator role's regions, which editing works on (`translator`; several regions selected and the
     reading-order numbers: `selection`), the viewer list, the area and the offline guard (`viewers`), the screens
     behind for the right pane (`side`), the root never on the screen (`seethrough.HiddenWindowMixin`)."""
 
@@ -245,7 +245,6 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         # the start's judgement of the GPU's memory made (`JobsMixin._job_init`): the viewer chooser may come from then
         # on (`see_menu.chooser_tick`), after the legal notice and the GPU's dialog, alone
         self._start_judged = False
-        self._see_viewer_note: tuple[str, float] | None = None  # (the viewer's title, until when the right pane says it)
         self._waiting = False  # the viewer window shows another tab; Auto mode is holding back
         self.annotation_store = AnnotationStore(settings.annotations_dir)
         self.glossary_store = GlossaryStore(settings.glossary_dir)
@@ -455,7 +454,7 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         self.lang_var = tk.StringVar(value=self.settings.target_language)
         self.auto_var = tk.BooleanVar(value=False)
         self.original_var = tk.BooleanVar(value=False)
-        # (the Translator role is the left pane's Edit, `see_edit`)
+        # (the Translator role is editing, `see_edit`)
         self.role_var = tk.StringVar(value=self.settings.role)
         self.book_var.trace_add("write", lambda *_a: self._book_for_role())  # a book opens in its role
         self._build_toolbar()
@@ -468,8 +467,8 @@ class App(StatusMixin, LiveViewMixin, JobsMixin, TranslatorMixin, ReplaceMixin, 
         # of a new size while a page job runs, that size's own: `_margins_of`)
         self.canvas.read_area_of = lambda image: area.margins_to_box(self._margins_of(image), image.size)
         # (the canvas is never seen: what it draws is the page the lettering over the viewer is made of, and its
-        # regions are those Edit works on; TASlation takes no key and no click of the reader's but on its own panes,
-        # the boxes of Edit and its dialogs)
+        # regions are those editing works on; TASlation takes no key and no click of the reader's but on its own panes,
+        # the boxes while editing and its dialogs)
 
         self.notes_var = tk.StringVar(value="")  # the notes for the reader on the page, under it when there are any
         self.notes_label = ttk.Label(self, textvariable=self.notes_var, anchor="w", justify="left", wraplength=900,

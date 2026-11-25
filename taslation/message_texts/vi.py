@@ -27,7 +27,7 @@ TEMPLATES: dict[str, str] = {
     "pipeline.cancelled": "đã hủy",
     "pipeline.from_cache": "Đã hiện {bubbles} dòng từ các bản dịch trước.",
     "pipeline.translated": "Đã dịch {bubbles} dòng trong {seconds:.0f} giây.",
-    "pipeline.to_review": "{review} chỗ đáng xem lại (bật Sửa, rồi Menu > Rà soát...).",
+    "pipeline.to_review": "{review} chỗ đáng xem lại (tắt Chế độ người đọc, rồi Menu > Rà soát...).",
     "pipeline.page_error": "{error}",
     "pipeline.no_content": "Không tìm thấy trang trong trình xem. Hãy kiểm tra sách đang mở, hoặc dùng Đặt vùng... ở khung bên trái.",
     "ollama.unreachable": "TASlation không kết nối được với chương trình dịch. Hãy bấm Dịch sau một lát; chương trình tự khởi động.",

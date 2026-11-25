@@ -2,11 +2,10 @@
 over, TASlation asks which window is the viewer and chooses none by itself. A drop-down of the windows named as their
 taskbar buttons, the remembered viewer first and preselected (Enter or OK), nothing preselected and OK greyed when
 none looks like a viewer, List again, Quit (Close while a viewer is followed); again after the viewer was closed,
-saying so, the new window only preselected; none for a viewer named with --window; after OK the right pane says
-"Viewer: <title>" for a few seconds. Fake windows (invented titles) and a withdrawn Tk root only: nothing is shown,
+saying so, the new window only preselected; none for a viewer named with --window; the right pane's foot names
+the viewer followed ("Viewer: <title>", a long title shortened in the middle). Fake windows (invented titles) and a withdrawn Tk root only: nothing is shown,
 no window of the computer's is touched."""
 
-import time
 import tkinter as tk
 from tkinter import ttk
 from types import SimpleNamespace
@@ -15,7 +14,7 @@ import pytest
 
 from taslation import viewerparts
 from taslation.capture import WindowInfo
-from taslation.ui import constants, layout, viewers
+from taslation.ui import constants, layout
 from taslation.ui import see_menu as sm
 from taslation.ui import seethrough as ui
 
@@ -199,12 +198,21 @@ def test_a_long_title_is_shortened_in_the_middle_to_the_lists_width(hidden_root,
     dialog.destroy()
 
 
-def test_after_a_choice_the_right_pane_says_the_viewer_for_a_few_seconds():
-    status = SimpleNamespace(get=lambda: "")
-    app = SimpleNamespace(_see_viewer_note=(READER.title, time.monotonic() + viewers.VIEWER_NOTE_S), status_var=status)
-    assert [row.text for row in ui.right_rows(app)] == [f"Viewer: {READER.title}"]
-    app.status_var = SimpleNamespace(get=lambda: f"Viewer: {READER.title}  (area set)")  # the status line says it
-    assert [row.text for row in ui.right_rows(app)] == [f"Viewer: {READER.title}  (area set)"]
-    app._see_viewer_note = (READER.title, time.monotonic() - 0.1)  # (its seconds over)
-    app.status_var = status
-    assert ui.right_rows(app) == []
+def test_the_right_pane_s_foot_names_the_viewer_followed_a_long_title_shortened_in_the_middle():
+    from taslation import panes as pn
+    from taslation.capture import taskbar_title
+
+    short = WindowInfo(hwnd=24, title="見本 - Google Chrome", class_name=CHROME, pid=24, rect=(0, 0, 800, 600))
+    app = SimpleNamespace(status_var=SimpleNamespace(get=lambda: ""), selected=short)
+    changing, foot = ui.right_rows(app)
+    named = f"Viewer: {taskbar_title(short)}"
+    assert changing == [] and named in [row.text for row in foot] and "…" not in named
+    app.status_var = SimpleNamespace(get=lambda: named)  # (the status line says it: once)
+    assert ui.right_rows(app)[0] == []
+    app.selected = WindowInfo(hwnd=23, title="見本の物語 " + "とても長い副題 " * 12 + "- Yomizuq - Google Chrome",
+                              class_name=CHROME, pid=23, rect=(0, 0, 800, 600))
+    (row,) = [r for r in ui.right_rows(app)[1] if r.text.startswith("Viewer: ")]
+    assert "…" in row.text and row.text.startswith("Viewer: 見本の物語") and row.text.endswith("Chrome")
+    assert row.lines == 1 and pn.fits_line("en", 96)(row.text)
+    app.selected = None
+    assert ui.NO_VIEWER in [r.text for r in ui.right_rows(app)[1]]

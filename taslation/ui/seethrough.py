@@ -1,7 +1,8 @@
 """See-through mode on the Tk side - the program's one mode since TASlation's own window went (the viewer's window or
 its full screen): TASlation's lettering lies over the viewer's own window (`capture.seethrough`), and the viewer takes
-every click and key itself - but, with the left pane's Edit on (`see_edit`: the Translator role), the clicks on the
-page's regions.
+every click and key itself in Reader mode (the left pane's switch); while editing (`see_edit`: the Translator role,
+the default) the page takes the mouse - every press, move and release over the viewer's client area is TASlation's,
+where no window lies over it - and the viewer the keys alone.
 
 * `start` makes the see-through window at the window's start (Windows; and asks the capture for frames up to every
   `wgc.FAST_UPDATE_MS`); where it cannot be made the program says so and ends (`could_not_start`); `close` ends it. `tick` (every TICK_MS) tells it which viewer to lie over and
@@ -31,21 +32,26 @@ page's regions.
   asked of the translator anew; dim until a page was lettered and while the window's Translate is), Auto, the target
   language (a click lists every target language at the pane's right side, `see_menu.languages_at_pane`; one clicked
   there is taken at once, `take_language`), the lettering's switch, the indicators' switch (kept in the settings
-  file: ``see_through_indicators``), Edit (with TASlation's window hidden: the page's regions edited on the overlay,
-  `see_edit`), Add area (a text area drawn on the page, Edit on or off: `see_edit.toggle_adding`; pressed while one
-  is to be added; "(Insert)" while that key adds one), Set area..., Settings..., Menu (`see_menu`: what the hidden
-  root's controls
-  offer that still means something here), Quit -, RIGHT the indicators: what the status slot says, how far the page
-  filling in is (lines lettered of the lines read), the status line, the backlog and the pages that went by too fast
-  (the indicator's own lines), where the translator runs - the window's words as they are: they name the panes'
-  controls and the Menu's entries, no key -, under the bubble last under
-  the pointer (`bubble_rows`: Copy the Japanese, Copy the translation and Ask again, then its Japanese and its
-  translation; kept once the pointer has left it, so that the pointer can go to the pane, until another bubble is
-  under it or the viewer shows another page: `bubble_tick`; Ask again asks the translator for that line alone, with
-  no question first: `ask_bubble`). The right pane takes a click on those plates alone; with the indicators switched
-  off the block goes with them. `panes_tick` (every TICK_MS) acts on the clicks on the panes and draws a pane again
-  only when what it says changed. A pane that would come near the page hides (`panes.place`); the right one leaves
-  the bubble's block out where it does not fit with it.
+  file: ``see_through_indicators``), Reader mode (with TASlation's window hidden; unchecked, the page's regions are
+  edited on the overlay, `see_edit`), Add area (a text area drawn on the page, editing or in Reader mode:
+  `see_edit.toggle_adding`; pressed while one is to be added; "(Insert)" while that key adds one), Set area...,
+  Settings..., Menu (`see_menu`: what the hidden root's controls offer that still means something here), Quit -,
+  RIGHT the indicators, a column as high as the steady band (`panes.render_column`) by one rule: what changes
+  above, what lasts below (`right_rows`). From the top: the bubble last under the pointer (`bubble_rows`: Copy the
+  Japanese, Copy the translation and Ask again, then its Japanese and its translation; kept once the pointer has
+  left it, so that the pointer can go to the pane, until another bubble is under it or the viewer shows another
+  page: `bubble_tick`; Ask again asks the translator for that line alone, with no question first: `ask_bubble`),
+  then the changing lines - the setup banner's, the offline guard's, what the status slot says, the status line,
+  the backlog and the pages that went by too fast (the indicator's own lines) -, cut before the foot where the band
+  is short: the oldest and least urgent first, the warnings last (`_drop_order`). At the bottom the foot, whose rows
+  keep their places whatever the rest says (each of one height: `panes.Row.alike`): how far the page filling in is
+  (lines lettered of the lines read; its room kept while none fills in), the mode (editing or Reader mode), where
+  the translator runs (the readers too where they run elsewhere), the viewer followed (its title shortened in the
+  middle), and the target language with the book where the band has room (`foot_rows`) - the window's words as they
+  are: they name the panes' controls and the Menu's entries, no key. The right pane takes a click on the block's
+  plates alone; with the indicators switched off the block goes with them. `panes_tick` (every TICK_MS) acts on the
+  clicks on the panes and draws a pane again only when what it says changed. A pane that would come near the page
+  hides (`panes.place`); the right one leaves the bubble's block out where it does not fit with the foot.
 * TASlation's own window is never on the screen in this mode (`hidden`): the Tk root stays the host of the widgets
   and the dialogs, mapped in its normal state - so that its widgets are laid out at their sizes, and its dialogs (Tk
   transients of it) show: Tk keeps a transient of a withdrawn or minimised window hidden - but off every monitor
@@ -80,11 +86,11 @@ page's regions.
   that involves TASlation's windows - to the hidden window, a dialog by its kind, a message box, a menu, the
   lettering, a side pane; from one of them back to the viewer or to another program - and every time the viewer
   loses the foreground while a job is at work is one line in the log (what to what, ms after the last job's start,
-  whether a job is at work, whether Edit is on; no title, no text) and counted (``_see_foreground``): what explains a
+  whether a job is at work, whether the page is being edited; no title, no text) and counted (``_see_foreground``): what explains a
   key of the person's that did not reach the book.
 
 Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, the
-menu, the taskbar button or a region in Edit, or a dialog of TASlation's own, moves the foreground."""
+menu, the taskbar button or a region being edited, or a dialog of TASlation's own, moves the foreground."""
 
 from __future__ import annotations
 
@@ -639,7 +645,7 @@ def foreground_tick(app: Any) -> list[str]:
     the viewer or to another program -, and each time the viewer loses the foreground to anything while a job is at
     work: one line in the log, counted (``_see_foreground``: by where it went; "the viewer lost it in a job" too). Each
     line says from where to where, how many ms after the last job's start it came (`StatusMixin._go_busy`; negative:
-    before it), whether a job is at work and whether Edit is on - no title, no text. This is what explains a key
+    before it), whether a job is at work and whether the page is being edited - no title, no text. This is what explains a key
     of the person's that went elsewhere than the book. The lines, for the tests."""
     notes = getattr(app, "_see_fronts", None)
     if notes is None:
@@ -676,7 +682,7 @@ def foreground_tick(app: Any) -> list[str]:
         since = getattr(app, "_busy_since", None)
         ms = "no job yet" if since is None else f"{round((note.at - float(since)) * 1000)} ms after the last job's start"
         line = (f"foreground: {was} -> {to}; {ms}{', a job at work' if job else ''}; "
-                f"Edit {'on' if see_edit.on(app) else 'off'}")
+                f"editing {'on' if see_edit.on(app) else 'off'}")
         log.info("%s", line)
         lines.append(line)
         kept = app.__dict__.setdefault("_see_foreground_lines", [])  # (the newest, for a tool's report)
@@ -988,7 +994,7 @@ def left_rows(app: Any) -> list[pn.Row]:
     first = pn.Row("stop", _("Stop"), **again) if _stoppable(app) else pn.Row("translate", _("Translate"), **again)
     from . import see_edit
 
-    edit = [pn.Row("edit", _(see_edit.EDIT), "toggle", on=see_edit.on(app)),
+    edit = [pn.Row("edit", _(see_edit.READER_MODE), "toggle", on=not see_edit.on(app)),
             pn.Row("add_area", _(see_edit.ADD_AREA), on=see_edit.adding(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
@@ -1002,16 +1008,30 @@ def left_rows(app: Any) -> list[pn.Row]:
             pn.Row("quit", _("Quit"))]
 
 
-def right_rows(app: Any) -> list[pn.Row]:
-    """The right pane, words only, each row only when it has something to say: the setup banner's lines (the setup's
-    problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their buttons
-    do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would show; for a
-    few seconds after a choice in the viewer chooser, "Viewer: <title>" (``_see_viewer_note``, `viewers.VIEWER_NOTE_S`);
-    the status slot (`status_slot`: what the page cannot show itself), how far the page filling in is, the status
-    line, the indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`), where the
-    translator runs, in the window's words as they are (they name the panes' controls and the Menu's entries, no
-    key). The reader's notes on a
-    page (`_show_notes`, the window's strip under the page) are left out."""
+MODE_EDITING = "Editing: turn pages with the keys"  # (the right pane's foot; Reader mode: `see_edit.READER_MODE`)
+TRANSLATOR_AT = {"gpu": "Translator: on the GPU", "cpu": "Translator: on the processor"}
+TRANSLATOR_NOT_YET = "Translator: not loaded yet"
+TRANSLATOR_READERS_AT = {("gpu", "cpu"): "Translator: on the GPU; OCR: on the processor",
+                         ("cpu", "gpu"): "Translator: on the processor; OCR: on the GPU"}  # (the readers elsewhere)
+NO_VIEWER = "Viewer: none chosen"
+PROGRESS = "This page: {done} of {total} lines"
+FOOT_LINES = 2  # a row of the right pane's foot is wrapped into at most so many lines
+READERS_NOT_PLACED = "not_asked"  # (`ocr.place.NOT_ASKED`: the readers' place not judged yet)
+
+
+def right_rows(app: Any) -> tuple[list[pn.Row], list[pn.Row]]:
+    """The right pane's words: (the changing rows, the foot's rows). The changing ones, each only when it has
+    something to say, grow down from the pane's top (under the bubble's block): the setup banner's lines (the setup's
+    problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their
+    buttons do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would
+    show; the status slot (`status_slot`: what the page cannot show itself), the status line, the indicator's lines
+    on the pages behind (the backlog, those that went by too fast: `side_model`); those that do not fit above the
+    foot are left out, the oldest and least urgent first, the warnings last (`_drop_order`). The foot's rows
+    (`foot_rows`) stay at the pane's bottom, where they are whatever the rest says: the line of the page filling in
+    (its room kept while none is), the mode, where the translator runs (and the readers where they run elsewhere),
+    the viewer followed, the target language and the book where there is room. In the window's words as they are
+    (they name the panes' controls and the Menu's entries, no key). The reader's notes on a page (`_show_notes`, the
+    window's strip under the page) are left out."""
     from . import status_slot
     from .banner import PROBLEM_COLOURS
 
@@ -1024,25 +1044,15 @@ def right_rows(app: Any) -> list[pn.Row]:
     if guard:
         rows.append(pn.Row("", guard, "text", warn=True))
     status = str(_get(getattr(app, "status_var", None), "") or "").strip()
-    note = getattr(app, "_see_viewer_note", None)  # (the viewer chosen in the chooser: `ViewerMixin._on_window_selected`)
-    if note is not None and time.monotonic() < note[1]:
-        said = _("Viewer: {title}").format(title=note[0])
-        if not status.startswith(said):  # (the status line saying it already, perhaps with more: once)
-            rows.append(pn.Row("", said, "text"))
     side = getattr(app, "_side", None)
     shown = getattr(getattr(side, "slot", None), "shown", None)
     want = shown[0] if shown else None
     slot = status_slot.slot_text(want[0]).strip() if want else ""
     if slot:
         rows.append(pn.Row("", slot, "text", warn=bool(want and want[1])))
-    fill = getattr(app, "_fill", None)
-    if fill is not None and fill.final is None:
-        total = sum(1 for s in fill.states if s != "skipped")
-        if total:
-            rows.append(pn.Row("", _("This page: {done} of {total} lines").format(done=fill.filled, total=total),
-                               "text"))
-    if status and any(status == row.text for row in rows):
-        status = ""  # (the status line saying a banner's line again: once)
+    foot = foot_rows(app)
+    if status and any(status == row.text for row in (*rows, *foot)):
+        status = ""  # (the status line saying a banner's line or a foot's again: once)
     if status:
         rows.append(pn.Row("", status, "text"))
     model = getattr(side, "model", None)
@@ -1058,11 +1068,85 @@ def right_rows(app: Any) -> list[pn.Row]:
                 rows.append(pn.Row("", _("{n} turned too fast to catch: turn back to them in the viewer to have them read.").format(n=missed), "text"))
         except Exception:  # noqa: BLE001 - the indicator's lines left out
             pass
-    where = getattr(app, "_compute_where", "")
-    if where in ("gpu", "cpu"):
-        rows.append(pn.Row("", _("Translator: on the GPU") if where == "gpu" else _("Translator: on the processor"),
-                           "text"))
+    return rows, foot
+
+
+def _readers_at(app: Any) -> str:
+    """Where the readers run ("gpu", "cpu"; "" while not judged yet: `ocr.Readers.placement`)."""
+    placement = getattr(getattr(getattr(app, "pipeline", None), "ocr", None), "placement", None)
+    device = str(getattr(placement, "device", "") or "")
+    if placement is None or getattr(placement, "why", "") == READERS_NOT_PLACED or device not in ("gpu", "cpu"):
+        return ""
+    return device
+
+
+def _viewer_title(win: Any) -> str:
+    try:
+        from ..capture import taskbar_title
+
+        return taskbar_title(win)
+    except Exception:  # noqa: BLE001 - (a window as the tests make it)
+        return str(getattr(win, "title", "") or "")
+
+
+def foot_rows(app: Any) -> list[pn.Row]:
+    """The right pane's foot (`right_rows`), from its top down, each row of one height whatever it says
+    (`pn.Row.alike`): the line of the page filling in ("This page: 3 of 8 lines"; its room kept, empty, while no page
+    fills in), the mode (TASlation's own window hidden: editing or Reader mode), where the translator runs - and the
+    readers, where they run elsewhere - ("not loaded yet" until Ollama's log said), the viewer followed (its title
+    shortened in the middle to one line) or none, then - a spare row, left out where the band is short - the target
+    language and the book's name (shortened in the middle)."""
+    from . import see_edit
+
+    dpi = int(getattr(app, "_see_dpi", st.BASE_DPI))
+    fits = pn.fits_line(ui_language(), dpi)
+    fill = getattr(app, "_fill", None)
+    progress = ""
+    if fill is not None and fill.final is None:
+        total = sum(1 for s in fill.states if s != "skipped")
+        if total:
+            progress = _(PROGRESS).format(done=fill.filled, total=total)
+    rows = [pn.Row("", progress, "text", lines=FOOT_LINES, alike=(_(PROGRESS).format(done=888, total=888),))]
+    if hidden(app):
+        editing, reading = _(MODE_EDITING), _(see_edit.READER_MODE)
+        rows.append(pn.Row("", editing if see_edit.on(app) else reading, "text", lines=FOOT_LINES,
+                           alike=(editing, reading)))
+    where, readers = getattr(app, "_compute_where", ""), _readers_at(app)
+    if where in TRANSLATOR_AT:
+        text = _(TRANSLATOR_READERS_AT.get((where, readers)) or TRANSLATOR_AT[where])
+    else:
+        text = _(TRANSLATOR_NOT_YET)
+    rows.append(pn.Row("", text, "text", lines=FOOT_LINES, alike=tuple(
+        _(t) for t in (TRANSLATOR_NOT_YET, *TRANSLATOR_AT.values(), *TRANSLATOR_READERS_AT.values()))))
+    win = getattr(app, "selected", None)
+    if win is not None:
+        head, _mark, tail = _("Viewer: {title}").partition("{title}")
+        title = pn.middle_cut(_viewer_title(win), lambda t: fits(head + t + tail))
+        rows.append(pn.Row("", head + title + tail, "text", lines=1))
+    else:
+        rows.append(pn.Row("", _(NO_VIEWER), "text", lines=1))
+    language = _language_shown(app)
+    book = str(_get(getattr(app, "book_var", None), "") or "").strip()
+    if book:
+        lead = f"{language} · "
+        text = lead + pn.middle_cut(book, lambda b: fits(lead + b))
+    else:
+        text = language
+    rows.append(pn.Row("", text, "text", lines=1, spare=True))
     return rows
+
+
+def _drop_order(app: Any, rows: list[pn.Row]) -> tuple[int, ...]:
+    """The order the changing rows of the right pane are left out in where they do not fit above its foot: the
+    oldest first (since when each text has been shown: ``_see_row_seen``, by its words), the warnings last."""
+    now = time.monotonic()
+    seen: dict[str, float] = app.__dict__.setdefault("_see_row_seen", {})
+    texts = {row.text for row in rows}
+    for text in [t for t in seen if t not in texts]:
+        del seen[text]
+    for text in texts:
+        seen.setdefault(text, now)
+    return tuple(sorted(range(len(rows)), key=lambda i: (rows[i].warn, seen[rows[i].text], -i)))
 
 
 def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, dpi: int,
@@ -1084,12 +1168,37 @@ def _picture(app: Any, side: str, rows: list[pn.Row], room: int, language: str, 
     return picture
 
 
+def _column(app: Any, side: str, block: list[pn.Row], changing: list[pn.Row], foot: list[pn.Row],
+            drop: tuple[int, ...], room: int, height: int, language: str, dpi: int,
+            scheme: pn.Colours) -> pn.Picture | None:
+    """The right pane's picture (`pn.render_column`: the bubble's *block* and the *changing* rows from the top, the
+    *foot* at the bottom of the column *height* px high) in the *room* its ground leaves (None: it does not fit, or
+    has nothing to say), made again only when what it is made of changed."""
+    rows = [*block, *changing, *foot]
+    if not rows:
+        return None
+    width = pn.width_for(rows, language, dpi, room, fill=True)
+    if width is None:
+        return None
+    key = (tuple(block), tuple(changing), tuple(foot), drop, width, height, language, dpi, scheme)
+    memo = app._see_pane_memo.get(side)
+    if memo is not None and memo[0] == key:
+        return memo[1]
+    picture = pn.render_column(block, changing, foot, width, height, language, dpi, scheme, drop)
+    if picture is None:
+        return None
+    app._see_pane_memo[side] = (key, picture, None)
+    return picture
+
+
 def panes_tick(app: Any) -> None:
     """The clicks on the side panes acted on, the bubble the right one shows followed (`bubble_tick`), then both panes
     handed to the see-through window as they are to be: on the ground at the capture area's outer edges, beside the
     page at the last rest, or hidden (no page on a flat ground yet, no room, the right one switched off). The right
-    one holds the bubble's block above the indicators when they fit with it, else the indicators alone; its plates'
-    boxes go with it (the window lets it take a click there alone)."""
+    one is a column as high as the band (`pn.column_height`): the bubble's block and the changing rows from its top
+    down, its foot at the bottom, the foot's rows where they stay (`right_rows`); the bubble's block only where it
+    fits with the foot, else the indicators alone; its plates' boxes go with it (the window lets it take a click there
+    alone)."""
     over = getattr(app, "_see_through", None)
     if over is None:
         return
@@ -1111,14 +1220,16 @@ def panes_tick(app: Any) -> None:
     room_left, room_right = pn.rooms(size, page, dpi, columns)
     left = _picture(app, "left", left_rows(app), room_left, language, dpi, scheme)
     left_size = left.size if left else None
-    words = right_rows(app) if indicators_on(app) else []
+    changing, foot = right_rows(app) if indicators_on(app) else ([], [])
+    drop = _drop_order(app, changing)
     block = bubble_rows(app) if indicators_on(app) else []
+    height = pn.column_height(size, band, dpi)
     used = "bubble"
-    right = _picture(app, used, block + words, room_right, language, dpi, scheme) if block else None
+    right = _column(app, used, block, changing, foot, drop, room_right, height, language, dpi, scheme) if block else None
     box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
     if right is None or box_right is None:  # (no bubble, or no room for its block: the indicators alone)
         used = "right"
-        right = _picture(app, used, words, room_right, language, dpi, scheme)
+        right = _column(app, used, [], changing, foot, drop, room_right, height, language, dpi, scheme)
         box_left, box_right = pn.place(size, page, band, left_size, right.size if right else None, dpi, columns)
     app._see_right_used = used
     for side, picture, box in (("left", left, box_left), ("right", right if used == "right" else None, box_right),
@@ -1133,7 +1244,10 @@ def panes_tick(app: Any) -> None:
 
 def pane_click(app: Any, side: str, x: int, y: int) -> str:
     """A click on the pane *side* at (*x*, *y*) of its picture as last handed over: the control there acted on; its
-    name ("" for none)."""
+    name ("" for none). A place entry open on a region's plate goes first (`see_edit.drop_place_entry`)."""
+    from . import see_edit
+
+    see_edit.drop_place_entry(app)
     memo = app._see_pane_memo.get(side if side == "left" else getattr(app, "_see_right_used", "right"))
     if memo is None or memo[2] is None:
         return ""
@@ -1222,7 +1336,7 @@ def _edit(app: Any) -> None:
 
 
 def _add_area(app: Any) -> None:
-    """The left pane's Add area: a text area to add begun, or given up (`see_edit.toggle_adding`), Edit on or off."""
+    """The left pane's Add area: a text area to add begun, or given up (`see_edit.toggle_adding`), editing or in Reader mode."""
     from . import see_edit
 
     see_edit.toggle_adding(app)
@@ -1265,7 +1379,7 @@ def bubble_tick(app: Any, over: Any) -> None:
 
     edited = see_edit._editor_region(app) if see_edit.on(app) else None
     result = getattr(app, "last_result", None)
-    if edited is not None and result is not None and result.original is not None:  # (Edit: the region in the editor,
+    if edited is not None and result is not None and result.original is not None:  # (editing: the region in the editor,
         box = tuple(int(v) for v in edited.bbox)  # whatever the pointer is over meanwhile)
         since = held[2] if held is not None and (held[0], held[1]) == (id(result.original), box) else now
         app._see_bubble = (id(result.original), box, since, now)
@@ -1457,8 +1571,8 @@ PANE_ACTIONS: dict[str, Any] = {
     "area": _dialog("set_area"),
     "settings": _dialog("open_settings"),
     "menu": _menu,
-    "edit": lambda app: _edit(app),  # (Edit: the Translator role on the overlay, `see_edit`)
-    "add_area": _add_area,  # (Add area: a text area drawn on the page, Edit on or off)
+    "edit": lambda app: _edit(app),  # (Reader mode: the Reader role, or editing on the overlay, `see_edit`)
+    "add_area": _add_area,  # (Add area: a text area drawn on the page, editing or in Reader mode)
     "quit": lambda app: app._on_close(),
     "bubble_source": _copy_source,  # (the right pane: the bubble last under the pointer)
     "bubble_translation": _copy_translation,

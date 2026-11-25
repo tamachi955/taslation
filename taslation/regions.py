@@ -152,11 +152,31 @@ def region_meta(region: Any) -> dict[str, Any]:
 
 
 def apply_order_hints(regions: list["TextRegion"]) -> list["TextRegion"]:
-    """Put regions the reader ordered first, in that order; the rest keep the detected order."""
+    """The reader's order (`order_hint`, numbered on each page unit) on *regions*, which come in the detected order:
+    the regions the reader ordered in that order, each unit's on its own; one without a hint (added or found after
+    the order was made) lands by its place: right after the ordered region with the highest number among those
+    detected before it on its unit (all of them are read before it), or first when none is; several such keep
+    the detected order among them. The units keep their order (that of their first regions)."""
     if not any(r.order_hint >= 0 for r in regions):
         return regions
-    hinted = sorted((r for r in regions if r.order_hint >= 0), key=lambda r: r.order_hint)
-    out = hinted + [r for r in regions if r.order_hint < 0]
+    units: dict[int, list[TextRegion]] = {}
+    for r in regions:
+        units.setdefault(r.unit, []).append(r)
+    out: list[TextRegion] = []
+    for group in units.values():
+        after: dict[int, list[TextRegion]] = {}  # an ordered region's number -> the unordered ones after it (-1: first)
+        top = -1
+        for r in group:
+            if r.order_hint >= 0:
+                top = max(top, r.order_hint)
+            else:
+                after.setdefault(top, []).append(r)
+        out.extend(after.pop(-1, []))
+        for r in sorted((r for r in group if r.order_hint >= 0), key=lambda r: r.order_hint):
+            out.append(r)
+            out.extend(after.pop(r.order_hint, []))
+        for rest in after.values():  # (two ordered regions with one number: none is lost)
+            out.extend(rest)
     for i, r in enumerate(out):
         r.order = i
     return out

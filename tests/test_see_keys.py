@@ -84,7 +84,7 @@ def test_each_change_that_involves_the_programs_windows_is_one_line_and_counted_
     with caplog.at_level("INFO", logger=ui.log.name):
         lines = ui.foreground_tick(app)
     assert lines[0] == ("foreground: the viewer -> a dialog (EditBubbleDialog); 120 ms after the last job's start, "
-                        "a job at work; Edit on")
+                        "a job at work; editing on")
     assert lines[1].startswith("foreground: a dialog (EditBubbleDialog) -> the viewer; 400 ms")
     assert any(line.startswith("foreground: the viewer -> another program; -30 ms") for line in lines)
     counts = app._see_foreground
@@ -102,8 +102,8 @@ def test_the_log_says_when_no_job_ran_yet_and_edit_off_and_another_programs_wind
     app = _app(_see_front_kind="another program")
     app._see_fronts = Notes([_note(DIALOG), _note(VIEWER, pid=999, root=1234, owner=VIEWER)])  # (a popup of the viewer)
     lines = ui.foreground_tick(app)
-    assert lines == ["foreground: another program -> a window of TASlation's; no job yet; Edit off",
-                     "foreground: a window of TASlation's -> the viewer; no job yet; Edit off"]
+    assert lines == ["foreground: another program -> a window of TASlation's; no job yet; editing off",
+                     "foreground: a window of TASlation's -> the viewer; no job yet; editing off"]
     kinds = [ui.front_kind(app, _note(888, pid=999)), ui.front_kind(app, _note(0, pid=0))]
     assert kinds == ["another program", "nothing"]
     assert ui.foreground_tick(SimpleNamespace()) == []  # (no hook: silent)
@@ -124,10 +124,10 @@ def test_a_change_the_hook_did_not_bring_is_seen_at_the_tick_and_logged_once():
     app = _app(_see_front_kind="the viewer", _see_front_hwnd=VIEWER)
     app._see_kinds[DIALOG] = "WarningBox"
     app._see_fronts = Looked([], _note(DIALOG))  # (the hook brought nothing: the dialog is in front now)
-    assert ui.foreground_tick(app) == ["foreground: the viewer -> a dialog (WarningBox); no job yet; Edit off"]
+    assert ui.foreground_tick(app) == ["foreground: the viewer -> a dialog (WarningBox); no job yet; editing off"]
     assert ui.foreground_tick(app) == [] and app._see_front_polled == 1  # (still in front: no second line)
     app._see_fronts = Looked([_note(VIEWER, pid=999)], _note(VIEWER, pid=999))  # (the hook's note: none added)
-    assert ui.foreground_tick(app) == ["foreground: a dialog (WarningBox) -> the viewer; no job yet; Edit off"]
+    assert ui.foreground_tick(app) == ["foreground: a dialog (WarningBox) -> the viewer; no job yet; editing off"]
     assert app._see_front_polled == 1 and app._see_front_notes == 1
 
 

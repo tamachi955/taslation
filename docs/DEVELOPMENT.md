@@ -139,7 +139,7 @@ rows' languages.
   once, the real program in English with its lettering over the stand-in and its two side panes, the translator's
   server started by TASlation's own starter on a port of its own (`--start-ollama`, 11435 by default), a scratch
   state. It acts four scenes - a page the stand-in turns by its own script filling in, the side panes, the pointer on
-  a bubble (the original in its place, the bubble's block in the right pane), Edit switched on with a box dragged and
+  a bubble (the original in its place, the bubble's block in the right pane), Reader mode unchecked with a box dragged and
   dragged back - with a pointer of its own (the see-through window is told where it is: the real pointer never moves)
   and clicks and drags posted to TASlation's own pane and lettering windows; nothing is sent to the stand-in or to any
   other window, and the tool never changes the foreground (the stand-in's browser opens without taking it, as in
@@ -274,7 +274,7 @@ rows' languages.
   `browser_start` says what came (`took_the_foreground`, where, whether the lock was taken). A run thus starts with
   the person's window in front: whatever needs the stand-in in front gets it where TASlation gives the viewer the
   foreground (a region editor's closing) or by the tool's guarded steps below. The run's end waits for a scene the
-  see-through watch is acting (`SeeWatch.acting`: the pointer on a bubble, Edit's click and drags, Add area), so that
+  see-through watch is acting (`SeeWatch.acting`: the pointer on a bubble, editing's clicks and drags, Add area), so that
   its measures are not cut.
   `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size (its dialogs') to it; no system setting
@@ -398,22 +398,32 @@ rows' languages.
   over the viewer; who is in front) and `run.behind` keeps them as they changed, with the time from back in sight to
   both panes on the screen (`panes_back_ms`). These are the only times the tool moves the foreground, between its own
   windows. `--see-edit`
-  keeps the book's role as the Translator's, so that the left pane's Edit is on from the start (`ui/see_edit.py`:
-  the page's regions take the mouse on the overlay, beside them every click is the viewer's), and from some 14 s in
-  measures it in place of the patch under the pointer (`edit`: messages POSTED to the lettering's own window, no
-  input of the system's, its look at the physical button left out for them): on a region of the page on show,
-  whether the window takes the mouse, which window `WindowFromPoint` gives on the box (the see-through window) and
-  beside every box (the stand-in), the pointer on it (its patches stay, outlined; the right pane holds the bubble's
+  keeps the book's role as editing, the program's default (every other run sets Reader mode), so that the left
+  pane's Reader mode is off from the start (`ui/see_edit.py`: the overlay takes the mouse over the whole client area,
+  the viewer the keys alone), and from some 14 s in measures it in place of the patch under the pointer (`edit`:
+  messages POSTED to TASlation's own windows, no input of the system's, its look at the physical button left out for
+  them): on a region of the page on show, whether the window takes the mouse, which window `WindowFromPoint` gives
+  on the box, beside every box and at the client area's bottom corner (the see-through window each time) and just
+  above the client area (the stand-in's frame), the pointer on it (its patches stay, outlined; the right pane holds the bubble's
   block), a click (the ms until the region editor is on the screen, beside the box or over it, on the box's monitor,
   whether it took the keys and holds that region; a WM_CLOSE posted to it, and the ms until the stand-in is in front
   again), a drag of the box by 24 x 12 px (handed over as a move, outlined at its new place meanwhile, the ms until
-  the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize).
-  `--see-add` measures adding text areas in place of both (`add`; Edit on with `--see-edit`, off without; best with
+  the page's marks have it there, the fewest patches shown meanwhile) and one of its bottom right corner (a resize);
+  then a click on the number plate of the last region of the page's first unit (handed over as a "plate", the ms until the
+  place entry shows and has the keys), "1" and Enter posted to the entry's own window (the ms until it is gone and the
+  stand-in is in front again, the job and its end; whether the region is first now, the others in their order, the
+  history's newest change an "order", the marks with its box first), a click on the empty ground (a "ground": no
+  editor, no change) and a rectangle drawn there (a "draw": a region of the reader's at the rectangle, and the others
+  still in the order typed). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
+  presses, clicks - none expected, the whole client area being the overlay's - and its turns). In every run the
+  right pane's foot rows are looked at once a second (`panes.foot`: their tops in the client area, one per frame
+  size, `constant`).
+  `--see-add` measures adding text areas in place of both (`add`; editing with `--see-edit`, Reader mode without; best with
   scenario `g`, one page held long): once a page is done and on show, the left pane's Add area and the Insert key
   (its WM_HOTKEY POSTED to the lettering's own window: no key of the system's is pressed), each followed by a
   rectangle dragged on the page's empty space - the ms until the row shows pressed and the whole page takes the mouse,
   which window `WindowFromPoint` gives there, the drag handed over as an "add", the ms until the page has a region of
-  the reader's there, and with Edit off until every click is the viewer's again -, then each way of giving it up (the
+  the reader's there, and in Reader mode until every click is the viewer's again -, then each way of giving it up (the
   row again, the key again, a right click); meanwhile who is in front every 50 ms against whether the key is held
   (read only: the tool moves no foreground) and the hot key's registrations, releases, failures and presses
   (`SeeThrough.counts`);
