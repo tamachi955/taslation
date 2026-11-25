@@ -19,6 +19,7 @@ from ..capture import (
     WindowInfo,
     is_browser_class,
     list_windows,
+    looks_like_viewer,
     match_windows,
     same_book_window,
     still_the_book,
@@ -35,7 +36,14 @@ from ..detect.page_area import panel_inside
 from ..i18n import _
 from ..recovery import put_back_enlarged
 from . import area
-from .constants import TAB_FOLLOW_MS, TAB_WATCH_MS, VIEWER_CLOSED, VIEWER_RESTORED, WINDOW_WATCH_MS
+from .constants import (
+    PICK_NOTHING_S,
+    TAB_FOLLOW_MS,
+    TAB_WATCH_MS,
+    VIEWER_CLOSED,
+    VIEWER_RESTORED,
+    WINDOW_WATCH_MS,
+)
 from .dialogs import caches as boxes
 from .dialogs.area import AreaDialog
 
@@ -211,7 +219,8 @@ class ViewerMixin:
         """A viewer chosen in the Viewer list (*picked*: by the person, in the viewer chooser or the toolbar's list;
         *named*: by the --window the person gave; else the list shown again, the viewer kept; *same_book*: a window
         that shows the book of the one before, its tab dragged out of it, `_tab_moved_out`: the book's name stays):
-        remembered for the next start (`_learn_viewer`, viewers.json), its book (the name its title gives:
+        remembered for the next start (`_learn_viewer`, viewers.json; a browser window picked only once a page with
+        lettering was read under its tab: `_pick_trial`), its book (the name its title gives:
         `_title_book`) and area, its line on the status line (the right pane's foot names it all the time:
         `seethrough.right_rows`), its window shown
         again when it is minimised (`show_minimised`) and looked at once as it is (`_enlarge_first`), and the window
@@ -233,7 +242,20 @@ class ViewerMixin:
         if before is not None and not same:
             self._viewer_left()
         self.selected = chosen
-        if picked or not same:
+        # a browser window the person picked is on trial until a page with lettering is read under its tab
+        # (`_pick_read`): nothing of it is learned before; the trial goes on, nothing learned, as the window shows
+        # another tab taken for the viewer's (`_tab_of`, followed: chosen again) or the book's tab is moved out
+        # (*same_book*), and ends with another window chosen
+        trial = picked and is_browser_class(chosen.class_name)
+        going_on = not picked and (same or same_book) and getattr(self, "_pick_trial", None) is not None
+        if trial or going_on:
+            self._pick_trial = {"since": time.monotonic()}  # (the wait for a page under its tab begins again)
+        else:
+            self._pick_trial = None
+        self._pick_nothing = False
+        if trial:
+            self._learn_viewer(chosen, True, trial=True)
+        elif (picked or not same) and not going_on:
             self._learn_viewer(chosen, picked or named)
         self._seen_title = chosen.title
         restored = show_minimised(self, chosen) if picked or not same else False
@@ -281,6 +303,7 @@ class ViewerMixin:
         self._viewer_left()
         self._viewer_closed = win  # what the next viewer's book is told from (`another_book`)
         self.selected = None
+        self._pick_trial, self._pick_nothing = None, False  # (a pick on trial: nothing of it learned)
         self._auto_last = self._auto_candidate = None
         self._waiting = False
         self._show_chosen()
@@ -311,10 +334,14 @@ class ViewerMixin:
         the query, the same book's name: `capture.still_the_book`) -, "viewer" - a tab the rules learned on this
         computer take for the same viewer's (`viewerparts.viewer_tab`: a viewer's part at its start or its end, or the
         end of a window chosen before with another book before it): another book in the viewer, followed
-        (`_follow_tab`) -, or "other": another tab, of which nothing is read. Asked once per title."""
+        (`_follow_tab`) -, or "other": another tab, of which nothing is read. While the window is a pick on trial
+        (`_pick_trial`: no page with lettering read under the tab it was picked with) a tab that looks like a viewer's
+        is "viewer" too (`capture.looks_like_viewer`: a viewer's part at an end, a title chosen before, a reading word):
+        the tab picked may have been another one in front. Asked once per title."""
         win = self.selected
         query = getattr(self, "window_query", "")
-        key = (win.hwnd, win.title, query, title)
+        trial = getattr(self, "_pick_trial", None) is not None
+        key = (win.hwnd, win.title, query, title, trial)
         memo = getattr(self, "_tab_memo", None)
         if memo is not None and memo[0] == key:
             return memo[1]
@@ -322,7 +349,8 @@ class ViewerMixin:
             kind = "book"
         else:
             try:
-                kind = "viewer" if viewerparts.viewer_tab(title) else "other"
+                viewer = viewerparts.viewer_tab(title) or (trial and looks_like_viewer(viewerparts.tab_of(title)))
+                kind = "viewer" if viewer else "other"
             except Exception:  # noqa: BLE001 - nothing known of the viewer: another tab
                 kind = "other"
         self._tab_memo = (key, kind)
@@ -347,7 +375,9 @@ class ViewerMixin:
         right pane says so in one line (`seethrough.right_rows`), nothing is learned of it, and every TAB_WATCH_MS a
         window of the same browser that shows the book's tab - the tab dragged out - is looked for (`_tab_moved_out`).
         A page job under way and the pages behind go on: their lines are the book's. The book's tab back: looked at at
-        once. Another book of the same viewer ("viewer"): followed (`_follow_tab`)."""
+        once. Another book of the same viewer ("viewer"): followed (`_follow_tab`). A pick on trial waits for a page
+        (`_pick_wait`)."""
+        self._pick_wait(kind)
         before = getattr(self, "_tab_kind", "book")
         self._tab_kind = kind
         self._tab_away = kind == "other"
@@ -406,20 +436,59 @@ class ViewerMixin:
         self._on_window_selected(same_book=same_book)
         return True
 
+    # ------------------------------------------------------------------ a browser window picked, on trial
+    def _pick_wait(self, kind: str) -> None:
+        """(each look at the chosen window's tab: `_tab_seen`, *kind* what it shows) While the browser window the
+        person picked is on trial (`_pick_trial`) and no page with lettering was read under its tab: PICK_NOTHING_S
+        with that tab in front, no page job under way and none ended meanwhile (`_pick_read`), and the right pane says
+        that no page with text is found in this tab and how to choose the window again (`seethrough.right_rows`:
+        `_pick_nothing`, PICK_NO_PAGE). Another tab in front or a page job begins the wait again."""
+        trial = getattr(self, "_pick_trial", None)
+        if trial is None:
+            self._pick_nothing = False
+            return
+        now = time.monotonic()
+        if kind != "book" or getattr(self, "busy", False):
+            trial["since"] = now
+        self._pick_nothing = now - trial["since"] >= PICK_NOTHING_S
+
+    def _pick_read(self, result: Any) -> None:
+        """A page job's page shown (*result*, `jobs`' "result") while the browser window the person picked is on trial
+        (`_pick_trial`): one with lettering (a region) under its tab ends the trial, the window as it is now learned as
+        a pick is (`_learn_viewer`: remembered for the next start, its title beside the ones chosen before); one
+        without begins the wait for a page again (`_pick_wait`)."""
+        trial = getattr(self, "_pick_trial", None)
+        if trial is None:
+            return
+        self._pick_nothing = False
+        if not getattr(result, "regions", None):
+            trial["since"] = time.monotonic()
+            return
+        self._pick_trial = None
+        win = getattr(self, "selected", None)
+        if win is not None:
+            self._learn_viewer(win, True)
+
     # ------------------------------------------------------------------ what is learned of the viewer
-    def _learn_viewer(self, win: WindowInfo, by_reader: bool) -> None:
+    def _learn_viewer(self, win: WindowInfo, by_reader: bool, trial: bool = False) -> None:
         """*win* is the viewer now: remembered for the next start, and its title set beside the titles of the windows
         chosen before (`viewerparts.chosen`: what they end alike with is the viewer's). The reader choosing another
         window (*by_reader*) while the one chosen last has given no page yet says that one was not the viewer: it is
-        not remembered, nor what its choice taught (`viewerparts.corrected`)."""
+        not remembered, nor what its choice taught (`viewerparts.corrected`). *trial*: a browser window the person
+        picked, of which nothing is learned until a page with lettering is read under its tab (`_pick_read`)."""
         unread = getattr(self, "_viewer_unread", None)
         learned: list[str] = []
         try:
             if by_reader and unread is not None and unread[0].hwnd != win.hwnd:
                 viewerparts.corrected(*unread)
-            learned = viewerparts.chosen(win)
+            if not trial:
+                learned = viewerparts.chosen(win)
         except Exception:  # noqa: BLE001 - nothing learned: the viewer is read all the same
             pass
+        if trial:
+            if unread is not None and unread[0].hwnd != win.hwnd:
+                self._viewer_unread = None  # (forgotten: what the trial teaches comes with its page)
+            return
         if unread is not None and unread[0].hwnd == win.hwnd:  # the same window chosen again: what it taught stands
             learned = [*unread[1], *learned]
         self._viewer_unread = (win, learned)

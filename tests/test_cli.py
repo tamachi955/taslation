@@ -195,10 +195,16 @@ def test_windows_command(capsys):
 
 
 def test_doctor_runs(capsys):
-    rc = main(["doctor"])
+    """Doctor's look at Ollama goes to a fake server on a port of its own (with the default URL it went to Ollama's
+    usual port on this computer, the person's own server there)."""
+    from fake_ollama import FakeOllama
+
+    with FakeOllama() as server:
+        rc = main(["--ollama-url", server.url, "doctor"])
     out = capsys.readouterr().out
     assert rc in (0, 1)
-    assert "Network guard: ON" in out
+    assert "Network guard: ON" in out and f"Ollama: reachable at {server.url}" in out
+    assert not any("messages" in r for r in server.requests)  # (a look: nothing translated)
 
 
 def test_the_window_starts_with_auto_on_unless_told_otherwise(monkeypatch):

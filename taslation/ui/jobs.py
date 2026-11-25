@@ -1172,6 +1172,9 @@ class JobsMixin:
             if order_gone:
                 self._end_order()
             self.last_result = data["result"]
+            pick_read = getattr(self, "_pick_read", None)  # (a browser window picked, on trial: `viewers`)
+            if pick_read is not None:
+                pick_read(self.last_result)
             self._viewer_unread = None  # a page read: the viewer chosen last was the one (`_learn_viewer`)
             self._grip_box = None
             if not any(r is self._chosen_region for r in self.last_result.regions):

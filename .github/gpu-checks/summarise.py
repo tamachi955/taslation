@@ -271,9 +271,13 @@ def meanings(report: dict[str, Any]) -> dict[str, str]:
             out[name] = (f"holds: {len(mine)} quick turns" if len(mine) >= 10
                          else f"unclear: {len(mine)} of its 10 turns seen")
         elif name == "e":
-            cached = sum(1 for r in mine if r.get("cached"))
-            out[name] = (f"holds: {cached} of {len(mine)} turns found their page in the cache" if cached
-                         else f"lost: none of {len(mine)} turns back found its page in the cache (the pages before "
+            # (a turn back lettered with nothing asked: its page from the cache, or from the lines the window kept of
+            # it - the backlog's, `reuse` -, either being what e is for)
+            back = sum(1 for r in mine if r.get("cached") or (not r.get("requests") and r.get("first_lettered_ms")
+                                                               is not None))
+            out[name] = (f"holds: {back} of {len(mine)} turns back lettered with nothing asked (the cache, or the "
+                         "lines kept)" if back
+                         else f"lost: none of {len(mine)} turns back lettered with nothing asked (the pages before "
                               "were not translated in time)")
         elif name == "x":
             cancel = run.get("cancel_in_flight") or {}
@@ -444,7 +448,8 @@ def _tab_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
                       s.get("followed_the_book_s_window_ms") is not None, s.get("followed_the_book_s_window_ms"))
             elif s.get("kind") == "switch":
                 check(name, "the right pane said in one line that the window shows another tab",
-                      s.get("right_pane_line_shown") is True, s.get("right_pane_line_shown"))
+                      s.get("right_pane_line_shown") is True,
+                      {"shown": s.get("right_pane_line_shown"), "right_pane_hidden": _pane_whys(run).get("right")})
 
 
 def _resize_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
@@ -491,7 +496,8 @@ def _slide_correctness(run: dict[str, Any], names: list[str], check: Any) -> Non
           slides.get("error") if isinstance(slides, dict) else slides)
     hidden = [[k + 1, *spell] for k, r in enumerate(rows) for spell in r.get("hidden_spells_ms_from_press") or []
               if not (isinstance(spell, list) and spell[-1] == "closed")]
-    check("s", "no side pane hidden on a slide (from its press until 10 s after its release)", not hidden, hidden)
+    check("s", "no side pane hidden on a slide (from its press until 10 s after its release)", not hidden,
+          {"spells": hidden, "hidden_why": _pane_whys(run)})
 
 
 def _behind_correctness(run: dict[str, Any], names: list[str], check: Any) -> None:
@@ -507,8 +513,35 @@ def _behind_correctness(run: dict[str, Any], names: list[str], check: Any) -> No
     if ended is None:
         return
     check("h", "both side panes on the screen once the stand-in was back in sight", b.get("panes_back_ms") is not None,
-          b.get("panes_back_ms"))
-    check("h", "the side panes stayed on the screen", b.get("panes_stayed") is True, b.get("panes_stayed"))
+          {"panes_back_ms": b.get("panes_back_ms"), "hidden_why": _pane_whys(run)})
+    check("h", "the side panes stayed on the screen", b.get("panes_stayed") is True,
+          {"panes_stayed": b.get("panes_stayed"), "hidden_why": _pane_whys(run)})
+
+
+def _pane_whys(run: dict[str, Any]) -> dict[str, Any]:
+    """Each look a side pane was not on the screen, by side and why (`standin_seethrough.SeeWatch.pane_report`'s
+    ``hidden_why``: no ground, no room, off the screen, sizing, covered, ?); {} from a tool before it said."""
+    why = (((run.get("see_through") or {}).get("panes") or {}).get("hidden_why"))
+    return why if isinstance(why, dict) else {}
+
+
+ROLES = {"reader": "Reader mode", "editing": "editing"}  # (--role: what a group runs in; the tool keeps it for the book)
+KEPT_ROLE = {"reader": "reader", "editing": "translator"}  # (standin_e2e's ``role_kept``: the window's role_var)
+
+
+def _role_correctness(report: dict[str, Any], role: str, check: Any) -> None:
+    """The group's role, *role* (`ROLES`), the one the window was in: the tool kept it for the book (``role_kept``)
+    and the window's role from the moment it was ready on was that one alone (``run.modes``: before the book's role is
+    known, the window's start has the settings' own)."""
+    run = report.get("run") or {}
+    want = KEPT_ROLE[role]
+    rows = [r for r in (run.get("modes") or {}).get("rows") or [] if isinstance(r, list) and len(r) == 2]
+    ready = run.get("ready_s")
+    if ready is not None:
+        rows = [r for r in rows if (r[0] or 0) <= ready][-1:] + [r for r in rows if (r[0] or 0) > ready]
+    seen = sorted({str(r[1]) for r in rows})
+    check("all", f"the window was in {ROLES[role]}, as the group says", report.get("role_kept") == want and
+          seen == [want], {"kept": report.get("role_kept"), "seen": seen})
 
 
 def _check(found: list[dict[str, Any]], scenario: str, criterion: str, ok: bool, seen: Any = None) -> None:
@@ -718,8 +751,11 @@ PRIORITY_KEYS = ("lowered", "not_lowered", "set_back", "low_ms", "backlog_reques
 
 
 def standin(report: Any, console: str, facts: dict[str, Any], group: str,
-            timeout_s: float | None = None) -> dict[str, Any]:
-    out: dict[str, Any] = {"kind": "standin", "group": group, **_run_facts(facts), "console": console_facts(console)}
+            timeout_s: float | None = None, role: str | None = None) -> dict[str, Any]:
+    """The verdict on a stand-in group's run; *role* ("reader" or "editing", `ROLES`): the role the group runs in,
+    a criterion of its own (None: not judged)."""
+    out: dict[str, Any] = {"kind": "standin", "group": group, "role": role, **_run_facts(facts),
+                           "console": console_facts(console)}
     if not isinstance(report, dict) or not isinstance(report.get("run"), dict):
         out["verdict"] = "no report"
         out["why"] = out["console"]["stopped"] or "the tool wrote no report (stopped by the step's time limit?)"
@@ -730,6 +766,9 @@ def standin(report: Any, console: str, facts: dict[str, Any], group: str,
     readable = int(captures.get("sharp") or 0) + int(captures.get("soft") or 0)
     failed_run = run.get("failed") or ""
     criteria = correctness(report, timeout_s)
+    if role is not None:
+        _role_correctness(report, role, lambda scenario, criterion, ok, seen=None: _check(
+            criteria, scenario, criterion, bool(ok), seen))
     failed = [c for c in criteria if not c["ok"]]
     out["verdict"] = "fail" if failed else "pass"
     out["run"] = "stopped" if failed_run else "no frames" if not readable else "works"
@@ -792,7 +831,8 @@ def standin_md(s: dict[str, Any]) -> str:
         lines.append(f"* capture: {route.get('used')} (Windows.Graphics.Capture looks {route.get('looks')}; "
                      f"{route.get('route')}); frames by state {s['captures']}")
         lines.append(f"* the window ready after {s.get('ready_s')} s; the run {s.get('seconds')} s; translator "
-                     f"{s.get('translator')}; OCR on {', '.join(s.get('ocr_devices') or []) or '-'}")
+                     f"{s.get('translator')}; OCR on {', '.join(s.get('ocr_devices') or []) or '-'}"
+                     + (f"; in {ROLES.get(s['role'], s['role'])}" if s.get("role") else ""))
     if s.get("wait_done"):
         w = s["wait_done"]
         lines.append(f"* --wait-done {w.get('cap_s')} s: {w.get('holds')} rests held {w.get('holds_by_why')}, held ms "
@@ -1175,6 +1215,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--check", action="store_true", help="exit 1 when the verdict is not a pass")
         if kind == "standin":
             p.add_argument("--timeout", type=float, help="the tool's --timeout (seconds)")
+            p.add_argument("--role", choices=sorted(ROLES), help="the role the group runs in (judged)")
         else:
             p.add_argument("--expected", type=Path, default=EXPECTED, help="the expected scores (JSON)")
     p = sub.add_parser("table")
@@ -1194,7 +1235,7 @@ def main(argv: list[str] | None = None) -> int:
     facts = read_json(args.facts) or {}
     console = read_text(args.console)
     if args.kind == "standin":
-        summary = standin(read_json(args.report), console, facts, args.group, args.timeout)
+        summary = standin(read_json(args.report), console, facts, args.group, args.timeout, args.role)
         text = standin_md(summary)
     else:
         summary = bench(read_json(args.report), console, facts, args.title, read_json(args.expected))

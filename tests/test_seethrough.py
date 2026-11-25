@@ -284,6 +284,35 @@ def test_the_steady_part_has_the_page_columns_and_the_area_rows_so_bars_never_mo
     assert frames_differ(ui.thumb(app, plain, fp), ui.thumb(app, other, Facts(other)))
 
 
+def test_half_a_spread_is_told_only_in_a_frame_of_the_rest_s_size():
+    """The page box at the last rest tells half a spread drawn (a frame to wait out) only in a frame of its size: in
+    the viewer's window given another size a single page about half as wide as the spread before, near its side, was
+    waited out - and every frame after it, since no frame waited out is at rest (the narrow window's pages never read,
+    on the runners and here, with the OCR on the processor)."""
+    from PIL import Image
+
+    from taslation.ui import seethrough as ui
+
+    def frame(size, box):
+        out = np.zeros((size[1], size[0], 3), np.uint8)
+        left, top, right, bottom = box
+        art = np.random.default_rng(3).integers(60, 250, (bottom - top, right - left, 1), dtype=np.uint8)
+        out[top:bottom, left:right] = art.repeat(3, axis=2)
+        return Image.fromarray(out)
+
+    app = see_app()
+    spread = frame((400, 200), (40, 0, 340, 200))
+    ui.note_frame(app, spread, Facts(spread))
+    assert app._see_rest_box == (40, 0, 340, 200) and app._see_rest_size == (400, 200)
+    half = frame((400, 200), (40, 0, 188, 200))  # one page of the spread drawn, the other not yet
+    assert ui.frame_look(app, half, Facts(half)).kind == "half" and ui.waits(app, half, Facts(half))
+    single = frame((380, 200), (40, 0, 188, 200))  # the window narrower: a page of its own there
+    facts = Facts(single)
+    assert ui.frame_look(app, single, facts).kind is None and not ui.waits(app, single, facts)
+    ui.note_frame(app, single, facts)  # at rest: the box at the new size
+    assert app._see_rest_box == (40, 0, 188, 200) and app._see_rest_size == (380, 200)
+
+
 def test_frames_with_bars_wait_until_they_have_stayed(monkeypatch):
     from taslation.ui import seethrough as ui
     from PIL import Image

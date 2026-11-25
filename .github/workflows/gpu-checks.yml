@@ -1,11 +1,12 @@
 # The two checks that need the developer's computer with its GPU for their timings - the real window beside the
 # stand-in viewer (tools/standin_e2e.py) and the OpenMantra benchmark (tools/openmantra_eval.py) - run for their
 # verdicts on GitHub's own Windows runners (4 processors, 16 GB, no GPU: the OCR, the layout model and the translator
-# run on the CPU), in parallel jobs: the stand-in's scenarios in seven groups, each with --wait-done (a rest held until
+# run on the CPU), in parallel jobs: the stand-in's scenarios in eight groups, each with --wait-done (a rest held until
 # its page is finished, scenario x's soft frames kept until the window asked on them, so that every scenario keeps its
-# meaning on a slower computer), scenario k (pages flipped past, read behind the reader, then read back) in a short
-# form, another tab shown, the window resized, the page slid, a start behind another window, and the benchmark's five
-# titles a job each. A stand-in job fails when a criterion of correctness fails (summarise.py's `correctness`: the run
+# meaning on a slower computer), each in the role it states (Reader mode; one group in editing, where TASlation
+# starts) and at the stand-in's size it states, scenario k (pages flipped past, read behind the reader, then read back)
+# in a short form, another tab shown, the window resized, the page slid, a start behind another window, and the
+# benchmark's five titles a job each. A stand-in job fails when a criterion of correctness fails (summarise.py's `correctness`: the run
 # went through, nothing kept or shown from a frame that was not the sharp one, no request sent for nothing, a page
 # translated before came back without a request, the narrow window's page read at its new size, no frame held behind
 # the reader after its read and nothing at the end, nothing read or learnt of another tab, no job while the window is
@@ -39,7 +40,7 @@ on:
         options: [both, stand-in, benchmark, none]
         default: both
       groups:
-        description: "The stand-in's groups: all, or some of c-a-b,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r8,s,h"
+        description: "The stand-in's groups: all, or some of c-a-b,c-a-b-editing,d-e-x-f2,k5-k1-k2,tab1-tab2-tab3-tab4-tab5-tab6,r1-r2-r3-r4-r5-r6-r7-r8,s,h"
         type: string
         default: all
       titles:
@@ -97,10 +98,14 @@ env:
   # on pages no scenario before turned to, on spreads as before), the short ones together, some three to seven minutes
   # of run each with --wait-done (k some five to nine: the backlog emptied after k's 2 s pace is its longest wait); and
   # the ones by their names only that need no second monitor: another tab shown (tab1-tab6, tab6 last: the book's tab
-  # moved out into a window of its own), the window resized (but r6 and r7, maximised and restored: the tool reads no
-  # page in a maximised frame yet), the page slid with the pointer (s), a start behind another window (h, with
-  # --start-behind cover)
-  STANDIN_GROUPS: '{"c-a-b": "c,a,b", "d-e-x-f2": "d,e,x,f2", "k5-k1-k2": "k", "tab1-tab2-tab3-tab4-tab5-tab6": "tab", "r1-r2-r3-r4-r5-r8": "r1,r2,r3,r4,r5,r8", "s": "s", "h": "h"}'
+  # moved out into a window of its own), the window resized (r1-r8; "resize" asks for them all), the page slid with the
+  # pointer (s), a start behind another window (h, with --start-behind cover). Each group states its role - "reader"
+  # (Reader mode, the tool's own) or "editing" (--editing: the book's role kept as editing, where TASlation starts;
+  # its group's name ends in -editing, its scenarios run in Reader mode too) - and the stand-in's size ("": the
+  # tool's, 1300 x 900, as the GPU computer's timings have it; the groups whose criteria look at the side panes get a
+  # window with room for them beside a spread, which 1300 x 900 leaves none: 1900 x 1000, within the runner's work
+  # area at DISPLAY_SIZE)
+  STANDIN_GROUPS: '{"c-a-b": {"scenarios": "c,a,b", "role": "reader", "size": ""}, "c-a-b-editing": {"scenarios": "c,a,b", "role": "editing", "size": ""}, "d-e-x-f2": {"scenarios": "d,e,x,f2", "role": "reader", "size": ""}, "k5-k1-k2": {"scenarios": "k", "role": "reader", "size": ""}, "tab1-tab2-tab3-tab4-tab5-tab6": {"scenarios": "tab", "role": "reader", "size": "1900x1000"}, "r1-r2-r3-r4-r5-r6-r7-r8": {"scenarios": "resize", "role": "reader", "size": "1900x1000"}, "s": {"scenarios": "s", "role": "reader", "size": "1900x1000"}, "h": {"scenarios": "h", "role": "reader", "size": "1900x1000"}}'
   # the inputs (a push has none: the defaults; a push to main runs no check), checked where they are used
   CHECKS: ${{ inputs.checks || (github.ref == 'refs/heads/main' && 'none') || 'both' }}
   WANTED_GROUPS: ${{ inputs.groups || 'all' }}
@@ -152,7 +157,11 @@ jobs:
           $all = $env:STANDIN_GROUPS | ConvertFrom-Json -AsHashtable
           $groups = @($(if ($env:WANTED_GROUPS -eq 'all') { $all.Keys } else { $env:WANTED_GROUPS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }))
           foreach ($g in $groups) { if (-not $all.ContainsKey($g)) { throw "no stand-in group '$g' (there are $($all.Keys -join ', '))" } }
-          $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_] } })
+          foreach ($g in $all.Keys) {
+              if ($all[$g].role -notin 'reader', 'editing') { throw "group $g's role is reader or editing, not '$($all[$g].role)'" }
+              if ("$($all[$g].size)" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "group $g's size is WxH or nothing, not '$($all[$g].size)'" }
+          }
+          $matrix = @($all.Keys | Where-Object { $_ -in $groups } | ForEach-Object { [ordered]@{ group = $_; scenarios = $all[$_].scenarios; role = $all[$_].role; size = "$($all[$_].size)" } })
           $titles = @($(if ($env:WANTED_TITLES -eq 'all') { 1..5 } else { $env:WANTED_TITLES -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } }))
           foreach ($t in $titles) { if ("$t" -notmatch '^[1-5]$') { throw "the titles are 1 to 5, not '$t'" } }
           $titles = @($titles | ForEach-Object { [int]$_ } | Sort-Object -Unique)
@@ -365,12 +374,12 @@ jobs:
     if: needs.prepare.outputs.standin == 'true'
     # Each job: the real window (OCR on the CPU) beside the stand-in viewer, a browser window of its own drawing the
     # dataset's pages, the translator through the Ollama TASlation's own starter starts on OLLAMA_PORT; its group's
-    # scenarios one after the other, as on the GPU computer, with --wait-done.
+    # scenarios one after the other, as on the GPU computer, with --wait-done, in its group's role and at its size.
     runs-on: windows-2025
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 7  # (a job a group; with the benchmark's 5 and tests.yml's 8, GitHub's 20 at once)
+      max-parallel: 7  # (a job a group, 7 of them at once; with the benchmark's 5 and tests.yml's 8, GitHub's 20)
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.standin_matrix) }}
     defaults:
@@ -447,9 +456,13 @@ jobs:
         timeout-minutes: 50
         env:
           SCENARIOS: ${{ matrix.scenarios }}
+          ROLE: ${{ matrix.role }}
+          STANDIN_SIZE: ${{ matrix.size }}
         run: |
           . .github/gpu-checks/helpers.ps1
           if ($env:SCENARIO_TIMEOUT -notmatch '^\d{2,4}$') { throw "scenario_timeout is seconds, not '$env:SCENARIO_TIMEOUT'" }
+          if ($env:ROLE -notin 'reader', 'editing') { throw "the role is reader or editing, not '$env:ROLE'" }
+          if ("$env:STANDIN_SIZE" -notmatch '^(\d{3,4}x\d{3,4})?$') { throw "the stand-in's size is WxH or nothing, not '$env:STANDIN_SIZE'" }
           if ($env:CANCEL_SOFT_MS -notmatch '^\d{2,5}$') { throw "cancel_soft_ms is milliseconds, not '$env:CANCEL_SOFT_MS'" }
           if ($env:WAIT_DONE -notmatch '^\d{1,4}$') { throw "wait_done is seconds, not '$env:WAIT_DONE'" }
           $env:PYTHONPATH = $env:GITHUB_WORKSPACE  # (the tool checks that taslation comes from this checkout)
@@ -458,6 +471,9 @@ jobs:
                          '--start-ollama', $env:OLLAMA_PORT, '--seed', '1', '--timeout', $env:SCENARIO_TIMEOUT,
                          '--cancel-soft-ms', $env:CANCEL_SOFT_MS)
           if ($env:WAIT_DONE -ne '0') { $arguments += @('--wait-done', $env:WAIT_DONE) }
+          # the group's role (the tool's own is Reader mode) and the stand-in's size (none: the tool's)
+          if ($env:ROLE -eq 'editing') { $arguments += @('--editing') }
+          if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }
           # scenario k in a short form: 6 pages flipped past at each pace and 3 of them read back (the tool's own form
           # is 20 and all 20). On the CPU the window reads and translates a caught page in some 20 to 30 s, and each
           # pace waits until the backlog has nothing left: 20 pages would take near --timeout at the 2 s pace
@@ -477,10 +493,11 @@ jobs:
         if: always()
         env:
           GROUP: ${{ matrix.group }}
+          ROLE: ${{ matrix.role }}
         run: |
           . .github/gpu-checks/helpers.ps1
           $py = $(if ($env:PY) { $env:PY } else { 'python' })
-          & $py .github/gpu-checks/summarise.py standin (Join-Path $ChecksDir 'standin\report.json') --console (Join-Path $ChecksDir 'console.txt') --facts $FactsFile --group $env:GROUP --out $ChecksDir --timeout $env:SCENARIO_TIMEOUT --check
+          & $py .github/gpu-checks/summarise.py standin (Join-Path $ChecksDir 'standin\report.json') --console (Join-Path $ChecksDir 'console.txt') --facts $FactsFile --group $env:GROUP --role $env:ROLE --out $ChecksDir --timeout $env:SCENARIO_TIMEOUT --check
           $code = $LASTEXITCODE
           $md = Join-Path $ChecksDir 'summary.md'
           if (Test-Path -LiteralPath $md) { Get-Content -LiteralPath $md -Raw -Encoding utf8 | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 }

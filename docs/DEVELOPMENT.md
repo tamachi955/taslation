@@ -605,12 +605,15 @@ a `ci/` branch reads main's (GitHub lets a branch read the default branch's cach
 stops at once with an error naming what is missing when main has not made them. GitHub deletes a cache not used for 7
 days; a run started by hand on `main` (checks none) makes it again.
 
-Then seven stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
+Then eight stand-in jobs (the scenarios in groups: c-a-b; d-e-x-f2, e turning back to d's pages; k5-k1-k2, k's
 three paces; and of those by their names only, the ones a runner's one monitor can show: tab1-...-tab6, another tab
-shown; r1-r2-r3-r4-r5-r8, the window resized - r6 and r7 not yet, maximised and restored: the tool reads no page in a
-maximised frame, although on a runner, `GITHUB_ACTIONS`, it may maximise on the primary monitor -; s, the page slid
-with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor; each with `--wait-done`, which holds
-no rest of k; all seven at a time) and five
+shown; r1-...-r8, the window resized, r6 maximised on the primary monitor, as the tool may on a runner,
+`GITHUB_ACTIONS`; s, the page slid with the pointer; h, with `--start-behind cover`; m0-m4 need a second monitor; and
+c-a-b-editing, c, a and b again in editing; each with `--wait-done`, which holds no rest of k; seven at a time). Each
+group states its role in `STANDIN_GROUPS` - Reader mode, the tool's own, or editing (`--editing`: where TASlation
+starts for a new book), judged as a criterion of its own - and the stand-in's size: the tool's 1300 x 900 leaves no
+room for the side panes beside a spread, so the groups whose criteria look at the panes (the tabs, the resizes, s,
+h) run at 1900 x 1000, the others at the tool's size, as the GPU computer's timings have it. And five
 benchmark jobs (a title a job, `--series`; at most five at a time) run beside `tests.yml`'s eight, each restoring the
 caches, fetching OpenMantra from its publisher (never cached, never uploaded) and letting TASlation's own starter
 start Ollama on port 11435. Scenario k runs in a short form there, `--k-turns 6 --k-read 3` (6 pages flipped past at

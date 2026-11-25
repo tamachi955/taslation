@@ -59,5 +59,12 @@ CHOOSER_TAB = "If the book is in a browser, bring its tab to the front first, th
 # often; another book in the same viewer's tab is followed once no page job runs, looked at again this often meanwhile
 TAB_WATCH_MS = 1000
 TAB_FOLLOW_MS = 250
+# A browser window the person picked is on trial until a page with lettering is read under its tab
+# (`viewers.ViewerMixin._pick_trial`): with that tab in front so long and nothing read, the right pane's line; with
+# another tab in front that is not taken for the viewer's (`TAB_AWAY`), the line under it
+PICK_NOTHING_S = 5.0
+PICK_NO_PAGE = ("No page with text found in this tab. If the book is in another tab, bring it to the front, then "
+                "choose the window again in Menu > Viewer...")
+PICK_AGAIN = "To read the tab in front, choose the window again in Menu > Viewer..."
 FIRST_PAGE = "Translate a page first: press Translate."  # the page tools with no page translated
 THIS_PAGE = "Translate this page first: press Translate."  # ... and with another page on show than the one translated

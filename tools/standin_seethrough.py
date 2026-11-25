@@ -449,6 +449,8 @@ class SeeWatch:
         self.truth, self.shots = truth, shots
         self.pane_shot = pane_shot  # (`_pane_watch`: one copy with both panes beside a spread, into this folder)
         self.panes: Counter[str] = Counter()  # (side, page kind, shown or hidden) at each look
+        self.pane_why: dict[str, str] = {"left": "", "right": ""}  # (`standin_monitors.watch_pane_whys`)
+        self.pane_hidden: Counter[str] = Counter()  # (side, why it was not on the screen) at each look
         self.pane_overlap: dict[str, int] = {}  # (side, page kind) -> the most px a pane shared with the page box
         self.pane_gaps: Counter[str] = Counter()  # (side, page kind, px between the pane and the page)
         self.pane_edges: Counter[str] = Counter()  # (side, page kind, px between the pane and its edge of the area)
@@ -495,6 +497,9 @@ class SeeWatch:
         from taslation.ui import seethrough as ui
 
         wgc.add_listener(self._frame)
+        import standin_monitors
+
+        standin_monitors.watch_pane_whys(self)  # (why a side pane is not on the screen: `_pane_watch`)
         # the pointer as the see-through window reads it is this tool's (`fake_point`: none but while `_hover_measure`
         # sets one): the real pointer is never moved, and wherever it rests it changes nothing in a run
         window.cursor_pos = lambda: self.fake_point
@@ -693,9 +698,14 @@ class SeeWatch:
         ground = getattr(self.app, "_see_ground", None)
         if over is None or ground is None:
             self.panes["no ground"] += 1
+            if over is not None:
+                for side in ("left", "right"):
+                    self.pane_hidden[f"{side}:no ground"] += 1
             return
         from taslation import panes as pn
         from taslation.capture import windows
+
+        import standin_monitors
 
         x0, y0, _w, _h = windows._client_box(self.hwnd)
         page = ground[1]
@@ -705,6 +715,8 @@ class SeeWatch:
         for side, box in boxes.items():
             self.panes[f"{side}:{kind}:{'shown' if box is not None else 'hidden'}"] += 1
             if box is None:
+                why = self.pane_why.get(side, "") or standin_monitors.other_why(over, side) or "?"
+                self.pane_hidden[f"{side}:{why}"] += 1
                 continue
             key = f"{side}:{kind}"
             self.pane_overlap[key] = max(self.pane_overlap.get(key, 0), pn.overlap(box, screen_page))
@@ -1736,7 +1748,13 @@ class SeeWatch:
     def pane_report(self) -> dict[str, Any]:
         over = self.over()
         counts = dict(over.counts) if over is not None else {}
-        return {"looks": dict(self.panes), "overlap_px_max": dict(self.pane_overlap),
+        return {"looks": dict(self.panes),
+                # each look a pane was not on the screen, by side and why: no ground (no page on a flat ground at
+                # rest), no room (beside the page), off the screen, sizing (with the pointer), covered (a window
+                # above the viewer), ? (none of these: the right one switched off, the window's own hiding)
+                "hidden_why": {side: {k.split(":", 1)[1]: n for k, n in self.pane_hidden.items()
+                                      if k.startswith(side + ":")} for side in ("left", "right")},
+                "overlap_px_max": dict(self.pane_overlap),
                 "gaps_px": dict(self.pane_gaps), "edges_px": dict(self.pane_edges), "x_in_client": dict(self.pane_x),
                 "sizes": dict(self.pane_sizes), "hover": self.hover,
                 "hits": {k: v for k, v in self.hits.items() if k.startswith("pane_")},

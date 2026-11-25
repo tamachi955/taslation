@@ -4,8 +4,11 @@ its start or its end, `viewerparts.shares_an_end`: another book in it, followed 
 another tab shows nothing of it is captured for reading (`OtherTab`, before the capture and right after it), the
 follow under way ends, the lettering hides and takes no mouse (`SeeThrough.set_away`), the right pane says so in one
 line, nothing is learned; the book's tab back, it is looked at at once; the book's tab dragged out into a window of
-its own is followed there. The viewer chooser says under its list to bring the book's tab to the front first. No
-window, no browser: tools/standin_e2e.py's tab scenarios play it on the stand-in viewer."""
+its own is followed there. The viewer chooser says under its list to bring the book's tab to the front first. A
+browser window the person picked is on trial until a page with lettering is read under its tab: nothing of it is
+learned before, a tab that looks like a viewer's is followed as the chosen one, and with nothing read for a while the
+right pane says so and how to choose the window again. No window, no browser: tools/standin_e2e.py's tab scenarios
+play it on the stand-in viewer."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -61,6 +64,7 @@ class Tabs:
     _tab_of = viewers.ViewerMixin._tab_of
     _tab_now = viewers.ViewerMixin._tab_now
     _tab_seen = viewers.ViewerMixin._tab_seen
+    _pick_wait = viewers.ViewerMixin._pick_wait
     _follow_tab = viewers.ViewerMixin._follow_tab
     _tab_moved_out = viewers.ViewerMixin._tab_moved_out
     _choose_listed = viewers.ViewerMixin._choose_listed
@@ -173,10 +177,122 @@ def test_the_book_s_tab_dragged_out_is_followed_into_its_own_window(tabs, monkey
     assert tabs.calls[-1] == ("selected", 30, True)  # (the book's name stays: the same book)
 
 
+# ------------------------------------------------------------------ a browser window picked, on trial
+NOTES = _as(BOOK, "Notes - Google Chrome")  # (the tab in front as the person picked the window)
+SHELF = "Moon Road 2 | My Book Shelf - Google Chrome"  # (a reading word: no viewer's part learned)
+BEFORE = "Star Road 1 - Reading Site - Google Chrome"  # (a title chosen before by itself)
+
+
+class Pick(Tabs):
+    """`Tabs` with the pick on trial: its page read, what is learned."""
+
+    _pick_read = viewers.ViewerMixin._pick_read
+    _learn_viewer = viewers.ViewerMixin._learn_viewer
+
+
+@pytest.fixture
+def pick(monkeypatch):
+    known = viewerparts.Memory(None, {"parts": ["FOLIO☆QAT"], "titles": ["Star Road 1 - Reading Site"]})
+    monkeypatch.setattr(viewerparts, "current", lambda: known)
+    learned: list[tuple] = []
+    monkeypatch.setattr(viewerparts, "chosen", lambda win: learned.append(("chosen", win.title)) or [])
+    monkeypatch.setattr(viewerparts, "corrected", lambda win, parts=(): learned.append(("corrected", win.title)))
+    titles = {NOTES.hwnd: NOTES.title}
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(viewers, "window_exists", lambda hwnd: hwnd in titles)
+    monkeypatch.setattr(viewers, "window_title", lambda hwnd: titles[hwnd])
+    monkeypatch.setattr(viewers, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    p = Pick(NOTES)
+    p._pick_trial = {"since": clock.now}
+    p.titles, p.clock, p.learned = titles, clock, learned
+    return p
+
+
+def test_on_trial_a_tab_that_looks_like_a_viewer_s_is_followed_as_the_chosen_one(pick):
+    for title, kind in ((SHELF, "viewer"), (BEFORE, "viewer"), (NEXT_BOOK, "viewer"), (OTHER, "other")):
+        pick.titles[NOTES.hwnd] = title
+        assert pick._tab_of(title) == kind, title
+    pick._pick_trial = None  # (once a page was read under the tab picked: the rule as ever)
+    assert [pick._tab_of(t) for t in (SHELF, BEFORE, NEXT_BOOK)] == ["other", "other", "viewer"]
+    pick._pick_trial = {"since": pick.clock.now}
+    pick.titles[NOTES.hwnd] = SHELF
+    assert pick._tab_now() == "viewer" and pick.calls[-1] == ("after", 0, "_follow_tab")
+    assert pick.learned == []  # (nothing learned of either tab)
+
+
+def test_on_trial_the_right_pane_says_no_page_was_found_after_a_while_with_nothing_read(pick):
+    def rows(app) -> list[str]:
+        state = {**vars(app), "selected": None, "status_var": SimpleNamespace(get=lambda: "")}
+        return [r.text for r in ui.right_rows(SimpleNamespace(**state))[0]]
+
+    from taslation.ui.constants import PICK_AGAIN, PICK_NO_PAGE, PICK_NOTHING_S
+
+    assert pick._tab_now() == "book" and not pick._pick_nothing
+    pick.clock.now += PICK_NOTHING_S - 1
+    pick._tab_now()
+    assert not pick._pick_nothing and PICK_NO_PAGE not in rows(pick)
+    pick.clock.now += 1
+    pick._tab_now()
+    assert pick._pick_nothing and PICK_NO_PAGE in rows(pick)
+    pick.busy = True  # (a page job under way: the wait begins again)
+    pick._tab_now()
+    assert not pick._pick_nothing
+    pick.busy = False
+    pick.clock.now += PICK_NOTHING_S
+    pick._tab_now()
+    assert pick._pick_nothing
+    pick.titles[NOTES.hwnd] = OTHER  # (another tab, not a viewer's: said, and how to have it read)
+    assert pick._tab_now() == "other" and not pick._pick_nothing
+    assert rows(pick) == [TAB_AWAY, PICK_AGAIN]
+    pick._pick_trial = None
+    assert rows(pick) == [TAB_AWAY]
+
+
+def test_on_trial_nothing_is_learned_until_a_page_with_lettering_is_read(pick):
+    from taslation.ui.constants import PICK_NOTHING_S
+
+    pick._pick_read(SimpleNamespace(regions=[]))  # (a page with nothing to letter: the wait begins again)
+    assert pick.learned == [] and pick._pick_trial == {"since": pick.clock.now}
+    pick.clock.now += PICK_NOTHING_S
+    pick._tab_now()
+    assert pick._pick_nothing
+    pick._pick_read(SimpleNamespace(regions=[object()]))
+    assert pick._pick_trial is None and not pick._pick_nothing and pick.learned == [("chosen", NOTES.title)]
+    pick._pick_read(SimpleNamespace(regions=[object()]))  # (no trial: nothing more)
+    assert pick.learned == [("chosen", NOTES.title)]
+
+
+def test_a_browser_window_picked_is_on_trial_and_one_of_another_program_is_learned_at_once(monkeypatch, memory):
+    from test_window_state import Chooser
+
+    learned: list[str] = []
+    monkeypatch.setattr(viewerparts, "chosen", lambda win: learned.append(win.title) or [])
+    monkeypatch.setattr(viewers, "window_exists", lambda hwnd: True)
+    monkeypatch.setattr(viewers, "show_minimised", lambda app, win: False)
+    shelf = _as(BOOK, SHELF)
+    images = WindowInfo(hwnd=40, title="000.jpg", class_name="WinUIDesktopWin32WindowClass", pid=40, rect=(0, 0, 9, 9))
+    w = Chooser([NOTES, images])
+    w.window_box.index = 0
+    w._on_window_selected(picked=True)
+    assert w._pick_trial is not None and learned == [] and w.selected is NOTES
+    w.windows = [shelf, images]  # (followed: the same window chosen again as it is now, its tab a viewer's)
+    w._on_window_selected()
+    assert w._pick_trial is not None and learned == [] and w.selected is shelf and w.book_var.get() != "Notes"
+    w.window_box.index = 1
+    w._on_window_selected(picked=True)  # (no browser's: no tab to doubt)
+    assert w._pick_trial is None and learned == ["000.jpg"]
+
+
 def test_the_chooser_says_to_bring_the_book_s_tab_to_the_front_first():
     from taslation.locales.features import viewer_tab
+    from taslation.ui.constants import PICK_AGAIN, PICK_NO_PAGE
 
     assert CHOOSER_TAB in viewer_tab.TEXTS and TAB_AWAY in viewer_tab.TEXTS
+    assert PICK_NO_PAGE in viewer_tab.TEXTS and PICK_AGAIN in viewer_tab.TEXTS
+    see = __import__("taslation.locales.features.see_through", fromlist=["TEXTS"]).TEXTS
+    for line in (PICK_NO_PAGE, PICK_AGAIN):  # (the Menu's entry named as it is in each language)
+        for lang, text in viewer_tab.TEXTS[line].items():
+            assert see["Viewer..."][lang] in text and see["Menu"][lang] in text, (lang, line)
     for text in viewer_tab.TEXTS.values():
         assert len(text) == 16 and all(v.strip() for v in text.values())
     from taslation.locales.features import viewer_choice

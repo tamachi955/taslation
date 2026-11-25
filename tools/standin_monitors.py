@@ -319,6 +319,52 @@ class Drag(threading.Thread):
             f["front_after"] = self.steps.front()
 
 
+def watch_pane_whys(holder: Any) -> None:
+    """`ui.seethrough.panes_tick`'s two calls of `pane_on_screen` (the left pane's box, then the right one's) and
+    `panes.place` watched, so that a pane not handed over is told by why in *holder*'s ``pane_why`` (side -> why, ""
+    for none): no ground yet, no room, off the screen (`Sampler`, `standin_seethrough.SeeWatch`: each install wraps
+    what is there, another's hooks too)."""
+    from taslation import panes as pn
+    from taslation.ui import seethrough as ui
+
+    tick, on_screen, place = ui.panes_tick, ui.pane_on_screen, pn.place
+    calls = {"n": 0}
+
+    def ticked(app: Any) -> Any:
+        calls["n"] = 0
+        if getattr(app, "_see_ground", None) is None:
+            holder.pane_why = {"left": "no ground", "right": "no ground"}
+        return tick(app)
+
+    def placed(*a: Any, **k: Any) -> Any:
+        out = place(*a, **k)
+        holder.pane_why = {"left": "" if out[0] is not None else "no room",
+                           "right": "" if out[1] is not None else "no room"}
+        return out
+
+    def screened(box: Any, origin: Any) -> Any:
+        side = "left" if calls["n"] % 2 == 0 else "right"
+        calls["n"] += 1
+        out = on_screen(box, origin)
+        if box is not None and out is None:
+            holder.pane_why[side] = "off the screen"
+        return out
+
+    ui.panes_tick = ticked
+    ui.pane_on_screen = screened
+    pn.place = placed
+
+
+def other_why(over: Any, side: str) -> str:
+    """Why the side pane *side*, handed over by the Tk thread, is not on the screen though `watch_pane_whys` found no
+    reason: the viewer sized with the pointer, or a window above the viewer meeting it ("" for neither)."""
+    if getattr(over, "_sizing", False):
+        return "sizing"  # (the viewer sized with the pointer: `SeeThrough._sizing_tick`)
+    if _covered_pane(over, side):
+        return "covered"  # (a window above the viewer meets it: the region editor, a dialog, another program's)
+    return ""
+
+
 def _covered_pane(over: Any, side: str) -> bool:
     """Whether the side pane *side* the Tk thread handed over is left out for a window above the viewer that meets it
     (the see-through window's `_covers`: the region editor, a dialog), as `SeeThrough._place_panes` finds it."""
@@ -360,37 +406,8 @@ class Sampler(threading.Thread):
         self.page_rects: dict[tuple[int, int, int, bool], tuple[int, int, int, int]] = {}
 
     def install(self) -> None:
-        """`ui.seethrough.panes_tick`'s two calls of `pane_on_screen` (the left pane's box, then the right one's) and
-        `panes.place` watched, so that a pane not handed over is told by why: no ground yet, no room, off the screen."""
-        from taslation import panes as pn
-        from taslation.ui import seethrough as ui
-
-        tick, on_screen, place = ui.panes_tick, ui.pane_on_screen, pn.place
-        calls = {"n": 0}
-
-        def ticked(app: Any) -> Any:
-            calls["n"] = 0
-            if getattr(app, "_see_ground", None) is None:
-                self.pane_why = {"left": "no ground", "right": "no ground"}
-            return tick(app)
-
-        def placed(*a: Any, **k: Any) -> Any:
-            out = place(*a, **k)
-            self.pane_why = {"left": "" if out[0] is not None else "no room",
-                             "right": "" if out[1] is not None else "no room"}
-            return out
-
-        def screened(box: Any, origin: Any) -> Any:
-            side = "left" if calls["n"] % 2 == 0 else "right"
-            calls["n"] += 1
-            out = on_screen(box, origin)
-            if box is not None and out is None:
-                self.pane_why[side] = "off the screen"
-            return out
-
-        ui.panes_tick = ticked
-        ui.pane_on_screen = screened
-        pn.place = placed
+        """Why a side pane is not handed over, kept in `pane_why` (`watch_pane_whys`)."""
+        watch_pane_whys(self)
 
     def tk_look(self) -> None:
         """(the Tk thread, each tick) The region editor's frame and its region's box in the page, for `look`; the
@@ -464,10 +481,8 @@ class Sampler(threading.Thread):
                 box = over.pane_shown(side)
                 pane = int((getattr(over, "panes", {}) or {}).get(side, 0) or 0)
                 why = self.pane_why.get(side, "")
-                if box is None and not why and getattr(over, "_sizing", False):
-                    why = "sizing"  # (the viewer sized with the pointer: `SeeThrough._sizing_tick`)
-                elif box is None and not why and _covered_pane(over, side):
-                    why = "covered"  # (a window above the viewer meets it: the region editor, a dialog)
+                if box is None and not why:
+                    why = other_why(over, side)
                 panes[side] = {"box": tuple(box) if box is not None else None,
                                "visible": bool(pane and _u.IsWindowVisible(pane)),
                                "monitors": s.met(box) if box is not None else [],

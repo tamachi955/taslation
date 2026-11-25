@@ -68,7 +68,8 @@ def _install_ps1(name: str) -> str:
     return m.group(1)
 
 
-def _groups() -> dict[str, str]:
+def _groups() -> dict[str, dict[str, str]]:
+    """The stand-in's groups: name -> {scenarios, role, size}."""
     return json.loads(_workflow()["env"]["STANDIN_GROUPS"])
 
 
@@ -107,7 +108,7 @@ def test_it_runs_for_a_ci_branch_main_or_by_hand_with_read_only_rights_and_bound
     # at most 20 jobs at once (GitHub's limit for the account) with tests.yml's, which the same push starts
     parallel = [jobs[name]["strategy"]["max-parallel"] for name in ("standin", "benchmark")]
     assert all(jobs[name]["strategy"]["fail-fast"] is False for name in ("standin", "benchmark"))
-    assert parallel == [len(_groups()), 5]
+    assert parallel == [min(len(_groups()), 7), 5]
     shards = _load(TESTS)["jobs"]["suite"]["strategy"]["matrix"]["shard"]
     assert len(shards) == int(_load(TESTS)["env"]["SHARDS"]) == 8
     assert sum(parallel) + len(shards) <= 20
@@ -232,22 +233,45 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
     import standin_e2e
 
     groups = _groups()
-    covered = []
-    for group, scenarios in groups.items():
-        names = standin_e2e.wanted(scenarios)
-        assert group == "-".join(names), group  # (the group says what the tool runs: a pair comes along)
-        covered += names
+    covered, editing = [], []
+    for group, spec in groups.items():
+        assert sorted(spec) == ["role", "scenarios", "size"], group
+        assert spec["role"] in ("reader", "editing"), group
+        names = standin_e2e.wanted(spec["scenarios"])
+        # (the group says what the tool runs, a pair comes along, and an editing group says so)
+        assert group == "-".join(names) + ("-editing" if spec["role"] == "editing" else ""), group
+        (editing if spec["role"] == "editing" else covered).extend(names)
     # every scenario of "all" once, and scenario k's three paces (never in "all") once; of those by their names only,
-    # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized (r6
-    # and r7: the tool reads no page in a maximised frame yet), the page slid, a start behind another window
-    by_name = [*standin_e2e.TAB_STEPS_ASKED, *(r for r in standin_e2e.R_STEPS if r not in ("r6", "r7")), "s", "h"]
+    # the ones a runner's one monitor can show: another tab (tab0 needs a start of its own), the window resized, the
+    # page slid, a start behind another window - all of them in Reader mode, and one group again in editing
+    by_name = [*standin_e2e.TAB_STEPS_ASKED, *standin_e2e.R_STEPS, "s", "h"]
     assert sorted(covered) == sorted([*standin_e2e.ORDER, *standin_e2e.K_ASKED, *by_name])
     assert len(covered) == len(set(covered))
+    assert editing and set(editing) <= set(covered) and sum(s["role"] == "editing" for s in groups.values()) == 1
     assert not set(covered) & set(standin_e2e.M_STEPS)  # (a second monitor: none on a runner)
     behind = "if (($env:SCENARIOS -split ',') -contains 'h') { $arguments += @('--start-behind', 'cover') }"
     assert behind in _step("standin", "Run: tools/standin_e2e.py")["run"]
+    # the groups whose criteria look at the side panes: a stand-in with room for them beside a spread (the tool's own
+    # size leaves none), within the runner's screen less its taskbar; the others at the tool's size
+    display = [int(v) for v in _workflow()["env"]["DISPLAY_SIZE"].split("||")[-1].strip(" '}").split("x")]
+    panes = {*standin_e2e.TAB_STEPS_ASKED, *standin_e2e.R_STEPS, "s", "h"}
+    for group, spec in groups.items():
+        names = set(standin_e2e.wanted(spec["scenarios"]))
+        if names & panes:
+            w, h = (int(v) for v in spec["size"].split("x"))
+            assert w > standin_e2e.STANDIN_SIZE[0] + 400 and w <= display[0] and h <= display[1] - 60, group
+        else:
+            assert spec["size"] == "", group
+    run = _step("standin", "Run: tools/standin_e2e.py")
+    assert run["env"]["ROLE"] == "${{ matrix.role }}" and run["env"]["STANDIN_SIZE"] == "${{ matrix.size }}"
+    for line in ("if ($env:ROLE -eq 'editing') { $arguments += @('--editing') }",
+                 "if ($env:STANDIN_SIZE) { $arguments += @('--standin-size', $env:STANDIN_SIZE) }"):
+        assert line in run["run"], line
+    assert standin_e2e.parse(["--editing", "--standin-size", "1900x1000"]).editing
+    verdict = _step("standin", "The verdict")
+    assert verdict["env"]["ROLE"] == "${{ matrix.role }}" and "--role $env:ROLE" in verdict["run"]
     # e turns back to the pages d translated: never alone, never without d
-    assert any(standin_e2e.wanted(s)[:2] == ["d", "e"] for s in groups.values())
+    assert any(standin_e2e.wanted(s["scenarios"])[:2] == ["d", "e"] for s in groups.values())
     choice = _on(_workflow())["workflow_dispatch"]["inputs"]["groups"]["description"]
     assert ",".join(groups) in choice
     run = _step("standin", "Run: tools/standin_e2e.py")
@@ -273,7 +297,7 @@ def test_the_stand_in_jobs_run_every_scenario_once_and_the_benchmark_every_title
 def test_scenario_k_runs_once_in_a_short_form_its_rests_never_held():
     import standin_e2e
 
-    groups = _groups()
+    groups = {g: s["scenarios"] for g, s in _groups().items()}
     with_k = [g for g, s in groups.items() if "k" in s.split(",")]
     assert len(with_k) == 1 and with_k[0].split("-")[-3:] == ["k5", "k1", "k2"], with_k
     run = _step("standin", "Run: tools/standin_e2e.py")["run"]
@@ -324,7 +348,7 @@ def test_the_plan_gives_the_jobs_asked_for(tmp_path):
             "MODELS_HASH": "m" * 64, "TRANSLATOR_HASH": "t" * 64, "PIP_HASH": "p" * 64}
     code, said, out = _run_step("prepare", "Which checks", base, tmp_path)
     assert code == 0, said
-    assert json.loads(out["standin_matrix"]) == [{"group": g, "scenarios": s} for g, s in _groups().items()]
+    assert json.loads(out["standin_matrix"]) == [{"group": g, **s} for g, s in _groups().items()]
     assert json.loads(out["titles"]) == [1, 2, 3, 4, 5]
     assert (out["standin"], out["benchmark"]) == ("true", "true")
     assert out["program_key"] == "ollama-program-v0.40.17-windows-amd64"
@@ -333,7 +357,8 @@ def test_the_plan_gives_the_jobs_asked_for(tmp_path):
     code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "stand-in", "WANTED_GROUPS": "d-e-x-f2",
                                                             "WANTED_TITLES": "3"}, tmp_path)
     assert code == 0, said
-    assert json.loads(out["standin_matrix"]) == [{"group": "d-e-x-f2", "scenarios": "d,e,x,f2"}]  # (an array of one)
+    assert json.loads(out["standin_matrix"]) == [{"group": "d-e-x-f2", "scenarios": "d,e,x,f2", "role": "reader",
+                                                  "size": ""}]  # (an array of one)
     assert (out["standin"], out["benchmark"], json.loads(out["titles"])) == ("true", "false", [3])
     code, said, out = _run_step("prepare", "Which checks", {**base, "CHECKS": "benchmark", "WANTED_TITLES": "5, 1,1",
                                                             "OLLAMA_VERSION": "latest"}, tmp_path)
@@ -712,6 +737,61 @@ def test_the_tab_resize_slide_and_behind_scenarios_fail_on_what_their_rule_forbi
         "the side panes stayed on the screen"]
     assert failed(s._behind_correctness, {}, ["h"]) == (
         ["the stand-in was out of sight at the start and back in sight"], 1)
+
+
+def test_a_group_s_role_is_judged_and_a_pane_s_criteria_say_why_it_was_hidden(tmp_path):
+    s = _summarise()
+    criterion = "the window was in {}, as the group says"
+    # the role the group states: kept for the book, and the window's alone from its ready on (before the book's role
+    # is known the window starts in the settings' own)
+    reading = {"modes": {"columns": ["t_s", "role"], "rows": [[0.1, "translator"], [0.4, "reader"]]}}
+    report = {**_report(**reading), "role_kept": "reader"}
+    assert s.standin(report, "", {}, "c", 600, "reader")["verdict"] == "pass"
+    assert criterion.format("Reader mode") not in _failed(s.standin(report, "", {}, "c", 600))  # (no role: none)
+    assert _failed(s.standin(report, "", {}, "c-editing", 600, "editing")) == [criterion.format("editing")]
+    later = {"modes": {"rows": [[0.1, "translator"], [0.4, "reader"], [30.0, "translator"]]}}
+    assert _failed(s.standin({**_report(**later), "role_kept": "reader"}, "", {}, "c", 600, "reader")) == [
+        criterion.format("Reader mode")]
+    editing = {**_report(modes={"rows": [[0.1, "translator"]]}), "role_kept": "translator"}
+    out = s.standin(editing, "", {}, "c-a-b-editing", 600, "editing")
+    assert out["verdict"] == "pass" and out["role"] == "editing" and "; in editing" in s.standin_md(out)
+    report_file = tmp_path / "report.json"
+    report_file.write_text(json.dumps(editing), encoding="utf-8")
+    assert s.main(["standin", str(report_file), "--group", "c-a-b-editing", "--role", "editing", "--out",
+                   str(tmp_path / "out"), "--timeout", "600", "--check"]) == 0
+    assert s.main(["standin", str(report_file), "--group", "c-a-b", "--role", "reader", "--out",
+                   str(tmp_path / "out"), "--timeout", "600", "--check"]) == 1
+    # e: a turn back lettered with nothing asked holds, from the cache or from the lines the window kept
+    turns = [{"n": 5, "segment": "e", "t_s": 50.0, "page": 2, "spread": True, "why": "previous", "requests": 0,
+              "cached": False, "first_lettered_ms": 300},
+             {"n": 6, "segment": "e", "t_s": 55.0, "page": 0, "spread": True, "why": "previous", "requests": 2,
+              "cached": False, "first_lettered_ms": 4000}]
+    meaning = s.meanings({"scenarios": ["e"], "run": {"turns": turns}})["e"]
+    assert meaning.startswith("holds: 1 of 2 turns back lettered with nothing asked"), meaning
+    assert s.meanings({"scenarios": ["e"], "run": {"turns": turns[1:]}})["e"].startswith("lost: none of 1")
+    # a side pane's criteria say why it was hidden (`standin_seethrough.SeeWatch.pane_report`'s hidden_why)
+    whys = {"left": {"no room": 60}, "right": {"no room": 58, "covered": 2}}
+    seen: dict[str, object] = {}
+    run = {"see_through": {"panes": {"hidden_why": whys}, "slides": {"slides": [
+        {"dir": "l", "hidden_spells_ms_from_press": [["left", None, None, "before"]]}], "error": None}},
+        "behind": {"behind": {"made": True, "ended_t": 8171}, "panes_back_ms": None, "panes_stayed": False},
+        "tabs": {"spells": [{"segment": "tab1", "kind": "switch", "right_pane_line_shown": False}],
+                 "jobs_on_the_other_tab": {}}}
+
+    def note(_scenario, criterion_, ok, seen_=None):
+        if not ok:
+            seen[criterion_] = seen_
+
+    s._slide_correctness(run, ["s"], note)
+    s._behind_correctness(run, ["h"], note)
+    s._tab_correctness(run, ["tab1"], note)
+    assert seen["no side pane hidden on a slide (from its press until 10 s after its release)"]["hidden_why"] == whys
+    assert seen["both side panes on the screen once the stand-in was back in sight"]["hidden_why"] == whys
+    assert seen["the right pane said in one line that the window shows another tab"] == {
+        "shown": False, "right_pane_hidden": whys["right"]}
+    # ... as the tool counts them, a look at a time (the hooks' why first, then the window's own)
+    source = (ROOT / "tools" / "standin_seethrough.py").read_text("utf-8")
+    assert '"hidden_why":' in source and "standin_monitors.watch_pane_whys(self)" in source
 
 
 def test_lines_taken_back_are_reported_and_fail_a_run_only_when_something_of_them_stayed():

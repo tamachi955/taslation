@@ -124,6 +124,36 @@ def test_is_loopback_host():
     assert not netguard.is_loopback_host("localhost.example.com")
 
 
+def test_no_test_reaches_ollama_s_usual_port_and_none_leaves_the_guard_on():
+    """tests/conftest.py refuses a connection to this computer's port 11434 - the person's own server there - as on a
+    computer where nothing listens on it, and notes it (the test that tried fails); and puts the guard back as it was
+    after each test (a guard left on blocked a later test's fake server on its own port on the runners, by their
+    order). Its hook is asked here as Python asks it, never with a real connection."""
+    import conftest
+
+    before = len(conftest._usual_port_tried)
+    for host in ("127.0.0.1", "localhost", "::1"):
+        with pytest.raises(ConnectionRefusedError):
+            conftest._usual_port_refused("socket.connect", (None, (host, conftest.USUAL_PORT)))
+    assert conftest._usual_port_tried[before:] == ["127.0.0.1:11434", "localhost:11434", "::1:11434"]
+    del conftest._usual_port_tried[before:]  # (this test's own: not a test that tried)
+    for event, args in (("socket.connect", (None, ("127.0.0.1", 11435))), ("socket.connect", (None, r"\\.\pipe\x")),
+                        ("socket.getaddrinfo", ("127.0.0.1", 11434, 0, 0, 0, 0))):
+        conftest._usual_port_refused(event, args)  # (another port, a pipe, a name looked up: let through)
+    assert len(conftest._usual_port_tried) == before
+    was = conftest._guard_now()
+    assert was == (False, netguard.state().allowed_ports if netguard.state() else None)
+    netguard.install(allowed_ports={9}, audit_hook=False)  # (left on by "a test")
+    conftest._guard_back(was)
+    assert not netguard.is_installed()
+    netguard.install(allowed_ports={9}, audit_hook=False)  # (on before "a test" that turned it off)
+    on = conftest._guard_now()
+    netguard.uninstall()
+    conftest._guard_back(on)
+    assert netguard.is_installed() and netguard.state().allowed_ports == frozenset({9})
+    netguard.uninstall()
+
+
 def test_audit_hook_blocks_raw_socket_module():
     """The C-level backstop catches code that bypasses the Python socket wrapper."""
     code = (

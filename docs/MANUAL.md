@@ -515,7 +515,11 @@ A tab with another book of the same viewer (its title starts or ends with the vi
 When you drag the book's tab out into a window of its own, TASlation finds that window and reads on there, under the same book name.
 
 In the dialog that chooses the viewer, a browser window is listed by the title of the tab in front.
-Bring the book's tab to the front first, then press "List again" (the line under the list says so). A window chosen while another tab is in front is read with that tab as the book's.
+Bring the book's tab to the front first, then press "List again" (the line under the list says so). A window chosen while another tab is in front is read with that tab as the book's,
+but only on trial: nothing of it is remembered for the next start until a page with text was read and lettered there.
+Until then, a tab you bring to the front that looks like a reader (it starts or ends with a viewer's name learned before, it was chosen before, or its title has a word such as "book") is taken as the book's tab in its place.
+If the tab chosen shows no page with text for about 5 seconds, the right pane says "No page with text found in this tab." and how to choose the window again in "Menu" > "Viewer...";
+with another tab in front meanwhile, it says how to have that tab read.
 
 When the reading reaches the end of the volume, some viewers show an end-of-book panel (ratings, the next volume). The arrow keys may not get you out of this panel,
 so then close it with "x" and go back to the first page. Text that looks like part of the viewer itself or of a colophon page (horizontal lines of Latin letters and numbers:

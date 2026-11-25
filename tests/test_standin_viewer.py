@@ -1135,6 +1135,30 @@ def test_a_black_frame_and_a_frame_without_code():
     assert sv.decode(None, 31).state() == "unknown"
 
 
+def test_a_frame_whose_page_begins_higher_or_lower_than_at_the_start_is_read_where_its_code_is():
+    """A maximised browser draws its rows above the page at another height than the window at the start had (the
+    tool's *top*): the code is looked for about the start's rows in the first frames of that size, and once found
+    there every frame of the size is read there (the middle of the rows that read: the first found reads at the
+    cells' edge); a size whose code is never found is given up after TOP_TRIES."""
+    notes = standin_e2e.Notes(31, 1.0)
+    big = (1920, 1032)
+    assert notes.shown(frame(8, True, top=31)).screen == (8, True)  # (the start's size and rows: as ever)
+    assert notes.shown(frame(12, True, top=31 - 8, size=big)).screen == (12, True)
+    assert notes.tops == {big: 23}  # (rows 20 to 25 read the cells, 25 first)
+    assert notes.shown(frame(14, False, top=23, size=big)).screen == (14, False)
+    assert notes.shown(frame(16, True, top=31, size=big)).state() == "unknown"  # (that size's rows are 23 now)
+    assert notes.shown(frame(8, True, top=31)).screen == (8, True)  # (the others' as before)
+    plain, small = Image.new("RGB", (800, 600), (200, 200, 200)), (800, 600)
+    for _ in range(standin_e2e.TOP_TRIES + 3):
+        assert notes.shown(plain).state() == "unknown"
+    assert notes.top_tries[small] == standin_e2e.TOP_TRIES and small not in notes.tops
+    far = (1000, 800)  # (a size whose code lies beyond the rows looked at)
+    assert notes.shown(frame(3, True, top=31 + standin_e2e.TOP_SEARCH_PX + 5, size=far)).state() == "unknown"
+    assert far not in notes.tops and notes.top_tries[far] == 1
+    lower = (1100, 800)  # (and one lower than at the start: the middle of its rows too)
+    assert notes.shown(frame(5, False, top=31 + 12, size=lower)).screen == (5, False) and notes.tops[lower] == 43
+
+
 def test_the_view_is_the_one_the_stand_in_says_once_its_window_is_in_place():
     """A browser at another scale starts its window at the size given in its own pixels: the view the tool reads the
     capture by is the size the page said last once the window is in place, else the one it was ready with."""

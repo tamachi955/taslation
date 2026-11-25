@@ -239,6 +239,7 @@ REST_MS = 2000  # a screen on show sharp so long is one the reader rested on
 STALE_MS = 1000  # a page lettered on show this long after the stand-in left it is an overlay left behind
 LAG_MS = 1000  # ... any page of the window's this long: the window did not follow
 LONG_CAPTURE_MS = 100  # a capture that took longer is noted with when it was
+TOP_SEARCH_PX, TOP_TRIES = 40, 30  # a frame's code looked for so many rows about the start's place, in so many frames
 STANDIN_SIZE = (1300, 900)
 NARROW_SIZE = (860, 1000)
 APP_SIZE = (1180, 940)
@@ -797,6 +798,8 @@ class Notes:
 
     def __init__(self, top: int, dpr: float):
         self.top, self.dpr = top, dpr
+        self.tops: dict[tuple[int, int], int] = {}  # (`shown`: the rows above the page's content, by frame size)
+        self.top_tries: Counter[tuple[int, int]] = Counter()
         self.lock = threading.RLock()
         self.jobs: list[dict[str, Any]] = []
         self.by_image: dict[int, dict[str, Any]] = {}
@@ -886,8 +889,35 @@ class Notes:
             self.timings.setdefault(name, []).append((ms, busy))
 
     def shown(self, image: Any) -> sv.Shown:
+        """What the frame *image* shows (`standin_viewer.decode`), its code read below the browser's own rows at the
+        top of the client area: as many as at the start (*top*), or as many as were found for a frame of its size
+        (`tops`). A frame of a size whose code is not where the start's rows put it - the browser's window maximised
+        draws its title rows lower or higher, and every frame of it was "unknown" - is read at the rows TOP_SEARCH_PX
+        about that place, the nearest first, until a place reads (TOP_TRIES frames of a size at most); the rows kept
+        for the size are the middle of the places that read there (the code's cells are some rows high: the first
+        place found reads at their edge)."""
+        if image is None:
+            return sv.Shown()
         try:
-            return sv.decode(image, self.top, self.dpr) if image is not None else sv.Shown()
+            size = image.size
+            top = self.tops.get(size, self.top)
+            found = sv.decode(image, top, self.dpr)
+            if found.known or size in self.tops or self.top_tries[size] >= TOP_TRIES:
+                return found
+            self.top_tries[size] += 1
+            cell = max(1, round(sv.CELL * self.dpr))
+            for step in range(1, TOP_SEARCH_PX + 1):
+                for other in (self.top - step, self.top + step):
+                    there = sv.decode(image, other, self.dpr) if other >= 0 else sv.Shown()
+                    if there.known and not there.black:
+                        away, end = (-1 if other < self.top else 1), other
+                        for _ in range(2 * cell):  # (on, away from the start's place, while it reads the same)
+                            if end + away < 0 or sv.decode(image, end + away, self.dpr) != there:
+                                break
+                            end += away
+                        self.tops[size] = (other + end + 1) // 2  # (as `decode` reads a cell: below its middle row)
+                        return there
+            return found
         except Exception:  # noqa: BLE001 - a picture of another shape: not known
             return sv.Shown()
 
@@ -5944,7 +5974,7 @@ def print_tabs(tabs: dict[str, Any] | None) -> None:
           f"{other['stored']}, units {other['units_stored']}); lettering looks over it "
           f"{tabs['lettering_looks_over_the_other_tab']}; chosen by its title "
           f"{tabs['chosen_by_the_other_tab_s_title']}; "
-          f"remembered {tabs['memory_holds_an_other_tab_title']}")
+          f"remembered {tabs['memory_holds_an_other_tab_title']}; a pick on trial {tabs.get('pick')}")
     for s in tabs["spells"]:
         away = s["while_away"]
         print(f"  {s['segment'] or 'start'} {s['kind']}/{s.get('how')} other {s['other']} late {s['title_late_ms']} "

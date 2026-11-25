@@ -239,8 +239,9 @@ def test_the_doctor_s_lines(tmp_path, models):
 def test_doctor_prints_where_each_stage_runs(tmp_path, monkeypatch, capsys):
     got = []
     monkeypatch.setattr(devices, "lines", lambda settings: got.append(settings) or ["  Detection: CPU (x); not timed yet"])
-    settings = _settings(tmp_path)
-    cli.cmd_doctor(argparse.Namespace(), settings)
+    with FakeOllama() as server:  # (doctor looks at Ollama: a fake on its own port, never the usual one's server)
+        settings = _settings(tmp_path, ollama_url=server.url)
+        cli.cmd_doctor(argparse.Namespace(), settings)
     out = capsys.readouterr().out
     assert "Where each stage runs:\n  Detection: CPU (x); not timed yet\n" in out and got == [settings]
     assert out.index("Where each stage runs:") < out.index("Result:")

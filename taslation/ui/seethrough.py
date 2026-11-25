@@ -112,7 +112,7 @@ from ..capture import wgc
 from ..i18n import _
 from ..i18n import current as ui_language
 from ..render.lettering import strip_marks
-from .constants import TAB_AWAY, TAB_WAITING
+from .constants import PICK_AGAIN, PICK_NO_PAGE, TAB_AWAY, TAB_WAITING
 
 log = logging.getLogger(__name__)
 # what the bubble's block says (the window's own words: its popup's buttons and lines, the region editor's)
@@ -792,12 +792,13 @@ def start(app: Any) -> bool:
     app._see_memo = []
     app._see_bars_since = None
     app._see_rest_box = None
+    app._see_rest_size = None  # the size of the frame the rest box was found in (`frame_look`)
     app._see_job = None
     app._see_carries = []  # (when, pages carried over, bubbles left out), see after_bars
     app._see_dpi = st.BASE_DPI  # the viewer's monitor's DPI (`tick`)
     app._see_ground = None  # (frame size, page box, steady band's rows, ground's colour, the capture area's columns)
     # at the last rest (`note_frame`)
-    app._see_unrested = None  # (when, page box, ground) of a frame not at rest yet (`note_frame`, `rest_tick`)
+    app._see_unrested = None  # (when, page box, ground, frame size) of a frame not at rest yet (`note_frame`, `rest_tick`)
     app._see_box_seen = None  # ((viewer, frame size), page box) of the frame noted last
     app._see_held_at = 0.0  # when the button was last seen held in the viewer
     app._see_pane_memo = {}  # side -> (what its picture was made of, the picture, its box) as handed over last
@@ -1054,7 +1055,9 @@ def right_rows(app: Any) -> tuple[list[pn.Row], list[pn.Row]]:
     problems and notices, what keeps TASlation from reading the viewer: `StatusMixin._show_banner`; what their
     buttons do is in the Menu, `see_menu.build`) and the offline guard's warning, which TASlation's window would
     show; while the viewer's window shows another tab, a line that says so (`viewers.ViewerMixin._tab_seen`; the
-    status line's waiting line left out then); the status slot (`status_slot`: what the page cannot show itself), the
+    status line's waiting line left out then; a browser window picked whose tab gave no page yet: how to have the tab
+    in front read, `PICK_AGAIN`), and while a browser window picked shows no page with text under its tab, one that
+    says so and how to choose the window again (`viewers.ViewerMixin._pick_wait`); the status slot (`status_slot`: what the page cannot show itself), the
     status line, the indicator's lines on the pages behind (the backlog, those that went by too fast: `side_model`);
     those that do not fit above the
     foot are left out, the oldest and least urgent first, the warnings last (`_drop_order`). The foot's rows
@@ -1077,6 +1080,10 @@ def right_rows(app: Any) -> tuple[list[pn.Row], list[pn.Row]]:
     away = bool(getattr(app, "_tab_away", False))
     if away:  # (the viewer's window shows another tab: said in one line, `viewers.ViewerMixin._tab_seen`)
         rows.append(pn.Row("", _(TAB_AWAY), "text"))
+        if getattr(app, "_pick_trial", None) is not None:  # (a pick on trial: the tab in front read once chosen)
+            rows.append(pn.Row("", _(PICK_AGAIN), "text"))
+    elif getattr(app, "_pick_nothing", False):  # (a window picked shows no page with text: `_pick_wait`)
+        rows.append(pn.Row("", _(PICK_NO_PAGE), "text"))
     status = str(_get(getattr(app, "status_var", None), "") or "").strip()
     if away and getattr(app, "_status_key", None) == TAB_WAITING:
         status = ""  # (the status line's waiting line says it again, at more length: once)
@@ -1764,7 +1771,11 @@ def area_rgb(app: Any, image: Image.Image, facts: Any) -> tuple[np.ndarray, tupl
 
 def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
     """`seethrough.look` of *image*'s capture area (kept with the frame's facts), its boxes in the frame's pixels; for
-    a frame `reading_frame` made, the look it was given (`LOOK_INFO`)."""
+    a frame `reading_frame` made, the look it was given (`LOOK_INFO`). The page box at the last rest tells half a spread
+    (`seethrough.half_of`) only in a frame of the size it was found in (`_see_rest_size`): in the viewer's window given
+    another size, a single page about half as wide as the spread before and near one of its sides was taken for half a
+    spread drawn, a frame to wait out - and so was every frame after it, since no frame waited out is at rest: the
+    page there was never read nor followed (the narrow window's turns, a window dragged narrower, until another size)."""
     given = getattr(image, "info", {}).get(LOOK_INFO)
     if given is not None:
         return given
@@ -1772,6 +1783,8 @@ def frame_look(app: Any, image: Image.Image, facts: Any) -> st.Look:
     def make() -> st.Look:
         rgb, box = area_rgb(app, image, facts)
         before = app._see_rest_box
+        if getattr(app, "_see_rest_size", None) not in (None, image.size):
+            before = None  # (another size than the rest's: no half of its spread here)
         if before is not None:
             before = (before[0] - box[0], before[1] - box[1], before[2] - box[0], before[3] - box[1])
         found = st.look(rgb, before, step=px(app, st.LOOK_STEP))
@@ -1825,9 +1838,9 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
         app._see_bars_since = None
         ground = _ground_of(app, image, facts, found)
         if _at_rest(app, image, found.box):
-            _rest(app, found.box, ground)
+            _rest(app, found.box, ground, image.size)
         else:
-            app._see_unrested = (time.monotonic(), found.box, ground)
+            app._see_unrested = (time.monotonic(), found.box, ground, image.size)
         return
     if app._see_bars_since is None:
         app._see_bars_since = time.monotonic()
@@ -1861,9 +1874,9 @@ def _ground_under_bars(app: Any, image: Image.Image, facts: Any, found: st.Look)
         return
     under = _ground_of(app, image, facts, found)
     if _at_rest(app, image, found.box):
-        _rest(app, found.box, under)
+        _rest(app, found.box, under, image.size)
     else:
-        app._see_unrested = (time.monotonic(), found.box, under)
+        app._see_unrested = (time.monotonic(), found.box, under, image.size)
 
 
 def _at_rest(app: Any, image: Image.Image, box: Any) -> bool:
@@ -1878,12 +1891,13 @@ def _at_rest(app: Any, image: Image.Image, box: Any) -> bool:
     return seen is None or seen[0] != key or _same_box(seen[1], box, px(app, st.LOOK_STEP))
 
 
-def _rest(app: Any, box: Any, ground: Any) -> None:
-    """The page at rest: its box (which tells half a spread) and the side panes' ground (None: no page on a flat
-    ground, the panes hide)."""
+def _rest(app: Any, box: Any, ground: Any, size: Any = None) -> None:
+    """The page at rest: its box (which tells half a spread, in frames of *size*, the frame's: `frame_look`) and the
+    side panes' ground (None: no page on a flat ground, the panes hide)."""
     app._see_unrested = None
     if box is not None:
         app._see_rest_box = box
+        app._see_rest_size = size
     app._see_ground = ground
 
 
@@ -1899,7 +1913,7 @@ def rest_tick(app: Any) -> None:
         app._see_held_at = now
         return
     if now - max(pending[0], getattr(app, "_see_held_at", 0.0)) >= REST_S:
-        _rest(app, pending[1], pending[2])
+        _rest(app, pending[1], pending[2], pending[3] if len(pending) > 3 else None)
 
 
 def _bars_due(app: Any, gone: bool = False) -> None:

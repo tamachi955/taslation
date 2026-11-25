@@ -1,6 +1,7 @@
 """The window's words about a browser window that shows another tab than the book's: the right pane's line while it
 does (`ui.seethrough.right_rows`; `ui.viewers.ViewerMixin._tab_seen`), and the viewer chooser's line under its list
-(`ui.see_menu.ViewerDialog`): a browser window is listed by the title of the tab in front.
+(`ui.see_menu.ViewerDialog`): a browser window is listed by the title of the tab in front; the right pane's line while
+a window picked shows no page with text in its tab (`ui.viewers.ViewerMixin._pick_wait`).
 
 Machine-translated; no native review."""
 
@@ -40,5 +41,42 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "如果書在瀏覽器中，請先把它的分頁切到最前面，再點選「重新整理清單」。",
         "ko": "책이 브라우저에 있으면 먼저 그 탭을 앞으로 가져온 다음 목록 새로 고침을 누르세요.",
         "th": "หากหนังสืออยู่ในเบราว์เซอร์ ให้สลับไปที่แท็บของหนังสือก่อน แล้วกด รีเฟรชรายการ",
+    },
+    "No page with text found in this tab. If the book is in another tab, bring it to the front, then choose the window "
+    "again in Menu > Viewer...": {
+        "ja": "このタブには文字のあるページが見つかりません。本が別のタブにある場合は、そのタブを前面に出してから、「メニュー」>「ビューア...」でウィンドウを選び直してください。",
+        "es": "No se encontró ninguna página con texto en esta pestaña. Si el libro está en otra pestaña, ponla delante y vuelve a elegir la ventana en Menú > Visor...",
+        "pt": "Nenhuma página com texto foi encontrada nesta aba. Se o livro estiver em outra aba, traga-a para a frente e escolha a janela de novo em Menu > Visualizador...",
+        "fr": "Aucune page avec du texte dans cet onglet. Si le livre est dans un autre onglet, mettez-le au premier plan, puis choisissez à nouveau la fenêtre dans Menu > Visionneuse...",
+        "de": "In diesem Tab wurde keine Seite mit Text gefunden. Ist das Buch in einem anderen Tab, holen Sie diesen nach vorn und wählen Sie das Fenster erneut unter Menü > Viewer...",
+        "it": "Nessuna pagina con testo trovata in questa scheda. Se il libro è in un'altra scheda, portala in primo piano, poi scegli di nuovo la finestra in Menu > Visualizzatore...",
+        "nl": "Geen pagina met tekst gevonden in dit tabblad. Staat het boek in een ander tabblad, zet dat dan vooraan en kies het venster opnieuw in Menu > Viewer...",
+        "pl": "W tej karcie nie znaleziono strony z tekstem. Jeśli książka jest w innej karcie, przenieś ją na wierzch, a potem wybierz okno ponownie w Menu > Czytnik...",
+        "ru": "На этой вкладке не найдено страницы с текстом. Если книга на другой вкладке, выведите её на передний план и снова выберите окно в «Меню» > «Просмотрщик...».",
+        "tr": "Bu sekmede metin içeren bir sayfa bulunamadı. Kitap başka bir sekmedeyse onu öne getirin, sonra pencereyi Menü > Görüntüleyici... ile yeniden seçin.",
+        "id": "Tidak ada halaman berteks di tab ini. Jika buku ada di tab lain, bawa tab itu ke depan, lalu pilih jendelanya lagi di Menu > Penampil...",
+        "vi": "Không tìm thấy trang có chữ trong tab này. Nếu sách ở tab khác, hãy đưa tab đó lên trước rồi chọn lại cửa sổ trong Menu > Trình xem...",
+        "zh": "此标签页中未找到带文字的页面。如果书在另一个标签页中，请先把它切到最前，再在“菜单 > 查看器...”中重新选择窗口。",
+        "zh-tw": "此分頁中找不到有文字的頁面。如果書在另一個分頁中，請先把它切到最前面，再在「選單 > 檢視器...」中重新選擇視窗。",
+        "ko": "이 탭에서 글자가 있는 페이지를 찾지 못했습니다. 책이 다른 탭에 있으면 그 탭을 앞으로 가져온 다음 메뉴 > 뷰어...에서 창을 다시 선택하세요.",
+        "th": "ไม่พบหน้าที่มีข้อความในแท็บนี้ หากหนังสืออยู่ในแท็บอื่น ให้สลับแท็บนั้นมาไว้ด้านหน้า แล้วเลือกหน้าต่างอีกครั้งที่ เมนู > โปรแกรมอ่าน...",
+    },
+    "To read the tab in front, choose the window again in Menu > Viewer...": {
+        "ja": "前面のタブを読むには、「メニュー」>「ビューア...」でウィンドウを選び直してください。",
+        "es": "Para leer la pestaña que está delante, vuelve a elegir la ventana en Menú > Visor...",
+        "pt": "Para ler a aba que está na frente, escolha a janela de novo em Menu > Visualizador...",
+        "fr": "Pour lire l'onglet au premier plan, choisissez à nouveau la fenêtre dans Menu > Visionneuse...",
+        "de": "Um den Tab im Vordergrund zu lesen, wählen Sie das Fenster erneut unter Menü > Viewer...",
+        "it": "Per leggere la scheda in primo piano, scegli di nuovo la finestra in Menu > Visualizzatore...",
+        "nl": "Kies het venster opnieuw in Menu > Viewer... om het tabblad vooraan te lezen.",
+        "pl": "Aby czytać kartę na wierzchu, wybierz okno ponownie w Menu > Czytnik...",
+        "ru": "Чтобы читать вкладку на переднем плане, снова выберите окно в «Меню» > «Просмотрщик...».",
+        "tr": "Öndeki sekmeyi okumak için pencereyi Menü > Görüntüleyici... ile yeniden seçin.",
+        "id": "Untuk membaca tab di depan, pilih jendelanya lagi di Menu > Penampil...",
+        "vi": "Để đọc tab đang ở trước, hãy chọn lại cửa sổ trong Menu > Trình xem...",
+        "zh": "要读取最前面的标签页，请在“菜单 > 查看器...”中重新选择窗口。",
+        "zh-tw": "若要讀取最前面的分頁，請在「選單 > 檢視器...」中重新選擇視窗。",
+        "ko": "앞에 있는 탭을 읽으려면 메뉴 > 뷰어...에서 창을 다시 선택하세요.",
+        "th": "หากต้องการอ่านแท็บที่อยู่ด้านหน้า ให้เลือกหน้าต่างอีกครั้งที่ เมนู > โปรแกรมอ่าน...",
     },
 }

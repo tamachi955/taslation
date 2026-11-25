@@ -233,14 +233,27 @@ class TabRun:
 
     def tick(self) -> None:
         """(the Tk thread, each tick) The right pane's line on another tab, the status line's kind, the book's name and
-        the window followed, kept where they changed (as digests: compared, never kept)."""
+        the window followed, kept where they changed (as digests: compared, never kept); a window picked in the viewer
+        chooser on trial (`ui.viewers.ViewerMixin._pick_trial`) and the right pane's lines of it ("no page": no page
+        with text in the tab picked, "again": how to have the tab in front read)."""
         app = self.app
         try:
             says = bool(self.away_line(app))
         except Exception:  # noqa: BLE001 - not told
             says = False
+        pick = ""
+        try:
+            from taslation.i18n import _ as tr
+            from taslation.ui import constants
+
+            for code, line in (("no page", "PICK_NO_PAGE"), ("again", "PICK_AGAIN")):
+                if hasattr(constants, line) and right_pane_says(app, tr(getattr(constants, line))):
+                    pick = code
+        except Exception:  # noqa: BLE001 - not told
+            pick = ""
         sel = getattr(app, "selected", None)
         rec = {"t": now_ms(), "away_line": says, "away": bool(getattr(app, "_tab_away", False)),
+               "trial": getattr(app, "_pick_trial", None) is not None, "pick_line": pick,
                "status": str(getattr(app, "_status_key", "") or "")[:40],
                "book": _digest(_get(getattr(app, "book_var", None))),
                "follows": self.windows().index(sel.hwnd) + 1 if sel is not None and sel.hwnd in self.windows() else 0,
@@ -325,6 +338,13 @@ class TabRun:
                     1 for r in rows if r.get("patches") and self._other_at(r["t"], r.get("on"))),
                 "chosen_by_the_other_tab_s_title": any(r["other_title"] for r in self.tk_rows),
                 "memory_holds_an_other_tab_title": _memory_holds(self.other_titles),
+                # (a window picked in the viewer chooser: on trial until a page with lettering was read under its tab)
+                "pick": {"on_trial_looks": sum(1 for r in self.tk_rows if r["trial"]),
+                         "trial_ended_ms": next((round(r["t"] - self.tk_rows[0]["t"]) for k, r in
+                                                 enumerate(self.tk_rows) if k and self.tk_rows[k - 1]["trial"]
+                                                 and not r["trial"]), None),
+                         "on_trial_at_end": bool(self.tk_rows and self.tk_rows[-1]["trial"]),
+                         "lines_said": sorted({r["pick_line"] for r in self.tk_rows if r["pick_line"]})},
                 "tk_rows": [{**r, "t": round(r["t"] - (self.spells[0]["away_t"] if self.spells else 0))}
                             for r in self.tk_rows][-60:],
                 "events": len(self.events), "looks": len(rows)}

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from taslation import bookname, health, names, ollama_start, protect, viewerparts
+from taslation import bookname, health, names, netguard, ollama_start, protect, viewerparts
 from taslation.config import Settings
 from taslation.detect import layout
 from taslation.ocr import place
@@ -25,6 +25,62 @@ def ocr_installed() -> bool:
 
 requires_ocr = pytest.mark.skipif(not ocr_installed(), reason="OCR model not downloaded (run setup_models.py)")
 windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+
+USUAL_PORT = 11434  # Ollama's usual port: on a person's computer their own server, which no test may reach
+_usual_port_tried: list[str] = []
+
+
+def _usual_port_refused(event: str, args: tuple) -> None:
+    """(an audit hook of the whole session: every thread, whatever patches a test made) A connection to Ollama's usual
+    port on this computer is refused before it is made - as on a computer where nothing listens there, so that a test
+    behaves the same on each - and noted: the test it came in fails (`no_test_reaches_the_usual_port`)."""
+    if event != "socket.connect":
+        return
+    try:
+        host, port = args[1][0], args[1][1]
+    except (IndexError, TypeError, KeyError):
+        return  # (no address of a host and a port: a local pipe's)
+    if port == USUAL_PORT and netguard.is_loopback_host(host):
+        _usual_port_tried.append(f"{host}:{port}")
+        raise ConnectionRefusedError(10061, "refused by tests/conftest.py: no test reaches Ollama's usual port")
+
+
+sys.addaudithook(_usual_port_refused)
+
+
+@pytest.fixture(autouse=True)
+def no_test_reaches_the_usual_port():
+    """No test - nor the code it runs, on any thread - reaches the server on Ollama's usual port: on the developer's
+    computer that is the person's own (`_usual_port_refused` refuses it; the test that tried fails here)."""
+    before = len(_usual_port_tried)
+    yield
+    tried = sorted(set(_usual_port_tried[before:]))
+    if tried:
+        pytest.fail(f"the test tried Ollama's usual port on this computer ({', '.join(tried)}): use a fake server on a "
+                    "port of its own (tests/fake_ollama.py) or a closed one")
+
+
+@pytest.fixture(autouse=True)
+def network_guard_as_it_was():
+    """The network guard (`netguard.install`, the process's own) as it was before each test: a test that leaves it
+    on would block a later test's fake server on its own port, by the order the tests run in, which differs between
+    a whole run here and the runners' parts of it; one that turned it off gets it back."""
+    was = _guard_now()
+    yield
+    _guard_back(was)
+
+
+def _guard_now() -> tuple[bool, frozenset[int] | None]:
+    state = netguard.state()
+    return netguard.is_installed(), state.allowed_ports if state is not None else None
+
+
+def _guard_back(was: tuple[bool, frozenset[int] | None]) -> None:
+    on, ports = was
+    if netguard.is_installed() and not on:
+        netguard.uninstall()
+    elif on and ports is not None:
+        netguard.install(ports, audit_hook=False)
 
 
 @pytest.fixture(autouse=True)
