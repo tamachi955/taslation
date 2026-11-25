@@ -461,8 +461,9 @@ class JobsMixin:
         model = chosen.name if models and health.has_model(models, chosen.name) else None
         if model and never_unloads(s.ollama_keep_alive):
             self._post("status", key="Getting the translator ready...")
-            try:
-                loaded.append(loaded_message(model, self.translator.warm_up(model)))
+            try:  # (a model Ollama holds as asked, and for good, already is only looked at)
+                kept = self.translator.has_loaded(model, for_good=True)
+                loaded.append(loaded_message(model, 0.0 if kept else self.translator.warm_up(model)))
             except TranslationError:
                 pass  # the first page's request loads it, or says what is wrong
         elif model and loads_at_start(s):
@@ -554,9 +555,11 @@ class JobsMixin:
         """(worker, at the start, before anything is loaded) The one judgement of the session (`ocr.place`): the
         GPU's memory for everything the settings put there. Enough, or short with ``gpu_short`` "processor" (what
         does not fit goes to the processor), or short with nothing that could go: settled as it is. Short otherwise:
-        the window asks (the "gpu_short" event, `ui.dialogs.gpu_short`) and this waits for the answer - Check again
-        judges anew, Start on the processor sends what does not fit there (and, with Do not ask again on this
-        computer ticked, keeps ``gpu_short`` "processor" in the settings), Quit closes the window. No NVIDIA GPU
+        the window asks (the "gpu_short" event, `ui.dialogs.gpu_short`, with the other models Ollama holds on the
+        card) and this waits for the answer - Check again judges anew, Release and check again first releases
+        TASlation's own models among those (`_release_loaded`), Start on the processor sends what does not fit there
+        (and, with Do not ask again on this computer ticked, keeps ``gpu_short`` "processor" in the settings), Quit
+        closes the window. No NVIDIA GPU
         (NVML does not answer): nothing is judged or asked. *asks_ollama*: Ollama answered the setup check (else
         /api/ps is not asked: a server that is not there takes Windows about 2 s to refuse). Whether the start goes
         on."""
@@ -579,9 +582,11 @@ class JobsMixin:
             if not plan.asks:
                 break
             offer = place.judge(facts, needs, "processor")
-            answer, remember = self._ask_gpu_short(plan.short, offer.cpu)
+            answer, remember = self._ask_gpu_short(plan.short, offer.cpu, facts.loaded)
             if answer == "quit":
                 return False
+            if answer == "release":
+                self._release_loaded([m for m in facts.loaded if m.ours])
             if answer == "processor":
                 choice = "processor"
                 if remember:
@@ -589,10 +594,11 @@ class JobsMixin:
         place.settle(plan)
         return True
 
-    def _ask_gpu_short(self, short: int, parts: tuple[str, ...]) -> tuple[str, bool]:
+    def _ask_gpu_short(self, short: int, parts: tuple[str, ...], loaded: tuple[Any, ...] = ()) -> tuple[str, bool]:
         """(worker) The start's dialog on the GPU's memory short by *short* MiB, *parts* the ones Start on the
-        processor sends there: the "gpu_short" event, its answer waited for ("again", "processor" or "quit"; the dialog
-        gone without one, the window closed: "quit") and whether Do not ask again on this computer was ticked."""
+        processor sends there, *loaded* the other models Ollama holds on the card (`place.Loaded`): the "gpu_short"
+        event, its answer waited for ("again", "release", "processor" or "quit"; the dialog gone without one, the
+        window closed: "quit") and whether Do not ask again on this computer was ticked."""
         answered = threading.Event()
         reply: list[tuple[str, bool]] = []
 
@@ -601,14 +607,35 @@ class JobsMixin:
                 reply.append((choice, remember))
                 answered.set()
 
-        self._post("gpu_short", short=short, parts=parts, answer=answer)
+        self._post("gpu_short", short=short, parts=parts, answer=answer, loaded=tuple(loaded))
         answered.wait()
         return reply[0]
 
-    def _show_gpu_short(self, short: int, parts: tuple[str, ...], answer: Callable[..., None]) -> None:
-        """The "gpu_short" event on the Tk thread: the start's dialog (`ui.dialogs.gpu_short.GpuShortDialog`), kept as
-        ``_gpu_dialog`` while it is open (a tool answers it through it), the answer handed to *answer*; Quit closes the
-        window."""
+    def _release_loaded(self, models: list[Any]) -> None:
+        """(worker) Release and check again: TASlation's own *models* among those Ollama holds on the card
+        (`place.Loaded` with *ours*) unloaded and waited for (`OllamaTranslator._release`), then the card's used memory
+        followed until it shows them gone (`place.wait_freed`), so that the judgement that follows sees the room they
+        leave. Another program's model is never asked to go. Never raises."""
+        from ..ocr import place
+        from ..translate.models import make_translator, wanted_name
+
+        s = self.settings
+        try:
+            translator = make_translator(s, wanted_name(s.ollama_model, s.target_language))
+            before = place.card_memory()
+        except Exception as e:  # noqa: BLE001 - nothing released: Check again as ever
+            LOG.info("the models could not be released at the start (%s)", type(e).__name__)
+            return
+        released = [m for m in models if m.ours and translator._release(m.name, wait=True)]
+        freed = sum(m.mib for m in released)
+        LOG.info("released at the start: %d of TASlation's models, %d MiB", len(released), freed)
+        place.wait_freed(before, freed)
+
+    def _show_gpu_short(self, short: int, parts: tuple[str, ...], answer: Callable[..., None],
+                        loaded: tuple[Any, ...] = ()) -> None:
+        """The "gpu_short" event on the Tk thread: the start's dialog (`ui.dialogs.gpu_short.GpuShortDialog`, *loaded*
+        the other models Ollama holds on the card), kept as ``_gpu_dialog`` while it is open (a tool answers it through
+        it), the answer handed to *answer*; Quit closes the window."""
         from .dialogs.gpu_short import GpuShortDialog
 
         def done(choice: str, remember: bool) -> None:
@@ -617,7 +644,7 @@ class JobsMixin:
             if choice == "quit":
                 self.after(0, self._on_close)
 
-        self._gpu_dialog = GpuShortDialog(self, short, parts, done)
+        self._gpu_dialog = GpuShortDialog(self, short, parts, done, loaded)
 
     def _keep_gpu_short(self) -> None:
         """The "gpu_short_kept" event: Do not ask again on this computer was ticked - ``gpu_short`` "processor" kept
@@ -1083,7 +1110,8 @@ class JobsMixin:
         elif kind == "not_here":  # saved files this Windows user cannot open here, found at the start
             self._tell_not_here(int(data.get("files", 0)))
         elif kind == "gpu_short":  # the start: the GPU's memory short for everything (`_judge_gpu` waits)
-            self._show_gpu_short(int(data["short"]), tuple(data["parts"]), data["answer"])
+            self._show_gpu_short(int(data["short"]), tuple(data["parts"]), data["answer"],
+                                 tuple(data.get("loaded", ())))
         elif kind == "gpu_short_kept":
             self._keep_gpu_short()
         elif kind == "models_loading":  # the start's loads under way, or over (`_watch_loads`)

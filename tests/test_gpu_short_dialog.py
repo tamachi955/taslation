@@ -110,6 +110,38 @@ def test_the_dialog_in_japanese_says_the_owner_s_words(hidden_root, answers):
     d.choose("quit")
 
 
+HELD = (place.Loaded("qwen3.5:4b", 3203, True), place.Loaded("someones-model:7b", 896, False))
+
+
+def test_the_dialog_names_the_models_ollama_holds_and_offers_to_release_taslation_s_own(hidden_root, answers):
+    d = gpu_short.GpuShortDialog(hidden_root, 296, (READERS,), lambda c, r: answers.append((c, r)), HELD)
+    assert d.message_text == (gpu_short.TEXT.format(mb=300) + "\n\n"
+                              "TASlation's models still loaded in Ollama: qwen3.5:4b (3210 MB).\n"
+                              "Other programs' models loaded in Ollama: someones-model:7b (900 MB).\n\n"
+                              "On the processor: the OCR readers.")
+    assert [b.cget("text") for b in d.buttons] == ["Release and check again", "Check again", "Start on the processor",
+                                                   "Quit"]
+    assert str(d.release_btn.cget("default")) == "active" and str(d.again_btn.cget("default")) != "active"
+    d._on_return()  # (Return: the first, Release and check again)
+    assert answers == [("release", False)]
+
+
+def test_with_only_other_programs_models_there_is_nothing_to_release(hidden_root, answers):
+    d = gpu_short.GpuShortDialog(hidden_root, 296, (), lambda c, r: answers.append((c, r)), HELD[1:])
+    assert d.release_btn is None and len(d.buttons) == 3 and str(d.again_btn.cget("default")) == "active"
+    assert d.message_text.endswith("\n\nOther programs' models loaded in Ollama: someones-model:7b (900 MB).")
+    d.choose("again")
+
+
+def test_the_models_in_japanese(hidden_root, answers):
+    set_language("ja")
+    d = gpu_short.GpuShortDialog(hidden_root, 296, (READERS,), lambda c, r: answers.append((c, r)), HELD)
+    assert "Ollama に読み込まれたままの TASlation のモデル: qwen3.5:4b（3210 MB）。" in d.message_text
+    assert "Ollama に読み込まれているほかのプログラムのモデル: someones-model:7b（900 MB）。" in d.message_text
+    assert d.release_btn.cget("text") == "解放してもう一度確認"
+    d.choose("quit")
+
+
 def test_here_the_dialog_is_the_real_one():
     assert gpu_short.GpuShortDialog.__init__.__name__ == "__init__"  # (elsewhere conftest's refusal: test_ocr_place)
 
@@ -129,6 +161,8 @@ class Window:
         self._events: queue.Queue = queue.Queue()
         self.replies = list(replies)
         self.asked: list[tuple[int, tuple[str, ...]]] = []
+        self.named: list[tuple] = []  # the other models each dialog named
+        self.released: list[list[str]] = []  # what Release and check again released
         self.posted: list[str] = []
         self._stop = threading.Event()
         self._pump = threading.Thread(target=self._answer, daemon=True)
@@ -143,7 +177,11 @@ class Window:
             self.posted.append(kind)
             if kind == "gpu_short":
                 self.asked.append((data["short"], tuple(data["parts"])))
+                self.named.append(tuple(data["loaded"]))
                 data["answer"](*self.replies.pop(0))
+
+    def _release_loaded(self, models):
+        self.released.append([m.name for m in models])
 
     def judge(self, asks_ollama=True) -> bool:
         try:
@@ -200,6 +238,34 @@ def test_check_again_while_still_short_asks_again(tmp_path, card):
     w = Window(_settings(tmp_path), replies=[("again", False), ("processor", False)])
     assert w.judge() is True and w.asked == [(996, (READERS, LAMA)), (296, (READERS,))]
     assert place.session().cpu == (READERS,)
+
+
+def test_release_and_check_again_releases_taslation_s_own_models_alone_then_judges_anew(tmp_path, card):
+    card.facts = [GpuFacts(total=6144, used=5203, loaded=HELD), GpuFacts(total=6144, used=1700, loaded=HELD[1:])]
+    w = Window(_settings(tmp_path), replies=[("release", False)])
+    assert w.judge() is True and w.named == [HELD] and w.released == [["qwen3.5:4b"]]
+    assert place.session().why == place.ROOM  # (judged anew on the facts after the release)
+
+
+def test_the_window_s_release_unloads_taslation_s_own_and_waits_for_the_card(tmp_path, monkeypatch):
+    from fake_ollama import FakeOllama
+
+    from taslation import netguard
+
+    with FakeOllama() as fake:
+        netguard.install(allowed_ports={fake.port}, audit_hook=False)
+        try:
+            fake.tracks_loads = True
+            fake.loaded.update({"qwen3.5:4b", "someones-model:7b"})
+            waited = []
+            monkeypatch.setattr(place, "card_memory", lambda: (6144, 5000))
+            monkeypatch.setattr(place, "wait_freed", lambda before, mib, timeout=3.0: waited.append((before, mib)))
+            w = SimpleNamespace(settings=_settings(tmp_path, ollama_url=fake.url))
+            jobs.JobsMixin._release_loaded(w, list(HELD))
+        finally:
+            netguard.uninstall()
+    assert fake.loaded == {"someones-model:7b"}  # (another program's model is never asked to go)
+    assert [r["model"] for r in fake.requests] == ["qwen3.5:4b"] and waited == [((6144, 5000), 3203)]
 
 
 def test_quit_ends_the_start_with_no_plan(tmp_path, card):

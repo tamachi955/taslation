@@ -2870,10 +2870,14 @@ class Director:
         if dialog is None or getattr(dialog, "answered", ""):
             return
         answer = str(getattr(self.args, "gpu_short_answer", "processor") or "processor")
+        if answer == "release" and getattr(dialog, "release_btn", None) is None:
+            answer = "processor"  # (no model of TASlation's to release: as by default)
         with notes.lock:
             if not notes.gpu_dialogs or notes.gpu_dialogs[-1].get("dialog") != id(dialog):
+                named = [{"name": m.name, "mib": m.mib, "ours": m.ours} for m in getattr(dialog, "loaded", ()) or ()]
                 notes.gpu_dialogs.append({"t": now_ms(), "dialog": id(dialog), "short_mb": getattr(dialog, "shown_mb", None),
-                                          "parts": list(getattr(dialog, "parts", ()) or ()), "answer": answer})
+                                          "parts": list(getattr(dialog, "parts", ()) or ()), "answer": answer,
+                                          "named": named})
         if answer != "none":
             dialog.choose(answer)
 
@@ -5722,11 +5726,13 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "of --ollama-url), with the environment it chooses; stopped at the end")
     ap.add_argument("--ollama-window-cache", default="auto", choices=("auto", "off", "on"),
                     help="the setting ollama_window_cache of the window (default: the app's, auto)")
-    ap.add_argument("--gpu-short-answer", default="processor", choices=("processor", "again", "quit", "none"),
+    ap.add_argument("--gpu-short-answer", default="processor",
+                    choices=("processor", "again", "release", "quit", "none"),
                     help="the start's dialog on the GPU's memory, when the window shows it (the card short for "
                          "everything at the start): answered through the window's own object with this (default: "
+                         "start on the processor; release: Release and check again where the dialog has it, else "
                          "start on the processor; none: left open), no input to the computer; noted in the report "
-                         "(gpu_start)")
+                         "(gpu_start, with the other models it named)")
     ap.add_argument("--canned-ms", type=int, default=350, help="the canned translator's answer time per line")
     ap.add_argument("--canned-load-s", type=float, default=5.0, help="the canned translator's load time")
     ap.add_argument("--browser", default="auto", choices=("auto", "chrome", "edge"))

@@ -70,7 +70,10 @@ while the OCR model loads (``load_model_at_start``, on by default: `ensure_loade
 *quiet*, on a thread of its own, after Ollama was started as ever), so that the first
 page does not wait for it; the commands and a window with the setting off leave it to
 the first request that wants it (`OllamaTranslator.ensure_loaded`, from every
-request to the model): /api/ps says whether it is loaded (a page in the cache sends no
+request to the model): /api/ps says whether it is loaded as the requests ask for it
+(`loaded_as_asked`: at their context size, and on the processor alone where they ask for that - a model loaded
+otherwise, by another program or another version, the server loads again at the next request, so it is loaded again
+here, at the start rather than at the first page) (a page in the cache sends no
 request, so reading the cache never loads it; it is not asked while the model answered
 within `PS_RECHECK_S`, half its ``keep_alive`` when that is shorter, and a request that
 failed or a release makes the next request ask again); when it is not, the reader is told
@@ -82,7 +85,8 @@ keeps the model after it, so the pages that go on needing it keep it, and it goe
 itself after that; nothing asks for it periodically. `release` unloads it at once: the
 end of a command, Menu > Release the model now, the window's close. ``"-1"`` (never unload) is
 the one setting that keeps the old way: loaded at the start, before the OCR model,
-and never released (`never_unloads`).
+and never released (`never_unloads`); a model found loaded as asked and kept for good (`kept_for_good`) is only
+looked at then.
 
 Every request to the model (`_chat`, PLaMo's `_generate`) runs within `taslation.ocr.place.translating`, a streamed
 one to its end: the OCR readers that are on the GPU read on the CPU meanwhile, for on a GPU the model computes on
@@ -117,7 +121,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterable, Iterator, Sequence
 from urllib.parse import urlparse
 
 from ..health import is_default_model, pull_command
@@ -241,6 +245,31 @@ def keep_alive_seconds(value: Any) -> float:
 def same_model(name: Any, model: str) -> bool:
     """Whether Ollama's *name* of a model is *model*, which may leave out the tag (":latest")."""
     return str(name) == model or (":" not in model and str(name) == f"{model}:latest")
+
+
+def entry_name(entry: dict[str, Any]) -> str:
+    """The name of the model of an /api/ps *entry*."""
+    return str(entry.get("name") or entry.get("model") or "")
+
+
+def of_model(entries: Iterable[dict[str, Any]], model: str) -> dict[str, Any] | None:
+    """The /api/ps entry of *model* among *entries* (`OllamaTranslator._ps_models`), None when it is not loaded."""
+    for entry in entries:
+        if same_model(entry_name(entry), model):
+            return entry
+    return None
+
+
+KEPT_FOR_GOOD_YEARS = 100  # /api/ps's ``expires_at`` of a model loaded with keep_alive -1: some 290 years ahead
+
+
+def kept_for_good(entry: dict[str, Any] | None) -> bool:
+    """Whether the model of the /api/ps *entry* is kept loaded for good (``keep_alive`` -1: its ``expires_at`` more
+    than `KEPT_FOR_GOOD_YEARS` ahead); False for no entry or a date that cannot be read."""
+    text = str((entry or {}).get("expires_at") or "")
+    if len(text) < 4 or not text[:4].isdigit():
+        return False
+    return int(text[:4]) - time.gmtime().tm_year > KEPT_FOR_GOOD_YEARS
 
 
 def loaded_message(model: str, seconds: float) -> Message:
@@ -735,14 +764,45 @@ class OllamaTranslator:
             self._answered(payload["model"])
         return time.monotonic() - start  # (not last_stats: a warm-up must not stand in for a page's statistics)
 
+    def _ps_models(self) -> list[dict[str, Any]]:
+        """Every model Ollama's /api/ps says is loaded now (its entries). Raises `TranslationError`; never starts
+        Ollama, never loads a model."""
+        data = self._request_once("/api/ps", timeout=PS_TIMEOUT)
+        return [entry for entry in data.get("models") or [] if isinstance(entry, dict)]
+
     def _loaded(self, model: str) -> dict[str, Any] | None:
         """What Ollama's /api/ps says of *model*, None when it is not loaded. Raises `TranslationError`; never starts
         Ollama."""
-        data = self._request_once("/api/ps", timeout=PS_TIMEOUT)
-        for entry in data.get("models") or []:
-            if isinstance(entry, dict) and same_model(entry.get("name") or entry.get("model"), model):
-                return entry
-        return None
+        return of_model(self._ps_models(), model)
+
+    def loaded_as_asked(self, entry: dict[str, Any] | None) -> bool:
+        """Whether the model of the /api/ps *entry* is loaded as this translator's requests ask for it, so that the
+        server serves them without loading it again: at their context size (``num_ctx``; or a multiple of it, a
+        server's parallel slots) where /api/ps says one (``context_length``; an older server that does not: as
+        asked), and with none of it on the GPU where they ask for the processor alone (``num_gpu`` 0). A model a
+        request asks for with another context or on the processor alone is loaded again by the server (its runner's
+        options differ); a number of layers set by hand is not looked at (/api/ps does not say them). False for no
+        entry."""
+        if not entry:
+            return False
+        context = entry.get("context_length")
+        try:
+            context, asked = int(context or 0), int(self.num_ctx or 0)
+        except (TypeError, ValueError):
+            context, asked = 0, 0
+        if context and asked and (context < asked or context % asked):
+            return False
+        return not (self.num_gpu == 0 and entry.get("size_vram"))
+
+    def has_loaded(self, model: str | None = None, for_good: bool = False) -> bool:
+        """Whether Ollama has *model* (default: the translator's) loaded as the requests ask for it
+        (`loaded_as_asked`) and, with *for_good*, kept loaded for good (`kept_for_good`): /api/ps only, nothing
+        loaded; False when it does not answer."""
+        try:
+            entry = self._loaded(model or self.model)
+        except TranslationError:
+            return False
+        return self.loaded_as_asked(entry) and (not for_good or kept_for_good(entry))
 
     def gpu_share(self, model: str | None = None) -> float | None:
         """How much of the loaded *model* (default: the translator's) is in GPU memory: ``size_vram`` / ``size`` of
@@ -806,14 +866,16 @@ class OllamaTranslator:
 
     def _ensure_loaded(self, cancel: threading.Event | None, on_slow: Callable[[float], None] | None,
                        quiet: bool = False, told: bool = False) -> bool:
-        """`ensure_loaded`, its turn come: nothing asked while the model answered lately (`_answered`). Whether it
-        loaded the model (and said so, unless *quiet*; *told*: the load was told already)."""
+        """`ensure_loaded`, its turn come: nothing asked while the model answered lately (`_answered`), nothing loaded
+        while /api/ps has it loaded as asked (`loaded_as_asked`; loaded otherwise, it is loaded again now with the
+        requests' options). Whether it loaded the model (and said so, unless *quiet*; *told*: the load was told
+        already)."""
         model = self.model
         held, until = self._fresh
         if held == model and time.monotonic() < until:
             return False
         try:
-            if self._loaded(model) is not None:
+            if self.loaded_as_asked(self._loaded(model)):
                 return False
         except TranslationError:
             return False

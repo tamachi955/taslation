@@ -192,6 +192,9 @@ def start(monkeypatch, tmp_path):
         return 3.4
 
     monkeypatch.setattr(OllamaTranslator, "warm_up", warm_up)
+    # (/api/ps of no server: the model not loaded; `kept` makes it loaded as asked and for good)
+    monkeypatch.setattr(OllamaTranslator, "has_loaded", lambda self, model=None, for_good=False:
+                        make.looked.append((model, for_good)) is None and make.kept)
     monkeypatch.setattr(taslation.ocr, "Readers", lambda path, threads=0: StubEngine(order, loading))
     monkeypatch.setattr(jobs, "ollama_compute", lambda log=None: "")  # (not this machine's Ollama log)
     monkeypatch.setattr(taslation.pipeline, "Pipeline",
@@ -205,6 +208,7 @@ def start(monkeypatch, tmp_path):
     make.order = order
     make.warm_up = warm_up
     make.loading = loading
+    make.kept, make.looked = False, []
     return make
 
 
@@ -224,6 +228,19 @@ def test_the_start_checks_then_loads_ollama_s_model_while_the_ocr_model_loads(st
     w._status_render = lambda: "something else"  # taken at the first look: what the line said when it was ready
     assert line().endswith("Ready.")
     assert w.translator.keep_alive == -1 and w.pipeline.ocr is not None
+
+
+def test_a_model_ollama_keeps_loaded_as_asked_for_good_is_only_looked_at(start):
+    start.kept = True  # (/api/ps: loaded at the requests' context, its expiry some 290 years ahead)
+    w = start(([], ["qwen3.5:4b"]))
+    w._job_init()
+    assert worker(start.order) == ["health"] and start.looked == [("qwen3.5:4b", True)]  # no warm-up: nothing loaded
+    w._status_render = lambda: "Ready."
+    assert w.events()[-1][1]["text"]() == "Translator ready.  Ready."
+    start.kept = False
+    start.order.clear()
+    start(([], ["qwen3.5:4b"]))._job_init()
+    assert worker(start.order) == ["health", ("warm-up", "qwen3.5:4b")]  # (not so: loaded, or kept for good, now)
 
 
 def test_the_viewer_chooser_waits_for_the_starts_judgement_of_the_gpu_and_never_comes_after_quit(start, monkeypatch):

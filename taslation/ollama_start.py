@@ -851,7 +851,7 @@ def count_as_own(*names: Any) -> None:
             _claims[path] = _Claim(claim.url, claim.own | more)
 
 
-def _ours(name: Any, own: Iterable[str]) -> bool:
+def is_ours(name: Any, own: Iterable[str]) -> bool:
     """Whether the loaded model *name* is one of TASlation's own (`MODELS`, or one of *own*)."""
     from .translate.models import by_ollama_name
     from .translate.ollama import same_model
@@ -997,7 +997,7 @@ def _finish(path: Path, claim: _Claim) -> str | None:
             _write(path, record)
             return IN_USE
         loaded = health.loaded_models(claim.url, PS_TIMEOUT_S) or []
-        foreign = sorted({str(m) for m in loaded if not _ours(m, claim.own)})
+        foreign = sorted({str(m) for m in loaded if not is_ours(m, claim.own)})
         if foreign:
             _drop(path)
             line = FOREIGN.format(count=len(foreign), names=", ".join(foreign))
@@ -1202,7 +1202,7 @@ class OllamaStarter:
                                 "it is")
                     return None
                 loaded = health.loaded_models(self.url, PS_TIMEOUT_S) or []  # (a silent server lists none)
-                foreign = sorted({str(m) for m in loaded if not _ours(m, self.own)})
+                foreign = sorted({str(m) for m in loaded if not is_ours(m, self.own)})
                 if foreign:
                     LOG.warning("no answer: another program has %d model(s) loaded in the translation program "
                                 "TASlation started; left as it is", len(foreign))

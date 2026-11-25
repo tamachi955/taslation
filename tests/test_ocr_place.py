@@ -218,9 +218,75 @@ def test_the_facts_are_the_card_s_memory_this_process_s_and_the_model_s_now(tmp_
     ollama.loaded.add(PLAMO_NAME)
     ollama.size = 1956 * place.MiB
     facts = REAL_GATHER(s)
-    assert facts == GpuFacts(total=6144, used=4000, own=500, translator_now=1956, answered=True)
-    assert facts.others == 4000 - 500 - 1956
+    # (the model's need on the card now: what its load was measured to add with the cache of that size, runner and all)
+    assert facts == GpuFacts(total=6144, used=4000, own=500, translator_now=2100, answered=True)
+    assert facts.others == 4000 - 500 - 2100
     assert not ollama.loads  # (/api/ps only: nothing was loaded to find out)
+
+
+def test_with_the_model_loaded_its_runner_s_own_memory_is_counted_once(tmp_path, monkeypatch, ollama):
+    """/api/ps leaves out the runner's own memory (PLaMo's load added 2065 MiB to the card's used memory, /api/ps said
+    1956): counted in the need and on the card as the need's, a start with the model loaded is judged as one without
+    it, to the 100 MiB the need is rounded up to - before, those 110 MiB counted again as other programs'."""
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    others = 1500
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, others))
+    unloaded = REAL_GATHER(s)
+    ollama.loaded.add(PLAMO_NAME)
+    ollama.size = 2050500853  # (/api/ps's size measured with q8_0 and the full window)
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, others + 2065))  # (what the load added)
+    loaded = REAL_GATHER(s)
+    need = place.needs(s, cuda=False)
+    assert need == [Need(TRANSLATOR, PLAMO_WINDOW)] and loaded.translator_now == PLAMO_WINDOW
+    assert unloaded.others == others and others - 100 < loaded.others <= others
+    assert left_at_peak(loaded, need) >= left_at_peak(unloaded, need)
+    ollama.share = 0.5  # (split by the server: what of the need is on the card, its share)
+    on, size = int(2050500853 * 0.5) // place.MiB, 2050500853 // place.MiB
+    assert REAL_GATHER(s).translator_now == round(PLAMO_WINDOW * on / size)
+
+
+def test_other_models_ollama_holds_on_the_card_are_named_taslation_s_own_apart(tmp_path, monkeypatch, ollama):
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, 5000))
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    ollama.loaded.update({PLAMO_NAME, "qwen3.5:4b", "someones-model:7b"})
+    ollama.sizes = {PLAMO_NAME: 1956 * place.MiB, "qwen3.5:4b": 3203 * place.MiB, "someones-model:7b": 900 * place.MiB}
+    facts = REAL_GATHER(s)
+    assert facts.loaded == (place.Loaded("qwen3.5:4b", 3203, True), place.Loaded("someones-model:7b", 900, False))
+    assert facts.releasable == ("qwen3.5:4b",)  # (TASlation's own: the one PLaMo's language does not use)
+    assert facts.others == 5000 - 2100  # (the other models are other programs' memory, counted as such)
+    named = _settings(tmp_path, ollama_url=ollama.url, ollama_model=PLAMO_NAME, target_language="English")
+    assert REAL_GATHER(named).releasable == ("qwen3.5:4b",)
+    mine = _settings(tmp_path, ollama_url=ollama.url, ollama_model="someones-model:7b")  # (named in the settings)
+    assert [m.name for m in REAL_GATHER(mine).loaded] == ["qwen3.5:4b", PLAMO_NAME]  # (its own is no other)
+    ollama.share = 0.0  # (on the processor: none of the card's memory, not named)
+    assert REAL_GATHER(s).loaded == ()
+
+
+def test_a_model_loaded_at_another_context_holds_what_ps_says_and_needs_what_a_load_adds(tmp_path, monkeypatch, ollama):
+    """Loaded by another program or another version at another context, the server loads it again for the first
+    request (`OllamaTranslator.loaded_as_asked`): what it holds now goes then, and the need is that of a load."""
+    monkeypatch.setattr(devices, "nvml_usage_mib", lambda: (6144, 3000))
+    monkeypatch.setattr(place, "own_mib", lambda: 0)
+    s = _settings(tmp_path, ollama_url=ollama.url)
+    ollama.loaded.add(PLAMO_NAME)
+    ollama.size = 1500 * place.MiB
+    ollama.contexts[PLAMO_NAME] = 4096
+    assert place.translator_need(s) == (PLAMO, 1500)  # (as before a load; /api/ps's figure on the card)
+    assert REAL_GATHER(s).others == 3000 - 1500
+    ollama.contexts[PLAMO_NAME] = 8192  # (as asked)
+    assert place.translator_need(s) == (2000, 2000)
+
+
+def test_once_released_the_card_s_used_memory_is_followed_until_it_shows_it(monkeypatch):
+    readings = iter([(6144, 4000), (6144, 3900), (6144, 2000)])
+    monkeypatch.setattr(place, "card_memory", lambda: next(readings))
+    assert place.wait_freed((6144, 4100), 2000, timeout=2.0) is True  # (fell by 2100 at the third look)
+    monkeypatch.setattr(place, "card_memory", lambda: (6144, 4000))
+    began = time.monotonic()
+    assert place.wait_freed((6144, 4100), 2000, timeout=0.3) is False and time.monotonic() - began < 1.0
+    assert place.wait_freed(None, 2000) is True and place.wait_freed((6144, 4100), 0) is True
 
 
 def test_no_nvidia_gpu_has_no_facts(tmp_path, monkeypatch):
@@ -268,7 +334,8 @@ def test_the_translator_s_need_while_loaded_before_and_after(tmp_path, ollama):
     assert place._translator_need(s) == (PLAMO, 0, True)  # (Ollama answered: none loaded)
     ollama.loaded.add(PLAMO_NAME)
     size = 3_000_000_000 // place.MiB  # (the fake's size)
-    assert place.translator_need(s) == (round(size * place.RUNNER_SHARE), size)  # loaded: /api/ps, the runner's share
+    need = round(size * place.RUNNER_SHARE)
+    assert place.translator_need(s) == (need, need)  # loaded: /api/ps, the runner's share; all of it on the card
     ollama.loaded.clear()
     need, now = place.translator_need(s)
     assert now == 0 and need == round(size * place.RUNNER_SHARE)  # learnt
@@ -279,7 +346,7 @@ def test_a_known_translator_of_the_size_it_was_measured_at_needs_what_was_measur
     s = _settings(tmp_path, ollama_url=ollama.url)
     ollama.loaded.add(PLAMO_NAME)
     ollama.size = 1823 * place.MiB + 512 * 1024
-    assert place.translator_need(s) == (2000, 1823)  # (what its load was measured to add, not its size)
+    assert place.translator_need(s) == (2000, 2000)  # (what its load was measured to add, not its size)
     ollama.loaded.clear()
     assert place.translator_need(s) == (2000, 0)
     ollama.loaded.add(PLAMO_NAME)
@@ -327,9 +394,9 @@ def test_a_model_of_the_reader_s_own_is_counted_by_its_file_until_seen_loaded(tm
     monkeypatch.setattr(place, "_file_mib", lambda translator, name: 2000)
     assert place.translator_need(s) == (round(2000 * place.UNKNOWN_SHARE), 0)
     ollama.loaded.add("someones-model:7b")
-    ollama.share = 0.5  # (split by the server: the need is all of it)
-    size = 3_000_000_000 // place.MiB
-    assert place.translator_need(s) == (round(size * place.RUNNER_SHARE), int(3_000_000_000 * 0.5) // place.MiB)
+    ollama.share = 0.5  # (split by the server: the need is all of it, on the card its share)
+    size, need = 3_000_000_000 // place.MiB, round(3_000_000_000 // place.MiB * place.RUNNER_SHARE)
+    assert place.translator_need(s) == (need, round(need * (int(3_000_000_000 * 0.5) // place.MiB) / size))
 
 
 def test_layers_set_by_hand_need_what_they_hold(tmp_path, ollama):
@@ -337,7 +404,7 @@ def test_layers_set_by_hand_need_what_they_hold(tmp_path, ollama):
     ollama.loaded.add(PLAMO_NAME)
     ollama.share = 0.4
     now = int(3_000_000_000 * 0.4) // place.MiB
-    assert place.translator_need(s) == (round(now * place.RUNNER_SHARE), now)  # (with the runner's own share)
+    assert place.translator_need(s) == (round(now * place.RUNNER_SHARE),) * 2  # (with the runner's own share)
     ollama.loaded.clear()
     assert place.translator_need(s) == (round(now * place.RUNNER_SHARE), 0)
 
@@ -895,7 +962,8 @@ def test_the_new_lines_are_in_every_language():
                 *(label for _value, label in system_page.OCR_RUNS_ON_CHOICES)):
         assert sorted(ocr_release.TEXTS[key]) == sorted(FEATURE_LANGUAGES), key
     keys = (gpu_short.TEXT, gpu_short.ON_PROCESSOR, gpu_short.AGAIN, gpu_short.PROCESSOR, gpu_short.QUIT,
-            gpu_short.REMEMBER, *devices.PART_NAMES.values(), ", ", status_slot.MODELS_KEY, devices.PLAN_SHORT,
+            gpu_short.REMEMBER, gpu_short.OURS_LOADED, gpu_short.THEIRS_LOADED, gpu_short.MODEL_MB, gpu_short.RELEASE,
+            *devices.PART_NAMES.values(), ", ", status_slot.MODELS_KEY, devices.PLAN_SHORT,
             devices.PLAN_FIXED, devices.PLAN_FAILED, system_page.GPU_SHORT_LABEL, system_page.GPU_SHORT_TEXT)
     assert sorted(gpu_start.TEXTS) == sorted(keys)
     for key in keys:

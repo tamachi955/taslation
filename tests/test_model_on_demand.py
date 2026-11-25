@@ -106,6 +106,51 @@ def test_a_model_that_is_loaded_is_not_loaded_again_and_the_requests_keep_it(oll
     assert all(r["keep_alive"] == "5m" for r in ollama.requests)  # each one starts the idle time again
 
 
+def test_a_model_loaded_as_asked_is_only_looked_at_one_loaded_otherwise_is_loaded_again_once(ollama):
+    """Loaded at another context (another program, another version), the server would load it again at the first
+    request: it is loaded again by `ensure_loaded` - at the window's start rather than the first page - and once."""
+    ollama.reloads_on_context = True
+    tr, said = _translator(ollama, num_ctx=16384)
+    ollama.loaded.add(MODEL)
+    ollama.contexts[MODEL] = 16384  # (as asked)
+    tr.ensure_loaded(quiet=True)
+    assert ollama.requests == [] and ollama.loads == 0 and said == []
+    ollama.contexts[MODEL] = 4096
+    tr._unsure()
+    tr.ensure_loaded()
+    assert ollama.loads == 1 and ollama.contexts[MODEL] == 16384 and _codes(said) == ["ollama.loading", "ollama.loaded"]
+    tr._unsure()
+    tr.ensure_loaded()  # (now as asked: looked at, no more)
+    assert ollama.loads == 1 and len(_warm_ups(ollama)) == 1
+
+
+def test_loaded_as_asked_is_the_requests_context_and_the_processor_where_they_ask_for_it(ollama):
+    tr, _said = _translator(ollama, num_ctx=8192)
+    entry = {"name": MODEL, "size": 100, "size_vram": 100}
+    assert tr.loaded_as_asked(entry)  # (an older server that does not say the context: as asked)
+    assert tr.loaded_as_asked({**entry, "context_length": 8192})
+    assert tr.loaded_as_asked({**entry, "context_length": 16384})  # (a server's parallel slots: twice the context)
+    assert not tr.loaded_as_asked({**entry, "context_length": 4096})
+    assert not tr.loaded_as_asked({**entry, "context_length": 12000}) and not tr.loaded_as_asked(None)
+    cpu, _said = _translator(ollama, num_ctx=8192, num_gpu="0")
+    assert not cpu.loaded_as_asked(entry) and cpu.loaded_as_asked({**entry, "size_vram": 0})
+    layers, _said = _translator(ollama, num_ctx=8192, num_gpu="12")
+    assert layers.loaded_as_asked({**entry, "size_vram": 40})  # (layers set by hand: /api/ps does not say them)
+
+
+def test_kept_for_good_is_an_expiry_centuries_ahead(ollama):
+    assert ollama_module.kept_for_good({"expires_at": "2318-02-25T09:12:46.4356053+09:00"})
+    for entry in ({"expires_at": "2026-11-25T09:17:46.43+09:00"}, {"expires_at": ""}, {}, None, {"expires_at": "soon"}):
+        assert not ollama_module.kept_for_good(entry)
+    tr, _said = _translator(ollama, keep_alive="-1")
+    assert not tr.has_loaded() and not tr.has_loaded(for_good=True)  # (not loaded)
+    ollama.loaded.add(MODEL)
+    ollama.expires_at = "2026-11-25T09:17:46+09:00"
+    assert tr.has_loaded() and not tr.has_loaded(for_good=True)
+    ollama.expires_at = "2318-02-25T09:12:46+09:00"
+    assert tr.has_loaded(for_good=True) and ollama.requests == []  # (/api/ps only)
+
+
 def test_after_the_idle_time_the_next_line_loads_it_again(ollama, monkeypatch):
     tr, said = _translator(ollama)
     tr.translate_page(["一"])

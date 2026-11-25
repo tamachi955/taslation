@@ -5,7 +5,9 @@ closes), and notices when the client goes away. ``answer`` scripts the model: gi
 (the items of its JSON line) and the request, it returns the reply's content, an (HTTP status, JSON body) error,
 or None for the usual reply. With ``tracks_loads`` it also keeps a model in memory as Ollama does: a request loads
 it, /api/ps shows it (else /api/ps is a 404, as on a server without it, and no load is checked), an empty request
-with ``keep_alive`` 0 unloads it, and ``shares`` says how much of each load lands on the GPU."""
+with ``keep_alive`` 0 unloads it, and ``shares`` says how much of each load lands on the GPU; /api/ps gives the
+context a model was loaded with (``contexts``) and, with ``reloads_on_context``, a request with another loads it
+again, as Ollama does."""
 from __future__ import annotations
 
 import json
@@ -40,6 +42,10 @@ class FakeOllama(ThreadingHTTPServer):
         self.shares: list[float] = []  # the GPU share of the next loads (then 1.0)
         self.share = 1.0  # the GPU share of the model in memory
         self.size = 3_000_000_000  # /api/ps's size of a model in memory, in bytes
+        self.sizes: dict[str, int] = {}  # ... of a model named here, in place of *size*
+        self.contexts: dict[str, int] = {}  # the num_ctx a model was loaded with (/api/ps's context_length)
+        self.reloads_on_context = False  # a request with another num_ctx loads the model again, as Ollama does
+        self.expires_at: str | None = None  # /api/ps's expires_at of every model in memory (None: not said)
         self.gone = threading.Event()  # the client closed the connection before the answer was over
         self.port = self.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}"
@@ -74,9 +80,16 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/tags":
             self._json(200, {"models": [{"name": n} for n in self.server.models]})
         elif self.path == "/api/ps" and self.server.tracks_loads:
-            size = self.server.size
-            self._json(200, {"models": [{"name": n, "model": n, "size": size, "size_vram": int(size * self.server.share)}
-                                        for n in sorted(self.server.loaded)]})
+            server, models = self.server, []
+            for n in sorted(server.loaded):
+                size = server.sizes.get(n, server.size)
+                entry = {"name": n, "model": n, "size": size, "size_vram": int(size * server.share)}
+                if n in server.contexts:
+                    entry["context_length"] = server.contexts[n]
+                if server.expires_at is not None:
+                    entry["expires_at"] = server.expires_at
+                models.append(entry)
+            self._json(200, {"models": models})
         else:
             self._json(404, {"error": "404 page not found"})
 
@@ -91,14 +104,22 @@ class _Handler(BaseHTTPRequestHandler):
             status, body = server.chat_error
             self._json(status, body)
             return
-        if not payload["messages"]:  # how Ollama is told to unload
+        if ("messages" in payload and not payload["messages"]) or (  # how Ollama is told to unload: a chat with no
+                "messages" not in payload and not payload.get("prompt") and payload.get("keep_alive") in (0, "0")):
+            # message, or (PLaMo's) a generate with no prompt and keep_alive 0
             server.loaded.discard(payload["model"])
+            server.contexts.pop(payload["model"], None)
             self._json(200, {"model": payload["model"], "done": True, "done_reason": "unload"})
             return
-        if server.tracks_loads and payload["model"] not in server.loaded:
+        context = (payload.get("options") or {}).get("num_ctx")
+        again = (server.reloads_on_context and payload["model"] in server.loaded and context
+                 and server.contexts.get(payload["model"]) != context)
+        if server.tracks_loads and (payload["model"] not in server.loaded or again):
             server.loaded.add(payload["model"])
             server.loads += 1
             server.share = server.shares.pop(0) if server.shares else 1.0
+            if context:
+                server.contexts[payload["model"]] = int(context)
         user = payload["messages"][-1]["content"]
         items: list[dict[str, Any]] = []
         try:  # the bubbles' JSON line of a translation request

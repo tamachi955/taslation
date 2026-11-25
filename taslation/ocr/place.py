@@ -11,14 +11,15 @@ TASlation's Ollama answers and before any model is loaded; a command: when its r
 card's total memory, less what other programs hold now, less every part the settings put on the GPU at its measured
 peak (`Need`, `needs`) and this process's CUDA context, must leave `MARGIN_MIB` free (`left_at_peak`). The answer is
 one number: enough, or short by N MiB (`short_by`). Enough: everything is loaded at the start, where it was judged to
-go, and stays there for the session (`Plan`, `settle`). Short: the window asks (`ui.dialogs.gpu_short`): check again
-(the person closed something), start with what does not fit on the processor (`TO_PROCESSOR`, least loss first: only
-as many parts as it takes), or quit; ``gpu_short`` "processor" (the dialog's "Do not ask again on this computer")
-starts the second way without asking, and a command or a tool, which cannot ask, does too. A setting that fixes a part
-(``ocr_runs_on`` "gpu" or "cpu", a number of layers in ``ollama_num_gpu``) is never moved: counted where it puts the
-part. One that forces a part onto the GPU ("gpu", a number of layers) never asks either: the person took the GPU into
-their own hands, the start goes on as the settings say, short, and the System page says by how much (with
-``gpu_short`` "processor" the parts not fixed go to the processor as ever).
+go, and stays there for the session (`Plan`, `settle`). Short: the window asks (`ui.dialogs.gpu_short`, which names
+the other models Ollama holds on the card): check again (the person closed something), release TASlation's own models
+among those and check again (`GpuFacts.releasable`), start with what does not fit on the processor (`TO_PROCESSOR`,
+least loss first: only as many parts as it takes), or quit; ``gpu_short`` "processor" (the dialog's "Do not ask
+again on this computer") sends it there without asking, and a command or a tool, which cannot ask, does too. A
+setting that fixes a part (``ocr_runs_on`` "gpu" or "cpu", a number of layers in ``ollama_num_gpu``) is never moved:
+counted where it puts the part. One that forces a part onto the GPU ("gpu", a number of layers) never asks either:
+the person took the GPU into their own hands, the start goes on as the settings say, short, and the System page says
+by how much (with ``gpu_short`` "processor" the parts not fixed go to the processor as ever).
 
 What a fuller card does (Windows' driver model; GTX 1660 Ti 6 GB, driver 610.88, Ollama 0.40.16, measured 2026-11-22
 with a process that held dummy memory, step by step, beside the model and the readers): nothing fails. No allocation
@@ -61,8 +62,14 @@ What the judgement measures (`GpuFacts`, `gather`):
   made): on Windows torch's ``mem_get_info`` counts what this process holds alone (another process's 2 GB left its
   free memory as it was, measured), so it cannot see Ollama or other programs; where there is no NVML (not Windows)
   torch's own figure, which is the card's there. None (no NVIDIA GPU): nothing is judged, nothing asked;
-* what of the used memory is TASlation's own: Ollama's ``size_vram`` of the translation model (/api/ps, which never
-  loads one) and this process's (torch's reserved memory and its CUDA context); the rest is other programs';
+* what of the used memory is TASlation's own: the translation model's, when Ollama has it loaded as the requests ask
+  for it (/api/ps, which never loads one) - its need, below, times the share /api/ps says is on the GPU
+  (``size_vram`` / ``size``), so that the runner's own memory, which /api/ps leaves out and the card's used memory
+  has, is not counted twice (`KNOWN_TRANSLATORS`' loads: PLaMo's runner 110 MiB beside /api/ps's 1956, Qwen's 736
+  beside 3203); loaded at another context (by another program, or another version), what /api/ps says it holds,
+  which goes as the server loads it again for the first request - and this process's (torch's reserved memory and its
+  CUDA context); the rest is other programs', the other models Ollama holds there among it (`Loaded`: named by the
+  start's dialog, which offers to release TASlation's own);
 * what the translation model needs: /api/ps's ``size`` while it is loaded (``size_vram`` where ``ollama_num_gpu`` puts
   only some layers there on purpose), with the runner's own memory that /api/ps leaves out (for a known model, what
   it was measured to add with the server's cache whose /api/ps size is the smallest that holds it; else
@@ -84,6 +91,7 @@ import gc
 import logging
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator, TypeVar
 
@@ -178,21 +186,40 @@ class Placement:
 
 
 @dataclass(frozen=True)
+class Loaded:
+    """A model the translation program holds in the card's memory now (/api/ps) other than the one the session
+    translates with: its Ollama *name*, its MiB there (``size_vram``), and whether it is one of TASlation's own
+    (*ours*: `translate.models.MODELS`, or the model the settings name), which the start's dialog offers to release."""
+
+    name: str
+    mib: int
+    ours: bool = False
+
+
+@dataclass(frozen=True)
 class GpuFacts:
     """What the judgement stands on, in MiB: the card's *total* and *used* memory (all programs), *own* this process's
-    now (0 without a CUDA context), *translator_now* what of the translation model is there now (/api/ps), and whether
-    Ollama *answered* /api/ps (False: taken for a model not loaded)."""
+    now (0 without a CUDA context), *translator_now* what of the translation model's need is on the card now (its
+    share there by /api/ps, the runner's own memory with it; a load of it at another context, which the server loads
+    again, by /api/ps alone), whether Ollama *answered* /api/ps (False: taken for a model not loaded), and the other
+    models the translation program holds there (*loaded*, `Loaded`: other programs' memory, counted in `others`)."""
 
     total: int
     used: int
     own: int = 0
     translator_now: int = 0
     answered: bool = True
+    loaded: tuple[Loaded, ...] = ()
 
     @property
     def others(self) -> int:
         """What other programs hold now: the used memory that is not TASlation's."""
         return max(0, self.used - self.own - self.translator_now)
+
+    @property
+    def releasable(self) -> tuple[str, ...]:
+        """The names of TASlation's own models among *loaded*: what the start's dialog can release."""
+        return tuple(m.name for m in self.loaded if m.ours)
 
 
 @dataclass(frozen=True)
@@ -436,9 +463,30 @@ def gather(settings: Any, memory: tuple[int, int] | None = None, own: int | None
     if memory is None:
         return None
     total, used = memory
-    _need, now, answered = _translator_need(settings, ask=ask)
+    _need, now, answered, loaded = _translator_facts(settings, ask=ask)
     own = own_mib() if own is None else own
-    return GpuFacts(total, used, own, now, answered)
+    return GpuFacts(total, used, own, now, answered, loaded)
+
+
+FREED_S = 3.0  # Release and check again: the card's used memory followed this long at most for what was released
+FREED_SHARE = 0.8  # ... until it fell by this share of what /api/ps said the models held (`wait_freed`)
+
+
+def wait_freed(before: tuple[int, int] | None, mib: int, timeout: float = FREED_S) -> bool:
+    """Once Ollama no longer lists the models released (*mib* of the card's memory by /api/ps), until the card's used
+    memory (`card_memory`, read as *before* the release) shows it: fallen by `FREED_SHARE` of it, *timeout* seconds at
+    most (the runner's process ends, then the driver frees its memory). Whether it did; True with nothing to wait
+    for."""
+    if before is None or mib <= 0:
+        return True
+    end = time.monotonic() + timeout
+    while True:
+        now = card_memory()
+        if now is None or before[1] - now[1] >= mib * FREED_SHARE:
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.1)
 
 
 def snapshot(tries: int = 3) -> tuple[tuple[int, int] | None, int]:
@@ -533,44 +581,79 @@ def _translator_need(settings: Any, cache: tuple[str, bool] | None = None,
     """`translator_need`, and whether Ollama answered /api/ps (True where nothing was asked of it); the model counted
     on a server with *cache* (KV type, full window; `server_cache` when None); *ask* False: as not loaded, Ollama not
     asked."""
+    need, now, answered, _loaded = _translator_facts(settings, cache, ask)
+    return need, now, answered
+
+
+def _translator_facts(settings: Any, cache: tuple[str, bool] | None = None,
+                      ask: bool = True) -> tuple[int | None, int, bool, tuple[Loaded, ...]]:
+    """`_translator_need` and the other models the translation program holds on the card (`Loaded`), from one look
+    at /api/ps. What of the need is there now (`GpuFacts.translator_now`): with the model loaded as the requests ask
+    for it (`OllamaTranslator.loaded_as_asked`), the need times /api/ps's share of it on the GPU - the runner's own
+    memory, which /api/ps leaves out and the card's used memory has, is the need's as well, and so it is not counted
+    as other programs' memory beside it; loaded otherwise (another context: the server loads it again for the first
+    request, freeing what it holds), what /api/ps says it holds, and the need as before a load."""
     from ..translate import TranslationError
     from ..translate.models import make_translator, wanted_name
-    from ..translate.ollama import num_gpu_value
+    from ..translate.ollama import num_gpu_value, of_model
 
     try:
         layers = num_gpu_value(getattr(settings, "ollama_num_gpu", ""))
     except ValueError:
         layers = None
     if layers == 0:
-        return 0, 0, True  # (the processor only)
+        return 0, 0, True, ()  # (the processor only: nothing asked)
     try:
         name = wanted_name(settings.ollama_model, settings.target_language)
         translator = make_translator(settings, name)
         num_ctx = int(getattr(translator, "num_ctx", 0) or 0)
     except (TranslationError, ValueError, AttributeError):
-        return None, 0, True
+        return None, 0, True, ()
     kv, full = server_cache(settings) if cache is None else cache
     key = (name, num_ctx, layers, str(kv), bool(full))
-    answered = True
+    answered, entries = True, []
     try:
-        entry = translator._loaded(name) if ask else None
+        entries = translator._ps_models() if ask else []
     except (TranslationError, OSError, ValueError):
-        entry, answered = None, False
+        answered = False
+    entry, held = of_model(entries, name), 0
+    loaded = other_models(settings, entries, name)
     if entry and entry.get("size") and entry.get("size_vram") is not None:
-        now = int(entry["size_vram"]) // MiB
-        need = int(entry["size"]) // MiB if layers is None else now
-        # the runner's own memory beside what /api/ps counts (in the used memory while it is loaded, as other
-        # programs' there) is counted in: as measured for a known model with the server's cache of the size it had
-        known = known_for_size(name, num_ctx, need) if layers is None else None
-        _learnt[key] = known if known is not None else round(need * RUNNER_SHARE)
-        return _learnt[key], now, True
+        on = int(entry["size_vram"]) // MiB
+        if translator.loaded_as_asked(entry):
+            base = int(entry["size"]) // MiB if layers is None else on
+            # the runner's own memory beside what /api/ps counts (in the used memory while it is loaded) is counted
+            # in: as measured for a known model with the server's cache of the size it had
+            known = known_for_size(name, num_ctx, base) if layers is None else None
+            need = _learnt[key] = known if known is not None else round(base * RUNNER_SHARE)
+            return need, (min(need, round(need * on / base)) if base > 0 else 0), True, loaded
+        held = on  # (loaded at another context: what it holds goes as the server loads it again)
     if key in _learnt:
-        return _learnt[key], 0, answered
+        return _learnt[key], held, answered, loaded
     measured = known_translator(name, num_ctx, (str(kv), bool(full))) if layers is None else None
     if measured:
-        return measured[0], 0, answered
+        return measured[0], held, answered, loaded
     size = _file_mib(translator, name) if ask and answered else None
-    return (round(size * UNKNOWN_SHARE) if size else None), 0, answered
+    return (round(size * UNKNOWN_SHARE) if size else None), held, answered, loaded
+
+
+def other_models(settings: Any, entries: Iterable[dict[str, Any]], name: str) -> tuple[Loaded, ...]:
+    """The models of the /api/ps *entries* other than *name* that hold some of the card's memory, the largest first
+    (`Loaded`; *ours*: one of TASlation's models, or the one *settings* name)."""
+    from ..ollama_start import is_ours, own_models
+    from ..translate.ollama import entry_name, same_model
+
+    own = own_models(settings)
+    out = []
+    for entry in entries:
+        other = entry_name(entry)
+        try:
+            mib = int(entry.get("size_vram") or 0) // MiB
+        except (TypeError, ValueError):
+            mib = 0
+        if other and mib > 0 and not same_model(other, name):
+            out.append(Loaded(other, mib, is_ours(other, own)))
+    return tuple(sorted(out, key=lambda m: (-m.mib, m.name)))
 
 
 def _file_mib(translator: Any, name: str) -> int | None:
