@@ -260,7 +260,8 @@ rows' languages.
   next scenario (the stand-in's size: the report's
   `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
   window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). The
-  tool never changes the foreground. `--scale 1.5` draws the stand-in as on a display
+  tool never changes the foreground (but between its own windows with `--start-behind` and `--chooser`: below).
+  `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size (its dialogs') to it; no system setting
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
   a computer with a CUDA GPU and both page models installed it loads the layout model as well as LaMa (since 0.2.0):
@@ -358,11 +359,28 @@ rows' languages.
   how many dialogs of the process were on a monitor at each look, and when the viewer chooser and the banner's
   dialog came and went). The tools choose the stand-in with `App(settings, window_query=browser.token, ...)`, as
   `gui --window` does: a viewer named that way brings no viewer chooser (the dialog the person chooses the viewer in
-  at every start), so no dialog of TASlation's takes the foreground in a tool's run. `--no-viewer-s S` gives the
+  at every start), so no dialog of TASlation's takes the foreground in a tool's run (but with `--chooser`: below).
+  `--no-viewer-s S` gives the
   window no viewer to find for its first S seconds (the window looks for the stand-in named every 2 s and chooses it
   once it is listed: `run.no_viewer`; no chooser comes meanwhile), and `--book-asked` starts it with a name that names no book, so that Auto's first page
   asks it in the start dialog, which the driver answers 1.5 s after it is on the screen through the dialog's own
-  object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground). `--see-edit`
+  object (`run.book_asked`: whether it was on a monitor, topmost, and whether it had the foreground).
+  `--start-behind MODE` has the stand-in out of sight before the window is made, as a viewer behind the reader's
+  other windows is when TASlation starts: covered by a plain window of a process of its own (`tools/standin_cover.py`,
+  another program's to the window, which tells its own windows by the process) over all of it (`cover`), its left
+  half (`part`), its monitor's work area (`max`, as a maximised window), or over all of it and in front (`front`: the
+  foreground taken from the stand-in only), or minimised (`minimised`); `--behind-before-s S` so long first.
+  `--behind-s S` after the window chose it, it is back in sight (`--behind-end close`: the cover goes; `raise`: the
+  stand-in put over the cover and given the foreground as a click on it does, only while the stand-in, the cover or
+  TASlation is in front - over a window the person uses meanwhile nothing is raised, the cover only goes). Scenario
+  `h` (by its name only) is two turns once it is back. `--chooser` names no viewer: the viewer chooser comes and the
+  driver answers it through its own object, first giving it the foreground (only while the stand-in or the cover is
+  in front). `--standin-bars-held MS` has a stand-in with a profile come with its bars up for MS ms (with
+  `--standin-option bar_key_hide=0` its turns leave them up). The side panes are looked at every 0.25 s (wanted,
+  shown, visible, topmost, above the stand-in; their ground and the room beside the page; the lettering; the windows
+  over the viewer; who is in front) and `run.behind` keeps them as they changed, with the time from back in sight to
+  both panes on the screen (`panes_back_ms`). These are the only times the tool moves the foreground, between its own
+  windows. `--see-edit`
   keeps the book's role as the Translator's, so that the left pane's Edit is on from the start (`ui/see_edit.py`:
   the page's regions take the mouse on the overlay, beside them every click is the viewer's), and from some 14 s in
   measures it in place of the patch under the pointer (`edit`: messages POSTED to the lettering's own window, no

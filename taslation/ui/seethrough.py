@@ -1435,7 +1435,8 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
     Another is kept aside (`_see_unrested`) and becomes it once REST_S has passed with no frame after it and no press
     (`rest_tick`). Before, every frame was: a page that a viewer drags along with the pointer, out of its place and
     over the panes' places, hid the panes while it was held there, and the frame of a page taken while it moved, or
-    found on no flat ground, set the panes by it until the next frame at rest."""
+    found on no flat ground, set the panes by it until the next frame at rest. A frame with bars over the page leaves
+    the ground as it is - but while none of a frame of its size is had: then it gives it (`_ground_under_bars`)."""
     found = frame_look(app, image, facts)
     if found.kind is not None:
         return
@@ -1446,11 +1447,7 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
             except Exception:  # noqa: BLE001 - no Tk loop (a test)
                 pass
         app._see_bars_since = None
-        ground = None
-        if found.box is not None:
-            _rgb, area = area_rgb(app, image, facts)
-            steady = st.steady_box(image.size, area)
-            ground = (image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2]))
+        ground = _ground_of(app, image, facts, found)
         if _at_rest(app, image, found.box):
             _rest(app, found.box, ground)
         else:
@@ -1462,6 +1459,35 @@ def note_frame(app: Any, image: Image.Image, facts: Any) -> None:
             app.after(int(BAR_WAIT_S * 1000) + 30, lambda: _bars_due(app))
         except Exception:  # noqa: BLE001 - no Tk loop (a test)
             pass
+    _ground_under_bars(app, image, facts, found)
+
+
+def _ground_of(app: Any, image: Image.Image, facts: Any, found: st.Look) -> Any:
+    """The side panes' ground in the frame *image* whose look is *found*: (its size, the page box, the steady band's
+    rows, the ground's colour, the capture area's columns); None when no page on a flat ground was found."""
+    if found.box is None:
+        return None
+    _rgb, area = area_rgb(app, image, facts)
+    steady = st.steady_box(image.size, area)
+    return image.size, found.box, (steady[1], steady[3]), found.ground, (area[0], area[2])
+
+
+def _ground_under_bars(app: Any, image: Image.Image, facts: Any, found: st.Look) -> None:
+    """A frame with bars over the page (`note_frame`) while no ground of a frame of its size is had: the side panes'
+    ground taken from it, at rest as any frame is (`_at_rest`, `rest_tick`). What the panes are placed by is there
+    with the bars as without them - the page's columns (`seethrough.ground_box` leaves the bars' rows out) and the
+    steady band, where bars never come -, and a viewer that came into sight with its bars up and keeps them (the
+    pointer resting on them, a click that holds them: a viewer brought to the front from behind other windows) gave
+    no frame without them before: the panes would stay hidden until the bars went, page turn after page turn. With a
+    ground of the frame's size had, the frames with bars leave it as it is (as ever)."""
+    ground = getattr(app, "_see_ground", None)
+    if found.box is None or (ground is not None and ground[0] == image.size):
+        return
+    under = _ground_of(app, image, facts, found)
+    if _at_rest(app, image, found.box):
+        _rest(app, found.box, under)
+    else:
+        app._see_unrested = (time.monotonic(), found.box, under)
 
 
 def _at_rest(app: Any, image: Image.Image, box: Any) -> bool:

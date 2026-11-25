@@ -93,7 +93,8 @@ They take their colours from that ground (light on a dark ground, dark on a ligh
 
 A pane needs room beside the page: one that would come near the page, or that the viewer's ground is too short for, hides rather than cover the page
 (beside a two-page spread in a 1920 x 1080 window there is room; in a narrow window, or beside a wide page, there may be none). The panes also hide while the viewer is minimised or hidden,
-and where another window lies over them. While the left pane has no room, a click on TASlation's button on the taskbar opens the Menu at the pointer,
+and where another window lies over them.
+Once the viewer is in sight again and there is room beside the page, the panes come back within about half a second, with no page turned (a viewer brought in front with its bars over the page too). While the left pane has no room, a click on TASlation's button on the taskbar opens the Menu at the pointer,
 with the left pane's controls ("Translate", "Auto", "Lettering", "Add area", "Set area..."), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
 closing it there (from the button's menu, or with Alt+F4) quits TASlation as "Quit" does.
 

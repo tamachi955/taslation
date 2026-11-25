@@ -10,6 +10,8 @@ part of a release.
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
                                 [--see-truth] [--see-indicators on|off] [--see-edit] [--standin-size WxH]
                                 [--standin-full-screen] [--no-viewer-s S] [--book-asked]
+                                [--start-behind cover|part|max|front|minimised] [--behind-s S] [--behind-before-s S]
+                                [--behind-end close|raise] [--chooser] [--standin-bars-held MS]
 
 What runs, all on this computer:
 
@@ -41,7 +43,8 @@ What runs, all on this computer:
   clicks refused outright): every function that captures, moves, raises or enlarges a window acts on the
   stand-in or this process's own windows, else the run stops; the window chosen is checked at every step
   (`standin_viewer.SelectionGuard`) and anything but the stand-in stops the run at once, nothing pressed.
-  This tool never changes the foreground: the window follows a viewer in front, which is the reader's case, and with
+  This tool never changes the foreground (but between its own windows with --start-behind and --chooser: below): the
+  window follows a viewer in front, which is the reader's case, and with
   *--front viewer* (the default) it is told the viewer is in front whoever is (the report counts who really was);
 * *--scale* other than 1: the stand-in's browser draws as on a display of that scale (``--force-device-scale-factor``,
   its own window and the page's devicePixelRatio), TASlation's text size (`Settings.ui_scale`) is set to it and the
@@ -58,6 +61,7 @@ stand-in's own:
   f2 the stand-in's window made narrow (single pages)
   f3 (by its name only) a's slow reading in the narrow window: the timing figures' screens of one page
   k  (by its name only: k5, k1, k2; k3 by its own name) pages flipped past at a pace, then read back
+  h  (by its name only, with --start-behind) two turns once the stand-in, out of sight at the start, is back
 
 The rests are written for a computer of the owner's speed. *--wait-done CAP_S* is for a slower one (GitHub's runners:
 the OCR on four logical processors, the model on them too): each rest of a, d, e, x, f2 and f3, the one at its end
@@ -102,6 +106,23 @@ gives the window no viewer to find for its first S seconds (it names the stand-i
 does: no viewer chooser comes, the window looks for the window named until it is listed), and
 *--book-asked* starts it with a name that names no book, so that the start dialog asks it at Auto's first page; the
 driver answers it through the dialog's own object (``run.no_viewer``, ``run.book_asked``).
+
+*--start-behind MODE* has the stand-in out of sight before the window is made, as a viewer behind the reader's other
+windows is when TASlation starts (`Behind`): covered by a plain window of a process of its own
+(`tools/standin_cover.py`: another program's to the window, which tells its own by the process) over all of it
+("cover"), its left half ("part"), its monitor's work area ("max", a maximised window), or over all of it and in front
+("front": the foreground taken from the stand-in only); or minimised ("minimised"); *--behind-before-s S* so long
+first (a browser behind other windows a while has stopped drawing). *--behind-s S* after the window chose it, it is
+back in sight (*--behind-end*: "close", the cover goes; "raise", the stand-in put over the cover and given the
+foreground, as a click on it does - only while the stand-in, the cover or TASlation is in front: over a window the
+person uses meanwhile nothing is raised, the cover only goes). *--chooser* names no viewer: the viewer chooser comes
+and the driver answers it through its own object, first giving it the foreground as a click on it does (only while
+the stand-in or the cover is in front). *--standin-bars-held MS* has a stand-in with a profile come with its bars up,
+held MS ms (with *--standin-option bar_key_hide=0* its turns leave them up: the pointer resting on them). The side
+panes are looked at every PANE_SAMPLE_S - whether the window wants each shown, has it shown, its window visible,
+topmost and above the stand-in; the panes' ground and the room beside the page; the lettering; the windows over the
+viewer; who is in front - and the report keeps them as they changed, with the time from back in sight to both panes
+on the screen (``run.behind``). These are the only times this tool moves the foreground, between its own windows.
 
 What is recorded, numbers only (no line of the pages, read or translated, is printed, logged or written): every
 frame the stand-in draws carries a code in its band (the screen, soft or sharp, spinner); the frames the window
@@ -238,11 +259,13 @@ SCENARIOS: dict[str, tuple[str, list[str]]] = {
                                              "w5000", "l700", "w1500", "o", "w7000", "r1500", "w3000", "o", "w8000"]),
     # (by its name only) one page held long: room for what is measured on a page done (--see-add)
     "g": ("one page held long", ["n", "w90000"]),
+    # (by its name only; with --start-behind) the first turns once the stand-in, out of sight at the start, is back
+    "h": ("turns after a start behind other windows", ["n", "w6000", "n", "w6000"]),
 }
 ORDER = ["c", "a", "b", "d", "e", "x", "f2"]
 K_PACES = {"k5": 500, "k1": 1000, "k2": 2000, "k3": 3000}  # scenario k: ms a page (never in "all")
 K_ASKED = ("k5", "k1", "k2")  # what "k" asks for (k3 only by its name)
-NAMED_ONLY = ("q", "f3", "s", "g")  # scenarios never in "all", only by their names
+NAMED_ONLY = ("q", "f3", "s", "g", "h")  # scenarios never in "all", only by their names
 SLIDE = re.compile(r"([rl])\d*(-\d+)?")  # a slide of the page with the pointer (to the edge without its "-D")
 NARROW = ("f2", "f3")  # the scenarios in the narrow window (the stand-in made narrow by the first of them asked)
 # a stand-in with a profile: what it said of its bars, arrows, spinner, washed-out pictures, turns, jumps, sizes and
@@ -355,18 +378,19 @@ def profile_screen(n: int, count: int, spread: bool) -> int:
 
 
 def build_plan(names: list[str], count: int, cancel_first: int | None = None, soft_ms: int = 700,
-               wait_done: float | None = None, k: dict[str, Any] | None = None, cover: bool = False
-               ) -> tuple[list[Segment], list[sv.Step]]:
+               wait_done: float | None = None, k: dict[str, Any] | None = None, cover: bool = False,
+               lead: list[str] | None = None) -> tuple[list[Segment], list[sv.Step]]:
     """The segments of the stand-in's script (each held at ``gN`` until the driver releases it, ``mN`` to mark it)
     and the script; the screen each turn will show, foreseen as the page turns (spreads until the narrow window).
     Scenario x turns to the screens of little text from page *cancel_first* on (`cancel_steps`); scenario k's
     segments (`k_steps`, *k*: turns, read, soft, narrow) to pages after the farthest one turned to before. With
     *wait_done* (--wait-done's cap, seconds) the rests of HOLD_SCENARIOS are held (`held`) and x's soft frames kept
     until the window asked (KEEP_SOFT_S at most, and the cap); without it the script is the same as ever. *cover*: the
-    screens of a stand-in with a profile, the cover alone (`profile_screen`)."""
+    screens of a stand-in with a profile, the cover alone (`profile_screen`). *lead*: steps of no turn run as the page
+    loads, before the first segment (``--standin-bars-held``: the bars up from the start)."""
     segments: list[Segment] = []
     index, spread, farthest = 0, True, 0
-    text: list[str] = []
+    text: list[str] = list(lead or [])
     holds = 0
     k = k or {}
     for go, name in enumerate(names, 1):
@@ -1850,10 +1874,15 @@ class CoverWindow:
     order of windows (`--cover`): what a reader's other program over the viewer is, made on purpose. Shown with no
     activation and no key; any window that lay above the stand-in stays above the cover. *part* below 1 (`--cover-part`):
     only the left part of the stand-in so wide is covered (a note or a dictionary laid over a part of the viewer), the
-    rest stays in sight. Its own thread and message loop; `close` ends it."""
+    rest stays in sight. *rect* (x, y, w, h): that place instead (a window maximised on the stand-in's monitor: its work
+    area). *front*: given the foreground as it shows - only while the stand-in has it (the tool's own window to the
+    tool's own window; never taken from another program) -, as another program the reader brought to the front over
+    the viewer is (``front_taken`` says whether it was). Its own thread and message loop; `close` ends it."""
 
-    def __init__(self, standin: int, part: float = 1.0, style: str = COVER_EX):
+    def __init__(self, standin: int, part: float = 1.0, style: str = COVER_EX,
+                 rect: tuple[int, int, int, int] | None = None, front: bool = False):
         self.standin, self.hwnd, self.part = standin, 0, part
+        self.rect, self.front, self.front_taken = rect, front, False
         self.no_activate_style = style == "noactivate"
         self.shown_t: float | None = None
         self._ready = threading.Event()
@@ -1899,6 +1928,8 @@ class CoverWindow:
         w, h = r.right - r.left + 2 * COVER_MARGIN, r.bottom - r.top + 2 * COVER_MARGIN
         if self.part < 1.0:  # (the left part alone: its right edge inside the stand-in)
             w = COVER_MARGIN + max(1, int((r.right - r.left) * self.part))
+        if self.rect is not None:
+            x, y, w, h = self.rect
         style = 0x00C00000 | 0x00080000  # WS_CAPTION | WS_SYSMENU: a window as any program's (not shown yet)
         ex = 0x08000000 if getattr(self, "no_activate_style", False) else 0  # [WS_EX_NOACTIVATE] (see COVER_EX)
         self.hwnd = int(user32.CreateWindowExW(ex, COVER_CLASS, "stand-in cover", style, x, y, w, h,
@@ -1915,6 +1946,8 @@ class CoverWindow:
             # Chromium's occlusion tracking until some other window event; a person's window that comes over the
             # viewer comes with a change of the window in front or a move)
             user32.SetWindowPos(self.hwnd, None, x + 1, y, w, h, 0x0010 | 0x0004)  # SWP_NOACTIVATE | SWP_NOZORDER
+            if self.front and int(user32.GetForegroundWindow() or 0) == int(self.standin):
+                self.front_taken = bool(user32.SetForegroundWindow(self.hwnd))
             self.shown_t = now_ms()
         self._ready.set()
         msg = wintypes.MSG()
@@ -1933,6 +1966,184 @@ class CoverWindow:
             user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
             self._thread.join(3.0)
         return now_ms()
+
+
+BEHIND_MODES = ("cover", "part", "max", "front", "minimised")
+BEHIND_S = 8.0  # --start-behind: the stand-in back in sight so long after the window chose it (--behind-s)
+BEHIND_ENDS = ("close", "raise")
+PANE_SAMPLE_S = 0.25  # --start-behind: the side panes' state looked at this often (kept where it changed)
+CHOOSER_ANSWER_MS = 400  # --chooser: the chooser answered so long after it was given the foreground
+
+
+def monitor_work_area(hwnd: int) -> tuple[int, int, int, int]:
+    """(x, y, w, h) of the work area of the monitor *hwnd* lies on most (a window maximised there fills it)."""
+    user32 = ctypes.WinDLL("user32")
+
+    class MonitorInfo(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                    ("dwFlags", wintypes.DWORD)]
+
+    user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    user32.MonitorFromWindow.restype = wintypes.HANDLE
+    user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
+    info = MonitorInfo()
+    info.cbSize = ctypes.sizeof(MonitorInfo)
+    user32.GetMonitorInfoW(user32.MonitorFromWindow(hwnd, 2), ctypes.byref(info))  # MONITOR_DEFAULTTONEAREST
+    r = info.rcWork
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
+class Behind:
+    """``--start-behind MODE``: the stand-in out of sight before the window is made, as a viewer behind the reader's
+    other windows is when TASlation starts - "cover": a plain window of a process of its own over all of it
+    (`tools/standin_cover.py`: another program's, never TASlation's - the window tells its own by the process), shown
+    with no activation (the stand-in keeps the foreground); "part": over its left half; "max": over the whole work area
+    of its monitor, as a maximised window is; "front": over all of it and given the foreground (taken from the stand-in
+    only): another program in front over the viewer; "minimised": the stand-in minimised with no activation. `end`
+    puts it back in sight (``--behind-end``): "close" - the cover gone (with "front" the foreground given back to the
+    stand-in first, so that nothing of the reader's gets it); "raise" - the stand-in put over the cover, which stays
+    under it, and given the foreground when the cover held it: a person's click on the viewer; a minimised stand-in
+    either way restored with no activation and put at the top of the order (made topmost and ordinary again, as
+    `capture.raise_window` does). The cover goes at the run's end (`close`). Only the tool's own windows are touched."""
+
+    def __init__(self, mode: str, standin: int, how: str = "close"):
+        self.mode, self.standin, self.how = mode, int(standin), how
+        self.cover: subprocess.Popen[str] | None = None
+        self.cover_hwnd = 0
+        self.facts: dict[str, Any] = {"mode": mode, "end": how, "made_t": None, "ended_t": None}
+
+    def start(self) -> None:
+        user32 = ctypes.WinDLL("user32")
+        self.facts["front_before"] = "standin" if int(user32.GetForegroundWindow() or 0) == self.standin else "other"
+        if self.mode == "minimised":
+            user32.ShowWindow(self.standin, 7)  # SW_SHOWMINNOACTIVE
+            self.facts["made"] = bool(user32.IsIconic(self.standin))
+        else:
+            argv = [sys.executable, "-I", str(Path(__file__).with_name("standin_cover.py")), "--over",
+                    str(self.standin), "--tool-pid", str(os.getpid())]
+            if self.mode == "part":
+                argv += ["--part", "0.5"]
+            if self.mode == "max":
+                argv += ["--rect", ",".join(str(v) for v in monitor_work_area(self.standin))]
+            if self.mode == "front":
+                argv.append("--front")
+            self.cover = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            line = (self.cover.stdout.readline() if self.cover.stdout else "").split()
+            if len(line) == 3 and line[0] == "ready":
+                self.cover_hwnd = int(line[1])
+                self.facts["front_taken"] = line[2] == "1"
+            self.facts["made"] = bool(self.cover_hwnd)
+            self.facts["cover_pid_other"] = bool(self.cover.pid and self.cover.pid != os.getpid())
+        self.facts["made_t"] = now_ms()
+
+    def _say(self, word: str) -> str:
+        cover = self.cover
+        if cover is None or cover.stdin is None or cover.poll() is not None:
+            return ""
+        try:
+            cover.stdin.write(word + "\n")
+            cover.stdin.flush()
+            return (cover.stdout.readline() if cover.stdout else "").strip()
+        except OSError:
+            return ""
+
+    def end(self) -> None:
+        """The stand-in back in sight (see the class)."""
+        if self.facts.get("ended_t") is not None:
+            return
+        # (put over the other windows only while the stand-in, the cover or TASlation is in front: never over a window
+        # the person is using meanwhile - then the cover only goes, the stand-in stays where it lies)
+        ours = front_kind(self.standin, self.cover_hwnd) in ("standin", "cover", "own")
+        self.facts["front_at_end"] = front_kind(self.standin, self.cover_hwnd)
+        if self.cover is not None:
+            raise_it = self.how == "raise" and ours
+            if self.how == "raise" and not ours:
+                self.facts["raise_skipped"] = True
+            self.facts["answer"] = self._say("raise" if raise_it else "end")
+            if not raise_it:
+                self.close()
+        else:
+            user32 = ctypes.WinDLL("user32")
+            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, wintypes.UINT]
+            stay = 0x0001 | 0x0002 | 0x0010  # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+            user32.ShowWindow(self.standin, 4)  # SW_SHOWNOACTIVATE: restored, not activated
+            if ours:
+                user32.SetWindowPos(self.standin, -1, 0, 0, 0, 0, stay)  # HWND_TOPMOST: to the top of the screen ...
+                user32.SetWindowPos(self.standin, -2, 0, 0, 0, 0, stay)  # HWND_NOTOPMOST: ... ordinary again
+            else:
+                self.facts["raise_skipped"] = True
+        self.facts["ended_t"] = now_ms()
+
+    def close(self) -> None:
+        """The cover gone (the run's end; `end` with "close")."""
+        cover, self.cover = self.cover, None
+        if cover is None:
+            return
+        try:
+            if cover.poll() is None and cover.stdin is not None:
+                cover.stdin.write("end\n")
+                cover.stdin.flush()
+                cover.stdin.close()
+            cover.wait(5.0)
+        except (OSError, subprocess.TimeoutExpired):
+            cover.kill()
+
+
+def pane_state(app: Any, standin: int, cover: int = 0) -> dict[str, Any]:
+    """The side panes as they are now (--start-behind): per side whether the Tk thread wants it shown, whether the
+    see-through window has it shown, whether its window is visible, topmost and above the stand-in in the order of the
+    windows; the Tk thread's ground and the left pane's room; whether the lettering shows; the windows found over the
+    viewer; the stand-in's state. Flags and counts only."""
+    from taslation.ui import seethrough as see_ui
+
+    user32 = ctypes.WinDLL("user32")
+    over = getattr(app, "_see_through", None)
+    out: dict[str, Any] = {"ground": getattr(app, "_see_ground", None) is not None, "left_room": see_ui.left_room(app),
+                           "standin_topmost": is_topmost(standin), "standin_iconic": bool(user32.IsIconic(standin)),
+                           "cover_above": cover_over(cover, standin) if cover and user32.IsWindow(cover) else None,
+                           "front": front_kind(standin, cover),
+                           "bars": getattr(app, "_see_bars_since", None) is not None}
+    ground = getattr(app, "_see_ground", None)
+    if ground is not None:
+        from taslation import panes as pn
+
+        size, page, _band, _colour, columns = ground
+        dpi = getattr(app, "_see_dpi", 96)
+        out["ground_at"] = {"size": list(size), "page": list(page) if page else None,
+                            "columns": list(columns) if columns else None, "dpi": dpi,
+                            "rooms": list(pn.rooms(size, page, dpi, columns))}
+        out["memo"] = {side: [m[1] is not None, m[2] is not None]
+                       for side, m in (getattr(app, "_see_pane_memo", None) or {}).items()}
+    if over is None:
+        return out
+    for side in ("left", "right"):
+        h = int(over.panes.get(side, 0) or 0)
+        out[side] = {"want": over._pane_want.get(side) is not None, "shown": over.pane_shown(side) is not None,
+                     "visible": bool(user32.IsWindowVisible(h)) if h else None,
+                     "topmost": is_topmost(h) if h else None, "above_standin": cover_over(h, standin) if h else None}
+    out["lettering"] = over.shown() is not None
+    out["covers"] = len(getattr(over, "_covers", ()) or ())
+    return out
+
+
+def front_kind(standin: int, cover: int = 0) -> str:
+    """Which window is in front: "standin", "cover" (`Behind`'s), "own" (one of this process's: TASlation's), "other"
+    or "none". Read only."""
+    user32 = ctypes.WinDLL("user32")
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    fg = int(user32.GetForegroundWindow() or 0)
+    if not fg:
+        return "none"
+    if fg == int(standin):
+        return "standin"
+    if cover and fg == int(cover):
+        return "cover"
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(wintypes.HWND(fg), ctypes.byref(pid))
+    return "own" if pid.value == os.getpid() else "other"
 
 
 def own_to_top(own: int) -> bool:
@@ -2570,6 +2781,10 @@ class Director:
         self.cover: CoverWindow | None = None  # (`cover_step`)
         self.cover_from: float | None = None
         self.own_topped = False  # (`cover_step`: the window put at the top of the order)
+        self.behind: Behind | None = None  # (--start-behind: `behind_step`)
+        self.behind_samples: list[dict[str, Any]] = []  # (the side panes' state where it changed: `behind_step`)
+        self.behind_sampled = 0.0
+        self.chooser_rows: list[dict[str, Any]] = []  # (--chooser: `chooser_step`)
         self.events: list[dict[str, Any]] = []
         self.seen = 0
         self.waiting_go = 0
@@ -2623,6 +2838,7 @@ class Director:
                 self.notes.tk_cpu.append((time.monotonic(), time.thread_time(), bool(getattr(self.app, "busy", False))))
             self.start_dialog()
             self.book_dialog()
+            self.chooser_step()
             self.check()
             if not self.over:
                 self.pull()
@@ -2634,6 +2850,7 @@ class Director:
                 self.step()
                 self.due_shots()
                 self.cover_step()
+                self.behind_step()
         except Exception as e:  # noqa: BLE001 - said by its type and where it rose (no message: no text), and the run ends
             self.stop(f"{type(e).__name__} in the driver{_where(e)}")
         if not self.over:
@@ -2766,6 +2983,104 @@ class Director:
                 if not over and c.get("under_t") is None:
                     c["under_t"] = now_ms()  # (the stand-in first found over the cover: put under the window)
 
+    def behind_step(self) -> None:
+        """--start-behind: the stand-in back in sight --behind-s after the window chose it (`Behind.end`); the side
+        panes' state (`pane_state`) every PANE_SAMPLE_S, kept where it changed."""
+        behind = self.behind
+        if behind is None:
+            return
+        chosen = getattr(getattr(self.app, "selected", None), "hwnd", None) == self.browser.hwnd
+        if chosen and behind.facts.get("chosen_t") is None:
+            behind.facts["chosen_t"] = now_ms()
+        since = behind.facts.get("chosen_t")
+        if since is not None and behind.facts.get("ended_t") is None \
+                and now_ms() - since >= float(getattr(self.args, "behind_s", BEHIND_S)) * 1000:
+            behind.end()
+        now = time.monotonic()
+        if now - self.behind_sampled < PANE_SAMPLE_S:
+            return
+        self.behind_sampled = now
+        state = pane_state(self.app, self.browser.hwnd, behind.cover_hwnd)
+        if not self.behind_samples or {k: v for k, v in self.behind_samples[-1].items() if k != "t"} != state:
+            self.behind_samples.append({"t": now_ms(), **state})
+
+    def chooser_step(self) -> None:
+        """--chooser: the viewer chooser (`ui.see_menu.ViewerDialog`), when the window shows it, noted (when, the
+        windows listed, which was preselected, whether OK was greyed) and answered through its own object: the
+        stand-in's entry chosen and OK (no input to the computer)."""
+        if not getattr(self.args, "chooser", False):
+            return
+        dialog = getattr(self.app, "_see_chooser", None)
+        if dialog is None:
+            return
+        row = self.chooser_rows[-1] if self.chooser_rows and self.chooser_rows[-1]["dialog"] == id(dialog) else None
+        if row is None:
+            index = dialog.box.current()
+            row = {"t": now_ms(), "dialog": id(dialog), "listed": len(dialog.windows),
+                   "preselected_standin": 0 <= index < len(dialog.windows)
+                   and dialog.windows[index].hwnd == self.browser.hwnd,
+                   "ok_greyed": dialog.ok_button.instate(["disabled"]), "answered_t": None}
+            self.chooser_rows.append(row)
+        if row["answered_t"] is not None:
+            return
+        at = next((i for i, w in enumerate(dialog.windows) if w.hwnd == self.browser.hwnd), None)
+        if at is None:
+            return  # (not listed yet: looked at again at the next tick)
+        if row.get("activated_t") is None:  # (first the dialog given the foreground, as a person's click on it does)
+            row["activated_t"] = now_ms()
+            row["activated"] = self.chooser_activate(dialog)
+            return
+        if now_ms() - row["activated_t"] < CHOOSER_ANSWER_MS:
+            return
+        dialog.box.current(at)
+        dialog._picked()
+        dialog.ok()
+        row["answered_t"] = now_ms()
+
+    def chooser_activate(self, dialog: Any) -> bool:
+        """The viewer chooser given the foreground before it is answered, as the person's click on it gives it - only
+        while the stand-in or the tool's own cover (`Behind`) is in front, never taken from another window. Whether it
+        came to the front."""
+        user32 = ctypes.WinDLL("user32")
+        fg = int(user32.GetForegroundWindow() or 0)
+        cover = self.behind.cover_hwnd if self.behind is not None else 0
+        if fg not in {int(self.browser.hwnd), int(cover or 0)}:
+            return False
+        try:
+            dialog.focus_force()
+            dialog.update_idletasks()
+            top = int(dialog.wm_frame(), 16)
+        except Exception:  # noqa: BLE001 - (gone meanwhile)
+            return False
+        return int(user32.GetForegroundWindow() or 0) in {top, int(dialog.winfo_id())}
+
+    def behind_report(self) -> dict[str, Any] | None:
+        """--start-behind / --chooser: what was done (times from the run's start) and the side panes' state as it
+        changed."""
+        if self.behind is None and not self.chooser_rows:
+            return None
+        t0 = self.epoch0
+
+        def rel(t: Any) -> Any:
+            return None if t is None else round(float(t) - t0)
+
+        facts = {k: (rel(v) if k.endswith("_t") else v) for k, v in (self.behind.facts if self.behind else {}).items()}
+        samples = [{**s, "t": rel(s["t"])} for s in self.behind_samples]
+
+        def on_screen(s: dict[str, Any]) -> bool:
+            return all(isinstance(s.get(side), dict) and s[side].get("shown") and s[side].get("visible")
+                       and s[side].get("above_standin") for side in ("left", "right"))
+
+        ended = facts.get("ended_t")
+        back = next((s["t"] for s in samples if ended is not None and s["t"] >= ended and on_screen(s)), None)
+        after = [s for s in samples if ended is not None and s["t"] >= (back if back is not None else ended)]
+        return {"behind": facts, "chooser": [{k: (rel(v) if k.endswith("_t") or k == "t" else v)
+                                              for k, v in r.items() if k != "dialog"} for r in self.chooser_rows],
+                # (in sight again -> both panes on the screen, to within PANE_SAMPLE_S; and whether they stayed so)
+                "panes_back_ms": None if back is None else back - ended,
+                "panes_stayed": bool(after) and back is not None and all(on_screen(s) for s in after),
+                "panes": samples[-40:], "pane_samples": len(samples)}
+
     def stop(self, why: str) -> None:
         if self.over:
             return
@@ -2886,6 +3201,10 @@ class Director:
         if self.phase == "settle":
             if getattr(self.args, "no_viewer_s", 0) and getattr(self.app, "selected", None) is None:
                 return  # (--no-viewer-s: nothing is released before the window has found the stand-in)
+            behind = self.behind
+            if behind is not None and (behind.facts.get("ended_t") is None
+                                       or now_ms() - behind.facts["ended_t"] < IDLE_S * 1000):
+                return  # (--start-behind: nothing is released before the stand-in is back in sight)
             ready_go = self.waiting_go >= seg.go
             app = self.app
             if seg.name == "c":
@@ -4248,7 +4567,11 @@ def run(args: argparse.Namespace) -> int:
     cover = bool(args.standin_profile) and profile_options.get("cover", "1") != "0"
     if "s" in names and args.standin_profile:
         raise SystemExit("scenario s slides the stand-in's page without a profile (no --standin-profile)")
-    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan, cover)
+    held_ms = int(getattr(args, "standin_bars_held", 0) or 0)
+    if held_ms and not args.standin_profile:
+        raise SystemExit("--standin-bars-held is for a stand-in with a profile (--standin-profile)")
+    segments, steps = build_plan(names, count, cancel_first, args.cancel_soft_ms, args.wait_done, k_plan, cover,
+                                 lead=[f"v{held_ms}"] if held_ms else None)
     if args.standin_profile:
         report["standin_profile"] = {"name": args.standin_profile, "options": profile_options}
     if any(n in K_PACES for n in names):
@@ -4428,8 +4751,14 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     import standin_seethrough
 
     activations = standin_seethrough.Activations()  # (TASlation's own windows' activations, from before it is made)
+    behind = None
+    if getattr(args, "start_behind", None):  # (the stand-in out of sight before the window is made: `Behind`)
+        behind = Behind(args.start_behind, hwnd, getattr(args, "behind_end", "close"))
+        behind.start()
+        time.sleep(max(0.0, float(getattr(args, "behind_before_s", 0.0) or 0.0)))  # (out of sight so long first)
     made_t = now_ms()  # (the window's start: what follows is timed from here, `start_clock`)
-    app = app_mod.App(settings, window_query=browser.token, book=BOOK_UNNAMED if args.book_asked else BOOK, auto=True)
+    query = "" if getattr(args, "chooser", False) else browser.token  # (--chooser: the window asks, `chooser_step`)
+    app = app_mod.App(settings, window_query=query, book=BOOK_UNNAMED if args.book_asked else BOOK, auto=True)
     built_t = now_ms()
     see = standin_seethrough.SeeWatch(app, hwnd, lambda image: notes.shown(image).screen,
                                       truth=bool(args.see_truth),
@@ -4470,6 +4799,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     app.after(600, lambda: app.geometry(f"{w}x{h}+{x}+{y}"))
     director = Director(app, browser, guard, selection, notes, segments, args, out, standin_dir, narrow_rect,
                         app_rect)
+    director.behind = behind
     director.start()
     began = now_ms()
     try:
@@ -4484,6 +4814,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
         else:
             demo_video.finish_app(app)
         director.close_saver()
+        if behind is not None:
+            behind.end()  # (never left out of sight or covered)
+            behind.close()
         logging.getLogger().removeHandler(tap)
         see.close()
     run_ = summarise(director, notes, tap, browser, patched, guard, began, ended, top, dpr, mode,
@@ -4497,6 +4830,12 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     see_pipeline["present_to_display_ms"] = see_lags(notes, see_pipeline.get("presents_t", []))
     see_pipeline["displays_t"] = [round(d["t"]) for d in notes.displays if d.get("lettered")]
     run_["start_clock"] = start_clock(notes, see, made_t, built_t, began)
+    behind_facts = director.behind_report()
+    if behind_facts is not None:
+        notes_now = list(see.over().notes) if see.over() is not None else []
+        behind_facts["pane_hides"] = dict(Counter(f"{n['side']}:{n.get('why')}" for n in notes_now
+                                                  if n["ev"] == "pane_hide"))
+        run_["behind"] = behind_facts
     return run_
 
 
@@ -5489,6 +5828,27 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                     help=f"the window begins with the name {BOOK_UNNAMED!r}, which names no book, so that Auto's first "
                          f"page asks it (the start dialog); answered {BOOK_ANSWER_S:g} s after it is on the screen, "
                          f"through its own object, with {BOOK!r} (run.book_asked)")
+    ap.add_argument("--start-behind", default=None, choices=BEHIND_MODES,
+                    help="the stand-in out of sight as the window starts (`Behind`: covered by the tool's own window - "
+                         "all of it, its left half, its monitor's work area, or all of it with the cover in front -, "
+                         "or minimised), back in sight --behind-s after the window chose it; nothing is released "
+                         "before; the side panes' state as it changed in run.behind")
+    ap.add_argument("--behind-s", type=float, default=BEHIND_S, metavar="S",
+                    help="--start-behind: seconds from the window's choice of the stand-in to its being back in sight "
+                         "(default %(default)s)")
+    ap.add_argument("--chooser", action="store_true",
+                    help="the window names no viewer (no window_query): its viewer chooser comes at the start, and "
+                         "the driver chooses the stand-in in it through the dialog's own object (run.behind.chooser)")
+    ap.add_argument("--standin-bars-held", type=int, default=0, metavar="MS",
+                    help="a stand-in with a profile: its bars up over the page from its start, held MS ms (as while "
+                         "the pointer rests on them; with --standin-option bar_key_hide=0 a turn leaves them up)")
+    ap.add_argument("--behind-end", default="close", choices=BEHIND_ENDS,
+                    help="--start-behind: how the stand-in comes back in sight: close (the cover goes) or raise (the "
+                         "stand-in put over the cover and given the foreground, as a click on it does; the cover "
+                         "stays under it until the run's end)")
+    ap.add_argument("--behind-before-s", type=float, default=0.0, metavar="S",
+                    help="--start-behind: the stand-in out of sight so long before the window is made (a viewer that "
+                         "has lain behind the other windows a while: its browser's occlusion tracking has stopped it)")
     args = ap.parse_args(argv)
     if args.soft_first is None:
         args.soft_first = "off" if args.standin_profile else "on"
