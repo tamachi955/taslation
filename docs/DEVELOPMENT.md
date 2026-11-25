@@ -487,7 +487,7 @@ rows' languages.
   `run.monitors` gives per step the lettering's offset from the client area and its looks at a stale place or
   scale (how long after the look that saw the client so, with patches on show or the editing ground alone), the
   panes and why each was hidden (no ground yet, no room, off the screen, covered by a window above the viewer such
-  as the region editor), the scales, the hidden root's monitor; per resize the lettering hidden and back at the new
+  as the region editor, the viewer sized with the button held on its border), the scales, the hidden root's monitor; per resize the lettering hidden and back at the new
   size, the jobs started while the button was held and on the sizes between, the capture area found again, the
   marks, an open editor's place and its region carried to the page at the new size, and a timeline (numbers only);
   the hover on the stand-in's monitor; and how far a region read at one size lies from the same region read at

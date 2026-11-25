@@ -837,6 +837,23 @@ def test_the_editor_goes_beside_the_region_on_its_monitor(monkeypatch):
     assert see_edit.editor_place(app, Region(A)) is None
 
 
+def test_the_editor_goes_to_the_left_rather_than_over_a_side_pane(monkeypatch):
+    """A pane under a window hides (the right one stayed away while the editor lay over it): the editor takes the
+    left where the left is clear of the panes, else the right as before."""
+    from taslation.ui import layout
+
+    monkeypatch.setattr(layout, "frame_extents", lambda *_a: (8, 31))
+    monkeypatch.setattr(layout, "work_area", lambda widget, x=None, y=None: (0, 0, 1920, 1040))
+    app = edit_app()  # (the client area at 500, 300: the region on the screen 600, 400 to 700, 460)
+    app._see_pane_memo = {"right": ("k", None, (220, 50, 420, 700))}  # (on the screen 720 to 920: the right side)
+    assert see_edit.pane_boxes(app, (500, 300)) == [(720, 350, 920, 1000)]
+    assert see_edit.editor_place(app, Region(A))(300, 200) == (600 - 12 - 316, 400)
+    app._see_pane_memo["left"] = ("k", None, (-250, 50, -50, 700))  # (the left side taken too: the right as before)
+    assert see_edit.editor_place(app, Region(A))(300, 200) == (700 + 12, 400)
+    app._see_pane_memo = {"right": ("k", None, None), "left": ("k", None, None)}  # (hidden panes: no matter)
+    assert see_edit.editor_place(app, Region(A))(300, 200) == (700 + 12, 400)
+
+
 class Placed:
     """An open editor on the screen: its client area at *at*, *size*; `geometry` moves it."""
 

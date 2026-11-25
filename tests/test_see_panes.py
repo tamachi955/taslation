@@ -584,6 +584,36 @@ def test_a_panes_box_is_known_to_the_tools_only_while_it_shows():
     assert over.pane_shown("left") == (100, 200, 250, 500)
 
 
+def test_a_press_on_the_viewer_s_sizing_border_hides_the_panes_until_the_release(monkeypatch):
+    """A window that shrinks under a pane would leave it outside the window until the next look: the panes hide from
+    the press on the sizing border on, and are placed again at the release."""
+    from taslation.capture import seethrough as window
+    from taslation.capture import windows as w
+
+    outer, bounds = (100, 100, 1316, 916), (107, 100, 1309, 909)  # (Windows' unseen border: 7 px left, right, below)
+    assert window.on_sizing_border((1312, 500), outer, bounds, 4)  # (the right border)
+    assert window.on_sizing_border((700, 912), outer, bounds, 4)  # (below)
+    assert window.on_sizing_border((103, 912), outer, bounds, 4)  # (the corner)
+    assert window.on_sizing_border((700, 102), outer, bounds, 4)  # (the band inside the top edge)
+    assert not window.on_sizing_border((700, 500), outer, bounds, 4)  # (on the page)
+    assert not window.on_sizing_border((1300, 500), outer, bounds, 4)  # (inside, near the right edge)
+    assert not window.on_sizing_border((1400, 500), outer, bounds, 4)  # (off the window)
+    assert not window.on_sizing_border(None, outer, bounds, 4)
+    over = window.SeeThrough()
+    monkeypatch.setattr(w, "window_rect", lambda hwnd: outer)
+    monkeypatch.setattr(window, "_user32", SimpleNamespace(IsZoomed=lambda hwnd: False))
+    assert not over._sizing_tick(5, (1312, 500), False, bounds)
+    assert over._sizing_tick(5, (1312, 500), True, bounds)  # (pressed on the border)
+    assert over._sizing_tick(5, (900, 500), True, bounds)  # (held: the edge goes with the pointer)
+    over._geometry = ("as it was",)
+    assert not over._sizing_tick(5, (900, 500), False, bounds) and over._geometry is None  # (let go: placed again)
+    assert not over._sizing_tick(5, (700, 500), True, bounds)  # (pressed on the page)
+    assert not over._sizing_tick(5, (1312, 500), True, bounds)  # (... and held onto the border: no sizing)
+    over._sizing_tick(5, None, False, bounds)
+    monkeypatch.setattr(window, "_user32", SimpleNamespace(IsZoomed=lambda hwnd: True))
+    assert not over._sizing_tick(5, (1312, 500), True, bounds)  # (maximised: no border to size it by)
+
+
 def test_shown_again_or_moved_the_windows_go_under_an_open_menu_of_this_process_never_above_it(monkeypatch):
     import inspect
     import os

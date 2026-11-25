@@ -145,6 +145,7 @@ LOOK_S = 0.05  # with no frame coming, the window looks at the viewer this often
 HOVER_IN_PX, HOVER_OUT_PX = 4, 10  # the pointer this near a patch's box hides it, and it shows again once the pointer
 # is farther than the second (px at 96 DPI, `seethrough.scaled`): no flicker at its edge
 COVER_S = 0.1  # the windows over the viewer are looked for at most this often
+SIZING_IN_PX = 4  # a press this near inside the viewer's frame edge sizes it too (`on_sizing_border`, px at 96 DPI)
 MAX_ABOVE = 512  # the order of the windows is walked this far up from the viewer
 LOG_KEPT = 50000  # notes kept in memory for the tools (`notes`)
 START_S = 2.0  # how long `start` waits for the window to be made
@@ -375,6 +376,19 @@ def cursor_pos() -> tuple[int, int] | None:
     if not _user32.GetCursorPos(ctypes.byref(point)):
         return None
     return int(point.x), int(point.y)
+
+
+def on_sizing_border(point: tuple[int, int] | None, outer: st.Box, bounds: st.Box, inner: int) -> bool:
+    """(pure) Whether the screen point *point* lies where a press sizes a window: inside its rectangle *outer*
+    (``GetWindowRect``: the resize border Windows keeps unseen round its frame included) and outside its frame as seen,
+    *bounds* (the DWM extended frame bounds), or within *inner* px inside that frame's top edge (where the frame has no
+    unseen border: a browser takes that band for sizing)."""
+    if point is None:
+        return False
+    x, y = point
+    if not (outer[0] <= x < outer[2] and outer[1] <= y < outer[3]):
+        return False
+    return x < bounds[0] or x >= bounds[2] or y < bounds[1] + inner or y >= bounds[3]
 
 
 def button_down() -> bool:
@@ -641,6 +655,8 @@ class SeeThrough:
         self._new_frame = False  # whether the look under way was started by a frame not looked at before
         self._dib: tuple[int, int, int, np.ndarray, tuple[int, int]] | None = None  # (dc, bitmap, old, pixels, size)
         self._pointer: tuple[int, int] | None = None  # where the pointer was at the last look (screen pixels)
+        self._was_held = False  # the button held at the last look
+        self._sizing = False  # the viewer's window sized by the pointer: pressed on its sizing border, held since
         self._hover_box: st.Box | None = None  # the box of the patch left out under the pointer
         self._hover_delay = 0.0  # s the pointer rests on a patch before it is left out (`set_hover_delay`)
         self._hover_wait: tuple[st.Box, float] | None = None  # (the patch the pointer came to, since when)
@@ -1005,6 +1021,8 @@ class SeeThrough:
         moved, self._pointer = pointer != self._pointer, pointer
         held = button_down()
         self._pane_presses(pointer, held, now)
+        if self._sizing_tick(viewer, pointer, held, bounds):
+            self._panes_hide("sizing")  # (before the window shrinks under them; back at the release)
         if not new_frame and changed == self._seen_changed and geometry == self._geometry and \
                 now - self._covers_at < COVER_S:
             self._right_plates(pointer, panes, held)
@@ -1029,7 +1047,8 @@ class SeeThrough:
         if geometry != self._geometry:
             self._dpi = viewer_dpi(viewer)
         self._seq, self._seen_changed, self._geometry = frame.seq, changed, geometry
-        self._place_panes(panes, origin, size)
+        if not self._sizing:
+            self._place_panes(panes, origin, size)
         self._right_plates(pointer, panes, held)
         self._edit_held()
         if not on:  # (the left pane's Lettering switched off: the lettering hidden, the side panes as they are)
@@ -1512,6 +1531,30 @@ class SeeThrough:
         self._unhover()
         self._marks_live = None
         self._edit_cancel(why)
+
+    def _sizing_tick(self, viewer: int, point: tuple[int, int] | None, held: bool, bounds: st.Box) -> bool:
+        """Whether the viewer's window is being sized with the pointer: the button pressed on its sizing border (as
+        the first look that finds the button down finds the pointer: `on_sizing_border`, never while maximised) and
+        held since. Meanwhile the side panes hide (`_step`): a window that shrinks under a pane would leave it
+        outside the window until the next look; they come back with the release, at once."""
+        from . import windows
+
+        if not held:
+            if self._sizing:
+                self._sizing = False
+                self._geometry = None  # (the next look places the panes again, whatever else changed)
+                self._note("sizing", on=0)
+        elif not self._was_held:
+            try:
+                outer = windows.window_rect(viewer)
+            except Exception:  # noqa: BLE001 - (gone meanwhile: no sizing)
+                outer = None
+            self._sizing = bool(outer is not None and not _user32.IsZoomed(viewer)
+                                and on_sizing_border(point, outer, bounds, st.scaled(SIZING_IN_PX, self._dpi)))
+            if self._sizing:
+                self._note("sizing", on=1)
+        self._was_held = held
+        return self._sizing
 
     def _pane_presses(self, point: tuple[int, int] | None, held: bool, now: float) -> None:
         """A press on a side pane whose release did not come to it (let go over another window, the button up by

@@ -458,7 +458,9 @@ class Sampler(threading.Thread):
                 box = over.pane_shown(side)
                 pane = int((getattr(over, "panes", {}) or {}).get(side, 0) or 0)
                 why = self.pane_why.get(side, "")
-                if box is None and not why and _covered_pane(over, side):
+                if box is None and not why and getattr(over, "_sizing", False):
+                    why = "sizing"  # (the viewer sized with the pointer: `SeeThrough._sizing_tick`)
+                elif box is None and not why and _covered_pane(over, side):
                     why = "covered"  # (a window above the viewer meets it: the region editor, a dialog)
                 panes[side] = {"box": tuple(box) if box is not None else None,
                                "visible": bool(pane and _u.IsWindowVisible(pane)),

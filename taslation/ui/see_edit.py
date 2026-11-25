@@ -590,7 +590,9 @@ def editor_place(app: Any, region: Any) -> Callable[[int, int], tuple[int, int]]
     """Where the editor of *region* goes on the screen, once its size is known (a function of its width and height
     giving its top left): beside the region's box - to its right, else to its left, else as near as the monitor's work
     area lets it -, level with the box's top, on the viewer's monitor; never over the box where there is room beside
-    it. None when the viewer's place on the screen is not known."""
+    it. To the left rather than over a side pane where the left has room clear of the panes (`pane_boxes`: a pane
+    under a window hides, `capture.SeeThrough._place_panes`). None when the viewer's place on the screen is not
+    known."""
     over = getattr(app, "_see_through", None)
     origin = over.client_origin() if over is not None else None
     if origin is None:
@@ -599,6 +601,7 @@ def editor_place(app: Any, region: Any) -> Callable[[int, int], tuple[int, int]]
     dpi = int(getattr(app, "_see_dpi", st.BASE_DPI))
     gap = st.scaled(EDITOR_GAP, dpi)
     left, top, right, bottom = origin[0] + box[0], origin[1] + box[1], origin[0] + box[2], origin[1] + box[3]
+    panes = pane_boxes(app, origin)
 
     def place(width: int, height: int) -> tuple[int, int]:
         from .layout import frame_extents, work_area
@@ -607,17 +610,37 @@ def editor_place(app: Any, region: Any) -> Callable[[int, int], tuple[int, int]]
         side, title = frame_extents(middle)  # (its frame as the box's monitor draws it)
         outer_w, outer_h = width + 2 * side, height + title + side
         area = work_area(app, *middle)
-        if right + gap + outer_w <= area[2]:
-            x = right + gap
-        elif left - gap - outer_w >= area[0]:
-            x = left - gap - outer_w
-        else:
-            x = right + gap
-        x = max(area[0], min(area[2] - outer_w, x))  # (a box partly off the screen: the editor on it all the same)
         y = max(area[1], min(area[3] - outer_h, top))
+        to_right, to_left = right + gap, left - gap - outer_w
+
+        def clear(x: int) -> bool:
+            return not any(seethrough._meets((x, y, x + outer_w, y + outer_h), p) for p in panes)
+
+        fits_right, fits_left = to_right + outer_w <= area[2], to_left >= area[0]
+        if fits_right and (clear(to_right) or not (fits_left and clear(to_left))):
+            x = to_right
+        elif fits_left:
+            x = to_left
+        else:
+            x = to_right
+        x = max(area[0], min(area[2] - outer_w, x))  # (a box partly off the screen: the editor on it all the same)
         return int(x), int(y)
 
     return place
+
+
+def pane_boxes(app: Any, origin: tuple[int, int]) -> list[tuple[int, int, int, int]]:
+    """The side panes' screen boxes as last handed to the see-through window (`seethrough.panes_tick`: the left one,
+    and the right one as the indicators or the bubble's block), the viewer's client area at *origin*; hidden ones none."""
+    memo = getattr(app, "_see_pane_memo", None) or {}
+    out = []
+    for side in ("left", "right", "bubble"):
+        entry = memo.get(side)
+        box = entry[2] if entry else None
+        if box is not None:
+            out.append((origin[0] + int(box[0]), origin[1] + int(box[1]), origin[0] + int(box[2]),
+                        origin[1] + int(box[3])))
+    return out
 
 
 def editor_beside(app: Any, editor: Any, region: Any) -> bool:
