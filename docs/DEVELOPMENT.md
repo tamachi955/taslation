@@ -142,8 +142,9 @@ rows' languages.
   a bubble (the original in its place, the bubble's block in the right pane), Edit switched on with a box dragged and
   dragged back - with a pointer of its own (the see-through window is told where it is: the real pointer never moves)
   and clicks and drags posted to TASlation's own pane and lettering windows; nothing is sent to the stand-in or to any
-  other window, and the tool never changes the foreground (the stand-in's browser takes it as it starts, as in every
-  stand-in run, and keeps it to the end). Its frames are copies of the screen in the stand-in's client area,
+  other window, and the tool never changes the foreground (the stand-in's browser opens without taking it, as in
+  every stand-in run: below; it gets it only where TASlation gives the viewer the foreground, as a region editor's
+  closing does). Its frames are copies of the screen in the stand-in's client area,
   each kept only when no other program's window lies over the stand-in and, outside where TASlation's own windows
   draw, it shows the stand-in's own frame of that moment (as the stand-in run's pane shot is checked); a frame that
   fails is never kept, and six in a row stop the run with the recording deleted. It says how long the screen was in
@@ -263,7 +264,18 @@ rows' languages.
   next scenario (the stand-in's size: the report's
   `driver_acts`), whichever comes first, and the page at rest is what the window showed then; a job cancelled as the
   window took its page at a new size of the stand-in is not one cancelled with its page on show (`resized_away`). The
-  tool never changes the foreground (but between its own windows with `--start-behind` and `--chooser`: below).
+  tool never changes the foreground (but between its own windows with `--start-behind` and `--chooser`: below). The
+  stand-in's browser opens without taking it either: started minimised and not activated (STARTUPINFO, which Chrome
+  does not take for its first window), with Windows' lock on foreground changes set while its window comes
+  (`standin_viewer.lock_foreground`: a change is possible only once the person has given no input for a while, and
+  then the tool may set the lock; it is lifted as the window is shown, at the close, or by any key or click of the
+  person's), its window then shown without activation; should it take the foreground all the same, it is minimised
+  and shown again without activation (Windows hands the foreground to the window behind). The report's
+  `browser_start` says what came (`took_the_foreground`, where, whether the lock was taken). A run thus starts with
+  the person's window in front: whatever needs the stand-in in front gets it where TASlation gives the viewer the
+  foreground (a region editor's closing) or by the tool's guarded steps below. The run's end waits for a scene the
+  see-through watch is acting (`SeeWatch.acting`: the pointer on a bubble, Edit's click and drags, Add area), so that
+  its measures are not cut.
   `--scale 1.5` draws the stand-in as on a display
   of that scale (the browser's `--force-device-scale-factor`) and sets TASlation's text size (its dialogs') to it; no system setting
   changes. OpenMantra pages from the datasets folder, or `--synthetic`. The window runs with the app's defaults, so on
@@ -357,7 +369,9 @@ rows' languages.
   with its taskbar button (no tool window, owned by none) titled "TASlation" and not minimised, "not shown" before Tk
   first shows it; once shown it stays shown in Windows' sense, since Tk's dialogs need a master in its normal state -
   every look "off" (or "not shown") is expected, with what `keep_hidden` put back, how often the foreground went
-  back to the viewer, what the window being in front gave instead (`front`: a dialog brought up, the chooser, the
+  back to the viewer (and how often a dialog's closing gave it back at once, `closing_gave_back`), the log of the
+  foreground's counts and newest lines (`foreground`, `foreground_lines`: kinds only; `foreground_notes` the changes
+  the hook brought, `foreground_polled` those first seen at a tick), what the window being in front gave instead (`front`: a dialog brought up, the chooser, the
   Menu at the pointer, the viewer - after a click on its taskbar button, which only the owner's own click makes),
   how many dialogs of the process were on a monitor at each look, and when the viewer chooser and the banner's
   dialog came and went). The tools choose the stand-in with `App(settings, window_query=browser.token, ...)`, as

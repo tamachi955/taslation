@@ -1438,9 +1438,15 @@ class JobsMixin:
                 return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
             self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),
-                                             hint=hint if still else "")
+                                             hint=hint if still else "", first=self._first_book_dialog())
 
         self._recognise_then(show, pending[0] if pending else None, self._start_first)
+
+    def _first_book_dialog(self) -> bool:
+        """Whether the book's name is asked for the first time in the session (a dialog of the start: it takes the
+        keys as ever); a later one came by itself with a new book (`StartDialog`'s *first*)."""
+        count = self._book_dialogs = int(getattr(self, "_book_dialogs", 0) or 0) + 1
+        return count == 1
 
     def _recognition(self, *frames: Any) -> Recognition:
         """What recognising the book on screen needs, taken from the window (on the Tk thread): the target language,
@@ -1546,7 +1552,7 @@ class JobsMixin:
                 return
             name, still = self.book_var.get().strip(), self._name_needed()  # a name typed meanwhile stays
             self._start_dialog = StartDialog(self, name, still, answer, matches=matches if still else (),
-                                             hint=hint if still else "")
+                                             hint=hint if still else "", first=self._first_book_dialog())
 
         self._recognise_then(show, *frames)
 

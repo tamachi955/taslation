@@ -96,7 +96,14 @@ s right after a page was done; the window's captures of the viewer stalled 1.5-3
 their own, and the stand-in viewer, a browser drawing on the processor, drew 4 and 7 of 10 quick turns); at
 below-normal priority it computes on what the desktop leaves. Only for a server this process alone uses (another
 TASlation's requests are not this one's to slow) and only on Windows; a process that cannot be set is left as it is.
-An Ollama the person runs is never touched."""
+An Ollama the person runs is never touched.
+
+The runners (`level_runners`, `after_answer`): Ollama starts a model's runner one class above the server, above
+normal - over the viewer, whose drawing of a turned page then waits for the model's work. As the answer to a request
+that has the server compute begins (the model is loaded by then: `translate.ollama`), the runners of the server
+TASlation started are put at the server's own class (its lowered one while it yields), never above normal, by a
+thread of its own and at most once every `LEVEL_GAP_S`; whatever sets the server's class sets theirs with it, never
+above normal either (`_set_all`, `capped`)."""
 
 from __future__ import annotations
 
@@ -886,8 +893,9 @@ def own_server(url: Any) -> tuple[int, int] | None:
 
 
 def _set_all(server: tuple[int, int], value: int) -> int:
-    """*server*, then every process it started now (`descendants`), given the priority class *value*; how many were.
-    The server first: what it started is looked for after it (a look that fails leaves them as they are)."""
+    """*server*, then every process it started now (`descendants`), given the priority class *value* - those never
+    above normal (`capped`); how many were. The server first: what it started is looked for after it (a look that
+    fails leaves them as they are)."""
     count = int(set_priority_class(*server, value))
     try:
         started = descendants(*server)
@@ -895,8 +903,76 @@ def _set_all(server: tuple[int, int], value: int) -> int:
         LOG.debug("the processes the server started were not found (%s)", type(e).__name__)
         return count
     for pid, began in started:
-        count += set_priority_class(pid, began, value)
+        count += set_priority_class(pid, began, capped(value))
     return count
+
+
+ABOVE_NORMAL_PRIORITY_CLASS, HIGH_PRIORITY_CLASS, REALTIME_PRIORITY_CLASS = 0x00008000, 0x00000080, 0x00000100
+CLASS_RANK = {IDLE_PRIORITY_CLASS: 0, BELOW_NORMAL_PRIORITY_CLASS: 1, NORMAL_PRIORITY_CLASS: 2,
+              ABOVE_NORMAL_PRIORITY_CLASS: 3, HIGH_PRIORITY_CLASS: 4, REALTIME_PRIORITY_CLASS: 5}
+LEVEL_GAP_S = 2.0  # at most one look for a runner to put at the server's class in so many seconds (`after_answer`)
+_level_lock = threading.Lock()
+_levelled_at = -1e9  # when the runners were last looked at (`after_answer`)
+
+
+def capped(value: int) -> int:
+    """The priority class *value*, but never above normal - the viewer's class: a runner computing above it takes the
+    processor from the person's turning the page."""
+    return value if CLASS_RANK.get(value, CLASS_RANK[NORMAL_PRIORITY_CLASS]) <= CLASS_RANK[NORMAL_PRIORITY_CLASS] \
+        else NORMAL_PRIORITY_CLASS
+
+
+def level_runners(url: Any) -> int:
+    """The processes the server TASlation started for *url* (`own_server`) started - Ollama starts a model's runner
+    one class above itself, above normal - put at the server's own class (its lowered one while it yields:
+    `yield_server`), never above normal (`capped`); how many were set. Nothing for a server TASlation did not start, and
+    off Windows."""
+    if sys.platform != "win32":
+        return 0
+    server = own_server(url)
+    if server is None:
+        return 0
+    with _yield_lock:
+        target = lower_class(_yielded[server]) if server in _yielded else priority_class(*server)
+    if target is None:
+        return 0
+    target = capped(target)
+    count = 0
+    for pid, began in descendants(*server):
+        if priority_class(pid, began) not in (None, target) and set_priority_class(pid, began, target):
+            count += 1
+    if count:
+        LOG.info("the server's runners put at its priority class: %d", count)
+    return count
+
+
+def after_answer(url: Any, path: Any) -> None:
+    """(`translate.ollama`, as the answer to a request that has the server compute begins: a model it loaded for it
+    has its runner by then) The runners put at the server's class (`level_runners`) on a thread of their own - the
+    answer is read meanwhile -, at most one look every LEVEL_GAP_S. Never raises."""
+    global _levelled_at
+    if sys.platform != "win32" or str(path) not in COMPUTING_PATHS or not url:
+        return
+    now = time.monotonic()
+    with _level_lock:
+        if now - _levelled_at < LEVEL_GAP_S:
+            return
+        _levelled_at = now
+    _level_soon(url)
+
+
+def _level_soon(url: Any) -> None:
+    """`level_runners` on a thread of its own (never raises)."""
+    def level() -> None:
+        try:
+            level_runners(url)
+        except Exception as e:  # noqa: BLE001 - the runner keeps its class: the answer comes all the same
+            LOG.debug("the runners' class was not set (%s)", type(e).__name__)
+
+    try:
+        threading.Thread(target=level, name="runner-class", daemon=True).start()
+    except RuntimeError:  # (the interpreter going)
+        pass
 
 
 def lower_class(was: int) -> int | None:

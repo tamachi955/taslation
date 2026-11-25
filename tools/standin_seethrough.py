@@ -550,6 +550,12 @@ class SeeWatch:
     def start(self) -> None:
         self.thread.start()
 
+    def acting(self) -> bool:
+        """Whether a scene of the watch's own (the pointer on a bubble, Edit's click and drags, Add area) is being
+        acted now: the run's end waits for it (`standin_e2e.Director.step`), so that its measures are not cut."""
+        thread = self.hover_thread
+        return thread is not None and thread.is_alive()
+
     def close(self) -> None:
         self.stop.set()
         self.thread.join(3.0)
@@ -1627,7 +1633,15 @@ class SeeWatch:
                 "fixes": dict(getattr(app, "_see_hidden_fixes", {}) or {}),
                 "handed_back": int(getattr(app, "_see_handed_back", 0) or 0),
                 "front": dict(getattr(app, "_see_front", {}) or {}), "button": dict(self.root_facts),
-                "menus_opened": len(getattr(app, "_see_menu_opened", []) or [])}
+                "menus_opened": len(getattr(app, "_see_menu_opened", []) or []),
+                # (the log of the foreground's counts: kinds only, `seethrough.foreground_tick`; and how often a
+                # dialog's closing gave the foreground back at once, `seethrough.closing`)
+                "foreground": dict(getattr(app, "_see_foreground", {}) or {}),
+                "foreground_lines": list(getattr(app, "_see_foreground_lines", []) or []),
+                "foreground_notes": int(getattr(app, "_see_front_notes", 0) or 0),
+                "foreground_polled": int(getattr(app, "_see_front_polled", 0) or 0),
+                "foreground_hooked": bool(getattr(getattr(app, "_see_fronts", None), "hooked", False)),
+                "closing_gave_back": int(getattr(app, "_see_closing", 0) or 0)}
 
     def _viewer_frame(self) -> np.ndarray | None:
         """The viewer's newest captured frame, cut to its client area as the see-through window lies on it (RGB)."""

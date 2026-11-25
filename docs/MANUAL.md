@@ -98,7 +98,8 @@ Once the viewer is in sight again and there is room beside the page, the panes c
 with the left pane's controls ("Translate", "Auto", "Translate into" (the list of the target languages), "Lettering", "Add area", "Set area..."), "Settings..." and "Quit" added. The taskbar button is the way to the program at any time;
 closing it there (from the button's menu, or with Alt+F4) quits TASlation as "Quit" does.
 
-TASlation's dialogs open over the viewer, on the viewer's monitor. A dialog you asked for takes the keys while it is open; once it closes, the keys go back to the viewer.
+TASlation's dialogs open over the viewer, on the viewer's monitor. A dialog you asked for takes the keys while it is open; once it closes, the keys go back to the viewer at once.
+A dialog that comes by itself while you read (a warning, a question after a change of the series sheet, the name of a book you opened, the box about the GPU's memory) stays in sight over the viewer but leaves the keys with it: the keys keep turning the pages, and a click on the dialog gives it the keys to answer.
 
 ### The bubble under the pointer: the original, and copying the Japanese
 

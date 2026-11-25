@@ -1259,8 +1259,23 @@ class EditBubbleDialog(tk.Toplevel):
             return
         self._saved = True
         self._remember_font()
+        self._hand_back()
         self.on_save(self._data())
         self.destroy()
+
+    def _hand_back(self) -> None:
+        """(see-through mode) The editor closing at the person's own act: the foreground given back to the viewer in
+        this same call, before the editor goes (`seethrough.closing`) - a key pressed as it closes goes to the book.
+        Not for Previous and Next (the next editor takes the keys)."""
+        if getattr(self, "_handed_back", False) or getattr(self, "_handed", False):
+            return
+        self._handed_back = True
+        try:
+            from .. import seethrough
+
+            seethrough.closing(self.master._root(), self)
+        except Exception:  # noqa: BLE001 - (the window going: the editor closes all the same)
+            pass
 
     # ------------------------------------------------------------------ the model asked
     def _ask(self, mode: str) -> None:
@@ -1331,7 +1346,10 @@ class EditBubbleDialog(tk.Toplevel):
 
     def destroy(self) -> None:
         """The editor closes: without Save (or a step to the region before or after it, whose preview the window
-        ends), the page shows the region as it was (*on_cancel*)."""
+        ends), the page shows the region as it was (*on_cancel*); the viewer gets the foreground back at once
+        (`_hand_back`)."""
+        if not getattr(self, "_closed", True):
+            self._hand_back()
         self._show_original(False)
         for job in ("_flash_job", "_preview_job"):
             if getattr(self, job, None) is not None:

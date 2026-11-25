@@ -10,7 +10,9 @@ System changes it back). Check again has the focus. The other models Ollama hold
 largest first, each with its MB) are named, TASlation's own apart from other programs'; with one of TASlation's
 among them a fourth way comes first, Release and check again (those of TASlation's are released, never another
 program's: `jobs.JobsMixin._release_loaded`). Nothing is sent anywhere: the figures are the card's own (NVML) and
-Ollama's on this computer.
+Ollama's on this computer. At the start it takes the keys as it shows; one that comes once a viewer is followed (later
+than the start, the person reading) is shown without taking them: topmost over the viewer, a click gives it the keys
+(`seethrough.comes_quietly`, `layout.show_quietly`).
 
 The dialog never appears without an NVIDIA GPU (nothing is judged), in a command or a tool (they cannot ask: they
 take the processor's way, `place.plan_for`), or with ``gpu_short`` "processor"; the test suite's windows run without a
@@ -25,7 +27,8 @@ from typing import Any, Callable, Sequence
 
 from ...devices import parts_text, short_mb
 from ...i18n import _
-from ..layout import place_window
+from .. import seethrough
+from ..layout import place_window, show_by_itself
 from .caches import ICONS, WARNING_CHARS, in_lines
 
 # the 16 languages: `locales/features/gpu_start.py`
@@ -54,6 +57,12 @@ class GpuShortDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, short: int, parts: Sequence[str],
                  on_answer: Callable[[str, bool], None], loaded: Sequence[Any] = ()):
         super().__init__(master)
+        app = master._root()
+        # (the start's own box takes the keys as it shows; one that comes once a viewer is followed - later than the
+        # start - is shown without taking them from it, `layout.show_quietly`)
+        self.quiet = getattr(app, "selected", None) is not None and seethrough.comes_quietly(app)
+        if self.quiet:
+            self.withdraw()
         self.title("TASlation")
         self.transient(master)
         self.resizable(False, False)
@@ -97,6 +106,14 @@ class GpuShortDialog(tk.Toplevel):
         self.bind("<Escape>", self._on_escape)
         self.protocol("WM_DELETE_WINDOW", lambda: self.choose("quit"))
         self.bind("<Destroy>", self._gone, add="+")
+        if self.quiet:
+            place_window(self, master)
+            show_by_itself(self, master, first, quiet=True)
+            try:
+                self.grab_set()
+            except tk.TclError:  # not on the screen (yet): no grab
+                pass
+            return
         first.focus_set()
         place_window(self, master)
         try:

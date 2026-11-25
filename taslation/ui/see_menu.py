@@ -377,26 +377,29 @@ class _Dialog(tk.Toplevel):
 
     def show(self, focus: tk.Misc | None = None, at: tuple[int, int] | None = None, keys: bool = False) -> None:
         """Shown, placed over the viewer (*at*: centred on that screen point instead); one that came by itself
-        topmost, taking the keys only while TASlation's own window has them (`layout.dialog_keys`) - unless *keys*:
-        it takes them as it shows (the start's viewer chooser, the one thing on the screen)."""
-        from .layout import dialog_keys, place_by_book, place_window
+        topmost, shown without taking the foreground while the person is in the book or in another program
+        (`layout.show_by_itself`: a click gives it the keys) - unless *keys*: it takes them as it shows (the start's
+        viewer chooser, the one thing on the screen)."""
+        from .layout import dialog_keys, place_by_book, place_window, show_by_itself, stay_on_top
 
         if self.by_itself:
             if at is not None:
                 place_window(self, self.app, at=at)
             else:
                 place_by_book(self, self.app)
-            try:
-                self.attributes("-topmost", True)
-            except tk.TclError:
-                pass
+            stay_on_top(self)
         else:
             place_window(self, self.app, at=at)
-        if self.app.winfo_viewable():  # (a window not on the screen, as the tests' root: it stays out of sight)
-            self.deiconify()
+        viewable = self.app.winfo_viewable()  # (a window not on the screen, as the tests' root: it stays out of sight)
         if self.by_itself and not keys:
-            dialog_keys(self, self.app, focus)
-        elif keys and self.winfo_viewable():
+            if viewable:
+                show_by_itself(self, self.app, focus)
+            else:
+                dialog_keys(self, self.app, focus)
+            return
+        if viewable:
+            self.deiconify()
+        if keys and self.winfo_viewable():
             try:
                 self.lift()
                 self.focus_force()
@@ -588,6 +591,7 @@ def open_viewer(app: Any, by_itself: bool = False) -> ViewerDialog:
         if dialog is not None and dialog.winfo_exists():
             if not by_itself:
                 dialog.by_itself = False  # (asked for now)
+                dialog._see_quiet = False
                 dialog.lift()
                 dialog.focus_force()
             return dialog

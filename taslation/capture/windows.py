@@ -25,7 +25,9 @@ changes - no code was taken from it, it is a C# project):
 * What happens to windows comes from out-of-context WinEvent hooks
   (`WindowEvents`: which window comes to the front, the viewer's window renamed,
   moved or closed), so that the window need not capture the viewer just to
-  notice; the callbacks only take notes (see the class for why).
+  notice; the callbacks only take notes (see the class for why). Every change
+  of the window in front is noted for the see-through mode's log of the
+  foreground as well (`ForegroundNotes`: kinds and processes, no title).
 * Which window is the viewer is decided on a browser window's *tab title*
   (`tab_title`: its title without " - Google Chrome" and the like), by rules
   that never guess between windows: a query names one window or the caller
@@ -48,8 +50,9 @@ import ctypes
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, NamedTuple, Sequence
 
 import numpy as np
 from PIL import Image
@@ -1533,3 +1536,97 @@ class WindowEvents:
         if len(self.notes) >= MAX_NOTES:  # not taken for long: the oldest go
             del self.notes[: len(self.notes) - MAX_NOTES + 1]
         self.notes.append(note)
+
+
+class Fronted(NamedTuple):
+    """A window that came to the front (`ForegroundNotes`): when (``time.monotonic``), the window, its process, its
+    top-level window and the one that owns it (GA_ROOTOWNER), and - for a window of this process only - its class
+    name ("" for any other program's: nothing of another program is kept but that it was another)."""
+
+    at: float
+    hwnd: int
+    pid: int
+    root: int
+    owner: int
+    own_class: str
+
+
+class ForegroundNotes:
+    """Every change of the window in front, from an out-of-context WinEvent hook (EVENT_SYSTEM_FOREGROUND) of the
+    thread that sets it: its callbacks come while that thread reads its messages (Tk's loop, for the window), and only
+    note what came (`Fronted`, at most MAX_NOTES kept until `take`n) - no call into Tk. Under Tk's loop the hook was
+    seen to bring one of two changes in a stand-in run: `now` gives the window in front at the log's tick as well.
+    For the see-through mode's log of the foreground (`ui.seethrough.foreground_tick`): no title, no text of any
+    window is read."""
+
+    def __init__(self) -> None:
+        self.notes: list[Fronted] = []
+        self._hook = 0
+        self._me = os.getpid()
+        self._proc = WINEVENTPROC(self._note) if IS_WINDOWS else None
+
+    @classmethod
+    def start(cls) -> "ForegroundNotes | None":
+        """The hook set (on this thread); None outside Windows. Where the hook cannot be set the notes are there all
+        the same, with no hook (`hooked` False): `now` is all they give."""
+        if not IS_WINDOWS:
+            return None
+        notes = cls()
+        hook = user32.SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, notes._proc, 0, 0,
+                                      WINEVENT_OUTOFCONTEXT)
+        notes._hook = int(hook or 0)
+        return notes
+
+    @property
+    def hooked(self) -> bool:
+        return bool(self._hook)
+
+    def take(self) -> list[Fronted]:
+        """The windows that came to the front since the last call, oldest first."""
+        notes, self.notes = self.notes, []
+        return notes
+
+    def now(self) -> Fronted:
+        """The window in front now, as a note (the log looks at it on each of its ticks as well: a change the hook
+        did not bring is not lost)."""
+        return fronted(foreground_window(), self._me)
+
+    def close(self) -> None:
+        """The hook removed (from the thread that set it): no note comes in after this."""
+        hook, self._hook = self._hook, 0
+        if hook and IS_WINDOWS:
+            user32.UnhookWinEvent(hook)
+
+    def _note(self, _hook, event, hwnd, _id_object, _id_child, _thread, _ms) -> None:  # type: ignore[no-untyped-def]
+        """The callback: what came to the front, noted (see the class)."""
+        try:
+            if event != EVENT_SYSTEM_FOREGROUND:
+                return
+            self.notes.append(fronted(int(hwnd or 0), self._me))
+            if len(self.notes) > MAX_NOTES:  # (not taken for long: the oldest go)
+                del self.notes[: len(self.notes) - MAX_NOTES]
+        except Exception:  # noqa: BLE001 - a callback from Windows must never raise
+            pass
+
+
+def fronted(hwnd: int, own_pid: int | None = None) -> Fronted:
+    """The window *hwnd* that came to the front now, as `ForegroundNotes` notes it."""
+    at = time.monotonic()
+    if not IS_WINDOWS or not hwnd:
+        return Fronted(at, int(hwnd or 0), 0, 0, 0, "")
+    pid = wintypes.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    root = int(user32.GetAncestor(hwnd, GA_ROOT) or 0)
+    owner = int(user32.GetAncestor(hwnd, GA_ROOTOWNER) or 0)
+    me = os.getpid() if own_pid is None else own_pid
+    return Fronted(at, int(hwnd), int(pid.value), root, owner, _class_name(hwnd) if pid.value == me else "")
+
+
+def stay_on_top(hwnd: int) -> bool:
+    """The top-level window *hwnd* made topmost, neither activated nor given the foreground (SetWindowPos with
+    SWP_NOACTIVATE, its place and size kept): a dialog that came by itself stays in sight above a full-screen viewer
+    and takes nothing from it. Whether it is topmost now (False outside Windows, for a handle that is no window)."""
+    if not IS_WINDOWS or not hwnd or not user32.IsWindow(hwnd):
+        return False
+    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_STAY)
+    return bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)

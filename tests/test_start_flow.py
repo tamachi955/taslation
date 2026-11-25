@@ -87,6 +87,7 @@ class Flow(BlackViewerMixin, tk.Toplevel):
     _name_needed = A._name_needed
     _begin_book = A._begin_book
     _ask_book = A._ask_book
+    _first_book_dialog = A._first_book_dialog
 
     def _recognised(self, *frames):
         """What the start dialog offers and what it says of it, all on the calling thread (the dialog itself waits
@@ -304,8 +305,9 @@ def flow(hidden_root, tmp_path, monkeypatch):
     dialogs = []
 
     class Recorded:
-        def __init__(self, master, name, generic, on_answer, matches=(), hint=""):
+        def __init__(self, master, name, generic, on_answer, matches=(), hint="", first=True):
             self.name, self.generic, self.on_answer = name, generic, on_answer
+            self.first = first
             self.default = "ok"
             self.matches, self.hint = list(matches), hint
             dialogs.append(self)

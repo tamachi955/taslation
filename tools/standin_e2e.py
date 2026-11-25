@@ -2785,6 +2785,7 @@ class Director:
         self.cover_from: float | None = None
         self.own_topped = False  # (`cover_step`: the window put at the top of the order)
         self.behind: Behind | None = None  # (--start-behind: `behind_step`)
+        self.see: Any = None  # (the see-through watch: the run's end waits for a scene of its being acted, `step`)
         self.behind_samples: list[dict[str, Any]] = []  # (the side panes' state where it changed: `behind_step`)
         self.behind_sampled = 0.0
         self.chooser_rows: list[dict[str, Any]] = []  # (--chooser: `chooser_step`)
@@ -3195,7 +3196,8 @@ class Director:
             if self.phase != "end":
                 self.phase, self.phase_at = "end", now
                 return
-            if (self.ended and rested and self.backlog_done()) or waited > self.args.timeout:
+            acting = self.see is not None and self.see.acting()  # (a scene of the watch's - Edit's, say - not cut)
+            if (self.ended and rested and self.backlog_done() and not acting) or waited > self.args.timeout:
                 if waited > self.args.timeout:
                     self.released["end"] = {"timed_out": True}
                 self.finish()
@@ -4652,6 +4654,8 @@ def run(args: argparse.Namespace) -> int:
         if not args.standin_full_screen:  # (the full screen is the browser's own place)
             place_own(hwnd, standin_rect, top=True)
         ready = placed_view(browser, ready, since)
+        browser._front_look("placed")  # (the stand-in shown and placed: it has not taken the foreground meanwhile)
+        report["browser_start"] = dict(browser.start_facts)
         report["run"] = run_app(args, report, browser, hwnd, ready, segments, out, standin_dir, url, app_rect,
                                 narrow_rect, mode)
     except Exception as e:  # noqa: BLE001 - said (its type and where, no value), then everything is closed
@@ -4807,6 +4811,7 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     director = Director(app, browser, guard, selection, notes, segments, args, out, standin_dir, narrow_rect,
                         app_rect)
     director.behind = behind
+    director.see = see
     director.start()
     began = now_ms()
     try:

@@ -448,6 +448,7 @@ class OllamaTranslator:
                 conn.response_class = http.client.HTTPResponse
                 conn.request("POST" if data else "GET", self._prefix + path, body=data, headers=headers)
                 resp = conn.getresponse()
+                _answer_began(getattr(self, "base", ""), path)
                 status, body = resp.status, resp.read()
                 if resp.will_close:
                     self._drop()
@@ -579,6 +580,7 @@ class OllamaTranslator:
                 conn.response_class = functools.partial(_Response, watch=watch)  # type: ignore[assignment]
                 resp = conn.getresponse()
                 began = True
+                _answer_began(getattr(self, "base", ""), path)
                 if resp.status >= 300:
                     raise self._http_failure(resp.status, resp.read(65536), path)
                 for raw in resp:
@@ -1236,6 +1238,18 @@ def _own_priority(path: str) -> None:
     from ..ollama_start import before_request
 
     before_request(path)
+
+
+def _answer_began(url: str, path: str) -> None:
+    """(as an answer begins) The runner of the model the server loaded for it put at the server's own priority class,
+    never above normal, when TASlation started the server (`ollama_start.after_answer`: Ollama starts it above
+    normal, over the viewer)."""
+    try:
+        from ..ollama_start import after_answer
+
+        after_answer(url, path)
+    except Exception:  # noqa: BLE001 - the answer is read all the same
+        pass
 
 
 def _stale(e: BaseException) -> bool:

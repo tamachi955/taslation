@@ -329,18 +329,115 @@ def place_by_book(win: tk.Toplevel, parent: tk.Misc) -> bool:
         place_window(win, parent)
         return False
     place_window(win, parent, at=((monitor[0] + monitor[2]) // 2, (monitor[1] + monitor[3]) // 2))
+    stay_on_top(win)
+    return True
+
+
+def stay_on_top(win: tk.Toplevel) -> None:
+    """*win* topmost, above a full-screen viewer too, and never activated for it: Windows is asked directly
+    (`capture.stay_on_top`, SWP_NOACTIVATE) once the dialog has its frame, so that a dialog shown without the
+    foreground (`show_quietly`) stays without it; before that, and outside Windows, Tk's own ``-topmost``."""
+    from ..capture import stay_on_top as on_top
+
+    try:
+        frame = int(win.wm_frame(), 16)
+        framed = IS_WINDOWS and frame != int(win.winfo_id())
+    except (tk.TclError, ValueError, AttributeError, TypeError):
+        framed, frame = False, 0
+    if framed and on_top(frame):
+        win._on_top = True  # type: ignore[attr-defined] - (for the tests: Tk's own flag is not set this way)
+        return
     try:
         win.attributes("-topmost", True)
     except tk.TclError:
         pass
+
+
+def show_quietly(win: tk.Toplevel, focus: tk.Misc | None = None) -> None:
+    """*win*, a dialog placed and still withdrawn, shown without taking the foreground: Tk's ``wm state normal``
+    (SW_SHOWNOACTIVATE; ``wm deiconify`` would raise it and force the focus into it, SetForegroundWindow, which
+    Windows lets through while the pointer's last input went to TASlation - a box in Edit), then topmost
+    (`stay_on_top`, SWP_NOACTIVATE). It waits in sight until the person clicks it (Windows activates it then: it takes
+    the keys, *focus* the first) and is marked meanwhile (``_see_quiet``: `seethrough.front_tick` brings no such
+    dialog to the front, a region editor's closing gives the foreground back past it)."""
+    win._see_quiet = True  # type: ignore[attr-defined]
+
+    def taken(_event: Any = None) -> None:
+        if not getattr(win, "_see_quiet", False):
+            return
+        win._see_quiet = False  # type: ignore[attr-defined]
+        if focus is not None:
+            try:
+                if win.focus_get() in (None, win):
+                    focus.focus_set()
+            except (tk.TclError, KeyError):
+                pass
+
+    try:
+        win.bind("<FocusIn>", taken, add="+")
+        win.wm_state("normal")
+        win.update_idletasks()
+    except tk.TclError:
+        return
+    stay_on_top(win)
+
+
+def show_by_itself(win: tk.Toplevel, parent: tk.Misc, focus: tk.Misc | None = None,
+                   quiet: bool | None = None) -> bool:
+    """*win*, a dialog that came by itself, placed and still withdrawn, shown: quietly while the person is in the
+    book or in another program (`show_quietly`; *quiet* None: `seethrough.comes_quietly` decides, True or False:
+    decided by the caller), else as ever - shown and given the keys while TASlation's own window has them
+    (`dialog_keys`). Either way the viewer gets the foreground back once it closes after the person went to it from the
+    book. Whether it came quietly."""
+    from . import seethrough
+
+    app = parent._root()
+    if quiet is None:
+        quiet = seethrough.comes_quietly(app)
+    if not quiet:  # (the keys as the dialog is on the screen: at once, or once Tk has mapped it)
+        def keys() -> None:
+            if not getattr(win, "_by_itself_keys", False):
+                win._by_itself_keys = True  # type: ignore[attr-defined]
+                dialog_keys(win, parent, focus)
+
+        try:
+            win.bind("<Map>", lambda event: keys() if event.widget is win else None, add="+")
+            win.deiconify()
+            if win.winfo_ismapped():
+                keys()
+        except tk.TclError:
+            pass
+        return False
+    show_quietly(win, focus)
+    _viewer_back(win, app)
     return True
+
+
+def _viewer_back(win: tk.Toplevel, app: Any) -> None:
+    """When *win* goes with TASlation's window in front (the person went to it from the book), the viewer gets the
+    foreground back."""
+    viewer = getattr(getattr(app, "selected", None), "hwnd", 0) or 0
+    if not viewer:
+        return
+
+    def back(event: tk.Event) -> None:
+        if event.widget is not win:
+            return
+        try:
+            if foreground_owner(foreground_window(), viewer) == "own" and window_exists(viewer):
+                give_foreground(viewer)
+        except (OSError, RuntimeError):  # the viewer gone meanwhile
+            pass
+
+    win.bind("<Destroy>", back, add="+")
 
 
 def dialog_keys(win: tk.Toplevel, parent: tk.Misc, focus: tk.Misc | None = None) -> None:
     """A dialog on the screen takes the keys only when TASlation's own window has them (the reader is in TASlation:
     *focus*, or the dialog, gets them). One that came by itself while the reader is in the book or in another
     program leaves the foreground where it is - in sight above the book (`place_by_book`), a click gives it the keys
-    - and when it closes after the reader went to it from the book, the book gets the foreground back."""
+    - and when it closes after the reader went to it from the book, the book gets the foreground back. (A dialog
+    that is still to be shown: `show_by_itself`, which shows it without taking the foreground there.)"""
     app = parent._root()
     viewer = getattr(getattr(app, "selected", None), "hwnd", 0) or 0
     try:
@@ -357,17 +454,7 @@ def dialog_keys(win: tk.Toplevel, parent: tk.Misc, focus: tk.Misc | None = None)
         return
     if owner != "viewer" or not viewer:
         return
-
-    def back(event: tk.Event) -> None:
-        if event.widget is not win:
-            return
-        try:
-            if foreground_owner(foreground_window(), viewer) == "own" and window_exists(viewer):
-                give_foreground(viewer)
-        except (OSError, RuntimeError):  # the viewer gone meanwhile
-            pass
-
-    win.bind("<Destroy>", back, add="+")
+    _viewer_back(win, app)
 
 
 def fit_combobox(box: ttk.Combobox, values: Iterable[Any], min_chars: int = 4, max_chars: int = 60) -> None:

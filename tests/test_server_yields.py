@@ -97,7 +97,7 @@ def test_each_goes_back_to_the_class_the_server_had_and_a_low_one_is_never_raise
     with asking_behind(URL):
         assert classes.of[SERVER] == BELOW
     before_request("/api/generate")
-    assert classes.of == {SERVER: 0x8000, RUNNER: 0x8000}
+    assert classes.of == {SERVER: 0x8000, RUNNER: NORMAL}  # (its runner never above normal: `ollama_start.capped`)
 
     classes.of = {SERVER: BELOW, RUNNER: BELOW}  # (a job started at below normal: one class lower all the same)
     with asking_behind(URL):

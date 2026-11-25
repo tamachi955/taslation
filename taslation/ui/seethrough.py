@@ -64,10 +64,24 @@ page's regions.
   otherwise the foreground goes back to the viewer (`hand_back`: a dialog of its own closed, a menu ended, the button
   clicked with the panes on the screen). Its dialogs come up alone, over the viewer (`dialog_centre`,
   `layout.dialog_area`), on the viewer's monitor (`layout.book_monitor`); one the reader asked for (from a pane, the
-  menu or the button: `asked`) takes the keys as it shows (`_mapped`), the others keep their own way (the start's
-  ones leave the foreground where it is: `layout.dialog_keys`). With no viewer chosen the viewer chooser comes by
-  itself (`see_menu.chooser_due`), and the setup banner's lines come as a small dialog of their own
+  menu or the button: `asked`) takes the keys as it shows (`_mapped`), and so do the start's own (the legal notice,
+  the GPU's box at the start, the viewer chooser at the start, the first book's name). One that comes by itself
+  during a session - the setup banner's, a warning box, a question a change of the sheet brought, the GPU's box later
+  than the start, the name of a new book - while the person is in the book or in another program comes quietly
+  (`comes_quietly`, `layout.show_by_itself`): shown without being activated (``wm state normal``, never ``wm
+  deiconify``, which forces the focus), topmost by SWP_NOACTIVATE, on the viewer's monitor; it takes the keys once
+  clicked, and `front_tick` brings none such to the front (`_shown_dialogs`). A dialog the person closes gives the
+  foreground back to the viewer at once: the region editor in the same call that closes it (`closing`), any other
+  at the next idle moment (`_closed`), not at the next tick. With no viewer chosen the viewer chooser comes by itself
+  (`see_menu.chooser_due`), and the setup banner's lines come as a small dialog of their own
   (`see_menu.show_banner`).
+* The log of the foreground (`foreground_tick`, from `capture.ForegroundNotes`: its hook's notes and the window in
+  front at each tick, since the hook does not bring every change): every change of the window in front
+  that involves TASlation's windows - to the hidden window, a dialog by its kind, a message box, a menu, the
+  lettering, a side pane; from one of them back to the viewer or to another program - and every time the viewer
+  loses the foreground while a job is at work is one line in the log (what to what, ms after the last job's start,
+  whether a job is at work, whether Edit is on; no title, no text) and counted (``_see_foreground``): what explains a
+  key of the person's that did not reach the book.
 
 Nothing here presses a key or posts a message to the viewer, and nothing but the reader's own choice in a pane, the
 menu, the taskbar button or a region in Edit, or a dialog of TASlation's own, moves the foreground."""
@@ -333,6 +347,10 @@ def _closed(app: Any, event: Any) -> None:
     except tk.TclError:
         pass
     app._see_closed_at = time.monotonic()
+    try:  # (what the tick would do, at once: the viewer back in front once Windows has given the window the foreground)
+        app.after_idle(lambda: hidden(app) and front_tick(app))
+    except (tk.TclError, RuntimeError, AttributeError):
+        pass
 
 
 def recently_closed(app: Any, within: float = CLOSED_S) -> bool:
@@ -388,7 +406,7 @@ def front_tick(app: Any, clicked: bool = False) -> str:
             return ""
     except (OSError, RuntimeError):
         return ""
-    dialogs = own_dialogs(app)
+    dialogs = _shown_dialogs(app)  # (one that came by itself and was never clicked waits: the keys go to the book)
     if dialogs:
         try:
             if clicked:
@@ -452,7 +470,10 @@ def _mapped(app: Any, event: Any) -> None:
     """(a top-level of the window's is shown) One the reader asked for (`asked`) is lifted and given the keys: it is
     what they wait for. The others are left as their own code has them; tips (no frame) and the start's decoy too."""
     widget = getattr(event, "widget", None)
-    if not hidden(app) or not isinstance(widget, tk.Toplevel) or not _recently_asked(app, ASKED_S):
+    if not hidden(app) or not isinstance(widget, tk.Toplevel):
+        return
+    _remember_kind(app, widget)
+    if not _recently_asked(app, ASKED_S) or getattr(widget, "_see_quiet", False):
         return
     try:
         if widget.wm_overrideredirect() or widget in (getattr(app, "_quiet_decoy", None) or ()):
@@ -491,7 +512,183 @@ def hand_back(app: Any) -> bool:
     return True
 
 
-COULD_NOT_START = "TASlation could not lay its lettering over the viewer's window on this computer, and ends."
+def _shown_dialogs(app: Any) -> list[Any]:
+    """The dialogs of the window's on show that hold the person's attention: `own_dialogs` but those that came by
+    themselves and were never clicked (`layout.show_quietly`: they wait in sight, the keys stay where they go)."""
+    return [d for d in own_dialogs(app) if not getattr(d, "_see_quiet", False)]
+
+
+def _typed_in(app: Any) -> bool:
+    """Whether the window in front is one the person types in that is TASlation's: a dialog of its own, a message
+    box, a menu - not the hidden window (Windows gives it the foreground when a dialog of its own closes, `hand_back`),
+    the lettering or a side pane (they never take it: the viewer keeps the keys)."""
+    from ..capture import foreground_owner, foreground_window
+
+    win = getattr(app, "selected", None)
+    try:
+        front = foreground_window()
+        if foreground_owner(front, int(win.hwnd) if win is not None else 0) != "own":
+            return False
+        over = getattr(app, "_see_through", None)
+        mine = set(over.own_windows()) if over is not None and hasattr(over, "own_windows") else set()
+        return front not in mine | {root_hwnd(app)}
+    except (OSError, RuntimeError, AttributeError):
+        return False
+
+
+def comes_quietly(app: Any) -> bool:
+    """Whether a dialog of TASlation's that came by itself during a session (the setup banner's, a warning box, a
+    question the person's change of the sheet brought, the book's name for a new book...) is shown without taking the
+    foreground (`layout.show_by_itself`): TASlation's own window hidden, the person not having asked for anything just
+    now (`asked`, ASKED_S) and not in a dialog of TASlation's (`_typed_in`) - the viewer or another program in front:
+    the person's keys stay where they go, the dialog waits in sight above the viewer and takes them once it is
+    clicked. The start's own dialogs and the ones asked for take the keys as they show."""
+    if not hidden(app) or _recently_asked(app, ASKED_S):
+        return False
+    return not _typed_in(app)
+
+
+def closing(app: Any, dialog: Any) -> bool:
+    """A dialog of the hidden window's that has the keys closing at the person's own act (the region editor's Save,
+    Cancel, Close, Escape): the foreground given back to the viewer now, in the same call, before the dialog goes -
+    not ~50-400 ms later as `hand_back` would (Windows gives it to the hidden window as the dialog's owner meanwhile,
+    and a key pressed then would go to TASlation, not to the book). Only while the dialog (or the hidden window) has
+    the foreground, no menu of TASlation's is up and no other dialog of its own holds the person (`_shown_dialogs`).
+    A request made before (`asked`) ends with it: a dialog that comes by itself next comes quietly. Whether it was
+    given back."""
+    if not hidden(app) or menu_up(app):
+        return False
+    win = getattr(app, "selected", None)
+    if win is None:
+        return False
+    from ..capture import foreground_window, give_foreground, window_exists
+
+    try:
+        frame = int(dialog.wm_frame(), 16)
+    except (tk.TclError, ValueError, AttributeError, TypeError):
+        frame = 0
+    if any(d is not dialog for d in _shown_dialogs(app)):
+        return False
+    try:
+        front = foreground_window()
+        if not front or front not in (frame, root_hwnd(app)) or not window_exists(win.hwnd):
+            return False
+        give_foreground(win.hwnd)
+    except (OSError, RuntimeError):
+        return False
+    app._see_asked = -1e9
+    app._see_closing = int(getattr(app, "_see_closing", 0)) + 1
+    return True
+
+
+# ------------------------------------------------------------------ the log of the foreground
+KINDS_KEPT = 64  # the dialogs' kinds kept by their windows' handles (`_mapped`), the newest
+NOT_OURS = ("the viewer", "another program", "nothing")
+
+
+def _remember_kind(app: Any, widget: Any) -> None:
+    """(a top-level of the window's shown) Its kind - its class's name, no title - kept by its window's handle for the
+    log of the foreground (`front_kind`): it may be gone by the time the log names it."""
+    try:
+        frame = int(widget.wm_frame(), 16)
+    except (tk.TclError, ValueError, AttributeError, TypeError):
+        return
+    kinds = app.__dict__.setdefault("_see_kinds", {})
+    kinds.pop(frame, None)
+    kinds[frame] = type(widget).__name__
+    while len(kinds) > KINDS_KEPT:
+        kinds.pop(next(iter(kinds)))
+
+
+def front_kind(app: Any, note: Any) -> str:
+    """What came to the front (`capture.Fronted`) as the log of the foreground names it: a window of TASlation's by
+    its kind - "the hidden window", "a dialog (its class)", "a message box", "a menu", "the lettering", "a side pane",
+    "a window of TASlation's" -, "the viewer" (its window or a popup of it), "another program" or "nothing"."""
+    import os
+
+    if not note.hwnd:
+        return "nothing"
+    if note.pid == os.getpid():
+        top = note.root or note.hwnd
+        if top == root_hwnd(app):
+            return "the hidden window"
+        over = getattr(app, "_see_through", None)
+        if over is not None and top == getattr(over, "hwnd", 0):
+            return "the lettering"
+        if over is not None and top in (getattr(over, "panes", {}) or {}).values():
+            return "a side pane"
+        kind = (getattr(app, "_see_kinds", {}) or {}).get(top)
+        if kind:
+            return f"a dialog ({kind})"
+        if note.own_class == "#32770":
+            return "a message box"
+        if note.own_class == "#32768":
+            return "a menu"
+        return "a window of TASlation's"
+    win = getattr(app, "selected", None)
+    viewer = int(win.hwnd) if win is not None else 0
+    if viewer and viewer in (note.hwnd, note.root, note.owner):
+        return "the viewer"
+    return "another program"
+
+
+def foreground_tick(app: Any) -> list[str]:
+    """(every tick, the window hidden) Each change of the window in front since the last tick (`capture.
+    ForegroundNotes`: the hook's notes, and the window in front now when it is not the last one noted - the hook does
+    not bring every change) that involves TASlation's windows - to one of them (`front_kind`), or from one of them back to
+    the viewer or to another program -, and each time the viewer loses the foreground to anything while a job is at
+    work: one line in the log, counted (``_see_foreground``: by where it went; "the viewer lost it in a job" too). Each
+    line says from where to where, how many ms after the last job's start it came (`StatusMixin._go_busy`; negative:
+    before it), whether a job is at work and whether Edit is on - no title, no text. This is what explains a key
+    of the person's that went elsewhere than the book. The lines, for the tests."""
+    notes = getattr(app, "_see_fronts", None)
+    if notes is None:
+        return []
+    from . import see_edit
+
+    lines: list[str] = []
+    taken = notes.take()
+    app._see_front_notes = int(getattr(app, "_see_front_notes", 0) or 0) + len(taken)  # (the hook's, for a tool)
+    look = getattr(notes, "now", None)
+    if look is not None:  # (and the window in front now: a change the hook did not bring is not lost)
+        front = look()
+        last = taken[-1].hwnd if taken else getattr(app, "_see_front_hwnd", None)
+        if front.hwnd != last:
+            taken.append(front)
+            app._see_front_polled = int(getattr(app, "_see_front_polled", 0) or 0) + 1
+    if taken:
+        app._see_front_hwnd = taken[-1].hwnd
+    for note in taken:
+        to = front_kind(app, note)
+        was = getattr(app, "_see_front_kind", None) or "nothing"
+        if to == was:
+            continue
+        app._see_front_kind = to
+        job = bool(getattr(app, "busy", False))
+        lost = was == "the viewer" and job
+        if to in NOT_OURS and was in NOT_OURS and not lost:
+            continue
+        counts = app.__dict__.setdefault("_see_foreground", {})
+        key = to if to not in NOT_OURS else "back to the viewer" if to == "the viewer" else f"to {to}"
+        counts[key] = counts.get(key, 0) + 1
+        if lost:
+            counts["the viewer lost it in a job"] = counts.get("the viewer lost it in a job", 0) + 1
+        since = getattr(app, "_busy_since", None)
+        ms = "no job yet" if since is None else f"{round((note.at - float(since)) * 1000)} ms after the last job's start"
+        line = (f"foreground: {was} -> {to}; {ms}{', a job at work' if job else ''}; "
+                f"Edit {'on' if see_edit.on(app) else 'off'}")
+        log.info("%s", line)
+        lines.append(line)
+        kept = app.__dict__.setdefault("_see_foreground_lines", [])  # (the newest, for a tool's report)
+        kept.append(line)
+        del kept[:-LINES_KEPT]
+    return lines
+
+
+LINES_KEPT = 32  # the newest lines of the log of the foreground kept on the window (`foreground_tick`)
+
+
+COULD_NOT_START ="TASlation could not lay its lettering over the viewer's window on this computer, and ends."
 
 
 def could_not_start(app: Any) -> None:
@@ -591,6 +788,11 @@ def start(app: Any) -> bool:
     app._see_handed_back = 0  # how often `hand_back` gave the foreground back to the viewer
     app._see_front = {}  # what `front_tick` did instead, counted
     app._see_closed_at = -1e9  # when a dialog of the window's went or a menu ended last (`_closed`)
+    app._see_closing = 0  # how often a dialog's closing gave the foreground back at once (`closing`)
+    app._see_fronts = None  # the notes of the window in front (`capture.ForegroundNotes`, `foreground_tick`)
+    app._see_front_kind = None  # what was in front at the last note (`front_kind`)
+    app._see_foreground = {}  # the changes of the foreground that involve TASlation's windows, counted
+    app._see_kinds = {}  # a dialog's window -> its kind (`_remember_kind`)
     app._see_no_peek = 0  # the handle left out of the taskbar's peek (`keep_hidden`)
     app._see_patcher = None  # the patch thread (`Patcher`)
     app._see_bubble = None  # (its page's key, its patch's box, chosen when, last on show when): the bubble the right
@@ -608,6 +810,7 @@ def start(app: Any) -> bool:
         from . import see_menu
 
         see_menu.init(app)
+        start_foreground_log(app)
         try:
             app.bind_class("Toplevel", "<Map>", lambda e: _mapped(app, e), add="+")
             for sequence in ("<Unmap>", "<Destroy>"):
@@ -622,7 +825,26 @@ def start(app: Any) -> bool:
     return True
 
 
+def start_foreground_log(app: Any) -> None:
+    """The notes of the window in front set up on this (Tk's) thread (`foreground_tick`), what is in front now the
+    first; where the hook cannot be set, the window in front at each tick is all the log has (none outside
+    Windows)."""
+    from ..capture import ForegroundNotes
+
+    try:
+        notes = ForegroundNotes.start()
+    except (OSError, AttributeError):
+        notes = None
+    app._see_fronts = notes
+    if notes is not None:
+        first = notes.now()
+        app._see_front_kind, app._see_front_hwnd = front_kind(app, first), first.hwnd
+
+
 def close(app: Any) -> None:
+    notes, app._see_fronts = getattr(app, "_see_fronts", None), None
+    if notes is not None:
+        notes.close()
     patcher, app._see_patcher = getattr(app, "_see_patcher", None), None
     if patcher is not None:
         patcher.close()
@@ -674,6 +896,7 @@ def tick(app: Any) -> None:
     if app._see_ticks % HIDE_EVERY == 1:
         keep_hidden(app)
         see_menu.chooser_tick(app)
+    foreground_tick(app)
     front_tick(app)
 
 

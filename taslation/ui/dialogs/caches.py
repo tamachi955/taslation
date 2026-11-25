@@ -17,7 +17,7 @@ from typing import Any, Callable, Sequence
 
 from ... import backup
 from ...bookname import split_name
-from ...capture import foreground_window, give_foreground
+from ...capture import foreground_owner, foreground_window, give_foreground
 from ...cache import CacheStore
 from ...i18n import _
 from ...recycle import to_recycle_bin
@@ -148,11 +148,15 @@ class WarningBox(tk.Toplevel):
     ``answer`` turns True on Continue (also Return while Continue has the focus, as it has from the start, unless
     *stay_first*: then Cancel has it); Cancel, Escape and closing the box leave it False. *alone*: Continue only
     (*go*, OK by default), a box that tells; *icon*: "warning", "info" or "question" (`ICONS`). *choice*: a box to
-    tick under the text, unticked at first; ``chosen`` turns True on Continue with it ticked."""
+    tick under the text, unticked at first; ``chosen`` turns True on Continue with it ticked. *shown* False: placed
+    but left withdrawn, for the caller to show (`_box`: quietly, `layout.show_quietly`)."""
 
     def __init__(self, master: tk.Misc, title: str, text: str, go: str | None = None, stay: str | None = None,
-                 stay_first: bool = False, alone: bool = False, icon: str = "warning", choice: str | None = None):
+                 stay_first: bool = False, alone: bool = False, icon: str = "warning", choice: str | None = None,
+                 shown: bool = True):
         super().__init__(master)
+        if not shown:
+            self.withdraw()  # (so that `place_window` leaves it withdrawn: no ``wm deiconify``, which takes the focus)
         self.title(title)
         self.transient(master)
         self.resizable(False, False)
@@ -189,7 +193,9 @@ class WarningBox(tk.Toplevel):
         self.bind("<Return>", self._on_return)
         self.bind("<Escape>", self._cancel)
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        (self.cancel_btn if stay_first else self.continue_btn).focus_set()
+        self.first_button = self.cancel_btn if stay_first else self.continue_btn
+        if shown:
+            self.first_button.focus_set()
         place_window(self, master)
         try:
             self.grab_set()
@@ -218,8 +224,13 @@ class WarningBox(tk.Toplevel):
 
 def _box(parent: tk.Misc, text: str, wait: bool, **kwargs: Any) -> WarningBox:
     """TASlation's own box over *parent* (`WarningBox`), in front and above everything - a full-screen viewer too -
-    with the keys. When the viewer chosen had the foreground (a box nobody asked for, the reader in the book), the
-    viewer gets it back once the box is closed. *wait*: until then (else at once, the box left to the reader)."""
+    with the keys. One that came by itself while the person is in the book or in another program (see-through mode:
+    `seethrough.comes_quietly`) is shown without taking the foreground - topmost, over the viewer, a click gives it
+    the keys (`layout.show_quietly`). When the viewer chosen had the foreground, the viewer gets it back once the box
+    is closed. *wait*: until then (else at once, the box left to the reader)."""
+    from .. import seethrough
+    from ..layout import show_quietly
+
     app = parent._root()
     win = getattr(app, "selected", None)
     viewer = getattr(win, "hwnd", 0) or 0
@@ -227,6 +238,25 @@ def _box(parent: tk.Misc, text: str, wait: bool, **kwargs: Any) -> WarningBox:
         had_viewer = bool(viewer) and foreground_window() == viewer
     except Exception:  # noqa: BLE001 - not Windows: nothing to give back
         had_viewer = False
+    if seethrough.comes_quietly(app) and app.winfo_viewable():
+        box = WarningBox(parent, kwargs.pop("title", "TASlation"), text, shown=False, **kwargs)
+        show_quietly(box, box.first_button)
+        try:
+            box.grab_set()
+        except tk.TclError:  # (closed already)
+            pass
+        if viewer:
+            def back_quiet(event: tk.Event) -> None:
+                if event.widget is box:
+                    try:
+                        if foreground_owner(foreground_window(), viewer) == "own":
+                            give_foreground(viewer)
+                    except Exception:  # noqa: BLE001 - the viewer gone meanwhile
+                        pass
+            box.bind("<Destroy>", back_quiet, add="+")
+        if wait and box.winfo_exists():
+            parent.wait_window(box)
+        return box
     box = WarningBox(parent, kwargs.pop("title", "TASlation"), text, **kwargs)
     if had_viewer:
         def back(event: tk.Event) -> None:

@@ -314,6 +314,10 @@ if sys.platform == "win32":
     _user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     _user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     _user32.GetAncestor.restype = wintypes.HWND
+    _user32.GetForegroundWindow.restype = wintypes.HWND
+    _user32.IsIconic.argtypes = [wintypes.HWND]
+    _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.LockSetForegroundWindow.argtypes = [wintypes.UINT]
     _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
     _kernel32.OpenProcess.restype = wintypes.HANDLE
 
@@ -378,6 +382,47 @@ def window_text(hwnd: int) -> str:
     return buffer.value
 
 
+SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE = 7, 4
+STARTF_USESHOWWINDOW = 0x00000001
+LSFW_LOCK, LSFW_UNLOCK = 1, 2
+
+
+def quiet_start() -> Any:
+    """How the stand-in browser is started (Windows): its first window minimised and not activated (STARTUPINFO's
+    SW_SHOWMINNOACTIVE, which a program's first ShowWindow takes in place of its own), so that it takes no foreground
+    as it opens - `StandinBrowser.wait_window` then shows it without activation. None elsewhere. (Chrome does not take
+    it - its first window is not the process's first ShowWindow -: `lock_foreground` keeps the foreground then.)"""
+    if sys.platform != "win32":
+        return None
+    info = subprocess.STARTUPINFO()
+    info.dwFlags |= STARTF_USESHOWWINDOW
+    info.wShowWindow = SW_SHOWMINNOACTIVE
+    return info
+
+
+def lock_foreground(lock: bool) -> bool:
+    """Windows' lock on changes of the window in front (`LockSetForegroundWindow`), set (*lock*) or lifted; whether
+    the call was taken. While the stand-in browser opens, the lock keeps its window from taking the foreground from
+    the person's window: a process may change the foreground only while the person has given no input for a while
+    (the foreground lock time-out), and then the tool may set this lock as well. A key or click of the person's lifts
+    it at once, and nothing of the person's is touched. False off Windows or when refused (the person was busy: the
+    browser cannot take the foreground then either)."""
+    if sys.platform != "win32":
+        return False
+    return bool(_user32.LockSetForegroundWindow(LSFW_LOCK if lock else LSFW_UNLOCK))
+
+
+def foreground() -> tuple[int, int]:
+    """(window, process) in front now ((0, 0): none, or not Windows); no title is read."""
+    if sys.platform != "win32":
+        return (0, 0)
+    hwnd = int(_user32.GetForegroundWindow() or 0)
+    pid = wintypes.DWORD(0)
+    if hwnd:
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return (hwnd, int(pid.value))
+
+
 def find_window(pids: set[int], token: str, windows: Iterable[tuple[int, int]] | None = None,
                 title: Callable[[int], str] | None = None) -> int | None:
     """The stand-in's window: a window of a process in *pids* (the tree the tool started) whose title holds *token*
@@ -400,11 +445,26 @@ class StandinBrowser:
                  scale: float = 1.0, draws_covered: bool = False, full_screen: bool = False):
         self.profile = make_profile(profile)
         self.token = token
-        self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered,
-                                                     full_screen),
-                                     stdin=subprocess.DEVNULL,
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                                     errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.started_from = foreground()  # (the window in front before: whose it is, `start_facts`)
+        # how the window came (`wait_window`): minimised without activation, then shown without activation, the
+        # foreground locked meanwhile (`lock_foreground`); whether the browser took the foreground at any look (it must
+        # not: the person's window keeps it), and whether it was then minimised and shown again without activation
+        self.start_facts: dict[str, Any] = {"asked": "minimised, not activated", "foreground_locked": False,
+                                            "came_minimised": None, "shown_without_activation": None,
+                                            "took_the_foreground": False, "took_it_at": None,
+                                            "minimised_again": False}
+        self._locked = self.start_facts["foreground_locked"] = lock_foreground(True)
+        try:
+            self.proc = subprocess.Popen(browser_command(program, url, self.profile, rect, scale, draws_covered,
+                                                         full_screen),
+                                         stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                                         encoding="utf-8", errors="replace",
+                                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                         startupinfo=quiet_start())
+        except BaseException:
+            self._unlock()
+            raise
         self.events: list[tuple[float, dict[str, str]]] = []
         self.lock = threading.Lock()
         self.hwnd: int | None = None
@@ -424,17 +484,66 @@ class StandinBrowser:
             return self.events[since:]
 
     def wait_window(self, seconds: float = 20.0) -> int:
+        """The stand-in's window once it is there: the browser was started minimised and not activated
+        (`quiet_start`), and its window is now shown in its normal size and place without being activated
+        (SW_SHOWNOACTIVATE) - a tool run never takes the foreground from the person's window; the lock on the foreground
+        set at the start is lifted once it is shown (or the wait ends). What came is kept in `start_facts`."""
         end = time.monotonic() + seconds
-        while time.monotonic() < end:
-            if self.proc.poll() is not None:
-                raise RuntimeError("the stand-in browser ended at its start")
-            self.tree = process_tree(self.proc.pid)
-            hwnd = find_window(self.tree, self.token)
-            if hwnd is not None:
-                self.hwnd = hwnd
-                return hwnd
-            time.sleep(0.2)
-        raise RuntimeError("the stand-in browser's window did not come")
+        try:
+            while time.monotonic() < end:
+                if self.proc.poll() is not None:
+                    raise RuntimeError("the stand-in browser ended at its start")
+                self.tree = process_tree(self.proc.pid)
+                self._front_look()
+                hwnd = find_window(self.tree, self.token)
+                if hwnd is not None:
+                    self.hwnd = hwnd
+                    self._show_quietly(hwnd)
+                    return hwnd
+                time.sleep(0.2)
+            raise RuntimeError("the stand-in browser's window did not come")
+        finally:
+            self._unlock()
+
+    def _unlock(self) -> None:
+        if getattr(self, "_locked", False):
+            self._locked = False
+            lock_foreground(False)
+
+    def _front_look(self, at: str = "opening") -> None:
+        """Whether the window in front is the browser's now (the window the person had keeps it, or it went to
+        another window of theirs, but never to the stand-in); the first look that found it so is named (*at*:
+        "opening", "shown", or the caller's word)."""
+        front = foreground()
+        if front[1] and front[1] in self.tree and front != self.started_from \
+                and not self.start_facts["took_the_foreground"]:
+            self.start_facts["took_the_foreground"] = True
+            self.start_facts["took_it_at"] = at
+
+    def _show_quietly(self, hwnd: int) -> None:
+        if sys.platform != "win32":
+            return
+        iconic = bool(_user32.IsIconic(hwnd))
+        self.start_facts["came_minimised"] = iconic
+        if iconic:
+            _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+            deadline = time.monotonic() + 2.0
+            while _user32.IsIconic(hwnd) and time.monotonic() < deadline:
+                time.sleep(0.02)
+        self.start_facts["shown_without_activation"] = not bool(_user32.IsIconic(hwnd))
+        time.sleep(0.3)  # (a browser that would activate itself as it is shown does so at once)
+        self._front_look("shown")
+        if self.start_facts["took_the_foreground"] and self._in_front(hwnd):
+            # (it took it all the same - the lock refused, the person busy: minimised without activation, Windows gives
+            # the foreground to the window behind, and shown again without activation; nothing of the person's touched)
+            _user32.ShowWindow(hwnd, SW_SHOWMINNOACTIVE)
+            time.sleep(0.1)
+            _user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+            self.start_facts["minimised_again"] = True
+
+    def _in_front(self, hwnd: int) -> bool:
+        front = foreground()
+        return front[1] in self.tree and int(_user32.GetAncestor(front[0], 2) or 0) == hwnd  # GA_ROOT
 
     def wait_event(self, ev: str, seconds: float, since: int = 0) -> dict[str, str]:
         end = time.monotonic() + seconds
@@ -459,6 +568,7 @@ class StandinBrowser:
         """The window closed (WM_CLOSE to it), the processes of the tree still there after a while ended, the profile
         deleted. What was done, numbers and flags only."""
         out: dict[str, Any] = {"closed_by_window": False, "processes_ended": 0, "profile_deleted": False}
+        self._unlock()  # (a window that never came: the lock on the foreground lifted all the same)
         if self.hwnd is not None and self.alive():
             _user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
             try:

@@ -233,7 +233,8 @@ class TranslatorMixin:
         changed = False
         editor = getattr(self, "_editor", None)  # an editor open by now (Next): the question over it, its grab back after
         parent = editor if editor is not None and editor.winfo_exists() else self
-        seethrough.asked(self)  # (see-through mode: the question the reader's Save brought takes the keys)
+        # (see-through mode: the question comes by itself once the edit is done - with the keys when the person is in a
+        # dialog of TASlation's, without them while they read on in the book: `seethrough.comes_quietly`)
         for old, new in changes:
             item = sheet_item_for(merged, old) if merged is not None else None
             if item is None:
@@ -387,7 +388,8 @@ class TranslatorMixin:
             return
         box_parent = parent if parent is not None and parent.winfo_exists() else self
         changes = shown_pairs(pairs)
-        seethrough.asked(self)  # (see-through mode: the question the reader's change of the sheet brought takes the keys)
+        # (see-through mode: the question comes once the volumes are counted - with the keys while the person is still in
+        # the sheet or another dialog of TASlation's, without them in the book: `seethrough.comes_quietly`)
         if not elsewhere:
             go, series = boxes.ask(box_parent, _(SHEET_OFFER).format(n=here, changes=changes),
                                    _(SHEET_APPLY).format(n=here), _(SHEET_LEAVE)), False
