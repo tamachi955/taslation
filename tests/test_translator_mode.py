@@ -57,6 +57,8 @@ class Window:
     _step_through = app_mod.App._step_through
     toggle_skip = app_mod.App.toggle_skip
     toggle_order = app_mod.App.toggle_order
+    _order_taken = app_mod.App._order_taken
+    _ask_after_order = app_mod.App._ask_after_order
     retranslate_page = app_mod.App.retranslate_page
     _end_order = app_mod.App._end_order
     _kept_at_once = app_mod.App._kept_at_once
@@ -398,8 +400,8 @@ def test_a_reading_order_is_taken_back_and_made_again(window):
     w = window
     regions = w._page_regions()
     w._ordering = list(reversed(regions))
-    w.toggle_order()
-    assert w.said[-1] == "Reading order saved for {n} region(s). The circular arrow beside Translate applies it."
+    w.toggle_order()  # (the lines whose context changed asked again: the same answers here)
+    assert w.said[-1] == translator.ORDER_SAVED_ASKED and not w.busy and len(w.history.done) == 1
     assert _skipped_and_order(w) == (False, len(regions))
     w.undo_edit()
     assert w.said[-1] == "Reading order taken back." and _skipped_and_order(w) == (False, 0)

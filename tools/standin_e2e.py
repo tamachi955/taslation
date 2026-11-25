@@ -8,7 +8,8 @@ part of a release.
                                 [--ocr-runs-on auto|cpu|gpu] [--start-ollama PORT] [--ollama-window-cache auto|off|on]
                                 [--wait-done CAP_S] [--soft-first on|off] [--standin-slider 0|1|2]
                                 [--standin-profile dark|light] [--standin-option NAME=VALUE ...]
-                                [--see-truth] [--see-indicators on|off] [--see-edit] [--standin-size WxH]
+                                [--see-truth] [--see-indicators on|off] [--see-edit] [--editing]
+                                [--standin-size WxH]
                                 [--standin-full-screen] [--no-viewer-s S] [--book-asked]
                                 [--start-behind cover|part|max|front|minimised] [--behind-s S] [--behind-before-s S]
                                 [--behind-end close|raise] [--chooser] [--standin-bars-held MS]
@@ -26,7 +27,8 @@ What runs, all on this computer:
 * TASlation in this process (`ui.app.App`, as ``taslation gui --book NAME`` opens it: its one mode, see-through -
   the lettering laid over the stand-in's own window by a click-through window of TASlation's, its own window hidden -,
   Auto on, early start and the load of the model at the start as the defaults have them, Reader mode on unless
-  *--see-edit*), on a scratch
+  *--see-edit* or *--editing* - the latter editing with nothing done on the page, for timing editing against Reader
+  mode -), on a scratch
   state folder (TASLATION_STATE_DIR under *--out*: the legal notice dismissed as the tests do, the window in
   English; the reader's capture area 0,85,0,0 as on the owner's browser reader, its top scaled with *--scale*),
   with the real OCR models
@@ -4746,7 +4748,9 @@ def run_app(args: argparse.Namespace, report: dict[str, Any], browser: sv.Standi
     state = demo_video.scratch_state()
     info = viewer_info()
     edit = bool(getattr(args, "see_edit", False))
-    remember_role(state, BOOK, "translator" if edit else "reader")  # (editing: the left pane's Reader mode off)
+    editing = edit or bool(getattr(args, "editing", False))  # (--editing: the role alone, nothing done on the page)
+    remember_role(state, BOOK, "translator" if editing else "reader")  # (editing: the left pane's Reader mode off)
+    report["role_kept"] = "translator" if editing else "reader"
     profiles = Profiles(state / "profiles.json")
     profiles.set_margins(info, area)
     settings = Settings(state_dir=state, ui_language="en", target_language="English", ui_scale=args.scale,
@@ -5829,6 +5833,10 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
                          "a click on its number plate with its place typed, and a rectangle drawn on the empty "
                          "ground, posted to TASlation's own windows, are measured in place of the patch under the "
                          "pointer (run.see_through.edit)")
+    ap.add_argument("--editing", action="store_true",
+                    help="the book's role kept as editing, as --see-edit keeps it, but nothing is done on the page: the "
+                         "patch under the pointer measured as in Reader mode (timing runs of editing against Reader "
+                         "mode: what editing alone costs)")
     ap.add_argument("--see-add", action="store_true",
                     help="adding text areas measured in place of both (run.see_through.add), editing with --see-edit "
                          "and Reader mode without: once a page is done, the left pane's Add area and the Insert key's "

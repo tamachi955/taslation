@@ -417,7 +417,9 @@ rows' languages.
   still in the order typed). Meanwhile what the stand-in's page said of the pointer (`standin_said_meanwhile`: bars,
   presses, clicks - none expected, the whole client area being the overlay's - and its turns). In every run the
   right pane's foot rows are looked at once a second (`panes.foot`: their tops in the client area, one per frame
-  size, `constant`).
+  size, `constant`). `--editing` keeps the role as editing as `--see-edit` does, but does nothing on the page (the
+  patch under the pointer measured as in Reader mode): for timing runs of editing against Reader mode (the report's
+  `role_kept`).
   `--see-add` measures adding text areas in place of both (`add`; editing with `--see-edit`, Reader mode without; best with
   scenario `g`, one page held long): once a page is done and on show, the left pane's Add area and the Insert key
   (its WM_HOTKEY POSTED to the lettering's own window: no key of the system's is pressed), each followed by a

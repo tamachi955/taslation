@@ -279,7 +279,8 @@ the folder where the cache, series sheets and settings are kept, and where the R
 ### Editing: correcting the page
 
 TASlation starts editing. "Reader mode" in the left pane (checked: you only read) switches editing off, and unchecked again, on. It stays as you left it for each book (a book you have not chosen for
-starts editing, or in Reader mode with "Start in Reader mode" in "Settings...", `--role reader` or `role = "reader"` in the settings file). While editing, every region of the page on show
+starts editing, or in Reader mode with "Start in Reader mode" in "Settings...", `--role reader` or `role = "reader"` in the settings file); until the book's choice is known,
+a moment after its name is, the lettering takes no clicks and shows no boxes. While editing, every region of the page on show
 is outlined over the viewer in its colour, with its number in the reading order on a small plate of that colour (green: translated, orange: not translated, blue: a region you marked yourself,
 red: translated but flagged for review). The right pane's foot says "Editing: turn pages with the keys" or "Reader mode".
 
@@ -300,11 +301,14 @@ red: translated but flagged for review). The right pane's foot says "Editing: tu
   or takes it out; dragging one of the chosen regions moves them all together (the whole group stops when one of them reaches the edge of the page). The box under the pointer
   gets a stronger outline with its corner handles instead of giving way to the original, and the right pane shows its words. A click on the empty ground does nothing,
   but drops a choice of several regions.
-* **The number plates**: a click on a box's number opens a small field over it to type the region's place in the reading order (1 to the number of regions on the page).
+* **The number plates**: a click on a box's number opens a small field over it to type the region's place in the reading order (1 to the number of regions on show).
   Enter takes it: the regions are numbered anew, and the lines whose earlier lines changed (from the first place that changed on) are translated again, your own corrections kept;
   "Undo" takes the new order and those translations back in one step. Esc, or a click anywhere else, gives it up. A drag from the number moves the box.
+  On a spread, a region stays on its own page: a place that belongs to the facing page puts it first or last on its own page, whichever is nearer
+  (the order is kept page by page, so the next reading keeps it).
   A region added later to a page whose order you set by hand takes its place by its position, the others keeping the order you gave.
-  "Reading order" (click the regions in order) and "Place in reading order..." stay in the Menu; they set the order without translating again.
+  "Reading order" (click the regions in order) and "Place in reading order..." stay in the Menu and work the same way: the lines whose earlier lines changed are translated again,
+  and "Undo" takes it all back in one step.
 * **The Menu** has the editing while editing: "Undo" and "Redo"; "Page" ("Reading order", "Add a text area", "Skip page"; then, for the chosen regions, "Set kind...",
   "Set text size...", "Place in reading order...", "Copy format", "Paste format", "Paste format on every region of this kind...", "Copy region", "Paste region",
   "Drop the chosen regions" and "Ignore this area on all pages of this book"; and "Use these areas for the series"); and "Review...", "My corrections...", "Lines to review...",
@@ -371,7 +375,8 @@ red: translated but flagged for review). The right pane's foot says "Editing: tu
   ("Cancel the reading order" leaves the order as it was). Split sentences, and who answers whom, are decided by this order.
   To correct the place of a single region, choose that region and, with "Place in reading order...",
   enter which place it should have (with several chosen, they are put at that place in their present order; the order of the other regions
-  does not change; "Undo" takes it back).
+  does not change; on a spread each stays on its own page, as with the number plates; "Undo" takes it back).
+  Either way, the lines whose earlier lines changed are translated again, as after a place typed on a number plate.
   "Skip page" marks a page with nothing to translate, such as an advertisement or the viewer's own panel, and the circular arrow (not using the cache) translates the page again with the current premises.
   The translations you corrected yourself (in the editor, or with Find and replace) stay as they are and are not sent to the model;
   tick "Replace the lines I corrected too" in its question to have them translated again as well.

@@ -17,8 +17,8 @@
   (`open_editor`, `editor_place`: alone, on the viewer's monitor, taking the keys; the foreground back to the viewer
   once it closes), Shift+click chooses several (`SelectionMixin._toggle_chosen`), a drag moves the box (those chosen
   with it: `_move_regions`), a drag on a corner resizes it (`_move_region`), a click on its plate types its place in
-  the reading order (`PlaceEntry`: the order made again, the lines after it translated again; a drag from the plate
-  moves the box); a drag on the empty ground draws a region to add, a click there drops a choice of several; while
+  the reading order (`PlaceEntry`: the region kept on its own page of a spread, the order made again, the lines
+  whose context changed translated again, as every tool's new order is; a drag from the plate moves the box); a drag on the empty ground draws a region to add, a click there drops a choice of several; while
   the reading order is clicked, a click numbers the region. A region in the editor keeps its patches whatever the
   frame says; the editor's Show original, held, shows the original under it (`set_bare`).
 * Adding a text area, editing or in Reader mode (`toggle_adding`): the left pane's Add area, the Insert key while
@@ -49,6 +49,9 @@ EDIT_ON = ("Editing: click a bubble to edit it, drag it to move it, drag on empt
            "to change its place in the reading order. Turn pages with the keys.")
 EDIT_OFF = "Reader mode: every click and the wheel go to the viewer."
 PLACE_ASK = "Type the bubble's place in the reading order (1 to {n}) and press Enter; Esc gives it up."
+# (... on a spread: the bubble stays on its own page, `selection.placed_order`)
+PLACE_ASK_SPREAD = ("Type the bubble's place in the reading order (1 to {n}) and press Enter; Esc gives it up. It "
+                    "stays on its own page: a place on the facing page puts it first or last there.")
 ORDERING = "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu."
 ADD_ENTRY = "Add a text area"
 ADD_AREA = "Add area"  # (the left pane's row: the Insert key is named in the help and the manual, the pane no wider)
@@ -68,8 +71,22 @@ PLATES_KEPT = 256
 
 def on(app: Any) -> bool:
     """Whether the page is being edited: see-through mode with TASlation's own window hidden, in the Translator role
-    (Reader mode unchecked)."""
-    return seethrough.hidden(app) and seethrough.on(app) and _role(app) == "translator"
+    (Reader mode unchecked), once the role of the book named is known (`role_known`)."""
+    return seethrough.hidden(app) and seethrough.on(app) and _role(app) == "translator" and role_known(app)
+
+
+def role_known(app: Any) -> bool:
+    """Whether the role of the book named is known: not while it is still to be decided - the Book box rests a moment
+    first, `TranslatorMixin._book_for_role`, and a book opens as the reader last chose for it -, so that the start's
+    default never applies to the lettering meanwhile: until then it takes no mouse and shows no boxes, as in Reader
+    mode, and nothing is said."""
+    return getattr(app, "_role_job", None) is None
+
+
+def reader_mode(app: Any) -> bool:
+    """Whether the left pane's Reader mode shows checked, and the right pane's foot says Reader mode: the role in
+    force (whatever the lettering applies now: `on`)."""
+    return _role(app) != "translator"
 
 
 def _role(app: Any) -> str:
@@ -400,18 +417,26 @@ def _front_editor(app: Any) -> None:
 
 
 # ------------------------------------------------------------------ a region's place typed on its plate
+def place_ask(regions: Any) -> str:
+    """What the status says while a place is typed on a plate: on a spread (the regions on show on two page units)
+    also that the bubble stays on its own page."""
+    return PLACE_ASK_SPREAD if len({getattr(r, "unit", 0) for r in regions}) > 1 else PLACE_ASK
+
+
 class PlaceEntry:
     """A small entry over a region's number plate (a click on the plate while editing, `open_place_entry`): the
-    region's place in the reading order typed there - Enter takes it (`SelectionMixin._place_regions` with *ask*:
-    the order made again as one "order" change, the plates numbered anew, the lines after the place translated
-    again), Esc gives it up, and so does a press anywhere else (on the page: `act`; a side pane: `pane_click`; the
-    viewer or another window: the entry's focus lost). It takes the keys as it shows, and gives the foreground back
-    to the viewer as it goes at Enter or Esc (`seethrough.closing`)."""
+    region's place in the reading order typed there, 1 to the regions on show - Enter takes it
+    (`SelectionMixin._place_regions`: the region kept on its own page of a spread, the order made again as one
+    "order" change, the plates numbered anew, the lines whose context changed translated again), Esc gives it up,
+    and so does a press anywhere else (on the page: `act`; a side pane: `pane_click`; the viewer or another window:
+    the entry's focus lost). It takes the keys as it shows, and gives the foreground back to the viewer as it goes at
+    Enter or Esc (`seethrough.closing`)."""
 
-    def __init__(self, app: Any, region: Any, place: int, total: int, at: tuple[int, int, int, int]) -> None:
+    def __init__(self, app: Any, region: Any, place: int, total: int, at: tuple[int, int, int, int],
+                 ask: str = PLACE_ASK) -> None:
         import tkinter as tk
 
-        self.app, self.region, self.total = app, region, total
+        self.app, self.region, self.total, self.ask = app, region, total, ask
         self.result = getattr(app, "last_result", None)
         self.opened = time.monotonic()
         self.focused = self.closed = False
@@ -465,7 +490,7 @@ class PlaceEntry:
         except ValueError:
             place = 0
         if not 1 <= place <= self.total:
-            self.app.say(PLACE_ASK, n=self.total)
+            self.app.say(self.ask, n=self.total)
             self.entry.select_range(0, "end")
             return "break"
         self.close(give_back=True)
@@ -475,7 +500,7 @@ class PlaceEntry:
         if (app.busy or app.last_result is not self.result or not holds(self.result, self.region)
                 or getattr(app, "_ordering", None) is not None or _editor_region(app) is not None or not on(app)):
             return "break"
-        app._place_regions([self.region], place, ask=True)
+        app._place_regions([self.region], place)
         return "break"
 
     def close(self, give_back: bool) -> None:
@@ -515,9 +540,10 @@ def open_place_entry(app: Any, region: Any) -> bool:
     h, w = plate.shape[:2]
     drop_place_entry(app)
     app._choose(region)
+    ask = place_ask(regions)
     app._see_place_entry = PlaceEntry(app, region, now + 1, len(regions),
-                                      (origin[0] + x, origin[1] + y, origin[0] + x + w, origin[1] + y + h))
-    app.say(PLACE_ASK, n=len(regions))
+                                      (origin[0] + x, origin[1] + y, origin[0] + x + w, origin[1] + y + h), ask)
+    app.say(ask, n=len(regions))
     return True
 
 

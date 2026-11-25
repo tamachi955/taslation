@@ -320,6 +320,9 @@ class Tools:
     def _redisplay(self):
         pass
 
+    def _page_regions(self):
+        return list(getattr(self.last_result, "regions", []))
+
     def _start_translate(self, image, complete=None):
         self.read.append(image)
 

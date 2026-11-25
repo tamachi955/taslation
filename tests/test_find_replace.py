@@ -98,6 +98,7 @@ class Window:
     _step_through = app_mod.App._step_through
     _record = app_mod.App._record
     _on_role_changed = app_mod.App._on_role_changed
+    _cancel_role_job = app_mod.App._cancel_role_job
 
     def __init__(self, cache, store, result=None, pipeline=None):
         self.store = store

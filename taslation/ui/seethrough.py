@@ -994,7 +994,7 @@ def left_rows(app: Any) -> list[pn.Row]:
     first = pn.Row("stop", _("Stop"), **again) if _stoppable(app) else pn.Row("translate", _("Translate"), **again)
     from . import see_edit
 
-    edit = [pn.Row("edit", _(see_edit.READER_MODE), "toggle", on=not see_edit.on(app)),
+    edit = [pn.Row("edit", _(see_edit.READER_MODE), "toggle", on=see_edit.reader_mode(app)),
             pn.Row("add_area", _(see_edit.ADD_AREA), on=see_edit.adding(app))] if hidden(app) else []
     return [first,
             pn.Row("auto", _("Auto"), "toggle", on=bool(_get(getattr(app, "auto_var", None), False))),
@@ -1109,7 +1109,7 @@ def foot_rows(app: Any) -> list[pn.Row]:
     rows = [pn.Row("", progress, "text", lines=FOOT_LINES, alike=(_(PROGRESS).format(done=888, total=888),))]
     if hidden(app):
         editing, reading = _(MODE_EDITING), _(see_edit.READER_MODE)
-        rows.append(pn.Row("", editing if see_edit.on(app) else reading, "text", lines=FOOT_LINES,
+        rows.append(pn.Row("", reading if see_edit.reader_mode(app) else editing, "text", lines=FOOT_LINES,
                            alike=(editing, reading)))
     where, readers = getattr(app, "_compute_where", ""), _readers_at(app)
     if where in TRANSLATOR_AT:

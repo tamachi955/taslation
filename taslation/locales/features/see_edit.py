@@ -1,7 +1,8 @@
 """The window's strings for editing in see-through mode (`ui.see_edit`): the left pane's switch Reader mode and its
 Add area (as wide as the pane's other rows at the most), the lines the status says as it is switched, while a
-region's place in the reading order is typed on its number and while the reading order is clicked or a region is
-drawn to add (and why none can be added now), the Menu's entries of its own (Add a text area, Cancel the reading
+region's place in the reading order is typed on its number (on a spread, that it stays on its own page), while the
+reading order is clicked or a region is drawn to add (and why none can be added now), once the order clicked is
+stored, the Menu's entries of its own (Add a text area, Cancel the reading
 order, Drop the chosen regions) and the tip of the region editor's Show original.
 The Menu's other entries are the window's own (Undo, Redo, Page, Reading order, Finish order, Skip page, Set kind...,
 Review..., ...); a region is worded as the window's "Drop this region" has it (ja 「領域」), a bubble as the right
@@ -70,6 +71,63 @@ TEXTS: dict[str, dict[str, str]] = {
         "zh-tw": "輸入對話框在閱讀順序中的位置（1 到 {n}），然後按 Enter；按 Esc 放棄。",
         "ko": "말풍선의 읽기 순서 위치(1~{n})를 입력하고 Enter를 누르세요. Esc로 그만둡니다.",
         "th": "พิมพ์ตำแหน่งของลูกโป่งคำพูดในลำดับการอ่าน (1 ถึง {n}) แล้วกด Enter กด Esc เพื่อยกเลิก",
+    },
+    # (... on a spread: the bubble stays on its own page)
+    "Type the bubble's place in the reading order (1 to {n}) and press Enter; Esc gives it up. It stays on its own page: a place on the facing page puts it first or last there.": {
+        "ja": "吹き出しの読み順での位置（1～{n}）を入力して Enter を押してください。Esc で取りやめます。吹き出しは自分のページにとどまります。向かいのページの位置を入れると、自分のページの最初か最後になります。",
+        "es": "Escribe el lugar del globo en el orden de lectura (de 1 a {n}) y pulsa Intro; Esc lo cancela. Se queda en su propia página: un lugar de la página de enfrente lo pone primero o último en la suya.",
+        "pt": "Digite o lugar do balão na ordem de leitura (de 1 a {n}) e pressione Enter; Esc desiste. Ele fica na própria página: um lugar da página oposta o coloca em primeiro ou em último na dele.",
+        "fr": "Tapez la place de la bulle dans l'ordre de lecture (de 1 à {n}) et appuyez sur Entrée ; Échap y renonce. Elle reste sur sa propre page : une place de la page en regard la met en premier ou en dernier sur la sienne.",
+        "de": "Tippen Sie die Stelle der Sprechblase in der Lesereihenfolge ein (1 bis {n}) und drücken Sie die Eingabetaste; Esc bricht ab. Sie bleibt auf ihrer eigenen Seite: Eine Stelle auf der gegenüberliegenden Seite setzt sie auf ihrer Seite an den Anfang oder ans Ende.",
+        "it": "Scrivi il posto del balloon nell'ordine di lettura (da 1 a {n}) e premi Invio; Esc annulla. Resta sulla sua pagina: un posto della pagina a fronte lo mette primo o ultimo sulla sua.",
+        "nl": "Typ de plaats van de ballon in de leesvolgorde (1 tot {n}) en druk op Enter; Esc ziet ervan af. Hij blijft op zijn eigen pagina: een plaats op de tegenoverliggende pagina zet hem op zijn pagina vooraan of achteraan.",
+        "pl": "Wpisz miejsce dymka w kolejności czytania (od 1 do {n}) i naciśnij Enter; Esc rezygnuje. Dymek zostaje na swojej stronie: miejsce na stronie obok stawia go na początku lub na końcu jego strony.",
+        "ru": "Введите место пузыря в порядке чтения (от 1 до {n}) и нажмите Enter; Esc отменяет. Пузырь остаётся на своей странице: место на соседней странице ставит его первым или последним на его странице.",
+        "tr": "Balonun okuma sırasındaki yerini yazın (1 ile {n} arası) ve Enter'a basın; Esc vazgeçer. Balon kendi sayfasında kalır: karşı sayfadaki bir yer onu kendi sayfasında başa ya da sona koyar.",
+        "id": "Ketik tempat balon dalam urutan baca (1 sampai {n}) lalu tekan Enter; Esc membatalkannya. Balon tetap di halamannya sendiri: tempat di halaman seberang menaruhnya pertama atau terakhir di halamannya.",
+        "vi": "Gõ vị trí của bong bóng trong thứ tự đọc (từ 1 đến {n}) rồi nhấn Enter; Esc để bỏ qua. Bong bóng vẫn ở trang của nó: một vị trí ở trang đối diện sẽ đặt nó đầu tiên hoặc cuối cùng trên trang của nó.",
+        "zh": "输入气泡在阅读顺序中的位置（1 到 {n}），然后按 Enter；按 Esc 放弃。气泡留在自己的页面上：输入对页的位置时，它会排在自己页面的第一个或最后一个。",
+        "zh-tw": "輸入對話框在閱讀順序中的位置（1 到 {n}），然後按 Enter；按 Esc 放棄。對話框留在自己的頁面上：輸入對頁的位置時，它會排在自己頁面的第一個或最後一個。",
+        "ko": "말풍선의 읽기 순서 위치(1~{n})를 입력하고 Enter를 누르세요. Esc로 그만둡니다. 말풍선은 자기 페이지에 남습니다. 맞은편 페이지의 위치를 넣으면 자기 페이지의 처음이나 끝에 놓입니다.",
+        "th": "พิมพ์ตำแหน่งของลูกโป่งคำพูดในลำดับการอ่าน (1 ถึง {n}) แล้วกด Enter กด Esc เพื่อยกเลิก ลูกโป่งคำพูดจะอยู่ในหน้าของตัวเอง: ตำแหน่งในหน้าตรงข้ามจะวางไว้แรกสุดหรือท้ายสุดในหน้าของมัน",
+    },
+    # Finish order: the order clicked stored and the lines whose context changed translated again, as a place typed
+    # on a plate or Place in reading order... is ({total}: the regions clicked)
+    "Reading order saved for {total} region(s). Menu > Undo takes it back.": {
+        "ja": "{total} 個の領域の読み順を保存しました。「メニュー」>「元に戻す」で元に戻せます。",
+        "es": "Orden de lectura guardado para {total} región(es). Menú > Deshacer lo deshace.",
+        "pt": "Ordem de leitura salva para {total} região(ões). Menu > Desfazer a desfaz.",
+        "fr": "Ordre de lecture enregistré pour {total} zone(s). Menu > Annuler l'annule.",
+        "de": "Lesereihenfolge für {total} Bereich(e) gespeichert. Menü > Rückgängig nimmt sie zurück.",
+        "it": "Ordine di lettura salvato per {total} area/e. Menu > Annulla lo annulla.",
+        "nl": "Leesvolgorde opgeslagen voor {total} gebied(en). Menu > Ongedaan maken maakt het ongedaan.",
+        "pl": "Zapisano kolejność czytania dla obszarów: {total}. Menu > Cofnij to cofnie.",
+        "ru": "Порядок чтения сохранён для областей: {total}. «Меню > Отменить» отменит это.",
+        "tr": "{total} bölge için okuma sırası kaydedildi. Menü > Geri al geri alır.",
+        "id": "Urutan baca disimpan untuk {total} wilayah. Menu > Batalkan membatalkannya.",
+        "vi": "Đã lưu thứ tự đọc cho {total} vùng. Menu > Hoàn tác để hoàn tác.",
+        "zh": "已保存 {total} 个区域的阅读顺序。用“菜单 > 撤销”可撤销。",
+        "zh-tw": "已儲存 {total} 個區域的閱讀順序。用「選單 > 復原」可復原。",
+        "ko": "영역 {total}개의 읽기 순서를 저장했습니다. 메뉴 > 실행 취소로 되돌릴 수 있습니다.",
+        "th": "บันทึกลำดับการอ่านของ {total} กรอบแล้ว เมนู > เลิกทำ จะเลิกทำ",
+    },
+    "Reading order saved for {total} region(s); {n} line(s) after the first change translated again. Menu > Undo takes it all back.": {
+        "ja": "{total} 個の領域の読み順を保存し、最初に変わった位置から後の {n} 行を翻訳し直しました。「メニュー」>「元に戻す」ですべて元に戻せます。",
+        "es": "Orden de lectura guardado para {total} región(es); {n} línea(s) desde el primer cambio traducidas de nuevo. Menú > Deshacer lo deshace todo.",
+        "pt": "Ordem de leitura salva para {total} região(ões); {n} linha(s) a partir da primeira mudança traduzidas de novo. Menu > Desfazer desfaz tudo.",
+        "fr": "Ordre de lecture enregistré pour {total} zone(s) ; {n} ligne(s) après le premier changement traduite(s) à nouveau. Menu > Annuler annule tout.",
+        "de": "Lesereihenfolge für {total} Bereich(e) gespeichert; {n} Zeile(n) ab der ersten Änderung neu übersetzt. Menü > Rückgängig nimmt alles zurück.",
+        "it": "Ordine di lettura salvato per {total} area/e; {n} riga/e dal primo cambiamento tradotte di nuovo. Menu > Annulla annulla tutto.",
+        "nl": "Leesvolgorde opgeslagen voor {total} gebied(en); {n} regel(s) vanaf de eerste wijziging opnieuw vertaald. Menu > Ongedaan maken maakt alles ongedaan.",
+        "pl": "Zapisano kolejność czytania dla obszarów: {total}; wiersze od pierwszej zmiany przetłumaczone ponownie: {n}. Menu > Cofnij cofnie wszystko.",
+        "ru": "Порядок чтения сохранён для областей: {total}; строк с первого изменения переведено заново: {n}. «Меню > Отменить» отменит всё.",
+        "tr": "{total} bölge için okuma sırası kaydedildi; ilk değişiklikten itibaren {n} satır yeniden çevrildi. Menü > Geri al hepsini geri alır.",
+        "id": "Urutan baca disimpan untuk {total} wilayah; {n} baris sejak perubahan pertama diterjemahkan ulang. Menu > Batalkan membatalkan semuanya.",
+        "vi": "Đã lưu thứ tự đọc cho {total} vùng; đã dịch lại {n} dòng từ chỗ thay đổi đầu tiên. Menu > Hoàn tác để hoàn tác tất cả.",
+        "zh": "已保存 {total} 个区域的阅读顺序，从第一处改动起的 {n} 行已重新翻译。用“菜单 > 撤销”可全部撤销。",
+        "zh-tw": "已儲存 {total} 個區域的閱讀順序，從第一處變動起的 {n} 行已重新翻譯。用「選單 > 復原」可全部復原。",
+        "ko": "영역 {total}개의 읽기 순서를 저장하고, 첫 변경 위치부터 {n}줄을 다시 번역했습니다. 메뉴 > 실행 취소로 모두 되돌릴 수 있습니다.",
+        "th": "บันทึกลำดับการอ่านของ {total} กรอบแล้ว และแปลใหม่ {n} บรรทัดตั้งแต่จุดที่เปลี่ยนแรก เมนู > เลิกทำ จะเลิกทำทั้งหมด",
     },
     "Reading order: click the bubbles in the order they are read, then choose Finish order in the Menu.": {
         "ja": "読み順：読む順番に吹き出しをクリックし、メニューの「読み順を確定」を選んでください。",

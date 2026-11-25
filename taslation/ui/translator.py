@@ -83,6 +83,11 @@ MADE_AGAIN = {"edit": "Edit made again.", "move": "Move made again.", "resize": 
 # the changes a page is read again from the stores for, when they are taken back or made again: they touch no region
 # of the window's (the page's regions were made anew by them)
 REREAD_KINDS = frozenset({"add", "skip", "order", "again"})
+# Finish order: the order the reader clicked stored (`SelectionMixin._order_taken`: the lines whose context changed
+# translated again), as a place typed on a plate or Place in reading order... is ({total}: the regions clicked)
+ORDER_SAVED = "Reading order saved for {total} region(s). Menu > Undo takes it back."
+ORDER_SAVED_ASKED = ("Reading order saved for {total} region(s); {n} line(s) after the first change translated again. "
+                     "Menu > Undo takes it all back.")
 PREVIEW_POLL_MS = 40  # how often the window looks for the editor's preview, while one is being lettered
 NO_REGION = "This region is no longer on the page: nothing was changed."
 # a rendering changed in the series sheet: the offer to give the lines already translated the new one, its buttons,
@@ -497,8 +502,9 @@ class TranslatorMixin:
         return True
 
     def toggle_order(self) -> None:
-        """Translator mode: click the regions in reading order, then press the button again. Ctrl+Z takes the order
-        back."""
+        """Translator mode: click the regions in reading order, then press the button again (Finish order): the order
+        stored per page unit and taken as every new order is (`SelectionMixin._order_taken`: the lines whose context
+        changed translated again). Ctrl+Z takes the order back, and those translations with it."""
         if self._ordering is None:
             if not self._page_to_work_on():
                 return
@@ -511,12 +517,15 @@ class TranslatorMixin:
         ordered = self._ordering
         self._end_order()
         result, pipeline = self.last_result, self.pipeline
-        before = unit_states(pipeline, result.units) if ordered and result is not None else []
-        if ordered and pipeline.set_reading_order(result, ordered):
-            self._kept_at_once("order", result, before)
-            self.say("Reading order saved for {n} region(s). The circular arrow beside Translate applies it.", n=len(ordered))
-        elif ordered:  # nothing can be kept under a name that names no book
-            self.say("Give the book a name first (Menu > Series and Volume...).")
+        if not ordered or result is None:
+            self._redisplay()
+            return
+        before = unit_states(pipeline, result.units)
+        shown = self._page_regions()
+        if pipeline.set_reading_order(result, ordered):
+            self._order_taken(result, shown, before, ORDER_SAVED, ORDER_SAVED_ASKED, {"total": len(ordered)})
+            return
+        self.say("Give the book a name first (Menu > Series and Volume...).")  # (nothing kept under no book's name)
         self._redisplay()
 
     def _kept_at_once(self, kind: str, result: Any, before: list) -> Step:
@@ -617,14 +626,24 @@ class TranslatorMixin:
 
     # ------------------------------------------------------------------ the role a book opens in
     def _book_for_role(self) -> None:
-        """The Book box changed: the role for the book it names is decided once the box rests (`_decide_role`)."""
+        """The Book box changed: the role for the book it names is decided once the box rests (`_decide_role`), but
+        for a book decided for already and a name that names no book (nothing to decide: the role in force stays).
+        While it is to be decided (``_role_job``), the lettering over the viewer applies no mode
+        (`see_edit.role_known`: it takes no mouse and shows no boxes)."""
+        self._cancel_role_job()
+        book = self.book_var.get().strip()
+        if not book or generic_book_name(book) or book == getattr(self, "_role_book", ""):
+            return
+        self._role_job = self.after(ROLE_DELAY_MS, self._decide_role)
+
+    def _cancel_role_job(self) -> None:
         job = getattr(self, "_role_job", None)
+        self._role_job = None
         if job is not None:
             try:
                 self.after_cancel(job)
             except tk.TclError:
                 pass
-        self._role_job = self.after(ROLE_DELAY_MS, self._decide_role)
 
     def _decide_role(self) -> None:
         """A book opens: in the role the reader chose for it, else in translator mode while it has no translations yet
@@ -679,6 +698,8 @@ class TranslatorMixin:
         book = self.book_var.get().strip()
         if chosen and book and not generic_book_name(book):
             remember_role(self.settings.state_dir, book, self.role_var.get())
+            self._cancel_role_job()  # (the reader's choice for the book stands: nothing decides it again)
+            self._role_book = book
         self._sync_tools()
         if self.role_var.get() != "translator":
             self._close_find()

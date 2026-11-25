@@ -683,7 +683,7 @@ def test_a_click_on_a_plate_types_its_place_enter_takes_it_and_esc_or_any_other_
     monkeypatch.setattr(see_edit.seethrough, "closing", lambda app, top: given.append(top) or True)
     app = edit_app(host=tk.Frame(hidden_root))
     placed = []
-    app._place_regions = lambda chosen, place, ask=False: placed.append((chosen, place, ask))
+    app._place_regions = lambda chosen, place: placed.append((chosen, place))
     a, b = app.last_result.regions[:2]
     hand(app, kind="plate", index=1, shift=False)
     entry = app._see_place_entry
@@ -696,7 +696,7 @@ def test_a_click_on_a_plate_types_its_place_enter_takes_it_and_esc_or_any_other_
     entry.entry.delete(0, "end")
     entry.entry.insert(0, "1")
     entry._take()
-    assert placed == [([b], 1, True)] and app._see_place_entry is None and not entry.alive()
+    assert placed == [([b], 1)] and app._see_place_entry is None and not entry.alive()
     assert given == [entry.top]  # (the foreground given back to the viewer)
     hand(app, kind="plate", index=0, shift=False)
     entry = app._see_place_entry
@@ -751,10 +751,71 @@ def test_the_left_pane_has_the_switch_only_while_the_window_is_hidden(tmp_path):
     assert rows["edit"].on is False and rows["edit"].text == "Reader mode" and rows["edit"].kind == "toggle"
     app.role_var.set("reader")  # (Reader mode: checked)
     assert {r.name: r for r in ui.left_rows(app)}["edit"].on is True
+    app.role_var.set("translator")
+    app._role_job = "after#1"  # (the book's role still to be decided: the switch shows the role in force)
+    assert {r.name: r for r in ui.left_rows(app)}["edit"].on is False
+    assert "Editing" in [r.text for r in ui.foot_rows(app)][1]
+    app._role_job = None
+    app.role_var.set("reader")
     toggled = []
     app._on_role_changed = lambda chosen=True: toggled.append(app.role_var.get())
     ui.PANE_ACTIONS["edit"](app)
     assert toggled == ["translator"]
+
+
+def test_no_mode_reaches_the_lettering_until_the_book_s_role_is_known(tmp_path):
+    """The Book box names a book: until the role it opens in is decided (`_decide_role`, once the box rests), the
+    lettering takes no mouse and shows no boxes - the start's editing never applies to a book kept in Reader mode
+    meanwhile -; a book decided for already, a name that names no book and the reader's own choice need no wait."""
+    from types import MethodType
+
+    from taslation.ui import translator
+
+    app = edit_app()
+    for name in ("_cancel_role_job", "_decide_role", "_apply_role"):
+        setattr(app, name, MethodType(getattr(translator.TranslatorMixin, name), app))
+    later = []
+    app.after = lambda ms, fn: later.append((ms, fn)) or f"after#{len(later)}"
+    app.after_cancel = lambda job: later.pop()
+    app.book_var, app.settings = Var("Book A"), SimpleNamespace(state_dir=tmp_path)
+    translator.remember_role(tmp_path, "Book A", "reader")
+    translator.remember_role(tmp_path, "Book B", "translator")
+
+    def looked() -> tuple:
+        see_edit.tick(app, app._see_through)
+        return app._see_through.marks[-1] is not None, app._see_through.grounds[-1]
+
+    assert see_edit.role_known(app) and looked() == (True, True)  # (no book named yet: the start's role)
+    translator.TranslatorMixin._book_for_role(app)
+    assert [ms for ms, _fn in later] == [translator.ROLE_DELAY_MS] and not see_edit.role_known(app)
+    assert not see_edit.on(app) and looked() == (False, False)  # (still editing by role: no boxes, no mouse)
+    later.pop()[1]()  # (the box rested: Book A opens in Reader mode)
+    assert app.role_var.get() == "reader" and see_edit.role_known(app) and looked() == (False, False)
+    app.book_var.set("Book B")
+    translator.TranslatorMixin._book_for_role(app)
+    assert not see_edit.role_known(app) and looked() == (False, False)
+    later.pop()[1]()  # (Book B: editing)
+    assert app.role_var.get() == "translator" and looked() == (True, True)
+    translator.TranslatorMixin._book_for_role(app)  # (the same book named again: decided already)
+    assert not later and see_edit.role_known(app)
+    app.book_var.set("")
+    translator.TranslatorMixin._book_for_role(app)  # (no book: nothing to decide)
+    assert not later and see_edit.role_known(app)
+    app.book_var.set("Book C")
+    translator.TranslatorMixin._book_for_role(app)
+    assert later and not see_edit.role_known(app)
+    for name in ("_sync_tools", "_close_find", "_complete_on_show"):
+        setattr(app, name, lambda: None)
+    app.role_var.set("reader")
+    translator.TranslatorMixin._on_role_changed(app, chosen=True)  # (the reader's choice meanwhile: it stands)
+    assert not later and see_edit.role_known(app) and app._role_book == "Book C"
+    assert translator.chosen_role(tmp_path, "Book C") == "reader"
+
+
+def test_on_a_spread_the_plate_says_the_bubble_stays_on_its_own_page():
+    one, two = [SimpleNamespace(unit=0)] * 3, [SimpleNamespace(unit=0), SimpleNamespace(unit=1)]
+    assert see_edit.place_ask(one) == see_edit.PLACE_ASK and see_edit.place_ask(two) == see_edit.PLACE_ASK_SPREAD
+    assert see_edit.PLACE_ASK_SPREAD.startswith(see_edit.PLACE_ASK)
 
 
 # ------------------------------------------------------------------ the editor beside the region

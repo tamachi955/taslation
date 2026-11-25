@@ -15,9 +15,10 @@ Each region's place in the page's reading order (`_page_regions`) shows in a sma
 (`_draw_order_badges`, `preview.ImageCanvas.draw_badges`: placed as a label is, clear of the neighbouring regions),
 unless an earlier version's View > Reading-order numbers turned them off (ui.json `ORDER_HIDDEN`, still read). While
 the reading order is set by clicks the labels carry the numbers instead. Page > Place in reading order... puts the
-selected regions at one place of the page's order without clicking the whole page again (`place_in_order`), one
-"order" change, as the reading order tool's is. Nothing here is kept but what the stores keep; no page image leaves
-memory."""
+selected regions at one place of the page's order without clicking the whole page again (`place_in_order`), each on
+its own page of a spread, as a place typed on a region's plate does; every new order - the reading order tool's
+too - is taken alike (`_order_taken`): stored per page unit, the lines whose context changed translated again, one
+"order" change. Nothing here is kept but what the stores keep; no page image leaves memory."""
 
 from __future__ import annotations
 
@@ -67,12 +68,20 @@ def ask_dialog(make: Callable[[], asks.ValueDialog]) -> Any:
 
 
 def placed_order(regions: Sequence[Any], chosen: Sequence[Any], place: int) -> list[Any]:
-    """The reading order *regions* with *chosen* among them (by identity) taken out and put back together, in their
-    order, from *place* (1 the first) on."""
+    """The reading order *regions* (the screen's, page unit by page unit: the numbers on show) with *chosen* among
+    them (by identity) taken out and put back together, in their order, from *place* (1 the first) on - each of them
+    kept among its own page unit's regions: a place among another page's regions of a spread puts it first or last
+    on its own page, whichever is nearer, and every page unit keeps the places it has on the screen (the order is
+    kept per page unit: `Pipeline.set_reading_order`, `regions.apply_order_hints`)."""
     moving = [r for r in regions if any(r is c for c in chosen)]
     rest = [r for r in regions if not any(r is c for c in chosen)]
     at = max(0, min(len(rest), int(place) - 1))
-    return rest[:at] + moving + rest[at:]
+    moved = rest[:at] + moving + rest[at:]
+    by_unit: dict[Any, list[Any]] = {}
+    for r in moved:
+        by_unit.setdefault(getattr(r, "unit", 0), []).append(r)
+    taken = {unit: iter(group) for unit, group in by_unit.items()}
+    return [next(taken[getattr(r, "unit", 0)]) for r in regions]
 
 
 def front_first(regions: Sequence[Any], dx: float, dy: float) -> list[Any]:
@@ -295,9 +304,10 @@ class SelectionMixin:
                                   SIZE_SET)
 
     def place_in_order(self) -> None:
-        """Page > Place in reading order...: the selected regions put at one place of the page's reading order, the
-        others' order kept (`placed_order`), without clicking the whole page in order again; stored as the reading
-        order tool stores an order (`Pipeline.set_reading_order`), one "order" change (Ctrl+Z)."""
+        """Page > Place in reading order...: the selected regions put at one place of the page's reading order, each
+        on its own page, the others' order kept (`placed_order`), without clicking the whole page in order again;
+        stored and translated again as the reading order tool's order is (`_place_regions`, `_order_taken`), one
+        "order" change (Ctrl+Z)."""
         group = self._acting_on()
         if not group:
             return
@@ -311,15 +321,15 @@ class SelectionMixin:
         place = ask_dialog(lambda: asks.PlaceDialog(self, len(chosen), len(regions), now))
         if place is None or self.busy or self.last_result is not result or self._ordering is not None:
             return
-        self._place_regions(chosen, int(place))
+        self._place_regions(chosen, int(place))  # (each kept on its own page; the lines after it asked again)
 
-    def _place_regions(self, chosen: Sequence[Any], place: int, ask: bool = False) -> None:
-        """*chosen* (regions of the page on show) at *place* of its reading order: the whole order stored, one change
-        ("order"); the page shows it at once. With *ask* (a number typed on a region's plate in see-through mode,
-        `see_edit.PlaceEntry`) the lines whose earlier lines the change made others - from the first place whose
-        region changed on, as the translator is given them: the page's lines before each one in reading order - are
-        asked of the translator again (`_ask_after_order`), but those the person corrected; the order and their new
-        translations are one change, which Menu > Undo takes back whole."""
+    def _place_regions(self, chosen: Sequence[Any], place: int) -> None:
+        """*chosen* (regions of the page on show) at *place* of the screen's reading order (1 to the regions on show),
+        each kept on its own page (`placed_order`: a place on the other page of a spread puts it first or last on
+        its own): the order of each page unit it changed stored (`Pipeline.set_reading_order`, per page unit, so
+        that the next reading keeps it) and taken as the reading order tool's is (`_order_taken`: the lines whose
+        context changed translated again; one "order" change). Where Enter on a region's plate in see-through mode
+        (`see_edit.PlaceEntry`) and Page > Place in reading order... (`place_in_order`) put regions."""
         result, pipeline = self.last_result, self.pipeline
         regions = self._page_regions()
         ordered = placed_order(regions, chosen, place)
@@ -327,32 +337,44 @@ class SelectionMixin:
             self.say(PLACED_ALREADY)
             return
         before = unit_states(pipeline, result.units)
-        if not pipeline.set_reading_order(result, ordered):  # nothing can be kept under a name that names no book
+        changed = {r.unit for r, was in zip(ordered, regions) if r is not was}
+        if not pipeline.set_reading_order(result, [r for r in ordered if r.unit in changed]):  # (no book named)
             self.say(NAME_FIRST)
             return
-        rest = [r for r in result.regions if not any(r is o for o in ordered)]
-        result.regions = [*ordered, *rest]  # the order asked for (the pipeline's hints restart on each page unit)
-        for i, r in enumerate(result.regions):
-            r.order = i
-        at = next(i for i, r in enumerate(ordered) if r is chosen[0]) + 1
-        first = next(i for i, (a, b) in enumerate(zip(ordered, regions)) if a is not b)
+        now = self._page_regions()
+        at = next((i for i, r in enumerate(now) if r is chosen[0]), 0) + 1
+        self._order_taken(result, regions, before, PLACED, PLACED_ASKED, {"place": at, "total": len(now)})
+
+    def _order_taken(self, result: Any, shown: Sequence[Any], before: list, kept: str, asked: str,
+                     values: dict[str, Any]) -> None:
+        """A reading order just stored for the page *result* (*shown*: its regions in the order they had; *before*:
+        the stores before it), whichever tool made it - the Menu's Reading order clicked through
+        (`TranslatorMixin.toggle_order`), Place in reading order... (`place_in_order`) or a place typed on a region's
+        plate (`_place_regions`): the page shows it at once, and the lines whose context the change made another -
+        from the first place whose region changed on, as the translator is given them: the page's lines before each
+        one in reading order - are asked of the translator again (`_ask_after_order`), but those the person
+        corrected; the order and their new translations are one "order" change, which Menu > Undo takes back whole.
+        Said once done: *asked* with *values* and {n}, how many were translated again; *kept* with *values* where
+        nothing was asked (the same order, no line translated after the change, no translator)."""
+        pipeline = self.pipeline
+        ordered = self._page_regions()
+        first = next((i for i, (a, b) in enumerate(zip(ordered, shown)) if a is not b), None)
         lines = [r for r in ordered[first:] if r.status == "translated" and r.tag != ERASE_ONLY
-                 and not pipeline.corrected(result, r)] if ask else []
+                 and not pipeline.corrected(result, r)] if first is not None else []
         if lines and getattr(pipeline, "translator", None) is not None:
-            self._ask_after_order(result, lines, before, at, len(ordered))
-            self._redisplay()
-            return
-        self._kept_at_once("order", result, before)
-        self.say(PLACED, place=at, total=len(ordered))
+            self._ask_after_order(result, lines, before, asked, values)
+        else:
+            self._kept_at_once("order", result, before)
+            self.say(kept, **values)
         self._redisplay()
 
-    def _ask_after_order(self, result: Any, lines: list[Any], before: list, place: int, total: int) -> None:
-        """(`_place_regions` with *ask*) The *lines* of the page *result* asked of the translator again in the worker,
-        one by one in reading order, each after the page's lines before it as they are by then (`Pipeline.ask_again`;
-        the Japanese read first where the page came from the cache: `Pipeline.read_source`), each answer kept as the
+    def _ask_after_order(self, result: Any, lines: list[Any], before: list, key: str, values: dict[str, Any]) -> None:
+        """(`_order_taken`) The *lines* of the page *result* asked of the translator again in the worker, one by one
+        in reading order, each after the page's lines before it as they are by then (`Pipeline.ask_again`; the
+        Japanese read first where the page came from the cache: `Pipeline.read_source`), each answer kept as the
         model's (`Pipeline.set_translation`, not the person's) and lettered as it comes; the order and those answers
         one "order" change (its stores before: *before*). The status line says "Asking the model..." meanwhile and
-        then how many were translated again, or the model's error."""
+        then *key* with *values* and {n}, how many were translated again, or the model's error."""
         from ..messages import message_of
         from ..translate import TranslationError
         from .progress import rendered
@@ -378,7 +400,7 @@ class SelectionMixin:
                                                                                              edited=False):
                         done += 1
                         self._post("result", result=result, edited=True, quiet=True)
-                self._post("status", key=PLACED_ASKED, values={"place": place, "total": total, "n": done})
+                self._post("status", key=key, values={**values, "n": done})
             except TranslationError as e:
                 self._post("status", key="No answer from the model: {error}", values={"error": rendered(message_of(e))})
             except Exception:  # noqa: BLE001 - the page stays as the order left it
